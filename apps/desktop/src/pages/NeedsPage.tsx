@@ -77,7 +77,7 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
 
 export function NeedsPage() {
   const s = useStore();
-  // the ages move on while asks wait
+  // The ages move on while asks wait.
   const now = useNow(selectAsks(s).length > 0, 5_000);
   return <NeedsView rows={needRows(s, now)} />;
 }

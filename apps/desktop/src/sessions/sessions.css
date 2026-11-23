@@ -1767,8 +1767,8 @@ body.split-dragging .xterm {
   display: grid;
   place-items: center;
 }
-/* the running colour of a terminal's mark, wherever its rows are listed: the old sidebar, a header, the dock, and the
-   Code page (.mpage), which lists them now */
+/* The running colour of a terminal's mark, wherever its rows are listed: the old sidebar, a header, the dock, and the
+   Code page (.mpage), which lists them now. */
 .side,
 .head,
 .dock,

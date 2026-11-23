@@ -47,7 +47,7 @@ describe("Needs you", () => {
     expect(text).toContain("Approve");
     expect(text).toContain("Question");
     expect(text).toContain("Which page should the post go on?");
-    // a command in the ask is set as code, not shown with its backticks
+    // A command in the ask is set as code, not shown with its backticks.
     expect(html).toContain("<code>rm -rf build/</code>");
     expect(text).not.toContain("Nothing needs you");
   });
@@ -89,7 +89,7 @@ describe("Team", () => {
     expect(html).toMatch(/class="tag err"[^>]*>Could not finish</);
     expect(html).toMatch(/class="tag"[^>]*>Not connected</);
     expect(html).toMatch(/class="tag"[^>]*>Idle</);
-    // each member's face: the app's own avatar for that member
+    // Each member's face is the app's own avatar for that member.
     expect(count(html, 'class="ui-av"')).toBe(5);
     expect(html).toContain('data-testid="team-kit"');
   });
@@ -124,7 +124,7 @@ describe("History", () => {
     expect(text.indexOf("Replies about late parcels")).toBeLessThan(text.indexOf("Thai date format"));
     expect(html).toMatch(/class="tag run"[^>]*>Working</);
     expect(html).toMatch(/class="tag ok"[^>]*>Done</);
-    // an idle thread carries no status word: most of them are, and a word on every row would be noise
+    // An idle thread carries no status word: most threads are idle, and a word on every row would be noise.
     expect(html).not.toContain(">Idle<");
     expect(count(html, 'data-testid="history-row"')).toBe(3);
   });
@@ -218,7 +218,7 @@ describe("the pages on the demo runtime", () => {
     expect(count(html, 'data-testid="needs-row"')).toBe(1);
     expect(text).toContain("Nam");
     expect(text).toContain(APPROVAL_SEED.command);
-    // the row focuses that ask in Nam's chat, as the sidebar's strip did
+    // The row focuses that ask in Nam's chat, as the sidebar's strip did.
     store.actions.openPage("needs");
     const [row] = needRows(store.getSnapshot(), Date.now());
     expect(row).toMatchObject({ who: "Nam", kind: "approval" });
@@ -226,7 +226,8 @@ describe("the pages on the demo runtime", () => {
     expect(store.getState().ui).toMatchObject({ view: "chat", thread: null, focusAsk: { bot: "nam", id: asks[0].item.id } });
     expect(store.getState().selectedBot).toBe("nam");
 
-    // Team: the five demo members in roster order, Nam waiting on the person, each row opening that member's chat
+    // Team lists the five demo members in roster order, with Nam waiting on the person, and each row opens that
+    // member's chat.
     const team = teamRows(store.getSnapshot());
     expect(team.map((m) => [m.displayName, m.status])).toEqual([
       ["Buddy", "idle"],

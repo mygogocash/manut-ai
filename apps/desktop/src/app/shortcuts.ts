@@ -163,7 +163,7 @@ export function useShortcuts(): void {
         const b = selectSidebarBots(s)[hit.index];
         if (b) void a.selectBot(b.name);
       } else if (hit.kind === "new-session") {
-        // the + menu lives on the Code page: away from it, the page opens and the menu opens as it mounts (newMenu.ts)
+        // The + menu lives on the Code page. Away from it, the page opens first and its menu opens as it mounts (newMenu.ts).
         if (s.ui.view !== "code") a.openPage("code");
         openNewSessionMenu();
       } else if (hit.kind === "session") {
@@ -172,7 +172,7 @@ export function useShortcuts(): void {
         const n = nextAsk(selectAsks(s), s.ui.focusAsk);
         if (n) void a.jumpToAsk(n.bot, n.item.id);
       } else if (hit.kind === "search") {
-        // what the menu's Search button does: History, its search box focused (HistoryPage.tsx reads ui.findSeq)
+        // This is the menu's Search button: History opens with its search box focused (HistoryPage.tsx reads ui.findSeq).
         a.openPage("history", { find: true });
       } else if (hit.kind === "details") {
         // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first

@@ -38,7 +38,7 @@ const midnight = (ms: number) => {
 export function byDay(entries: readonly HistoryEntry[], nowMs: number): HistoryDay[] {
   const today = midnight(nowMs);
   const n = new Date(today);
-  // yesterday's midnight from the calendar, not 24 hours back, so a change of clocks cannot move it
+  // Yesterday's midnight comes from the calendar, not 24 hours back, so a change of clocks cannot move it.
   const yesterday = new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1).getTime();
   const days: HistoryDay[] = [];
   for (const e of entries) {

@@ -18,7 +18,7 @@ describe("the + menu's opener", () => {
     const off = onOpenNewSessionMenu(() => seen.push("first"));
     expect(seen).toEqual(["first"]);
     off();
-    // the press was used: a menu mounted later does not open by itself
+    // The press is used up, so a menu mounted later does not open by itself.
     const off2 = onOpenNewSessionMenu(() => seen.push("second"));
     expect(seen).toEqual(["first"]);
     off2();

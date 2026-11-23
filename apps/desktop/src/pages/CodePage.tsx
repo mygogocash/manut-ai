@@ -22,17 +22,17 @@ export function CodePage() {
     <MenuPageFrame page="code" title={t("menu.code")}>
       <div className="col">
         {SESSIONS_ENTRY && (
-          // the sidebar section's test id, so what found TERMINALS there finds it here
+          // It keeps the sidebar section's test id, so what found TERMINALS there finds it here.
           <section
             className="terms"
             data-testid="side-sessions"
             tabIndex={-1}
             onPointerDown={(e) => {
-              // keep the previous focus for Escape, before the right press can blur it
+              // Keep the previous focus for Escape, before the right press can blur it.
               if (e.button === 2 && sessionBackground(e.target)) e.preventDefault();
             }}
             onContextMenu={(e) => {
-              // rows own their menu; controls and text fields keep their native one
+              // Rows own their menu, and controls and text fields keep their native one.
               if (!sessionBackground(e.target)) return;
               e.preventDefault();
               const focus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : e.currentTarget;

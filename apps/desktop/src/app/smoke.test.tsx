@@ -34,21 +34,21 @@ describe("the app on its default runtime", () => {
     const text = words(html);
     expect(html).toContain('data-testid="sidebar"');
     expect(html).toContain('aria-label="Manut AI home"');
-    // the design canvas's menu, top to bottom; Buddy's main chat is open, and it stands in for Home, which New marks
+    // The design canvas's menu, top to bottom. Buddy's main chat is open, and it stands in for Home, which New marks.
     expect(text).toContain("New Needs you Team Code Artifacts Customize History");
     expect(html).toMatch(/class="nav new" aria-current="page"[^>]*data-testid="menu-new"/);
     expect(html.split('aria-current="page"').length - 1).toBe(1);
-    // nothing waits on the person yet, so Needs you has no count
+    // Nothing waits on the person yet, so Needs you has no count.
     expect(html).not.toContain('class="cnt"');
     // Buddy's staged greeting is the open chat
     expect(text).toContain("demo runtime");
     expect(html).toContain('data-testid="composer"');
 
-    // the team: every member on the Team page
+    // The whole team is on the Team page.
     const team = renderToString(<TeamPage />);
     for (const name of ["Buddy", "Nam", "Pim", "Ton", "Kit"]) expect(words(team), name).toContain(name);
 
-    // what the runtime does not have is not offered, in the menu or on Customize
+    // What the runtime does not have is not offered, in the menu or on Customize.
     const customize = renderToString(<CustomizePage />);
     for (const id of ["nav-automations", "nav-plugins", "places"]) expect(html + customize, id).not.toContain(`data-testid="${id}"`);
     expect(html).not.toContain('class="me-btn"'); // the old Accounts row

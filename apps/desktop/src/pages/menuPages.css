@@ -12,7 +12,7 @@
   flex-direction: column;
   background: var(--main);
   color: var(--ink);
-  /* the canvas's root type (.r): the desktop's body text is 13px, the canvas's screens are 14px */
+  /* The canvas's root type (.r): the desktop's body text is 13px, and the canvas's screens are 14px. */
   font-size: 14px;
   line-height: 1.5;
 }
@@ -27,7 +27,7 @@
   stroke-linejoin: round;
 }
 
-/* the top bar: the page's name, then what acts on the page at its right */
+/* The top bar holds the page's name, then what acts on the page at its right. */
 .mpage .top {
   flex: none;
   display: flex;
@@ -52,14 +52,14 @@
   align-items: center;
   gap: 8px;
 }
-/* the desktop's: the page scrolls under its top bar, which stays */
+/* The desktop's own: the page scrolls under its top bar, which stays. */
 .mpage-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 
-/* two ways to lay a page out: a centred reading column, or a list across the page */
+/* A page is laid out as a centred reading column or as a list across the page. */
 .mpage .col {
   width: 100%;
   max-width: 736px;
@@ -77,7 +77,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* the desktop's: a list of rows inside either layout, as tight as the canvas's .pane */
+/* The desktop's own: a list of rows inside either layout, as tight as the canvas's .pane. */
 .mpage .rows {
   display: flex;
   flex-direction: column;
@@ -87,7 +87,7 @@
   list-style: none;
 }
 
-/* a grey section header, and a row (a whole row is one button that opens what it names) */
+/* A grey section header, and a row: a whole row is one button that opens what it names. */
 .mpage .band {
   display: flex;
   align-items: center;
@@ -100,7 +100,7 @@
   color: var(--aui-muted);
   font-size: 13px;
 }
-/* the desktop's: History's days, each a band over its rows, the next day 12px further down as the canvas spaces them */
+/* The desktop's own: History's days, each a band over its rows, 12px apart as the canvas spaces them. */
 .mpage .day {
   display: flex;
   flex-direction: column;
@@ -109,7 +109,7 @@
 .mpage .day + .day {
   margin-top: 12px;
 }
-/* the desktop's: one quiet line where a list has nothing to show for what was asked of it */
+/* The desktop's own: one quiet line where a list has nothing to show for what was asked of it. */
 .mpage .none {
   margin: 0;
   padding: 8px 10px;
@@ -124,7 +124,7 @@
   min-height: 44px;
   padding: 8px 10px;
   border-radius: var(--rad);
-  /* the desktop's: rows are buttons here, not the canvas's links */
+  /* The desktop's own: rows are buttons here, not the canvas's links. */
   width: 100%;
   text-align: left;
 }
@@ -135,7 +135,7 @@
   flex: 1 1 200px;
   min-width: 0;
 }
-/* the desktop's: a row's two lines, its quiet trailing words, and the chevron of a row that opens a page */
+/* The desktop's own: a row's two lines, its quiet trailing words, and the chevron of a row that opens a page. */
 .mpage .l1 {
   display: block;
   font-weight: 500;
@@ -158,7 +158,7 @@
   font-size: 12px;
 }
 
-/* status words */
+/* Status words, coloured as the canvas colours them. */
 .mpage .tag {
   display: inline-flex;
   align-items: center;
@@ -195,8 +195,8 @@
   color: var(--aui-danger);
 }
 
-/* an empty page: its row's drawing, what will be here, and why it is empty. The heading is an h2 under the page's
-   h1 (the canvas draws an h3, which would skip a level here) */
+/* An empty page shows its row's drawing, what will be here, and why it is empty. The heading is an h2 under the
+   page's h1, because the canvas's h3 would skip a level here. */
 .mpage .empty {
   display: flex;
   flex-direction: column;
@@ -257,7 +257,7 @@
   color: var(--aui-placeholder);
 }
 
-/* the desktop's: the Code page holds the terminal list the sidebar used to, as its own section */
+/* The desktop's own: the Code page holds the terminal list the sidebar used to, as its own section. */
 .mpage .terms {
   display: flex;
   flex-direction: column;

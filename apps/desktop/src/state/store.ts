@@ -1562,8 +1562,8 @@ export function reduce(state: AppState, a: Action): AppState {
     case "ui.settings":
       return { ...state, ui: { ...state.ui, view: "settings", back: backOf(state.ui), settingsPage: a.page ?? state.ui.settingsPage } };
     case "ui.closeSettings":
-      // back to the menu page or the session the page was opened from (a session only while it is still open);
-      // otherwise the chat
+      // Back to the menu page or the session the page was opened from (a session only while it is still open),
+      // otherwise to the chat.
       return { ...state, ui: { ...state.ui, view: state.ui.back === "session" && !state.ui.session ? "chat" : state.ui.back, back: "chat" } };
     case "system.note":
       return touchChat(state, a.bot, (c) =>
@@ -2853,7 +2853,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const bot = state.selectedBot;
       if (!bot) return;
       if (state.ui.view !== "chat") dispatch({ type: "ui.closeSettings" });
-      // the draft goes into the chat's composer, so a menu page the closed page returned to gives way to the chat
+      // The draft goes into the chat's composer, so a menu page that the closed page returned to gives way to the chat.
       if (isMenuPage(state.ui.view)) dispatch({ type: "ui.thread", bot, thread: state.ui.thread });
       dispatch({ type: "ui.draft", bot, text });
     },

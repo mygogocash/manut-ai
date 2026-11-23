@@ -9,7 +9,7 @@
 // `Sidebar` feeds it from the app's store.
 import type { ReactNode } from "react";
 // sidebar.css still styles what the menu's foot carries (the disk chip, the usage meters, the update control) and
-// .vh; sessions.css styles the terminal view and the Code page's list
+// .vh, and sessions.css styles the terminal view and the Code page's list.
 import "./sidebar.css";
 import "../sessions/sessions.css";
 import "./menu.css";
@@ -66,7 +66,7 @@ export function SideMenu({
   return (
     <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar">
       <div className="brand">
-        {/* the mark leads where New does, as the canvas's mark links to Home */}
+        {/* The mark leads where New does, as the canvas's mark links to Home. */}
         <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
           <BrandMark />
         </button>
@@ -110,8 +110,8 @@ export function SideMenu({
       )}
       <div className="sb-foot">
         {foot}
-        {/* who uses the app, and their settings. The canvas names the owner and the shop here; the runtime names
-            neither yet, so the row says "You" and adds nothing made up */}
+        {/* Who uses the app, and their settings. The canvas names the owner and the shop here, but the runtime names
+            neither yet, so the row says "You" and adds nothing made up. */}
         <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
           <span className="av" aria-hidden="true">
             {Array.from(t("nav.you"))[0]}
@@ -135,7 +135,7 @@ export function Sidebar() {
     open: () => void s.openThread(r.bot, r.thread),
   }));
   const go = (row: MenuRow) => {
-    // New is Home, and the home member's main chat stands in for Home until Home exists
+    // New is Home, and the home member's main chat stands in for Home until Home exists.
     if (row === "new") {
       if (home) void s.selectBot(home);
     } else s.openPage(row);
@@ -151,12 +151,12 @@ export function Sidebar() {
       onAccount={() => s.openSettings()}
       foot={
         <>
-          {/* little disk space left on the home folder's volume (src/lib/disk.ts); nothing while it is fine */}
+          {/* A chip when the home folder's volume is low on space (src/lib/disk.ts), and nothing while it is fine. */}
           <DiskChip />
-          {/* the coding CLIs' subscription usage, which only a runtime that reads their logins has */}
+          {/* The coding CLIs' subscription usage, which only a runtime that reads their logins has. */}
           {can("accounts") && <Usage />}
           {can("accounts") && <AccountsWatcher />}
-          {/* a newer signed release; nothing until in-app updates are turned on (updater.ts) */}
+          {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}
           <UpdateButton />
         </>
       }

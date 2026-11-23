@@ -96,7 +96,7 @@ export function HistoryView({
         spellCheck={false}
         onChange={(e) => onQuery(e.target.value)}
         onKeyDown={(e) => {
-          // Esc empties the box first; an empty box leaves Esc to whatever else wants it
+          // Esc empties the box first, and an empty box leaves Esc to whatever else wants it.
           if (e.key !== "Escape" || !query) return;
           e.preventDefault();
           onQuery("");

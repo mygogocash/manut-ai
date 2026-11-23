@@ -30,11 +30,11 @@ export function currentRow(ui: Pick<Ui, "view" | "thread">, selectedBot: string 
     case "customize":
     case "history":
       return ui.view;
-    // a terminal session and the Tasks page are the Code page's own places
+    // A terminal session and the Tasks page are the Code page's own places.
     case "session":
     case "tasks":
       return "code";
-    // Automations and Plugins are entries of the Customize page
+    // Automations and Plugins are entries of the Customize page.
     case "automations":
     case "plugins":
       return "customize";
@@ -62,7 +62,7 @@ export interface MemberThread {
 export function threadsNewestFirst(threads: Readonly<Record<string, readonly ThreadRow[]>>, members: readonly string[]): MemberThread[] {
   const all: MemberThread[] = [];
   for (const bot of members) for (const row of threads[bot] ?? []) all.push({ bot, row, ts: Math.max(row.last ?? 0, row.started_at ?? 0) });
-  // the sort is stable, so equal times keep the members' order
+  // The sort is stable, so equal times keep the members' order.
   return all.sort((a, b) => b.ts - a.ts);
 }
 
