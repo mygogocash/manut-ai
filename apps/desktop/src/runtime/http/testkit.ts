@@ -47,6 +47,13 @@ export const WRITE_OPS = [
   "accounts.discard",
   "team.pause",
   "team.resume",
+  "memory.remember",
+  "memory.confirm",
+  "memory.correct",
+  "memory.forget",
+  "routine.create",
+  "routine.pause",
+  "routine.resume",
 ] as const;
 
 

@@ -6,10 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../../i18n";
 import type { BridgeError } from "../../lib/protocol";
 import type { RoutineRow } from "../routines";
+import { ShopCache } from "./cache";
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { ApiSession } from "./session";
-import { fakeApi, iso, memoryVault, ORIGIN, scheduleJson, serveShop, storedSession, T0 } from "./testkit";
+import { fakeApi, iso, memoryCacheStore, memoryVault, ORIGIN, savedRead, scheduleJson, serveShop, storedSession, T0 } from "./testkit";
 
 const NOW = T0 + 600_000;
 
@@ -173,5 +174,49 @@ describe("the team's routines on the connected runtime", () => {
 
   it("says the words it adds in every language it is shown in", () => {
     for (const l of LANGS) expect(t("rt.whenUnknown", undefined, l).trim(), l).not.toBe("");
+  });
+});
+
+describe("the Customize page's ops while only a kept read of the shop is shown", () => {
+  /** An earlier run kept a read five minutes ago, and now the API cannot be reached, so the kept read stands in for the shop. */
+  async function keptOnly() {
+    const api = fakeApi();
+    api.on("GET", "/v1/tenant/export", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
+    const kept = await savedRead(NOW - 300_000, { schedules: [scheduleJson({ nextFire: NOW + 3600_000 })] });
+    const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(NOW)), deviceId: () => "device-2" });
+    const host = new HttpHost({ session, cache: new ShopCache(memoryCacheStore(kept)) });
+    const rt = new HttpRuntime(host);
+    await rt.connect();
+    const req = rt.request.bind(rt) as unknown as (op: string, params: unknown) => Promise<unknown>;
+    return { api, host, req };
+  }
+
+  it("lists the kept read's schedules as routines, at once and without asking the API", async () => {
+    const { api, host, req } = await keptOnly();
+    expect(host.cache).toEqual({ kind: "showing", at: NOW - 300_000 });
+    const sent = api.calls.length;
+    const { routines } = (await req("routine.list", {})) as { routines: RoutineRow[] };
+    expect(routines).toEqual([expect.objectContaining({ id: "sched-1", name: "Morning brief", enabled: true, next: (NOW + 3600_000) / 1000 })]);
+    expect(api.calls).toHaveLength(sent);
+  });
+
+  it("still cannot show what the team knows, in the same words as when it is connected", async () => {
+    const { req } = await keptOnly();
+    expect(await refusal(req("memory.list", {}))).toEqual({ code: "not_yet", message: t("rt.notYetShow") });
+  });
+
+  it("refuses every memory and routine write as offline, holds none back, and sends nothing", async () => {
+    const { api, req } = await keptOnly();
+    for (const [op, params] of [
+      ["memory.remember", { text: "We ship on weekdays" }],
+      ["memory.confirm", { fact: "f5" }],
+      ["memory.correct", { fact: "f1", text: "Free shipping on orders over ฿900" }],
+      ["memory.forget", { fact: "f1" }],
+      ["routine.create", { name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
+      ["routine.pause", { routine: "sched-1" }],
+      ["routine.resume", { routine: "sched-1" }],
+    ] as const)
+      expect(await refusal(req(op, params)), op).toEqual({ code: "offline", message: t("rt.offline") });
+    expect(api.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });
