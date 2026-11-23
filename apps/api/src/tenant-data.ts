@@ -52,7 +52,7 @@ export async function tenantCall(
 
 /// Assembles a tenant's task documents with their histories, connection
 /// metadata, schedules, consent, inbound attention items, pilot records, model
-/// meter, audit log, memory and deletion tombstone. Each task answers with its document, event
+/// meter, audit log, memory, people and deletion tombstone. Each task answers with its document, event
 /// log, action proposals and attempts, so the export no longer leaves the
 /// history behind (the old "task record only" gap is closed below).
 ///
@@ -115,6 +115,11 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
   const memoryResp = await tenantCall(env, tenant, `/memory/export?${query}`);
   if (!memoryResp.ok) failed.push("memory");
   const memory: unknown = memoryResp.ok ? await memoryResp.json() : null;
+  // The people around the shop: helpers, invites, cover, the notes helpers passed on and the names the owner gave,
+  // never a helper session's hash (people-store.ts).
+  const peopleResp = await tenantCall(env, tenant, `/people/export?${query}`);
+  if (!peopleResp.ok) failed.push("people");
+  const people: unknown = peopleResp.ok ? await peopleResp.json() : null;
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -141,6 +146,7 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
     model,
     audit,
     memory,
+    people,
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }

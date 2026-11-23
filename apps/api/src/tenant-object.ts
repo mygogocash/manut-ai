@@ -4,6 +4,7 @@ import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
 import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
 import { modelTenantRoute, wipeModelTenant } from "./model-meter";
+import { peopleTenantRoute, wipePeopleTenant } from "./people-store";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -64,6 +65,10 @@ export class TenantObject extends DurableObject {
     // What the team knows about the shop: its facts, and the owner's say over each (memory-store.ts).
     if (url.pathname === "/memory" || url.pathname.startsWith("/memory/")) {
       return memoryTenantRoute(this.ctx.storage, request, url);
+    }
+    // The people around the shop: the owner's helpers, invites, cover and notes passed on (people-store.ts).
+    if (url.pathname === "/people" || url.pathname.startsWith("/people/")) {
+      return peopleTenantRoute(this.ctx.storage, request, url);
     }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
@@ -193,8 +198,9 @@ export class TenantObject extends DurableObject {
   /// Wipes the tenant's consent, task index, attention items, pilot records
   /// (shop, customer messages, replies, payments), model meter (cap
   /// override, monthly totals, reservations, per-call records), audit log
-  /// (entries and the miss count) and memory (facts and the fingerprints of
-  /// forgotten texts), then writes a tombstone.
+  /// (entries and the miss count), memory (facts and the fingerprints of
+  /// forgotten texts) and people (helpers, invites and every helper
+  /// session, so no helper can open a deleted shop), then writes a tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
   /// afterwards as new, never restored.
@@ -215,6 +221,7 @@ export class TenantObject extends DurableObject {
     await wipePilotTenant(this.ctx.storage, body.tenant);
     await wipeModelTenant(this.ctx.storage, body.tenant);
     await wipeMemoryTenant(this.ctx.storage, body.tenant);
+    await wipePeopleTenant(this.ctx.storage, body.tenant);
     await wipeAuditTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);

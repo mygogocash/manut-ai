@@ -21,6 +21,9 @@ type SessionRec = {
   csrfHash?: string | undefined;
   /// Absent legacy records belong to generation zero. A tenant wipe advances it.
   wipeGeneration?: number | undefined;
+  /// The email Apple verified when this session's chain was signed in (auth.ts), carried through every refresh. An
+  /// email invite checks it (docs/people.md); nothing else reads it, and it never names the tenant.
+  email?: string | undefined;
 };
 
 /// One row of the per-tenant membership index: which companies this tenant
@@ -56,6 +59,8 @@ type RefreshRec = {
   /// born at first rotation.
   born?: number | undefined;
   wipeGeneration?: number | undefined;
+  /// The chain's verified email (`SessionRec.email`), so a refresh hands it to the next session.
+  email?: string | undefined;
 };
 
 const ACCESS_TTL_SECONDS = 3600;
@@ -179,6 +184,7 @@ export class AuthObject extends DurableObject {
     }
     let tenant: string;
     let identityExpiry: number;
+    let email: string | undefined;
     try {
       const identity = await verifyAppleToken(body.identityToken, body.nonce, {
         clientId: this.authEnv.APPLE_CLIENT_ID ?? "test-client",
@@ -187,6 +193,7 @@ export class AuthObject extends DurableObject {
       });
       tenant = identity.tenant;
       identityExpiry = identity.exp;
+      email = identity.email;
     } catch {
       return Response.json({ error: "invalid_identity" }, { status: 401 });
     }
@@ -200,6 +207,7 @@ export class AuthObject extends DurableObject {
       exp: now + ACCESS_TTL_SECONDS,
       refreshHash: await sha256Hex(refresh),
       csrfHash: await sha256Hex(csrf),
+      ...(email ? { email } : {}),
     };
     const grant: RefreshRec = {
       accessHash: await sha256Hex(access),
@@ -207,6 +215,7 @@ export class AuthObject extends DurableObject {
       deviceId: body.deviceId,
       exp: now + REFRESH_TTL_SECONDS,
       born: now,
+      ...(email ? { email } : {}),
     };
     const usedKey = `used:${await sha256Hex(body.identityToken)}`;
     // Verification can suspend; consuming the token and issuing its session are one
@@ -295,10 +304,11 @@ export class AuthObject extends DurableObject {
       if (now - born > REFRESH_ABSOLUTE_TTL_SECONDS) {
         return Response.json({ error: "session_expired" }, { status: 401 });
       }
+      const email = grant.email ? { email: grant.email } : {};
       const session: SessionRec = { tenant: grant.tenant, deviceId: grant.deviceId,
-        exp: now + ACCESS_TTL_SECONDS, refreshHash, csrfHash, wipeGeneration: generation };
+        exp: now + ACCESS_TTL_SECONDS, refreshHash, csrfHash, wipeGeneration: generation, ...email };
       const next: RefreshRec = { accessHash, tenant: grant.tenant, deviceId: grant.deviceId,
-        exp: now + REFRESH_TTL_SECONDS, born, wipeGeneration: generation };
+        exp: now + REFRESH_TTL_SECONDS, born, wipeGeneration: generation, ...email };
       await storage.put({ [`sat:${accessHash}`]: session, [`srt:${refreshHash}`]: next });
       return Response.json({ accessToken: access, refreshToken: refresh, csrf,
         expiresIn: ACCESS_TTL_SECONDS, tenant: grant.tenant });
@@ -332,7 +342,9 @@ export class AuthObject extends DurableObject {
         await storage.delete([`sat:${accessHash}`, `srt:${session.refreshHash}`]);
         return Response.json({ ok: false });
       }
-      return Response.json({ ok: true, tenant: session.tenant });
+      // The verified email rides along only for the routes that check who is signed in (people.ts); every other
+      // route reads the tenant alone.
+      return Response.json({ ok: true, tenant: session.tenant, ...(session.email ? { email: session.email } : {}) });
     });
   }
 

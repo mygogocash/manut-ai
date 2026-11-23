@@ -29,6 +29,9 @@ function defaults(): Record<string, () => Response> {
       Response.json({ entries: [{ id: "aud-entry-1", action: "shop.created" }], missed: null }),
     "TENANT GET /memory/export": () =>
       Response.json({ facts: [{ id: "f1", text: "Closed on Mondays", status: "confirmed" }], forgottenCount: 2 }),
+    "TENANT GET /people/export": () =>
+      Response.json({ state: { shop: TENANT, ownerId: "owner", helpers: [{ id: "helper-1" }], invites: [], away: null,
+        passedOn: [], removed: [] }, names: { "helper-1": "Mint" } }),
     "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
@@ -161,6 +164,7 @@ describe("tenant export fan-out", () => {
       model?: { months?: unknown[] };
       audit?: { entries?: unknown[]; missed?: unknown };
       memory?: { facts?: unknown[]; forgottenCount?: number };
+      people?: { state?: { helpers?: unknown[] }; names?: unknown };
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
@@ -175,6 +179,9 @@ describe("tenant export fan-out", () => {
     expect(body.audit).toEqual({ entries: [{ id: "aud-entry-1", action: "shop.created" }], missed: null });
     // What the team knows about the shop: its facts, and only how many it was told to forget.
     expect(body.memory).toEqual({ facts: [{ id: "f1", text: "Closed on Mondays", status: "confirmed" }], forgottenCount: 2 });
+    // The people around the shop: its helpers and the names the owner gave them.
+    expect(body.people?.state?.helpers).toEqual([{ id: "helper-1" }]);
+    expect(body.people?.names).toEqual({ "helper-1": "Mint" });
   });
 
   for (const [route, part] of [
@@ -187,6 +194,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /model/export", "model"],
     ["TENANT GET /audit/export", "audit"],
     ["TENANT GET /memory/export", "memory"],
+    ["TENANT GET /people/export", "people"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {

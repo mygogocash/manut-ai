@@ -189,6 +189,9 @@ importers:
       '@manut/member-grants':
         specifier: workspace:*
         version: link:../../packages/member-grants
+      '@manut/people-rules':
+        specifier: workspace:*
+        version: link:../../packages/people-rules
       '@manut/shop-memory':
         specifier: workspace:*
         version: link:../../packages/shop-memory

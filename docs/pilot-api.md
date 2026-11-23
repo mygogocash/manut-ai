@@ -12,6 +12,9 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - **Owner**: the shop owner. Has no account in week 1. Approves or declines one reply through a signed,
   single-use link: `/v1/pilot/approvals/{token}`. Confirms or refuses the deletion of a live shop's data the same
   way: `/v1/pilot/deletions/{token}`.
+- **Helper**: someone the owner trusts with conversations (the canvas's Mint). Invited by the operator on the owner's
+  word, signs in with Apple, and approves private messages and replies with a helper session, never money, public
+  posts, payment confirmations or commands ("Helpers", below; `docs/people.md`).
 - **Shop**: one tenant in the backend. `tenant` is its id. A shop is **live** once its owner has given consent
   (`cloudWork`) or a LINE connection exists.
 
@@ -266,8 +269,8 @@ type DeletedShop = {
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
   every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent,
-  what the team knows about the shop and the shop's registry row. The owner's approval links answer `link_invalid`
-  afterwards and the webhook
+  what the team knows about the shop, its people (helpers, invites and every helper session, so no helper can open it
+  again) and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
   answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
@@ -398,7 +401,7 @@ type AuditActor =
   | { kind: "system" };                          // the control plane or the broker, on its own
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
-  "connectionId" | "previousConnectionId" | "confirmationId" | "factId", string>>;
+  "connectionId" | "previousConnectionId" | "confirmationId" | "factId" | "inviteId" | "helperId", string>>;
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -421,14 +424,22 @@ What is written, and by whom:
 | `attempt.started` | system | `taskId`, `attemptId` | `ok` |
 | `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
 | `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
-| `approval.decided` | owner or helper, with the id they decided as | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
+| `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
 | `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
+| `invite.created`, `invite.revoked` | operator | `inviteId` | `ok` |
+| `helper.joined` | helper | `inviteId`, `helperId` | `ok` |
+| `helper.session_opened` | helper | `helperId` | `ok` |
+| `helper.removed` | operator | `helperId` | `ok` |
+| `away.set`, `away.cleared` | operator | `helperId` (who covers, or covered) | `ok` |
+| `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
-section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
-entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
+section 3); a pilot shop has none until a worker runs for it. A reply decided through the owner's link keeps its
+`reply.*` entries and writes no `approval.*` one; a reply decided from a session ("Deciding from a session", below)
+writes `approval.decided`, naming the shop's own session or the helper. The people entries name invites, helpers and
+requests by id only: never a name, a note, or an identity's value.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
   and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
@@ -711,8 +722,9 @@ send twice, and settles `confirmed`, `failed` or `unknown` as it does for every 
 ## Approvals for a session
 
 `GET /v1/approvals?state=open` or `GET /v1/approvals?state=recent`, with a signed-in session
-(`Authorization: Bearer <access token>`), answers the session's own approval-core records and where each stands now,
-for the desktop's answering slice. It only reads: nothing is decided through it.
+(`Authorization: Bearer <access token>`), answers the shop's approval-core records and where each stands now, for the
+desktop's answering slice. The shop's own session reads its own shop; a helper session ("Helpers", below) reads the one
+shop it was given for. It only reads: deciding is the next section.
 
 - **What is listed.** Every approval-core request in the tenant's tasks: a worker's request (the job flow) and every
   LINE reply. A proposal that no request decides, such as a session's own `linear.issue.create` through
@@ -726,24 +738,33 @@ for the desktop's answering slice. It only reads: nothing is decided through it.
   lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
   (`request.createdAt`), then by id.
 - **`limit`**: 1 to 200, 50 when absent. It bounds `recent` only; `open` is never cut short.
-- **Scope.** The session's own tenant, as the tenant export reads it: every task in the tenant's index, read with the
-  tenant the session verified and nothing else. So one tenant never reads another's approvals, even through a task id
-  planted in its own index or an action planted in its own task. Fellow members' company tasks are not listed:
+- **Scope.** The shop's own, as the tenant export reads it: every task in the shop's index, read with the shop's
+  tenant (the session's own, or the one a helper session names) and nothing else. So one shop never reads another's
+  approvals, even through a task id planted in its own index or an action planted in its own task. Fellow members' company tasks are not listed:
   reading those takes a verified company assertion, which this route does not make. Like reading a task, it needs no
   feature switch and no consent.
 - **A reply stored before replies had requests** and still waiting is listed as the request it would have opened:
   asked when the reply was proposed, expiring with it. A reply decided before then has no record and is not listed;
   its history stays in the export.
+- **A note passed on.** A request a helper passed on to the owner comes with `passedOn`: who passed it, their name, the
+  note and when. It is shown to whoever lists the shop's approvals.
 
-Errors: 401 `unauthorized` without a session (the operator key is not a session), 400 `invalid_state`, 400
-`invalid_limit`, 405 `method_not_allowed` for anything but `GET`, and 503 `approvals_unavailable` when the tenant's
-index or one of its tasks cannot be read, never a partial list.
+Errors: 401 `unauthorized` without a session (the operator key is not a session), 401 `removed` with `removedAt` for a
+helper the owner removed, 400 `invalid_state`, 400 `invalid_limit`, 405 `method_not_allowed` for anything but `GET`, and
+503 `approvals_unavailable` when the shop's index, one of its tasks or its people cannot be read, never a partial list.
 
 ```ts
 // WireRecord and WireStanding are approval-core's wire JSON (packages/approval-core/src/wire.ts).
 type Approvals = {
   state: "open" | "recent";
-  approvals: { taskId: string; record: WireRecord; standing: WireStanding }[];
+  approvals: { taskId: string; record: WireRecord; standing: WireStanding; passedOn?: PassedOnNote }[];
+};
+
+type PassedOnNote = {
+  by: string;     // the helper's id
+  name: string;   // the name the owner gave them
+  note: string;   // 1 to 500 characters, as the helper wrote it, trimmed
+  at: string;
 };
 
 // What a LINE reply's request names, in `record.request.detail`. Its id is the reply's action id.
@@ -756,3 +777,167 @@ type ReplyDetail = {
   payloadHash: string;
 };
 ```
+
+## Deciding from a session
+
+`POST /v1/approvals/{requestId}/decision`, with a signed-in session and the body `{ optionId, seenRevision }`, decides
+one of the shop's approval-core requests: the path the desktop's answering slice and a helper's app both use. The
+request id is the one the listing above gives (`record.request.id`).
+
+- **Who decides comes from the session, never from the body.** The shop's own session decides as the owner (role
+  `owner`, `decidedBy: "owner-session"`); a helper session as that helper (role `helper`, `decidedBy` the helper's id).
+  The body is exactly `optionId` (1 to 64 characters) and `seenRevision` (a whole number from 1); a body with any other
+  field, a `role` or a `decidedBy` above all, answers 400 `invalid_request` and decides nothing.
+- **approval-core decides the rest**, in the request's own task object, as for a worker's request and the owner's
+  link: whether that role may decide the request's kind (a helper decides `message` and `reply` only, approving or
+  declining), that it is decided once, at the revision the person saw, before it expires, and while the attempt that
+  asked still runs, and that the option was offered.
+- **The switches and consent of the owner's link**, read first, before anything is recorded: `officeCloud` for any
+  decision; for an approval, `officeExternalWrites` and the shop's consent. So with consent missing even a request the
+  caller may not decide answers `consent_required` first, as on the link; approval-core's refusal follows once the
+  gates pass.
+- **Sent once, whichever path approved it.** An approved reply goes to the broker's one-use begin gate, the same gate
+  the owner's link sends through, before the answer: the answer's `action` is where it stands then (`confirmed` once
+  LINE has it). A reply approved here is never sent again by its link, and the reverse.
+- **Nothing settles an action without its request.** Only approval-core requests are found here; a plain proposal no
+  request decides answers 404.
+- **Scope.** The shop's own requests, found through the shop's index and read with the shop's tenant, so one shop's
+  session or helper never decides another shop's request, even one planted in its own index.
+- **The audit log** gets the job flow's `approval.decided` entry, naming `owner-session` or the helper's id. A reply
+  decided here is not written to the pilot's reply record, so the pilot gate keeps counting the owner's link decisions.
+
+Answers:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ result: { ok: true, decision }, action }` | Decided. `decision` is approval-core's `SettledDecision`; `action` is the action's state after it (`approved`, `rejected`, `dispatching`, `confirmed`, `failed`, `unknown`) |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ optionId, seenRevision }`, or the request id is not one |
+| 400 | `{ error: "not_offered", result }` | The request offers no such option |
+| 401 | `{ error: "unauthorized" }` | No session, an ended one, or the operator key |
+| 401 | `{ error: "removed", removedAt }` | A helper session of a helper the owner removed |
+| 403 | `{ error: "feature_disabled", feature }` | `officeCloud` is off, or `officeExternalWrites` for an approval |
+| 403 | `{ error: "consent_required" }` | An approval while the shop has not consented |
+| 403 | `{ error: "not_permitted", result }` | The caller's role may not decide the request's kind |
+| 404 | `{ error: "not_found" }` | The shop holds no such request |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST` |
+| 409 | `{ error: "already_decided", result, action }` | Someone decided first: `result.decision` says who (`decidedBy`, `role`) and when |
+| 409 | `{ error: "changed", result }` | The request moved on: `result.currentRevision` is the one to show |
+| 409 | `{ error: "superseded", result }` | `result.reason`: `attempt_ended`, `turn_ended` or `withdrawn` |
+| 410 | `{ error: "expired", result }` | Past the request's expiry: `result.expiredAt` |
+| 503 | `{ error: "approvals_unavailable" }` and others | The shop's index, a task or the shop's people could not be read |
+
+`result` is approval-core's `DecideResult` as the task object answered it. Every refusal of approval-core's also
+carries `action`, where the action stands, so a second decision can show what happened to it.
+
+## Helpers
+
+The owner's helpers (`docs/people.md`): an invite for one LINE account or email, once, for 7 days; joining as that
+account; helper sessions scoped to one shop; passing a request on with a note; cover while the owner is away; and
+removal. The rules are `@manut/people-rules`'; what a helper may decide is approval-core's `mayDecide`. Only pilot
+shops have helpers so far.
+
+### Operator routes
+
+Under the admin gate, as exact `ADMIN_METHODS` entries, on the owner's word. Each names an existing pilot shop (else 404
+`shop_not_found`; 400 `tenant_required` without a tenant), and each change is written to the shop's audit log under the
+operator's Access identity.
+
+| Method and path | Body or query | Answer |
+| --- | --- | --- |
+| `GET /v1/admin/people` | `?tenant=` | `People` |
+| `POST /v1/admin/people/invites` | `{ tenant, name, identity }` | `{ invite: InviteView, inviteUrl }` |
+| `POST /v1/admin/people/invites/revoke` | `{ tenant, inviteId }` | `{ invite: InviteView }`; 404 `unknown_invite`; 409 `not_pending` |
+| `POST /v1/admin/people/remove` | `{ tenant, helperId }` | `{ removed, sessionsEnded, invitesRevoked, coverEnded }`; 404 `not_a_helper` |
+| `POST /v1/admin/people/away` | `{ tenant, helperId, until }` | `{ away: AwayView }`; 400 `bad_date` (not a time in the future); 404 `not_a_helper` |
+| `POST /v1/admin/people/away/clear` | `{ tenant }` | `{ away: null }` |
+
+- **Invites.** `identity` is `{ kind: "line", id }` (a LINE account id, compared exactly) or `{ kind: "email", address }`
+  (compared without case); `name` is 1 to 80 characters once trimmed. 400 `invalid_request` for another shape or name,
+  400 `bad_identity` for an empty id or an address with no `@`, 409 `already_invited` while an open invite names the
+  same identity, 409 `already_helper` for a current helper. The answer's `inviteUrl` is `${WEB_ORIGIN}/join/{token}`
+  for the operator to copy: **the API never sends it** (LINE and email sending are parked). 503 `not_configured` with
+  `setting` when `WEB_ORIGIN` or `APPROVAL_LINK_SECRET` is missing.
+- **The invite token** is an HMAC-SHA256 under `APPROVAL_LINK_SECRET` in its own domain, `manut-ai/pilot-invite/v1.`,
+  over the shop's tenant, the invite's id and its expiry, so no approval or deletion link passes for an invite, and the
+  reverse. Minting is deterministic: `People` shows a pending invite's same link again.
+- **Removal** ends every helper session of theirs in the same write that removes them, revokes their pending invites,
+  ends their cover, and refuses their decisions from then on. What they did stays in the audit log under their id, and
+  `People.removed` keeps their name.
+- **Cover** adds no power: approval-core decides whoever covers, so money, public posts, payment confirmations and
+  commands wait for the owner.
+
+```ts
+type Identity = { kind: "line"; id: string } | { kind: "email"; address: string };
+
+type People = {
+  tenant: string;
+  owner: { name: string };
+  helpers: { id: string; name: string; identity: Identity; joinedAt: string; devices: number }[]; // devices: sessions open now
+  invites: InviteView[];
+  away: AwayView | null;
+  passedOn: { requestId: string; kind: string; by: string; name: string; note: string; at: string }[];
+  removed: { id: string; name: string }[];   // helpers who were removed, so their id in the log still has a name
+};
+
+type InviteView = {
+  id: string;
+  name: string;
+  identity: Identity;
+  status: "pending" | "used" | "revoked" | "expired";   // expired: never used in its 7 days
+  createdAt: string;
+  expiresAt: string;                                    // 7 days after createdAt
+  inviteUrl?: string;                                   // while pending only
+};
+
+type AwayView = { helperId: string; name: string; until: string; inForce: boolean };
+```
+
+### A helper's own routes
+
+**`POST /v1/people/accept`** with `{ token }` (the invite link's last segment, in the body, never in a URL) and a
+signed-in session of the lifted auth. Today that is Sign in with Apple (`POST /v1/auth/exchange`): the session keeps
+the email Apple verified, and that email is the account the invite is checked against. Nothing signs in as a LINE
+account yet, so a LINE invite answers `wrong_account` to every session until a LINE sign-in exists.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ answer: "joined", shop: { id, name, ownerName }, helper: { id, name }, session: HelperSession }` | The account the invite names, inside its 7 days, the first time |
+| 403 | `{ answer: "wrong_account", shop: { name, ownerName }, invitedOn: "line" \| "email" }` | Another account; the invite stays unused for the right one. The invited value is never shown |
+| 409 | `{ answer: "already_used" }` | The invite was used |
+| 410 | `{ answer: "expired" }`, `{ answer: "revoked" }` | Past its 7 days, or revoked |
+| 404 | `{ answer: "unknown" }` | No such invite, or not an invite token this backend signed |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ token }` |
+| 401 | `{ error: "unauthorized" }` | No signed-in session (a helper session and the operator key are not one) |
+
+Only `joined` and `wrong_account` name the shop.
+
+**`POST /v1/people/session`** with `{ shop }` (the shop's id from `joined`) and a signed-in session: a helper opens the
+shop on another device, as the identity they joined with. 200 `{ shop, helper, session: HelperSession }`; anyone else,
+for any shop or none, 403 `not_a_helper`.
+
+```ts
+type HelperSession = {
+  accessToken: string;   // "mhs1.<shop, base64url>.<64 hex>": send as `Authorization: Bearer <accessToken>`
+  expiresAt: string;     // 30 days on; open the shop again with the signed-in session after that
+};
+```
+
+A helper session is accepted by `GET /v1/approvals`, `POST /v1/approvals/{requestId}/decision` and
+`POST /v1/approvals/{requestId}/pass-on`, for its own shop only. Every other session route answers it 401: a helper
+never acts as the shop. The shop keeps only its SHA-256.
+
+**`POST /v1/approvals/{requestId}/pass-on`** with `{ note }` and a helper session: the helper hands the owner a request
+they may not decide, with a note of 1 to 500 characters (trimmed). It decides nothing: the request keeps waiting for
+the owner, and the note is shown with it (`passedOn` in the listing, and in `People`). The note is kept in the shop's
+people record, never in the audit log.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ passedOn: { requestId, kind, by, note, at } }` | Passed on |
+| 400 | `{ error: "bad_note" }` | An empty note, or one over 500 characters |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ note }` with a string |
+| 403 | `{ error: "not_a_helper" }` | The shop's own session: only a helper passes a request on |
+| 404 | `{ error: "not_found" }` | The shop holds no such request |
+| 409 | `{ error: "decide_yourself" }` | A message or a reply, which the helper decides |
+| 409 | `{ error: "already_decided", by, at }` | Someone decided it: who and when |
+| 409 | `{ error: "already_passed" }` | A request is passed on once |
