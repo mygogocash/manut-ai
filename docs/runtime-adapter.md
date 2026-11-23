@@ -251,7 +251,9 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
   `api_session_read`, `api_session_write` and `api_session_clear` commands (`apps/desktop/src-tauri/src/api_link.rs`)
   are the only way to it, and the page cannot name any other item. The app makes the item, so macOS lets it read the
   item without asking and asks the person before any other program reads it. Ad-hoc signed development builds change
-  signature on each build, so macOS may ask once after a rebuild.
+  signature on each build, so macOS may ask once after a rebuild. A second item beside it (account `outpost`) holds this
+  Mac's outpost and its credential (`docs/browser-control.md`); only the shell reads it, and no command gives it to the
+  page.
 - In memory, in the page's one `ApiSession` per origin, while the app runs.
 - Never in localStorage (which holds only `manut.runtime`), a log, an address, or a command line. A session is never
   sent to any origin but its own.
