@@ -74,19 +74,19 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four December helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it
-   after the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 7, several shops in one view, the design and the API side (`feat/several-shops`, Opus);
-   - item 9, desktop leftovers and three app bugs the Playwright revival found (`feat/desktop-leftovers`, Sonnet);
+1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
+   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   - item 11, the Playwright follow-up: the failing specs and a sharded CI job (`test/playwright-follow-up`, Sonnet);
    - item 8a, the outpost's step channel in the API (`feat/outpost-step-channel`, Opus);
-   - item 6, macOS notifications on `@manut/notify-rules` (`feat/macos-notifications`, Sonnet).
-   Merged: items 2 and 3 (routines running, shop templates), item 5 (the desktop answering approvals), the
-   Playwright revival (#15) and `notify-rules` (#16).
+   - item 6, macOS notifications on `@manut/notify-rules` (`feat/macos-notifications`, Sonnet);
+   - several shops' console owner link and ending a shop session from the app (`feat/owner-link-console`, Sonnet).
+   Merged: items 2 and 3 (routines running, shop templates), item 5 (the desktop answering approvals), item 7
+   (several shops, the API side), item 9 (desktop leftovers), the Playwright revival (#15) and `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 8b, the outpost in the desktop shell, after 8a (Opus);
-   - item 11, the Playwright follow-up: the 31 failing specs and sharding the CI job, after item 9 (Haiku);
-   - the desktop's switcher for several shops, after item 7.
+   - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2),
+     after item 6, which changes the same approvals code (Opus: per-shop sessions).
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
