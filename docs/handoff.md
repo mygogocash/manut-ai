@@ -75,6 +75,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 06:21 from `e2ab4e7`, with macOS notifications' package changes and the owner's link
   page naming the helper who decided (pages `c2d41d40`, API `85c2dd36`); smoke-tested: a bad link answers 404, the
   shops route 401 without a session, the approval page loads, the admin routes are behind Access.
+- Dev's API was redeployed on 24 Nov at 06:51 from `8b49ff9`, with browser control's slice 2 and the begin gate's
+  race fix (API `66c25549`; the pages did not change); smoke-tested: the outpost's steps and the approvals answer 401
+  without a credential, a bad link 404, the admin routes are behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
