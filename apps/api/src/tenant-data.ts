@@ -52,7 +52,7 @@ export async function tenantCall(
 
 /// Assembles a tenant's task documents with their histories, connection
 /// metadata, schedules, consent, inbound attention items, pilot records, model
-/// meter and deletion tombstone. Each task answers with its document, event
+/// meter, audit log, memory and deletion tombstone. Each task answers with its document, event
 /// log, action proposals and attempts, so the export no longer leaves the
 /// history behind (the old "task record only" gap is closed below).
 ///
@@ -97,6 +97,16 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
   const modelResp = await tenantCall(env, tenant, `/model/export?${query}`);
   if (!modelResp.ok) failed.push("model");
   const model: unknown = modelResp.ok ? await modelResp.json() : null;
+  // The shop's audit log: every entry, oldest first, and how many entries it
+  // could not write (audit-log.ts).
+  const auditResp = await tenantCall(env, tenant, `/audit/export?${query}`);
+  if (!auditResp.ok) failed.push("audit");
+  const audit: unknown = auditResp.ok ? await auditResp.json() : null;
+  // What the team knows about the shop: every fact, waiting ones included, and only how many texts it was told to
+  // forget, never their fingerprints (memory-store.ts).
+  const memoryResp = await tenantCall(env, tenant, `/memory/export?${query}`);
+  if (!memoryResp.ok) failed.push("memory");
+  const memory: unknown = memoryResp.ok ? await memoryResp.json() : null;
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -121,6 +131,8 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
     attention: attention.items ?? [],
     pilot,
     model,
+    audit,
+    memory,
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }

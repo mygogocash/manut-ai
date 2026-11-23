@@ -1,9 +1,19 @@
+import { formatMoney } from "@manut/format";
+import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
   ApiError,
+  MODEL_CAP_MAX_SATANG,
   type ApprovalState,
+  type AuditActor,
+  type AuditEntry,
+  type AuditMissed,
   type DeletedShop,
   type DeletionRequest,
+  type FactSource,
   type GateStatus,
+  type ModelCap,
+  type ModelCounts,
+  type ModelUsage,
   type PilotGate,
   type Shop,
 } from "../api";
@@ -292,10 +302,364 @@ export const gateWords = {
   listWhen: (iso: string, now: number = Date.now()) => `Recorded ${formatStamp(iso, now)}.`,
 } as const;
 
+/// The Audit page: one shop's audit log (docs/pilot-api.md, "Audit log"), newest first. Each entry reads as one
+/// sentence, who and then what, with its outcome as a tag; under it, when, and the ids it is about for looking the
+/// records up. A code this console does not know yet is shown as it is, never dropped.
+export const auditWords = {
+  nav: "Audit",
+  title: "Audit",
+  intro:
+    "Who did what for this shop, and when, newest first. The log keeps who and what only: never a customer's words, a reply's text or a key.",
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading the audit log",
+  empty: "Nothing recorded for this shop yet.",
+  noShops: "No shops yet.",
+  older: "Show older entries",
+  loadingOlder: "Loading older entries",
+  listLabel: (shop: string) => `${shop}'s audit log`,
+  unavailable: "The API could not read the audit log. Try again.",
+  /// The API counts every entry it could not write, so a gap is never read as nothing having happened.
+  missed: (missed: AuditMissed, now: number = Date.now()) =>
+    `${missed.count} ${missed.count === 1 ? "entry" : "entries"} could not be written, so this log is not complete. The last was at ${formatStamp(missed.lastAt, now)} (${missed.lastAction}).`,
+} as const;
+
+/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name.
+export function auditActorText(actor: AuditActor, ownerName: string): string {
+  switch (actor.kind) {
+    case "operator":
+      return actor.email ?? "An operator (no Access identity)";
+    case "owner":
+      return actor.id ? `${ownerName} (${actor.id})` : ownerName;
+    case "helper":
+      return `Helper ${actor.id}`;
+    case "worker":
+      return `Worker attempt ${actor.attemptId.slice(0, 8)}`;
+    case "system":
+      return "Manut AI";
+    default:
+      return "Someone";
+  }
+}
+
+const amountOf = (entry: AuditEntry) => (entry.amountSatang === undefined ? "" : ` of ${formatBaht(entry.amountSatang)}`);
+
+/// What each action did, said after who did it.
+const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
+  "shop.created": () => "created the shop",
+  "line.connected": (entry) =>
+    entry.subject.previousConnectionId ? "connected a new LINE account in place of the old one" : "connected the shop's LINE account",
+  "reply.proposed": () => "proposed a reply",
+  "payment.recorded": (entry) => `recorded an order payment${amountOf(entry)}`,
+  "subscription_payment.recorded": (entry) => `recorded a subscription payment${amountOf(entry)}`,
+  "model.cap_set": (entry) =>
+    `set the monthly model cap${entry.amountSatang === undefined ? "" : ` to ${formatBaht(entry.amountSatang)}`}`,
+  "model.cap_cleared": () => "cleared the model cap, so the default applies again",
+  "deletion.requested": () => "asked to delete the shop's data",
+  "reply.decided": () => "decided a reply",
+  "deletion.decided": () => "answered the request to delete the shop's data",
+  "consent.given": () => "allowed Manut AI to send for the shop",
+  "consent.withdrawn": () => "withdrew permission to send for the shop",
+  "dispatch.started": () => "started sending an approved action",
+  "dispatch.settled": () => "finished sending an approved action",
+  "attempt.started": () => "started a worker attempt",
+  "attempt.ended": (entry) => (entry.actor.kind === "worker" ? "finished its attempt" : "ended a worker attempt"),
+  "approval.requested": () => "asked for approval of an action",
+  "approval.decided": () => "decided an approval request",
+  "approval.superseded": () => "closed an approval request",
+  "memory.remembered": () => "told the team something to remember",
+  "memory.proposed": () => "added something the team learned",
+  "memory.confirmed": () => "confirmed a fact as true",
+  "memory.corrected": () => "corrected a fact",
+  "memory.forgotten": () => "made the team forget a fact",
+};
+
+/// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290."
+export function auditSentence(entry: AuditEntry, ownerName: string): string {
+  const said = Object.hasOwn(AUDIT_ACTIONS, entry.action) ? AUDIT_ACTIONS[entry.action]!(entry) : `did ${entry.action}`;
+  return `${auditActorText(entry.actor, ownerName)} ${said}.`;
+}
+
+/// The outcome as a tag, or nothing for an action simply done as asked.
+export function auditOutcomeTag(outcome: string, ownerName: string): { label: string; className: string } | null {
+  switch (outcome) {
+    case "ok":
+      return null;
+    case "approved":
+      return { label: "Approved", className: "tag ok" };
+    case "declined":
+      return { label: "Declined", className: "tag" };
+    case "refused":
+      return { label: "Refused", className: "tag warn" };
+    case "awaiting_owner":
+      return { label: `Waiting for ${ownerName}`, className: "tag warn" };
+    case "confirmed":
+      return { label: "Sent", className: "tag ok" };
+    case "failed":
+      return { label: "Failed", className: "tag err" };
+    case "unknown":
+      return { label: "Not sure it was sent", className: "tag warn" };
+    case "done":
+      return { label: "Done", className: "tag ok" };
+    case "cancelled":
+      return { label: "Cancelled", className: "tag" };
+    case "superseded":
+      return { label: "No longer open", className: "tag" };
+    default:
+      return { label: outcome, className: "tag" };
+  }
+}
+
+/// Why, for an attempt that ended or a decision that was refused.
+const AUDIT_REASONS: Readonly<Record<string, string>> = {
+  budget: "The shop's model budget ran out.",
+  silent: "The worker stopped reporting.",
+  deadline: "The attempt ran out of time.",
+  attempt_ended: "Its attempt had already ended.",
+  turn_ended: "Its turn had already ended.",
+  withdrawn: "It had been taken back.",
+  already_decided: "It was already decided.",
+  not_permitted: "That role may not decide it.",
+  expired: "It had expired.",
+  changed: "It had changed since it was shown.",
+  not_offered: "That choice was not offered.",
+  not_found: "There was no such request.",
+};
+
+export function auditReasonText(reason: string): string {
+  return Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+}
+
+/// The ids an entry is about, in one order whatever order they came in. A worker's request shares its action's id,
+/// so the id is listed once, as the action.
+const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
+  ["taskId", "task"],
+  ["attemptId", "attempt"],
+  ["requestId", "request"],
+  ["actionId", "action"],
+  ["messageId", "message"],
+  ["paymentId", "payment"],
+  ["connectionId", "LINE connection"],
+  ["previousConnectionId", "replacing"],
+  ["confirmationId", "confirmation"],
+  ["factId", "fact"],
+];
+
+export function auditSubjectText(subject: Record<string, string>): string {
+  const known = new Set(SUBJECT_LABELS.map(([key]) => key));
+  const parts = SUBJECT_LABELS.flatMap(([key, label]) => {
+    const id = subject[key];
+    if (!id || (key === "requestId" && subject.actionId === id)) return [];
+    return [`${label} ${id}`];
+  });
+  for (const [key, id] of Object.entries(subject)) if (!known.has(key) && id) parts.push(`${key} ${id}`);
+  return parts.join(" · ");
+}
+
 /// What the API said to recording a subscription payment that recorded nothing.
 export function subscriptionErrorText(error: unknown, shop: string): string {
   if (error instanceof ApiError && error.code === "slip_already_recorded") return gateWords.alreadyRecorded(shop);
   return errorText(error);
+}
+
+/// The Model spend page: one shop's model spend for one Bangkok month against its monthly cap (docs/model-gateway.md,
+/// "Operator routes"). Money is whole satang, written with `formatMoney` and read with `parseMoney` from @manut/format and
+/// never through a float. Spend is shown as the API rounds it, up, and what is left rounded down, so the page never shows
+/// a shop more room than it has. Sentences that hold a figure or a name are functions.
+
+const UNKNOWN_AMOUNT = "unknown";
+const NO_IDENTITY = "an operator (no Access identity)";
+
+/// An amount of satang as baht: ฿186, ฿113.41. A figure that is not a whole, non-negative number of satang, which the API
+/// never sends, is shown as "unknown" rather than crashing the page or showing a wrong amount.
+export function moneyText(satang: number): string {
+  return Number.isSafeInteger(satang) && satang >= 0 ? formatMoney(satang) : UNKNOWN_AMOUNT;
+}
+
+export type SpendLevel = "empty" | "ok" | "half" | "cap";
+
+/// Where a month stands against the cap. At the cap when nothing is left, however it came about: spend, calls in progress,
+/// a cap lowered under the spend, or a zero cap. Over half when spend and holds together are more than half of it. Empty
+/// when nothing was spent, held, called or refused; a failed call costs nothing but still means calls were made.
+export function spendLevel(usage: ModelUsage): SpendLevel {
+  if (usage.remainingSatang === 0) return "cap";
+  const { ok, failed, unreadable, abandoned, refused } = usage.counts;
+  if (usage.spentSatang === 0 && usage.heldSatang === 0 && ok + failed + unreadable + abandoned + refused === 0) {
+    return "empty";
+  }
+  return (usage.spentSatang + usage.heldSatang) * 2 > usage.capSatang ? "half" : "ok";
+}
+
+/// Whole percent of the cap that spend and holds take, rounded down and never past 100. The remainder is taken first,
+/// so the division is exact. A zero cap is all used.
+export function percentUsed(usage: ModelUsage): number {
+  if (usage.capSatang <= 0) return 100;
+  const scaled = (usage.spentSatang + usage.heldSatang) * 100;
+  const percent = (scaled - (scaled % usage.capSatang)) / usage.capSatang;
+  return percent > 100 ? 100 : percent;
+}
+
+const MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+  "November", "December"] as const;
+
+/// "2026-11" as "November 2026"; anything that is not a month is shown as it is.
+export function monthName(month: string): string {
+  const match = MONTH.exec(month);
+  return match ? `${MONTH_NAMES[Number(match[2]) - 1]} ${match[1]}` : month;
+}
+
+/// The `count` months before `month`, newest first: 2026-02 gives 2026-01, 2025-12, 2025-11.
+export function monthsBack(month: string, count: number): string[] {
+  const match = MONTH.exec(month);
+  if (!match) return [];
+  const index = Number(match[1]) * 12 + Number(match[2]) - 1;
+  return Array.from({ length: count }, (_, i) => {
+    const earlier = index - (i + 1);
+    return `${String(Math.floor(earlier / 12)).padStart(4, "0")}-${String((earlier % 12) + 1).padStart(2, "0")}`;
+  });
+}
+
+/// How one call ended, as a tag. A code this console does not know yet is shown as it is, never dropped.
+export function callOutcomeTag(outcome: string): { label: string; className: string } {
+  switch (outcome) {
+    case "ok":
+      return { label: "Done", className: "tag ok" };
+    case "failed":
+      return { label: "Failed, not charged", className: "tag" };
+    case "unreadable":
+      return { label: "Worst case charged", className: "tag warn" };
+    case "abandoned":
+      return { label: "Never finished, worst case charged", className: "tag warn" };
+    default:
+      return { label: outcome, className: "tag" };
+  }
+}
+
+/// What went wrong with one of the two model routes. `write` is setting or clearing a cap, where a 503 `meter_unavailable`
+/// does not say whether the cap was written, so the words say so. Anything else is the console's usual words.
+export function modelErrorText(error: unknown, action: "read" | "write"): string {
+  if (error instanceof ApiError) {
+    if (error.code === "not_configured") return modelSpendWords.notConfigured(error.setting);
+    if (error.code === "meter_unavailable") {
+      return action === "read" ? modelSpendWords.unavailable : modelSpendWords.capUnconfirmed;
+    }
+  }
+  return errorText(error);
+}
+
+export const modelSpendWords = {
+  nav: "Model spend",
+  title: "Model spend",
+  intro:
+    "What each shop's AI team has spent on language models in a month, against the shop's monthly cap. Every call is priced and held against the cap before it is made, and a call that would pass the cap is refused. Spend is shown rounded up and what is left rounded down, so a shop never looks to have more room than it has.",
+  shopLabel: "Shop",
+  monthLabel: "Month",
+  thisMonth: "This month",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading model spend",
+  noShops: "No shops yet.",
+  /// The API names the setting it cannot read: a model setting it was given that is not a whole number, or one it needs.
+  notConfigured: (setting?: string) =>
+    `The model gateway is not set up: ${setting ? `the API setting ${setting}` : "one of the API's model settings"} is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.`,
+  unavailable: "The API could not read this shop's model meter, so no spend is shown. Try again.",
+  capUnconfirmed: "The API could not confirm the cap, so it may not have changed. Check the cap shown, then try again.",
+
+  // Where the month stands
+  level: {
+    empty: { label: "No spend yet", className: "tag" },
+    ok: { label: "Under half of the cap", className: "tag ok" },
+    half: { label: "Over half of the cap", className: "tag warn" },
+    cap: { label: "At the cap", className: "tag err" },
+  } satisfies Record<SpendLevel, { label: string; className: string }>,
+  usedText: (percent: number) => `${percent}% of the cap is used`,
+  emptyText: (month: string, current: boolean) =>
+    current ? "No model calls yet this month." : `No model calls in ${monthName(month)}.`,
+  atCapText: (current: boolean, capSatang: number) =>
+    capSatang === 0
+      ? `The cap is ${moneyText(0)}, so every call is refused.`
+      : current
+        ? "New calls are refused until the cap is raised or the month turns."
+        : "That month's spend and holds reached the cap.",
+  /// The API keeps one cap per shop, not one per month, so an earlier month is read against the cap as it is now.
+  pastNote:
+    "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.",
+
+  // The four figures
+  spentLabel: "Spent",
+  spentHelp: (tokens: { input: number; output: number }) =>
+    `${tokens.input.toLocaleString("en-US")} tokens in, ${tokens.output.toLocaleString("en-US")} out.`,
+  heldLabel: "Held for calls in progress",
+  heldHelp: (count: number | null) =>
+    count === null
+      ? "Calls in progress, counted at their worst case."
+      : count === 0
+        ? "No calls in progress."
+        : `${count} ${count === 1 ? "call" : "calls"} in progress, counted at ${count === 1 ? "its" : "their"} worst case.`,
+  leftLabel: "Left",
+  leftHelp: "The cap less what is spent and held.",
+  capLabel: "Monthly cap",
+  capSource: (usage: Pick<ModelUsage, "capSource" | "capOverride">, now: number = Date.now()) => {
+    if (usage.capSource !== "override") return "The default. No operator has set one for this shop.";
+    const set = usage.capOverride;
+    return set ? `Set by ${set.setBy ?? NO_IDENTITY}${whenAfter(set.setAt, now)}.` : "Set by an operator.";
+  },
+
+  // The calls
+  callsText: (counts: ModelCounts) =>
+    `${countOf(counts.ok + counts.failed + counts.unreadable + counts.abandoned, "call", "calls")} made, ${counts.refused.toLocaleString("en-US")} refused at the cap.`,
+  /// What became of the calls that did not simply finish, naming what each one cost; empty when every call finished.
+  outcomesText: (counts: ModelCounts) => {
+    const parts: string[] = [];
+    if (counts.failed) parts.push(`${counts.failed.toLocaleString("en-US")} failed (not charged)`);
+    if (counts.unreadable) {
+      parts.push(`${counts.unreadable.toLocaleString("en-US")} answered without a usable token count (charged at the worst case)`);
+    }
+    if (counts.abandoned) parts.push(`${counts.abandoned.toLocaleString("en-US")} never finished (charged at the worst case)`);
+    return parts.length === 0 ? "" : `Of these, ${listOf(parts)}.`;
+  },
+  callsTitle: "Calls",
+  callsLabel: (shop: string, month: string) => `${shop}'s model calls in ${monthName(month)}`,
+  columns: { when: "When", model: "Model", tokens: "Tokens", cost: "Cost", outcome: "How it ended" },
+  tokensText: (input: number, output: number) =>
+    `${input.toLocaleString("en-US")} in, ${output.toLocaleString("en-US")} out`,
+  /// The API lists a month's newest 200 records. Refused calls have no record, so only calls made count against the list.
+  newestNote: (shown: number, counts: ModelCounts) => {
+    const made = counts.ok + counts.failed + counts.unreadable + counts.abandoned;
+    return shown < made ? `Showing the newest ${shown.toLocaleString("en-US")} of ${made.toLocaleString("en-US")} calls.` : null;
+  },
+  roundingNote:
+    "Each cost is rounded up to a whole satang, so the rows can add up to a little more than the month's spend.",
+
+  // Changing the cap
+  formTitle: "Change the cap",
+  capInputLabel: "New monthly cap in baht",
+  capInputHelp: `Like 300 or 300.50, up to ${moneyText(MODEL_CAP_MAX_SATANG)}. A new cap applies from the next call; calls already in progress keep the budget they hold.`,
+  setButton: "Set cap",
+  setting: "Setting",
+  clearButton: "Use the default cap",
+  clearing: "Clearing",
+  clearHelp: (hasOverride: boolean) =>
+    hasOverride ? "Removes this shop's own cap, so the default applies again." : "This shop already uses the default cap.",
+  badCap: "Write the cap in baht, like 300 or 300.50. It must be more than ฿0.",
+  tooBigCap: `The cap can be at most ${moneyText(MODEL_CAP_MAX_SATANG)}.`,
+  /// The cap as the API's answer says it now stands, so what the page confirms is what was written, not what was typed.
+  capAnswer: (shop: string, answer: ModelCap, now: number = Date.now()) => {
+    const cap = moneyText(answer.capSatang);
+    if (answer.capSource !== "override") return `The cap for ${shop} is now ${cap}, the default. The override is cleared.`;
+    const set = answer.capOverride;
+    const by = set ? `, set by ${set.setBy ?? NO_IDENTITY}${whenAfter(set.setAt, now)}` : "";
+    return `The cap for ${shop} is now ${cap}${by}. It applies from the next call; calls already in progress keep the budget they hold.`;
+  },
+} as const;
+
+/// " at 10:00" or " on 23 November at 10:00", or nothing for a time that is not one.
+function whenAfter(iso: string, now: number): string {
+  return Number.isNaN(Date.parse(iso)) ? "" : ` ${whenText(iso, now)}`;
 }
 
 /// "at 10:00" today, "on 23 November at 10:00" on any other day of the shop's calendar.
@@ -312,4 +676,117 @@ function countOf(n: number, one: string, many: string): string {
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/// The Memory page: what Buddy's team knows about one shop, laid out as the design canvas's "Customize: memory and
+/// routines" board. The titles and labels are the board's own words. The operator acts for the owner, so the words that say
+/// what an action does name the owner, and a fact is never shown again once it is forgotten.
+export const memoryWords = {
+  nav: "Memory",
+  title: "Memory",
+  intro: (owner: string) =>
+    `What Buddy's team knows about this shop, and where each fact came from. Correct or forget a fact only when ${owner} asks you to. What a customer said is not used until ${owner} says it is true.`,
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading what the team knows",
+  noShops: "No shops yet.",
+  unavailable: "The API could not read what the team knows. Try again.",
+
+  // The board's groups: each band has its title, and a note on what its rows are
+  knownTitle: "What your team knows",
+  sourceLabel: "Where it came from",
+  knownEmpty: "Nothing yet. Tell Buddy something to remember below.",
+  waitingTitle: "Waiting for your OK",
+  waitingNote: "Not used until you confirm",
+  /// The group's one name for a list or a screen reader: the band's two parts as the plan writes them.
+  waitingLabel: "Waiting for your OK: not used until you confirm",
+  tellTitle: "Tell Buddy something to remember",
+
+  // One fact
+  corrected: "Corrected",
+  notConfirmed: "Not confirmed",
+  confirm: "It's true",
+  correct: "Correct",
+  forget: "Forget",
+  correctLabel: "Corrected words",
+  saveCorrection: "Save correction",
+  saving: "Saving",
+  cancel: "Cancel",
+  forgetAsk: (owner: string) =>
+    `Forget this fact? The team stops using it and will not learn it again unless ${owner} says it again.`,
+  forgetYes: "Yes, forget it",
+  forgetNo: "Keep it",
+  forgottenNote: (n: number) =>
+    n === 1
+      ? "1 text was forgotten. Only a fingerprint of it is kept, so the team does not learn it again."
+      : `${n.toLocaleString("en-US")} texts were forgotten. Only a fingerprint of each is kept, so the team does not learn them again.`,
+
+  // Telling the team something new
+  tellHelp: (n: number) =>
+    `${n.toLocaleString("en-US")} of ${MAX_TEXT} characters. The team uses it as soon as you save it.`,
+  remember: "Remember",
+
+  // What an action did, and why one did not
+  remembered: "Remembered.",
+  confirmed: "Confirmed.",
+  correctedDone: "Corrected.",
+  forgotten: "Forgotten.",
+  alreadyKnown: "The team already knows this: a fact says the same.",
+  full: `The team already holds ${MAX_FACTS} facts. Forget one to make room.`,
+  invalidText: `Write between 1 and ${MAX_TEXT} characters.`,
+  gone: "That fact is already gone. The list was refreshed.",
+  saveUnavailable: "The API could not read or save what the team knows. Try again.",
+} as const;
+
+const UNKNOWN_SOURCE = "From somewhere this console does not know yet";
+
+/// A fact's source as the board says it: "From your price list, 3 November", "Learned from 12 of your edits", "From the
+/// last 90 days of orders", "From your cost sheet in Google Sheets". It never fails on what it cannot read: a date that is not one is left out, and a kind
+/// this console does not know yet is shown as it is.
+export function factSourceText(source: FactSource, ownerName: string): string {
+  if (typeof source !== "object" || source === null) return UNKNOWN_SOURCE;
+  switch (source.kind) {
+    case "owner":
+      return `Told to the team by ${ownerName}`;
+    case "document": {
+      const date = new Date(source.date);
+      return Number.isNaN(date.getTime()) ? `From ${source.name}` : `From ${source.name}, ${formatDate(date.toISOString())}`;
+    }
+    case "edits":
+      return `Learned from ${source.count} of your edits`;
+    case "orders":
+      return source.days === 1 ? "From the last day of orders" : `From the last ${source.days} days of orders`;
+    case "connection": {
+      const detail = source.detail.trim();
+      return detail ? `From your ${detail} in ${source.name}` : `From ${source.name}`;
+    }
+    case "customer":
+      return `A customer said it, in chat ${source.chat}`;
+    default: {
+      const kind: unknown = (source as { kind?: unknown }).kind;
+      return typeof kind === "string" && kind ? `From ${kind}` : UNKNOWN_SOURCE;
+    }
+  }
+}
+
+/// What the API said to a change in the team's memory that changed nothing: its own refusals in the board's words, and
+/// the console's usual words for the rest.
+export function memoryErrorText(error: unknown): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "already_known":
+        return memoryWords.alreadyKnown;
+      case "full":
+        return memoryWords.full;
+      case "invalid_text":
+        return memoryWords.invalidText;
+      case "not_found":
+        return memoryWords.gone;
+      case "memory_unavailable":
+        return memoryWords.saveUnavailable;
+    }
+  }
+  return errorText(error);
 }

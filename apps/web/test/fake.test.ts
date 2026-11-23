@@ -379,3 +379,510 @@ describe("the fake's pilot gate, measured as the API measures it", () => {
     expect((await api.getGate()).shops).toHaveLength(2);
   });
 });
+
+describe("the fake's audit log, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 in Bangkok
+  const ENTRY_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
+  const operator = { kind: "operator", email: null };
+
+  /// The log oldest first, each entry as what it says, without its id and time.
+  async function trail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  it("records the operator's actions, the owner's consent and decisions, and each send as it settles", async () => {
+    let now = NOW;
+    const api = createFakeApi({ now: () => now, settleMs: 3000, webOrigin: "https://web.test" });
+    const { tenant } = await api.createShop({ name: "Kanom Jeen", ownerName: "Nok" });
+    const first = await api.createLineConnection({ tenant, channelId: "c1", botUserId: "Ukj", channelSecret: "s1",
+      channelAccessToken: "t1" });
+    const second = await api.createLineConnection({ tenant, channelId: "c1", botUserId: "Ukj", channelSecret: "s2",
+      channelAccessToken: "t2" });
+    const body = JSON.stringify({ events: [{ type: "message", webhookEventId: "kj-1", source: { userId: "Ucustomer" },
+      message: { type: "text", text: "ส่งของวันไหนคะ" } }] });
+    await api.deliverLineWebhook(second.connectionId, body, await lineSignature("s2", body));
+    const message = (await api.listMessages(tenant))[0]!;
+    const reply = await api.proposeReply({ tenant, messageId: message.id, text: "พรุ่งนี้ค่ะ" });
+    const token = tokenOf(reply.approvalUrl);
+    await api.giveConsent(token);
+    await api.decide(token, true);
+    now += 3000;
+    expect((await api.getApproval(token)).state).toBe("confirmed");
+    const payment = await api.recordPayment({ tenant, orderRef: "KJ-1", amountSatang: 12000, promptPayId: "0812345678" });
+    const subscription = await api.recordSubscriptionPayment({ tenant, amountSatang: 49900, slipRef: "KB-9" });
+
+    const about = { taskId: reply.taskId, actionId: reply.actionId };
+    expect(await trail(api, tenant)).toEqual([
+      { actor: operator, action: "shop.created", subject: {}, outcome: "ok" },
+      { actor: operator, action: "line.connected", subject: { connectionId: first.connectionId }, outcome: "ok" },
+      { actor: operator, action: "line.connected",
+        subject: { connectionId: second.connectionId, previousConnectionId: first.connectionId }, outcome: "ok" },
+      { actor: operator, action: "reply.proposed", subject: { ...about, messageId: message.id }, outcome: "ok" },
+      { actor: { kind: "owner" }, action: "consent.given", subject: {}, outcome: "ok" },
+      { actor: { kind: "owner" }, action: "reply.decided", subject: about, outcome: "approved" },
+      { actor: { kind: "system" }, action: "dispatch.started", subject: about, outcome: "ok" },
+      { actor: { kind: "system" }, action: "dispatch.settled", subject: about, outcome: "confirmed" },
+      { actor: operator, action: "payment.recorded", subject: { paymentId: payment.id }, outcome: "ok",
+        amountSatang: 12000 },
+      { actor: operator, action: "subscription_payment.recorded", subject: { paymentId: subscription.id }, outcome: "ok",
+        amountSatang: 49900 },
+    ]);
+    // Metadata only, as the API keeps it: no customer's words and no reply's text.
+    const written = JSON.stringify(await api.listAudit(tenant));
+    expect(written).not.toContain("ส่งของวันไหนคะ");
+    expect(written).not.toContain("พรุ่งนี้ค่ะ");
+  });
+
+  it("pages newest first with the API's cursor, and refuses a page it cannot read", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const all = await api.listAudit("shop_baanmali");
+    expect(all.tenant).toBe("shop_baanmali");
+    expect(all.missed).toBeNull();
+    expect(all.entries.length).toBeGreaterThan(4);
+    expect(all.entries.every((entry) => ENTRY_ID.test(entry.id))).toBe(true);
+    expect(all.entries.map((entry) => entry.id)).toEqual([...all.entries.map((entry) => entry.id)].sort().reverse());
+    // The sample shop's history: the replies of its sample world, newest first.
+    expect(all.entries[0]).toMatchObject({ action: "reply.proposed", subject: { actionId: "act_ploy" } });
+
+    const one = await api.listAudit("shop_baanmali", { limit: 2 });
+    expect(one.entries).toEqual(all.entries.slice(0, 2));
+    expect(one.next).toBe(all.entries[1]!.id);
+    const two = await api.listAudit("shop_baanmali", { before: one.next!, limit: 2 });
+    expect(two.entries).toEqual(all.entries.slice(2, 4));
+
+    for (const query of [{ limit: 0 }, { limit: 201 }, { limit: 1.5 }, { before: "pay_2301" }]) {
+      await expect(api.listAudit("shop_baanmali", query)).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    await expect(api.listAudit("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    expect(await api.listAudit("shop_nobody")).toEqual({ tenant: "shop_nobody", entries: [], next: null, missed: null });
+  });
+
+  it("records a deletion's request and its owner's answer, exports the log, and deletes it with the shop", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    const kept = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(kept.confirmUrl), false);
+    const deletions = (await trail(api, "shop_baanmali")).filter((entry) => entry.action.startsWith("deletion."));
+    expect(deletions).toEqual([
+      { actor: operator, action: "deletion.requested", subject: { confirmationId: expect.any(String) },
+        outcome: "awaiting_owner" },
+      { actor: { kind: "owner" }, action: "deletion.decided", subject: { confirmationId: expect.any(String) },
+        outcome: "declined" },
+    ]);
+    const exported = await api.exportShop("shop_baanmali");
+    expect(exported.audit).toEqual({ entries: (await api.listAudit("shop_baanmali", { limit: 200 })).entries.reverse(),
+      missed: null });
+
+    const again = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(again.confirmUrl), true);
+    expect(await api.listAudit("shop_baanmali")).toEqual({ tenant: "shop_baanmali", entries: [], next: null,
+      missed: null });
+  });
+
+  it("replaces a practice world saved before the audit log existed", async () => {
+    const saved = new Map([["manut.pilot.fake.v1", JSON.stringify({ version: 3, seq: 100, shops: [], connections: [],
+      messages: [], actions: [], payments: [], subscriptionPayments: [], deletions: [], confirmations: [],
+      expiredTokens: [] })]]);
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.listAudit("shop_baanmali")).entries.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the fake's memory, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z");
+  const fresh = () => createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+  const operator = { kind: "operator", email: null };
+
+  /// The memory entries of a shop's log, oldest first, as what they say: no id, no time.
+  async function memoryTrail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().filter((entry) => entry.action.startsWith("memory.")).map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  it("starts Baan Mali with what its sample world taught the team, a customer's two facts waiting, and Sabai Tea with nothing", async () => {
+    const api = fresh();
+    const memory = await api.getMemory("shop_baanmali");
+    expect(memory.tenant).toBe("shop_baanmali");
+    expect(memory.facts.map((fact) => [fact.id, fact.status, fact.source.kind])).toEqual([
+      ["f1", "confirmed", "owner"], ["f2", "confirmed", "document"], ["f3", "confirmed", "edits"],
+      ["f4", "confirmed", "orders"], ["f5", "confirmed", "connection"], ["f6", "waiting", "customer"],
+      ["f7", "waiting", "customer"],
+    ]);
+    expect(memory.forgottenCount).toBe(0);
+    expect(await api.getMemory("shop_sabaitea")).toEqual({ tenant: "shop_sabaitea", facts: [], forgottenCount: 0 });
+    // Any tenant can be read, as in the API: one the team knows nothing about is an empty memory.
+    expect(await api.getMemory("shop_nobody")).toEqual({ tenant: "shop_nobody", facts: [], forgottenCount: 0 });
+  });
+
+  it("remembers the owner's fact trimmed and confirmed, and refuses as the package and the API do", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    expect(await api.rememberFact({ tenant, text: "  We close on Mondays " })).toEqual({ id: "f1", text: "We close on Mondays",
+      status: "confirmed", createdAt: NOW, updatedAt: NOW, source: { kind: "owner" } });
+    await expect(api.rememberFact({ tenant, text: " we  close on MONDAYS" })).rejects.toMatchObject({ status: 409, code: "already_known" });
+    for (const text of ["", "   ", "x".repeat(281), 5 as unknown as string]) {
+      await expect(api.rememberFact({ tenant, text })).rejects.toMatchObject({ status: 400, code: "invalid_text" });
+    }
+    expect((await api.getMemory(tenant)).facts).toHaveLength(1);
+    // A waiting fact is confirmed by saying it, not added twice.
+    const waiting = (await api.getMemory("shop_baanmali")).facts.find((fact) => fact.status === "waiting")!;
+    const confirmed = await api.rememberFact({ tenant: "shop_baanmali", text: waiting.text.toUpperCase() });
+    expect(confirmed).toMatchObject({ id: waiting.id, status: "confirmed" });
+    expect((await api.getMemory("shop_baanmali")).facts).toHaveLength(7);
+  });
+
+  it("holds at most 200 facts, and Forget makes room", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    for (let i = 0; i < 200; i++) await api.rememberFact({ tenant, text: `fact ${i}` });
+    await expect(api.rememberFact({ tenant, text: "one more" })).rejects.toMatchObject({ status: 409, code: "full" });
+    await api.forgetFact({ tenant, id: "f1" });
+    expect(await api.rememberFact({ tenant, text: "one more" })).toMatchObject({ id: "f201" });
+  });
+
+  it("says 'It's true' to a waiting fact, and answering a confirmed fact changes nothing", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const first = await api.confirmFact({ tenant, id: "f6" });
+    expect(first).toMatchObject({ id: "f6", status: "confirmed", updatedAt: NOW, source: { kind: "customer" } });
+    expect(await api.confirmFact({ tenant, id: "f6" })).toEqual(first);
+    await expect(api.confirmFact({ tenant, id: "f99" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+    for (const id of ["", "f".repeat(65), 7 as unknown as string]) {
+      await expect(api.confirmFact({ tenant, id })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    expect((await api.getMemory(tenant)).facts.filter((fact) => fact.status === "waiting").map((fact) => fact.id)).toEqual(["f7"]);
+  });
+
+  it("corrects a fact: new words, confirmed, marked as corrected, keeping where it came from", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const before = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f7")!;
+    const corrected = await api.correctFact({ tenant, id: "f7", text: " Customers expect 15% off when they buy 5 sets " });
+    expect(corrected).toEqual({ ...before, text: "Customers expect 15% off when they buy 5 sets", status: "confirmed", updatedAt: NOW, correctedAt: NOW });
+    const other = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f1")!;
+    await expect(api.correctFact({ tenant, id: "f7", text: other.text.toLowerCase() })).rejects.toMatchObject({ status: 409, code: "already_known" });
+    await expect(api.correctFact({ tenant, id: "f7", text: "" })).rejects.toMatchObject({ status: 400, code: "invalid_text" });
+    await expect(api.correctFact({ tenant, id: "f99", text: "anything" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("forgets by keeping only a fingerprint: gone from the memory, the export and the log, and not reused as an id", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const text = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f2")!.text;
+    expect(await api.forgetFact({ tenant, id: "f2" })).toEqual({ id: "f2" });
+    await expect(api.forgetFact({ tenant, id: "f2" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+    const after = await api.getMemory(tenant);
+    expect(after.facts.map((fact) => fact.id)).not.toContain("f2");
+    expect(after.forgottenCount).toBe(1);
+    for (const kept of [JSON.stringify(after), JSON.stringify(await api.exportShop(tenant)), JSON.stringify(await api.listAudit(tenant, { limit: 200 }))]) {
+      expect(kept).not.toContain(text);
+    }
+    // The owner saying it again lifts the Forget; the new fact has a new id.
+    expect(await api.rememberFact({ tenant, text })).toMatchObject({ id: "f8", status: "confirmed" });
+    expect((await api.getMemory(tenant)).forgottenCount).toBe(0);
+  });
+
+  it("writes an audit entry for each change, by the fact's id and never its words, and none for a refusal or a no-op", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    const made = await api.rememberFact({ tenant, text: "A secret supplier is Khun Somchai" });
+    await api.correctFact({ tenant, id: made.id, text: "A secret supplier is Khun Somsri" });
+    await api.confirmFact({ tenant, id: made.id }); // already confirmed: nothing changed
+    await api.rememberFact({ tenant, text: "a secret supplier is khun somsri" }).catch(() => undefined); // refused
+    await api.forgetFact({ tenant, id: made.id });
+    expect(await memoryTrail(api, tenant)).toEqual([
+      { actor: operator, action: "memory.remembered", subject: { factId: "f1" }, outcome: "ok" },
+      { actor: operator, action: "memory.corrected", subject: { factId: "f1" }, outcome: "ok" },
+      { actor: operator, action: "memory.forgotten", subject: { factId: "f1" }, outcome: "ok" },
+    ]);
+    expect(JSON.stringify(await api.listAudit(tenant))).not.toMatch(/Somchai|Somsri|supplier/);
+  });
+
+  it("gives each sample fact its entry, the waiting ones as waiting for the owner", async () => {
+    const api = fresh();
+    const trail = await memoryTrail(api, "shop_baanmali");
+    expect(trail.map((entry) => [entry.action, entry.subject.factId, entry.outcome])).toEqual([
+      ["memory.remembered", "f1", "ok"], ["memory.proposed", "f2", "ok"], ["memory.proposed", "f3", "ok"],
+      ["memory.proposed", "f4", "ok"], ["memory.proposed", "f5", "ok"], ["memory.proposed", "f6", "awaiting_owner"],
+      ["memory.proposed", "f7", "awaiting_owner"],
+    ]);
+    expect(trail.map((entry) => entry.actor.kind)).toEqual(["operator", "system", "system", "system", "system", "system", "system"]);
+  });
+
+  it("needs the operator key on every memory route, and a tenant", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    const tenant = "shop_baanmali";
+    await expect(api.getMemory(tenant)).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.rememberFact({ tenant, text: "x" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.confirmFact({ tenant, id: "f6" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.correctFact({ tenant, id: "f6", text: "x" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.forgetFact({ tenant, id: "f6" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    const keyed = fresh();
+    await expect(keyed.getMemory("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    await expect(keyed.rememberFact({ tenant: "", text: "x" })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+  });
+
+  it("keeps the memory across tabs that share the saved world", async () => {
+    const saved = new Map<string, string>();
+    const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key) };
+    const one = createFakeApi({ now: () => NOW, storage });
+    const two = createFakeApi({ now: () => NOW, storage });
+    await one.rememberFact({ tenant: "shop_sabaitea", text: "Saved in one tab" });
+    expect((await two.getMemory("shop_sabaitea")).facts.map((fact) => fact.text)).toEqual(["Saved in one tab"]);
+    await two.forgetFact({ tenant: "shop_sabaitea", id: "f1" });
+    expect(await one.getMemory("shop_sabaitea")).toEqual({ tenant: "shop_sabaitea", facts: [], forgottenCount: 1 });
+  });
+
+  it("exports the memory with the shop, as the API's export does, and deletes it with the shop", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    await api.forgetFact({ tenant, id: "f2" });
+    const exported = (await api.exportShop(tenant)) as { memory?: unknown };
+    expect(exported.memory).toEqual(await api.getMemory(tenant).then(({ facts, forgottenCount }) => ({ facts, forgottenCount })));
+    const link = asked(await api.deleteShop({ tenant, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    expect(await api.getMemory(tenant)).toEqual({ tenant, facts: [], forgottenCount: 0 });
+  });
+
+  it("replaces a practice world saved before the team's memory existed", async () => {
+    const saved = new Map([["manut.pilot.fake.v1", JSON.stringify({ version: 4, seq: 100, shops: [], connections: [], messages: [],
+      actions: [], payments: [], subscriptionPayments: [], deletions: [], confirmations: [], expiredTokens: [], audit: [] })]]);
+    const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key) };
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.getMemory("shop_baanmali")).facts).toHaveLength(7);
+  });
+});
+
+describe("the fake's model spend, answered as docs/model-gateway.md says", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 on 23 November in Bangkok
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const NO_CALLS = { ok: 0, failed: 0, unreadable: 0, abandoned: 0, refused: 0 };
+
+  function memory() {
+    const saved = new Map<string, string>();
+    return {
+      saved,
+      storage: {
+        getItem: (key: string) => saved.get(key) ?? null,
+        setItem: (key: string, value: string) => void saved.set(key, value),
+        removeItem: (key: string) => void saved.delete(key),
+      },
+    };
+  }
+
+  it("gives Baan Mali a believable month: ฿186 spent of its ฿300 cap, with one call in progress", async () => {
+    const usage = await createFakeApi({ now: () => NOW }).getModelUsage(BAAN_MALI);
+    expect(usage).toMatchObject({
+      tenant: BAAN_MALI,
+      month: "2026-11",
+      capSatang: 30000,
+      capSource: "override",
+      capOverride: { capSatang: 30000, setBy: "ops@manut.test" },
+      spentSatang: 18600,
+      spentMillisatang: 18_599_456,
+      heldSatang: 59,
+      heldMillisatang: 58_800,
+      // 30,000 satang less what is spent and held, 11,341.744 satang, rounded down.
+      remainingSatang: 11341,
+      counts: { ok: 49, failed: 1, unreadable: 0, abandoned: 0, refused: 0 },
+      tokens: { input: 935_200, output: 89_780 },
+    });
+    expect(Date.parse(usage.capOverride!.setAt)).toBeLessThan(NOW);
+    expect(usage.holds).toEqual([{ callId: expect.stringMatching(/^call-/), model: "claude-sonnet-5-5",
+      worstMillisatang: 58_800, at: new Date(NOW - 60_000).toISOString(), expiresAt: new Date(NOW + 14 * 60_000).toISOString() }]);
+
+    // The month's records agree with its totals, newest first, each in this Bangkok month.
+    const calls = usage.calls!;
+    expect(calls).toHaveLength(50);
+    expect(new Set(calls.map((call) => call.id)).size).toBe(50);
+    expect(calls.reduce((sum, call) => sum + call.millisatang, 0)).toBe(18_599_456);
+    expect(calls.reduce((sum, call) => sum + call.inputTokens, 0)).toBe(935_200);
+    expect(calls.reduce((sum, call) => sum + call.outputTokens, 0)).toBe(89_780);
+    expect(calls.map((call) => call.at)).toEqual([...calls.map((call) => call.at)].sort().reverse());
+    expect(calls.every((call) => call.at >= "2026-10-31T17:00:00.000Z" && call.at <= new Date(NOW).toISOString())).toBe(true);
+    expect(new Set(calls.map((call) => call.model))).toEqual(
+      new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]));
+    // `satang` is `millisatang` rounded up, and the one failed call cost nothing.
+    for (const call of calls) {
+      expect(call.satang * 1000).toBeGreaterThanOrEqual(call.millisatang);
+      expect(call.satang * 1000 - call.millisatang).toBeLessThan(1000);
+    }
+    expect(calls.filter((call) => call.outcome === "failed")).toEqual([
+      expect.objectContaining({ millisatang: 0, satang: 0, inputTokens: 0, outputTokens: 0 })]);
+    expect(calls.filter((call) => call.outcome === "ok")).toHaveLength(49);
+  });
+
+  it("gives a shop with no calls the default cap and an empty month", async () => {
+    expect(await createFakeApi({ now: () => NOW }).getModelUsage(SABAI_TEA)).toEqual({
+      tenant: SABAI_TEA, month: "2026-11", capSatang: 20000, capSource: "default", capOverride: null,
+      spentSatang: 0, spentMillisatang: 0, heldSatang: 0, heldMillisatang: 0, remainingSatang: 20000,
+      counts: NO_CALLS, tokens: { input: 0, output: 0 }, calls: [], holds: [],
+    });
+  });
+
+  it("reads any Bangkok month, which turns at midnight there, and refuses what is not a month", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    // The cap is the shop's, not the month's: an earlier month has no calls but the same cap.
+    expect(await api.getModelUsage(BAAN_MALI, "2026-10")).toMatchObject({ month: "2026-10", capSatang: 30000,
+      capSource: "override", spentSatang: 0, remainingSatang: 30000, counts: NO_CALLS, calls: [], holds: [] });
+    expect((await api.getModelUsage(BAAN_MALI, "2026-11")).spentSatang).toBe(18600);
+
+    for (const [at, month] of [["2026-11-30T16:59:59Z", "2026-11"], ["2026-11-30T17:00:00Z", "2026-12"],
+      ["2026-12-31T17:00:00Z", "2027-01"]] as const) {
+      expect((await createFakeApi({ now: () => Date.parse(at) }).getModelUsage(SABAI_TEA)).month).toBe(month);
+    }
+    for (const bad of ["2026-13", "2026-00", "2026-1", "26-11", "november", "2026-11-01", " 2026-11", ""]) {
+      await expect(api.getModelUsage(BAAN_MALI, bad)).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    await expect(api.getModelUsage("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+  });
+
+  it("puts Baan Mali's sample month inside whichever Bangkok month the practice world is made in", async () => {
+    // Half an hour into December in Bangkok: the sample calls sit in December, not behind in November.
+    const api = createFakeApi({ now: () => Date.parse("2026-11-30T17:30:00Z") });
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ month: "2026-12", spentSatang: 18600,
+      counts: { ok: 49, failed: 1 } });
+  });
+
+  it("sets a shop's cap in whole satang, answers the cap as it now stands, and clears it with null", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 15000 })).toEqual({
+      tenant: SABAI_TEA, capSatang: 15000, capSource: "override",
+      // The practice key has no Access identity, so nobody is named, as the API records a service token.
+      capOverride: { capSatang: 15000, setAt: "2026-11-23T03:00:00.000Z", setBy: null },
+    });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 15000, capSource: "override",
+      capOverride: { capSatang: 15000, setBy: null }, remainingSatang: 15000 });
+
+    // A cap under what is already spent is allowed and leaves nothing; zero is a real cap that stops every call.
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 10000 });
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 10000, spentSatang: 18600, remainingSatang: 0 });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 0 })).toMatchObject({ capSatang: 0, capSource: "override" });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 1_000_000_000 })).toMatchObject({ capSatang: 1_000_000_000 });
+
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toEqual({
+      tenant: SABAI_TEA, capSatang: 20000, capSource: "default", capOverride: null });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default", capOverride: null });
+    // Clearing a shop that has no override is the same answer, not an error.
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toMatchObject({ capSource: "default" });
+  });
+
+  it("refuses a cap that is not 0 to 1,000,000,000 whole satang, or null, or that is missing, and changes nothing", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    for (const capSatang of [-1, 1.5, 1_000_000_001, Number.NaN, Number.POSITIVE_INFINITY, "100", true, undefined]) {
+      await expect(api.setModelCap({ tenant: SABAI_TEA, capSatang } as never)).rejects.toMatchObject({ status: 400,
+        code: "invalid_request" });
+    }
+    // A body that forgot `capSatang` never clears a cap by accident.
+    await expect(api.setModelCap({ tenant: BAAN_MALI } as never)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(api.setModelCap({ tenant: "", capSatang: 100 })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    // The tenant is checked before the cap, as the API checks it.
+    await expect(api.setModelCap({ tenant: "", capSatang: -1 })).rejects.toMatchObject({ code: "tenant_required" });
+
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 30000, capOverride: { setBy: "ops@manut.test" } });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default" });
+    // Nothing was refused into the log either.
+    const log = (await api.listAudit(SABAI_TEA, { limit: 200 })).entries;
+    expect(log.some((entry) => entry.action.startsWith("model."))).toBe(false);
+  });
+
+  it("writes a cap's change to the shop's audit log, as the API does in the same write", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    await api.setModelCap({ tenant: SABAI_TEA, capSatang: 15000 });
+    await api.setModelCap({ tenant: SABAI_TEA, capSatang: null });
+    const log = (await api.listAudit(SABAI_TEA, { limit: 200 })).entries.reverse().map(({ id: _id, at: _at, ...said }) => said);
+    expect(log.slice(-2)).toEqual([
+      { actor: { kind: "operator", email: null }, action: "model.cap_set", subject: {}, outcome: "ok", amountSatang: 15000 },
+      { actor: { kind: "operator", email: null }, action: "model.cap_cleared", subject: {}, outcome: "ok" },
+    ]);
+    // Baan Mali's sample log already holds the entry for the cap its sample world was given.
+    const sample = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries.find((entry) => entry.action === "model.cap_set");
+    expect(sample).toMatchObject({ actor: { kind: "operator", email: "ops@manut.test" }, outcome: "ok", amountSatang: 30000 });
+  });
+
+  it("answers 503 not_configured, naming the setting, when a Worker var cannot be read as the API reads it", async () => {
+    const cases: [{ MODEL_SATANG_PER_USD?: string; MODEL_DEFAULT_CAP_SATANG?: string }, string][] = [
+      [{ MODEL_DEFAULT_CAP_SATANG: "3,390" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_DEFAULT_CAP_SATANG: "" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_DEFAULT_CAP_SATANG: "1000000001" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_SATANG_PER_USD: "33.90" }, "MODEL_SATANG_PER_USD"],
+      [{ MODEL_SATANG_PER_USD: "0" }, "MODEL_SATANG_PER_USD"],
+      [{ MODEL_SATANG_PER_USD: "1000001" }, "MODEL_SATANG_PER_USD"],
+      // When both are wrong the rate is named, because the API reads it first.
+      [{ MODEL_SATANG_PER_USD: "x", MODEL_DEFAULT_CAP_SATANG: "y" }, "MODEL_SATANG_PER_USD"],
+    ];
+    for (const [vars, setting] of cases) {
+      const api = createFakeApi({ now: () => NOW, modelGateway: { vars } });
+      await expect(api.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 503, code: "not_configured", setting });
+      await expect(api.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 503,
+        code: "not_configured", setting });
+    }
+    // The cap is checked before the settings are read, as in the API.
+    const broken = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_SATANG_PER_USD: "x" } } });
+    await expect(broken.setModelCap({ tenant: BAAN_MALI, capSatang: -1 })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("takes the default cap from MODEL_DEFAULT_CAP_SATANG, and answers 503 meter_unavailable when the meter is down", async () => {
+    const api = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_DEFAULT_CAP_SATANG: "25000",
+      MODEL_SATANG_PER_USD: "3390" } } });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 25000, capSource: "default", remainingSatang: 25000 });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toMatchObject({ capSatang: 25000, capSource: "default" });
+    // Zero is a readable default: it stops every shop that has no override of its own.
+    const stopped = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_DEFAULT_CAP_SATANG: "0" } } });
+    expect(await stopped.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 0, remainingSatang: 0 });
+
+    const down = createFakeApi({ now: () => NOW, modelGateway: { meterUnavailable: true } });
+    await expect(down.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 503, code: "meter_unavailable" });
+    await expect(down.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 503,
+      code: "meter_unavailable" });
+    // Refusals that need no meter still come first.
+    await expect(down.getModelUsage("")).rejects.toMatchObject({ code: "tenant_required" });
+  });
+
+  it("refuses both routes without an operator key", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    await expect(api.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+
+  it("takes a shop's meter and its cap with it when the shop is deleted", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    // As the API's meter, wiped with the rest of the shop's object: an empty month on the default cap.
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 20000, capSource: "default", capOverride: null,
+      spentSatang: 0, heldSatang: 0, counts: NO_CALLS, calls: [], holds: [] });
+  });
+
+  it("keeps a cap changed in practice across a reload, and starts again on reset", async () => {
+    const { storage } = memory();
+    await createFakeApi({ now: () => NOW, storage }).setModelCap({ tenant: SABAI_TEA, capSatang: 12345 });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    expect(await reloaded.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 12345, capSource: "override" });
+    reloaded.reset();
+    expect(await reloaded.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default" });
+  });
+
+  it("replaces a practice world saved without the model meter, whether it is a version behind or only lacks it", async () => {
+    const world = { seq: 100, shops: [], connections: [], messages: [], actions: [], payments: [], subscriptionPayments: [],
+      deletions: [], confirmations: [], expiredTokens: [], audit: [], memory: {} };
+    // Version 5 is a world saved when the team's memory was the newest state: it holds that, but no meter.
+    for (const saved of [{ version: 5, ...world }, { version: 6, ...world }]) {
+      const kept = memory();
+      kept.saved.set("manut.pilot.fake.v1", JSON.stringify(saved));
+      const api = createFakeApi({ now: () => NOW, storage: kept.storage });
+      expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+      expect((await api.getModelUsage(BAAN_MALI)).spentSatang).toBe(18600);
+    }
+  });
+});

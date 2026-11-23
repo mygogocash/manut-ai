@@ -5,12 +5,15 @@ import {
   REPLY_MAX_LENGTH,
   type ApprovalState,
   type ApprovalView,
+  type AuditActor,
+  type AuditEntry,
   type AwaitingOwner,
   type DeletedShop,
   type DeletionGoes,
   type DeletionRequest,
   type DeletionState,
   type DeletionView,
+  type Fact,
   type InboundMessage,
   type Payment,
   type PilotApi,
@@ -19,6 +22,22 @@ import {
   type SubscriptionPayment,
 } from "./types";
 import { pilotGate } from "./gate";
+import * as shopMemory from "@manut/shop-memory";
+import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
+import {
+  capOf,
+  ceilSatang,
+  gatewayDefaultCap,
+  isCapValue,
+  isMonth,
+  monthOf,
+  usageOf,
+  validTenant,
+  wipeMeter,
+  writeCap,
+  type FakeModel,
+  type FakeModelGateway,
+} from "./meter";
 
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
@@ -32,6 +51,21 @@ import { pilotGate } from "./gate";
 /// open the owner's page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined,
 /// demo-old and demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
 /// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
+///
+/// Each shop's audit log is kept as the API keeps it: the same actions and outcomes, metadata only, ids that sort by
+/// time and page with the API's cursor, exported with the shop and deleted with it. Practice actions are an
+/// operator's with no Access identity, as the API records a service token. Baan Mali's log starts with the history
+/// of its sample world.
+///
+/// What the team knows about each shop is kept by `@manut/shop-memory`'s own rules, as the API keeps it: a refusal
+/// answers the API's status and code, a change is recorded in the shop's audit log by the fact's id and never its
+/// words, and the facts are exported with the shop and deleted with it. Baan Mali starts with five facts the team
+/// learned and two a customer said, which wait for its owner; Sabai Tea has been told nothing.
+///
+/// Each shop's model spend (docs/model-gateway.md) is kept as the API's meter keeps it: one record per call, the
+/// reservations still open, and an operator's cap override. Months and totals are read from the records, so a total can
+/// never disagree with what it adds up. Baan Mali has ฿186 spent of an operator's ฿300 cap with one call in progress, and
+/// Sabai Tea the default cap and no calls. A cap set in practice is kept with the rest of the world.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -45,6 +79,8 @@ export type FakeApiOptions = {
   webOrigin?: string;
   /// Keeps the sample data across reloads and tabs, so an approval link opened in a new tab still works.
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined;
+  /// What the model gateway reads from the Worker's settings, and whether its meter is up (meter.ts).
+  modelGateway?: FakeModelGateway;
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
@@ -88,8 +124,10 @@ type FakeConfirmation = {
   approved?: boolean;
   decidedAt?: string;
 };
+/// An audit entry with the shop it belongs to, which the API keeps by the shop's own object instead.
+type FakeAuditEntry = AuditEntry & { tenant: string };
 type FakeDb = {
-  version: 3;
+  version: 6;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -101,11 +139,16 @@ type FakeDb = {
   confirmations: FakeConfirmation[];
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
   expiredTokens: string[];
+  audit: FakeAuditEntry[];
+  /// What the team knows, per shop, as `@manut/shop-memory` keeps it. A shop with no entry has been told nothing.
+  memory: Record<string, MemoryState>;
+  model: FakeModel;
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
-/// (version 1) or before trial starts and subscription payments were kept (version 2) is replaced by a fresh one
-/// rather than read without them.
+/// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
+/// (version 3), before what the team knows (version 4) or before the model meter (version 5) is replaced by a fresh
+/// one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -149,8 +192,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 3 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
-        Array.isArray(parsed.subscriptionPayments)
+      return parsed && parsed.version === 6 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+        Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
+        typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
+        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds)
         ? parsed
         : null;
     } catch {
@@ -188,6 +233,20 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   function nextId(prefix: string): string {
     db.seq += 1;
     return `${prefix}_${db.seq}`;
+  }
+
+  /// Appends to the shop's audit log, now, as the API would: ids only, and a code for what happened.
+  function audit(
+    tenant: string,
+    actor: AuditActor,
+    action: string,
+    subject: Record<string, string>,
+    outcome = "ok",
+    extra: { amountSatang?: number } = {},
+  ): void {
+    db.seq += 1;
+    const at = now();
+    db.audit.push({ tenant, id: auditId(at, db.seq), at: iso(at), actor, action, subject, outcome, ...extra });
   }
 
   /// The API's answers for a shop that is not there: `tenant_deleted`, saying when and by whom, once it has been
@@ -251,6 +310,11 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.actions = db.actions.filter((a) => !mine(a));
     db.payments = db.payments.filter((p) => !mine(p));
     db.subscriptionPayments = db.subscriptionPayments.filter((p) => !mine(p));
+    // The log goes with the shop; the deletion record below keeps who asked and when.
+    db.audit = db.audit.filter((e) => !mine(e));
+    // What the team knew goes too, the fingerprints of what it forgot with it.
+    delete db.memory[record.tenant];
+    wipeMeter(db.model, record.tenant);
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
   }
@@ -282,6 +346,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     };
     db.confirmations.push(confirmation);
     writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(at), deletedBy: null, confirmationId: confirmation.id });
+    audit(shop.tenant, PRACTICE_OPERATOR, "deletion.requested", { confirmationId: confirmation.id }, "awaiting_owner");
     return awaiting(confirmation);
   }
 
@@ -334,6 +399,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     if (now() - Date.parse(action.decidedAt) < settleMs) return;
     action.state = action.outcome;
     if (action.outcome !== "failed") action.dispatchedAt = iso(now());
+    audit(action.tenant, SYSTEM, "dispatch.settled", { taskId: action.taskId, actionId: action.actionId },
+      action.outcome);
   }
 
   function byToken(token: string): FakeAction {
@@ -368,8 +435,46 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return `${webOrigin.replace(/\/+$/, "")}/approve/${encodeURIComponent(action.token)}`;
   }
 
+  /// The shop's log, newest first, as the API answers it.
+  function auditOf(tenant: string): AuditEntry[] {
+    return db.audit
+      .filter((entry) => entry.tenant === tenant)
+      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .map(({ tenant: _tenant, ...entry }) => entry);
+  }
+
   function newestFirst<T>(items: T[], at: (item: T) => string): T[] {
     return [...items].sort((a, b) => Date.parse(at(b)) - Date.parse(at(a)));
+  }
+
+  /// What the team knows about a shop: nothing for one it was never told about.
+  function memoryOf(tenant: string): MemoryState {
+    return db.memory[tenant] ?? shopMemory.emptyState();
+  }
+
+  /// The API's checks before a memory rule runs: a tenant of 1 to 256 characters, and a fact id of 1 to 64.
+  function memoryTenant(tenant: unknown): string {
+    if (typeof tenant !== "string" || tenant.length < 1 || tenant.length > 256) throw new ApiError(400, "tenant_required");
+    return tenant;
+  }
+
+  function memoryFactId(id: unknown): string {
+    if (typeof id !== "string" || id.length < 1 || id.length > 64) throw new ApiError(400, "invalid_request");
+    return id;
+  }
+
+  /// One change to a shop's memory by the package's rule, as the API does it. A refusal answers the API's status and
+  /// code and changes nothing. A change is kept and recorded in the shop's audit log by the fact's id, never its words;
+  /// a confirm of a fact that is already confirmed hands back the very state it was given, so it records nothing.
+  function changeFact(tenant: string, action: string, operate: (state: MemoryState) => Result): Fact {
+    const before = memoryOf(tenant);
+    const result = operate(before);
+    if (!result.ok) throw new ApiError(MEMORY_STATUS[result.reason], result.reason);
+    if (result.state !== before) {
+      db.memory[tenant] = result.state;
+      audit(tenant, PRACTICE_OPERATOR, action, { factId: result.fact.id });
+    }
+    return result.fact;
   }
 
   return {
@@ -421,6 +526,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       run(() => {
         const action = byToken(token);
         shopOf(action.tenant).consent = true;
+        audit(action.tenant, OWNER, "consent.given", {});
         return viewOf(action);
       }),
 
@@ -432,6 +538,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         if (approve && !shop.consent) throw new ApiError(403, "consent_required");
         action.decidedAt = iso(now());
         action.state = approve ? "dispatching" : "rejected";
+        const about = { taskId: action.taskId, actionId: action.actionId };
+        audit(action.tenant, OWNER, "reply.decided", about, approve ? "approved" : "declined");
+        if (approve) audit(action.tenant, SYSTEM, "dispatch.started", about);
         return viewOf(action);
       }),
 
@@ -443,6 +552,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         if (!name || !ownerName) throw new ApiError(400, "invalid_body");
         const shop: FakeShop = { tenant: nextId("shop"), name, ownerName, consent: false };
         db.shops.push(shop);
+        audit(shop.tenant, PRACTICE_OPERATOR, "shop.created", {});
         return { tenant: shop.tenant, name: shop.name, ownerName: shop.ownerName };
       }),
 
@@ -473,7 +583,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         });
         // The first connection starts the shop's trial; a later one never moves it.
         if (!shop.trialStartedAt && !shop.lineConnectionId) shop.trialStartedAt = iso(now());
+        const previous = shop.lineConnectionId;
         shop.lineConnectionId = connectionId;
+        audit(shop.tenant, PRACTICE_OPERATOR, "line.connected",
+          { connectionId, ...(previous && previous !== connectionId ? { previousConnectionId: previous } : {}) });
         return { connectionId, webhookUrl: `${FAKE_API_ORIGIN}/v1/inbound/line/${connectionId}` };
       }),
 
@@ -509,6 +622,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         };
         db.actions.push(action);
         message.replyActionId = action.actionId;
+        audit(input.tenant, PRACTICE_OPERATOR, "reply.proposed",
+          { taskId: action.taskId, actionId: action.actionId, messageId: message.id });
         return {
           taskId: action.taskId,
           actionId: action.actionId,
@@ -559,6 +674,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const note = input.slipNote?.trim();
         if (note) payment.slipNote = note;
         db.payments.push(payment);
+        audit(input.tenant, PRACTICE_OPERATOR, "payment.recorded", { paymentId: payment.id }, "ok",
+          { amountSatang: payment.amountSatang });
         return payment;
       }),
 
@@ -593,6 +710,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             payments: db.payments.filter((p) => p.tenant === tenant),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === tenant),
           },
+          // As the backend's export: every entry, oldest first, and what the log could not write.
+          audit: { entries: auditOf(tenant).reverse(), missed: null },
+          // What the team knows: every fact, waiting ones included, and only how many it was told to forget.
+          memory: shopMemory.exportFacts(memoryOf(tenant)),
         };
       }),
 
@@ -607,6 +728,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const current = currentConfirmation(record);
         if (record && current?.status === "decided" && current.approved) return wipe(record);
         if (isLiveShop(shop)) return askOwner(shop, record);
+        // Recorded and then wiped with the rest of the shop, as the API does.
+        audit(shop.tenant, PRACTICE_OPERATOR, "deletion.requested", {});
         return wipe(writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(now()), deletedBy: null }));
       }),
 
@@ -622,8 +745,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         confirmation.status = "decided";
         confirmation.approved = approve;
         confirmation.decidedAt = iso(now());
-        const record = recordOf(confirmation.tenant);
-        if (approve && record?.confirmationId === confirmation.id) wipe(record);
+        audit(confirmation.tenant, OWNER, "deletion.decided", { confirmationId: confirmation.id },
+          approve ? "approved" : "declined");
+        const deletion = recordOf(confirmation.tenant);
+        if (approve && deletion?.confirmationId === confirmation.id) wipe(deletion);
         return deletionViewOf(confirmation);
       }),
 
@@ -652,6 +777,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const note = input.slipNote?.trim();
         if (note) payment.slipNote = note;
         db.subscriptionPayments.push(payment);
+        audit(input.tenant, PRACTICE_OPERATOR, "subscription_payment.recorded", { paymentId: payment.id }, "ok",
+          { amountSatang: payment.amountSatang });
         return payment;
       }),
 
@@ -681,7 +808,130 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           now(),
         );
       }),
+
+    // As the API: any tenant (one with no log, or a deleted shop, reads as an empty page), newest first, the page
+    // before an entry's id, 50 at a time unless asked for 1 to 200.
+    listAudit: (tenant, query = {}) =>
+      run(() => {
+        admin();
+        if (!tenant) throw new ApiError(400, "tenant_required");
+        const limit = query.limit ?? 50;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new ApiError(400, "invalid_request");
+        const before = query.before;
+        if (before !== undefined && !AUDIT_ID.test(before)) throw new ApiError(400, "invalid_request");
+        const older = auditOf(tenant).filter((entry) => before === undefined || entry.id < before);
+        const entries = older.slice(0, limit);
+        const last = entries[entries.length - 1];
+        return { tenant, entries, next: older.length > limit && last ? last.id : null, missed: null };
+      }),
+
+    // As the API: any tenant, an empty memory for one the team was never told about, every fact (waiting ones
+    // included) oldest first, and only the number of forgotten fingerprints.
+    getMemory: (tenant) =>
+      run(() => {
+        admin();
+        const shop = memoryTenant(tenant);
+        return { tenant: shop, ...shopMemory.exportFacts(memoryOf(shop)) };
+      }),
+
+    rememberFact: (input) =>
+      run(() => {
+        admin();
+        const tenant = memoryTenant(input.tenant);
+        return changeFact(tenant, "memory.remembered", (state) => shopMemory.remember(state, input.text, now()));
+      }),
+
+    confirmFact: (input) =>
+      run(() => {
+        admin();
+        const tenant = memoryTenant(input.tenant);
+        const id = memoryFactId(input.id);
+        return changeFact(tenant, "memory.confirmed", (state) => shopMemory.confirm(state, id, now()));
+      }),
+
+    correctFact: (input) =>
+      run(() => {
+        admin();
+        const tenant = memoryTenant(input.tenant);
+        const id = memoryFactId(input.id);
+        return changeFact(tenant, "memory.corrected", (state) => shopMemory.correct(state, id, input.text, now()));
+      }),
+
+    forgetFact: (input) =>
+      run(() => {
+        admin();
+        const tenant = memoryTenant(input.tenant);
+        const id = memoryFactId(input.id);
+        const result = shopMemory.forget(memoryOf(tenant), id);
+        if (!result.ok) throw new ApiError(MEMORY_STATUS[result.reason], result.reason);
+        db.memory[tenant] = result.state;
+        audit(tenant, PRACTICE_OPERATOR, "memory.forgotten", { factId: id });
+        return { id };
+      }),
+
+    // As the API: the tenant, then the month (the current Bangkok month unless one is named), then the settings and the
+    // meter. Any tenant reads, as in the API; a shop it never metered has an empty month on the default cap.
+    getModelUsage: (tenant, month) =>
+      run(() => {
+        admin();
+        if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+        if (month !== undefined && !isMonth(month)) throw new ApiError(400, "invalid_request");
+        const defaultCapSatang = gatewayDefaultCap(options.modelGateway);
+        return usageOf(db.model, tenant, month ?? monthOf(now()), defaultCapSatang);
+      }),
+
+    // As the API: the tenant, then a cap that is present and null or whole satang within the limit, then the settings
+    // and the meter. The change and its audit entry are written together, and a refusal writes neither.
+    setModelCap: (input) =>
+      run(() => {
+        admin();
+        const { tenant, capSatang } = input;
+        if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+        if (!isCapValue(capSatang)) throw new ApiError(400, "invalid_request");
+        const defaultCapSatang = gatewayDefaultCap(options.modelGateway);
+        writeCap(db.model, tenant, capSatang, iso(now()));
+        if (capSatang === null) {
+          audit(tenant, PRACTICE_OPERATOR, "model.cap_cleared", {});
+        } else {
+          audit(tenant, PRACTICE_OPERATOR, "model.cap_set", {}, "ok", { amountSatang: capSatang });
+        }
+        return capOf(db.model, tenant, defaultCapSatang);
+      }),
   };
+
+}
+
+/// How each refusal of the package is answered: the API's statuses for the memory routes.
+const MEMORY_STATUS: Record<Refusal, number> = {
+  invalid_text: 400,
+  invalid_source: 400,
+  not_found: 404,
+  already_known: 409,
+  forgotten: 409,
+  full: 409,
+};
+
+/// Who the fake's log names. Practice actions come from the practice key, which has no Access identity: the API
+/// records such an operator as `email: null`, as it records a service token.
+const PRACTICE_OPERATOR: AuditActor = { kind: "operator", email: null };
+const OWNER: AuditActor = { kind: "owner" };
+const SYSTEM: AuditActor = { kind: "system" };
+
+/// The API's entry ids: a base-36 millisecond clock, a sequence and a random tail, so ids sort by time and page with
+/// the same cursor the API takes.
+const AUDIT_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
+
+function auditId(ms: number, seq: number): string {
+  return sortableId("aud", ms, seq);
+}
+
+/// A prefix, a base-36 millisecond clock, a sequence and a random tail, so ids sort by time. The meter's call ids
+/// (`call-…`) are made the same way.
+function sortableId(prefix: string, ms: number, seq: number): string {
+  const tail = new Uint8Array(4);
+  crypto.getRandomValues(tail);
+  const hex = [...tail].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${prefix}-${ms.toString(36).padStart(9, "0")}-${(seq % 46656).toString(36).padStart(3, "0")}-${hex}`;
 }
 
 /// LINE's `x-line-signature`: base64 HMAC-SHA256 of the raw body under the channel secret.
@@ -837,7 +1087,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 3,
+    version: 6,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -885,5 +1135,129 @@ function seed(at: number): FakeDb {
     deletions: demos.map((entry) => entry.record),
     confirmations: demos.map((entry) => entry.confirmation),
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
+    audit: sampleAudit(at, tenant, connectionId),
+    memory: { [tenant]: sampleMemory(at) },
+    model: seedModel(at, tenant),
   };
+}
+
+/// Baan Mali's model spend as the meter would have kept it: 50 calls spread across the Bangkok month `at` falls in, ฿186.00
+/// in all, against the ฿300 cap an operator set five days ago, and one more call still in progress. Each kind of call is
+/// priced at ฿35 a dollar by docs/model-gateway.md's table and rounded up once per call: a Sonnet 5.5 reply of 2,800
+/// tokens in and 560 out is 39,200 millisatang. Spreading the calls from the month's first moment to `at` keeps them in
+/// the current month whatever day the practice world is made.
+function seedModel(at: number, tenant: string): FakeModel {
+  const monthStart = Date.parse(`${monthOf(at)}-01T00:00:00+07:00`);
+  // Per kind: model, tokens in, tokens out, millisatang each, how many, and how it ended.
+  const kinds: [string, number, number, number, number, string][] = [
+    ["claude-opus-5-5", 52_000, 5_200, 1_092_000, 6, "ok"], // the week's plan
+    ["claude-opus-5-5", 31_000, 2_900, 637_000, 12, "ok"], // the research behind a reply
+    ["claude-opus-5-5", 18_000, 1_200, 336_000, 11, "ok"], // an order looked up
+    ["claude-sonnet-5-5", 2_800, 560, 39_200, 18, "ok"], // a reply drafted
+    ["claude-haiku-5-5", 1_400, 250, 928, 2, "ok"], // a message sorted
+    ["claude-haiku-5-5", 0, 0, 0, 1, "failed"], // the provider failed, so nothing was charged
+  ];
+  const rows = kinds.flatMap(([model, inputTokens, outputTokens, millisatang, count, outcome]) =>
+    Array.from({ length: count }, () => ({ model, inputTokens, outputTokens, millisatang, outcome })));
+  // A fixed shuffle mixes the kinds without a random number: 31 and 50 share no factor, so it visits every row once.
+  const calls = rows.map((_, i) => {
+    const row = rows[(i * 31) % rows.length]!;
+    const when = monthStart + Math.floor(((at - monthStart) * (i + 1)) / (rows.length + 1));
+    return {
+      tenant,
+      id: sortableId("call", when, i),
+      at: new Date(when).toISOString(),
+      model: row.model,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      millisatang: row.millisatang,
+      satang: ceilSatang(row.millisatang),
+      outcome: row.outcome,
+    };
+  });
+  // A Sonnet reply asked for a minute ago: its worst case is held, 3,400 tokens in and 1,000 out at the table's price.
+  const heldAt = at - MINUTE_MS;
+  return {
+    overrides: [{ tenant, capSatang: 30_000, setAt: new Date(at - 5 * DAY_MS).toISOString(), setBy: "ops@manut.test" }],
+    calls,
+    holds: [{
+      tenant,
+      callId: sortableId("call", heldAt, rows.length),
+      model: "claude-sonnet-5-5",
+      worstMillisatang: 58_800,
+      at: new Date(heldAt).toISOString(),
+      expiresAt: new Date(heldAt + 15 * MINUTE_MS).toISOString(),
+    }],
+  };
+}
+
+/// Baan Mali's audit log as its sample world would have written it, oldest first, and Sabai Tea's one entry. The
+/// times match the sample's own: the shop and its LINE account 13 days ago, then each payment, reply and decision.
+function sampleAudit(at: number, tenant: string, connectionId: string): FakeAuditEntry[] {
+  const operator: AuditActor = { kind: "operator", email: null };
+  // The operator who set Baan Mali's cap was signed in through Access, so the log names them.
+  const named: AuditActor = { kind: "operator", email: "ops@manut.test" };
+  const owner: AuditActor = { kind: "owner" };
+  const system: AuditActor = { kind: "system" };
+  const taskId = `task_${tenant}`;
+  let seq = 0;
+  const entry = (shop: string, minutesAgo: number, actor: AuditActor, action: string, subject: Record<string, string>,
+    outcome = "ok", amountSatang?: number): FakeAuditEntry => {
+    const ms = at - minutesAgo * MINUTE_MS;
+    seq += 1;
+    return { tenant: shop, id: auditId(ms, seq), at: new Date(ms).toISOString(), actor, action, subject, outcome,
+      ...(amountSatang !== undefined ? { amountSatang } : {}) };
+  };
+  const reply = (actionId: string, messageId: string) => ({ taskId, actionId, messageId });
+  const decided = (actionId: string) => ({ taskId, actionId });
+  return [
+    entry(tenant, 13 * 24 * 60 + 30, operator, "shop.created", {}),
+    entry(tenant, 13 * 24 * 60, operator, "line.connected", { connectionId }),
+    entry(tenant, 5 * 24 * 60, named, "model.cap_set", {}, "ok", 30000),
+    entry("shop_sabaitea", 2 * 24 * 60, operator, "shop.created", {}),
+    // What the team learned about the shop, by the ids of the facts in `sampleMemory`.
+    entry(tenant, 12 * 24 * 60, operator, "memory.remembered", { factId: "f1" }),
+    entry(tenant, 11 * 24 * 60, system, "memory.proposed", { factId: "f2" }),
+    entry(tenant, 6 * 24 * 60, system, "memory.proposed", { factId: "f3" }),
+    entry(tenant, 3 * 24 * 60, system, "memory.proposed", { factId: "f4" }),
+    entry(tenant, 2 * 24 * 60, system, "memory.proposed", { factId: "f5" }),
+    entry(tenant, 1500, operator, "payment.recorded", { paymentId: "pay_2288" }, "ok", 45000),
+    entry(tenant, 1320, operator, "reply.proposed", reply("act_joy", "msg_joy")),
+    entry(tenant, 410, operator, "reply.proposed", reply("act_fah", "msg_fah")),
+    entry(tenant, 395, owner, "reply.decided", decided("act_fah"), "declined"),
+    entry(tenant, 290, operator, "reply.proposed", reply("act_mai", "msg_mai")),
+    entry(tenant, 282, owner, "reply.decided", decided("act_mai"), "approved"),
+    entry(tenant, 282, system, "dispatch.started", decided("act_mai")),
+    entry(tenant, 282, system, "dispatch.settled", decided("act_mai"), "confirmed"),
+    entry(tenant, 120, operator, "payment.recorded", { paymentId: "pay_2301" }, "ok", 129000),
+    entry(tenant, 90, system, "memory.proposed", { factId: "f6" }, "awaiting_owner"),
+    entry(tenant, 50, system, "memory.proposed", { factId: "f7" }, "awaiting_owner"),
+    entry(tenant, 70, operator, "reply.proposed", reply("act_tracking", "msg_tracking")),
+    entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
+    entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
+  ];
+}
+
+/// What Baan Mali's team knows, as its sample world would have taught it, and the design canvas's own sample facts: what Fon
+/// said herself, what a price list, twelve of her edits, ninety days of orders and a cost sheet taught it, and two things
+/// customers said, which wait for Fon. Built by the package's own rules, so the practice world holds exactly what the API
+/// would. Ids are f1 to f7 and the next is f8.
+function sampleMemory(at: number): MemoryState {
+  const ago = (minutes: number) => at - minutes * MINUTE_MS;
+  const day = 24 * 60;
+  let state = shopMemory.emptyState();
+  const keep = (result: Result) => {
+    if (!result.ok) throw new Error(`the sample fact was refused: ${result.reason}`);
+    state = result.state;
+  };
+  keep(shopMemory.remember(state, "Gift wrapping is free in December.", ago(12 * day)));
+  keep(shopMemory.propose(state, "Free shipping on orders over ฿800",
+    { kind: "document", name: "your price list", date: ago(20 * day) }, ago(11 * day)));
+  keep(shopMemory.propose(state, "Reply warmly and end with ค่ะ", { kind: "edits", count: 12 }, ago(6 * day)));
+  keep(shopMemory.propose(state, "Jasmine is the best seller", { kind: "orders", days: 90 }, ago(3 * day)));
+  keep(shopMemory.propose(state, "A jasmine candle costs ฿118 to make",
+    { kind: "connection", name: "Google Sheets", detail: "cost sheet" }, ago(2 * day)));
+  keep(shopMemory.propose(state, "Closed on Mondays", { kind: "customer", chat: "line:Ujoy" }, ago(90)));
+  keep(shopMemory.propose(state, "Customers expect 20% off when they buy 5 sets", { kind: "customer", chat: "line:Ufah" }, ago(50)));
+  return state;
 }

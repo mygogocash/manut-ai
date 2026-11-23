@@ -35,6 +35,16 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - Approving an external write still needs the shop's consent (`cloudWork`), recorded from the owner through
   the link (`/consent` below), never by an operator.
 - A decision settles once. The task object already refuses a second decision; the link routes keep that.
+- A reply is decided through `packages/approval-core`, as a worker's request and a deletion's confirmation are. Each
+  proposed reply is stored with one approval-core request of kind `reply`, opened in the same task object storage
+  transaction, which names the exact reply: its action id, the operation, the bot it is sent from, the one customer it
+  goes to (`recipient`), the draft (`text`) and the hash the send is checked against. The owner's link decides that
+  request as the owner (role `owner`, `decidedBy: "owner-link"`), at its one revision (a reply is never revised; a
+  changed reply is a new one with a new link), and only before its expiry, which is the reply's and the link's. The
+  request and the reply's action change in one transaction, so of any number of decisions exactly one settles, and no
+  route moves a reply's action without its request: the task object's older decision route decides a reply through
+  its request too. A reply stored before replies had requests is read as the request it would have opened and stores
+  it with its first decision. None of the answers below changed.
 - Customer message text is stored for the pilot (the operator must read it to draft a reply) and falls under
   the backend's existing retention and tenant export/delete.
 
@@ -131,6 +141,13 @@ type DeletionView = {
 | `POST /v1/admin/pilot/subscription-payments` | `{ tenant, amountSatang, slipRef, slipNote? }` | `SubscriptionPayment`. 409 `{ "error": "slip_already_recorded" }`, recording nothing, for a slip already recorded for the shop |
 | `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
 | `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
+| `GET /v1/admin/audit` | `?tenant=&before=&limit=` | `AuditPage`: one page of the shop's audit log, newest first ("Audit log", below) |
+| `GET /v1/admin/memory` | `?tenant=` | `Memory`: every fact the team holds for the shop, waiting ones included, and how many texts it was told to forget ("Memory", below) |
+| `POST /v1/admin/memory/remember` | `{ tenant, text }` | `Fact`: the owner's own fact, confirmed at once |
+| `POST /v1/admin/memory/confirm` | `{ tenant, id }` | `Fact`: "It's true" on a waiting fact |
+| `POST /v1/admin/memory/correct` | `{ tenant, id, text }` | `Fact`: the new words, confirmed |
+| `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
+| `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -205,11 +222,13 @@ type SubscriptionPayment = {
 // The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
 // attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, displayNames }`, where
 // `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
-// for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is there once the shop was deleted.
+// for the shop's customers, `{ lineUserId, displayName }[]`. `audit: { entries, missed }` is the shop's audit log,
+// oldest first ("Audit log", below). `memory: { facts, forgottenCount }` is what the team knows about the shop
+// ("Memory", below). `deletedAt` is there once the shop was deleted.
 // Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
-// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "schedules",
-// "tombstone"),
+// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "audit", "memory",
+// "schedules", "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
 type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
 
@@ -245,8 +264,9 @@ type DeletedShop = {
   400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
-  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent
-  and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
+  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent,
+  what the team knows about the shop and the shop's registry row. The owner's approval links answer `link_invalid`
+  afterwards and the webhook
   answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
@@ -332,6 +352,318 @@ type GateShop = {
 };
 ```
 
+## Audit log
+
+Each shop has one append-only log of who did what and when, kept in the shop's TenantObject beside its other
+records (`apps/api/src/audit-log.ts`). Operators read it a page at a time, the console's Audit page shows it, the
+tenant export carries it, and it goes with the shop when the shop is deleted. The deletion's own record is not in
+it: that record outlives the shop in AuthObject ("Export and deletion", above).
+
+### `GET /v1/admin/audit`
+
+Under the admin gate, as an exact `ADMIN_METHODS` entry like the routes above. The query names the shop and the page:
+
+- `tenant` (required, else 400 `tenant_required`). Any tenant can be read, not only pilot shops; one with no log, a
+  deleted shop's included, answers an empty page.
+- `before`: an entry's `id`; the page holds the entries stored before it. Anything else is 400 `invalid_request`.
+- `limit`: 1 to 200, 50 when absent. Anything else is 400 `invalid_request`.
+
+A log that cannot be read answers 503 `{ "error": "audit_unavailable" }`, never an empty page.
+
+```ts
+type AuditPage = {
+  tenant: string;
+  entries: AuditEntry[];        // newest first
+  next: string | null;          // `before` for the page before this one; null on the oldest page
+  missed: AuditMissed | null;   // what the log could not write; null when it never missed an entry
+};
+
+type AuditEntry = {
+  id: string;                   // "aud-<time>-<sequence>-<random>": sorts by when the log stored it
+  at: string;                   // when the log stored it
+  actor: AuditActor;
+  action: string;               // one of the actions below
+  subject: AuditSubject;        // ids only
+  outcome: string;              // one of the outcomes below
+  reason?: string;              // a code: why an attempt ended, why a decision was refused
+  amountSatang?: number;        // the money it was about: a payment recorded, a cap set
+};
+
+type AuditActor =
+  | { kind: "operator"; email: string | null }  // the Cloudflare Access identity; null for a service token
+  | { kind: "owner"; id?: string }               // through a signed link (no id), or a signed-in device's id
+  | { kind: "helper"; id: string }               // staff the owner trusts with conversations
+  | { kind: "worker"; attemptId: string }        // a worker, by the attempt it was given
+  | { kind: "system" };                          // the control plane or the broker, on its own
+
+type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
+  "connectionId" | "previousConnectionId" | "confirmationId" | "factId", string>>;
+
+type AuditMissed = { count: number; lastAt: string; lastAction: string };
+```
+
+What is written, and by whom:
+
+| Action | Actor | Subject | Outcome |
+| --- | --- | --- | --- |
+| `shop.created` | operator | none | `ok` |
+| `line.connected` | operator | `connectionId`, and `previousConnectionId` when it replaced one | `ok` |
+| `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |
+| `payment.recorded`, `subscription_payment.recorded` | operator | `paymentId`, with `amountSatang` | `ok` |
+| `model.cap_set`, `model.cap_cleared` | operator | none; a cap set carries `amountSatang` | `ok` |
+| `deletion.requested` | operator | `confirmationId` for a live shop | `awaiting_owner` for a live shop; `ok` for one deleted at once, which the deletion then wipes with the rest |
+| `consent.given`, `consent.withdrawn` | owner | none | `ok` |
+| `reply.decided` | owner | `taskId`, `actionId` | `approved` or `declined` |
+| `deletion.decided` | owner | `confirmationId` | `approved` or `declined` |
+| `dispatch.started` | system | `taskId`, `actionId` | `ok` |
+| `dispatch.settled` | system | `taskId`, `actionId` | `confirmed`, `failed` or `unknown` |
+| `attempt.started` | system | `taskId`, `attemptId` | `ok` |
+| `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
+| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
+| `approval.decided` | owner or helper, with the id they decided as | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
+| `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
+| `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
+| `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
+
+The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
+section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
+entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
+
+- **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
+  and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
+  amount is a whole number of satang, and a field it does not know is refused rather than dropped. A customer's
+  words, a draft's text, a note or a secret therefore cannot be written into it, even by mistake.
+- **It never blocks or fails the action it records.** When the record an entry describes lives in the shop's
+  TenantObject (the shop, its LINE pointer, a reply's record and its decision time, both kinds of payment, consent,
+  the model cap, what the team knows), the entry goes into the same storage write, so the two exist together or not at all; an entry that
+  cannot be kept as given (a malformed actor) is replaced in that write by a raised miss count, and the action goes
+  ahead. When the record lives in another object (a deletion's in AuthObject, a dispatch's and the job flow's in task
+  objects), the entry is appended after the action has succeeded, best effort: the action's own record is the
+  authority, and the log must not hold it up. An append that fails, or that the log refuses, is counted in `missed`
+  by a second, smaller write; if that fails too, the Worker logs the action and the tenant id, nothing else. A log
+  with misses says so, rather than letting a gap read as nothing having happened.
+- **Export and deletion.** The tenant export carries `audit: { entries, missed }`, oldest first, and names `audit`
+  in `export_incomplete` when it cannot be read. The tenant deletion wipes the log and its miss count with the
+  shop's other records; entries written while the deletion runs, the owner's yes among them, go with it.
+- **The console** shows one shop's log at a time on its Audit page, newest first, with "Show older entries" for the
+  next page. The practice-mode fake keeps the same log for its sample shops, by the same rules.
+
+## Memory
+
+What Buddy's team knows about each shop: facts, where each came from, and the owner's say over them. The rules are
+the pure functions of `packages/shop-memory` (`@manut/shop-memory`); `apps/api/src/memory-store.ts` stores their
+state, one record per shop in the shop's TenantObject (the facts, the fingerprints of the texts the owner had the team
+forget, and the counter for the next id), and `apps/api/src/memory.ts` has the routes. The owner has no account in the
+pilot, so an operator relays the owner's word through the console's Memory page: the owner's own fact, "It's true" on
+a waiting fact, Correct and Forget. A worker never does these: it proposes what it learned (below).
+
+All five routes are under the admin gate, each an exact `ADMIN_METHODS` entry (the shop travels in the query or the
+body). A shop is any valid tenant, as in the audit and model routes; a shop that was deleted is not looked up first.
+
+```ts
+type Memory = {
+  tenant: string;
+  facts: Fact[];            // every fact, waiting ones included, oldest first: the order they were made
+  forgottenCount: number;   // how many texts the team was told to forget; the fingerprints are never sent
+};
+
+type Fact = {
+  id: string;               // "f1", "f2", ...: counted per shop and never reused, not even after Forget
+  text: string;             // trimmed, 1 to 280 characters (counted by characters, Thai included)
+  status: "confirmed" | "waiting";   // a waiting fact is not used until the owner confirms it
+  createdAt: number;        // epoch milliseconds, as the package keeps them: not the ISO strings used elsewhere here
+  updatedAt: number;
+  correctedAt?: number;     // set once the owner corrected it
+  source: FactSource;       // "Where it came from"
+};
+
+type FactSource =
+  | { kind: "owner" }                                    // the owner said it
+  | { kind: "document"; name: string; date: number }     // "From your price list, 3 November"
+  | { kind: "edits"; count: number }                     // "Learned from 12 of your edits"
+  | { kind: "orders"; days: number }                     // "From the last 90 days of orders"
+  | { kind: "connection"; name: string; detail: string } // "From your cost sheet in Google Sheets"
+  | { kind: "customer"; chat: string };                  // something a customer said, by chat reference
+```
+
+**What each route does**
+
+- `GET /v1/admin/memory?tenant=` answers `Memory`. 400 `tenant_required` for a missing or invalid tenant.
+- `POST /v1/admin/memory/remember` `{ tenant, text }` adds the owner's own fact, confirmed at once, with source
+  `{ kind: "owner" }`. Words that match a waiting fact confirm that fact instead of adding a second. It also lifts an
+  earlier Forget of the same words.
+- `POST /v1/admin/memory/confirm` `{ tenant, id }` is "It's true": a waiting fact becomes confirmed. Confirming a
+  confirmed fact changes nothing and answers the same fact.
+- `POST /v1/admin/memory/correct` `{ tenant, id, text }` gives the fact new words, confirmed, with `correctedAt` set.
+  The fact keeps its source and its `createdAt`. A correction to the words of a forgotten text lifts that Forget.
+- `POST /v1/admin/memory/forget` `{ tenant, id }` removes the fact and keeps only a fingerprint of its words (FNV-1a
+  64-bit of the compared form), so the team does not learn them again. The answer is `{ id }`: the words are not sent
+  back, and neither they nor the fingerprint reach the export, the audit log or any answer.
+
+Each answers the fact on success (`Fact`, status 200; Forget answers `{ id }`), or the package's refusal as
+`{ "error": reason }`:
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `invalid_text` | The words are missing, not text, blank or over 280 characters |
+| 400 | `invalid_source` | A proposal's source cannot be kept (never from an operator route) |
+| 400 | `invalid_request` | The body is not an object, or `id` is missing, not text or over 64 characters |
+| 400 | `tenant_required`, `invalid_json` | No valid tenant; a body that is not JSON |
+| 404 | `not_found` | The shop has no fact with that id |
+| 409 | `already_known` | The shop holds the same words (see below) |
+| 409 | `forgotten` | A proposal for words the owner had the team forget (never from an operator route) |
+| 409 | `full` | The shop already holds 200 facts. Forget one to make room |
+| 413 | `body_too_large` | The body is over 16 KB |
+| 503 | `memory_unavailable` | The shop's object could not be reached or did not answer as it should |
+
+**Rules**
+
+- **Same words.** Words are compared after Unicode NFC, trimming, collapsing spaces and lower case, so
+  `Closed on  Mondays ` and `closed on mondays` are the same, and Thai text compares the same way.
+- **A customer's words wait.** `proposeFact` makes a fact from a customer's chat `waiting`: it is not used until the
+  owner confirms it with "It's true" or corrects it. Facts from the owner's own data (`owner`, `document`, `edits`,
+  `orders`, `connection`) are confirmed at once. The same words proposed again from the owner's own data confirm a
+  waiting fact; a customer repeating them does not.
+- **Forget is kept as a fingerprint.** A proposal for forgotten words is refused `forgotten`, in any form. Only the
+  owner saying them again (`remember`, or a correction to them) lifts it.
+- **At most 200 facts per shop.** Forget makes room.
+- **One transaction per change.** The state is read, one rule applied, and the new state and its audit entry written in
+  one storage transaction of the shop's object, so two operators' clicks on one shop are decided one after the other
+  and neither is lost. Two clicks on the same words give one 200 and one 409 `already_known`. The object's memory paths
+  are the Worker's alone (its `x-memory` header, like `x-model` and `x-audit`).
+- **Audit.** Every change writes an entry that names the actor, the action and the fact's id, never its words
+  ("Audit log", above). The operator routes record the operator's Access identity (none for a service token). A refusal
+  changes nothing and writes nothing, and neither does a confirm of a fact already confirmed.
+- **Export and deletion.** The tenant export carries `memory: { facts, forgottenCount }`, as the package's
+  `exportFacts` gives it: every fact, waiting ones included, and only the number of fingerprints. The tenant deletion
+  wipes the shop's memory, the fingerprints included.
+
+**A worker's proposal** is a function, not a route (no operator can make one, and no worker can confirm one):
+
+```ts
+proposeFact(env, tenant, text, source, options?: { actor?: AuditActor; now?: () => number }):
+  Promise<{ ok: true; fact: Fact } | { ok: false; reason: Refusal | "invalid_request" | "unavailable" }>
+```
+
+It never throws, so the job that calls it never fails for the memory. `reason` is one of the package's refusals,
+`invalid_request` for a tenant that is not one or a proposal too large to send (over 32 KB), or `unavailable` when the
+shop's object cannot be reached or does not answer as it should. `actor` is who the audit entry names:
+`{ kind: "worker", attemptId }` when the job flow gives it, and the system otherwise. `now` is the caller's clock, for
+tests. The store keeps only the fields of a source's own kind, and refuses with `invalid_source` a name, detail or chat
+reference over 256 characters, a count or number of days that is not a whole number, and a document date outside 0 to
+8,640,000,000,000,000 milliseconds, so one shop's record stays small.
+
+**What a worker reads** is also a function, not a route:
+
+```ts
+usableFacts(env, tenant): Promise<{ ok: true; facts: Fact[] } | { ok: false; error: "invalid_request" | "memory_unavailable" }>
+```
+
+It answers only the facts a worker may use, as the package's `usable` decides: confirmed ones, oldest first. A fact
+still waiting for the owner is never handed out, so it can never reach a model. A stored fact that is not whole is left
+out, and a shop's object that cannot be read is `memory_unavailable`, never an empty memory. Nam, Pim and Ton read it
+for every job ("Workers", below).
+
+**The console** has a Memory page in the side menu, beside Audit, laid out as the design canvas's "Customize: memory
+and routines" board, newest fact first in each group:
+
+- "What your team knows", with "Where it came from" on its band and, on each fact, where it came from (`source`) and
+  Correct and Forget. Correct opens the words in place and sends `correct`; Forget asks once more in the row, because
+  the words are gone once it is answered.
+- "Waiting for your OK: not used until you confirm", shown only while something waits: each customer's fact tinted
+  and tagged "Not confirmed", with "It's true" (`confirm`) and Forget. It has no Correct: correct a fact once the team
+  knows it.
+- "Tell Buddy something to remember", a box with a "Remember" button that sends `remember`, and a count of the 280
+  characters it takes.
+
+The operator relays the owner's word, so the page says to correct or forget a fact only when the owner asks. One change
+runs at a time, and each refusal above is said in the board's words. The practice-mode fake keeps the same state with
+`@manut/shop-memory`'s own rules: it starts Baan Mali with five facts the team learned and two a customer said, which
+wait, and it replaces a practice world saved before memory existed.
+
+## Workers
+
+Nam (sales chat), Pim (content) and Ton (books) are workers on the job flow (`apps/api/src/workers.ts`; how they run
+is `docs/phase-0-spikes.md`, section 4). An operator starts one member's job for a shop, and the result is a draft on
+the job's own task for the owner to read. No worker sends, posts, pays or refunds, and none asks for an external write.
+
+### `POST /v1/admin/workers/run`
+
+Under the admin gate, as an exact `ADMIN_METHODS` entry. The body is `{ tenant, member, job }`:
+
+- `member`: `nam`, `pim` or `ton`.
+- `job`, one of:
+  - `{ kind: "reply", messageId }`: a reply to a customer's message the shop holds (`GET /v1/admin/pilot/messages`).
+  - `{ kind: "post", topic }`: a post about the topic, 1 to 500 characters once trimmed.
+  - `{ kind: "daily_summary" }`: yesterday's sales in Bangkok, from the order payments the shop has recorded
+    (`POST /v1/admin/pilot/payments`), each counted as a LINE sale at the time it was confirmed.
+
+A reply is Nam's job, a post Pim's and a summary Ton's. A job asked of another member is passed to the member whose job
+it is, and the answer says who did it.
+
+```ts
+type WorkerRun = {
+  taskId: string;                      // the job's own task: in the shop's export, gone with the shop's deletion
+  member: "nam" | "pim" | "ton";       // who did the job
+  passedFrom?: "nam" | "pim" | "ton";  // who passed it on, when it was not theirs
+  outcome: "done" | "failed";
+  reason?: string;                     // why it failed, as a code (below)
+  draft?: Draft;                       // when done
+};
+
+type Draft = {
+  attemptId: string;                   // the attempt that wrote it: one draft per attempt
+  member: string;                      // "nam", "pim" or "ton"
+  job: string;                         // "reply", "post" or "daily_summary"
+  text: string;                        // the words, for the owner to read
+  about?: { messageId?: string; date?: string };  // the message a reply answers; the day a summary covers
+  send?: { answer: "draft_only" | "ask"; kind: "reply" };  // what sending a reply would take (below)
+  at: string;
+};
+```
+
+A refusal answers `{ "error": code }`. The 400s, 403s and 404s come before anything is created; a 503 can leave the
+job's task behind with no attempt on it, which holds nothing.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `tenant_required` | No valid tenant |
+| 400 | `unknown_member` | `member` is not `nam`, `pim` or `ton` |
+| 400 | `invalid_job` | `job` is missing, of another kind, has a field its kind does not, or its topic or message id is blank or too long |
+| 400 | `invalid_request`, `invalid_json` | The body is not a JSON object |
+| 403 | `feature_disabled` with `feature: "officeCloud"` | The cloud-work kill switch is off |
+| 403 | `consent_required` | The owner has not consented to cloud work |
+| 404 | `shop_not_found` | The tenant is not a pilot shop |
+| 404 | `message_not_found` | The shop holds no message with that id (customer messages age out after 7 days) |
+| 413 | `body_too_large` | The body is over 16 KB |
+| 503 | `shop_unavailable`, `message_unavailable`, `task_unavailable`, `meter_unavailable` | An object could not be read or written |
+
+A job that started answers 200, also when it failed, because its task and the audit log record it. `reason` is then
+`not_connected` (the LINE connection the customer wrote to is gone), `budget` (the shop's model cap is spent),
+`not_configured` (no model key yet), `provider_error`, `memory_unavailable`, `payments_unavailable`,
+`vault_unavailable`, `empty_draft`, or a code of the job flow's own.
+
+**Rules**
+
+- **Gates.** `officeCloud` and the owner's consent, read before anything is created. A draft is not an external write,
+  so `officeExternalWrites` is not read.
+- **Permissions.** `@manut/member-grants`' `decide` answers before the member does anything. A reply goes out through
+  the connection the customer wrote to, which starts in practice mode for three days: the answer is `draft_only` then,
+  and `ask` after. Either way the reply is only drafted and nothing is asked. To send it, an operator proposes the
+  draft's text for its `messageId` through `POST /v1/admin/pilot/replies`, and the owner approves it on the link as for
+  any reply.
+- **Memory.** Each job reads the facts the team may use (`usableFacts`, above), never a waiting one. A customer's words
+  reach the model only as the customer's message, never as instructions.
+- **Cost.** One model call per job, through the model gateway and against the shop's cap (`claude-haiku-5-5`). Ton with
+  no sales for the day drafts "No sales were recorded on 2026-11-22." and calls no model. Ton reads the newest 500
+  payments, as the console lists them.
+- **The task.** The job's task is a draft in the cloud location. Its event log holds what each attempt reported
+  (`turnStarted`, `spend`, `turnCompleted`, and a `handoffNote` `{ from, to, job }` when a job was passed on), and the
+  draft is kept beside it, one per attempt. The draft's words are on the task only.
+- **Audit.** Metadata only: `attempt.started` for each attempt (by the operator's Access identity, or by the system
+  for the member a job was passed to), and `attempt.ended` with its outcome and reason. No entry holds a customer's
+  words, a draft or a secret.
+
 ## One origin
 
 The pages and the API share one origin, so the console needs no CORS and one Cloudflare Access application
@@ -370,5 +702,56 @@ A reply is one action proposal on the shop's task with `operationType: "line.mes
 - `recipients`: `[lineUserId]` of the customer who wrote the message being answered.
 - `payload`: `{ "text": string }`, 1 to 5,000 characters.
 
+Proposing it opens its approval-core request ("Security rules", above), whichever route proposes it.
+
 The broker pushes it with the LINE Messaging API, sending the action id as the retry key so a retry can never
 send twice, and settles `confirmed`, `failed` or `unknown` as it does for every provider.
+
+## Approvals for a session
+
+`GET /v1/approvals?state=open` or `GET /v1/approvals?state=recent`, with a signed-in session
+(`Authorization: Bearer <access token>`), answers the session's own approval-core records and where each stands now,
+for the desktop's answering slice. It only reads: nothing is decided through it.
+
+- **What is listed.** Every approval-core request in the tenant's tasks: a worker's request (the job flow) and every
+  LINE reply. A proposal that no request decides, such as a session's own `linear.issue.create` through
+  `POST /v1/tasks/:id/actions`, is not an approval-core approval and is not listed.
+- **The wire format.** Each record is encoded with approval-core's `encodeRecord` and its standing with
+  `encodeStanding` (`packages/approval-core/src/wire.ts`), so a client reads both with approval-core's own decoders.
+  The standing is read now, at the record's current revision and against the attempt holding its task.
+- **Kinds.** The task object sets each request's kind from the operation it decides, never from whoever proposed it:
+  a LINE reply (`line.message.push`) is `reply`; a worker's `linear.issue.create` is `command`.
+- **`state`**, required: `open` lists every record whose standing is `open`, still waiting for a decision; `recent`
+  lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
+  (`request.createdAt`), then by id.
+- **`limit`**: 1 to 200, 50 when absent. It bounds `recent` only; `open` is never cut short.
+- **Scope.** The session's own tenant, as the tenant export reads it: every task in the tenant's index, read with the
+  tenant the session verified and nothing else. So one tenant never reads another's approvals, even through a task id
+  planted in its own index or an action planted in its own task. Fellow members' company tasks are not listed:
+  reading those takes a verified company assertion, which this route does not make. Like reading a task, it needs no
+  feature switch and no consent.
+- **A reply stored before replies had requests** and still waiting is listed as the request it would have opened:
+  asked when the reply was proposed, expiring with it. A reply decided before then has no record and is not listed;
+  its history stays in the export.
+
+Errors: 401 `unauthorized` without a session (the operator key is not a session), 400 `invalid_state`, 400
+`invalid_limit`, 405 `method_not_allowed` for anything but `GET`, and 503 `approvals_unavailable` when the tenant's
+index or one of its tasks cannot be read, never a partial list.
+
+```ts
+// WireRecord and WireStanding are approval-core's wire JSON (packages/approval-core/src/wire.ts).
+type Approvals = {
+  state: "open" | "recent";
+  approvals: { taskId: string; record: WireRecord; standing: WireStanding }[];
+};
+
+// What a LINE reply's request names, in `record.request.detail`. Its id is the reply's action id.
+type ReplyDetail = {
+  actionId: string;
+  operationType: "line.message.push";
+  targetResourceId: string;   // the bot user id the reply is sent from
+  recipient: string;          // the LINE user id of the customer who wrote
+  text: string;               // exactly what will be sent
+  payloadHash: string;
+};
+```

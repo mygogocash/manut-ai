@@ -82,6 +82,28 @@ export const FlagIcon = () => (
   </Icon>
 );
 
+/// A page of lines: the record of who did what.
+export const AuditIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h7a1 1 0 011 1v9a1 1 0 01-1 1h-7a1 1 0 01-1-1v-9a1 1 0 011-1zM6 6h4M6 8.5h4M6 11h2.5" />
+  </Icon>
+);
+
+/// A bookmark: what the team keeps to remember.
+export const MemoryIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h7a1 1 0 011 1v10L8 10.2 3.5 13.5v-10a1 1 0 011-1z" />
+  </Icon>
+);
+
+/// A coin with a baht-like B: what the AI team spends on language models.
+export const SpendIcon = () => (
+  <Icon>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M6.75 5v6M6.75 5h1.75a1.5 1.5 0 010 3H6.75M6.75 8h2a1.5 1.5 0 010 3H6.75" />
+  </Icon>
+);
+
 /// The viewer's light or dark setting, kept current while the page is open.
 export function useColorScheme(): "light" | "dark" {
   const query = "(prefers-color-scheme: dark)";

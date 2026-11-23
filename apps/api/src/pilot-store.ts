@@ -30,6 +30,7 @@ import {
   type Role,
 } from "@manut/approval-core";
 import { DELETION_LINK_TTL_MS } from "./approval-link";
+import { actorOr, auditPut, type AuditActor, type AuditRecord } from "./audit-log";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
 import { bangkokDay } from "./pilot-gate";
@@ -175,6 +176,15 @@ async function values<T>(storage: DurableObjectStorage, prefix: string, options:
   return [...(await storage.list<T>({ prefix, ...options })).values()];
 }
 
+/// The audit entry a write records, in the same put as the record it describes (audit-log.ts), by the actor the
+/// Worker named: the operator's Access identity for the console's writes, the owner for the owner's link. A write
+/// that names nobody is the system's. An actor the log cannot keep becomes a counted miss rather than a wrong name.
+function audited(storage: DurableObjectStorage, tenant: string, actor: unknown, fallback: AuditActor,
+  record: Omit<AuditRecord, "actor">): Promise<Record<string, unknown>> {
+  const who = actorOr(actor, fallback);
+  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action);
+}
+
 /// `/pilot/*` on a TenantObject. Reads need only the tenant; writes need the
 /// Worker's `x-pilot` header as well.
 export async function pilotTenantRoute(storage: DurableObjectStorage, request: Request, url: URL): Promise<Response> {
@@ -269,7 +279,11 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
     taskId: body.taskId,
     createdAt: new Date().toISOString(),
   };
-  await storage.put(keys.shop(tenant), shop);
+  await storage.put({
+    [keys.shop(tenant)]: shop,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
+      outcome: "ok" })),
+  });
   return json({ shop });
 }
 
@@ -288,10 +302,18 @@ async function setShopConnection(storage: DurableObjectStorage, tenant: string, 
   const shop = await storage.get<PilotShopRecord>(keys.shop(tenant));
   if (!shop) return json({ error: "not_found" }, 404);
   const first = shop.trialStartedAt === undefined && shop.lineConnectionId === undefined;
-  await storage.put(keys.shop(tenant), {
-    ...shop,
-    lineConnectionId: body.lineConnectionId,
-    ...(first ? { trialStartedAt: new Date().toISOString() } : {}),
+  const replaced = shop.lineConnectionId !== undefined && shop.lineConnectionId !== body.lineConnectionId;
+  await storage.put({
+    [keys.shop(tenant)]: {
+      ...shop,
+      lineConnectionId: body.lineConnectionId,
+      ...(first ? { trialStartedAt: new Date().toISOString() } : {}),
+    },
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, {
+      action: "line.connected",
+      subject: { connectionId: body.lineConnectionId, ...(replaced ? { previousConnectionId: shop.lineConnectionId } : {}) },
+      outcome: "ok",
+    })),
   });
   return json({ previous: shop.lineConnectionId ?? null });
 }
@@ -391,17 +413,25 @@ async function recordReply(storage: DurableObjectStorage, tenant: string, body: 
   await storage.put({
     [keys.reply(tenant, actionId)]: reply,
     [keys.message(tenant, messageId)]: { ...message, replyActionId: actionId },
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "reply.proposed",
+      subject: { taskId, actionId, messageId }, outcome: "ok" })),
   });
   return json({ reply });
 }
 
-/// First decision time wins; a later call never moves it.
+/// First decision time wins; a later call never moves it. The owner's decision is written to the audit log with
+/// it, once, when it is first recorded: `approve` says which way the owner decided.
 async function recordDecided(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
   if (!bounded(body.actionId) || !bounded(body.decidedAt, 64)) return json({ error: "invalid_request" }, 400);
   const reply = await storage.get<PilotReplyRecord>(keys.reply(tenant, body.actionId));
   if (!reply) return json({ error: "not_found" }, 404);
   if (reply.decidedAt === undefined) {
-    await storage.put(keys.reply(tenant, body.actionId), { ...reply, decidedAt: body.decidedAt });
+    const outcome = body.approve === true ? "approved" : body.approve === false ? "declined" : "ok";
+    await storage.put({
+      [keys.reply(tenant, body.actionId)]: { ...reply, decidedAt: body.decidedAt },
+      ...(await audited(storage, tenant, body.actor, { kind: "owner" }, { action: "reply.decided",
+        subject: { taskId: reply.taskId, actionId: body.actionId }, outcome })),
+    });
   }
   return json({ recorded: true });
 }
@@ -423,7 +453,11 @@ async function recordPayment(storage: DurableObjectStorage, tenant: string, body
     ...(typeof slipNote === "string" && slipNote.length > 0 ? { slipNote } : {}),
     confirmedAt: new Date(now).toISOString(),
   };
-  await storage.put(keys.payment(tenant, payment.id), payment);
+  await storage.put({
+    [keys.payment(tenant, payment.id)]: payment,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "payment.recorded",
+      subject: { paymentId: payment.id }, outcome: "ok", amountSatang })),
+  });
   return json({ payment });
 }
 
@@ -454,7 +488,11 @@ async function recordSubscriptionPayment(storage: DurableObjectStorage, tenant: 
     ...(typeof slipNote === "string" && slipNote.length > 0 ? { slipNote } : {}),
     confirmedAt: new Date(now).toISOString(),
   };
-  await storage.put(keys.subscription(tenant, payment.id), payment);
+  await storage.put({
+    [keys.subscription(tenant, payment.id)]: payment,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "subscription_payment.recorded",
+      subject: { paymentId: payment.id }, outcome: "ok", amountSatang })),
+  });
   return json({ payment });
 }
 

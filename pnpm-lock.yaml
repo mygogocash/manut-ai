@@ -177,9 +177,21 @@ importers:
 
   apps/api:
     dependencies:
+      '@manut/agent-prompts':
+        specifier: workspace:*
+        version: link:../../packages/agent-prompts
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
+      '@manut/books':
+        specifier: workspace:*
+        version: link:../../packages/books
+      '@manut/member-grants':
+        specifier: workspace:*
+        version: link:../../packages/member-grants
+      '@manut/shop-memory':
+        specifier: workspace:*
+        version: link:../../packages/shop-memory
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.6.0
@@ -287,6 +299,9 @@ importers:
       '@manut/promptpay':
         specifier: workspace:*
         version: link:../../packages/promptpay
+      '@manut/shop-memory':
+        specifier: workspace:*
+        version: link:../../packages/shop-memory
       '@manut/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
@@ -337,7 +352,33 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
 
+  packages/agent-prompts:
+    dependencies:
+      '@manut/shop-memory':
+        specifier: workspace:*
+        version: link:../shop-memory
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
   packages/approval-core:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/books:
+    dependencies:
+      '@manut/format':
+        specifier: workspace:*
+        version: link:../format
     devDependencies:
       typescript:
         specifier: 7.0.2
@@ -355,7 +396,82 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
 
+  packages/member-grants:
+    dependencies:
+      '@manut/approval-core':
+        specifier: workspace:*
+        version: link:../approval-core
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/people-rules:
+    dependencies:
+      '@manut/approval-core':
+        specifier: workspace:*
+        version: link:../approval-core
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
   packages/promptpay:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/routine-rules:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/sheets-rows:
+    dependencies:
+      '@manut/books':
+        specifier: workspace:*
+        version: link:../books
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/shop-memory:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/shop-templates:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/slip-rules:
     devDependencies:
       typescript:
         specifier: 7.0.2

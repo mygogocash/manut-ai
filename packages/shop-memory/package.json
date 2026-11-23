@@ -1,0 +1,15 @@
+{
+  "name": "@manut/shop-memory",
+  "private": true,
+  "type": "module",
+  "description": "What the team knows about one shop: facts, where they came from, and the owner's say over them.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

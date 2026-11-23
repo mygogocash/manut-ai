@@ -5,21 +5,23 @@
 /// owner approves or declines that one exact reply through a link.
 ///
 /// Nothing here adds a way around the lifted backend's guarantees. A reply is
-/// an ordinary exact-action proposal on the shop's task, decided once by the
-/// task object, dispatched at most once by the broker's begin gate, checked
+/// an ordinary exact-action proposal on the shop's task, stored with the
+/// approval-core request that alone decides it (a `reply`, naming the draft
+/// and its one recipient), decided once through that request in the task
+/// object, dispatched at most once by the broker's begin gate, checked
 /// against the live connection grant before any LINE traffic, and settled
-/// confirmed, failed or unknown. The link adds only who may decide: whoever
-/// holds a link this backend signed for that one action, before it expires.
-/// Approving still needs the shop's cloud-work consent, which only the owner
-/// can record, through the link, and the same kill switches as the session
-/// routes.
+/// confirmed, failed or unknown. The link adds only who decides: whoever
+/// holds a link this backend signed for that one action, before it expires,
+/// is the owner. Approving still needs the shop's cloud-work consent, which
+/// only the owner can record, through the link, and the same kill switches as
+/// the session routes.
 ///
 /// Deleting a live shop's data is the same shape: the operator's request opens
 /// one owner confirmation in approval-core's store (pilot-store.ts), the
 /// owner's link names exactly that confirmation, and the wipe starts only once
 /// the owner's yes is settled there.
 
-import type { ApprovalRecord } from "@manut/approval-core";
+import type { ApprovalRecord, DecideResult } from "@manut/approval-core";
 import {
   APPROVAL_LINK_TTL_MS,
   checkApprovalToken,
@@ -29,6 +31,7 @@ import {
   type ApprovalClaim,
   type DeletionClaim,
 } from "./approval-link";
+import { appendAudit, countAuditMiss, type AuditActor } from "./audit-log";
 import { readBodyBytes, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
 import { isValidTenant } from "./companies";
@@ -63,7 +66,7 @@ import {
   type StoredDeletion,
   type SubscriptionPayment,
 } from "./pilot-store";
-import type { ActionProposalJSON } from "./task-object";
+import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
 export type PilotEnv = TenantDataEnv & {
@@ -434,7 +437,10 @@ async function recordOwnerConsent(request: Request, env: PilotEnv, claim: Approv
 /// decision and dispatch routes, in the same order: the officeCloud switch
 /// for any decision; for an approval, the officeExternalWrites switch and the
 /// shop's consent, all checked before anything is recorded, so a refusal
-/// leaves the reply waiting. The task object then settles the decision once.
+/// leaves the reply waiting. The task object then settles the decision once,
+/// through the reply's approval-core request, as the owner (approval-core's
+/// rules: settle once, before the reply's expiry, the one revision a reply
+/// has, an option it offers), and moves the reply with it.
 /// An approval goes straight on to the broker's begin gate (one-use,
 /// re-checking freshness, grant revision and task state) and the provider
 /// call runs after the answer, in waitUntil, exactly as the session dispatch
@@ -461,36 +467,48 @@ async function decideByLink(
   if (before.action.state !== "proposed") return json({ error: "already_decided", view: before.view }, 409);
   if (approve && before.view.needsConsent) return json({ error: "consent_required" }, 403);
 
+  // The reply's approval-core request decides it, and the task object moves the reply with it in one transaction.
+  // Whoever holds the link is the owner, so the role is set here and never read from the request; a reply is never
+  // revised, so the owner saw its one revision.
   const stub = env.TASK.get(env.TASK.idFromName(claim.taskId));
   const decided = await stub.fetch(
-    new Request(`https://task/actions/${encodeURIComponent(claim.actionId)}/decision`, {
+    new Request(`https://task/requests/${encodeURIComponent(claim.actionId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-tenant": claim.tenant },
-      // `by` is required by the object but ignored when a tenant is sent:
-      // the approval is stamped with the shop's tenant, as a session's is.
-      body: JSON.stringify({ approve, by: "owner-link" }),
+      body: JSON.stringify({ optionId: approve ? "approve" : "decline", seenRevision: REPLY_REVISION,
+        decidedBy: "owner-link", role: "owner" }),
     }),
   );
-  if (!decided.ok) {
-    const refusal = (await decided.json().catch(() => null)) as { error?: unknown } | null;
-    if (decided.status === 409 && refusal?.error === "action_expired") return json({ error: "link_expired" }, 410);
-    if (decided.status === 409) {
-      // Lost a race with another decision on the same link.
-      const raced = await loadView(env, claim);
-      return raced ? json({ error: "already_decided", view: raced.view }, 409) : json({ error: "link_invalid" }, 404);
-    }
-    if (decided.status === 404) return json({ error: "link_invalid" }, 404);
-    return json({ error: "decision_unavailable" }, 503);
+  if (decided.status === 404) return json({ error: "link_invalid" }, 404);
+  if (decided.status === 409) return raced(env, claim);
+  if (!decided.ok) return json({ error: "decision_unavailable" }, 503);
+  const settled = (await decided.json()) as { result: DecideResult; action: ActionProposalJSON };
+  if (!settled.result.ok) {
+    // Lost a race with another decision on the same reply.
+    if (settled.result.refused === "already_decided") return raced(env, claim);
+    if (settled.result.refused === "expired") return json({ error: "link_expired" }, 410);
+    // Withdrawn, not permitted, or an option or revision the link never showed: nothing this link can decide.
+    return json({ error: "link_invalid" }, 404);
   }
-  const action = (await decided.json()) as ActionProposalJSON;
-  await pilotWrite(env, claim.tenant, "/pilot/reply-decided", {
+  const action = settled.action;
+  // The decision time and the audit log's entry for the owner's decision share one write. Neither may hold up the
+  // decision the task object already settled, so a failed write is only counted as a miss in the log.
+  const recorded = await pilotWrite(env, claim.tenant, "/pilot/reply-decided", {
     actionId: claim.actionId,
     decidedAt: action.approval?.at ?? new Date().toISOString(),
-  }).catch(() => undefined);
+    approve,
+  }).catch(() => null);
+  if (!recorded?.ok) await countAuditMiss(env, claim.tenant, "reply.decided");
 
   if (approve) await startSend(env, ctx, claim, action);
   const after = await loadView(env, claim);
   return after ? json(after.view) : json({ error: "link_invalid" }, 404);
+}
+
+/// The answer to a decision that another one beat to the reply: the view as it now stands.
+async function raced(env: PilotEnv, claim: ApprovalClaim): Promise<Response> {
+  const loaded = await loadView(env, claim);
+  return loaded ? json({ error: "already_decided", view: loaded.view }, 409) : json({ error: "link_invalid" }, 404);
 }
 
 /// Begins the send of an approved reply. The begin gate compares against the
@@ -642,6 +660,10 @@ async function decideDeletionByLink(request: Request, env: PilotEnv, claim: Dele
     // decide.
     return json({ error: "link_invalid" }, 404);
   }
+  // The owner's answer, settled in AuthObject above, goes to the shop's log before any wipe; a yes then takes the
+  // log with the rest of the shop, and the deletion record in AuthObject keeps who asked and when.
+  await appendAudit(env, claim.tenant, { actor: { kind: "owner" }, action: "deletion.decided",
+    subject: { confirmationId: claim.confirmationId }, outcome: approve ? "approved" : "declined" });
   if (approve && loaded.deletion) {
     const wiped = await wipeShop(env, loaded.deletion);
     return json(await deletionView(env, { ...loaded, deletion: wiped.record }));
@@ -678,15 +700,17 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   if (!isRecord(parsed.value)) return json({ error: "invalid_request" }, 400);
   const body = parsed.value;
-  if (route === "POST /v1/admin/pilot/shops") return createShop(env, body);
+  // Who the shop's audit log names for this write: the operator's Access identity (audit-log.ts).
+  const actor: AuditActor = { kind: "operator", email: await operatorIdentity(ctx) };
+  if (route === "POST /v1/admin/pilot/shops") return createShop(env, body, actor);
   // Every other write names an existing pilot shop.
   if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
   const shop = await readShop(env, body.tenant);
   if (!shop) return noShop(env, body.tenant);
-  if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
-  if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
-  if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
-  if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body);
+  if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body, actor);
+  if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags, actor);
+  if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body, actor);
+  if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body, ctx);
   return json({ error: "not_found" }, 404);
 }
@@ -777,6 +801,10 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
     deletedBy: await operatorIdentity(ctx),
   };
   if (!(await writeDeletion(env, record)).ok) return json({ error: "audit_unavailable" }, 503);
+  // Wiped with the shop once the deletion finishes; an entry that outlives a wipe that stopped part way says who
+  // asked for it.
+  await appendAudit(env, shop.tenant, { actor: { kind: "operator", email: record.deletedBy },
+    action: "deletion.requested", subject: {}, outcome: "ok" });
   return (await wipeShop(env, record)).response;
 }
 
@@ -814,6 +842,12 @@ async function askOwner(env: PilotEnv, shop: PilotShopRecord, ctx: ExecutionCont
   if (!response.ok) return json({ error: "audit_unavailable" }, 503);
   const opened = (await response.json()) as OpenedConfirmation;
   if (opened.outcome === "approved") return (await wipeShop(env, opened.deletion)).response;
+  // A new confirmation is a new request; asking again while one waits only answers its link again.
+  if (opened.outcome === "opened") {
+    await appendAudit(env, shop.tenant, { actor: { kind: "operator", email: opened.deletion.deletedBy },
+      action: "deletion.requested", subject: { confirmationId: opened.confirmation.request.id },
+      outcome: "awaiting_owner" });
+  }
   const expiresAtMs = opened.confirmation.request.expiresAt ?? 0;
   const token = await mintDeletionToken(env.APPROVAL_LINK_SECRET, {
     tenant: shop.tenant,
@@ -846,7 +880,7 @@ async function wipeShop(env: PilotEnv, record: PilotDeletionRecord): Promise<{ r
 /// per-tenant boundary (vault, task ownership, consent, export, deletion)
 /// applies to it unchanged. No session can ever carry such a tenant: session
 /// tenants come from a verified provider subject.
-async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise<Response> {
+async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: AuditActor): Promise<Response> {
   // Names are stored as a person reads them, without outer spaces, so the name the console shows is the name an
   // operator can type back to confirm a deletion.
   const name = typeof body.name === "string" ? body.name.trim() : body.name;
@@ -857,6 +891,7 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise
     name,
     ownerName,
     taskId: `pilot-task-${crypto.randomUUID()}`,
+    actor,
   });
   if (!created.ok) return json({ error: "shop_unavailable" }, 503);
   const registered = await authCall(env, "/pilot-shops", {
@@ -938,7 +973,8 @@ async function listFrom(env: PilotEnv, tenant: string, path: string, field: stri
 /// connection and revokes it, wiping its sealed secrets, so a rotated token
 /// leaves nothing usable behind; a reply still waiting on the old connection
 /// then fails at dispatch rather than sending through it.
-async function connectLine(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
+async function connectLine(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>,
+  actor: AuditActor): Promise<Response> {
   const { channelId, botUserId, channelSecret, channelAccessToken } = body;
   if (!bounded(channelId, 64) || typeof botUserId !== "string" || !LINE_USER_ID.test(botUserId) ||
       !bounded(channelSecret, 256) || !bounded(channelAccessToken, 4096)) {
@@ -981,7 +1017,7 @@ async function connectLine(env: PilotEnv, shop: PilotShopRecord, body: Record<st
     await revoke(connectionId);
     return json({ error: "inbound_route_unavailable" }, 503);
   }
-  const pointed = await pilotWrite(env, tenant, "/pilot/shop-connection", { lineConnectionId: connectionId });
+  const pointed = await pilotWrite(env, tenant, "/pilot/shop-connection", { lineConnectionId: connectionId, actor });
   if (!pointed.ok) {
     await revoke(connectionId);
     return json({ error: "shop_unavailable" }, 503);
@@ -1037,7 +1073,8 @@ async function ensureShopTask(env: PilotEnv, shop: PilotShopRecord): Promise<boo
 /// kill switches as the session propose route apply. Consent is not needed
 /// to propose, as for the operator path through `consentGate`: the owner
 /// gives it on the link, before approving, which is the step that sends.
-async function proposeReply(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, flags: Flags): Promise<Response> {
+async function proposeReply(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, flags: Flags,
+  actor: AuditActor): Promise<Response> {
   const current = await flags();
   if (!current.officeCloud) return json({ error: "feature_disabled", feature: "officeCloud" }, 403);
   if (!current.officeExternalWrites) return json({ error: "feature_disabled", feature: "officeExternalWrites" }, 403);
@@ -1108,6 +1145,7 @@ async function proposeReply(env: PilotEnv, shop: PilotShopRecord, body: Record<s
     proposedAt: action.proposedAt,
     expiresAt: action.expiresAt,
     expectedReplyActionId: prior,
+    actor,
   });
   if (!bound.ok) return json(await bound.json().catch(() => ({ error: "reply_unavailable" })), bound.status === 409 ? 409 : 503);
   const token = await mintApprovalToken(env.APPROVAL_LINK_SECRET, {
@@ -1163,7 +1201,8 @@ async function listActions(env: PilotEnv, tenant: string): Promise<Response> {
 /// `POST /v1/admin/pilot/payments`: the operator records a PromptPay slip
 /// they checked against the shop's bank app. Nothing is charged or moved
 /// here; this is the shop's ledger of confirmations, kept until deletion.
-async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
+async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>,
+  actor: AuditActor): Promise<Response> {
   const { orderRef, amountSatang, promptPayId, slipNote } = body;
   if (!bounded(orderRef, 128) || !bounded(promptPayId, 64) || typeof amountSatang !== "number" ||
       !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
@@ -1175,6 +1214,7 @@ async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<
     amountSatang,
     promptPayId,
     ...(slipNote !== undefined ? { slipNote } : {}),
+    actor,
   });
   if (!recorded.ok) return json({ error: "payment_unavailable" }, 503);
   return json(((await recorded.json()) as { payment: Payment }).payment);
@@ -1191,7 +1231,8 @@ async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<
 /// satang; anything else, a float included, is refused rather than rounded.
 /// The slip's reference is trimmed as a person typed it, and a slip already
 /// recorded for the shop answers 409 and records nothing.
-async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>) {
+async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>,
+  actor: AuditActor) {
   const { amountSatang, slipNote } = body;
   const slipRef = typeof body.slipRef === "string" ? body.slipRef.trim() : body.slipRef;
   if (typeof amountSatang !== "number" || !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
@@ -1202,6 +1243,7 @@ async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, b
     amountSatang,
     slipRef,
     ...(slipNote !== undefined ? { slipNote } : {}),
+    actor,
   });
   if (recorded.status === 409) return json({ error: "slip_already_recorded" }, 409);
   if (!recorded.ok) return json({ error: "payment_unavailable" }, 503);

@@ -1,5 +1,6 @@
 mod accounts;
 mod acp_agents;
+mod api_link;
 mod acp_chat;
 mod agent_chat;
 mod app_menu;
@@ -19,6 +20,7 @@ mod power;
 mod pty_bench;
 mod session_files;
 mod sessions;
+mod shop_cache;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -36,6 +38,7 @@ use platform::Os;
 use sessions::{AgentInfo, Output, Sessions};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use zeroize::Zeroizing;
 
 /// What the commands share. Oh My Hermes also kept its Python bridge and its SSH links to other computers' bridges
 /// here; Manut AI's runtime lives in the page behind `src/runtime`, so the shell owns only local processes.
@@ -393,6 +396,61 @@ struct ShellStarted {
 #[tauri::command]
 fn host_name() -> String {
     this_host::name()
+}
+
+/// The connected runtime's one way to reach apps/api (api_link.rs): the page names the address, the method, the
+/// session token and the body, and gets back the status and the body, or `offline` / `failed`. The shell checks the
+/// address itself (https, or plain http on this computer; `/v1/` paths only), whatever the page sends.
+#[tauri::command]
+async fn api_request(url: String, method: String, bearer: Option<String>, body: Option<String>) -> Result<api_link::ApiAnswer, String> {
+    let bearer = bearer.map(Zeroizing::new);
+    tauri::async_runtime::spawn_blocking(move || api_link::request(&url, &method, bearer.as_ref().map(|b| b.as_str()), body.as_deref()))
+        .await
+        .map_err(|_| "failed".to_string())?
+        .map_err(api_link::LinkError::wire)
+}
+
+/// The API session the keychain holds for the connected runtime, or none (api_link.rs). Off the main thread: a locked
+/// keychain asks the person first.
+#[tauri::command]
+async fn api_session_read() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(api_link::session_read).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Replaces the API session the keychain holds.
+#[tauri::command]
+async fn api_session_write(value: String) -> Result<(), String> {
+    let value = Zeroizing::new(value);
+    tauri::async_runtime::spawn_blocking(move || api_link::session_write(&value)).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Removes the API session from the keychain (signing out, or a session the API ended).
+#[tauri::command]
+async fn api_session_clear() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(api_link::session_clear).await.map_err(|_| "keychain".to_string())?
+}
+
+/// The connected runtime's last good read of the shop, kept for when the API cannot be reached (shop_cache.rs,
+/// src/runtime/http/cache.ts): `~/.manut/shop-cache/<key>.json`, owner-only, written through a temporary file and renamed,
+/// and only ever one shop's. `key` is the 64 hex digits the page makes of the shop; the shell takes no path.
+#[tauri::command]
+async fn shop_cache_write(key: String, text: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::write(&home, &key, &text)).await.map_err(|e| e.to_string())?
+}
+
+/// What the saved read of shop `key` holds, or null when none is kept.
+#[tauri::command]
+async fn shop_cache_read(key: String) -> Result<Option<String>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::read(&home, &key)).await.map_err(|e| e.to_string())?
+}
+
+/// Removes the saved read of the shop (signing out, a session the API ended, switching to Practice or to another origin).
+#[tauri::command]
+async fn shop_cache_clear() -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::clear(&home)).await.map_err(|e| e.to_string())?
 }
 
 /// Keystrokes (and pastes) from the terminal view into session `id`.
@@ -941,6 +999,13 @@ pub fn run() {
             window_close,
             power_busy,
             window_prefs,
+            api_request,
+            api_session_read,
+            api_session_write,
+            api_session_clear,
+            shop_cache_write,
+            shop_cache_read,
+            shop_cache_clear,
             term_link::term_link_take,
             disk::disk_watch
         ])

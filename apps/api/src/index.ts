@@ -1,3 +1,5 @@
+import { auditAdminRoute } from "./audit-log";
+import { listApprovals } from "./approvals";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
@@ -8,6 +10,7 @@ import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
+import { memoryAdminRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
@@ -17,6 +20,7 @@ import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
+import { workersAdminRoute } from "./workers";
 
 export { AuthObject, CompanyObject, CredObject, RelayObject, ScheduleObject, TaskObject, TenantObject };
 
@@ -193,6 +197,15 @@ const ADMIN_METHODS = new Set([
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
+  // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
+  "GET /v1/admin/audit",
+  // What the team knows about the shop (memory.ts): read it, and the owner's say over each fact as an operator relays
+  // it. A worker's proposal is a function, not a route. The tenant travels in the query or the body.
+  "GET /v1/admin/memory", "POST /v1/admin/memory/remember", "POST /v1/admin/memory/confirm",
+  "POST /v1/admin/memory/correct", "POST /v1/admin/memory/forget",
+  // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
+  // model through the gateway, never the route. The tenant travels in the body.
+  "POST /v1/admin/workers/run",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -603,6 +616,21 @@ export default {
     const model = await modelAdminRoute(request, url, env, ctx);
     if (model) return model;
 
+    // The shop's audit log (audit-log.ts), read-only. The admin gate above already required both credentials and
+    // the exact method.
+    const audit = await auditAdminRoute(request, url, env);
+    if (audit) return audit;
+
+    // What the team knows about the shop (memory.ts). The admin gate above already required both credentials and the
+    // exact method.
+    const memory = await memoryAdminRoute(request, url, env, ctx);
+    if (memory) return memory;
+
+    // Nam, Pim and Ton (workers.ts). The admin gate above already required both credentials and the exact method; the
+    // runner reads the kill switches and the owner's consent before it creates anything.
+    const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
+    if (workers) return workers;
+
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
     if (url.pathname === "/v1/admin/flags") {
@@ -967,6 +995,17 @@ export default {
           new Request(`https://schedules/schedules/${scheduleMatch[1]}`, { method: "DELETE", headers }),
         );
       }
+    }
+
+    // Approvals for a session (approvals.ts): the tenant's approval-core
+    // records and where each stands, as approval-core's wire JSON. Reading
+    // only, so, like reading a task, it needs neither a switch nor consent.
+    if (url.pathname === "/v1/approvals") {
+      const context = await contextOf(request, env);
+      if (!context) return json({ error: "unauthorized" }, 401);
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!context.tenant) return json({ error: "tenant_required" }, 400);
+      return listApprovals(env, context.tenant, url);
     }
 
     // Exact-action approvals. Proposals and decisions pass through to the

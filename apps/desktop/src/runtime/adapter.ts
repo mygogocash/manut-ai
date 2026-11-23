@@ -6,14 +6,17 @@
 // Hermes, no Python and no second process, and a real backend can arrive later as one more adapter.
 //
 // Adapters today (`src/runtime/index.ts` picks one):
-//   - `mock`: an in-process runtime with staged data and scripted turns (`src/runtime/mock`). The default.
+//   - `mock`: an in-process runtime with staged data and scripted turns (`src/runtime/mock`). The default, which
+//     Settings › Developer calls Practice.
+//   - `http`: the read-only connected runtime over apps/api at one origin (`src/runtime/http`), chosen in Settings ›
+//     Developer as Connected. docs/runtime-adapter.md maps its ops to the API's routes.
 //   - `websocket`: the original loopback transport (`src/lib/bridge.ts`), used only when a URL is configured, which
 //     is how the Playwright suite reaches `e2e/mock-bridge.mjs`.
 import type { BridgeEvent, EventName, EventOf, Op, OpParams, OpResult } from "../lib/protocol";
 
 export type RuntimeStatus = "connecting" | "open" | "closed";
 
-export type RuntimeKind = "mock" | "websocket";
+export type RuntimeKind = "mock" | "websocket" | "http";
 
 /** What a runtime can do beyond chat. The app hides a feature whose capability is off instead of showing a screen
  *  that cannot work; each one names a group of protocol ops, so a runtime that grows them only flips its flag. */

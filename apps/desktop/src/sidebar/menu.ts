@@ -37,6 +37,12 @@ export function currentRow(ui: Pick<Ui, "view" | "thread">, selectedBot: string 
     case "customize":
     case "history":
       return ui.view;
+    // The activity log is History's own place. A job's page is, like a thread, a conversation's worth of work and not a
+    // place in the menu.
+    case "activity":
+      return "history";
+    case "job":
+      return null;
     // A terminal session and the Tasks page are the Code page's own places.
     case "session":
     case "tasks":

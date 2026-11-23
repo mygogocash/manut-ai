@@ -1,13 +1,19 @@
 import {
   ApiError,
   type ApprovalView,
+  type AuditPage,
   type AwaitingOwner,
   type CreatedLineConnection,
   type CreatedShop,
   type DeletedShop,
   type DeletionView,
+  type Fact,
   type InboundMessage,
+  type Memory,
+  type ModelCap,
+  type ModelUsage,
   type NewLineConnection,
+  type NewModelCap,
   type NewPayment,
   type NewReply,
   type NewShop,
@@ -32,7 +38,7 @@ export type HttpApiOptions = {
 };
 
 type Request = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   path: string;
   query?: Record<string, string>;
   body?: unknown;
@@ -180,11 +186,55 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         })
       ).payments,
     getGate: () => request<PilotGate>({ method: "GET", path: "/v1/admin/pilot/gate", admin: true }),
+
+    // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
+    listAudit: (tenant, query = {}) =>
+      request<AuditPage>({
+        method: "GET",
+        path: "/v1/admin/audit",
+        query: {
+          tenant,
+          ...(query.before !== undefined ? { before: query.before } : {}),
+          ...(query.limit !== undefined ? { limit: String(query.limit) } : {}),
+        },
+        admin: true,
+      }),
+
+    // What the team knows about a shop. A change sends the tenant and exactly what its route takes, and answers the
+    // fact (Forget answers the id of the one it removed); a refusal is an ApiError with the API's code.
+    getMemory: (tenant) => request<Memory>({ method: "GET", path: "/v1/admin/memory", query: { tenant }, admin: true }),
+    rememberFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/remember", body: input, admin: true }),
+    confirmFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/confirm", body: input, admin: true }),
+    correctFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/correct", body: input, admin: true }),
+    forgetFact: (input) =>
+      request<{ id: string }>({ method: "POST", path: "/v1/admin/memory/forget", body: input, admin: true }),
+
+    // The month goes in the query only when asked for: the API's own current Bangkok month decides otherwise.
+    getModelUsage: (tenant, month) =>
+      request<ModelUsage>({
+        method: "GET",
+        path: "/v1/admin/model/usage",
+        query: { tenant, ...(month !== undefined ? { month } : {}) },
+        admin: true,
+      }),
+    // Built field by field so `capSatang` is always in the body, null included: the API refuses a body without it,
+    // so clearing a cap is said and never implied by leaving it out.
+    setModelCap: (input: NewModelCap) =>
+      request<ModelCap>({
+        method: "PUT",
+        path: "/v1/admin/model/cap",
+        body: { tenant: input.tenant, capSatang: input.capSatang },
+        admin: true,
+      }),
   };
 }
 
 /// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
-/// wipe left, and when and by whom a deleted shop was deleted. Fields of the wrong type are dropped, not guessed.
+/// wipe left, when and by whom a deleted shop was deleted, and the setting a `not_configured` answer names. Fields of
+/// the wrong type are dropped, not guessed.
 async function errorOf(response: Response): Promise<ApiError> {
   let parsed: unknown;
   try {
@@ -203,6 +253,7 @@ async function errorOf(response: Response): Promise<ApiError> {
     ...(failed ? { failed } : {}),
     ...(typeof record.deletedAt === "string" ? { deletedAt: record.deletedAt } : {}),
     ...(typeof record.deletedBy === "string" || record.deletedBy === null ? { deletedBy: record.deletedBy } : {}),
+    ...(typeof record.setting === "string" && record.setting ? { setting: record.setting } : {}),
   });
 }
 
