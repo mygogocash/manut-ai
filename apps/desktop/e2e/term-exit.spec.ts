@@ -319,16 +319,25 @@ test("the terminal draws in the bundled JetBrains Mono at 13px with Symbols Nerd
     const host = document.querySelector('[data-testid="terminal"] .xterm');
     const term = [...((window as any).__manutTerms as Set<any>)].find((t) => t.element === host);
     await document.fonts.ready;
+    // JetBrains Mono's advance as this page's own layout measures it now: 32 "W"s in that family alone, the way xterm
+    // measures its cell, so the same platform rounds both
+    const probe = document.createElement("span");
+    probe.textContent = "W".repeat(32);
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${term.options.fontSize}px "JetBrains Mono";font-kerning:none`;
+    document.body.append(probe);
+    const advance = probe.getBoundingClientRect().width / 32;
+    probe.remove();
     return {
       family: term.options.fontFamily as string,
       size: term.options.fontSize as number,
+      advance,
       jb: document.fonts.check('13px "JetBrains Mono"'),
       jbBold: document.fonts.check('bold 13px "JetBrains Mono"'),
       jbItalic: document.fonts.check('italic 13px "JetBrains Mono"'),
       // the symbols file is fetched on its first glyph (unicode-range): ask for one
       sym: (await document.fonts.load('13px "Symbols Nerd Font Mono"', "\ue0b0")).length > 0,
       loaded: [...document.fonts].filter((f) => f.status === "loaded").map((f) => `${f.family.replace(/"/g, "")} ${f.weight} ${f.style}`).sort(),
-      // the measured cell is JetBrains Mono's advance (0.6em), not Menlo's or SF Mono's
+      // the cell the terminal measured and lays every glyph out on
       cell: term._core._renderService.dimensions.css.cell.width as number,
     };
   });
@@ -337,8 +346,12 @@ test("the terminal draws in the bundled JetBrains Mono at 13px with Symbols Nerd
   expect(look.size).toBe(13);
   expect({ jb: look.jb, jbBold: look.jbBold, jbItalic: look.jbItalic, sym: look.sym }).toEqual({ jb: true, jbBold: true, jbItalic: true, sym: true });
   expect(look.loaded).toEqual(expect.arrayContaining(["JetBrains Mono 400 normal", "Symbols Nerd Font Mono 400 normal"]));
-  expect(look.cell).toBeGreaterThan(7.6);
-  expect(look.cell).toBeLessThan(8.0);
+  // The cell is JetBrains Mono's advance, 0.6em (7.8px at 13px), not a wider or proportional fallback's. Each platform
+  // rounds that advance its own way: Chromium on Linux snaps a hinted glyph to whole pixels, so the cell is exactly 8,
+  // where macOS keeps the fraction. So the cell is held to the advance this page measures for the same family, and to
+  // 0.6em within the half pixel that rounding can move it, never to a fixed range such as 7.6 to 8.
+  expect(Math.abs(look.cell - 0.6 * look.size)).toBeLessThan(0.5);
+  expect(look.cell).toBeCloseTo(look.advance, 1);
   // Korean is two cells wide each (unicode 11 widths) and nothing overlaps: the cursor lands after 4 cells
   await typeLine(page, "");
   await page.evaluate((p) => (window as any).__manutMockOut(p, "\r\n한글 OK\r\n\x1b[32m  main\x1b[0m  \ue0a0 \ue0b0 ready\r\n"), (await page.evaluate(() => (window as any).__manutSessions.ptyOf((window as any).__manutSessions.getState().list[0].id))) as number);

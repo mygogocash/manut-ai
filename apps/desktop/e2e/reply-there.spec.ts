@@ -55,6 +55,9 @@ const ALLOWED = new Set([
   "links.places",
   // the bot's own plans, for the header's panel button (a read of its dag runs)
   "runs.list",
+  // Mission Control's jobs, for the open panel's "Recent work" (src/pages/RecentWork.tsx, MemberWork): a read of the
+  // shop's job list that writes nothing. The mock bridge answers it with unknown_op, so the panel lists no jobs here.
+  "jobs.list",
   // a remote machine saved in ~/.manut/peers.json comes back on boot: its bots join the list (rule 31)
   "peers.attach",
   "peers.detach",

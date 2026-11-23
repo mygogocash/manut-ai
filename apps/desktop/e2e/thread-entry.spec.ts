@@ -157,30 +157,22 @@ test("no New thread line under a bot: the tree holds only its threads; the row's
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
 });
 
-test("the row's + opens a new thread; an offline bot has no + and no New thread in its menu", async ({ page }) => {
-  test.skip(true, NO_BOT_ROW);
+test("a member's menu on Team opens a new thread; an offline member has no New thread in it", async ({ page }) => {
+  // The row's + and its menu left with the sidebar; a member's ⋯ menu on the Team page has New thread now.
   await setup(page);
-  await page.getByTestId("bot-row-friren").hover();
-  const plus = page.getByTestId("bot-new-friren");
-  await expect(plus).toBeVisible();
-  // the + sits left of ⋯ and the time gives way: nothing overlaps
-  const p = (await plus.boundingBox())!;
-  const more = (await page.getByTestId("bot-more-friren").boundingBox())!;
-  expect(p.x + p.width).toBeLessThanOrEqual(more.x);
-  const name = (await page.getByTestId("bot-row-friren").locator(".bot-n").boundingBox())!;
-  expect(name.x + name.width).toBeLessThanOrEqual(p.x);
-  await plus.click();
+  await page.getByTestId("menu-team").click();
+  await page.getByTestId("team-more-friren").click();
+  await page.getByTestId("team-menu-new-friren").click();
   await created(page);
   expect((await calls("thread.create"))[0].params.bot).toBe("friren");
   await expect(page.getByTestId("composer")).toBeFocused();
 
   await mock("mock.botStatus", { bot: "omh-tui", status: "offline" });
-  await page.getByTestId("bot-omh-tui").click();
-  await page.getByTestId("bot-row-omh-tui").hover();
-  await expect(page.getByTestId("bot-new-omh-tui")).toHaveCount(0);
-  await page.getByTestId("bot-omh-tui").click({ button: "right" });
-  await expect(page.getByTestId("row-new-thread")).toHaveCount(0);
-  await expect(page.getByTestId("row-menu-sep")).toHaveCount(0);
+  await page.getByTestId("menu-team").click();
+  await expect(page.getByTestId("team-omh-tui")).toContainText("Not connected");
+  await page.getByTestId("team-more-omh-tui").click();
+  await expect(page.getByTestId("team-menu-omh-tui")).toBeVisible();
+  await expect(page.getByTestId("team-menu-new-omh-tui")).toHaveCount(0);
 });
 
 test("the row menu sets New thread apart: its own group with an icon and a divider, then the management items", async ({ page }) => {

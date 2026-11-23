@@ -118,13 +118,22 @@ jobs:
         run: cargo test --locked
 
   e2e:
-    # The Playwright suite inherited from Oh My Hermes (156 spec files). Some specs still expect screens the fork
-    # removed (apps/desktop/README.md), so this job may fail without failing the run. Its job summary has the
-    # counts and the failing tests. It is not one of the checks main will require.
-    name: Desktop Playwright
+    # The Playwright suite inherited from Oh My Hermes (156 spec files), run as six shards side by side. One job
+    # stopped at its 35 minutes with a fifth of the suite never started, so each shard takes what `--shard` gives it
+    # (whole spec files, the same number of tests each) and finishes in a quarter of an hour or less. Some specs may
+    # still fail (apps/desktop/README.md), so these jobs may fail without failing the run. Each shard writes its counts
+    # and failing tests to its job summary, and the job below adds them up. None of them is one of the checks main
+    # will require.
+    name: Desktop Playwright (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
+    strategy:
+      # A shard that fails says nothing about the others, so none of them is cancelled for it. Adding a shard is one
+      # more number here: the divisor below is the matrix's own size.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -134,13 +143,46 @@ jobs:
       - name: Install Chromium
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
-      # --global-timeout ends the suite after 35 minutes with its report still written, so a hung run still
-      # leaves counts behind instead of being killed by the job's timeout.
-      - name: Run the suite
+      # --global-timeout ends a shard after 35 minutes with its report still written, so a hung run still leaves
+      # counts behind instead of being killed by the job's timeout.
+      - name: Run the shard
         working-directory: apps/desktop
         env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results.json
-        run: pnpm exec playwright test --reporter=list,json --global-timeout=2100000
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results-${{ matrix.shard }}.json
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=list,json --global-timeout=2100000
       - name: Write the counts to the job summary
         if: ${{ !cancelled() }}
-        run: node .github/scripts/playwright-summary.mjs "$RUNNER_TEMP/playwright-results.json"
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, shard ${{ matrix.shard }} of ${{ strategy.job-total }}" "$RUNNER_TEMP/playwright-results-${{ matrix.shard }}.json"
+      # The shard's JSON report, for the job below. A shard that left none is named there.
+      - name: Keep the report for the all-shards summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/playwright-results-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-summary:
+    # The shards' counts added up in one summary, with the failing tests of every shard in one list. It does not run
+    # the suite, so it needs no workspace: only the script and Node, which the runner has.
+    name: Desktop Playwright (all shards)
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A run whose shards all left nothing finds no artifact; the summary then says it has no report.
+      - name: Fetch the shards' reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: playwright-results-*
+          path: ${{ runner.temp }}/playwright-results
+          merge-multiple: true
+      - name: Write the counts of all shards to the job summary
+        run: node .github/scripts/playwright-summary.mjs --title "Desktop Playwright, all shards" "$RUNNER_TEMP/playwright-results"

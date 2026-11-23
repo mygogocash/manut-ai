@@ -1,18 +1,21 @@
-// Tasks (src/tasks), against the mock bridge and the mock task host (window.__manutTasks):
-// 1. the sidebar's Tasks row sits under the search, above BOTS; each source mark opens the page on that source;
+// Tasks (src/tasks), against the mock bridge and the mock task host (window.__manutTasks). The Tasks row is on the
+// Code page now (src/pages/CodePage.tsx, under the terminals), where the sidebar's row was, so every spec opens Code
+// before it reaches for the row:
+// 1. the Tasks row sits on the Code page under the terminals; each source mark opens the page on that source;
 // 2. filters and kinds reach the host as fixed words (list calls recorded in window.__manutTaskCalls); search filters
 //    the page; pagination asks for the next page;
 // 3. a row opens the read-only drawer (description, comments, checks for a PR, Open in browser);
 // 4. Start in thread creates a thread under the picked bot titled `#<n> <title>` whose first message is the issue's
 //    URL, title and body + "Work on this issue." (thread.create + chat.send session=<thread>);
 // 5. gh not signed in: one sentence naming `gh auth login` and a button that opens a terminal shell;
-// 6. right-click the row -> Hide from sidebar; Settings › General shows it again;
-// 7. Linear: the connect screen names the bot and the `hermes -p <bot> mcp install linear` command.
+// 6. right-click the row -> Hide from sidebar; Settings › General shows it again.
+// The old seventh test, Linear's connect screen, is gone: the page offers GitHub and GitLab only (SOURCES in
+// src/tasks/types.ts), because Linear was reached through a bot's Hermes, which Manut AI does not have.
 // Shots first (MANUT_SHOTS=<dir>): tasks-bar-dark, tasks-page-github-{dark,light}, tasks-detail, tasks-start-thread.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chatOpen } from "./start";
+import { chatOpen, openCode, openSettings, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -110,19 +113,22 @@ async function shot(page: Page, name: string) {
 
 const taskCalls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutTaskCalls?: any[] }).__manutTaskCalls ?? []));
 
-async function openOn(page: Page, src: "github" | "gitlab" | "linear") {
+/** The Tasks page on `src`, opened from its mark on the Tasks row. The row is on the Code page, which the page itself
+ *  replaces in the main column, so every call starts from Code. */
+async function openOn(page: Page, src: "github" | "gitlab") {
+  await openCode(page);
   await page.getByTestId("tasks-bar").hover();
   await page.getByTestId(`tasks-bar-${src}`).click();
   await expect(page.getByTestId("tasks-page")).toBeVisible();
   await expect(page.getByTestId(`tasks-src-${src}`)).toHaveAttribute("aria-pressed", "true");
 }
 
+/** Open the seeded thread so its folder becomes the page's context (it stays the open thread while Code is the page).
+ *  The thread trees under the bot rows left with the sidebar, so it is opened from History. A second `setup` in one
+ *  test (the light page in the shots) seeds the thread again, so the first row is taken, as the tree's was. */
 async function openThreadFolder(page: Page) {
-  // open the seeded thread so its folder becomes the page's context
-  await page.getByTestId("bot-kami").click();
-  const row = page.locator('[role="treeitem"][aria-level="2"]', { hasText: "Tasks port" }).first();
-  await expect(row).toBeVisible();
-  await row.click();
+  await page.getByTestId("menu-history").click();
+  await page.getByTestId("history-row").filter({ hasText: "Tasks port" }).first().click();
 }
 
 test.beforeEach(async () => {
@@ -136,6 +142,7 @@ test.describe("shots", () => {
     test.setTimeout(60_000);
     await setup(page);
     await openThreadFolder(page);
+    await openCode(page);
     await page.getByTestId("tasks-bar").hover();
     await shot(page, "tasks-bar-dark");
     await openOn(page, "github");
@@ -166,14 +173,16 @@ test.describe("shots", () => {
   });
 });
 
-test("the Tasks row sits under the search, above BOTS, and each mark opens its source", async ({ page }) => {
+test("the Tasks row sits on the Code page under the terminals, and each mark opens its source", async ({ page }) => {
   await setup(page);
+  await openCode(page);
   const bar = await page.getByTestId("tasks-bar").boundingBox();
-  const search = await page.getByTestId("bot-search").boundingBox();
-  const bots = await page.getByTestId("side-bots").boundingBox();
-  expect(bar!.y).toBeGreaterThan(search!.y);
-  expect(bar!.y + bar!.height).toBeLessThanOrEqual(bots!.y + 1);
-  for (const src of ["gitlab", "linear", "github"] as const) await openOn(page, src);
+  const terminals = await page.getByTestId("side-sessions").boundingBox();
+  expect(bar!.y).toBeGreaterThanOrEqual(terminals!.y + terminals!.height - 1);
+  // the bar's marks are the sources the page offers: GitHub and GitLab, never Linear
+  await expect(page.getByTestId("tasks-bar").locator('[data-testid^="tasks-bar-"]')).toHaveCount(2);
+  await expect(page.getByTestId("tasks-bar-linear")).toHaveCount(0);
+  for (const src of ["gitlab", "github"] as const) await openOn(page, src);
   // the plain row keeps the last source
   await page.getByTestId("tasks-page").getByRole("button", { name: "Close tasks" }).click();
   await page.getByTestId("tasks-open").click();
@@ -242,7 +251,9 @@ test("a row opens the read-only drawer; Start in thread opens a bot thread with 
   expect(sent.text.startsWith(`https://github.com/${REPO}/issues/1836\n\n#1836 Measurement path for the Claude composer calibration\n\n## What`)).toBe(true);
   expect(sent.text.endsWith("\n\nWork on this issue.")).toBe(true);
   expect(new TextEncoder().encode(sent.text).length).toBeLessThan(4096 + 300);
-  await expect(page.locator('[role="treeitem"][aria-level="2"]', { hasText: "#1836 Measurement path" })).toBeVisible();
+  // the thread is listed with the team's others, in History (the bots' thread trees left with the sidebar)
+  await page.getByTestId("menu-history").click();
+  await expect(page.getByTestId("history-row").filter({ hasText: "#1836 Measurement path" })).toBeVisible();
 });
 
 test("a PR's drawer lists its checks", async ({ page }) => {
@@ -271,30 +282,19 @@ test("gh not signed in: one sentence naming gh auth login, and a button that ope
 
 test("right-click › Hide from sidebar; Settings › General shows it again", async ({ page }) => {
   await setup(page);
+  await openCode(page);
   await page.getByTestId("tasks-bar").click({ button: "right" });
   await page.getByTestId("tasks-bar-hide").click();
   await expect(page.getByTestId("tasks-bar")).toHaveCount(0);
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // the app starts wherever it was left; the row is looked for on Code, once the start is done
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId("tasks-bar")).toHaveCount(0);
-  await page.getByTestId("nav-settings").click();
+  await openSettings(page, "general");
   const tog = page.getByTestId("set-tasks-bar");
   await expect(tog).toHaveAttribute("aria-checked", "false");
   await tog.click();
+  await openCode(page);
   await expect(page.getByTestId("tasks-bar")).toBeVisible();
-});
-
-test("Linear: connect screen with the bot's own Hermes command; a configured Linear MCP is said, nothing listed", async ({ page }) => {
-  await setup(page);
-  await openOn(page, "linear");
-  await expect(page.getByTestId("tasks-linear-connect")).toContainText("Connect Linear to Kami");
-  await expect(page.getByTestId("tasks-linear-cmd")).toContainText("hermes -p kami mcp install linear");
-  await mock("mock.linear", { bot: "kami", server: "linear" });
-  await page.getByTestId("tasks-linear-bot").click();
-  await page.getByTestId("tasks-linear-bot-friren").click();
-  await expect(page.getByTestId("tasks-linear-cmd")).toContainText("hermes -p friren mcp install linear");
-  await page.getByTestId("tasks-linear-bot").click();
-  await page.getByTestId("tasks-linear-bot-kami").click();
-  await expect(page.getByTestId("tasks-linear-on")).toContainText("Kami has Linear (linear)");
-  expect((await calls("tasks.linear")).map((c) => c.params.bot)).toEqual(["kami", "friren", "kami"]);
 });

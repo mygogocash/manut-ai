@@ -151,9 +151,8 @@ test("a split pane's row closed and undone comes back into its split, in the sam
   await row(page, b).locator(".ss-open").click();
   await expect(term(page, b)).toBeVisible();
   await expect(page.getByTestId("session-split")).toHaveCount(0);
-  // Undo, from the toast on the Code page (the toasts show only there: see the Cmd+Z test below), brings the split back
-  // and shows it
-  await openCode(page);
+  // Undo, from the toast (the app mounts its host once, so it is on screen over the terminal in view too), brings the
+  // split back and shows it
   await page.getByTestId(`close-toast-${a}`).getByTestId("close-toast-undo").click();
   await expect(page.getByTestId("session-split")).toBeVisible();
   expect(await slots()).toEqual(before);
@@ -162,10 +161,6 @@ test("a split pane's row closed and undone comes back into its split, in the sam
 });
 
 test("⌘Z / Ctrl+Shift+Z undoes the newest close; plain Ctrl+Z in a terminal stays the program's", async ({ page }) => {
-  // A known app bug since the side menu: the undo toasts and their ⌘Z (CloseToasts) are mounted in the TERMINALS
-  // header (SessionsHeader), which is on the Code page only, so with a terminal open there is no toast and ⌘Z undoes
-  // nothing. This test passes as expected to fail until CloseToasts is mounted with the app.
-  test.fail(true, "CloseToasts is mounted with the Code page's TERMINALS header, so a terminal on screen has no undo toast or ⌘Z");
   await app(page);
   const a = await shell(page, "/home/you/code/web-app");
   const b = await shell(page, "/home/you/code/api-server");
@@ -207,10 +202,9 @@ test("several closes stack, three shown with the newest on top, each with its ow
   expect(await shown.evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")))).toEqual([rows[3], rows[2], rows[1]].map((i) => `close-toast-${i}`));
   const tops = await shown.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
   expect(tops[0]).toBeLessThan(tops[1]);
-  // undo the newest; the oldest shows again, still waiting (read on the Code page: Undo shows the terminal it brought
-  // back, and the toasts show only on the Code page, as the Cmd+Z test says)
+  // undo the newest; the oldest shows again, still waiting (Undo shows the terminal it brought back, and the toasts are
+  // on screen over it)
   await page.getByTestId(`close-toast-${rows[3]}`).getByTestId("close-toast-undo").click();
-  await openCode(page);
   await expect(shown).toHaveCount(3);
   await expect(page.getByTestId(`close-toast-${rows[0]}`)).toBeVisible();
 });

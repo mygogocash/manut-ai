@@ -69,15 +69,15 @@ test("asks on bots you are not looking at: the menu counts them, Needs you lists
   await expect(items).toHaveCount(2);
   const friren = items.filter({ hasText: "Friren" });
   const hermes = items.filter({ hasText: "Hermes" });
-  // the command shows as code, not with raw backticks
-  await expect(friren.locator(".l1")).toHaveText("Allow rm -rf build/?");
-  await expect(friren.locator(".l1 code")).toHaveText("rm -rf build/");
+  // the ask in its card's words, with the exact action under it set as code, not with raw backticks
+  await expect(friren.locator(".l1")).toHaveText("Run shell command");
+  await expect(friren.locator("code.act")).toHaveText("rm -rf build/");
   await expect(friren.locator(".tag")).toHaveText("Approve");
   await expect(hermes.locator(".l1")).toHaveText("Which environment should I deploy to?");
   await expect(hermes.locator(".tag")).toHaveText("Question");
   await page.screenshot({ path: join(SHOTS, "T12-needs-dark.png"), animations: "disabled" });
 
-  await friren.click();
+  await friren.getByTestId("needs-open").click();
   await chatOpen(page, "friren");
   const card = page.getByTestId("timeline").getByTestId("card-approval");
   await expect(card).toBeFocused();
@@ -266,47 +266,35 @@ test("a timed-out ask shows Timed out and the count clears", async ({ page }) =>
   expect(await calls("approval.respond")).toEqual([]);
 });
 
-test("row menu: pin moves a bot to the top (and ⌘1 follows), Remove from list takes it out, + brings it back", async ({ page }) => {
-  test.skip(true, "the bot rows' menu (pin, Remove from list, Edit bot) and the + to add a bot left with the sidebar; Team has none of them yet");
+test("Team's menu: Pin to top moves a member to the top and marks them, Unpin puts them back, and the pin survives a reload", async ({ page }) => {
+  // The sidebar's row menu also had Edit bot, Remove from list and the + to add a bot back. Those left with the
+  // sidebar and Team's menu has none of them, so only the pin is tested (the old test also pressed ⌘1 after pinning;
+  // that is not carried over).
   await open(page);
-  const order = () => page.locator(".bot-list button.bot").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
-  expect(await order()).toEqual(["bot-kami", "bot-friren", "bot-default", "bot-omh-tui"]);
+  await page.getByTestId("menu-team").click();
+  const order = () => page.locator('[data-testid^="team-row-"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+  await expect.poll(order).toEqual(["team-row-kami", "team-row-friren", "team-row-default", "team-row-omh-tui"]);
+  await expect(page.locator('[data-testid^="team-pinned-"]')).toHaveCount(0);
 
-  // right-click opens the menu; it offers no New thread, Duplicate or Delete
-  await page.getByTestId("bot-default").click({ button: "right" });
-  const menu = page.getByTestId("row-menu");
-  // Restart (slot 14) restarts the gateway that serves the bot, and names the bots that share it
-  await expect(menu.getByRole("menuitem")).toHaveText([/^New thread · /, "Pin to top", "Edit bot", /^Restart/, "Remove from list"]);
-  await page.screenshot({ path: join(SHOTS, "T12-menu-dark.png"), animations: "disabled" });
-  await menu.getByRole("menuitem", { name: "Pin to top" }).click();
-  expect(await order()).toEqual(["bot-default", "bot-kami", "bot-friren", "bot-omh-tui"]);
-  await expect(page.getByTestId("bot-default").getByTestId("pinned")).toBeVisible();
-  await page.keyboard.press(`${await mod(page)}+1`);
-  await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
+  await page.getByTestId("team-more-default").click();
+  await expect(page.getByTestId("team-menu-default").getByRole("menuitem")).toHaveText([/^New thread · /, "Pin to top", "Restart"]);
+  await page.getByTestId("team-menu-pin-default").click();
+  await expect.poll(order).toEqual(["team-row-default", "team-row-kami", "team-row-friren", "team-row-omh-tui"]);
+  await expect(page.getByTestId("team-pinned-default")).toBeVisible();
 
-  // the ⋯ button opens the same menu; Remove from list survives a reload
-  await page.getByTestId("bot-friren").hover();
-  await page.getByTestId("bot-more-friren").click();
-  await page.getByTestId("row-menu").getByRole("menuitem", { name: "Remove from list" }).click();
-  expect(await order()).toEqual(["bot-default", "bot-kami", "bot-omh-tui"]);
+  // kept on this computer: the pin is there after a reload
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
-  expect(await order()).toEqual(["bot-default", "bot-kami", "bot-omh-tui"]);
+  await startDone(page);
+  await page.getByTestId("menu-team").click();
+  await expect.poll(order).toEqual(["team-row-default", "team-row-kami", "team-row-friren", "team-row-omh-tui"]);
+  await expect(page.getByTestId("team-pinned-default")).toBeVisible();
 
-  // there is no hidden-bots list any more: the bot is under + again, and Add brings it back (at the end)
-  await page.getByTestId("bot-kami").click({ button: "right" });
-  await expect(page.getByTestId("row-menu").getByRole("menuitem", { name: "Show hidden…" })).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Add a bot" }).click();
-  await page.getByTestId("addbot-friren").getByRole("button", { name: "Add" }).click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
-  expect(await order()).toEqual(["bot-default", "bot-kami", "bot-omh-tui", "bot-friren"]);
-
-  // Edit bot opens that bot's page in Settings
-  await page.getByTestId("bot-friren").click({ button: "right" });
-  await page.getByTestId("row-menu").getByRole("menuitem", { name: "Edit bot" }).click();
-  await expect(page.getByTestId("settings-view")).toBeVisible();
-  await expect(page.getByTestId("bot-name")).toHaveText("Friren");
+  // the menu now offers Unpin, and the member goes back to where the list put them
+  await page.getByTestId("team-more-default").click();
+  await expect(page.getByTestId("team-menu-unpin-default")).toHaveText("Unpin");
+  await page.getByTestId("team-menu-unpin-default").click();
+  await expect.poll(order).toEqual(["team-row-kami", "team-row-friren", "team-row-default", "team-row-omh-tui"]);
+  await expect(page.getByTestId("team-pinned-default")).toHaveCount(0);
 });
 
 test("light theme: the Needs you page and the interview stay readable", async ({ page }) => {
