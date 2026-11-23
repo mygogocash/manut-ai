@@ -34,8 +34,21 @@ for (const env of [undefined, "dev", "staging", "prod"]) {
     `${where}: WEB must name this environment's pages Worker`);
   assert.equal(web.assets?.binding, "ASSETS", where);
   assert.equal(web.assets?.run_worker_first, true, `${where}: the page headers are set in src/pages.ts`);
+  // Only the front door has a host: the pages Worker is reached through WEB and nothing else.
+  assert.deepEqual(web.routes ?? [], [], `${where}: the pages Worker must have no route of its own`);
+  assert.equal(web.workers_dev, false, where);
+  // The links the API mints (approval pages, LINE webhooks) must point at the host that serves both.
+  for (const route of api.routes ?? []) {
+    const host = typeof route === "string" ? route : route.pattern;
+    assert.equal(api.vars?.WEB_ORIGIN, `https://${host}`, `${where}: WEB_ORIGIN must be the front door's host`);
+    assert.equal(api.vars?.PUBLIC_API_ORIGIN, `https://${host}`, `${where}: PUBLIC_API_ORIGIN must be the front door's host`);
+  }
   checked++;
 }
+// The owner's choice of host for dev (docs/decisions.md): the API Worker owns dev.manut.xyz as its custom domain.
+const dev = unstable_readConfig({ config: "wrangler.jsonc", env: "dev" }, { hideWarnings: true });
+assert.deepEqual(dev.routes, [{ pattern: "dev.manut.xyz", custom_domain: true }], "dev serves on dev.manut.xyz");
+checked++;
 
 // One local registry for both Workers, so the API Worker's WEB binding finds the pages Worker the way the
 // deployed binding finds the deployed one.

@@ -52,6 +52,14 @@
     "dev": {
       "name": "manut-api-dev",
       "services": [{"binding": "WEB", "service": "manut-web-dev"}],
+      // The owner's manut.xyz zone on Cloudflare (docs/decisions.md). The API
+      // Worker owns the whole host as its custom domain and hands every page
+      // to the pages Worker, so the links it mints point here too.
+      "routes": [{"pattern": "dev.manut.xyz", "custom_domain": true}],
+      "vars": {
+        "WEB_ORIGIN": "https://dev.manut.xyz",
+        "PUBLIC_API_ORIGIN": "https://dev.manut.xyz"
+      },
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},

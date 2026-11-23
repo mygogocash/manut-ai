@@ -23,7 +23,7 @@ Week 1, the pilot slice:
 - [x] LINE Official Account connector, signed approval link and payment records in `apps/api` (497 tests)
 - [x] Owner's approval page and operator console in `apps/web` (37 tests)
 - [x] Serve `apps/web` and `apps/api` from one origin, so the console needs no CORS and Cloudflare Access covers both: the API Worker is the front door and hands pages to a pages Worker (checked by `pnpm test`)
-- [x] Operator routes to export and delete one shop's pilot data (console buttons for them still to come)
+- [x] Operator routes to export and delete one shop's pilot data, and the console's Shop data tab for both (the owner's confirmation for a live shop is being built)
 - [ ] A real-phone pass of the approval page, and a first real LINE push in a dev environment
 
 Week 2, brought forward:
