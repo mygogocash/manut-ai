@@ -89,6 +89,8 @@ export const AUDIT_ACTIONS = [
   "signin.requested",
   "signin.redeemed",
   "outpost.registered",
+  "outpost.removed",
+  "outpost.credential_rotated",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

@@ -19,6 +19,8 @@
 /// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
+/// - `POST /outposts/remove` `{ outpostId }`: removes it, refusing every grant still waiting for it.
+/// - `POST /outposts/credential` `{ outpostId, credentialHash }`: a new credential's digest in place of the old one.
 /// - `POST /sign-in-grants` `{ signInId, outpostId, member, taskId, attemptId }`: a grant, for a member named on a
 ///   working sign-in, to an online outpost, for 60 seconds.
 /// - `POST /sign-in-grants/claim` `{ grantId, outpostId, credentialHash }`: the outpost's redeem, first half. Checks the
@@ -322,6 +324,10 @@ export async function signInVaultRoute(
       return registerOutpost(storage, tenant, body);
     case "POST /outposts/heartbeat":
       return outpostHeartbeat(storage, tenant, body);
+    case "POST /outposts/remove":
+      return removeOutpost(storage, tenant, body);
+    case "POST /outposts/credential":
+      return rotateCredential(storage, tenant, body);
     case "POST /sign-in-grants":
       return issueGrant(storage, tenant, body);
     case "POST /sign-in-grants/claim":
@@ -490,6 +496,59 @@ async function registerOutpost(storage: DurableObjectStorage, tenant: string, bo
     lastHeartbeatAt: null, createdAt: new Date().toISOString() };
   await storage.put(keys.outpost(record.id), record);
   return json({ outpost: outpostView(record, Date.now()) });
+}
+
+/// The outpost of `tenant` an operator names, or null for a malformed id, one never made, one removed, or another
+/// tenant's.
+async function outpostOf(storage: DurableObjectStorage, tenant: string, id: unknown): Promise<OutpostRecord | null> {
+  if (typeof id !== "string" || !UUID.test(id)) return null;
+  const record = await storage.get<OutpostRecord>(keys.outpost(id));
+  return record && record.tenant === tenant ? record : null;
+}
+
+const OUTPOST_NOT_FOUND = { error: "outpost_not_found" };
+
+/// Writes every entry, at most 128 keys per call as Durable Object storage takes them.
+async function putAll(storage: DurableObjectStorage, entries: Record<string, unknown>): Promise<void> {
+  const all = Object.entries(entries);
+  for (let i = 0; i < all.length; i += STORAGE_BATCH) await storage.put(Object.fromEntries(all.slice(i, i + STORAGE_BATCH)));
+}
+
+/// Removal deletes the outpost, so its credential stops working at once: every outpost request is checked against the
+/// digest kept here, and there is none. In the same step, each grant still waiting for it (not used, not late) is used
+/// up, so nothing can ever redeem it. Nothing else here awaits anything but this object's own storage, so no request
+/// comes between the reads and the writes. The audit log keeps the outpost's history.
+async function removeOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const nowMs = Date.now();
+  const usedAt = new Date(nowMs).toISOString();
+  const grants: Record<string, GrantRecord> = {};
+  for (const [key, grant] of await storage.list<GrantRecord>({ prefix: keys.grants })) {
+    if (grant.tenant === tenant && grant.outpostId === outpost.id && grant.usedAt === null &&
+        nowMs < Date.parse(grant.expiresAt)) {
+      grants[key] = { ...grant, usedAt };
+    }
+  }
+  await putAll(storage, grants);
+  await storage.delete(keys.outpost(outpost.id));
+  return json({ removed: true, outpostId: outpost.id, grantsRefused: Object.keys(grants).length });
+}
+
+/// A new credential's digest in place of the old one, so the old credential stops working at once. The outpost reads
+/// as asleep until the holder of the new one beats: no new grant goes to a machine that may not hold it. Grants already
+/// waiting for the outpost stay, for the new credential.
+async function rotateCredential(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  if (typeof body.credentialHash !== "string" || !DIGEST.test(body.credentialHash)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const rotated: OutpostRecord = { ...outpost, credentialHash: body.credentialHash, lastHeartbeatAt: null };
+  await storage.put(keys.outpost(outpost.id), rotated);
+  return json({ outpost: outpostView(rotated, Date.now()) });
 }
 
 /// A beat changes only the time of the last one: it is the outpost saying it is awake, not work.

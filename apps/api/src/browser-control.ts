@@ -51,19 +51,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/// `/v1/admin/vault/*` and `/v1/admin/outposts`, after the admin gate, which already required both credentials and an
-/// exact method. Answers null for any other path.
+/// `/v1/admin/vault/*` and `/v1/admin/outposts{,/*}`, after the admin gate, which already required both credentials and
+/// an exact method. Answers null for any other path.
 export async function vaultAdminRoute(
   request: Request,
   url: URL,
   env: VaultEnv,
   ctx: ExecutionContext,
 ): Promise<Response | null> {
-  if (!url.pathname.startsWith("/v1/admin/vault/") && url.pathname !== "/v1/admin/outposts") return null;
+  if (!url.pathname.startsWith("/v1/admin/vault/") && url.pathname !== "/v1/admin/outposts" &&
+      !url.pathname.startsWith("/v1/admin/outposts/")) {
+    return null;
+  }
   const route = `${request.method} ${url.pathname}`;
   if (route === "GET /v1/admin/vault/sign-ins") return listSignIns(env, url);
   if (route === "GET /v1/admin/outposts") return listOutposts(env, url);
   if (route === "POST /v1/admin/outposts") return registerOutpost(request, env, ctx);
+  if (route === "POST /v1/admin/outposts/remove") return removeOutpost(request, env, ctx);
+  if (route === "POST /v1/admin/outposts/credential") return rotateCredential(request, env, ctx);
   const write = OPERATOR_WRITES[route];
   if (write) return operatorWrite(request, env, ctx, write);
   return json({ error: "not_found" }, 404);
@@ -233,30 +238,86 @@ async function listOutposts(env: VaultEnv, url: URL): Promise<Response> {
   }
 }
 
-/// `POST /v1/admin/outposts` with `{ tenant, name, kind }`: registers an outpost and answers its credential, this once.
-/// The credential is minted here and only its digest goes to the vault, so it is kept nowhere: an outpost that loses
-/// it is registered again.
-async function registerOutpost(request: Request, env: VaultEnv, ctx: ExecutionContext): Promise<Response> {
+/// A new outpost credential: `mo1_` and 32 random bytes in base64url. Minted here and handed out once; only its digest
+/// ever goes to the vault.
+function mintCredential(): string {
+  return `mo1_${base64url(crypto.getRandomValues(new Uint8Array(32)))}`;
+}
+
+/// The one answer that holds a new credential, which no cache on the way may keep.
+function credentialAnswer(outpost: OutpostView, credential: string): Response {
+  return Response.json({ outpost, credential }, { headers: { "cache-control": "no-store" } });
+}
+
+/// An operator's request body, read: `{ tenant, ... }`. Answers the refusal to send, or the tenant and the rest.
+async function operatorBody(request: Request): Promise<Response | { tenant: string; fields: Record<string, unknown> }> {
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
-  const body = parsed.value;
-  if (!isRecord(body)) return json({ error: "invalid_request" }, 400);
-  if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
-  const tenant = body.tenant;
-  const credential = `mo1_${base64url(crypto.getRandomValues(new Uint8Array(32)))}`;
-  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  if (!isRecord(parsed.value)) return json({ error: "invalid_request" }, 400);
+  const { tenant, ...fields } = parsed.value;
+  if (!isValidTenant(tenant)) return json({ error: "tenant_required" }, 400);
+  return { tenant, fields };
+}
+
+/// One call to the shop's vault object, or null when it did not answer one it understood.
+async function askVault(env: VaultEnv, tenant: string, path: string, body: Record<string, unknown>):
+  Promise<Awaited<ReturnType<typeof vaultAnswer>>> {
   try {
-    answer = await vaultAnswer(await vaultCall(env, tenant, "POST", "/outposts",
-      { name: body.name, kind: body.kind, credentialHash: await sha256Hex(credential) }));
+    return await vaultAnswer(await vaultCall(env, tenant, "POST", path, body));
   } catch {
-    answer = null;
+    return null;
   }
+}
+
+/// `POST /v1/admin/outposts` with `{ tenant, name, kind }`: registers an outpost and answers its credential, this once.
+/// The credential is minted here and only its digest goes to the vault, so it is kept nowhere: an outpost that loses
+/// it gets a new one (`POST /v1/admin/outposts/credential`).
+async function registerOutpost(request: Request, env: VaultEnv, ctx: ExecutionContext): Promise<Response> {
+  const read = await operatorBody(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields } = read;
+  const credential = mintCredential();
+  const answer = await askVault(env, tenant, "/outposts",
+    { name: fields.name, kind: fields.kind, credentialHash: await sha256Hex(credential) });
   if (!answer) return json({ error: "vault_unavailable" }, 503);
   if (answer.status !== 200 || !isRecord(answer.body.outpost)) return json(answer.body, answer.status);
   const outpost = answer.body.outpost as OutpostView;
   await appendAudit(env, tenant, { actor: { kind: "operator", email: await operatorIdentity(ctx) },
     action: "outpost.registered", subject: { outpostId: outpost.id }, outcome: "ok" });
-  return json({ outpost, credential });
+  return credentialAnswer(outpost, credential);
+}
+
+/// `POST /v1/admin/outposts/credential` with `{ tenant, outpostId }`: a new credential for the outpost, answered this
+/// once, as at registration. The old one stops working at once, and the outpost is asleep until the new one beats.
+async function rotateCredential(request: Request, env: VaultEnv, ctx: ExecutionContext): Promise<Response> {
+  const read = await operatorBody(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields } = read;
+  const credential = mintCredential();
+  const answer = await askVault(env, tenant, "/outposts/credential",
+    { outpostId: fields.outpostId, credentialHash: await sha256Hex(credential) });
+  if (!answer) return json({ error: "vault_unavailable" }, 503);
+  if (answer.status !== 200 || !isRecord(answer.body.outpost)) return json(answer.body, answer.status);
+  const outpost = answer.body.outpost as OutpostView;
+  await appendAudit(env, tenant, { actor: { kind: "operator", email: await operatorIdentity(ctx) },
+    action: "outpost.credential_rotated", subject: { outpostId: outpost.id }, outcome: "ok" });
+  return credentialAnswer(outpost, credential);
+}
+
+/// `POST /v1/admin/outposts/remove` with `{ tenant, outpostId }`: the outpost is gone, its credential stops working at
+/// once, and whatever still waited for it is refused in the same step (sign-in-vault.ts). Answers what the vault
+/// answers, with how many it refused.
+async function removeOutpost(request: Request, env: VaultEnv, ctx: ExecutionContext): Promise<Response> {
+  const read = await operatorBody(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields } = read;
+  const answer = await askVault(env, tenant, "/outposts/remove", { outpostId: fields.outpostId });
+  if (!answer) return json({ error: "vault_unavailable" }, 503);
+  if (answer.status === 200 && typeof answer.body.outpostId === "string") {
+    await appendAudit(env, tenant, { actor: { kind: "operator", email: await operatorIdentity(ctx) },
+      action: "outpost.removed", subject: { outpostId: answer.body.outpostId }, outcome: "ok" });
+  }
+  return json(answer.body, answer.status);
 }
 
 /// `GET /v1/admin/vault/sign-ins?tenant=`: the shop's live sign-ins, oldest first, each saying only that its password

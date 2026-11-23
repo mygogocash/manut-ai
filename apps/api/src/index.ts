@@ -223,6 +223,9 @@ const ADMIN_METHODS = new Set([
   // query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
   "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
+  // Remove an outpost, refusing what waits for it, or replace its credential, the new one shown once. The tenant and the
+  // outpost's id travel in the body.
+  "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
   // The team's routines (routines.ts): list a shop's with the team, make one, pause, resume or remove one, and pause or
   // resume the whole team; the shop templates a new shop can start from, and a shop's first-week questions with the
   // owner's answer relayed. The tenant and the ids travel in the query or the body.

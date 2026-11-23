@@ -45,6 +45,16 @@ async function list(tenant: string) {
   return (await response.json()) as { tenant: string; outposts: Outpost[] };
 }
 
+function remove(tenant: string, outpostId: unknown) {
+  return adminFetch(`${API}/v1/admin/outposts/remove`, { method: "POST", headers: OPERATOR,
+    body: JSON.stringify({ tenant, outpostId }) });
+}
+
+function rotate(tenant: string, outpostId: unknown) {
+  return adminFetch(`${API}/v1/admin/outposts/credential`, { method: "POST", headers: OPERATOR,
+    body: JSON.stringify({ tenant, outpostId }) });
+}
+
 function heartbeat(tenant: string, outpostId: unknown, credential?: string) {
   return sourceWorker.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: {
     "content-type": "application/json", ...(credential !== undefined ? { authorization: `Bearer ${credential}` } : {}),
@@ -171,10 +181,93 @@ describe("outposts", () => {
     expect((await list(fresh("outpost:other-shop"))).outposts).toEqual([]);
   });
 
+  it("rotates an outpost's credential: the new one is shown once, and the old one stops at once", async () => {
+    const tenant = fresh("outpost:shop");
+    const { outpost, credential: old } = await registered(tenant);
+    expect((await heartbeat(tenant, outpost.id, old)).status).toBe(200);
+
+    const response = await rotate(tenant, outpost.id);
+    expect(response.status).toBe(200);
+    const { outpost: rotated, credential } = (await response.json()) as { outpost: Outpost; credential: string };
+    expect(credential).toMatch(CREDENTIAL);
+    expect(credential).not.toBe(old);
+    // Asleep until the holder of the new credential beats: the old holder's beats no longer count.
+    expect(rotated).toEqual({ ...outpost, status: "asleep", lastHeartbeatAt: null });
+    expect((await list(tenant)).outposts).toEqual([rotated]);
+
+    expect((await heartbeat(tenant, outpost.id, old)).status).toBe(401);
+    expect((await heartbeat(tenant, outpost.id, credential)).status).toBe(200);
+    const stored = await runInDurableObject(vault(tenant), (_instance, state) =>
+      state.storage.get<Record<string, unknown>>(`outpost:${outpost.id}`));
+    expect(stored?.credentialHash).toBe(await sha256Hex(credential));
+    expect(JSON.stringify(stored)).not.toContain(credential);
+    const listed = await (await adminFetch(`${API}/v1/admin/outposts?tenant=${encodeURIComponent(tenant)}`,
+      { headers: OPERATOR })).text();
+    expect(listed).not.toContain(credential);
+    expect(listed).not.toContain(await sha256Hex(credential));
+
+    expect(await audit(tenant)).toEqual([
+      { actor: { kind: "operator", email: null }, action: "outpost.registered", subject: { outpostId: outpost.id },
+        outcome: "ok" },
+      { actor: { kind: "operator", email: null }, action: "outpost.credential_rotated",
+        subject: { outpostId: outpost.id }, outcome: "ok" },
+    ]);
+  });
+
+  it("removes an outpost: it leaves the list, and its credential stops working", async () => {
+    const tenant = fresh("outpost:shop");
+    const { outpost, credential } = await registered(tenant);
+    const sibling = await registered(tenant, { name: "Cloud outpost", kind: "cloud" });
+    expect((await heartbeat(tenant, outpost.id, credential)).status).toBe(200);
+
+    const response = await remove(tenant, outpost.id);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ removed: true, outpostId: outpost.id, grantsRefused: 0 });
+    expect((await list(tenant)).outposts.map((entry) => entry.id)).toEqual([sibling.outpost.id]);
+    expect((await heartbeat(tenant, outpost.id, credential)).status).toBe(401);
+    expect(await runInDurableObject(vault(tenant), (_instance, state) => state.storage.get(`outpost:${outpost.id}`)))
+      .toBeUndefined();
+    expect((await audit(tenant)).at(-1)).toEqual({ actor: { kind: "operator", email: null }, action: "outpost.removed",
+      subject: { outpostId: outpost.id }, outcome: "ok" });
+
+    // Removed is gone: a second removal and a rotation find nothing, and write nothing to the log.
+    for (const again of [await remove(tenant, outpost.id), await rotate(tenant, outpost.id)]) {
+      expect(again.status).toBe(404);
+      expect(await again.json()).toEqual({ error: "outpost_not_found" });
+    }
+    expect((await audit(tenant)).map((entry) => entry.action)).toEqual(["outpost.registered", "outpost.registered",
+      "outpost.removed"]);
+  });
+
+  it.each(["remove", "rotate"] as const)("refuses to %s an outpost it cannot find, or another shop's", async (how) => {
+    const tenant = fresh("outpost:shop");
+    const other = fresh("outpost:other-shop");
+    const foreign = await registered(other);
+    const call = how === "remove" ? remove : rotate;
+    for (const outpostId of [crypto.randomUUID(), "not-an-outpost", 42, foreign.outpost.id]) {
+      const response = await call(tenant, outpostId);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "outpost_not_found" });
+    }
+    const response = await call("", foreign.outpost.id);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "tenant_required" });
+    // The other shop's outpost is untouched.
+    expect((await heartbeat(other, foreign.outpost.id, foreign.credential)).status).toBe(200);
+    expect(await audit(tenant)).toEqual([]);
+  });
+
   it("is reached only through exact routes", async () => {
     const tenant = fresh("outpost:shop");
-    expect((await adminFetch(`${API}/v1/admin/outposts`, { method: "PUT", headers: OPERATOR,
-      body: JSON.stringify({ tenant }) })).status).toBe(404);
+    for (const [method, path] of [["PUT", "/v1/admin/outposts"], ["GET", "/v1/admin/outposts/remove"],
+      ["GET", "/v1/admin/outposts/credential"], ["DELETE", "/v1/admin/outposts"], ["POST", "/v1/admin/outposts/x"]] as const) {
+      expect((await adminFetch(`${API}${path}`, { method, headers: OPERATOR,
+        ...(method === "GET" ? {} : { body: JSON.stringify({ tenant }) }) })).status).toBe(404);
+    }
+    for (const path of ["/v1/admin/outposts/remove", "/v1/admin/outposts/credential"]) {
+      expect((await SELF.fetch(`${API}${path}`, { method: "POST", headers: OPERATOR,
+        body: JSON.stringify({ tenant, outpostId: crypto.randomUUID() }) })).status).toBe(403);
+    }
     expect((await SELF.fetch(`${API}/v1/outposts/heartbeat`)).status).toBe(404);
     expect((await SELF.fetch(`${API}/v1/outposts`, { method: "POST", body: "{}" })).status).toBe(404);
     // Without Cloudflare Access the operator key alone registers nothing.
