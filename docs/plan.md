@@ -78,11 +78,12 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
-| running | 4. Console: the People page | | Sonnet |
+| done | 4. Console: the People page | | Sonnet |
+| running | 7. Several shops in one view: the design and the API side (the desktop switcher after item 5) | | Opus |
 | done locally | The Playwright revival: pull request #15, merged when CI's Playwright job passes | | Haiku |
 | running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
-| 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
+| 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
 
 ## Queue for cloud routines
