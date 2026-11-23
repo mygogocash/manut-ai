@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { isValidCompanyId } from "./companies";
+import { isValidLinePushProposal, LINE_PUSH_OPERATION } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
 
 export type TaskCriterionJSON = {
@@ -217,8 +218,9 @@ async function requestHash(method: string, route: string, raw: string): Promise<
 
 /// External operations the pilot may perform after exact approval. Anything
 /// else is rejected at propose time; adding a type is a deliberate,
-/// separately reviewed change.
-const ACTION_ALLOWLIST = new Set(["linear.issue.create"]);
+/// separately reviewed change. `line.message.push` is the Manut AI pilot's
+/// owner-approved LINE reply (docs/pilot-api.md).
+const ACTION_ALLOWLIST = new Set(["linear.issue.create", LINE_PUSH_OPERATION]);
 
 /// An immutable external-action proposal with its approval and dispatch
 /// history. The id is the stable logical operation id: retries and recovery
@@ -1025,6 +1027,13 @@ export class TaskObject extends DurableObject {
     }
     if (!ACTION_ALLOWLIST.has(operationType)) {
       return Response.json({ error: "unknown_operation" }, { status: 400 });
+    }
+    // A LINE reply is exactly one text of 1 to 5,000 characters to exactly
+    // one LINE user, so the owner approves nothing that LINE would refuse or
+    // that reaches more than the one customer.
+    if (operationType === LINE_PUSH_OPERATION &&
+        !isValidLinePushProposal({ payload, recipients: recipients as unknown[], targetResourceId })) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
     }
     const expiresAt = Date.parse(body.expiresAt as string);
     const now = Date.now();

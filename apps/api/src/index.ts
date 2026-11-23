@@ -8,6 +8,7 @@ import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
+import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
@@ -54,6 +55,20 @@ export interface Env {
   /// LINEAR_WEBHOOK_SECRET`). Never in config; without it every delivery is
   /// refused as unsigned.
   LINEAR_WEBHOOK_SECRET?: string;
+  /// Manut AI pilot (docs/pilot-api.md, pilot.ts). The owner's approval page
+  /// origin (`approvalUrl` is `${WEB_ORIGIN}/approve/{token}`) and this
+  /// Worker's public origin (for each LINE `webhookUrl`): Worker vars, set
+  /// per environment. Without them the routes that build those URLs refuse.
+  WEB_ORIGIN?: string;
+  PUBLIC_API_ORIGIN?: string;
+  /// Signs the owner's approval links (`wrangler secret put
+  /// APPROVAL_LINK_SECRET`, at least 32 characters). Never in config; without
+  /// it no link is minted and every link is invalid.
+  APPROVAL_LINK_SECRET?: string;
+  /// Public pilot ingress: LINE webhooks, and the owner's approval routes,
+  /// which the page polls while a send settles.
+  LINE_INBOUND_LIMITER?: RateLimit;
+  PILOT_APPROVAL_LIMITER?: RateLimit;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -73,6 +88,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
+  else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
+  // Any method: the link is a bearer capability, so every probe counts.
+  else if (pathname.startsWith("/v1/pilot/approvals/")) binding = env.PILOT_APPROVAL_LIMITER;
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
@@ -140,6 +158,11 @@ function tenantHeaders(context: RequestContext, headers: Headers): void {
 const ADMIN_METHODS = new Set([
   "GET /v1/admin/flags", "PUT /v1/admin/flags", "POST /v1/admin/prune",
   "GET /v1/admin/entitlements", "PUT /v1/admin/entitlements", "POST /v1/admin/connections",
+  // Manut AI pilot operator console (docs/pilot-api.md). Ids travel in the
+  // query string or the body, never the path, so each entry is exact.
+  "POST /v1/admin/pilot/shops", "GET /v1/admin/pilot/shops", "POST /v1/admin/pilot/line-connections",
+  "GET /v1/admin/pilot/messages", "POST /v1/admin/pilot/replies", "GET /v1/admin/pilot/actions",
+  "POST /v1/admin/pilot/payments", "GET /v1/admin/pilot/payments",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -533,6 +556,13 @@ export default {
         return receiveLinearWebhook(request, env, Date.now());
       }
     }
+
+    // Manut AI pilot (pilot.ts): the LINE webhook, the owner's signed
+    // approval link, and the operator console. Its ingress limits and the
+    // admin gate already ran above; flags are read only by routes that need
+    // them.
+    const pilot = await pilotRoute(request, url, env, ctx, () => featureFlags(env));
+    if (pilot) return pilot;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

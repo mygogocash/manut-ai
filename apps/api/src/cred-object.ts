@@ -7,7 +7,12 @@ type CredEnv = {
   CRED_KEY_PREVIOUS?: string;
 };
 
-export type ConnectionProviders = "gmail" | "gcal" | "linear";
+/// `line` is a Manut AI pilot shop's LINE Official Account. Its sealed secret
+/// is one envelope holding both the channel access token and the channel
+/// secret (connectors/line.ts), so both stay encrypted at rest and neither is
+/// returned by any route; its account is the channel id and its one granted
+/// resource the bot's user id.
+export type ConnectionProviders = "gmail" | "gcal" | "linear" | "line";
 
 type ConnectionRec = {
   id: string;
@@ -42,7 +47,7 @@ type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsActions" |
   grantRevision?: number;
 };
 
-const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear"]);
+const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear", "line"]);
 const REFRESH_LEASE_SECONDS = 60;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESOURCE_IDS = 100;

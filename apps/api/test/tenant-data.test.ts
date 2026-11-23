@@ -22,6 +22,8 @@ function defaults(): Record<string, () => Response> {
     "TENANT GET /consent": () => Response.json({ cloudWork: true, updatedAt: "2026-09-24T00:00:00.000Z" }),
     "TENANT GET /tombstone": () => Response.json({ tombstone: null }),
     "TENANT GET /attention": () => Response.json({ items: [{ id: "item-1" }] }),
+    "TENANT GET /pilot/export": () => Response.json({ shop: null, messages: [], replies: [], payments: [], displayNames: [] }),
+    "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
     "TASK:task-a GET /export": () =>
@@ -166,6 +168,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /consent", "consent"],
     ["TENANT GET /tombstone", "tombstone"],
     ["TENANT GET /attention", "attention"],
+    ["TENANT GET /pilot/export", "pilot"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {

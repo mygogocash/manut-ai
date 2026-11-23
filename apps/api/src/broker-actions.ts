@@ -1,10 +1,15 @@
 import { readConnectionSecret } from "./cred-broker";
+import { LINE_PUSH_OPERATION, lineReplyText, openLineCredentials, pushLineMessage } from "./connectors/line";
 import { checkGrant, ConnectorError } from "./connectors/types";
+import { readReplyBinding } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 
 type ActionEnv = {
   TASK: DurableObjectNamespace;
   CRED: DurableObjectNamespace;
+  /// Holds the pilot's reply records, which a LINE push is checked against.
+  /// Without it no LINE push is ever sent.
+  TENANT?: DurableObjectNamespace;
 };
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
@@ -28,7 +33,8 @@ export type LinearIssueReceipt = {
   url: string;
 };
 
-/// The pilot's first and only writable operation: creating a reviewed issue
+/// The first writable operation (the second, `line.message.push`, lives in
+/// connectors/line.ts): creating a reviewed issue
 /// in an approved test project. Title and description come from the approved
 /// proposal alone; the project is the proposal's target, already checked
 /// against its declared scope at propose time.
@@ -257,6 +263,33 @@ export async function finishDispatchAction(
     return settle("failed");
   }
 
+  if (proposal.operationType === LINE_PUSH_OPERATION) {
+    // One approved reply to one customer (docs/pilot-api.md). Beyond the
+    // checks above, the reply must still be what its record binds: the
+    // record, written from the stored message when the reply was proposed,
+    // names this task, this connection, and the message's author as the one
+    // recipient. A proposal with no record (made through any other route) or
+    // one aimed at anybody else fails here without LINE traffic. The action
+    // id is LINE's retry key; see pushLineMessage for how each answer
+    // settles.
+    const credentials = openLineCredentials(secret);
+    const text = lineReplyText(proposal.payload);
+    const to = proposal.recipients?.length === 1 ? proposal.recipients[0] : undefined;
+    if (!credentials || text === null || !to || !env.TENANT) return settle("failed");
+    const binding = await readReplyBinding({ TENANT: env.TENANT }, proposal.tenant, actionId).catch(() => null);
+    if (!binding || binding.taskId !== taskId || binding.connectionId !== proposal.connectionId || binding.lineUserId !== to) {
+      return settle("failed");
+    }
+    const pushed = await pushLineMessage(opts.fetchImpl ?? fetch, credentials.channelAccessToken, {
+      to,
+      text,
+      retryKey: actionId,
+    });
+    if (pushed.outcome === "confirmed") {
+      return settle("confirmed", { providerOperationId: pushed.receipt.providerOperationId, receipt: pushed.receipt });
+    }
+    return settle(pushed.outcome);
+  }
   if (proposal.operationType !== "linear.issue.create") {
     return settle("failed");
   }

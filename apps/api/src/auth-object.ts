@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
+import { pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
 
 type AuthEnv = {
   APPLE_CLIENT_ID?: string;
@@ -121,6 +122,10 @@ export class AuthObject extends DurableObject {
     if (url.pathname === "/inbound-routes") {
       if (request.method === "GET") return this.readInboundRoutes(url);
       if (request.method === "POST") return this.writeInboundRoute(request);
+    }
+    // The Manut AI pilot's shop registry (pilot-store.ts).
+    if (url.pathname === "/pilot-shops") {
+      return pilotRegistryRoute(this.ctx.storage, request);
     }
     if (url.pathname === "/flags") {
       if (request.method === "GET") {
@@ -510,7 +515,9 @@ export class AuthObject extends DurableObject {
     // Company-console state for this tenant goes with the sessions: the
     // account entitlement and the membership index. Company records
     // themselves are owned by their companies, not by any one member.
-    await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`]);
+    // A pilot shop's registry row goes too, so a deleted shop leaves the
+    // operator console's list.
+    await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`, pilotRegistryKey(body.tenant)]);
     // Inbound routes name the tenant, so they go too. The index is keyed by
     // provider account, not tenant, so this scans it; it holds one row per
     // connected workspace and stays small.

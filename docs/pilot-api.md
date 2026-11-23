@@ -123,6 +123,27 @@ type Payment = {
 };
 ```
 
+## Rules settled while building (23 Nov 2026)
+
+- **One open reply per message.** Proposing a second reply while one is still waiting answers 409
+  `{ "error": "reply_pending" }`. After a reply is declined, expires or fails, the operator may propose again.
+- **Connecting LINE again** revokes the shop's previous connection; its webhook URL stops receiving.
+- **Consent cannot be withdrawn through the link.** `/consent` accepts only `{ "cloudWork": true }`.
+- **A reply approved but not yet sending** (`approved`) is picked up by the next `GET` of its link, which begins
+  the send the owner approved. The begin gate is one-use, so it can never send twice. The page polls `approved`
+  the same way it polls `dispatching`.
+- **LINE answers.** A 409 with `x-line-accepted-request-id` means an earlier push with the same retry key went
+  through: the reply settles `confirmed`. Any other 4xx settles `failed` (LINE sends nothing on an error). A
+  5xx, a timeout or a network error settles `unknown` and is never retried automatically.
+- **Retention.** Customer messages, duplicate markers and cached display names are removed after 7 days by the
+  operator prune. Shops, reply records and payments stay until the shop is deleted.
+- **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute).
+- **CORS.** The approval routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator routes do
+  not answer CORS: the console must be served from the same origin as the API (see `docs/plan.md`).
+- **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body.
+
+Not built yet: an operator route to export or delete one shop's pilot data (the functions exist and are tested).
+
 ## The send itself
 
 A reply is one action proposal on the shop's task with `operationType: "line.message.push"`:

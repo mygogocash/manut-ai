@@ -15,6 +15,18 @@
   // RELAY_ENABLED is deliberately unset in every environment: until the owner
   // turns the relay on at gate G3, every /relay/ route answers 503
   // relay_disabled (docs/relay-protocol-v1.md, the kill switch).
+  // Manut AI pilot (docs/pilot-api.md): three settings, none of them in this
+  // file. APPROVAL_LINK_SECRET signs the owner's approval links and is a
+  // Wrangler secret (`wrangler secret put APPROVAL_LINK_SECRET`, at least 32
+  // random characters); without it no link is minted and every link is
+  // invalid. WEB_ORIGIN (the approval page's origin, e.g. https://<web host>)
+  // and PUBLIC_API_ORIGIN (this Worker's public origin, used in each LINE
+  // webhook URL) are plain Worker vars the owner sets per environment under
+  // "vars"; until they are set, minting a reply link or connecting a LINE
+  // account answers 503 not_configured. LINE channel secrets and access
+  // tokens never appear here: operators enter them per shop, and they go
+  // straight into the encrypted credential vault. The LINE webhook stays
+  // unreachable while officeInbound is off, like the Linear one.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   "workers_dev": false,
@@ -82,6 +94,26 @@
             "limit": 60,
             "period": 60
           }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112323",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112324",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     },
@@ -138,6 +170,26 @@
           "namespace_id": "2026112315",
           "simple": {
             "limit": 60,
+            "period": 60
+          }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112325",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112326",
+          "simple": {
+            "limit": 120,
             "period": 60
           }
         }
@@ -198,6 +250,26 @@
             "limit": 60,
             "period": 60
           }
+        },
+        // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+        // address like the Linear webhook, and the owner's approval routes,
+        // which the page polls while a send settles. Proposed ids, unverified
+        // against the account like the rest.
+        {
+          "name": "LINE_INBOUND_LIMITER",
+          "namespace_id": "2026112327",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "PILOT_APPROVAL_LIMITER",
+          "namespace_id": "2026112328",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     }
@@ -207,6 +279,8 @@
   // in every environment. This patch has not queried a Cloudflare account.
   // The relay limiters (2026100404/05, and 14/15, 24/25 and 34/35 in dev,
   // staging and prod) are proposed the same way and are equally unverified.
+  // So are the pilot limiters (2026112321/22 here, 23/24, 25/26 and 27/28
+  // in dev, staging and prod).
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -247,6 +321,26 @@
       "namespace_id": "2026112305",
       "simple": {
         "limit": 60,
+        "period": 60
+      }
+    },
+    // Manut AI pilot ingress (pilot.ts): LINE webhooks, keyed per source
+    // address like the Linear webhook, and the owner's approval routes,
+    // which the page polls while a send settles. Proposed ids, unverified
+    // against the account like the rest.
+    {
+      "name": "LINE_INBOUND_LIMITER",
+      "namespace_id": "2026112321",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "PILOT_APPROVAL_LIMITER",
+      "namespace_id": "2026112322",
+      "simple": {
+        "limit": 120,
         "period": 60
       }
     }

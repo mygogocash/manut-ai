@@ -51,8 +51,8 @@ export async function tenantCall(
 }
 
 /// Assembles a tenant's task documents with their histories, connection
-/// metadata, schedules, consent, inbound attention items and deletion
-/// tombstone. Each task answers with its document, event log, action
+/// metadata, schedules, consent, inbound attention items, pilot records and
+/// deletion tombstone. Each task answers with its document, event log, action
 /// proposals and attempts, so the export no longer leaves the history behind
 /// (the old "task record only" gap is closed below).
 ///
@@ -87,6 +87,11 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
   const attentionResp = await tenantCall(env, tenant, `/attention?${query}`);
   if (!attentionResp.ok) failed.push("attention");
   const attention = (attentionResp.ok ? await attentionResp.json() : {}) as { items?: unknown[] };
+  // Manut AI pilot records: the shop, its customers' messages, replies and
+  // payments. Empty for every tenant that is not a pilot shop.
+  const pilotResp = await tenantCall(env, tenant, `/pilot/export?${query}`);
+  if (!pilotResp.ok) failed.push("pilot");
+  const pilot: unknown = pilotResp.ok ? await pilotResp.json() : null;
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -109,6 +114,7 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
     schedules: schedules.schedules ?? [],
     consent,
     attention: attention.items ?? [],
+    pilot,
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }
@@ -162,11 +168,31 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
       failed.push(id);
     }
   }
-  void nowMs;
+  // Pilot customer messages age out on the source-snapshot window
+  // (pilot-store.ts). Nothing to prune for a tenant that is not a pilot shop.
+  let messagesPruned = 0;
+  const pilotResp = await tenantCall(env, tenant, "/pilot/prune", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-pilot": "1" },
+    body: JSON.stringify({ tenant, nowMs }),
+  });
+  if (pilotResp.ok) {
+    const counts = (await pilotResp.json()) as { messagesPruned?: unknown };
+    messagesPruned = typeof counts.messagesPruned === "number" ? counts.messagesPruned : 0;
+  } else {
+    failed.push("pilot");
+  }
   if (failed.length > 0) {
     return json({ error: "prune_incomplete", tasksPruned, failed }, 500);
   }
-  return json({ tenant, tasksPruned, attemptsPruned, actionsPruned, prunedAt: new Date(nowMs).toISOString() });
+  return json({
+    tenant,
+    tasksPruned,
+    attemptsPruned,
+    actionsPruned,
+    messagesPruned,
+    prunedAt: new Date(nowMs).toISOString(),
+  });
 }
 ///
 /// The order is the safety property. Tasks, connections and schedules go

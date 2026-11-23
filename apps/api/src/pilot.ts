@@ -1,0 +1,783 @@
+/// The Manut AI pilot's routes (docs/pilot-api.md): the LINE webhook, the
+/// owner's signed approval link, and the operator console under
+/// `/v1/admin/pilot/*`. In the pilot people play the shop's AI team: an
+/// operator reads a customer's LINE message, drafts a reply, and the shop
+/// owner approves or declines that one exact reply through a link.
+///
+/// Nothing here adds a way around the lifted backend's guarantees. A reply is
+/// an ordinary exact-action proposal on the shop's task, decided once by the
+/// task object, dispatched at most once by the broker's begin gate, checked
+/// against the live connection grant before any LINE traffic, and settled
+/// confirmed, failed or unknown. The link adds only who may decide: whoever
+/// holds a link this backend signed for that one action, before it expires.
+/// Approving still needs the shop's cloud-work consent, which only the owner
+/// can record, through the link, and the same kill switches as the session
+/// routes.
+
+import { APPROVAL_LINK_TTL_MS, checkApprovalToken, mintApprovalToken, type ApprovalClaim } from "./approval-link";
+import { readBodyBytes, readJsonBody } from "./body";
+import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
+import { isValidTenant } from "./companies";
+import {
+  fetchLineDisplayName,
+  hasLineSignatureShape,
+  LINE_PUSH_OPERATION,
+  LINE_TEXT_MAX,
+  LINE_USER_ID,
+  lineReplyText,
+  lineTextEvents,
+  openLineCredentials,
+  sealableLineCredentials,
+  verifyLineSignature,
+} from "./connectors/line";
+import { readConnectionSecret } from "./cred-broker";
+import type { FeatureFlags } from "./index";
+import type { InboundMessage, Payment, PilotReplyRecord, PilotShopRecord } from "./pilot-store";
+import type { ActionProposalJSON } from "./task-object";
+import { authCall, credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
+
+export type PilotEnv = TenantDataEnv & {
+  /// Where the owner's approval page lives: `approvalUrl` is
+  /// `${WEB_ORIGIN}/approve/{token}`, and only this origin may call the
+  /// approval routes from a browser.
+  WEB_ORIGIN?: string;
+  /// This Worker's public origin, for the `webhookUrl` an operator pastes into
+  /// the LINE Developers Console.
+  PUBLIC_API_ORIGIN?: string;
+  /// Signs approval links (`wrangler secret put APPROVAL_LINK_SECRET`).
+  /// Without it no link is minted and every link is invalid.
+  APPROVAL_LINK_SECRET?: string;
+};
+
+type Flags = () => Promise<Pick<FeatureFlags, "officeCloud" | "officeExternalWrites" | "officeInbound">>;
+
+const MAX_BODY_BYTES = 256 * 1024;
+/// The pilot's single AI team member, as the owner's page presents it.
+const MEMBER_NAME = "Nam";
+const MEMBER_ROLE = "sales chat";
+const UNKNOWN_CUSTOMER = "a customer";
+/// Vault ids are `crypto.randomUUID()`. Anything else in the webhook path is
+/// not a connection and is answered before any object wakes.
+const CONNECTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/// A reply still open: answering the same message again would put two
+/// replies in front of the owner at once.
+const OPEN_STATES = new Set(["proposed", "approved", "dispatching"]);
+
+type ViewState = ActionProposalJSON["state"];
+
+export type ApprovalView = {
+  shopName: string;
+  memberName: string;
+  memberRole: string;
+  kind: "line.reply";
+  customerName: string;
+  customerMessage: string;
+  replyText: string;
+  state: ViewState;
+  decidedAt?: string;
+  expiresAt: string;
+  needsConsent: boolean;
+};
+
+function json(data: unknown, status = 200): Response {
+  return Response.json(data, { status });
+}
+
+function empty(status: number): Response {
+  return new Response(null, { status });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function bounded(value: unknown, max = 256): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+/// A configured origin, normalized, or null when unset or not a URL. Routes
+/// that need one refuse up front rather than hand out a broken link.
+function originOf(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/// A proposal still waiting for its decision past its own deadline has
+/// expired, whether or not anything has touched it since: the task object
+/// marks expiry lazily, when a decision or dispatch finds it.
+function viewState(action: ActionProposalJSON, nowMs: number): ViewState {
+  if (action.state === "proposed" && Date.parse(action.expiresAt) <= nowMs) return "expired";
+  return action.state;
+}
+
+async function readAction(env: PilotEnv, tenant: string, taskId: string, actionId: string): Promise<ActionProposalJSON | null> {
+  const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(
+    new Request(`https://task/actions/${encodeURIComponent(actionId)}`, { headers: { "x-tenant": tenant } }),
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`action_read_${response.status}`);
+  return (await response.json()) as ActionProposalJSON;
+}
+
+async function shopConsent(env: PilotEnv, tenant: string): Promise<boolean> {
+  const response = await tenantCall(env, tenant, `/consent?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return false;
+  const record = (await response.json().catch(() => null)) as { cloudWork?: unknown } | null;
+  return record?.cloudWork === true;
+}
+
+async function readShop(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
+  const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return null;
+  return ((await response.json()) as { shop: PilotShopRecord }).shop;
+}
+
+function pilotWrite(env: PilotEnv, tenant: string, path: string, body: Record<string, unknown>): Promise<Response> {
+  return tenantCall(env, tenant, path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-pilot": "1" },
+    body: JSON.stringify({ tenant, ...body }),
+  });
+}
+
+/// Entry point from the Worker, after the ingress rate gate and the admin
+/// gate. Answers null for any path that is not the pilot's.
+export async function pilotRoute(
+  request: Request,
+  url: URL,
+  env: PilotEnv,
+  ctx: ExecutionContext,
+  flags: Flags,
+): Promise<Response | null> {
+  const line = url.pathname.match(/^\/v1\/inbound\/line\/([^/]+)$/);
+  if (line && request.method === "POST") return receiveLineWebhook(request, env, ctx, line[1] ?? "", flags);
+  const approval = url.pathname.match(/^\/v1\/pilot\/approvals\/([^/]+)(?:\/(consent|decision))?$/);
+  if (approval) return approvalRoute(request, env, ctx, approval[1] ?? "", approval[2], flags);
+  if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags);
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// LINE webhook
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/inbound/line/{connectionId}`. Public, because LINE holds no
+/// session: the channel secret's signature is the credential. Answers carry
+/// no body. Order matters: the connection is found first (its secret is what
+/// the signature is checked against), the signature is checked before a byte
+/// of the body is parsed, and nothing is stored unless both hold.
+///
+/// A closed `officeInbound` flag and a connection that does not exist, is
+/// revoked or is not a LINE connection all answer the same empty 404, so the
+/// route tells a caller nothing about which shops exist. Every correctly
+/// signed delivery answers 200, whether it stored messages, only repeated
+/// ones already stored, or held nothing the pilot keeps (LINE's empty
+/// "verify" delivery among them). A storage failure answers 503 so that
+/// LINE's webhook redelivery, when the operator has turned it on, can try
+/// again; the event-id record makes that retry safe.
+async function receiveLineWebhook(
+  request: Request,
+  env: PilotEnv,
+  ctx: ExecutionContext,
+  connectionId: string,
+  flags: Flags,
+): Promise<Response> {
+  if (!(await flags()).officeInbound) return empty(404);
+  if (!CONNECTION_ID.test(connectionId)) return empty(404);
+  const length = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(length) && length > MAX_BODY_BYTES) return empty(413);
+
+  // Which tenant vault holds the connection. Only the operator's
+  // line-connections route writes these rows; the vault stays authoritative.
+  const indexed = await authCall(env, `/inbound-routes?provider=line&account=${encodeURIComponent(connectionId)}`);
+  if (!indexed.ok) return empty(503);
+  const listed = (await indexed.json().catch(() => null)) as { routes?: { tenant?: unknown; connectionId?: unknown }[] } | null;
+  const route = (listed?.routes ?? []).find((entry) => entry.connectionId === connectionId && bounded(entry.tenant));
+  if (!route || !bounded(route.tenant)) return empty(404);
+  const tenant = route.tenant;
+  const metaResponse = await credStub(env, tenant).fetch(
+    new Request(`https://cred/connections/${connectionId}`, { headers: { "x-tenant": tenant } }),
+  );
+  if (metaResponse.status === 404) return empty(404);
+  if (!metaResponse.ok) return empty(503);
+  const meta = (await metaResponse.json().catch(() => null)) as { provider?: unknown; resourceIds?: unknown } | null;
+  const botUserId = Array.isArray(meta?.resourceIds) ? meta.resourceIds[0] : undefined;
+  if (meta?.provider !== "line" || typeof botUserId !== "string" || !LINE_USER_ID.test(botUserId)) return empty(404);
+
+  // A request with no plausible signature costs no unseal.
+  const signature = request.headers.get("x-line-signature");
+  if (!hasLineSignatureShape(signature)) return empty(401);
+  let credentials;
+  try {
+    credentials = openLineCredentials(await readConnectionSecret(env, connectionId, tenant));
+  } catch {
+    return empty(503);
+  }
+  if (!credentials) return empty(503);
+  const body = await readBodyBytes(request, MAX_BODY_BYTES);
+  if (!body.ok) return empty(body.status);
+  if (!(await verifyLineSignature(credentials.channelSecret, body.value, signature))) return empty(401);
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(body.value));
+  } catch {
+    return empty(200);
+  }
+  const events = lineTextEvents(payload, botUserId);
+  if (events.length === 0) return empty(200);
+  const stored = await pilotWrite(env, tenant, "/pilot/messages", { connectionId, events });
+  if (!stored.ok) return empty(503);
+  const result = (await stored.json().catch(() => null)) as { created?: { lineUserId: string; named: boolean }[] } | null;
+  // Display names are a courtesy for the owner's page ("a customer"
+  // otherwise), so the lookup runs after LINE has its answer and never
+  // delays or fails the delivery.
+  const unnamed = [...new Set((result?.created ?? []).filter((entry) => !entry.named).map((entry) => entry.lineUserId))];
+  if (unnamed.length > 0) {
+    ctx.waitUntil(fillDisplayNames(env, tenant, credentials.channelAccessToken, unnamed.slice(0, 10)).catch(() => undefined));
+  }
+  return empty(200);
+}
+
+async function fillDisplayNames(env: PilotEnv, tenant: string, channelAccessToken: string, lineUserIds: string[]) {
+  for (const lineUserId of lineUserIds) {
+    const displayName = await fetchLineDisplayName(fetch, channelAccessToken, lineUserId);
+    if (displayName) await pilotWrite(env, tenant, "/pilot/names", { lineUserId, displayName });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Owner's approval link
+// ---------------------------------------------------------------------------
+
+/// The page at WEB_ORIGIN calls these routes from the owner's browser, so
+/// they answer CORS for that one origin and no other. CORS grants nothing
+/// the link does not: it only lets that page read the answers. Every answer
+/// carries `cache-control: no-store`, because it holds the customer's words
+/// and sits behind a capability URL.
+function linkResponse(response: Response, request: Request, env: PilotEnv): Response {
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "no-store");
+  headers.append("vary", "origin");
+  const allowed = originOf(env.WEB_ORIGIN);
+  if (allowed && request.headers.get("origin") === allowed) headers.set("access-control-allow-origin", allowed);
+  return new Response(response.body, { status: response.status, headers });
+}
+
+async function approvalRoute(
+  request: Request,
+  env: PilotEnv,
+  ctx: ExecutionContext,
+  token: string,
+  leaf: string | undefined,
+  flags: Flags,
+): Promise<Response> {
+  if (request.method === "OPTIONS") {
+    const preflight = empty(204);
+    preflight.headers.set("access-control-allow-methods", "GET, POST");
+    preflight.headers.set("access-control-allow-headers", "content-type");
+    preflight.headers.set("access-control-max-age", "600");
+    return linkResponse(preflight, request, env);
+  }
+  const answer = await (async (): Promise<Response> => {
+    const checked = await checkApprovalToken(env.APPROVAL_LINK_SECRET, token, Date.now());
+    if (!checked.ok) return json({ error: checked.error }, checked.error === "link_expired" ? 410 : 404);
+    const claim = checked.claim;
+    if (!leaf && request.method === "GET") {
+      const loaded = await loadView(env, claim);
+      if (!loaded) return json({ error: "link_invalid" }, 404);
+      // An approval whose send never began (the begin gate was unreachable
+      // just after the decision was recorded) would otherwise sit at
+      // "approved" for ever, with the owner's page polling it. The owner has
+      // already said yes, so reading the link starts the send they approved.
+      // The begin gate is one-use, so however many reads arrive, at most one
+      // send begins; the same switches and consent are checked again first.
+      if (loaded.action.state === "approved" && !loaded.view.needsConsent) {
+        const current = await flags();
+        if (current.officeCloud && current.officeExternalWrites) {
+          await startSend(env, ctx, claim, loaded.action);
+          const after = await loadView(env, claim);
+          if (after) return json(after.view);
+        }
+      }
+      return json(loaded.view);
+    }
+    if (leaf === "consent" && request.method === "POST") return recordOwnerConsent(request, env, claim);
+    if (leaf === "decision" && request.method === "POST") return decideByLink(request, env, ctx, claim, flags);
+    return json({ error: "not_found" }, 404);
+  })().catch(() => json({ error: "unavailable" }, 503));
+  return linkResponse(answer, request, env);
+}
+
+/// Reads everything the owner's page shows. Null when the action or its
+/// reply record is gone, which the link reports as invalid: the tenant was
+/// deleted, or the link names something this backend never proposed.
+async function loadView(env: PilotEnv, claim: ApprovalClaim): Promise<{ view: ApprovalView; action: ActionProposalJSON } | null> {
+  const [action, contextResponse, consent] = await Promise.all([
+    readAction(env, claim.tenant, claim.taskId, claim.actionId),
+    tenantCall(env, claim.tenant, `/pilot/context?tenant=${encodeURIComponent(claim.tenant)}&actionId=${encodeURIComponent(claim.actionId)}`),
+    shopConsent(env, claim.tenant),
+  ]);
+  if (!action || !contextResponse.ok) return null;
+  const context = (await contextResponse.json()) as {
+    shop: PilotShopRecord | null;
+    reply: PilotReplyRecord | null;
+    message: InboundMessage | null;
+  };
+  if (!context.shop || !context.reply || context.reply.taskId !== claim.taskId) return null;
+  const decidedAt = context.reply.decidedAt ?? action.approval?.at;
+  const view: ApprovalView = {
+    shopName: context.shop.name,
+    memberName: MEMBER_NAME,
+    memberRole: MEMBER_ROLE,
+    kind: "line.reply",
+    customerName: context.message?.displayName ?? UNKNOWN_CUSTOMER,
+    // A message past the retention window is gone; the reply still shows.
+    customerMessage: context.message?.text ?? "",
+    replyText: lineReplyText(action.payload) ?? "",
+    state: viewState(action, Date.now()),
+    ...(decidedAt ? { decidedAt } : {}),
+    expiresAt: new Date(claim.expiresAtMs).toISOString(),
+    needsConsent: !consent,
+  };
+  return { view, action };
+}
+
+/// `POST /v1/pilot/approvals/{token}/consent`. The only way a pilot shop's
+/// consent is recorded: from the owner, through a live link. Operators have
+/// no route that writes it. The body must say `{ "cloudWork": true }`
+/// exactly; withdrawing is not something this link offers.
+async function recordOwnerConsent(request: Request, env: PilotEnv, claim: ApprovalClaim): Promise<Response> {
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value) || parsed.value.cloudWork !== true) return json({ error: "invalid_request" }, 400);
+  if (!(await loadView(env, claim))) return json({ error: "link_invalid" }, 404);
+  const recorded = await tenantCall(env, claim.tenant, "/consent", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tenant: claim.tenant, cloudWork: true }),
+  });
+  if (!recorded.ok) return json({ error: "consent_unavailable" }, 503);
+  const loaded = await loadView(env, claim);
+  return loaded ? json(loaded.view) : json({ error: "link_invalid" }, 404);
+}
+
+/// `POST /v1/pilot/approvals/{token}/decision`. The same gates as the session
+/// decision and dispatch routes, in the same order: the officeCloud switch
+/// for any decision; for an approval, the officeExternalWrites switch and the
+/// shop's consent, all checked before anything is recorded, so a refusal
+/// leaves the reply waiting. The task object then settles the decision once.
+/// An approval goes straight on to the broker's begin gate (one-use,
+/// re-checking freshness, grant revision and task state) and the provider
+/// call runs after the answer, in waitUntil, exactly as the session dispatch
+/// route runs it, re-checking connection health and grant before any LINE
+/// traffic.
+async function decideByLink(
+  request: Request,
+  env: PilotEnv,
+  ctx: ExecutionContext,
+  claim: ApprovalClaim,
+  flags: Flags,
+): Promise<Response> {
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value) || typeof parsed.value.approve !== "boolean") return json({ error: "invalid_request" }, 400);
+  const approve = parsed.value.approve;
+  const current = await flags();
+  if (!current.officeCloud) return json({ error: "feature_disabled", feature: "officeCloud" }, 403);
+  if (approve && !current.officeExternalWrites) {
+    return json({ error: "feature_disabled", feature: "officeExternalWrites" }, 403);
+  }
+  const before = await loadView(env, claim);
+  if (!before) return json({ error: "link_invalid" }, 404);
+  if (before.action.state !== "proposed") return json({ error: "already_decided", view: before.view }, 409);
+  if (approve && before.view.needsConsent) return json({ error: "consent_required" }, 403);
+
+  const stub = env.TASK.get(env.TASK.idFromName(claim.taskId));
+  const decided = await stub.fetch(
+    new Request(`https://task/actions/${encodeURIComponent(claim.actionId)}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-tenant": claim.tenant },
+      // `by` is required by the object but ignored when a tenant is sent:
+      // the approval is stamped with the shop's tenant, as a session's is.
+      body: JSON.stringify({ approve, by: "owner-link" }),
+    }),
+  );
+  if (!decided.ok) {
+    const refusal = (await decided.json().catch(() => null)) as { error?: unknown } | null;
+    if (decided.status === 409 && refusal?.error === "action_expired") return json({ error: "link_expired" }, 410);
+    if (decided.status === 409) {
+      // Lost a race with another decision on the same link.
+      const raced = await loadView(env, claim);
+      return raced ? json({ error: "already_decided", view: raced.view }, 409) : json({ error: "link_invalid" }, 404);
+    }
+    if (decided.status === 404) return json({ error: "link_invalid" }, 404);
+    return json({ error: "decision_unavailable" }, 503);
+  }
+  const action = (await decided.json()) as ActionProposalJSON;
+  await pilotWrite(env, claim.tenant, "/pilot/reply-decided", {
+    actionId: claim.actionId,
+    decidedAt: action.approval?.at ?? new Date().toISOString(),
+  }).catch(() => undefined);
+
+  if (approve) await startSend(env, ctx, claim, action);
+  const after = await loadView(env, claim);
+  return after ? json(after.view) : json({ error: "link_invalid" }, 404);
+}
+
+/// Begins the send of an approved reply. The begin gate compares against the
+/// revision the proposal was approved under; the broker's finish half then
+/// compares that against the live connection's revision before any LINE
+/// traffic, and settles failed on a mismatch. If begin refuses (the task was
+/// settled meanwhile, the stored content no longer matches its hash, or the
+/// send already began) nothing is sent by this call. A begin that could not
+/// be reached leaves the reply approved, and the next read of the link tries
+/// again.
+async function startSend(env: PilotEnv, ctx: ExecutionContext, claim: ApprovalClaim, action: ActionProposalJSON): Promise<void> {
+  const dispatch = { tenant: claim.tenant, grantRevision: action.grantRevision };
+  const begun = await beginDispatchAction(env, claim.taskId, claim.actionId, dispatch).catch(() => null);
+  if (begun?.ok) {
+    ctx.waitUntil(
+      finishDispatchAction(env, claim.taskId, claim.actionId, { ...dispatch, proposal: begun.proposal }).catch(
+        () => undefined,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Operator console (behind adminGate: Access audience, operator bearer, and
+// an exact ADMIN_METHODS entry, all checked before this runs)
+// ---------------------------------------------------------------------------
+
+async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: Flags): Promise<Response> {
+  const route = `${request.method} ${url.pathname}`;
+  if (request.method === "GET") {
+    if (route === "GET /v1/admin/pilot/shops") return listShops(env);
+    const tenant = url.searchParams.get("tenant") ?? "";
+    if (!isValidTenant(tenant)) return json({ error: "tenant_required" }, 400);
+    if (!(await readShop(env, tenant))) return json({ error: "shop_not_found" }, 404);
+    if (route === "GET /v1/admin/pilot/messages") return listFrom(env, tenant, "/pilot/messages", "messages");
+    if (route === "GET /v1/admin/pilot/payments") return listFrom(env, tenant, "/pilot/payments", "payments");
+    if (route === "GET /v1/admin/pilot/actions") return listActions(env, tenant);
+    return json({ error: "not_found" }, 404);
+  }
+  if (request.method !== "POST") return json({ error: "not_found" }, 404);
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value)) return json({ error: "invalid_request" }, 400);
+  const body = parsed.value;
+  if (route === "POST /v1/admin/pilot/shops") return createShop(env, body);
+  // Every other write names an existing pilot shop.
+  if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
+  const shop = await readShop(env, body.tenant);
+  if (!shop) return json({ error: "shop_not_found" }, 404);
+  if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
+  if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
+  if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
+  return json({ error: "not_found" }, 404);
+}
+
+/// A pilot shop is a tenant of its own (`pilot:<uuid>`), so every existing
+/// per-tenant boundary (vault, task ownership, consent, export, deletion)
+/// applies to it unchanged. No session can ever carry such a tenant: session
+/// tenants come from a verified provider subject.
+async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise<Response> {
+  if (!bounded(body.name, 200) || !bounded(body.ownerName, 200)) return json({ error: "invalid_request" }, 400);
+  const tenant = `pilot:${crypto.randomUUID()}`;
+  const created = await pilotWrite(env, tenant, "/pilot/shop", {
+    name: body.name,
+    ownerName: body.ownerName,
+    taskId: `pilot-task-${crypto.randomUUID()}`,
+  });
+  if (!created.ok) return json({ error: "shop_unavailable" }, 503);
+  const registered = await authCall(env, "/pilot-shops", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ tenant }),
+  });
+  if (!registered.ok) return json({ error: "shop_unavailable" }, 503);
+  return json({ tenant, name: body.name, ownerName: body.ownerName });
+}
+
+async function listShops(env: PilotEnv): Promise<Response> {
+  const registry = await authCall(env, "/pilot-shops");
+  if (!registry.ok) return json({ error: "shops_unavailable" }, 503);
+  const { tenants } = (await registry.json()) as { tenants: string[] };
+  const shops = await Promise.all(
+    tenants.map(async (tenant) => {
+      const [shop, consent] = await Promise.all([readShop(env, tenant), shopConsent(env, tenant)]);
+      if (!shop) return null;
+      return {
+        tenant,
+        name: shop.name,
+        ownerName: shop.ownerName,
+        ...(shop.lineConnectionId ? { lineConnectionId: shop.lineConnectionId } : {}),
+        consent,
+      };
+    }),
+  );
+  return json({ shops: shops.filter((shop) => shop !== null) });
+}
+
+async function listFrom(env: PilotEnv, tenant: string, path: string, field: string): Promise<Response> {
+  const response = await tenantCall(env, tenant, `${path}?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return json({ error: `${field}_unavailable` }, 503);
+  const listed = (await response.json()) as Record<string, unknown>;
+  return json({ [field]: listed[field] ?? [] });
+}
+
+/// Connects the shop's LINE Official Account. Both secrets go straight into
+/// the shop's vault, sealed together, and never come back out of any route.
+/// The grant is the connection's only resource, the bot's user id, with
+/// actions allowed: the one thing this connection exists to do is push the
+/// owner's approved replies. Connecting again replaces the previous
+/// connection and revokes it, wiping its sealed secrets, so a rotated token
+/// leaves nothing usable behind; a reply still waiting on the old connection
+/// then fails at dispatch rather than sending through it.
+async function connectLine(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
+  const { channelId, botUserId, channelSecret, channelAccessToken } = body;
+  if (!bounded(channelId, 64) || typeof botUserId !== "string" || !LINE_USER_ID.test(botUserId) ||
+      !bounded(channelSecret, 256) || !bounded(channelAccessToken, 4096)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const publicOrigin = originOf(env.PUBLIC_API_ORIGIN);
+  if (!publicOrigin) return json({ error: "not_configured", setting: "PUBLIC_API_ORIGIN" }, 503);
+  const tenant = shop.tenant;
+  const vault = credStub(env, tenant);
+  const stored = await vault.fetch(
+    new Request("https://cred/connections", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-tenant": tenant },
+      body: JSON.stringify({
+        tenant,
+        provider: "line",
+        accountId: channelId,
+        scopes: [],
+        refreshToken: sealableLineCredentials({ channelAccessToken, channelSecret }),
+        resourceIds: [botUserId],
+        allowsActions: true,
+      }),
+    }),
+  );
+  if (!stored.ok) return json({ error: "vault_unavailable" }, 503);
+  const { id: connectionId } = (await stored.json()) as { id: string };
+  const revoke = (id: string) =>
+    vault
+      .fetch(new Request(`https://cred/connections/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-tenant": tenant } }))
+      .catch(() => undefined);
+  // The webhook names only the connection, so the route index maps it back
+  // to the shop's vault. Without the row every delivery would answer 404, so
+  // a failed write undoes the connection and lets the operator try again.
+  const indexed = await authCall(env, "/inbound-routes", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ provider: "line", accountId: connectionId, tenant, connectionId }),
+  }).catch(() => null);
+  if (!indexed?.ok) {
+    await revoke(connectionId);
+    return json({ error: "inbound_route_unavailable" }, 503);
+  }
+  const pointed = await pilotWrite(env, tenant, "/pilot/shop-connection", { lineConnectionId: connectionId });
+  if (!pointed.ok) {
+    await revoke(connectionId);
+    return json({ error: "shop_unavailable" }, 503);
+  }
+  const { previous } = (await pointed.json()) as { previous: string | null };
+  if (previous && previous !== connectionId) await revoke(previous);
+  return json({ connectionId, webhookUrl: `${publicOrigin}/v1/inbound/line/${connectionId}` });
+}
+
+/// The shop's task, created on first use. Indexed before it is created, as
+/// `POST /v1/tasks` does, so export and deletion can always find it. A draft
+/// in the cloud location: nothing ever claims it for execution; it only
+/// holds the shop's reply proposals and their history.
+async function ensureShopTask(env: PilotEnv, shop: PilotShopRecord): Promise<boolean> {
+  const indexed = await tenantCall(env, shop.tenant, "/index", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tenant: shop.tenant, taskId: shop.taskId }),
+  });
+  if (!indexed.ok) return false;
+  const stub = env.TASK.get(env.TASK.idFromName(shop.taskId));
+  if ((await stub.fetch(new Request("https://task/", { headers: { "x-tenant": shop.tenant } }))).ok) return true;
+  const created = await stub.fetch(
+    new Request("https://task/", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-task-id": shop.taskId,
+        "x-tenant": shop.tenant,
+        "x-route": "POST /v1/admin/pilot/replies",
+        "x-create-only": "1",
+      },
+      body: JSON.stringify({
+        id: shop.taskId,
+        title: "LINE customer replies",
+        objective: "Answer customers on LINE with replies the owner approves one by one.",
+        state: "draft",
+        location: "cloud",
+        funding: "cloudBYOK",
+        criteria: [],
+        updatedAt: new Date().toISOString(),
+        tenantId: shop.tenant,
+      }),
+    }),
+  );
+  return created.ok || created.status === 409;
+}
+
+/// `POST /v1/admin/pilot/replies`: proposes one exact reply to one stored
+/// message and mints the owner's link. The operator supplies only the text;
+/// the recipient is the message's author and the connection the shop's own,
+/// both read from storage, so no request can aim a reply elsewhere. The same
+/// kill switches as the session propose route apply. Consent is not needed
+/// to propose, as for the operator path through `consentGate`: the owner
+/// gives it on the link, before approving, which is the step that sends.
+async function proposeReply(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, flags: Flags): Promise<Response> {
+  const current = await flags();
+  if (!current.officeCloud) return json({ error: "feature_disabled", feature: "officeCloud" }, 403);
+  if (!current.officeExternalWrites) return json({ error: "feature_disabled", feature: "officeExternalWrites" }, 403);
+  const { messageId, text } = body;
+  if (!bounded(messageId, 128) || typeof text !== "string" || text.length < 1 || text.length > LINE_TEXT_MAX) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const webOrigin = originOf(env.WEB_ORIGIN);
+  if (!webOrigin) return json({ error: "not_configured", setting: "WEB_ORIGIN" }, 503);
+  if (!env.APPROVAL_LINK_SECRET || env.APPROVAL_LINK_SECRET.length < 32) {
+    return json({ error: "not_configured", setting: "APPROVAL_LINK_SECRET" }, 503);
+  }
+  const tenant = shop.tenant;
+  const messageResponse = await tenantCall(
+    env,
+    tenant,
+    `/pilot/message?tenant=${encodeURIComponent(tenant)}&id=${encodeURIComponent(messageId)}`,
+  );
+  if (messageResponse.status === 404) return json({ error: "message_not_found" }, 404);
+  if (!messageResponse.ok) return json({ error: "message_unavailable" }, 503);
+  const { message } = (await messageResponse.json()) as { message: InboundMessage };
+  if (!shop.lineConnectionId || message.connectionId !== shop.lineConnectionId) {
+    return json({ error: "connection_changed" }, 409);
+  }
+  const metaResponse = await credStub(env, tenant).fetch(
+    new Request(`https://cred/connections/${encodeURIComponent(message.connectionId)}`, { headers: { "x-tenant": tenant } }),
+  );
+  if (!metaResponse.ok) return json({ error: "connection_unavailable" }, 409);
+  const meta = (await metaResponse.json()) as { provider?: unknown; accountId?: unknown; resourceIds?: unknown; grantRevision?: unknown };
+  const botUserId = Array.isArray(meta.resourceIds) ? meta.resourceIds[0] : undefined;
+  if (meta.provider !== "line" || !bounded(meta.accountId) || typeof botUserId !== "string" ||
+      !Number.isInteger(meta.grantRevision)) {
+    return json({ error: "connection_unavailable" }, 409);
+  }
+  const prior = message.replyActionId ?? null;
+  if (prior) {
+    const priorAction = await readAction(env, tenant, shop.taskId, prior).catch(() => null);
+    if (priorAction && OPEN_STATES.has(viewState(priorAction, Date.now()))) return json({ error: "reply_pending" }, 409);
+  }
+  if (!(await ensureShopTask(env, shop))) return json({ error: "task_unavailable" }, 503);
+
+  const expiresAt = new Date(Date.now() + APPROVAL_LINK_TTL_MS).toISOString();
+  const proposed = await env.TASK.get(env.TASK.idFromName(shop.taskId)).fetch(
+    new Request("https://task/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-tenant": tenant },
+      body: JSON.stringify({
+        connectionId: message.connectionId,
+        providerAccountId: meta.accountId,
+        operationType: LINE_PUSH_OPERATION,
+        targetResourceId: botUserId,
+        resourceScope: [botUserId],
+        payload: { text },
+        recipients: [message.lineUserId],
+        grantRevision: meta.grantRevision,
+        expiresAt,
+      }),
+    }),
+  );
+  if (!proposed.ok) return json(await proposed.json().catch(() => ({ error: "propose_failed" })), proposed.status);
+  const action = (await proposed.json()) as ActionProposalJSON;
+  // Without this record the broker refuses to send the reply, so a failure
+  // here leaves an inert proposal and no link.
+  const bound = await pilotWrite(env, tenant, "/pilot/replies", {
+    taskId: shop.taskId,
+    actionId: action.id,
+    messageId: message.id,
+    proposedAt: action.proposedAt,
+    expiresAt: action.expiresAt,
+    expectedReplyActionId: prior,
+  });
+  if (!bound.ok) return json(await bound.json().catch(() => ({ error: "reply_unavailable" })), bound.status === 409 ? 409 : 503);
+  const token = await mintApprovalToken(env.APPROVAL_LINK_SECRET, {
+    tenant,
+    taskId: shop.taskId,
+    actionId: action.id,
+    expiresAtMs: Date.parse(action.expiresAt),
+  });
+  return json({ taskId: shop.taskId, actionId: action.id, approvalUrl: `${webOrigin}/approve/${token}`, expiresAt: action.expiresAt });
+}
+
+/// `GET /v1/admin/pilot/actions`: every reply's live state, newest first,
+/// with its link re-minted at the same expiry (minting is deterministic, so
+/// re-reading never extends a link).
+async function listActions(env: PilotEnv, tenant: string): Promise<Response> {
+  const response = await tenantCall(env, tenant, `/pilot/replies?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return json({ error: "actions_unavailable" }, 503);
+  const { replies } = (await response.json()) as { replies: PilotReplyRecord[] };
+  const webOrigin = originOf(env.WEB_ORIGIN);
+  const nowMs = Date.now();
+  // A proposal that cannot be read fails the whole list rather than
+  // vanishing from it: a reply missing from the console reads as never sent.
+  const actions = await Promise.all(
+    replies.map(async (reply) => {
+      const action = await readAction(env, tenant, reply.taskId, reply.actionId);
+      if (!action) return null;
+      const decidedAt = reply.decidedAt ?? action.approval?.at;
+      const token = await mintApprovalToken(env.APPROVAL_LINK_SECRET, {
+        tenant,
+        taskId: reply.taskId,
+        actionId: reply.actionId,
+        expiresAtMs: Date.parse(action.expiresAt),
+      }).catch(() => null);
+      return {
+        taskId: reply.taskId,
+        actionId: reply.actionId,
+        messageId: reply.messageId,
+        replyText: lineReplyText(action.payload) ?? "",
+        state: viewState(action, nowMs),
+        proposedAt: action.proposedAt,
+        ...(decidedAt ? { decidedAt } : {}),
+        ...(action.dispatch?.at ? { dispatchedAt: action.dispatch.at } : {}),
+        approvalUrl: webOrigin && token ? `${webOrigin}/approve/${token}` : "",
+      };
+    }),
+  ).catch(() => null);
+  if (!actions) return json({ error: "actions_unavailable" }, 503);
+  // An action that answers 404 belongs to a task deleted with its tenant,
+  // which is not a missing record.
+  return json({ actions: actions.filter((action) => action !== null) });
+}
+
+/// `POST /v1/admin/pilot/payments`: the operator records a PromptPay slip
+/// they checked against the shop's bank app. Nothing is charged or moved
+/// here; this is the shop's ledger of confirmations, kept until deletion.
+async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
+  const { orderRef, amountSatang, promptPayId, slipNote } = body;
+  if (!bounded(orderRef, 128) || !bounded(promptPayId, 64) || typeof amountSatang !== "number" ||
+      !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
+      (slipNote !== undefined && (typeof slipNote !== "string" || slipNote.length > 1000))) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const recorded = await pilotWrite(env, shop.tenant, "/pilot/payments", {
+    orderRef,
+    amountSatang,
+    promptPayId,
+    ...(slipNote !== undefined ? { slipNote } : {}),
+  });
+  if (!recorded.ok) return json({ error: "payment_unavailable" }, 503);
+  return json(((await recorded.json()) as { payment: Payment }).payment);
+}

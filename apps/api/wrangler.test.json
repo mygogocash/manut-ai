@@ -14,6 +14,9 @@
     "OFFICE_EXTERNAL_WRITES": "1",
     "LINEAR_WEBHOOK_SECRET": "test-linear-webhook-secret",
     "RELAY_ENABLED": "1",
+    "WEB_ORIGIN": "https://web.manut.test",
+    "PUBLIC_API_ORIGIN": "https://api.manut.test",
+    "APPROVAL_LINK_SECRET": "test-approval-link-secret-0123456789abcdef",
     "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
   },
   "ratelimits": [
@@ -54,6 +57,22 @@
       "namespace_id": "2026100495",
       "simple": {
         "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "LINE_INBOUND_LIMITER",
+      "namespace_id": "2026100496",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "PILOT_APPROVAL_LIMITER",
+      "namespace_id": "2026100497",
+      "simple": {
+        "limit": 120,
         "period": 60
       }
     }
