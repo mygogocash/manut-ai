@@ -1802,6 +1802,7 @@ export const zh: Record<Key, string> = {
   "rt.offline": "离线：无法连接 Manut AI API。",
   "rt.unavailable": "Manut AI API 暂时没有响应。",
   "rt.signedOut": "已退出登录。请在 设置 › 开发者 中登录。",
+  "rt.connectToAnswer": "连接后才能回复",
   "rt.notFound": "这家店里已经没有这一项了。",
   "rt.untitled": "无标题任务",
   "rt.task": "**{title}**\n\n{objective}",
@@ -1874,5 +1875,9 @@ export const zh: Record<Key, string> = {
   "mode.signedOut": "已退出登录 · {host}",
   "mode.offline": "离线 · {host}",
   "mode.unavailable": "无响应 · {host}",
+  "mode.cachedOffline": "离线。显示的是 {time} 时的内容",
+  "mode.cachedUnavailable": "无响应。显示的是 {time} 时的内容",
+  "mode.oldOffline": "离线。已保存的副本超过 7 天，因此不再显示",
+  "mode.oldUnavailable": "无响应。已保存的副本超过 7 天，因此不再显示",
   "mode.open": "运行时设置",
 };

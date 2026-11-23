@@ -1,7 +1,8 @@
 // The desktop shell's side of the connected runtime: one Rust command that makes an API request (the webview's own
-// fetch is held to CORS, and the API answers none), and three that keep the session in the keychain.
+// fetch is held to CORS, and the API answers none), three that keep the session in the keychain, and three that keep
+// the last good read of the shop in a file of the app's own.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LinkDown, shellFetch, shellVault, VaultUnavailable } from "./shell";
+import { LinkDown, shellCacheStore, shellFetch, shellVault, VaultUnavailable } from "./shell";
 
 type Call = [string, Record<string, unknown> | undefined];
 
@@ -94,5 +95,40 @@ describe("shellVault", () => {
 
   it("has no keychain outside the desktop app", async () => {
     await expect(shellVault().read()).rejects.toBeInstanceOf(VaultUnavailable);
+  });
+});
+
+describe("shellCacheStore", () => {
+  it("writes, reads and clears the saved read through the shell's three file commands, naming a file only by its key", async () => {
+    const kept = new Map<string, string>();
+    const calls = shell((cmd, args) => {
+      if (cmd === "shop_cache_write") kept.set(String(args?.key), String(args?.text));
+      if (cmd === "shop_cache_clear") kept.clear();
+      return cmd === "shop_cache_read" ? (kept.get(String(args?.key)) ?? null) : null;
+    });
+    const store = shellCacheStore();
+    const key = "ab".repeat(32);
+    expect(await store.read(key)).toBeNull();
+    await store.write(key, '{"v":1}');
+    expect(await store.read(key)).toBe('{"v":1}');
+    await store.clear();
+    expect(await store.read(key)).toBeNull();
+    expect(calls).toEqual([
+      ["shop_cache_read", { key }],
+      ["shop_cache_write", { key, text: '{"v":1}' }],
+      ["shop_cache_read", { key }],
+      ["shop_cache_clear", {}],
+      ["shop_cache_read", { key }],
+    ]);
+  });
+
+  it("lets a refusal of the shell through for the cache to ignore, and keeps nothing outside the desktop app", async () => {
+    shell(() => {
+      throw "refused";
+    });
+    await expect(shellCacheStore().write("ab".repeat(32), "{}")).rejects.toBe("refused");
+    vi.unstubAllGlobals();
+    await expect(shellCacheStore().read("ab".repeat(32))).rejects.toThrow();
+    await expect(shellCacheStore().clear()).rejects.toThrow();
   });
 });

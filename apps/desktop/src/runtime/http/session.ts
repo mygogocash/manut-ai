@@ -71,6 +71,10 @@ export interface SessionOptions {
   now?: () => number;
   /** a new device id for each sign-in */
   deviceId?: () => string;
+  /** Called whenever a session this computer held ends (signed out here, ended by the API) or is replaced by a new
+   *  sign-in, so what was read with it, the saved read of the shop, is forgotten with it. It runs before anything
+   *  waits on the API. A failure in it never stops a sign-out. */
+  onEnd?: () => unknown;
 }
 
 const text = (v: unknown, max = 8192): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
@@ -119,6 +123,7 @@ export class ApiSession {
   private readonly vault: SessionVault;
   private readonly now: () => number;
   private readonly newDeviceId: () => string;
+  private readonly onEnd: (() => unknown) | undefined;
   private record: StoredSession | null = null;
   /** Another origin's session found in the keychain item, which holds one session at a time. It is never sent here;
    *  a sign-in here ends it on its own API first, so overwriting the item never leaves it live there. */
@@ -134,6 +139,7 @@ export class ApiSession {
     this.vault = opts.vault;
     this.now = opts.now ?? Date.now;
     this.newDeviceId = opts.deviceId ?? (() => crypto.randomUUID());
+    this.onEnd = opts.onEnd;
   }
 
   subscribe(fn: (s: SignInState) => void): () => void {
@@ -172,10 +178,14 @@ export class ApiSession {
     const rec = this.record;
     if (!rec) {
       if (this.state.kind !== "no_keychain") this.set({ kind: "signed_out" });
+      // Nothing is held, but a read kept from an earlier session may be: signing out forgets it all the same.
+      await this.ended();
       return { revoked: false };
     }
     // Nothing uses the session from here on, so a refresh answering late cannot bring it back (see `rotate`).
     this.record = null;
+    // What was read with the session goes first, without waiting on the API, which may be slow or out of reach.
+    await this.ended();
     const res = await this.send("DELETE", "/v1/auth/session", rec.accessToken);
     const revoked = res.kind === "answer" && res.status === 200;
     try {
@@ -274,6 +284,7 @@ export class ApiSession {
   /** Ends another origin's session on that origin's own API (best effort: the item is overwritten either way). */
   private async endForeign(rec: StoredSession): Promise<void> {
     this.foreign = null;
+    await this.ended();
     await this.send("DELETE", "/v1/auth/session", rec.accessToken, undefined, rec.origin);
   }
 
@@ -323,8 +334,18 @@ export class ApiSession {
   /** The API ended the session: forget it here. */
   private async end(): Promise<void> {
     this.record = null;
+    await this.ended();
     await this.vault.clear().catch(() => undefined);
     this.set({ kind: "signed_out", ended: "expired" });
+  }
+
+  /** Tells whoever kept something read with the session that it is over. */
+  private async ended(): Promise<void> {
+    try {
+      await this.onEnd?.();
+    } catch {
+      // Whatever it could not forget, the session still ends.
+    }
   }
 
   private async send(method: "GET" | "POST" | "DELETE", path: string, bearer: string | null, body?: unknown, origin = this.origin): Promise<Raw> {

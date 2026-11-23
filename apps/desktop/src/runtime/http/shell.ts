@@ -1,5 +1,5 @@
-// What the connected runtime needs from the desktop shell (src-tauri/src/api_link.rs): a way to reach the API and a
-// place to keep the session.
+// What the connected runtime needs from the desktop shell (src-tauri/src/api_link.rs, shop_cache.rs): a way to reach the
+// API, a place to keep the session, and a file of the app's own for the last good read of the shop.
 //
 // Requests go through a Rust command rather than the webview's own fetch. The webview is held to CORS, and the API's
 // session routes answer no CORS on purpose (docs/pilot-api.md); the packaged app's content security policy also
@@ -10,7 +10,13 @@
 // commands name, never in localStorage, a log or an address. On a computer whose shell has no keychain support yet
 // (anything but macOS today) the vault answers `VaultUnavailable` and Connected cannot sign in.
 //
-// Both take `fetch`'s shape and a three-call vault, so the runtime's tests hand in fakes and never need the shell.
+// The last good read of the shop is kept in one file under the app's own folder (`~/.manut/shop-cache/`), written and
+// read by three more Rust commands that name a file only by a key of 64 hex digits (cache.ts makes it), never by a
+// path. It holds no token and nothing from the keychain (cache.ts says what it does hold).
+//
+// Each takes a plain shape (`fetch`'s, a three-call vault, a three-call store), so the runtime's tests hand in fakes and
+// never need the shell.
+import type { CacheStore } from "./cache";
 
 export interface FetchInit {
   method: "GET" | "POST" | "DELETE";
@@ -93,5 +99,19 @@ export function shellVault(): SessionVault {
     read: () => call<string | null>("api_session_read"),
     write: (value) => call<void>("api_session_write", { value }),
     clear: () => call<void>("api_session_clear"),
+  };
+}
+
+/** The saved read of the shop through the shell's `shop_cache_write`, `shop_cache_read` and `shop_cache_clear`. Outside
+ *  the desktop app there is no disk to keep it on, so every call fails, which the cache reads as nothing kept. */
+export function shellCacheStore(): CacheStore {
+  const call = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+    if (!inShell()) throw new Error("no desktop shell");
+    return invoke<T>(cmd, args);
+  };
+  return {
+    write: (key, text) => call<void>("shop_cache_write", { key, text }),
+    read: (key) => call<string | null>("shop_cache_read", { key }),
+    clear: () => call<void>("shop_cache_clear"),
   };
 }

@@ -1802,6 +1802,7 @@ export const ja: Record<Key, string> = {
   "rt.offline": "オフライン：Manut AI API に接続できません。",
   "rt.unavailable": "Manut AI API が今は応答していません。",
   "rt.signedOut": "サインアウトしました。設定 › 開発者 でサインインしてください。",
+  "rt.connectToAnswer": "返答するには接続してください",
   "rt.notFound": "このお店にはもうありません。",
   "rt.untitled": "無題のタスク",
   "rt.task": "**{title}**\n\n{objective}",
@@ -1874,5 +1875,9 @@ export const ja: Record<Key, string> = {
   "mode.signedOut": "サインアウト中 · {host}",
   "mode.offline": "オフライン · {host}",
   "mode.unavailable": "応答なし · {host}",
+  "mode.cachedOffline": "オフライン。{time} 時点の内容を表示しています",
+  "mode.cachedUnavailable": "応答なし。{time} 時点の内容を表示しています",
+  "mode.oldOffline": "オフライン。保存したコピーは7日より古いため表示しません",
+  "mode.oldUnavailable": "応答なし。保存したコピーは7日より古いため表示しません",
   "mode.open": "ランタイムの設定",
 };

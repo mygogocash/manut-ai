@@ -1813,6 +1813,7 @@ export const en = {
   "rt.offline": "Offline: the Manut AI API cannot be reached.",
   "rt.unavailable": "The Manut AI API is not answering right now.",
   "rt.signedOut": "Signed out. Sign in under Settings › Developer.",
+  "rt.connectToAnswer": "Connect to answer this",
   "rt.notFound": "That is not in this shop any more.",
   "rt.untitled": "Untitled task",
   "rt.task": "**{title}**\n\n{objective}",
@@ -1887,5 +1888,9 @@ export const en = {
   "mode.signedOut": "Signed out · {host}",
   "mode.offline": "Offline · {host}",
   "mode.unavailable": "Not answering · {host}",
+  "mode.cachedOffline": "Offline. Showing what was here at {time}",
+  "mode.cachedUnavailable": "Not answering. Showing what was here at {time}",
+  "mode.oldOffline": "Offline. The saved copy is more than 7 days old, so it is not shown",
+  "mode.oldUnavailable": "Not answering. The saved copy is more than 7 days old, so it is not shown",
   "mode.open": "Runtime settings",
 };

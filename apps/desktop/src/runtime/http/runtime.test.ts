@@ -18,6 +18,7 @@ import {
   T0,
   taskJson,
   tokens,
+  WRITE_OPS,
   type FakeApi,
 } from "./testkit";
 
@@ -267,42 +268,7 @@ describe("writing", () => {
     serveShop(api);
     await rt.connect();
     const req = rt.request.bind(rt) as unknown as (op: string, p: unknown) => Promise<unknown>;
-    const writes = [
-      "chat.send",
-      "chat.steer",
-      "chat.interrupt",
-      "approval.respond",
-      "clarify.respond",
-      "chat.set_model",
-      "chat.attach",
-      "folder.open",
-      "folder.close",
-      "folder.resume",
-      "thread.create",
-      "thread.remove",
-      "bots.rename",
-      "bots.set_avatar",
-      "bots.restart",
-      "automations.add",
-      "automations.pause",
-      "automations.resume",
-      "automations.remove",
-      "plugins.inspect",
-      "plugins.install",
-      "plugins.toggle",
-      "plugins.update",
-      "plugins.reload",
-      "plugins.remove",
-      "peers.probe",
-      "peers.attach",
-      "peers.detach",
-      "accounts.add",
-      "accounts.set_active",
-      "accounts.remove",
-      "accounts.label",
-      "accounts.discard",
-    ];
-    for (const op of writes)
+    for (const op of WRITE_OPS)
       expect(await refusal(req(op, { bot: "buddy", request_id: "action-1", choice: "once", text: "hi", job: "sched-1" })), op).toEqual({
         code: "not_yet",
         message: t("rt.notYet"),
@@ -370,14 +336,16 @@ describe("staying current", () => {
     ]);
   });
 
-  it("closes when a read fails while open, and opens again with nothing to replay: the app reads everything again", async () => {
+  it("keeps showing the last read when a read fails while open, and when the API answers again closes and opens once with nothing to replay: the app reads everything again", async () => {
     const { api, rt, events, statuses, host } = setup();
     serveShop(api);
     await rt.connect();
     api.on("GET", "/v1/tenant/export", { status: 500, json: { error: "export_incomplete", failed: ["index"] } });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(host.link).toBe("unavailable");
-    expect(rt.status).toBe("closed");
+    // the last good read stands in for the shop, so the screens keep what they show (offline.test.ts)
+    expect(rt.status).toBe("open");
+    expect(statuses).toEqual(["connecting", "open"]);
     serveShop(api, { tasks: [taskJson({ actions: [actionJson({ id: "action-3" })] })] });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(rt.status).toBe("open");
