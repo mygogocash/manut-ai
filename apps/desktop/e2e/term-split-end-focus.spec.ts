@@ -4,6 +4,11 @@
 // a different session than the split's heir.
 import { expect, test, type Page } from "@playwright/test";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
+import { openCode } from "./start";
+
+/** Why two tests close a pane from its row. The row's × is on the Code page now, which takes the main column the
+ *  terminal fills, so the view cannot be seen handing over from a row close. The key close tests show the handover. */
+const NO_ROW_VIEW = "closing a TERMINALS row now happens on the Code page, which replaces the terminal in the main column, so the view cannot be seen handing over from it (the list left the sidebar, where it sat beside the terminal); the key-close tests show the handover";
 
 type Call = { op: string; id?: number; data?: string };
 type W = { __manutSessions: { startTerminal(a: string, c: string): string; ptyOf(id: string): number | null; getState(): { list: { id: string }[] } }; __manutCloseGraceMs?: number; __manutSessionCalls?: Call[]; __manutShellCalls?: Call[] };
@@ -62,6 +67,8 @@ async function world(page: Page, o: { grace?: number; agent?: "shell" | "claude"
   const d0 = await make(page, "shell", "/w/d0");
   const p = await make(page, o.agent ?? "shell", "/w/p");
   const d1 = await make(page, "shell", "/w/d1");
+  // the rows are on the Code page; a terminal opened from there fills the main column
+  await openCode(page);
   await row(page, p).locator(".ss-open").click();
   await expect.poll(() => uiSession(page)).toBe(p);
   await term(page, p).locator(".xterm-helper-textarea").focus();
@@ -84,11 +91,12 @@ async function ends(page: Page, id: string) {
   await expect.poll(async () => (await list(page)).includes(id)).toBe(false);
 }
 
-/** `id` has the view, the sidebar highlight and the keyboard, and typed keys reach its program */
+/** `id` has the view and the keyboard, and typed keys reach its program. The list's highlight of the open row is not
+ *  checked: a row is marked active only while its terminal is in view, and the list is on the Code page, where no
+ *  terminal is in view (the highlight beside the terminal left with the sidebar). */
 async function expectHas(page: Page, id: string) {
   await expect.poll(() => uiSession(page)).toBe(id);
   await expect.poll(() => focusedTerm(page)).toBe(id);
-  await expect(row(page, id)).toHaveClass(/\bactive\b/);
   const p = await ptyOf(page, id);
   const mark = `Z${Date.now() % 1_000_000}`;
   await page.keyboard.type(mark);
@@ -130,6 +138,7 @@ test("a zoomed pane that ends hands the view to the other pane", async ({ page }
 });
 
 test("closing the pane in view from its row (no undo window) hands the view to the other pane", async ({ page }) => {
+  test.skip(true, NO_ROW_VIEW);
   const { p } = await world(page);
   const n = await splitBy(page, p, (await keys(page)).right);
   await row(page, n).hover();
@@ -140,6 +149,7 @@ test("closing the pane in view from its row (no undo window) hands the view to t
 });
 
 test("with the undo window on, closing the pane in view hands the view to the other pane, and Undo puts it back", async ({ page }) => {
+  test.skip(true, NO_ROW_VIEW);
   const { p } = await world(page, { grace: 10_000 });
   const n = await splitBy(page, p, (await keys(page)).right);
   await row(page, n).hover();
@@ -158,6 +168,7 @@ test("not split: the session in view ends and the row below it in the sidebar op
   const a = await make(page, "shell", "/w/web");
   const b = await make(page, "shell", "/w/api");
   const c = await make(page, "shell", "/w/web");
+  await openCode(page);
   await row(page, c).locator(".ss-open").click();
   await expect.poll(() => uiSession(page)).toBe(c);
   await term(page, c).locator(".xterm-helper-textarea").focus();

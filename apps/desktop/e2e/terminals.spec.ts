@@ -14,6 +14,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -45,6 +46,13 @@ async function shot(page: Page, name: string) {
 
 const FOLDERS = ["/home/you/code/web-app", "/home/you/code/manut"];
 
+// Why these tests are skipped: the sidebar left with the side menu. Its BOTS region, the dock of bot tiles beside it
+// (Dock.tsx is no longer rendered) and the separate scroll of BOTS and TERMINALS are gone; TERMINALS is one list, on
+// the Code page.
+const NO_BOTS_REGION = "the sidebar's BOTS region and its dock of bot tiles left with the sidebar (Dock.tsx is no longer rendered), so there is nothing to shoot beside TERMINALS";
+const NO_REGION_SCROLL = "BOTS and TERMINALS are no longer two regions of the sidebar, each with its own scroll and its own divider; the side menu has no BOTS region, and TERMINALS is one list on the Code page";
+const NO_DOCK = "the dock of bot tiles left with the sidebar (Dock.tsx is no longer rendered), so a short window has no dock to keep to one row";
+
 async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]; keep?: boolean } = {}) {
   await page.addInitScript(
     ([theme, folders, roster, keep]) => {
@@ -62,12 +70,13 @@ async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]
     [o.theme ?? null, FOLDERS, o.roster ?? null, !!o.keep] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder` (one of the recent folders, else the picker's). */
 async function newTerm(page: Page, agent: string, folder?: string): Promise<string> {
-  const before = await page.locator('[data-testid^="session-s"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   if (folder) {
@@ -83,9 +92,8 @@ async function newTerm(page: Page, agent: string, folder?: string): Promise<stri
   await page.getByTestId(`session-agent-${agent}`).click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect(page.locator(".xterm-rows").last()).toContainText("(mock)");
-  const after = await page.locator('[data-testid^="session-s"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
-  const id = after.find((x) => x && !before.includes(x) && /^session-s\d+$/.test(x))!;
-  return id.slice("session-".length);
+  // the new terminal is the one in view, and its rows are not on screen while it is: its id is the terminal's own
+  return (await page.getByTestId("terminal").getAttribute("data-session"))!;
 }
 
 const typeIn = async (page: Page, text: string) => {
@@ -108,6 +116,8 @@ async function seedTerminals(page: Page) {
   // pi ended: its row goes on as the login shell (term-exit.spec.ts)
   const done = await newTerm(page, "pi", FOLDERS[1]);
   await typeIn(page, "exit");
+  // the rows are on the Code page, which takes the main column the terminal fills
+  await openCode(page);
   await expect(page.getByTestId(`session-${done}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
   return { claude, codex, shellGrok, shell, done };
 }
@@ -120,11 +130,13 @@ test.describe("shots", () => {
   test.use({ deviceScaleFactor: 2 });
   for (const theme of ["dark", "light"] as const) {
     test(`shots: TERMINALS groups, sidebar and dock (${theme})`, async ({ page }) => {
+      test.skip(true, NO_BOTS_REGION);
       test.skip(!SHOTS, "no shot folder");
       test.setTimeout(90_000);
       await page.setViewportSize({ width: 1280, height: 900 });
       await open(page, { theme });
       const ids = await seedTerminals(page);
+      await openCode(page);
       await page.getByTestId(`session-${ids.claude}`).locator(".ss-open").click();
       // output flowing on claude: the spinner shows
       await typeIn(page, "after 0 progress");
@@ -152,6 +164,7 @@ test.describe("shots", () => {
       await mock("mock.manual", { bot: "kami", on: false });
       await mock("mock.manual", { bot: "friren", on: false });
       if (theme === "dark") {
+        await openCode(page);
         await page.getByTestId("session-new").click();
         await expect(page.getByTestId("session-agent-shell")).toBeVisible();
         await shot(page, "termsessions-plus-menu");
@@ -163,13 +176,15 @@ test.describe("shots", () => {
 
 test("the + menu: Shell first, then CLIs with official marks; no chat choice; picking starts a terminal in the chip's folder", async ({ page }) => {
   await open(page);
+  await openCode(page);
   await page.getByTestId("session-start").click();
   const menu = page.getByTestId("session-menu");
   await expect(menu).toBeVisible();
   const rows = menu.locator("[data-testid^=session-agent-]");
   await expect(rows.first()).toHaveAttribute("data-testid", "session-agent-shell");
   await expect(rows.first().getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
-  for (const a of ["claude", "codex", "grok", "opencode", "omh"]) await expect(menu.getByTestId(`session-agent-${a}`)).toBeVisible();
+  // oh-my-hermes is not offered in the + menu any more (offeredAgents in src/sessions/agents.ts), so it is not listed here
+  for (const a of ["claude", "codex", "grok", "opencode"]) await expect(menu.getByTestId(`session-agent-${a}`)).toBeVisible();
   // no letter glyphs: every CLI row draws a mark image or svg
   for (const a of ["claude", "codex", "grok"]) await expect(menu.getByTestId(`session-agent-${a}`).locator("svg, img").first()).toBeVisible();
   await expect(page.getByTestId("session-way")).toHaveCount(0);
@@ -223,12 +238,16 @@ test("rows: grouped by folder with the branch; two-line cards (status, mark, tit
   // a CLI that ended is a shell now (no check: the row goes on); output flowing = spinner, then idle; a shell that
   // could not start = x
   await expect(page.getByTestId(`session-${ids.done}`)).toHaveAttribute("data-term-status", "idle");
+  // the codex row's status is read on the Code page, where the rows are: its terminal is typed in, then the list is shown
   await page.getByTestId(`session-${ids.codex}`).locator(".ss-open").click();
   await typeIn(page, "hello");
+  await openCode(page);
   await expect(page.getByTestId(`session-${ids.codex}`)).toHaveAttribute("data-term-status", "busy");
   await expect(page.getByTestId(`session-${ids.codex}`)).toHaveAttribute("data-term-status", "idle", { timeout: 6000 });
+  await page.getByTestId(`session-${ids.codex}`).locator(".ss-open").click();
   await page.evaluate(() => ((window as unknown as Record<string, unknown>).__manutShellDie = { code: 1 }));
   await typeIn(page, "after 10 exit 3");
+  await openCode(page);
   await expect(page.getByTestId(`session-${ids.codex}`)).toHaveAttribute("data-term-status", "err");
   await page.evaluate(() => delete (window as unknown as Record<string, unknown>).__manutShellDie);
   // the selected row is a rounded block with a border, no accent bar
@@ -266,12 +285,16 @@ test("a saved chat-mode session is not listed; a saved terminal one is", async (
     }
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
+  // the rows are on the Code page
+  await openCode(page);
   await expect(page.getByTestId("session-s2")).toBeVisible();
   await expect(page.getByTestId("session-s1")).toHaveCount(0);
 });
 
 test("scroll: 12 bots x 6 threads and 15 terminals at 900px; each region scrolls on its own; the dock of bots out of view", async ({ page }) => {
+  test.skip(true, NO_REGION_SCROLL);
   test.setTimeout(180_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   const { bots } = await mock("mock.manyBots", { n: 12 });
@@ -349,6 +372,7 @@ test("scroll: 12 bots x 6 threads and 15 terminals at 900px; each region scrolls
 });
 
 test("a short window keeps one row of tiles", async ({ page }) => {
+  test.skip(true, NO_DOCK);
   await page.setViewportSize({ width: 1280, height: 640 });
   await mock("mock.manyBots", { n: 6 });
   await open(page, { roster: ["kami", "friren", "bot01", "bot02", "bot03", "bot04", "bot05", "bot06"] });
@@ -378,25 +402,27 @@ for (const [platform, mod] of [["Win32", "Control"], ["MacIntel", "Meta"]] as co
     await open(page);
     const a = await newTerm(page, "shell", FOLDERS[0]);
     const b = await newTerm(page, "shell", FOLDERS[0]);
+    await openCode(page);
     await page.getByTestId(`session-${a}`).locator(".ss-open").click();
-    await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
+    // the session in view is the one the terminal shows: a row's highlight is beside the terminal, which is not on the Code page
+    await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
     const area = page.locator(".xterm-helper-textarea").last();
     await area.focus();
     await page.keyboard.press(`${mod}+Shift+BracketRight`);
-    await expect(page.getByTestId(`session-${b}`)).toHaveClass(/active/);
+    await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", b);
     await page.locator(".xterm-helper-textarea").last().focus();
     await page.keyboard.press(`${mod}+Shift+BracketLeft`);
-    await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
+    await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
     await page.locator(".xterm-helper-textarea").last().focus();
     if (platform === "Win32") {
-      // Ctrl+K in a terminal kills a line: the bot search does not take the keyboard
+      // Ctrl+K in a terminal kills a line: it is the terminal's, and the terminal keeps the keyboard
       await page.keyboard.press("Control+k");
-      await expect(page.getByTestId("bot-search")).not.toBeFocused();
+      await expect(page.locator(".xterm-helper-textarea").last()).toBeFocused();
     } else {
       // Ctrl+Shift+] on macOS is the program's: nothing moves
       await page.keyboard.press("Control+Shift+BracketRight");
       await page.waitForTimeout(200);
-      await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
+      await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
     }
   });
 }

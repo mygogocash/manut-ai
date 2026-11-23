@@ -4,6 +4,7 @@
 // each cell of the overlay holds that quarter's colour, not blank and not a half-block mosaic. A Kitty picture placed
 // at the cursor (no U=1) still goes to xterm's image add-on, and with Show images off nothing is kept or painted.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { feed, mock, newTerminal, openApp } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -238,6 +239,7 @@ test("B2: a hidden terminal that gets pictures keeps one overlay canvas, repaint
   }
   // an empty alternate screen printed while hidden: nothing of the old picture shows when it is back
   await page.evaluate(([p]) => (window as unknown as { __manutMockOut(p: number, d: string): boolean }).__manutMockOut(p as number, "\x1b[?1049h"), [pa] as const);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
   await expect.poll(() => layers()).toBe(1);
@@ -294,6 +296,7 @@ test("NB2: placeholder cells whose picture is gone (deleted, or the terminal par
   await page.evaluate(() => (window as unknown as { __manutPark: { set(l: object): void } }).__manutPark.set({ hiddenMs: 200, idleMs: 200, sweepMs: 100 }));
   await expect.poll(() => page.evaluate(() => (window as unknown as { __manutPark: { parked(): number } }).__manutPark.parked())).toBe(1);
   await page.evaluate(() => (window as unknown as { __manutPark: { set(l: object): void } }).__manutPark.set({ hiddenMs: 999_999, idleMs: 999_999, sweepMs: 1000 }));
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
   await expect.poll(async () => (await probe(page, null)).virtual).toBe(0);

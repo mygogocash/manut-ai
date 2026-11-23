@@ -1,6 +1,7 @@
 // Markdown in bot bubbles: GFM tables with alignment, code blocks that wrap, task lists without a second
 // marker, headings by size, and nothing (links, code) poking out of the bubble.
 import { expect, test } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -59,7 +60,7 @@ test.beforeEach(async () => {
 
 test("tables, code blocks, task lists and headings render inside the bubble", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   await mock("mock.emit", { events: [{ event: "message", bot: "kami", id: "md-spec", text: TEXT }] });
   const bubble = page.getByTestId("bubble-bot").last();

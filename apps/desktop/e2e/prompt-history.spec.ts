@@ -4,6 +4,7 @@
 // (Alt+arrow recalls from any line).
 // A prompt held in manut's queue joins the history once it is sent; text the app puts in the box ends a walk.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -33,7 +34,8 @@ test.beforeEach(async () => {
 
 async function openFriren(page: Page) {
   await page.goto("/");
-  await page.getByTestId("bot-friren").click();
+  await chatOpen(page);
+  await openChat(page, "friren");
   await expect(page.getByTestId("header").getByText("Friren", { exact: true })).toBeVisible();
   await expect(page.getByTestId("composer")).toBeEnabled();
   await page.getByTestId("composer").click();
@@ -95,8 +97,8 @@ test("leaving the chat mid-walk keeps the unsent draft, not the prompt on show",
   await box.fill("my unsent draft");
   await box.press("ArrowUp");
   await expect(box).toHaveValue("an earlier prompt");
-  await page.getByTestId("bot-kami").click();
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "kami");
+  await openChat(page, "friren");
   await expect(page.getByTestId("composer")).toHaveValue("my unsent draft");
 });
 
@@ -155,7 +157,7 @@ test("a held prompt is not recalled until it is sent; text the app puts in the b
   // Hermes refuses the steer: what is typed mid-answer waits in manut's queue
   await mock("mock.steerMode", { bot: "kami", mode: "reject" });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   const box = page.getByTestId("composer");
   const held = (text: string) => page.locator("[data-testid=bubble-user][data-held]", { hasText: text });
   await say(page, "Refactor the gateway retry code");

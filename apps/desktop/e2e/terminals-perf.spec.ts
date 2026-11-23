@@ -6,6 +6,7 @@
 // 2. The hidden printing rows still show it live: the spinner while output flows, the last printed line, then idle.
 // Render counts come from `window.__manutRenders` (dev builds only, termActivity.ts `countRender`).
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -37,7 +38,8 @@ async function open(page: Page) {
     (window as unknown as Record<string, unknown>).__manutMockAgents = ["claude", "codex", "omh"];
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `n` Shell terminals in two folders through the session store, as the + menu does; the last one is shown. */
@@ -53,6 +55,8 @@ async function startShells(page: Page, n: number): Promise<string[]> {
     }
     return ids;
   }, n);
+  // the rows are on the Code page, which takes the main column the last terminal fills, so every terminal is hidden there
+  await openCode(page);
   for (const id of ids) await expect(page.getByTestId(`session-${id}`)).toBeVisible();
   return ids;
 }

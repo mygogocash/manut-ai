@@ -5,6 +5,7 @@
 // #2359, Code block colors draft #2360, the rest none.
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const DEMO = "dag:20261110_091904_d4a1c7e2/docs-dark-mode";
@@ -53,7 +54,7 @@ async function openDemo(page: Page, theme: "dark" | "light" = "dark") {
     }) as typeof window.open;
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("places").click();
   // the tabs slide in with the panel: press one once it has stopped
   await motionDone(page);

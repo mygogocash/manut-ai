@@ -2,6 +2,7 @@
 // reload, per kind of tab (Details, the tool tabs, Plans); a double click goes back to the usual width; the chat
 // column keeps its room; ←/→ on the focused handle step it. No bridge call is made for any of it.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -27,7 +28,7 @@ const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getIte
 
 async function openPanel(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("places").click();
   await expect(page.getByTestId("details-panel")).toHaveAttribute("data-tab", "details");
   await expect.poll(() => width(page)).toBe(300);
@@ -57,7 +58,7 @@ test("drag the panel's edge wider, it stays after a reload, and double-click bri
   await expect(page.getByTestId("window")).not.toHaveClass(/panel-dragging/);
 
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(page);
   await expect.poll(() => width(page)).toBe(420);
 
   await page.getByTestId("panel-resizer").dblclick();

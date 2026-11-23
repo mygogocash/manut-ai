@@ -9,6 +9,7 @@
 // the login shell, as before. The mock's Claude Code keeps what it wrote in this page's storage
 // (`__manutMockClaudeConvs`) and refuses `--resume` of a conversation it never wrote, as the real one does.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FOLDER = "/home/you/code/web-app";
@@ -79,11 +80,13 @@ async function open(page: Page) {
     }
   }, FOLDER);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Pick `agent` from the TERMINALS + menu in FOLDER; its session id. */
 async function pick(page: Page, agent: string): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -116,6 +119,7 @@ async function claude(page: Page, talk = true): Promise<{ id: string; conv: stri
 }
 
 async function openRow(page: Page, id: string) {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-ended")).toBeVisible();
 }
@@ -135,7 +139,8 @@ test("a Claude Code terminal whose conversation cannot be continued after a rest
   await expect.poll(() => savedOf(page, id)).toMatchObject({ agent: "claude", agentSession: conv, running: false });
   await openRow(page, id);
   await expect(screen(page)).toContainText(`No conversation found with session ID: ${conv}`);
-  await expect(page.getByTestId(`session-${id}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude");
+  // its mark, in the terminal's own header (the row with the same mark is on the Code page now)
+  await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude");
   await expect(page.getByTestId("session-fresh")).toBeVisible();
   expect(await shellStarts(page)).toEqual([]);
 
@@ -191,6 +196,7 @@ test("a Claude Code terminal nobody typed in starts again under the same id afte
   // Claude Code never wrote that conversation: no `--resume` (it would refuse it), the same id as a new one
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", cwd: FOLDER, sessionId: conv })]);
   expect((await starts(page))[0].resume).toBeUndefined();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   // the mock's CLI prints its banner or its refusal, never both: the banner means it took the id
   await expect(screen(page)).toContainText("(mock)");
@@ -294,6 +300,7 @@ test("a continued Claude Code the person used and then left goes on as the login
   const { id, conv } = await claude(page);
   await page.reload();
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", resume: conv })]);
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toContainText("(mock)");
   // the person types /exit at once: their keys say it was used, however soon it ended
@@ -334,6 +341,7 @@ test("a written conversation the look misses: Claude Code refuses the id as new,
   // "Session ID … is already in use": continued once, with the same id
   expect(second).toMatchObject({ agent: "claude", cwd: FOLDER, resume: conv });
   expect(second.sessionId).toBeUndefined();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toContainText("(mock)");
   await expect(page.getByTestId("session-ended")).toHaveCount(0);
@@ -368,7 +376,8 @@ test("a Codex conversation with no rollout is not started to refuse it: the row 
   expect(await starts(page)).toEqual([]);
   await openRow(page, id);
   await expect(screen(page)).toContainText("Codex could not find this conversation");
-  await expect(page.getByTestId(`session-${id}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
+  // its mark, in the terminal's own header (the row with the same mark is on the Code page now)
+  await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
 
   // the way out stays after another restart
   await page.reload();
@@ -438,6 +447,7 @@ test("keys pressed while Codex looks for its conversation do not hide its refusa
   await nextLoads(page, { gone: [A], codexRefuseMs: 2_500 });
   await page.reload();
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "codex", resume: A })]);
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   // Codex has set up its screen; the person types before it says it found nothing (2.5 s after the start)
   await say(page, "hello");
@@ -455,6 +465,7 @@ test("a continued conversation whose transcript says \"is already in use\" and t
   await expect(screen(page)).toContainText("you said");
   await page.reload();
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", resume: conv })]);
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   // continued, Claude Code shows it again before the person presses a key
   await expect(screen(page)).toContainText("> Error: Port 8080 is already in use");

@@ -3,7 +3,8 @@
 // model's mark with what ran the node, a status icon and word), every edge a 1.25px line with rounded turns and a
 // small arrowhead, in the side panel and at full size when the panel is maximised in place (⌘⇧G). Real (redacted) dag runs, real
 // delegation logs for the models and routes, and a synthetic 40-node run for the layout.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FAN = "dag:20261102_235818_fcfb1bdd/codex-coexist";
@@ -46,11 +47,20 @@ async function mockError(op: string, params: Record<string, unknown>): Promise<s
   return reply.error?.code;
 }
 
+/** An element's words without its drawings. Since the fork an agent's mark is a drawing of its first letter (README.md:
+ *  other companies' logos are replaced by initials), and these checks read the words beside the mark. */
+const words = (l: Locator) =>
+  l.evaluate((e) => {
+    const c = e.cloneNode(true) as Element;
+    c.querySelectorAll("svg").forEach((s) => s.remove());
+    return (c.textContent ?? "").replace(/\s+/g, " ").trim();
+  });
+
 async function openRuns(page: Page, bot = "kami") {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   if (bot !== "kami") {
-    await page.getByTestId(`bot-${bot}`).click();
+    await openChat(page, bot);
     await page.keyboard.press(`${await mod(page)}+Period`);
   } else if (!/\bpanel-open\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "")) {
     // a second load in the same test reopens the panel as it was left (resume): open it only when closed
@@ -310,7 +320,7 @@ test("a selected run folds the list into its header; 'All runs' unfolds it; pick
 
 test("a bot with no runs says so", async ({ page }) => {
   await openRuns(page);
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByTestId("panel-runs")).toContainText("No plans yet.");
 });
 
@@ -443,18 +453,22 @@ test("the header says what waits on the person, in the needs colour, and opens i
   await mock("mock.ask", { bot: "kami", kind: "approval" });
   const needs = panel(page).getByTestId("run-plan-needs");
   await expect(needs).toHaveText("1 needs you");
-  const [needsColour, sidebarNeeds] = await Promise.all([
+  const [needsColour, appNeeds] = await Promise.all([
     needs.evaluate((e) => getComputedStyle(e).color),
-    page.locator(".side").evaluate((e) => {
+    // the app's needs amber, as the chat's subagent rows define it (the sidebar that defined it too left)
+    page.evaluate(() => {
+      const scope = document.createElement("div");
+      scope.className = "sa-row";
       const probe = document.createElement("i");
       probe.style.color = document.documentElement.dataset.theme === "light" ? "var(--needs-text)" : "var(--needs)";
-      e.appendChild(probe);
+      scope.appendChild(probe);
+      document.body.appendChild(scope);
       const c = getComputedStyle(probe).color;
-      probe.remove();
+      scope.remove();
       return c;
     }),
   ]);
-  expect(needsColour).toBe(sidebarNeeds);
+  expect(needsColour).toBe(appNeeds);
   await needs.click();
   await expect(page.getByTestId("timeline").getByTestId("card-approval")).toBeFocused();
 });
@@ -488,7 +502,13 @@ test("a node is its title, one mark with what ran it, and a status icon with a w
   const by: Record<string, { title: string; lines: number; clamp: string; tall: number; cut: boolean; repair: boolean; marks: [string, string][]; facts: string[]; whole: string; status: string; icon: string; children: string[] }> = Object.fromEntries(
     await nodes.evaluateAll((els) =>
       els.map((e) => {
-        const texts = (sel: string) => [...e.querySelectorAll(sel)].map((l) => (l.textContent ?? "").trim());
+        // the words only: an agent's mark draws its first letter (words(), above)
+        const texts = (sel: string) =>
+          [...e.querySelectorAll(sel)].map((l) => {
+            const c = l.cloneNode(true) as Element;
+            c.querySelectorAll("svg").forEach((s) => s.remove());
+            return (c.textContent ?? "").trim();
+          });
         const title = e.querySelector<HTMLElement>("[data-testid=node-title]")!;
         return [
           e.getAttribute("data-node"),
@@ -674,8 +694,9 @@ test("a node shows the logo of the model that ran it: Claude, OpenAI, Gemini; th
   // a model is known: its maker's mark, and the CLI the lane went to only as words
   expect(inPanel["t3-doctor"]).toMatchObject({ marks: ["model:claude"], logo: "claude", whole: "Opus 5.5 · low · via Codex" });
   expect(inPanel["t1-hermes"]).toMatchObject({ marks: ["model:claude"], whole: "Opus 5.5 · high · via Codex" });
-  // no model is known: the CLI's own mark, with its name where the model's would be
-  expect(inPanel["t1-discovery"]).toMatchObject({ marks: ["agent:codex"], logo: "codex", whole: "Codex · high", via: null });
+  // no model is known: the CLI's own mark, with its name where the model's would be (the mark draws Codex's first
+  // letter since the fork, as other companies' logos are replaced by initials)
+  expect(inPanel["t1-discovery"]).toMatchObject({ marks: ["agent:codex"], logo: "letter", whole: "Codex · high", via: null });
   // a Hermes helper: its model's mark alone
   expect(inPanel["t5-verify"]).toMatchObject({ marks: ["model:claude"], whole: "Opus 5.5 · review", via: null });
   for (const n of Object.values(inPanel)) expect(n.marks).toHaveLength(1);
@@ -1031,12 +1052,21 @@ test("Dependencies and Node details are plain text under the boxes", async ({ pa
   const card = details.getByTestId("run-detail");
   await expect(card).toHaveCount(1);
   await expect(card).toHaveAttribute("data-node", "t3-doctor");
-  expect((await card.innerText()).split("\n").map((s) => s.trim()).filter(Boolean)).toEqual(["Doctor check for the Codex pack", "Codex · low", expect.stringMatching(/^Running \d+m \d\ds · layer 2 · /)]);
+  // its lines of words: an agent's mark draws its first letter (words(), above), which is not a line of text
+  const lines = await card.evaluate((e) => {
+    const marks = [...e.querySelectorAll<SVGElement>("svg[data-agent=letter]")];
+    for (const m of marks) m.style.display = "none";
+    const text = (e as HTMLElement).innerText;
+    for (const m of marks) m.style.display = "";
+    return text;
+  });
+  expect(lines.split("\n").map((s) => s.trim()).filter(Boolean)).toEqual(["Doctor check for the Codex pack", "Codex · low", expect.stringMatching(/^Running \d+m \d\ds · layer 2 · /)]);
   // its status is the running dot, as on its box; one mark
   await expect(card.locator("svg[data-icon]")).toHaveAttribute("data-icon", "dot");
   expect(await card.getByTestId("node-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-mark")))).toEqual(["codex"]);
   // all of it in the app's own font: monospace is for code and paths only
-  const fonts = await box.locator(".bv-sec, .bv-sec *").evaluateAll((els) => [...new Set(els.map((e) => getComputedStyle(e).fontFamily))]);
+  // (an agent's mark is a drawing of its letter, in the drawing's own font: words(), above)
+  const fonts = await box.locator(".bv-sec, .bv-sec *:not(svg):not(svg *)").evaluateAll((els) => [...new Set(els.map((e) => getComputedStyle(e).fontFamily))]);
   expect(fonts).toEqual([await page.evaluate(() => getComputedStyle(document.body).fontFamily)]);
   expect(await box.locator(".bv-sec").first().innerText()).not.toMatch(GLYPHS);
   const plain = await box.locator(".bv-sec, .bv-sec *").evaluateAll((els) =>
@@ -1163,7 +1193,7 @@ test("clicking a node opens its detail under 'Node details'; a failed node offer
   const word = drawer.getByTestId("run-state-word");
   await expect(word).toHaveText("failed");
   // its lane went to Codex and no model was reported: Codex, and the effort its unnamed category says
-  await expect(drawer.getByTestId("run-facts")).toHaveText("Codex · high");
+  await expect.poll(() => words(drawer.getByTestId("run-facts"))).toBe("Codex · high");
   expect(await drawer.getByTestId("run-facts").getByTestId("node-mark").evaluateAll((els) => els.map((e) => e.getAttribute("data-mark")))).toEqual(["codex"]);
   await expect(drawer).not.toContainText("unspecified");
   expect(await word.evaluate((e) => getComputedStyle(e).color)).not.toBe(await drawer.evaluate((e) => getComputedStyle(e).color));
@@ -1208,7 +1238,7 @@ test("88 sub-runs: the first 8 rows, running then failed first; 'Show all 88' op
   await expect(box).toHaveAttribute("data-run", CLI_CODEX);
   // a CLI session's header names the CLI and the folder it ran in
   await expect(box.getByTestId("run-plan-counts")).toHaveText(/^Completed · 84 of 88 done · 1 failed · \d+s$/);
-  await expect(box.getByTestId("run-plan-where")).toHaveText("Codex · api-server");
+  await expect.poll(() => words(box.getByTestId("run-plan-where"))).toBe("Codex · api-server");
   const graph = box.getByTestId("run-graph");
   await expect(graph).toHaveAttribute("data-frontiers", "1");
   const cards = box.getByTestId("run-node");
@@ -1517,7 +1547,7 @@ test("a delegate fan-out without a dag is its own run of one frontier", async ({
 
 test("a delegate_task in chat: one plain sentence per dag part, a read-only status, and the run opens", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.emit", {
     events: [
       { event: "turn.start", bot: "kami" },
@@ -1562,7 +1592,7 @@ test("CLI runs: listed under the bot's own runs with the agent's mark and name; 
   const box = panel(page);
   await expect(box).toHaveAttribute("data-run", CLI_CLAUDE);
   await expect(box.getByTestId("run-plan-counts")).toHaveText(/ of 3 done/);
-  await expect(box.getByTestId("run-plan-where")).toHaveText("Claude · web-app"); // the CLI, and the folder the session ran in
+  await expect.poll(() => words(box.getByTestId("run-plan-where"))).toBe("Claude · web-app"); // the CLI, and the folder the session ran in
   await expect(box.getByTestId("run-node")).toHaveCount(3);
   await expect(box.getByTestId("run-graph")).toHaveAttribute("data-frontiers", "1");
   // the mark of the model each subagent ran on (Opus 5.5: Anthropic's), one a node

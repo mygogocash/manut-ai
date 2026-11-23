@@ -10,6 +10,7 @@
 //      marks the row as the bell does (and raises no notification); done without working first marks nothing.
 // Chromium (Playwright's headless shell); nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 import { mock, newTerminal, openApp } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -136,7 +137,7 @@ test("OSC 7: the reported folder only names the panel tab; after a restart the t
   // the kept tab names the folder the shell started in, never the reported one
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("manut.termpanel.tabs") || "{}").tabs?.[0]?.cwd)).toBe(first.at);
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await startDone(page);
   await page.waitForTimeout(300);
   if (!(await page.getByTestId("termpanel").isVisible())) await page.keyboard.press("Control+Backquote");
   await expect(shown).toContainText("login shell in");
@@ -166,6 +167,9 @@ test("OSC 7: a TERMINALS row's folder line follows the folder its shell reports,
   const id = await newTerminal(page);
   const pty = (await ptyOf(page, id))!;
   const row = page.getByTestId(`session-${id}`);
+  // the row is on the Code page; its shell goes on printing there
+  await openCode(page);
+  await expect(row).toBeVisible();
   await expect(row.getByTestId("term-cwd")).toHaveCount(0);
   await out(page, pty, OSC("7;file:///tmp/x%20y"));
   await expect(row.getByTestId("term-cwd")).toHaveText("x y");
@@ -183,6 +187,8 @@ test("OSC 7: a TERMINALS row takes this computer's own name before the bottom pa
   // the mock computer is "mybox.local"; no panel shell has started in this page load
   expect(await page.evaluate(() => ((window as unknown as { __manutShellCalls?: { op: string }[] }).__manutShellCalls ?? []).filter((c) => c.op === "start").length)).toBe(0);
   await out(page, pty, OSC("7;file://mybox/home/you/code/api-server"));
+  // the row is on the Code page
+  await openCode(page);
   await expect(row.getByTestId("term-cwd")).toHaveText("api-server");
 });
 
@@ -206,8 +212,10 @@ test("OSC 9;4: progress keeps the row working, and done while the person looks e
   const row = page.getByTestId(`session-${a}`);
   // done with no working before it, while looked at: nothing
   await out(page, ptyA, OSC("9;4;0"));
-  // working (indeterminate): the spinner holds past the output window (BUSY_MS, 2 s) with nothing printed
+  // working (indeterminate): the spinner holds past the output window (BUSY_MS, 2 s) with nothing printed (its row is
+  // read on the Code page from here on; the terminal is shown again from the row when it must be looked at)
   await out(page, ptyA, OSC("9;4;3"));
+  await openCode(page);
   await expect(row).toHaveAttribute("data-term-status", "busy");
   await page.waitForTimeout(2600);
   await expect(row).toHaveAttribute("data-term-status", "busy");
@@ -216,16 +224,22 @@ test("OSC 9;4: progress keeps the row working, and done while the person looks e
   expect(b).not.toBe(a);
   await out(page, ptyA, OSC("9;4;1;80"));
   await out(page, ptyA, OSC("9;4;0"));
+  await openCode(page);
   await expect(row).toHaveAttribute("data-term-status", "bell");
   expect(await page.evaluate(() => (window as unknown as { __notes: string[] }).__notes)).toEqual([]);
   // the escape's text is not on the row
   await expect(row).not.toContainText("9;4");
   // back to it: seen
   await row.locator(".ss-open").click();
+  await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
+  await openCode(page);
   await expect(row).not.toHaveAttribute("data-term-status", "bell");
   // done while looked at, after working: no mark
+  await row.locator(".ss-open").click();
+  await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
   await out(page, ptyA, OSC("9;4;1;10"));
   await out(page, ptyA, OSC("9;4;0"));
   await page.waitForTimeout(100);
+  await openCode(page);
   await expect(row).not.toHaveAttribute("data-term-status", "bell");
 });

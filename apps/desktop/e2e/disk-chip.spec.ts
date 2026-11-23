@@ -1,9 +1,10 @@
 // Little disk space on the home folder's volume (src/lib/disk.ts, src-tauri/src/disk.rs): the mock host reads
-// `__manutDiskFree` bytes with the shell's rules. A low disk shows the sidebar chip and sends one note; the chip opens
+// `__manutDiskFree` bytes with the shell's rules. A low disk shows the side menu's chip and sends one note; the chip opens
 // Settings › General, whose "Off" hides it. With MANUT_SHOTS=<dir> it writes disk-chip-{dark,light}.png.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || "";
 
@@ -25,7 +26,7 @@ async function open(page: Page, free: number, theme: "dark" | "light" = "dark") 
     w.Notification = FakeNotification;
   }, free);
   await page.goto("/");
-  await expect(page.getByTestId("foot-row")).toBeVisible();
+  await chatOpen(page);
 }
 
 const notes = (page: Page) => page.evaluate(() => (window as any).__notes as { title: string; body: string }[]);

@@ -11,6 +11,12 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+// Every test here is about the bots' thread tree: its rows under each bot, their states, their times, their row x and
+// their row's chat card. The tree left with the sidebar (ThreadTree.tsx and BotRow.tsx are no longer rendered), and the
+// side menu lists recent threads without a tree; threads are opened from History and the composer's ./thread.
+test.skip(true, "the bots' thread tree left with the sidebar (ThreadTree.tsx and BotRow.tsx are no longer rendered): rows under each bot, their states, times, row × and row cards have no place in the side menu");
+import { chatOpen } from "./start";
+
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
 
@@ -44,7 +50,7 @@ async function shot(page: Page, name: string) {
 async function setup(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** Kami with four threads, one per live state the events below put them in (plus a fifth that stays idle). */
@@ -61,7 +67,7 @@ async function seed(page: Page) {
   const { threads } = await mock("mock.threads", { bot: "kami", threads: SEED });
   // reload so the app reads thread.list fresh
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   const ids = threads as string[];
   const [notes, nightly, slack, docs, og] = ids;
   // running: a turn starts on the 502 thread; needs you: the docs thread asks; done / failed: turns ended

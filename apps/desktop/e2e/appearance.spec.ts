@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chatOpen } from "./start";
+import { tokenColor } from "./tokens";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -28,7 +30,7 @@ async function mock(op: string): Promise<any> {
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -54,19 +56,22 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("defaults: OMH colours, soft bubbles, small text", async ({ page }) => {
+test("defaults: the manut colours, soft bubbles, small text", async ({ page }) => {
   await open(page);
   const html = page.locator("html");
   await expect(html).toHaveAttribute("data-palette", "manut");
   await expect(html).toHaveAttribute("data-bubbles", "soft");
   await expect(html).toHaveAttribute("data-text", "small");
   expect(await css(page, "bubble-bot", "font-size")).toBe("13px");
-  expect(await css(page, "bubble-bot", "background-color")).toBe("rgb(29, 26, 32)");
+  // the default colour set takes the design tokens (packages/ui-kit), as the fork restyled it
+  expect(await css(page, "bubble-bot", "background-color")).toBe(await tokenColor(page, "--bub-bot"));
 });
 
 test("colour set: picking one repaints your bubble, links and accent, and the logo stays", async ({ page }) => {
   await open(page);
-  const logoBefore = await page.locator(".brand b").evaluate((e) => getComputedStyle(e).backgroundImage);
+  // the logo is the side menu's brand mark now; its paint must not follow the colour set
+  const logo = () => page.locator(".sb-mark").evaluate((svg) => [...svg.querySelectorAll("rect, path")].map((e) => `${getComputedStyle(e).fill} ${getComputedStyle(e).stroke}`).join("|"));
+  const logoBefore = await logo();
   const meBefore = await css(page, "bubble-user", "background-color");
   await appearance(page);
   await expect(page.getByTestId("palette-manut")).toHaveAttribute("aria-checked", "true");
@@ -81,7 +86,7 @@ test("colour set: picking one repaints your bubble, links and accent, and the lo
   await page.getByRole("button", { name: "Close settings" }).click();
   expect(await css(page, "bubble-user", "background-color")).not.toBe(meBefore);
   expect(await css(page, "bubble-user", "background-color")).toBe("rgb(31, 49, 80)"); // #1f3150
-  expect(await page.locator(".brand b").evaluate((e) => getComputedStyle(e).backgroundImage)).toBe(logoBefore);
+  expect(await logo()).toBe(logoBefore);
   // light theme has its own tint for the same set
   await page.evaluate(async () => {
     const m = await import(/* @vite-ignore */ "/src/state/store.ts");
@@ -98,7 +103,7 @@ test("bubble styles: solid puts your bubble in the accent; open drops the bot's 
   await expect(page.getByTestId("bubbles-hint")).toHaveText("Your messages in the accent colour");
   await page.getByRole("button", { name: "Close settings" }).click();
   expect(await css(page, "bubble-user", "background-image")).toContain("linear-gradient");
-  expect(await css(page, "bubble-user", "color")).toBe("rgb(255, 255, 255)");
+  expect(await css(page, "bubble-user", "color")).toBe(await tokenColor(page, "--on-accent"));
 
   await appearance(page);
   await page.getByTestId("bubbles-seg").getByRole("radio", { name: "Open" }).click();

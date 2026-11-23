@@ -65,7 +65,7 @@ const calls = (page: Page) => page.evaluate(() => (window as unknown as { __updC
 test("no update: the user row shows no button", async ({ page }) => {
   await stub(page, { version: null });
   await page.goto("/");
-  await expect(page.getByTestId("me")).toBeVisible();
+  await expect(page.getByTestId("nav-settings")).toBeVisible();
   await expect.poll(() => calls(page)).toEqual(["check"]);
   await expect(page.getByTestId("update-btn")).toHaveCount(0);
   await expect(page.getByTestId("update-progress")).toHaveCount(0);
@@ -79,18 +79,18 @@ test("a failed check stays quiet", async ({ page }) => {
   await expect(page.getByTestId("update-error")).toHaveCount(0);
 });
 
-test("update available: button with the version, bottom-left in the user row", async ({ page }) => {
+test("update available: button with the version, in the side menu's foot above Settings", async ({ page }) => {
   await stub(page, { version: "0.1.2", hold: true });
   await page.goto("/");
-  const btn = page.getByTestId("me").getByTestId("update-btn");
+  // the side menu's foot holds the update button, above the account row (the foot slot sits there in the side menu)
+  const btn = page.getByTestId("sidebar").getByTestId("update-btn");
   await expect(btn).toHaveText("Update to 0.1.2");
-  // inside the sidebar, below Settings, and nothing in the row overflows the sidebar
+  // inside the sidebar, above Settings, and nothing in the row overflows the sidebar
   const side = (await page.getByTestId("sidebar").boundingBox())!;
   const b = (await btn.boundingBox())!;
   const settings = (await page.getByTestId("nav-settings").boundingBox())!;
   expect(b.x + b.width).toBeLessThanOrEqual(side.x + side.width);
-  expect(b.y).toBeGreaterThan(settings.y);
-  expect(b.y + b.height).toBeGreaterThan(side.y + side.height - 60);
+  expect(b.y + b.height).toBeLessThanOrEqual(settings.y);
 
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
@@ -120,7 +120,7 @@ test("a failed install says why and offers a retry", async ({ page }) => {
   await expect(page.getByTestId("update-btn")).toHaveText("Retry update");
   expect(await calls(page)).toEqual(["check", "install"]);
   // the app stays usable: the composer and the bot list still respond
-  await expect(page.getByTestId("side-bots")).toBeVisible();
+  await expect(page.getByTestId("menu-team")).toBeVisible();
   // a retry asks again
   await page.getByTestId("update-btn").click();
   await expect(page.getByTestId("update-confirm")).toBeVisible();
@@ -135,7 +135,7 @@ const MIN = 60_000;
 async function leftOpen(page: Page) {
   await page.clock.install();
   await page.goto("/");
-  await expect(page.getByTestId("me")).toBeVisible();
+  await expect(page.getByTestId("nav-settings")).toBeVisible();
   await expect.poll(() => calls(page)).toEqual(["check"]);
 }
 

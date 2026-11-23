@@ -1,6 +1,7 @@
 // A routine that keeps failing folds into one timeline line that counts its runs (khope: the routine history kept
 // piling up in the bot's chat, one line every 30 minutes).
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -24,7 +25,7 @@ const emit = (...events: Record<string, unknown>[]) => mock("mock.emit", { event
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 

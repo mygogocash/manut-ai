@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { chatResume } from "./e2e/start";
 // The Playwright suite inherited from Oh My Hermes. It reaches the app through the WebSocket runtime adapter
 // (VITE_MANUT_BRIDGE below) and the Node mock bridge in e2e/mock-bridge.mjs, not the in-process runtime the app
 // uses by default. It has not been run since the fork: the specs of removed screens were deleted, and the rest
@@ -15,8 +16,10 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     viewport: { width: 1280, height: 820 },
-    // past the first-run cards, with all four mock bots in the sidebar list: specs see the app as a returning person
-    // who added them does (onboarding.spec.ts and roster.spec.ts start from nothing)
+    // past the first-run cards, with all four mock bots on the team, and Kami's chat left open: specs see the app as a
+    // returning person who added them does (onboarding.spec.ts starts from nothing). The app opens on Home unless a
+    // snapshot says otherwise, and these specs were written for a chat at start, so the snapshot opens Kami's
+    // (e2e/start.ts says why this way and not through Team).
     storageState: {
       cookies: [],
       origins: [
@@ -25,6 +28,7 @@ export default defineConfig({
           localStorage: [
             { name: "manut.onboarded", value: "1" },
             { name: "manut.roster", value: JSON.stringify(["kami", "friren", "default", "omh-tui"]) },
+            { name: "manut.resume", value: chatResume("kami") },
           ],
         },
       ],

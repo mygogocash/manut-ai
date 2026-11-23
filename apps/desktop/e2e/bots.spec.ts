@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -36,7 +37,7 @@ const callsOf = async (op: string) =>
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function botPage(page: Page, name = "kami") {
@@ -58,14 +59,17 @@ test("rename: pencil, type, Enter saves; the new name shows everywhere and the p
   await page.getByTestId("rename").click();
   const field = page.getByTestId("rename-input");
   await expect(field).toBeFocused();
-  await expect(page.getByText("The profile stays")).toBeVisible();
+  await expect(page.getByText("Only the name shown changes.")).toBeVisible();
   await field.fill("  Kami   the Helper ");
   await field.press("Enter");
   await expect(page.getByTestId("bot-name")).toHaveText("Kami the Helper");
-  await expect(page.getByTestId("bot-kami").locator(".bot-n")).toHaveText("Kami the Helper"); // sidebar
   await expect(page.getByTestId("settings-nav-bot-kami")).toContainText("Kami the Helper");
   await expect(page.locator(".st-row", { hasText: "Profile ID" })).toContainText("kami"); // the id is unchanged
   expect((await callsOf("bots.rename")).map((c) => c.params)).toEqual([{ bot: "kami", name: "Kami   the Helper" }]);
+  // the Team page names the member by it, as the sidebar's row did
+  await page.getByTestId("menu-team").click();
+  await expect(page.getByTestId("team-kami").locator(".l1")).toHaveText("Kami the Helper");
+  await botPage(page);
 
   // Escape cancels without a call; empty goes back to the profile's own name
   await page.getByTestId("rename").click();
@@ -97,8 +101,9 @@ test("picture: choose a file, it is cropped square and shows on every avatar; re
   await expect(page.getByTestId("avatar-reset")).toHaveCount(0);
   await page.getByTestId("avatar-file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: PNG });
 
-  const own = page.getByTestId("bot-kami").locator("img.ui-av");
-  await expect(own).toHaveAttribute("data-own", "1"); // sidebar row
+  // Settings' own list draws the member's avatar beside the page (the sidebar's row did before)
+  const own = page.getByTestId("settings-nav-bot-kami").locator("img.ui-av");
+  await expect(own).toHaveAttribute("data-own", "1");
   await expect(page.getByTestId("avatar-edit").locator("img")).toHaveAttribute("data-own", "1");
   const sent = (await callsOf("bots.set_avatar"))[0].params as { bot: string; data: string };
   expect(sent.bot).toBe("kami");
@@ -142,7 +147,7 @@ test("bot page: what the bot has done (sessions per place, skills, routines)", a
   await expect(places).toContainText("since");
   await page.getByTestId("bot-open-chat").click();
   await expect(page.getByTestId("settings-view")).toHaveCount(0);
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 });
 
 test("All bots: a card per bot with status, model and places; search filters; a card opens the bot", async ({ page }) => {
@@ -184,9 +189,10 @@ test("screenshots: All bots and a bot page with its own picture, dark and light"
   await page.setViewportSize({ width: 1200, height: 760 });
   await open(page);
   await botPage(page);
-  const mark = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "assets", "manut-mark.png"));
-  await page.getByTestId("avatar-file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: mark });
-  await expect(page.getByTestId("bot-kami").locator("img.ui-av")).toHaveAttribute("data-own", "1");
+  // any square-able PNG: the app's mark is an SVG since the fork
+  const picture = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "media", "chart.png"));
+  await page.getByTestId("avatar-file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: picture });
+  await expect(page.getByTestId("settings-nav-bot-kami").locator("img.ui-av")).toHaveAttribute("data-own", "1");
   await page.screenshot({ path: join(SHOTS, "bots-page-dark.png") });
   await page.getByTestId("settings-nav-bots").click();
   await expect(page.getByTestId("bot-card-kami").locator(".bc-place")).toHaveCount(3);

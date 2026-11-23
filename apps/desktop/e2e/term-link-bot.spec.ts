@@ -5,6 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -49,10 +50,12 @@ async function open(page: Page, theme?: "dark" | "light") {
     [FOLDER, theme ?? ""] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 async function newTerm(page: Page, agent: string): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -122,8 +125,11 @@ test("a bot's request shows a card and types nothing until Allow; Deny types not
   await expect(card.locator("button")).toHaveText(["Deny", "Allow once"]);
   // Deny has the focus: a stray Enter is not an Allow
   await expect(card.locator("button").first()).toBeFocused();
-  // the row and the Dock count show it waits on the person
+  // its row (on the Code page; then back on the terminal from it) and the app's badge show it waits on the person
+  await openCode(page);
   await expect(page.getByTestId(`session-${id}`)).toHaveAttribute("data-term-status", "bell");
+  await page.getByTestId(`session-${id}`).locator(".ss-open").click();
+  await expect(card).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => (window as unknown as W).__manutBadge)).toBeGreaterThan(0);
   // several looks later, still nothing typed
   await page.waitForTimeout(3500);
@@ -209,16 +215,21 @@ test("a request to a paused terminal shows its card there: Deny, or Resume and s
   await expect.poll(async () => Object.keys(await files(page))).toContain(la);
   // manut restarts: the shell comes back paused, nothing runs
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   await expect.poll(async () => (await files(page))[la]?.state).toBe("ended");
   await ask(page, la, "first request");
   const card = page.getByTestId("term-share-card");
   await expect(card).toHaveCount(1);
-  await expect(page.getByTestId(`session-${a}`)).toHaveAttribute("data-term-status", "bell");
   // no Allow once where nothing runs: only Resume and send
   await expect(card.locator("button")).toHaveText(["Deny", "Resume and send"]);
   await expect(card.locator("button").first()).toBeFocused();
+  // its row, on the Code page, shows it waits on the person; then back on the terminal from it
+  await openCode(page);
+  await expect(page.getByTestId(`session-${a}`)).toHaveAttribute("data-term-status", "bell");
+  await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await card.getByRole("button", { name: "Deny" }).click();
   await expect(card).toHaveCount(0);
   expect(await page.evaluate(() => ((window as unknown as W).__manutShellCalls ?? []).filter((c) => c.op === "start").length)).toBe(0);
@@ -252,6 +263,7 @@ test.describe("shots", () => {
       const link = await linkId(page, id);
       await expect.poll(async () => Object.keys(await files(page))).toContain(link);
       await page.reload();
+      await openCode(page);
       await page.getByTestId(`session-${id}`).locator(".ss-open").click();
       await expect(page.getByTestId("session-paused")).toBeVisible();
       await ask(page, link, "Run the payment tests again and tell me which one fails:\npnpm test payments --reporter=dot");

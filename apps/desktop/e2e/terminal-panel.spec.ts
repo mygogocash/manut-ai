@@ -5,6 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { mock, openApp } from "./term-find-helpers";
+import { chatOpen } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || process.env.MANUT_SHOTS_DIR || "";
 const PROJECT = "/home/you/code/web-app";
@@ -155,7 +156,7 @@ test("the top edge drags to resize, and the height is kept on this computer", as
   const saved = await page.evaluate(() => Number(localStorage.getItem("manut.termpanel.h")));
   expect(saved).toBe(Math.round(before.height + 100));
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.keyboard.press("Control+Backquote");
   await expect.poll(async () => Math.round((await panel(page).boundingBox())?.height ?? 0)).toBe(saved);
 });

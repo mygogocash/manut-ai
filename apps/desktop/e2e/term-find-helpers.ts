@@ -3,6 +3,7 @@
 // piece of text in the terminal. Never opens a real browser: `window.open` (what openExternal uses outside Tauri) and
 // the clipboard are stubbed and record what they were asked.
 import { expect, type Page } from "@playwright/test";
+import { chatOpen, chatResume, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -42,15 +43,18 @@ export async function usePlatform(page: Page) {
   }, PLATFORM);
 }
 
-/** The app on the mock host. `window.open` and the clipboard are stubs that record into window.__opened / __clipWrites. */
+/** The app on the mock host, on Kami's chat with no session saved from an earlier test. `window.open` and the
+ *  clipboard are stubs that record into window.__opened / __clipWrites. */
 export async function openApp(page: Page, o: OpenOpts = {}) {
   await usePlatform(page);
   await page.addInitScript(
-    ([theme, term, clip]) => {
+    ([theme, term, clip, resume]) => {
       if (!sessionStorage.getItem("__kept")) {
         localStorage.removeItem("manut.sessions.recent");
         localStorage.removeItem("manut.sessions.open");
-        localStorage.removeItem("manut.resume");
+        // A snapshot with no sessions, rather than none: without one the app starts on Home, and these specs start
+        // on a chat, as the app did before Home (e2e/start.ts).
+        localStorage.setItem("manut.resume", resume as string);
       }
       if (theme) localStorage.setItem("manut.theme", theme as string);
       localStorage.setItem("manut.term", JSON.stringify(term ?? {}));
@@ -72,14 +76,15 @@ export async function openApp(page: Page, o: OpenOpts = {}) {
         },
       });
     },
-    [o.theme ?? null, o.term ?? {}, o.clipboard ?? ""] as const,
+    [o.theme ?? null, o.term ?? {}, o.clipboard ?? "", chatResume("kami")] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** A new Claude Code session opened as a terminal; returns its session id once the mock program has printed. */
 export async function newTerminal(page: Page): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

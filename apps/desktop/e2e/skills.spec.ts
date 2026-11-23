@@ -7,6 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { openChat, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || join(homedir(), ".hermes/profiles/kami/cache/scratch/manut-fable/shots3");
@@ -37,7 +38,9 @@ const options = (page: Page) => page.getByTestId("skill-option");
 
 async function openFriren(page: Page) {
   await page.goto("/");
-  await page.getByTestId("bot-friren").click();
+  // a later load in the same test comes back on Friren's chat (resume), so wait for the start, not for Kami's chat
+  await startDone(page);
+  await openChat(page, "friren");
   await expect(page.getByTestId("header").getByText("Friren", { exact: true })).toBeVisible();
   await expect(page.getByTestId("composer")).toBeEnabled();
   await page.getByTestId("composer").click();

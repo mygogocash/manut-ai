@@ -3,6 +3,7 @@
 // to "Ran 2 subagents · …". The run name opens that run in Plans. Read-only.
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
+import { chatOpen, chatResume } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const LIVE = "dag:20261102_235818_fcfb1bdd/codex-coexist-live";
@@ -27,7 +28,7 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 
 async function send(page: Page, text: string) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("composer").fill(text);
   await page.keyboard.press("Enter");
 }
@@ -133,11 +134,12 @@ test("dark and light: the card has no fill and 6px corners, its text is readable
 
 test("the chat stays at the bottom as the panel opens and the card grows after its turn; scrolling up lets go", async ({ page }) => {
   // a returning person (a tab picked before) in light: the panel opens by itself mid-turn and narrows the column
-  await page.addInitScript(() => {
+  // (a snapshot with Kami's chat and no panel, rather than none: without one the app starts on Home)
+  await page.addInitScript((resume) => {
     localStorage.setItem("manut.panelPicked", "1");
     localStorage.setItem("manut.theme", "light");
-    localStorage.removeItem("manut.resume");
-  });
+    localStorage.setItem("manut.resume", resume);
+  }, chatResume("kami"));
   await send(page, "/delegate two lookups");
   const card = page.getByTestId("fanout-card");
   await expect(card).toHaveAttribute("data-state", "done");
