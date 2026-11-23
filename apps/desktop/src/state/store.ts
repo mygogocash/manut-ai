@@ -368,6 +368,13 @@ export interface Look {
   text: TextSize;
 }
 export const PALETTES: Palette[] = ["manut", "graphite", "ocean", "forest", "sunset", "rose"];
+
+/** The pages of the side menu (src/sidebar/menu.ts) that fill the main column, in the menu's order. They are places of
+ *  their own, like the chat: a page opened from one of them (Settings, Automations, Plugins, Tasks) returns to it. */
+export const MENU_PAGES = ["needs", "team", "code", "artifacts", "customize", "history"] as const;
+export type MenuPage = (typeof MENU_PAGES)[number];
+export const isMenuPage = (view: string): view is MenuPage => (MENU_PAGES as readonly string[]).includes(view);
+
 export interface Ui {
   panelOpen: boolean;
   panelTab: PanelTabId;
@@ -380,11 +387,13 @@ export interface Ui {
   draft: { bot: string; text: string; n: number } | null;
   theme: Theme;
   look: Look;
-  /** "session" = a terminal session (SESSIONS in the sidebar) fills the main column; `session` names it.
-   *  "automations" and "plugins" are the two pages of the sidebar's foot. */
-  view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks";
-  /** Where a page's back arrow (and Settings' ×) returns: the chat or the session the page was opened from. */
-  back: "chat" | "session";
+  /** "session" = a terminal session (listed on the Code page) fills the main column; `session` names it.
+   *  "automations" and "plugins" are entries of the Customize page; the menu's own pages are `MenuPage`. */
+  view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks" | MenuPage;
+  /** Where a page's back arrow (and Settings' ×) returns: the chat, the session or the menu page it was opened from. */
+  back: "chat" | "session" | MenuPage;
+  /** Bumped by the menu's Search button (and ⌘K): the History page's search box takes the focus on each new value. */
+  findSeq: number;
   /** Automations: the job the detail panel shows (`<bot>:<id>`); Plugins: the bot whose plugins the page shows. */
   automation: string | null;
   pluginsBot: string | null;
@@ -621,6 +630,7 @@ export function initialState(): AppState {
       look: readLook(),
       view: "chat",
       back: "chat",
+      findSeq: 0,
       settingsPage: "general",
       pinned: readList("manut.pinned"),
       roster: readRoster(),
@@ -940,6 +950,8 @@ export type Action =
   | { type: "ui.automations"; job?: string | null }
   | { type: "ui.plugins"; bot?: string | null }
   | { type: "ui.tasks" }
+  /** A page of the side menu fills the main column; `find` also asks History's search box for the focus. */
+  | { type: "ui.page"; page: MenuPage; find?: boolean }
   | { type: "ui.lang"; lang: Lang }
   | { type: "models"; bot: string; options: ModelOptions }
   | { type: "model.set"; bot: string; current: ModelCurrent }
@@ -1502,6 +1514,10 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, view: "plugins", back: backOf(state.ui), ...(a.bot ? { pluginsBot: a.bot } : {}) } };
     case "ui.tasks":
       return { ...state, ui: { ...state.ui, view: "tasks", back: backOf(state.ui) } };
+    case "ui.page":
+      // A menu page is a place of its own, not a page in front of one, so it keeps no way back: the shortcuts that
+      // leave a page for the chat (⌘., ⌘⇧G) call closeSettings, and from here that must land on the chat.
+      return { ...state, ui: { ...state.ui, view: a.page, back: "chat", ...(a.find ? { findSeq: state.ui.findSeq + 1 } : {}) } };
     case "ui.lang":
       return { ...state, ui: { ...state.ui, lang: a.lang } };
     case "models":
@@ -1546,8 +1562,9 @@ export function reduce(state: AppState, a: Action): AppState {
     case "ui.settings":
       return { ...state, ui: { ...state.ui, view: "settings", back: backOf(state.ui), settingsPage: a.page ?? state.ui.settingsPage } };
     case "ui.closeSettings":
-      // back to the session the page was opened from, when it is still open; otherwise the chat
-      return { ...state, ui: { ...state.ui, view: state.ui.back === "session" && state.ui.session ? "session" : "chat", back: "chat" } };
+      // back to the menu page or the session the page was opened from (a session only while it is still open);
+      // otherwise the chat
+      return { ...state, ui: { ...state.ui, view: state.ui.back === "session" && !state.ui.session ? "chat" : state.ui.back, back: "chat" } };
     case "system.note":
       return touchChat(state, a.bot, (c) =>
         withItems(c, [...c.items, { kind: "system", id: `system-${a.now}-${c.items.length}`, ts: a.now / 1000, text: a.text }]),
@@ -1767,9 +1784,10 @@ export function heldDrafts(state: AppState, drafts: Record<string, string>): Rec
 
 /** Whether a message typed now in `bot`'s main chat is held instead of sent: a turn runs, others wait before it,
  *  a send's turn has not started, or the chat is being read again after the bridge came back. */
-/** The view a page returns to: the one it was opened from, or (page to page) where the first page returns. */
+/** The view a page returns to: the one it was opened from (the chat, a session or a menu page), or (page to page)
+ *  where the first page returns. */
 function backOf(ui: Ui): Ui["back"] {
-  return ui.view === "chat" || ui.view === "session" ? ui.view : ui.back;
+  return ui.view === "chat" || ui.view === "session" || isMenuPage(ui.view) ? ui.view : ui.back;
 }
 
 /** Hermes' run states that mean a routine failed (the bridge's FAILED_RUN). */
@@ -1909,6 +1927,8 @@ export interface Actions {
   openPlugins(bot?: string | null): void;
   /** Open the Tasks page (src/tasks: issues and pull requests, read-only). */
   openTasks(): void;
+  /** Open one of the side menu's pages; `find` (the menu's Search button, ⌘K) also focuses History's search box. */
+  openPage(page: MenuPage, opts?: { find?: boolean }): void;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
   /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
@@ -2750,6 +2770,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       void loadAutomations();
     },
     openTasks: () => dispatch({ type: "ui.tasks" }),
+    openPage: (page, opts) => dispatch({ type: "ui.page", page, find: opts?.find }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
       try {
@@ -2832,6 +2853,8 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       const bot = state.selectedBot;
       if (!bot) return;
       if (state.ui.view !== "chat") dispatch({ type: "ui.closeSettings" });
+      // the draft goes into the chat's composer, so a menu page the closed page returned to gives way to the chat
+      if (isMenuPage(state.ui.view)) dispatch({ type: "ui.thread", bot, thread: state.ui.thread });
       dispatch({ type: "ui.draft", bot, text });
     },
     setTheme(theme) {
