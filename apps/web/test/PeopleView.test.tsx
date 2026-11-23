@@ -1,7 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, type CreatedInvite, type HelperRemoval, type People, type PilotApi, type Shop } from "../src/api";
-import { createFakeApi } from "../src/api/fake";
+import {
+  ApiError, type CreatedInvite, type HelperRemoval, type LinkedOwner, type OwnerAccountView, type People, type PilotApi,
+  type Shop, type UnlinkedOwner,
+} from "../src/api";
+import { createFakeApi, PRACTICE_OWNER_CODES } from "../src/api/fake";
 import { OpsConsole } from "../src/ops/OpsConsole";
 import { readOperatorKey } from "../src/ops/operatorKey";
 import { PeopleView } from "../src/ops/PeopleView";
@@ -33,7 +36,7 @@ function peopleView(api: PilotApi = fakeApi(), shops: Shop[] = SHOPS, tenant: st
   return api;
 }
 
-const who = () => screen.getByRole("region", { name: "Who can use Manut AI for Baan Mali" });
+const who = (shop = "Baan Mali") => screen.getByRole("region", { name: `Who can use Manut AI for ${shop}` });
 const cover = () => screen.getByRole("region", { name: "While you are away" });
 const rowsOf = (name: string) => within(screen.getByRole("list", { name })).getAllByRole("listitem");
 const rowWith = (text: string, list = PEOPLE) => {
@@ -70,7 +73,7 @@ describe("the People page", () => {
       expect(screen.getByRole("heading", { level: 2, name: title })).toBeTruthy();
     }
     expect(within(who()).getByText("2 people, 1 invited")).toBeTruthy();
-    expect(screen.getByText(/Fon has no account here in the pilot, so invite, cancel, remove and set cover only when Fon asks you to\./))
+    expect(screen.getByText(/Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to\./))
       .toBeTruthy();
 
     // Going back to a shop leaves the People page.
@@ -88,7 +91,8 @@ describe("the People page", () => {
     const fon = rowWith("Fon");
     expect(within(fon).getByText("Owner")).toBeTruthy();
     expect(within(fon).getByText("Approves everything: messages and replies, money and public posts.")).toBeTruthy();
-    expect(within(fon).queryByRole("button")).toBeNull();
+    // The owner is never removed: the only change offered on their row is unlinking the account.
+    expect(within(fon).getAllByRole("button").map((button) => button.textContent)).toEqual(["Unlink"]);
 
     const mint = rowWith("Mint");
     expect(within(mint).getByText("Helper")).toBeTruthy();
@@ -646,5 +650,335 @@ describe("cover while the owner is away", () => {
     fireEvent.click(within(form()).getByRole("button", { name: "Set cover" }));
     await waitFor(() => expect(within(cover()).getByRole("alert").textContent)
       .toBe("The API could not read or save this shop's people. Check the list, then try again."));
+  });
+});
+
+// The owner's linked account (docs/several-shops.md, slice 3): the owner's row says whether an account is linked, a box takes the
+// code the owner reads out from their app, and Unlink asks first. Most tests run against the practice-mode fake, which answers
+// both routes as the API does (Baan Mali starts linked, Sabai Tea does not); a stub stands in where a test needs an answer the
+// fake never gives (a list that moved on, an owner's list that could not be written).
+const SABAI_TEA = "shop_sabaitea";
+const SABAI_PEOPLE = "Sabai Tea's people";
+const ACCOUNT: OwnerAccountView = { id: "owner-1", linkedAt: "2026-11-12T03:00:00.000Z", devices: 2 };
+const LINKED: LinkedOwner = { tenant: "t1", ownerAccount: { id: "owner-9", linkedAt: "2026-11-23T03:00:00.000Z" } };
+const UNLINKED: UnlinkedOwner = { tenant: "t1", unlinked: "owner-1", sessionsEnded: 2 };
+const withAccount = (account: OwnerAccountView | null, overrides: Partial<People> = {}) =>
+  emptyPeople({ owner: { name: "Fon", account }, ...overrides });
+
+describe("the owner's account on the owner's row", () => {
+  it("says an account is linked and since when, how many devices have it, and offers Unlink and no box for a code", async () => {
+    peopleView();
+    await screen.findByRole("list", { name: PEOPLE });
+    const fon = rowWith("Fon");
+    expect(within(fon).getByText("Linked to the owner's account on 12 November")).toBeTruthy();
+    expect(within(fon).getByText("Signed in on 2 devices.")).toBeTruthy();
+    expect(within(fon).getByRole("button", { name: "Unlink" })).toBeTruthy();
+    expect(within(fon).queryByText("Not linked to an account yet")).toBeNull();
+    expect(screen.queryByLabelText("Link code")).toBeNull();
+    expect(screen.queryByRole("form", { name: "Link the owner's account" })).toBeNull();
+  });
+
+  it("says no account is linked yet, and offers the box for the code with its one line of care", async () => {
+    peopleView(fakeApi(), SHOPS, SABAI_TEA);
+    await screen.findByRole("list", { name: SABAI_PEOPLE });
+    const dao = rowWith("Dao", SABAI_PEOPLE);
+    expect(within(dao).getByText("Not linked to an account yet")).toBeTruthy();
+    expect(within(dao).queryByRole("button", { name: "Unlink" })).toBeNull();
+    const form = within(dao).getByRole("form", { name: "Link the owner's account" });
+    expect(within(form).getByLabelText("Link code")).toBeTruthy();
+    expect(within(form).getByText("Take the code only from the owner, on a call or in the shop's own chat.")).toBeTruthy();
+    expect(within(form).getByText(/8 letters and numbers, as the owner's app shows them/)).toBeTruthy();
+    expect((within(form).getByRole("button", { name: "Link" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("says a linked account with no device signed in, and says a single device in the singular", async () => {
+    for (const [devices, said] of [[0, "Not signed in on any device."], [1, "Signed in on 1 device."]] as const) {
+      const { unmount } = renderWithApi(<PeopleView shops={T1} tenant="t1" onForget={() => {}} />,
+        stubApi({ getPeople: async () => withAccount({ ...ACCOUNT, devices }) }));
+      await screen.findByRole("list", { name: PEOPLE });
+      expect(within(rowWith("Fon")).getByText(said)).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("shows the account of the shop chosen on the page, and leaves a half-typed code behind", async () => {
+    peopleView(fakeApi(), SHOPS, SABAI_TEA);
+    await screen.findByRole("list", { name: SABAI_PEOPLE });
+    fireEvent.change(screen.getByLabelText("Link code"), { target: { value: "7K0M" } });
+    fireEvent.change(screen.getByLabelText("Shop"), { target: { value: BAAN_MALI } });
+    await screen.findByRole("list", { name: PEOPLE });
+    expect(within(rowWith("Fon")).getByText("Linked to the owner's account on 12 November")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Shop"), { target: { value: SABAI_TEA } });
+    await screen.findByRole("list", { name: SABAI_PEOPLE });
+    expect((screen.getByLabelText("Link code") as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("linking the owner's account", () => {
+  const open = async (api: PilotApi = fakeApi()) => {
+    peopleView(api, SHOPS, SABAI_TEA);
+    await screen.findByRole("list", { name: SABAI_PEOPLE });
+    const form = screen.getByRole("form", { name: "Link the owner's account" });
+    return {
+      api,
+      form,
+      code: within(form).getByLabelText("Link code") as HTMLInputElement,
+      link: within(form).getByRole("button", { name: "Link" }) as HTMLButtonElement,
+    };
+  };
+  const type = (code: HTMLInputElement, text: string) => fireEvent.change(code, { target: { value: text } });
+  const { dao, fon, guest, ranOut } = PRACTICE_OWNER_CODES;
+
+  it("waits for eight characters, counting neither the dash nor spaces, and sends nothing before then", async () => {
+    const api = fakeApi();
+    const send = vi.spyOn(api, "linkOwner");
+    const { form, code, link } = await open(api);
+    expect(link.disabled).toBe(true);
+    for (const [typed, ready] of [["7K0M-4X1", false], ["7K0M-4X1R", true], ["7k0m4x1r", true], [" 7K0M 4X1R ", true],
+      ["7K0M-4X1R9", false], ["----", false]] as const) {
+      type(code, typed);
+      expect(link.disabled, typed).toBe(!ready);
+    }
+    // Pressing Enter with too few characters sends nothing either.
+    type(code, "7K0M-4X1");
+    fireEvent.submit(form);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends the shop and the code as typed but for its outer spaces, says what it did, and shows the account linked", async () => {
+    const { api, code, link } = await open();
+    const send = vi.spyOn(api, "linkOwner");
+    type(code, "  7k0m-4x1r ");
+    fireEvent.click(link);
+
+    expect((await within(who("Sabai Tea")).findByRole("status")).textContent).toBe("Linked. Sabai Tea now shows in Dao's app.");
+    expect(send).toHaveBeenCalledWith({ tenant: SABAI_TEA, code: "7k0m-4x1r" });
+    // The list is read again: the row says since when, no device has it yet, and the box has gone for Unlink.
+    await waitFor(() => expect(within(rowWith("Dao", SABAI_PEOPLE)).getByText("Linked to the owner's account on 23 November"))
+      .toBeTruthy());
+    const row = rowWith("Dao", SABAI_PEOPLE);
+    expect(within(row).getByText("Not signed in on any device.")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Unlink" })).toBeTruthy();
+    expect(screen.queryByRole("form", { name: "Link the owner's account" })).toBeNull();
+  });
+
+  it("takes the code with Enter too, and lets Fon's own code answer the link Baan Mali already has", async () => {
+    const api = fakeApi();
+    const send = vi.spyOn(api, "linkOwner");
+    const { code, form } = await open(api);
+    type(code, dao);
+    fireEvent.submit(form);
+    await within(who("Sabai Tea")).findByRole("status");
+    expect(send).toHaveBeenCalledTimes(1);
+    // Fon's code, tried on Baan Mali through the API, links nothing new: it answers the link it has.
+    expect(await api.linkOwner({ tenant: BAAN_MALI, code: fon })).toMatchObject({ ownerAccount: { id: "owner-fon" } });
+  });
+
+  it("explains a code nobody made or that was used, and keeps what was typed to fix", async () => {
+    const { form, code, link } = await open();
+    type(code, "ZZZZ-ZZZZ");
+    fireEvent.click(link);
+    expect((await within(form).findByRole("alert")).textContent)
+      .toBe("That code is not known or has run out. Ask the owner for a new one.");
+    expect(code.value).toBe("ZZZZ-ZZZZ");
+    expect(screen.queryByRole("status")).toBeNull();
+    // A right code then goes through, and the old refusal is gone.
+    type(code, dao);
+    fireEvent.click(link);
+    await within(who("Sabai Tea")).findByRole("status");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("explains a code that ran out, in its own words, and a code that was already used", async () => {
+    const { form, code, link } = await open();
+    type(code, ranOut);
+    fireEvent.click(link);
+    expect((await within(form).findByRole("alert")).textContent)
+      .toBe("That code has run out. A code works for 15 minutes. Ask the owner for a new one.");
+    // A code goes the first time it is tried, whatever the answer: trying it again finds nothing.
+    fireEvent.click(link);
+    await waitFor(() => expect(within(form).getByRole("alert").textContent)
+      .toBe("That code is not known or has run out. Ask the owner for a new one."));
+  });
+
+  it("says the shop is already linked when the list was out of date, reads the list again, and keeps saying so", async () => {
+    const getPeople = vi.fn()
+      .mockResolvedValueOnce(withAccount(null))
+      .mockResolvedValue(withAccount(ACCOUNT));
+    const linkOwner = vi.fn(async (): Promise<LinkedOwner> => { throw new ApiError(409, "already_linked"); });
+    peopleView(stubApi({ getPeople, linkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    type(screen.getByLabelText("Link code") as HTMLInputElement, guest);
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    await waitFor(() => expect(getPeople).toHaveBeenCalledTimes(2));
+    // The box is gone with the account now shown, but what the API said stays above the list.
+    await waitFor(() => expect(screen.queryByLabelText("Link code")).toBeNull());
+    expect(screen.getByRole("alert").textContent).toBe("This shop is already linked to an account. Unlink it first.");
+    expect(within(rowWith("Fon")).getByText("Linked to the owner's account on 12 November")).toBeTruthy();
+  });
+
+  it("says when the API could not write the owner's list: the account is linked, and the box stays for linking again", async () => {
+    const getPeople = vi.fn()
+      .mockResolvedValueOnce(withAccount(null))
+      .mockResolvedValue(withAccount({ ...ACCOUNT, devices: 0 }));
+    const linkOwner = vi.fn(async (): Promise<LinkedOwner> => { throw new ApiError(503, "index_unavailable"); });
+    peopleView(stubApi({ getPeople, linkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    const code = screen.getByLabelText("Link code") as HTMLInputElement;
+    type(code, "K7M4-X9RQ");
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    await waitFor(() => expect(getPeople).toHaveBeenCalledTimes(2));
+    const form = screen.getByRole("form", { name: "Link the owner's account" });
+    expect((await within(form).findByRole("alert")).textContent).toBe(
+      "The account is linked, but the owner's app cannot list the shop yet. Ask the owner for a new code and link again to put it there.");
+    expect(within(rowWith("Fon")).getByText("Linked to the owner's account on 12 November")).toBeTruthy();
+    expect(code.value).toBe("K7M4-X9RQ");
+    // Linking the same account again with a new code puts the shop on the owner's list, and then the box goes.
+    linkOwner.mockResolvedValue(LINKED);
+    type(code, "2WNZ-5H8T");
+    fireEvent.click(within(form).getByRole("button", { name: "Link" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "Link the owner's account" })).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says so when the API could not link, and does not read the list on its behalf", async () => {
+    const getPeople = vi.fn(async () => withAccount(null));
+    const linkOwner = vi.fn(async (): Promise<LinkedOwner> => { throw new ApiError(503, "shops_unavailable"); });
+    peopleView(stubApi({ getPeople, linkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    type(screen.getByLabelText("Link code") as HTMLInputElement, "K7M4-X9RQ");
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The API could not link the account just now. Press Refresh to see whether it did, then try again with a new code from the owner.");
+    expect(getPeople).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("form", { name: "Link the owner's account" })).toBeTruthy();
+  });
+
+  it("offers another key when the API refuses this one, and says when it cannot be reached", async () => {
+    let answer = new ApiError(403, "forbidden");
+    const linkOwner = vi.fn(async (): Promise<LinkedOwner> => { throw answer; });
+    peopleView(stubApi({ getPeople: async () => withAccount(null), linkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    type(screen.getByLabelText("Link code") as HTMLInputElement, "K7M4-X9RQ");
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("The API refused the operator key");
+    answer = new ApiError(0, "network");
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent)
+      .toBe("Could not reach the API. Check the connection and try again."));
+  });
+
+  it("sends one request however often the button is pressed while it waits, and locks the page's other buttons", async () => {
+    const pending = deferred<LinkedOwner>();
+    const linkOwner = vi.fn(() => pending.promise);
+    peopleView(stubApi({ getPeople: async () => withAccount(null, { helpers: [MINT] }), linkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    const link = screen.getByRole("button", { name: "Link" }) as HTMLButtonElement;
+    type(screen.getByLabelText("Link code") as HTMLInputElement, "K7M4-X9RQ");
+    fireEvent.click(link);
+    fireEvent.click(link);
+    await waitFor(() => expect(link.disabled).toBe(true));
+    expect(link.getAttribute("aria-busy")).toBe("true");
+    expect(link.textContent).toBe("Linking");
+    expect(linkOwner).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement).disabled).toBe(true);
+    pending.resolve(LINKED);
+    await screen.findByRole("status");
+  });
+});
+
+describe("unlinking the owner's account", () => {
+  it("asks once more with what it does, and does nothing until the operator says yes", async () => {
+    const api = peopleView();
+    const unlink = vi.spyOn(api, "unlinkOwner");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(within(rowWith("Fon")).getByRole("button", { name: "Unlink" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Unlink Fon's account?" });
+    expect(within(dialog).getByText("Fon's app will be signed out of this shop on every device.")).toBeTruthy();
+    expect(within(dialog).getByText("Fon can link the account again later with a new code.")).toBeTruthy();
+    expect(unlink).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep the link" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(unlink).not.toHaveBeenCalled();
+    expect(within(rowWith("Fon")).getByText("Linked to the owner's account on 12 November")).toBeTruthy();
+  });
+
+  it("unlinks on yes, says how many sessions ended, and shows the shop with no account and the box for a new code", async () => {
+    const api = peopleView();
+    const unlink = vi.spyOn(api, "unlinkOwner");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(within(rowWith("Fon")).getByRole("button", { name: "Unlink" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Unlink Fon's account?" }))
+      .getByRole("button", { name: "Unlink Fon's account" }));
+
+    expect((await within(who()).findByRole("status")).textContent).toBe("Unlinked. 2 sessions ended.");
+    expect(unlink).toHaveBeenCalledWith({ tenant: BAAN_MALI });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(within(rowWith("Fon")).getByText("Not linked to an account yet")).toBeTruthy());
+    expect(within(rowWith("Fon")).queryByRole("button", { name: "Unlink" })).toBeNull();
+    expect(screen.getByRole("form", { name: "Link the owner's account" })).toBeTruthy();
+    // Mint and Beam are as they were: unlinking the owner touches no one else.
+    expect(rowsOf(PEOPLE)).toHaveLength(3);
+  });
+
+  it("says one session in the singular and none as none", async () => {
+    for (const [sessionsEnded, said] of [[1, "Unlinked. 1 session ended."], [0, "Unlinked. 0 sessions ended."]] as const) {
+      const unlinkOwner = vi.fn(async (): Promise<UnlinkedOwner> => ({ ...UNLINKED, sessionsEnded }));
+      const { unmount } = renderWithApi(<PeopleView shops={T1} tenant="t1" onForget={() => {}} />,
+        stubApi({ getPeople: async () => withAccount(ACCOUNT), unlinkOwner }));
+      await screen.findByRole("list", { name: PEOPLE });
+      fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+      fireEvent.click(screen.getByRole("button", { name: "Unlink Fon's account" }));
+      expect((await screen.findByRole("status")).textContent).toBe(said);
+      unmount();
+    }
+  });
+
+  it("says the list moved on when no account is linked any more, reads the list again, and keeps saying so", async () => {
+    const getPeople = vi.fn()
+      .mockResolvedValueOnce(withAccount(ACCOUNT))
+      .mockResolvedValue(withAccount(null));
+    const unlinkOwner = vi.fn(async (): Promise<UnlinkedOwner> => { throw new ApiError(404, "not_linked"); });
+    peopleView(stubApi({ getPeople, unlinkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unlink Fon's account" }));
+    await waitFor(() => expect(getPeople).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull());
+    expect(screen.getByRole("alert").textContent).toBe("This shop has no linked account now. The list was refreshed.");
+  });
+
+  it("says so when the API could not unlink, and keeps the question open to try again", async () => {
+    let answer = new ApiError(503, "shops_unavailable");
+    const unlinkOwner = vi.fn(async (): Promise<UnlinkedOwner> => { throw answer; });
+    peopleView(stubApi({ getPeople: async () => withAccount(ACCOUNT), unlinkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unlink Fon's account" }));
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("The API could not read or save this shop's people. Check the list, then try again.");
+    expect(screen.getByRole("dialog", { name: "Unlink Fon's account?" })).toBeTruthy();
+    answer = new ApiError(403, "forbidden");
+    fireEvent.click(screen.getByRole("button", { name: "Unlink Fon's account" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The API refused the operator key"));
+  });
+
+  it("sends one request however often the button is pressed while it waits, and locks the page's other buttons", async () => {
+    const pending = deferred<UnlinkedOwner>();
+    const unlinkOwner = vi.fn(() => pending.promise);
+    peopleView(stubApi({ getPeople: async () => withAccount(ACCOUNT, { helpers: [MINT] }), unlinkOwner }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    const yes = screen.getByRole("button", { name: "Unlink Fon's account" }) as HTMLButtonElement;
+    fireEvent.click(yes);
+    fireEvent.click(yes);
+    await waitFor(() => expect(yes.disabled).toBe(true));
+    expect(yes.textContent).toBe("Unlinking");
+    expect((screen.getByRole("button", { name: "Keep the link" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(unlinkOwner).toHaveBeenCalledTimes(1);
+    pending.resolve(UNLINKED);
+    await screen.findByRole("status");
   });
 });

@@ -5,7 +5,8 @@ session names the one shop it acts for; how the desktop shows the shops together
 pilot shop the operator created; and the slices that follow. This is the roadmap's Phase 6 "several shops in one
 view" (`docs/plan.md`, December item 7). The first slice is built in `apps/api`: `shops.ts` and `shops-store.ts`, with
 the owner's account kept beside the helpers in `people.ts` and `people-store.ts`. The routes are in
-`docs/pilot-api.md`, "Several shops".
+`docs/pilot-api.md`, "Several shops". The console's owner link (slice 3) and ending a shop session (slice 5) are built
+too.
 
 ## Where things stood
 
@@ -101,7 +102,12 @@ owner's word.
 A shop has one linked owner account at a time. Linking a second answers 409 `already_linked` until the operator
 unlinks the first (`POST /v1/admin/shops/owner/unlink`), which ends that account's owner sessions at once and writes
 `owner.unlinked`. Linking the same account again changes nothing and writes its index row again, which mends a row a
-failed write left out. The operator sees the link on the shop's People answer (`owner.account`).
+failed write left out. The operator sees the link on the shop's People answer (`owner.account`), and the console's People
+page does everything with it: the owner's row says whether an account is linked and on how many devices; with none, a box
+takes the code the owner reads out, with the line "Take the code only from the owner, on a call or in the shop's own
+chat."; with one, Unlink asks once more ("{owner}'s app will be signed out of this shop on every device.") and says how many
+sessions it ended. That line says where a code may come from and no more: how operators confirm a code is not settled by the
+owner (`docs/decisions.md`).
 
 ## How the desktop shows them (the next slice)
 
@@ -125,7 +131,10 @@ failed write left out. The operator sees the link on the shop's People answer (`
    unlink, and the link in People.
 2. **Desktop:** the switcher, the combined "Needs you" and the per-shop offline cache, after the desktop's answering
    slice lands.
-3. **Console:** show the owner's account on the shop's People page, with a box for the link code and an unlink button.
+3. **Done here (console):** the shop's People page shows the owner's linked account on the owner's row, with a box for the
+   link code and an Unlink that asks first (24 Nov 2026). The Audit page has words for `owner.linked`, `owner.unlinked` and
+   the shop sessions' entries, and the practice mode answers both routes as the API does, with sample codes on its home
+   page.
 4. **Owner sessions on more routes**, each its own decision: the shop's consent, export and memory. Today an owner
    session reaches the approval routes and the team's routines. Whether the owner manages helpers from their own
    session belongs here too (`docs/people.md`, "Not built yet").

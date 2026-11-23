@@ -1,11 +1,13 @@
 import { APPROVAL_KINDS, mayDecide } from "@manut/approval-core";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiError, useApi, type Identity, type InviteView, type People, type PeopleHelper, type Shop } from "../api";
+import {
+  ApiError, useApi, type Identity, type InviteView, type OwnerAccountView, type People, type PeopleHelper, type Shop,
+} from "../api";
 import { endOfShopDay, langOf } from "../format";
 import { CheckIcon } from "../ui/marks";
 import { CopyButton } from "./CopyButton";
 import { useLoad } from "./useLoad";
-import { errorText, isAuthError, peopleErrorText, peopleWords as W } from "./words";
+import { errorText, isAuthError, ownerAccountErrorText, peopleErrorText, peopleWords as W } from "./words";
 
 /// The People page: who can use Manut AI for one shop, as the API keeps it (`GET /v1/admin/people`), laid out from the
 /// design canvas's "Settings: people" and "States: people and roles" boards. "Who can use Manut AI" lists the owner, each
@@ -13,17 +15,23 @@ import { errorText, isAuthError, peopleErrorText, peopleWords as W } from "./wor
 /// approval-core's rule; "While you are away" says who covers messages and until when; and the notes helpers passed on
 /// come last, with the kind of request they were about.
 ///
-/// The owner has no account in the pilot, so the operator relays the owner's word, and the page says so. An invite makes a
-/// link for the operator to send, because Manut AI sends nothing (LINE and email sending are parked). Removing a helper asks
-/// once more in its row, because it signs them out of every device. One change runs at a time: every button waits while one
+/// The owner cannot change the list from the app yet, so the operator relays the owner's word, and the page says so. The owner's
+/// row also says whether an account is linked as the owner's (docs/several-shops.md): with none, a box takes the code the owner
+/// reads out from their app, and with one, Unlink asks once more and signs that account out of the shop on every device. An invite
+/// makes a link for the operator to send, because Manut AI sends nothing (LINE and email sending are parked). Removing a helper
+/// asks once more in its row, because it signs them out of every device. One change runs at a time: every button waits while one
 /// is on its way, so a double press sends one request, and a refusal that says the list moved on (an invite already used,
-/// a helper already gone) reads the list again. The shop is chosen on the page, starting from the one in the side menu, so
-/// the page stays open while the operator looks through several shops.
+/// a helper already gone, an account already linked) reads the list again. The shop is chosen on the page, starting from the one
+/// in the side menu, so the page stays open while the operator looks through several shops.
 
 type Notice = { place: "who" | "cover"; text: string };
 
-/// The people refusals that mean the list this page shows is out of date.
-const MOVED_ON = new Set(["unknown_invite", "not_pending", "not_a_helper"]);
+/// The people refusals that mean the list this page shows is out of date. `index_unavailable` is one too: the account was linked
+/// all the same, only the owner's own list of shops could not be written.
+const MOVED_ON = new Set(["unknown_invite", "not_pending", "not_a_helper", "already_linked", "not_linked", "index_unavailable"]);
+
+/// How long a link code is once the dash and spaces, which are no part of it, are left out.
+const CODE_LENGTH = 8;
 
 /// The API answers 503 `people_unavailable` when the shop's people cannot be read: never an empty list instead.
 function loadErrorText(error: unknown): string {
@@ -147,20 +155,35 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
   const [inviting, setInviting] = useState(false);
   const [created, setCreated] = useState<{ name: string; url: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
+  // True once the API said it linked the account but could not write the owner's list: the box for a code stays, so linking again
+  // with a new code can put the shop there.
+  const [unlisted, setUnlisted] = useState(false);
 
   const owner = people.owner.name;
+  // The account linked as the owner's, or none (a shop whose API says nothing of one is shown as having none).
+  const account: OwnerAccountView | null = people.owner.account ?? null;
+  const linkBoxShown = account === null || unlisted;
   const pending = people.invites.filter((invite) => invite.status === "pending");
   const expired = people.invites.filter((invite) => invite.status === "expired");
   const covering = people.away?.inForce ? people.away.helperId : null;
   const removedNames = people.removed.map((one) => one.name).filter((name) => name !== "");
   const locked = busy !== null;
-  // A refusal of a change made from a row (cancelling an invite, removing a helper) is said above the list, not in the row:
-  // the refusals that mean the list moved on are followed by a refresh that takes the row away, and the message must outlive it.
-  const listError = Object.entries(errors).find(([key]) => key.startsWith("helper:") || key.startsWith("invite:"))?.[1];
+  // A refusal of a change made from a row (cancelling an invite, removing a helper, unlinking the account) is said above the list,
+  // not in the row: the refusals that mean the list moved on are followed by a refresh that takes the row away, and the message
+  // must outlive it. A refusal of linking is said in the box while the box is there, and above the list once the account is shown.
+  const listError = Object.entries(errors).find(([key]) =>
+    key.startsWith("helper:") || key.startsWith("invite:") || key === "owner:unlink" || (key === "owner:link" && !linkBoxShown))?.[1];
 
-  /// One change. `work` makes the call and answers what to say where the operator is looking. When it did not happen, why is
-  /// said where the change was asked for, and a refusal that means the list moved on also reads the list again.
-  async function change(key: string, work: () => Promise<Notice | null>): Promise<boolean> {
+  // The question before unlinking goes when there is no account to unlink, so it never comes back open for the next one.
+  useEffect(() => {
+    if (account === null) setUnlinking(false);
+  }, [account]);
+
+  /// One change. `work` makes the call and answers what to say where the operator is looking. When it did not happen, `explain`
+  /// says why where the change was asked for, and a refusal that means the list moved on also reads the list again.
+  async function change(key: string, work: () => Promise<Notice | null>,
+    explain: (error: unknown) => string = peopleErrorText): Promise<boolean> {
     if (running.current) return false;
     running.current = true;
     setBusy(key);
@@ -171,7 +194,7 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
       reload();
       return true;
     } catch (error) {
-      setErrors((current) => ({ ...current, [key]: peopleErrorText(error) }));
+      setErrors((current) => ({ ...current, [key]: explain(error) }));
       if (error instanceof ApiError && MOVED_ON.has(error.code)) reload();
       return false;
     } finally {
@@ -198,6 +221,23 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
       setRemoving(null);
       return { place: "who", text: W.removed(name, done) };
     });
+  const link = (code: string) =>
+    change("owner:link", async () => {
+      try {
+        await api.linkOwner({ tenant: shop.tenant, code });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "index_unavailable") setUnlisted(true);
+        throw error;
+      }
+      setUnlisted(false);
+      return { place: "who", text: W.linked(owner, shop.name) };
+    }, (error) => ownerAccountErrorText(error, "link"));
+  const unlink = () =>
+    change("owner:unlink", async () => {
+      const done = await api.unlinkOwner({ tenant: shop.tenant });
+      setUnlinking(false);
+      return { place: "who", text: W.unlinked(done.sessionsEnded) };
+    }, (error) => ownerAccountErrorText(error, "unlink"));
   const setCover = (helper: PeopleHelper, until: string) =>
     change("cover", async () => {
       const done = await api.setAway({ tenant: shop.tenant, helperId: helper.id, until });
@@ -221,14 +261,20 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
         {notice?.place === "who" && <Said text={notice.text} />}
         {listError && <Failed text={listError} />}
         <ul aria-label={W.listLabel(shop.name)} style={listStyle}>
-          <li className="rowl" style={rowStyle}>
-            <Avatar name={owner} tone={0} />
-            <span className="grow" style={lines}>
-              <span style={{ fontWeight: 500 }}>{owner}</span>
-              <span className="mut" style={quiet}>{W.ownerCan}</span>
-            </span>
-            <span className="tag">{W.ownerRole}</span>
-          </li>
+          <OwnerRow
+            owner={owner}
+            account={account}
+            linkBoxShown={linkBoxShown}
+            locked={locked}
+            linking={busy === "owner:link"}
+            unlinking={busy === "owner:unlink"}
+            asking={unlinking}
+            linkError={linkBoxShown ? errors["owner:link"] : undefined}
+            onAsk={() => setUnlinking(true)}
+            onKeep={() => setUnlinking(false)}
+            onUnlink={() => void unlink()}
+            onLink={link}
+          />
           {people.helpers.map((helper, index) => (
             <HelperRow
               key={helper.id}
@@ -419,6 +465,99 @@ function Allowed({ yes, no }: { yes: boolean; no: string }) {
         no
       )}
     </span>
+  );
+}
+
+/// The owner, as the board draws them, with whether an account is linked as theirs. Linked: since when and on how many devices,
+/// and "Unlink", which opens a question in the row and does nothing until it is answered yes, because it signs the account out of
+/// the shop on every device. Not linked: the box for the code the owner reads out from their app.
+function OwnerRow({ owner, account, linkBoxShown, locked, linking, unlinking, asking, linkError, onAsk, onKeep, onUnlink, onLink }: {
+  owner: string;
+  account: OwnerAccountView | null;
+  linkBoxShown: boolean;
+  locked: boolean;
+  linking: boolean;
+  unlinking: boolean;
+  asking: boolean;
+  linkError: string | undefined;
+  onAsk: () => void;
+  onKeep: () => void;
+  onUnlink: () => void;
+  onLink: (code: string) => Promise<boolean>;
+}) {
+  const titleId = "unlink-owner";
+  return (
+    <li className="rowl" style={rowStyle}>
+      <Avatar name={owner} tone={0} />
+      <span className="grow" style={lines}>
+        <span style={{ fontWeight: 500 }}>{owner}</span>
+        <span className="mut" style={quiet}>{W.ownerCan}</span>
+        <span className="mut" style={quiet}>{account ? W.ownerLinked(account.linkedAt) : W.ownerNotLinked}</span>
+        {account && <span className="mut" style={quiet}>{W.devices(account.devices)}</span>}
+      </span>
+      <span className="tag">{W.ownerRole}</span>
+      {account && (
+        <button type="button" className="btn ghost" disabled={locked} onClick={onAsk}>
+          {W.unlink}
+        </button>
+      )}
+      {account && asking && (
+        <div className="dialog" role="dialog" aria-labelledby={titleId} style={{ flexBasis: "100%", maxWidth: 560 }}>
+          <h3 id={titleId}>{W.unlinkTitle(owner)}</h3>
+          <p style={{ margin: 0 }}>{W.unlinkEffect(owner)}</p>
+          <p className="mut" style={{ margin: 0 }}>{W.unlinkNote(owner)}</p>
+          <div className="chips">
+            <button type="button" className="btn danger solid" disabled={locked} aria-busy={unlinking ? true : undefined}
+              onClick={onUnlink}>
+              {unlinking ? W.unlinking : W.unlinkYes(owner)}
+            </button>
+            <button type="button" className="btn" disabled={locked} onClick={onKeep}>
+              {W.unlinkNo}
+            </button>
+          </div>
+        </div>
+      )}
+      {linkBoxShown && <OwnerLinkForm busy={linking} locked={locked} error={linkError} onLink={onLink} />}
+    </li>
+  );
+}
+
+/// The box for the code the owner reads out from their app (`XXXX-XXXX`). It takes the code in any case, with or without the dash,
+/// and waits for eight characters before "Link" can be pressed; the API reads what was typed. What was typed stays when the API
+/// refuses it, so it can be fixed rather than typed again. The one line beside it says where a code may be taken from.
+function OwnerLinkForm({ busy, locked, error, onLink }: {
+  busy: boolean;
+  locked: boolean;
+  error: string | undefined;
+  onLink: (code: string) => Promise<boolean>;
+}) {
+  const [code, setCode] = useState("");
+  const blocked = [...code.replace(/[\s-]/g, "")].length !== CODE_LENGTH || locked;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (blocked) return;
+    if (await onLink(code.trim())) setCode("");
+  }
+
+  return (
+    <form aria-label={W.linkTitle} onSubmit={(event) => void submit(event)}
+      style={{ flexBasis: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 12 }}>
+        <div className="field" style={{ flex: "0 1 260px" }}>
+          <label htmlFor="owner-code">{W.codeLabel}</label>
+          <input id="owner-code" className="input" type="text" autoComplete="off" autoCapitalize="characters" spellCheck={false}
+            placeholder="XXXX-XXXX" value={code} aria-describedby="owner-code-help owner-code-take"
+            onChange={(event) => setCode(event.target.value)} />
+        </div>
+        <button type="submit" className="btn dark" disabled={blocked} aria-busy={busy ? true : undefined}>
+          {busy ? W.linking : W.link}
+        </button>
+      </div>
+      <div id="owner-code-help" className="help">{W.codeHelp}</div>
+      <div id="owner-code-take" className="help">{W.codeTake}</div>
+      {error && <Failed text={error} />}
+    </form>
   );
 }
 

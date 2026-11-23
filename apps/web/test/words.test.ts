@@ -38,6 +38,7 @@ import {
   memberName,
   memberRole,
   memoryErrorText,
+  ownerAccountErrorText,
   memoryWords,
   modelErrorText,
   modelSpendWords,
@@ -604,6 +605,66 @@ describe("the People page's words", () => {
     expect(said(403, "forbidden")).toContain("The API refused the operator key");
     expect(said(0, "network")).toBe("Could not reach the API. Check the connection and try again.");
     expect(peopleErrorText(new Error("boom"))).toBe("Something unexpected went wrong. Try again.");
+  });
+});
+
+// The owner's linked account on the People page (docs/several-shops.md): what the owner's row says, the code box, the question before
+// unlinking, and a refusal of either route in plain words.
+describe("the People page's words for the owner's linked account", () => {
+  it("says on the owner's row whether an account is linked, in plain words", () => {
+    expect(peopleWords.ownerLinked("2026-11-12T03:00:00.000Z")).toBe("Linked to the owner's account on 12 November");
+    expect(peopleWords.ownerNotLinked).toBe("Not linked to an account yet");
+    expect(peopleWords.intro("Fon")).toBe(
+      "Who can use Manut AI for this shop. Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to.");
+  });
+
+  it("takes the code only from the owner, and says how it is written and what Link does", () => {
+    expect(peopleWords.linkTitle).toBe("Link the owner's account");
+    expect(peopleWords.codeLabel).toBe("Link code");
+    expect(peopleWords.codeHelp).toBe(
+      "8 letters and numbers, as the owner's app shows them: like K7M4-X9RQ. Capitals or small letters, with or without the dash.");
+    expect(peopleWords.codeTake).toBe("Take the code only from the owner, on a call or in the shop's own chat.");
+    expect([peopleWords.link, peopleWords.linking]).toEqual(["Link", "Linking"]);
+    expect(peopleWords.linked("Fon", "Baan Mali")).toBe("Linked. Baan Mali now shows in Fon's app.");
+  });
+
+  it("asks once more before unlinking with what it does, and says what it did from the API's own count", () => {
+    expect(peopleWords.unlink).toBe("Unlink");
+    expect(peopleWords.unlinkTitle("Fon")).toBe("Unlink Fon's account?");
+    expect(peopleWords.unlinkEffect("Fon")).toBe("Fon's app will be signed out of this shop on every device.");
+    expect(peopleWords.unlinkNote("Fon")).toBe("Fon can link the account again later with a new code.");
+    expect(peopleWords.unlinkYes("Fon")).toBe("Unlink Fon's account");
+    expect(peopleWords.unlinkNo).toBe("Keep the link");
+    expect(peopleWords.unlinking).toBe("Unlinking");
+    expect(peopleWords.unlinked(2)).toBe("Unlinked. 2 sessions ended.");
+    expect(peopleWords.unlinked(1)).toBe("Unlinked. 1 session ended.");
+    expect(peopleWords.unlinked(0)).toBe("Unlinked. 0 sessions ended.");
+  });
+
+  it("explains each refusal of linking in plain words, and the console's usual words for the rest", () => {
+    const said = (status: number, code: string) => ownerAccountErrorText(new ApiError(status, code), "link");
+    expect(said(404, "unknown_code")).toBe("That code is not known or has run out. Ask the owner for a new one.");
+    expect(said(410, "code_expired")).toBe("That code has run out. A code works for 15 minutes. Ask the owner for a new one.");
+    expect(said(409, "already_linked")).toBe("This shop is already linked to an account. Unlink it first.");
+    expect(said(400, "invalid_request")).toBe("Write the code the owner's app shows: 8 letters and numbers, like K7M4-X9RQ.");
+    expect(said(503, "index_unavailable")).toBe(
+      "The account is linked, but the owner's app cannot list the shop yet. Ask the owner for a new code and link again to put it there.");
+    expect(said(503, "shops_unavailable")).toBe(
+      "The API could not link the account just now. Press Refresh to see whether it did, then try again with a new code from the owner.");
+    expect(said(404, "shop_not_found")).toBe("Not found (shop_not_found). It may have been removed.");
+    expect(said(403, "forbidden")).toContain("The API refused the operator key");
+    expect(said(0, "network")).toBe("Could not reach the API. Check the connection and try again.");
+    expect(ownerAccountErrorText(new Error("boom"), "link")).toBe("Something unexpected went wrong. Try again.");
+  });
+
+  it("explains each refusal of unlinking in plain words, and does not borrow the link's words for the same code", () => {
+    const said = (status: number, code: string) => ownerAccountErrorText(new ApiError(status, code), "unlink");
+    expect(said(404, "not_linked")).toBe("This shop has no linked account now. The list was refreshed.");
+    expect(said(503, "shops_unavailable")).toBe("The API could not read or save this shop's people. Check the list, then try again.");
+    // `invalid_request` means a bad code only when linking: unlinking sends no code.
+    expect(said(400, "invalid_request")).toBe("The API did not accept this (invalid_request).");
+    expect(said(404, "unknown_code")).toBe("Not found (unknown_code). It may have been removed.");
+    expect(said(403, "forbidden")).toContain("The API refused the operator key");
   });
 });
 

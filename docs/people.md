@@ -40,8 +40,9 @@ record, apply one rule, write the record and its audit entry, with no `await` be
 decided one after the other. A refusal writes nothing.
 
 People exist for pilot shops today: the operator routes need the shop's record, which gives the shop's name for the
-invite and its answers. In the pilot the owner has no account, so the operator console invites, removes and sets cover
-on the owner's word, as it already does for memory.
+invite and its answers. In the pilot the owner cannot yet manage helpers from their own session (an account the operator
+links reaches only the approval routes and the team's routines, `docs/several-shops.md`), so the operator console invites,
+removes and sets cover on the owner's word, as it already does for memory.
 
 ## Who is deciding: the role comes from the session
 

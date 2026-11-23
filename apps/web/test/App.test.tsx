@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/api";
-import { createFakeApi } from "../src/api/fake";
+import { createFakeApi, PRACTICE_OWNER_CODES } from "../src/api/fake";
 import { App } from "../src/App";
 import { matchRoute } from "../src/router";
 
@@ -27,6 +27,23 @@ describe("routing", () => {
     expect(await screen.findByRole("article", { name: "Delete everything Manut AI stores for Khao Soi Nimman?" }))
       .toBeTruthy();
     expect(screen.getByText("Practice mode. This page uses sample data and deletes nothing real.")).toBeTruthy();
+  });
+
+  it("lists the practice link codes for a shop's People page, each with what it does, in practice mode only", () => {
+    window.history.replaceState(null, "", "/");
+    const { unmount } = render(<App setup={{ api: createFakeApi(), mode: "fake" }} />);
+    const list = screen.getByRole("list", { name: "Link codes for a shop's People page" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      `${PRACTICE_OWNER_CODES.dao}: Dao's account. It links Sabai Tea.`,
+      `${PRACTICE_OWNER_CODES.fon}: Fon's account, which Baan Mali already has. Nothing changes.`,
+      `${PRACTICE_OWNER_CODES.guest}: another account. It links a shop with no account, and is refused for one that has one.`,
+      `${PRACTICE_OWNER_CODES.ranOut}: a code that has run out.`,
+    ]);
+    expect(screen.getByText(/type one of these to link an owner's account\. Each code works once, and is used up the first time it is tried\./))
+      .toBeTruthy();
+    unmount();
+    render(<App setup={{ api: createFakeApi(), mode: "live" }} />);
+    expect(screen.queryByRole("list", { name: "Link codes for a shop's People page" })).toBeNull();
   });
 
   it("uses the fake when VITE_API_ORIGIN is absent or empty", () => {
