@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { APPROVAL_KINDS, mayDecide } from "@manut/approval-core";
 import {
   ApiError,
   type AuditEntry,
   type DeletedShop,
+  type Identity,
   type ModelCap,
   type ModelCounts,
   type ModelUsage,
+  type People,
   type PilotGate,
   type Shop,
 } from "../src/api";
 import {
   auditActorText,
+  auditNamesOf,
   auditOutcomeTag,
   auditReasonText,
   auditSentence,
@@ -20,9 +24,19 @@ import {
   deletedText,
   deleteRefusalText,
   deleteWhatText,
+  draftSendText,
+  draftsErrorText,
+  draftsWords,
   errorText,
   factSourceText,
   gateWords,
+  jobAboutText,
+  jobEndingNote,
+  jobEndingTag,
+  jobKindText,
+  jobReasonText,
+  memberName,
+  memberRole,
   memoryErrorText,
   memoryWords,
   modelErrorText,
@@ -30,7 +44,10 @@ import {
   moneyText,
   monthName,
   monthsBack,
+  peopleErrorText,
+  peopleWords,
   percentUsed,
+  shopsWords,
   spendLevel,
   subscriptionErrorText,
   unfinishedText,
@@ -449,5 +466,408 @@ describe("the model spend page's words", () => {
   it("holds the form's refusals, which name the limit from the API's own", () => {
     expect(modelSpendWords.badCap).toBe("Write the cap in baht, like 300 or 300.50. It must be more than ฿0.");
     expect(modelSpendWords.tooBigCap).toBe("The cap can be at most ฿10,000,000.");
+  });
+});
+
+// The owner's people, in plain words for the operator. Every sentence that holds a name is a function; the rest are said
+// once. Money and public posts are never a helper's to approve, so no sentence here says otherwise.
+describe("the People page's words", () => {
+  const mint: Identity = { kind: "email", address: "mint@baanmali.example" };
+  const beam: Identity = { kind: "line", id: "beam.baanmali" };
+
+  it("says what the owner and a helper may approve, and never offers a helper money or public posts", () => {
+    expect(peopleWords.ownerCan).toBe("Approves everything: messages and replies, money and public posts.");
+    expect(peopleWords.helperCan("Fon")).toBe(
+      "Approves messages and replies to customers. Money and public posts stay with Fon.");
+    expect(peopleWords.ownerRole).toBe("Owner");
+    expect(peopleWords.helperRole).toBe("Helper");
+    // The table is read from approval-core's own rule, so it can never say something the rule does not.
+    expect(APPROVAL_KINDS.map((kind) => [peopleWords.kindRow[kind], mayDecide("owner", kind), mayDecide("helper", kind)]))
+      .toEqual([
+        ["Messages to customers", true, true],
+        ["Replies to customers", true, true],
+        ["Money: refunds, discounts and payments", true, false],
+        ["Public posts", true, false],
+        ["Confirming that a payment arrived", true, false],
+        ["Commands the team asks to run", true, false],
+      ]);
+    expect(peopleWords.yes).toBe("Yes");
+    expect(peopleWords.no).toBe("No");
+    expect(peopleWords.noAsks("Fon")).toBe("No, asks Fon");
+    for (const kind of APPROVAL_KINDS) expect(peopleWords.kindTag[kind].length).toBeGreaterThan(0);
+  });
+
+  it("counts people and invites as the board does", () => {
+    expect(peopleWords.count(1, 0)).toBe("1 person");
+    expect(peopleWords.count(2, 0)).toBe("2 people");
+    expect(peopleWords.count(2, 1)).toBe("2 people, 1 invited");
+    expect(peopleWords.count(1, 3)).toBe("1 person, 3 invited");
+    expect(peopleWords.whoTitle("Baan Mali")).toBe("Who can use Manut AI for Baan Mali");
+  });
+
+  it("says who a person is, since when, and on how many devices", () => {
+    expect(peopleWords.identityText(mint)).toBe("mint@baanmali.example");
+    expect(peopleWords.identityText(beam)).toBe("LINE ID beam.baanmali");
+    expect(peopleWords.helperSince("2026-11-13T03:05:00.000Z")).toBe("Helper since 13 November.");
+    expect(peopleWords.devices(0)).toBe("Not signed in on any device.");
+    expect(peopleWords.devices(1)).toBe("Signed in on 1 device.");
+    expect(peopleWords.devices(2)).toBe("Signed in on 2 devices.");
+  });
+
+  it("says in the board's words who is covering and until when", () => {
+    expect(peopleWords.coverInForce("Mint", "2026-11-27T16:59:59.000Z"))
+      .toBe("You are away until Friday 27 November. Mint is covering messages.");
+    expect(peopleWords.coverOver("Mint", "2026-11-27T16:59:59.000Z"))
+      .toBe("The cover for Mint ended on Friday 27 November. Nobody is covering now.");
+    expect(peopleWords.noCover("Fon")).toBe(
+      "Nobody is covering. Choose a helper and a day to let them approve messages while Fon is away.");
+    expect(peopleWords.coverSet("Mint", "2026-11-27T16:59:59.000Z")).toBe("Mint covers messages until Friday 27 November.");
+    expect(peopleWords.coverEnded).toBe("The cover has ended.");
+    expect(peopleWords.coverNote("Fon")).toBe("Money and public posts still wait for Fon.");
+  });
+
+  it("asks once more before removing a helper, in the board's own words", () => {
+    expect(peopleWords.removeTitle("Mint")).toBe("Remove Mint?");
+    expect(peopleWords.removeEffect("Mint", "Baan Mali")).toBe(
+      "Mint can no longer sign in to Baan Mali. Requests Mint was looking at go back to you.");
+    expect(peopleWords.removeKept("Mint")).toBe("What Mint approved stays in the activity log, with Mint's name.");
+    expect(peopleWords.removeYes("Mint")).toBe("Remove Mint");
+    expect(peopleWords.removeNo("Mint")).toBe("Keep Mint");
+  });
+
+  it("says what a removal did from the API's own counts, leaving out what did not happen", () => {
+    const answer = { removed: "helper-1", sessionsEnded: 2, invitesRevoked: [] as string[], coverEnded: false };
+    expect(peopleWords.removed("Mint", answer)).toBe("Mint was removed and signed out on every device.");
+    expect(peopleWords.removed("Mint", { ...answer, coverEnded: true }))
+      .toBe("Mint was removed and signed out on every device. Their cover has ended.");
+    expect(peopleWords.removed("Mint", { ...answer, invitesRevoked: ["inv-1"] }))
+      .toBe("Mint was removed and signed out on every device. 1 pending invite for them was cancelled.");
+    expect(peopleWords.removed("Mint", { ...answer, invitesRevoked: ["inv-1", "inv-2"], coverEnded: true }))
+      .toBe("Mint was removed and signed out on every device. 2 pending invites for them were cancelled. Their cover has ended.");
+  });
+
+  it("says that an invite's link is sent by hand, and what an invite can and cannot do", () => {
+    expect(peopleWords.sendYourself).toBe("Send this link yourself; Manut AI does not send it.");
+    expect(peopleWords.inviteReady("Beam")).toBe("The invite for Beam is ready.");
+    expect(peopleWords.copyInviteOf("Beam")).toBe("for Beam's invite");
+    expect(peopleWords.copyNewInvite).toBe("for the new invite");
+    expect(peopleWords.inviteCan("Beam", "Fon")).toBe(
+      "Beam can approve messages and replies to customers. Money and public posts stay with Fon.");
+    expect(peopleWords.inviteCan("", "Fon")).toBe(
+      "A helper can approve messages and replies to customers. Money and public posts stay with Fon.");
+    expect(peopleWords.identityHelp).toContain("Manut AI does not send the invite");
+    expect(peopleWords.identityHelp).toContain("works once, for 7 days");
+    // What the pilot cannot do yet is said where the operator types the account, so no invite is made in hope.
+    expect(peopleWords.signInNote).toBe(
+      "Signing in with LINE is not built yet, so an invite to a LINE ID cannot be opened until it is. An email invite opens only for someone whose Apple ID uses that email.");
+    expect(peopleWords.inviteMade("2026-11-23T01:00:00.000Z", "2026-11-30T01:00:00.000Z"))
+      .toBe("Invite made 23 November at 08:00. It works once, until Monday 30 November at 08:00.");
+    expect(peopleWords.inviteRanOut("2026-11-30T01:00:00.000Z"))
+      .toBe("This invite ran out on Monday 30 November at 08:00. Invite again for a new link.");
+  });
+
+  it("says when a note was passed on, in the kind's short name, or as it is for a kind it does not know", () => {
+    expect(peopleWords.notePassedBy("Mint")).toBe("Passed on by Mint");
+    expect(peopleWords.kindOf("money")).toBe("Money");
+    expect(peopleWords.kindOf("public_post")).toBe("Public post");
+    expect(peopleWords.kindOf("something_new")).toBe("something_new");
+    expect(peopleWords.noteWhen("2026-11-23T00:00:00.000Z")).toBe("23 November at 07:00");
+    expect(peopleWords.noteRequest("req_refund")).toBe("request req_refund");
+    expect(peopleWords.noNotes("Fon")).toBe(
+      "No notes yet. When a helper cannot approve a request, they can pass it to Fon with a note, and it shows here.");
+    expect(peopleWords.removedNote(["Mint"])).toBe(
+      "Removed helpers: Mint. What they approved stays in the activity log, with their names.");
+    expect(peopleWords.removedNote(["Mint", "Kai", "Pim"])).toBe(
+      "Removed helpers: Mint, Kai and Pim. What they approved stays in the activity log, with their names.");
+  });
+
+  it("names the setting a link needs, and explains each refusal of the people routes", () => {
+    expect(peopleWords.notConfigured("WEB_ORIGIN")).toBe(
+      "The API cannot make invite links: its setting WEB_ORIGIN is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.");
+    expect(peopleWords.notConfigured()).toContain("one of its link settings");
+    const said = (status: number, code: string, setting?: string) =>
+      peopleErrorText(new ApiError(status, code, undefined, setting ? { setting } : {}));
+    expect(said(409, "already_invited")).toBe(
+      "That account already has an invite waiting. Send its link, or cancel it first.");
+    expect(said(409, "already_helper")).toBe("That person is already a helper.");
+    expect(said(400, "bad_identity")).toBe("Write a LINE ID, or an email address like name@example.com.");
+    expect(said(400, "invalid_request")).toBe("Write a name of 1 to 80 characters, and a LINE ID or an email address.");
+    expect(said(404, "unknown_invite")).toBe("That invite is already gone. The list was refreshed.");
+    expect(said(409, "not_pending")).toBe(
+      "That invite was already used or cancelled, so it cannot be cancelled. The list was refreshed.");
+    expect(said(404, "not_a_helper")).toBe("That person is no longer a helper. The list was refreshed.");
+    expect(said(400, "bad_date")).toBe("Choose a day that has not passed yet.");
+    expect(said(503, "people_unavailable")).toBe(
+      "The API could not read or save this shop's people. Check the list, then try again.");
+    expect(said(503, "not_configured", "APPROVAL_LINK_SECRET")).toContain("its setting APPROVAL_LINK_SECRET");
+    // Anything else is the console's usual words.
+    expect(said(403, "forbidden")).toContain("The API refused the operator key");
+    expect(said(0, "network")).toBe("Could not reach the API. Check the connection and try again.");
+    expect(peopleErrorText(new Error("boom"))).toBe("Something unexpected went wrong. Try again.");
+  });
+});
+
+// The new audit actions: the owner's people and browser control. Each reads as one sentence by who did it, with the
+// people's names when the people list knows them, and none is ever shown by its raw action name.
+describe("the audit log's words for the owner's people and for browser control", () => {
+  const op = { kind: "operator" as const, email: "ops@manut.test" };
+  const helper = { kind: "helper" as const, id: "helper-1" };
+  const worker = { kind: "worker" as const, attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" };
+  const outpost = { kind: "outpost" as const, id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-23T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok",
+    ...overrides });
+  const said = (overrides: Partial<AuditEntry>, names: Record<string, string> = {}) =>
+    auditSentence(entry(overrides), "Fon", names);
+
+  it("says what each of the people's eight actions did, with the owner's name where it helps", () => {
+    expect(said({ actor: op, action: "invite.created", subject: { inviteId: "inv-1" } })).toBe("ops@manut.test invited a helper.");
+    expect(said({ actor: op, action: "invite.revoked", subject: { inviteId: "inv-1" } })).toBe("ops@manut.test cancelled an invite.");
+    expect(said({ actor: helper, action: "helper.joined", subject: { inviteId: "inv-1", helperId: "helper-1" } }))
+      .toBe("Helper helper-1 joined the shop through an invite.");
+    expect(said({ actor: helper, action: "helper.session_opened", subject: { helperId: "helper-1" } }))
+      .toBe("Helper helper-1 signed in on another device.");
+    expect(said({ actor: op, action: "helper.removed", subject: { helperId: "helper-1" } })).toBe("ops@manut.test removed a helper.");
+    expect(said({ actor: op, action: "away.set", subject: { helperId: "helper-1" } }))
+      .toBe("ops@manut.test set a helper to cover messages while Fon is away.");
+    expect(said({ actor: op, action: "away.cleared", subject: { helperId: "helper-1" } })).toBe("ops@manut.test ended the cover.");
+    expect(said({ actor: helper, action: "request.passed_on", subject: { requestId: "req_1", taskId: "t1" } }))
+      .toBe("Helper helper-1 passed a request on to Fon.");
+  });
+
+  it("names a helper, a removed helper and an invite by what the owner called them, once the people list knows them", () => {
+    const names = { "helper-1": "Mint", "inv-1": "Beam" };
+    expect(auditActorText(helper, "Fon", names)).toBe("Mint");
+    expect(auditActorText(helper, "Fon")).toBe("Helper helper-1");
+    expect(auditActorText({ kind: "helper", id: "helper-9" }, "Fon", names)).toBe("Helper helper-9");
+    expect(said({ actor: op, action: "invite.created", subject: { inviteId: "inv-1" } }, names)).toBe("ops@manut.test invited Beam.");
+    expect(said({ actor: op, action: "invite.revoked", subject: { inviteId: "inv-1" } }, names))
+      .toBe("ops@manut.test cancelled Beam's invite.");
+    expect(said({ actor: helper, action: "helper.joined", subject: { inviteId: "inv-1", helperId: "helper-1" } }, names))
+      .toBe("Mint joined the shop through an invite.");
+    expect(said({ actor: helper, action: "helper.session_opened", subject: { helperId: "helper-1" } }, names))
+      .toBe("Mint signed in on another device.");
+    expect(said({ actor: op, action: "helper.removed", subject: { helperId: "helper-1" } }, names)).toBe("ops@manut.test removed Mint.");
+    expect(said({ actor: op, action: "away.set", subject: { helperId: "helper-1" } }, names))
+      .toBe("ops@manut.test set Mint to cover messages while Fon is away.");
+    expect(said({ actor: op, action: "away.cleared", subject: { helperId: "helper-1" } }, names))
+      .toBe("ops@manut.test ended Mint's cover.");
+    expect(said({ actor: helper, action: "request.passed_on", subject: { requestId: "req_1" } }, names))
+      .toBe("Mint passed a request on to Fon.");
+    // A helper who decided an approval is named too.
+    expect(said({ actor: helper, action: "approval.decided", outcome: "approved" }, names)).toBe("Mint decided an approval request.");
+    // A name an id merely shares with a property every object has is not a name.
+    expect(auditActorText({ kind: "helper", id: "constructor" }, "Fon", {})).toBe("Helper constructor");
+  });
+
+  it("reads the names off the people list: helpers, removed helpers and invites, skipping any it has no name for", () => {
+    const people: People = {
+      tenant: "t1",
+      owner: { name: "Fon" },
+      helpers: [{ id: "helper-1", name: "Mint", identity: { kind: "email", address: "mint@baanmali.example" },
+        joinedAt: "2026-11-13T03:05:00.000Z", devices: 1 }],
+      invites: [{ id: "inv-1", name: "Beam", identity: { kind: "line", id: "beam.baanmali" }, status: "pending",
+        createdAt: "2026-11-23T01:00:00.000Z", expiresAt: "2026-11-30T01:00:00.000Z" },
+      { id: "inv-2", name: "", identity: { kind: "line", id: "x" }, status: "revoked", createdAt: "2026-11-23T01:00:00.000Z",
+        expiresAt: "2026-11-30T01:00:00.000Z" }],
+      away: null,
+      passedOn: [],
+      removed: [{ id: "helper-0", name: "Kai" }, { id: "helper-8", name: "" }],
+    };
+    expect(auditNamesOf(people)).toEqual({ "helper-1": "Mint", "inv-1": "Beam", "helper-0": "Kai" });
+  });
+
+  it("says what each of browser control's seven actions did, and by whom, including an outpost", () => {
+    expect(auditActorText(outpost, "Fon")).toBe("Outpost b4c8d1e2");
+    expect(said({ actor: op, action: "signin.created", subject: { signInId: "s1" } }))
+      .toBe("ops@manut.test added a site sign-in to the vault.");
+    expect(said({ actor: op, action: "signin.password_replaced", subject: { signInId: "s1" } }))
+      .toBe("ops@manut.test replaced a site sign-in's password.");
+    expect(said({ actor: op, action: "signin.removed", subject: { signInId: "s1" } }))
+      .toBe("ops@manut.test removed a site sign-in from the vault.");
+    expect(said({ actor: op, action: "outpost.registered", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test registered an outpost.");
+    expect(said({ actor: worker, action: "signin.requested", subject: { signInId: "s1", outpostId: "o1" } }))
+      .toBe("Worker attempt 6f9d1f0e asked to sign in to a site.");
+    expect(said({ actor: worker, action: "signin.broken", subject: { signInId: "s1" } }))
+      .toBe("Worker attempt 6f9d1f0e reported that a site refused a saved password.");
+    expect(said({ actor: outpost, action: "signin.redeemed", subject: { outpostId: "o1" } }))
+      .toBe("Outpost b4c8d1e2 asked for a sign-in to type into a site.");
+  });
+
+  it("has words for every new action: none is shown by its raw name or as an action it does not know", () => {
+    const actors = { op, helper, worker, outpost };
+    const actions: [string, keyof typeof actors][] = [
+      ["invite.created", "op"], ["invite.revoked", "op"], ["helper.joined", "helper"], ["helper.session_opened", "helper"],
+      ["helper.removed", "op"], ["away.set", "op"], ["away.cleared", "op"], ["request.passed_on", "helper"],
+      ["signin.created", "op"], ["signin.password_replaced", "op"], ["signin.removed", "op"], ["signin.broken", "worker"],
+      ["signin.requested", "worker"], ["signin.redeemed", "outpost"], ["outpost.registered", "op"],
+    ];
+    expect(actions).toHaveLength(15);
+    for (const [action, who] of actions) {
+      const sentence = said({ actor: actors[who], action });
+      expect(sentence, action).not.toContain(action);
+      expect(sentence, action).not.toMatch(/\bdid\b/);
+      expect(sentence.endsWith("."), action).toBe(true);
+    }
+    // An action the console does not know yet is still shown as it is, never dropped.
+    expect(said({ action: "something.new" })).toBe("Manut AI did something.new.");
+  });
+
+  it("labels the ids the new entries are about", () => {
+    expect(auditSubjectText({ inviteId: "inv-1", helperId: "helper-1" })).toBe("invite inv-1 · helper helper-1");
+    expect(auditSubjectText({ taskId: "t1", attemptId: "a1", signInId: "s1", outpostId: "o1", grantId: "g1" }))
+      .toBe("task t1 · attempt a1 · sign-in s1 · outpost o1 · grant g1");
+    expect(auditSubjectText({ requestId: "req_1", taskId: "t1" })).toBe("task t1 · request req_1");
+  });
+
+  it("explains why a sign-in step was refused, in plain words, and still shows a reason it does not know", () => {
+    expect(auditReasonText("sign_in_not_found")).toBe("That sign-in was not found, or it had been removed.");
+    expect(auditReasonText("member_not_allowed")).toBe("That member is not named on the sign-in.");
+    expect(auditReasonText("sign_in_broken")).toBe("The site had refused the saved password, so a new one was needed.");
+    expect(auditReasonText("outpost_not_found")).toBe("There was no such outpost.");
+    expect(auditReasonText("outpost_asleep")).toBe("The outpost was asleep.");
+    expect(auditReasonText("grant_not_found")).toBe("The shop had no such grant.");
+    expect(auditReasonText("wrong_outpost")).toBe("The grant was for another outpost.");
+    expect(auditReasonText("grant_used")).toBe("The grant had already been used.");
+    expect(auditReasonText("grant_expired")).toBe("The grant had run out of its 60 seconds.");
+    expect(auditReasonText("feature_disabled")).toBe("That kind of work was switched off.");
+    expect(auditReasonText("consent_required")).toBe("The owner had not allowed it, or had withdrawn permission.");
+    expect(auditReasonText("vault_unavailable")).toBe("The vault did not answer.");
+    expect(auditReasonText("vault_not_configured")).toBe("The vault has no key set.");
+    expect(auditReasonText("unseal_failed")).toBe("The vault could not open the saved password.");
+    expect(auditReasonText("task_unavailable")).toBe("The task could not be read.");
+    // The reasons that already had words keep them.
+    expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
+    expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
+  });
+});
+
+describe("the drafts page's words", () => {
+  it("says plainly, in the intro and on every draft, that nothing has been sent and that this page cannot send it", () => {
+    expect(draftsWords.intro).toContain("has not been sent to anyone");
+    expect(draftsWords.intro).toContain("nothing on this page sends it");
+    expect(draftsWords.notSent).toBe("Not sent");
+    expect(draftsWords.notSentNote).toBe("This is a draft. It has not been sent to anyone.");
+    // No word on the page offers to send: the only verbs about sending say it is not done.
+    for (const text of [draftsWords.nav, draftsWords.title, draftsWords.refresh, draftsWords.older, draftsWords.notSent]) {
+      expect(text).not.toMatch(/\bsend\b/i);
+    }
+  });
+
+  it("names the members as people say them, with the part each plays, and shows one it does not know as it is", () => {
+    expect([memberName("nam"), memberName("pim"), memberName("ton")]).toEqual(["Nam", "Pim", "Ton"]);
+    expect([memberRole("nam"), memberRole("pim"), memberRole("ton")]).toEqual(["sales chat", "content", "books"]);
+    expect(memberName("kit")).toBe("kit");
+    expect(memberRole("kit")).toBeNull();
+    // An own property only: a name that is on every object is not a member.
+    expect(memberName("constructor")).toBe("constructor");
+    expect(memberRole("toString")).toBeNull();
+  });
+
+  it("names each kind of job, and shows a kind it does not know as it is", () => {
+    expect([jobKindText("reply"), jobKindText("post"), jobKindText("daily_summary")]).toEqual([
+      "Reply to a customer", "Post", "Sales summary"]);
+    expect(jobKindText("refund")).toBe("refund");
+  });
+
+  it("tags each ending, naming the owner who is waited for and the member a job was passed to", () => {
+    expect(jobEndingTag({ state: "running" }, "Fon")).toEqual({ label: "Running", className: "tag run" });
+    expect(jobEndingTag({ state: "done" }, "Fon")).toEqual({ label: "Done", className: "tag ok" });
+    expect(jobEndingTag({ state: "failed", reason: "budget" }, "Fon")).toEqual({ label: "Failed", className: "tag err" });
+    expect(jobEndingTag({ state: "awaiting_owner" }, "Fon")).toEqual({ label: "Waiting for Fon", className: "tag warn" });
+    expect(jobEndingTag({ state: "handed_over", to: "ton" }, "Fon")).toEqual({ label: "Passed to Ton", className: "tag" });
+    expect(jobEndingTag({ state: "cancelled" }, "Fon")).toEqual({ label: "Cancelled", className: "tag" });
+    // A state a newer API sends is shown as it is, never dropped.
+    expect(jobEndingTag({ state: "paused" } as never, "Fon")).toEqual({ label: "paused", className: "tag" });
+  });
+
+  it("says in a line how a job that did not simply finish stands", () => {
+    expect(jobEndingNote({ state: "done" })).toBeNull();
+    expect(jobEndingNote({ state: "running" })).toBe("Still working on it.");
+    expect(jobEndingNote({ state: "failed", reason: "budget" })).toBe("The shop's model budget ran out.");
+    expect(jobEndingNote({ state: "awaiting_owner" })).toBe("Asked for an approval and stopped until it is answered.");
+    expect(jobEndingNote({ state: "handed_over", to: "nam" })).toBe("Nam has not taken it up yet.");
+    expect(jobEndingNote({ state: "cancelled" })).toBe("It was stopped before it finished.");
+    expect(jobEndingNote({ state: "paused" } as never)).toBeNull();
+  });
+
+  it("explains why a job failed in plain words, and shows a code it does not know as it is", () => {
+    expect(jobReasonText("not_connected")).toBe("The shop's LINE connection to that customer is gone.");
+    expect(jobReasonText("payments_unavailable")).toBe("The shop's recorded payments could not be read.");
+    expect(jobReasonText("empty_draft")).toBe("The model wrote nothing, so there is no draft.");
+    expect(jobReasonText("unknown")).toBe("It ended without saying why.");
+    // The attempt's own codes keep the audit page's words.
+    expect(jobReasonText("budget")).toBe("The shop's model budget ran out.");
+    expect(jobReasonText("silent")).toBe("The worker stopped reporting.");
+    expect(jobReasonText("deadline")).toBe("The attempt ran out of time.");
+    expect(jobReasonText("flood")).toBe("Reason: flood.");
+    expect(jobReasonText("constructor")).toBe("Reason: constructor.");
+  });
+
+  it("says what a draft is about: the message a reply answers, the day a summary covers", () => {
+    expect(jobAboutText({ messageId: "msg_nok" })).toBe("Answers message msg_nok");
+    expect(jobAboutText({ date: "2026-11-21" })).toBe("Sales on 21 November");
+    expect(jobAboutText({ messageId: "msg_1", date: "2026-11-21" })).toBe("Answers message msg_1 · Sales on 21 November");
+    expect(jobAboutText({ date: "last Friday" })).toBe("Sales on last Friday");
+    expect(jobAboutText({})).toBeNull();
+    expect(jobAboutText(undefined)).toBeNull();
+  });
+
+  it("says what sending a reply would take, which is never sending it here", () => {
+    expect(draftSendText({ answer: "ask", kind: "reply" }, "Fon")).toBe(
+      "To send it, propose it as a reply on the Messages tab. Fon approves it before anything is sent.");
+    expect(draftSendText({ answer: "draft_only", kind: "reply" }, "Fon")).toBe(
+      "The shop's LINE connection is still in practice mode, so a reply can only be drafted for now.");
+    expect(draftSendText(undefined, "Fon")).toBeNull();
+    expect(draftSendText({ answer: "ask", kind: "post" }, "Fon")).toBeNull();
+  });
+
+  it("writes a cost as baht from whole satang, and a handover as one sentence", () => {
+    expect(draftsWords.cost(2)).toBe("Model cost ฿0.02");
+    expect(draftsWords.cost(129000)).toBe("Model cost ฿1,290");
+    expect(draftsWords.cost(0)).toBe("Model cost ฿0");
+    // A figure the API never sends is shown as unknown, not as a wrong amount.
+    expect(draftsWords.cost(1.5)).toBe("Model cost unknown");
+    expect(draftsWords.passed("nam", "ton")).toBe("Nam passed this job to Ton.");
+    expect(draftsWords.task("worker-task-1")).toBe("task worker-task-1");
+    expect(draftsWords.listLabel("Baan Mali")).toBe("Baan Mali's worker jobs");
+  });
+
+  it("puts the drafts route's own refusals in words, and the console's usual words for the rest", () => {
+    expect(draftsErrorText(new ApiError(503, "drafts_unavailable"))).toBe("The API could not read this shop's jobs. Try again.");
+    expect(draftsErrorText(new ApiError(503, "shop_unavailable"))).toBe("The API could not read this shop's record. Try again.");
+    expect(draftsErrorText(new ApiError(404, "shop_not_found"))).toBe(errorText(new ApiError(404, "shop_not_found")));
+    expect(draftsErrorText(new ApiError(403, "forbidden"))).toMatch(/refused the operator key/);
+    expect(draftsErrorText(new ApiError(0, "network"))).toBe("Could not reach the API. Check the connection and try again.");
+  });
+});
+
+describe("the shops overview's words", () => {
+  it("names each part of a shop that could not be read, and which shop it was", () => {
+    expect(shopsWords.shopsFailed([{ name: "Sabai Tea", parts: ["model spend"] }])).toBe(
+      "Some shops could not be read in full: Sabai Tea (model spend). Try again.");
+    expect(shopsWords.shopsFailed([
+      { name: "Sabai Tea", parts: ["model spend", "audit log"] },
+      { name: "Baan Mali", parts: ["audit log"] },
+    ])).toBe(
+      "Some shops could not be read in full: Sabai Tea (model spend and audit log) and Baan Mali (audit log). Try again.");
+    expect(shopsWords.parts).toEqual({ usage: "model spend", audit: "audit log" });
+  });
+
+  it("writes a month's spend against the cap as baht, and names the page each link opens for the shop", () => {
+    expect(shopsWords.spendOf(18600, 30000)).toBe("฿186 of ฿300");
+    expect(shopsWords.spendOf(0, 20000)).toBe("฿0 of ฿200");
+    expect(shopsWords.spendOf(5, 20000)).toBe("฿0.05 of ฿200");
+    expect(shopsWords.openLabel("Audit", "Baan Mali")).toBe("Audit for Baan Mali");
+    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend"]);
+  });
+
+  it("says why nothing is shown for the trial, payment and activity when the gate could not be read", () => {
+    expect(shopsWords.gateFailed).toBe(
+      "The pilot gate could not be read, so trials, payments and activity are not shown. Try again.");
+    expect(shopsWords.unreadable).toBe("Could not be read");
+    expect(shopsWords.columns.active(14)).toBe("Active on day 14");
+    expect(shopsWords.columns.activeUnknown).toBe("Active");
   });
 });

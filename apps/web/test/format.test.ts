@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dayOffset, formatBaht, formatClock, formatIsoDate, formatStamp, langOf, parseBahtToSatang } from "../src/format";
+import { dayOffset, endOfShopDay, formatBaht, formatClock, formatIsoDate, formatStamp, formatWeekdayDate, langOf,
+  parseBahtToSatang } from "../src/format";
 
 describe("money and time", () => {
   it("writes baht with the sign first and satang only when there are some", () => {
@@ -41,5 +42,22 @@ describe("money and time", () => {
   it("marks Thai text so it is read as Thai", () => {
     expect(langOf("ขอบคุณค่ะ")).toBe("th");
     expect(langOf("Thank you")).toBeUndefined();
+  });
+
+  it("writes a day with its weekday on the shop's calendar, whatever the viewer's zone", () => {
+    expect(formatWeekdayDate("2026-11-27T03:00:00Z")).toBe("Friday 27 November");
+    expect(formatWeekdayDate("2026-11-27T16:59:59Z")).toBe("Friday 27 November");
+    // 17:00 UTC is already the next morning in Bangkok.
+    expect(formatWeekdayDate("2026-11-27T17:00:00Z")).toBe("Saturday 28 November");
+    expect(formatWeekdayDate("2026-11-22T03:00:00Z")).toBe("Sunday 22 November");
+  });
+
+  it("finds the last moment of a day on the shop's calendar, and refuses what is not a day", () => {
+    expect(endOfShopDay("2026-11-27")).toBe("2026-11-27T16:59:59.000Z");
+    expect(endOfShopDay("2026-12-31")).toBe("2026-12-31T16:59:59.000Z");
+    expect(formatIsoDate(endOfShopDay("2026-11-27")!)).toBe("2026-11-27");
+    for (const bad of ["", "27/11/2026", "2026-13-01", "2026-02-30", "2026-11-27T10:00", " 2026-11-27", "tomorrow"]) {
+      expect(endOfShopDay(bad)).toBeNull();
+    }
   });
 });

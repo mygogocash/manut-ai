@@ -218,12 +218,13 @@ export type AwaitingOwner = { status: "awaiting_owner"; confirmUrl: string; expi
 
 /// Who an audit entry says acted: an operator by their Cloudflare Access identity (null for a service token, and in
 /// practice mode), the shop's owner (through a link, or with the id of their signed-in device), a helper, a worker by
-/// its attempt, or Manut AI's own system.
+/// its attempt, an outpost (a machine that runs the team's browser) by its id, or Manut AI's own system.
 export type AuditActor =
   | { kind: "operator"; email: string | null }
   | { kind: "owner"; id?: string }
   | { kind: "helper"; id: string }
   | { kind: "worker"; attemptId: string }
+  | { kind: "outpost"; id: string }
   | { kind: "system" };
 
 /// One entry of a shop's audit log (docs/pilot-api.md, "Audit log"): who did what and when, metadata only. `action`
@@ -235,7 +236,7 @@ export type AuditEntry = {
   actor: AuditActor;
   action: string;
   /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
-  /// `previousConnectionId`, `confirmationId`, `factId`.
+  /// `previousConnectionId`, `confirmationId`, `factId`, `inviteId`, `helperId`, `signInId`, `outpostId`, `grantId`.
   subject: Record<string, string>;
   outcome: string;
   reason?: string;
@@ -269,6 +270,70 @@ export type FactRef = { tenant: string; id: string };
 
 /// The owner's correction: new words for a fact.
 export type FactCorrection = { tenant: string; id: string; text: string };
+
+/// The one account an invite or a helper is bound to (docs/pilot-api.md, "Helpers"): a LINE account id, compared exactly,
+/// or an email, compared without case.
+export type Identity = { kind: "line"; id: string } | { kind: "email"; address: string };
+
+/// `expired` is an invite never used in its 7 days. The API reads it from the clock, so a pending invite turns expired
+/// by itself.
+export type InviteStatus = "pending" | "used" | "revoked" | "expired";
+
+export type InviteView = {
+  id: string;
+  /// The name the owner gave, carried to the helper who joins through the invite.
+  name: string;
+  identity: Identity;
+  status: InviteStatus;
+  createdAt: string;
+  /// 7 days after `createdAt`.
+  expiresAt: string;
+  /// The link to copy, for a pending invite only, and only when the API can make links. Nothing sends it.
+  inviteUrl?: string;
+};
+
+export type PeopleHelper = {
+  id: string;
+  name: string;
+  identity: Identity;
+  joinedAt: string;
+  /// Sessions open now, one for each device signed in.
+  devices: number;
+};
+
+/// Cover while the owner is away: `helperId` covers messages until `until`. It is `inForce` until that time exactly; after
+/// it the cover stays on record, no longer in force, until an operator clears it.
+export type AwayView = { helperId: string; name: string; until: string; inForce: boolean };
+
+/// A note a helper passed on to the owner with a request they may not decide. `kind` is the request's approval-core kind;
+/// a kind this console does not know yet is shown as it is, so it is kept a string.
+export type PassedOnItem = { requestId: string; kind: string; by: string; name: string; note: string; at: string };
+
+/// `GET /v1/admin/people`: the owner, the helpers, every invite, the cover, the notes helpers passed on, and the helpers
+/// who were removed, so what they did in the activity log still has their name.
+export type People = {
+  tenant: string;
+  owner: { name: string };
+  helpers: PeopleHelper[];
+  invites: InviteView[];
+  away: AwayView | null;
+  passedOn: PassedOnItem[];
+  removed: { id: string; name: string }[];
+};
+
+/// `name` is 1 to 80 characters once trimmed.
+export type NewInvite = { tenant: string; name: string; identity: Identity };
+export type InviteRef = { tenant: string; inviteId: string };
+export type HelperRef = { tenant: string; helperId: string };
+/// `until` is any time the API can read, in the future.
+export type NewAway = { tenant: string; helperId: string; until: string };
+
+/// The invite as it now stands, and the link for the operator to copy: the API never sends it.
+export type CreatedInvite = { invite: InviteView; inviteUrl: string };
+
+/// What a removal did: the helper's sessions it ended, their pending invites it revoked (by id), and whether they were the
+/// one covering.
+export type HelperRemoval = { removed: string; sessionsEnded: number; invitesRevoked: string[]; coverEnded: boolean };
 
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
@@ -329,6 +394,56 @@ export type NewModelCap = { tenant: string; capSatang: number | null };
 
 /// The largest cap the API takes: ฿10 million, far above any shop's month.
 export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
+
+/// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
+export type WorkerMember = "nam" | "pim" | "ton";
+
+/// What a job is: a reply to a customer's message, a post about a topic, or yesterday's sales summary.
+export type WorkerJobKind = "reply" | "post" | "daily_summary";
+
+/// How a worker's job stands. `failed` carries the code the job ended with, which this console puts in words and shows as it
+/// is when it does not know the code yet. `handed_over` is a job passed on to a member who has not taken it up; a job passed
+/// on and taken up shows the member who took it up, and its ending is theirs.
+export type WorkerJobEnding =
+  | { state: "running" }
+  | { state: "done" }
+  | { state: "failed"; reason: string }
+  | { state: "awaiting_owner" }
+  | { state: "handed_over"; to: WorkerMember }
+  | { state: "cancelled" };
+
+/// What a member wrote for the owner to read. It is a draft: it has not been sent to anyone. `about` names the message a
+/// reply answers or the day a summary covers. `send` says what sending a reply would take: `draft_only` while the shop's LINE
+/// connection is in practice mode, `ask` once it is over, when the owner's approval is needed.
+export type WorkerDraft = {
+  text: string;
+  at: string;
+  about?: { messageId?: string; date?: string };
+  send?: { answer: "draft_only" | "ask"; kind: string };
+};
+
+/// One job of a shop's team (docs/pilot-api.md, "Workers' drafts"). `member` is who has the job now, and `passedFrom` who
+/// passed it to them. `draft` is the newest the job wrote, or null. `costSatang` is what the job's model calls cost, in
+/// whole satang, and is absent for a job that called none.
+export type WorkerJobEntry = {
+  taskId: string;
+  member: WorkerMember;
+  passedFrom?: WorkerMember;
+  job: WorkerJobKind;
+  /// When the job started.
+  at: string;
+  ending: WorkerJobEnding;
+  draft: WorkerDraft | null;
+  costSatang?: number;
+};
+
+/// One page of a shop's jobs, newest first. `next` is the cursor for the page after it, null when nothing is older. A page
+/// can hold fewer than asked, or none, while `next` says there is more.
+export type WorkerJobsPage = { tenant: string; jobs: WorkerJobEntry[]; next: string | null };
+
+/// Which page to read: the jobs before the cursor `before` (a job's task id), at most `limit` of them (1 to 25; the API
+/// reads 10 when the console does not say).
+export type WorkerJobsQuery = { before?: string; limit?: number };
 
 /// The reply text the broker accepts: 1 to 5,000 characters.
 export const REPLY_MAX_LENGTH = 5000;
@@ -409,6 +524,24 @@ export interface PilotApi {
   /// Forget: the fact and its words are gone, and only a fingerprint is kept so the team does not learn them again.
   forgetFact(input: FactRef): Promise<{ id: string }>;
 
+  /// `GET /v1/admin/people`: who can use Manut AI for the shop, with each pending invite's link. Rejects with 400
+  /// `tenant_required`, 404 `shop_not_found` and 503 `people_unavailable`.
+  getPeople(tenant: string): Promise<People>;
+  /// The owner's say over who helps, relayed by the operator (docs/pilot-api.md, "Helpers"). Each rejects with the API's
+  /// refusal, changing nothing: 400 `invalid_request`, `bad_identity` or `bad_date`, 404 `shop_not_found`,
+  /// `unknown_invite` or `not_a_helper`, 409 `already_invited`, `already_helper` or `not_pending`, 503 `not_configured`
+  /// (naming the setting a link needs) or `people_unavailable`.
+  /// An invite for one LINE account or email, for 7 days, once. The API sends nothing: the link is for the operator to send.
+  createInvite(input: NewInvite): Promise<CreatedInvite>;
+  /// An invite that was not used yet stops working.
+  revokeInvite(input: InviteRef): Promise<{ invite: InviteView }>;
+  /// The helper is signed out on every device in the same step; their pending invites and any cover of theirs end.
+  removeHelper(input: HelperRef): Promise<HelperRemoval>;
+  /// One helper covers messages until `until`. Money and public posts still wait for the owner.
+  setAway(input: NewAway): Promise<{ away: AwayView }>;
+  /// The owner is back. Clearing when nobody covers changes nothing.
+  clearAway(input: { tenant: string }): Promise<{ away: null }>;
+
   /// `GET /v1/admin/model/usage`: a shop's model spend, cap and calls for one Bangkok month (`YYYY-MM`), the current
   /// one when none is given. Rejects with 400 `tenant_required`, 400 `invalid_request` for a month that is not one, 503
   /// `not_configured` naming the setting it could not read (`ApiError.setting`), and 503 `meter_unavailable`.
@@ -418,6 +551,12 @@ export interface PilotApi {
   /// `invalid_request` for a cap that is missing, not whole or out of range, 503 `not_configured` naming the setting,
   /// and 503 `meter_unavailable`, which does not say whether the cap was written.
   setModelCap(input: NewModelCap): Promise<ModelCap>;
+
+  /// `GET /v1/admin/workers/drafts`: one page of what Nam, Pim and Ton did for a shop, newest first, drafts and handovers
+  /// included. It only reads: a draft in it has not been sent. Rejects with 400 `tenant_required`, 400 `invalid_request` for a
+  /// cursor that is not one of the shop's jobs or a size out of range, 404 `shop_not_found`, and 503 `shop_unavailable` or
+  /// `drafts_unavailable`.
+  listWorkerJobs(tenant: string, query?: WorkerJobsQuery): Promise<WorkerJobsPage>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.

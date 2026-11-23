@@ -151,6 +151,14 @@ type DeletionView = {
 | `POST /v1/admin/memory/correct` | `{ tenant, id, text }` | `Fact`: the new words, confirmed |
 | `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
 | `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
+| `GET /v1/admin/workers/drafts` | `?tenant=&before=&limit=` | `WorkerJobsPage`: one page of the shop's worker jobs, newest first, drafts and handovers included ("Workers' drafts", below) |
+
+The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
+reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
+shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
+spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
+have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages.
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -680,11 +688,71 @@ A job that started answers 200, also when it failed, because its task and the au
   no sales for the day drafts "No sales were recorded on 2026-11-22." and calls no model. Ton reads the newest 500
   payments, as the console lists them.
 - **The task.** The job's task is a draft in the cloud location. Its event log holds what each attempt reported
-  (`turnStarted`, `spend`, `turnCompleted`, and a `handoffNote` `{ from, to, job }` when a job was passed on), and the
-  draft is kept beside it, one per attempt. The draft's words are on the task only.
+  (`turnStarted`, `spend` with the call's `costSatang`, `turnCompleted`, and a `handoffNote` `{ from, to, job }` when a
+  job was passed on), and the draft is kept beside it, one per attempt. The draft's words are on the task only.
 - **Audit.** Metadata only: `attempt.started` for each attempt (by the operator's Access identity, or by the system
   for the member a job was passed to), and `attempt.ended` with its outcome and reason. No entry holds a customer's
   words, a draft or a secret.
+
+### Workers' drafts: `GET /v1/admin/workers/drafts`
+
+What the team did for a shop, newest first, a page at a time: the console's Drafts page reads it. Under the admin gate,
+as an exact `ADMIN_METHODS` entry. It only reads: it writes nothing, calls no model and sends nothing, so a draft stays a
+draft, and a reply reaches a customer only through `POST /v1/admin/pilot/replies` and the owner's approval. The answer
+holds the words of drafts, so it carries `cache-control: no-store`.
+
+- `tenant` (required, else 400 `tenant_required`). A tenant that is no pilot shop answers 404 `shop_not_found`; a shop
+  with no jobs answers an empty page.
+- `before`: the `taskId` of a job on an earlier page, usually the `next` the last page gave. Anything else, or a job
+  that is not the shop's, is 400 `invalid_request`.
+- `limit`: 1 to 25, 10 when absent. Anything else is 400 `invalid_request`.
+
+```ts
+type WorkerJobsPage = {
+  tenant: string;
+  jobs: WorkerJobEntry[];       // newest first
+  next: string | null;          // `before` for the page after this one; null when there is nothing older
+};
+
+type WorkerJobEntry = {
+  taskId: string;               // the job's own task
+  member: "nam" | "pim" | "ton";            // who has the job now: the member of its newest attempt
+  passedFrom?: "nam" | "pim" | "ton";       // who passed it to them, when it was not theirs ("Passed to Ton")
+  job: "reply" | "post" | "daily_summary";
+  at: string;                   // when the job started: when its first attempt was claimed
+  ending: WorkerJobEnding;
+  draft: { text: string; at: string; about?: { messageId?: string; date?: string };
+           send?: { answer: "draft_only" | "ask"; kind: "reply" } } | null;   // the newest draft; not sent
+  costSatang?: number;          // what the job's model calls cost, in whole satang; absent when it called none
+};
+
+type WorkerJobEnding =
+  | { state: "running" }                          // its attempt can still act
+  | { state: "done" }
+  | { state: "failed"; reason: string }           // the code the attempt ended with (see "Workers", above)
+  | { state: "awaiting_owner" }                   // a worker that asked and stopped until the owner answers
+  | { state: "handed_over"; to: "nam" | "pim" | "ton" }   // passed on to a member who has not taken it up
+  | { state: "cancelled" };
+```
+
+- **Jobs.** A job is a task the runner made (`worker-task-…`) that has at least one attempt, so a task a refused start left
+  behind is not listed. A task that is not the shop's, or whose title or executors the runner never gives, is not listed
+  either. `limit` counts jobs, a job passed on counting once; a page reads on past anything that is not a job, so it can
+  come back short or empty while `next` says there is more.
+- **Handovers.** A job passed to the member whose job it is shows that member and `passedFrom`; its ending, draft and
+  cost are theirs. `handed_over` is for a job passed on that nobody has taken up. A handoff note that does not name one of
+  the team is not a handover.
+- **Endings.** An attempt still marked active whose lease or deadline has passed can no longer act, so it reads as the
+  sweep will settle it, `failed` with the reason `deadline` or `silent`; the read ends nothing. A finished attempt with no
+  recorded outcome predates outcomes and reads as `failed` with the reason `unknown`, never as a success.
+- **Cost.** The sum of the `costSatang` on the job's `spend` reports: the gateway's own price for each call, rounded up
+  to whole satang as the meter's record is. A call the provider failed reports no spend, so a job shows no cost for it;
+  the shop's Model spend page still counts it.
+- **Failures.** A task that cannot be read fails the whole page with 503 `{ "error": "drafts_unavailable" }`, as does the
+  shop's index of tasks; a shop record that cannot be read answers 503 `shop_unavailable`. A job is never left out of a
+  page in silence.
+- **The console** has a Drafts page in the side menu, beside Audit and Memory: the shop is chosen on the page, each job
+  shows its draft in full under "Not sent", and "Show older jobs" reads the next page. It has no send button.
 
 ## Vault sign-ins and outposts
 

@@ -139,6 +139,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - **Helpers:** a real sign-in for them (LINE Login is parked; email sign-in needs a sending service, which may
   cost money; today only an email Apple verified can accept an invite); whether helpers' decisions should count
   toward the pilot gate (they do not now).
+- **The console's first page:** it opens on the first shop's messages; say if it should open on the new Shops
+  overview instead.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
