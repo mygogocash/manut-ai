@@ -1,7 +1,8 @@
 /// Buddy's three cloud team members as workers on the job flow (job-flow.ts; docs/phase-0-spikes.md, section 4). Nam
 /// drafts a reply to a customer's message, Pim drafts a post about a topic an operator gives, and Ton writes the owner a
 /// short summary of yesterday's sales from the order payments the shop has recorded. An operator starts each job from
-/// the console (`POST /v1/admin/workers/run`, below); the runner does the rest.
+/// the console (`POST /v1/admin/workers/run`, below); the runner does the rest. The console reads the jobs back through
+/// `GET /v1/admin/workers/drafts` (`readJobs`, below): a read of the tasks the runner made, which writes nothing.
 ///
 /// Every result is a draft, kept on the job's own task for the owner to read (task-object.ts, `DraftJSON`). Nothing
 /// here can send, post, pay or refund: the runner never asks for an external write, so the approval paths that already
@@ -46,8 +47,8 @@ import { usableFacts } from "./memory";
 import { operatorIdentity } from "./pilot";
 import { bangkokDay } from "./pilot-gate";
 import type { InboundMessage, Payment, PilotShopRecord } from "./pilot-store";
-import type { DraftJSON } from "./task-object";
-import { credStub, tenantCall } from "./tenant-data";
+import type { AttemptJSON, DraftJSON, TaskDocJSON, TaskEventJSON } from "./task-object";
+import { credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
 
 export const WORKER_MEMBERS = ["nam", "pim", "ton"] as const;
 export type WorkerMember = (typeof WORKER_MEMBERS)[number];
@@ -294,9 +295,12 @@ async function work(
   if (!built.ok) return fail(built.reason);
   const answered = await port.callModel(built.request);
   if (!answered.ok) return fail(answered.error === "budget_exceeded" ? "budget" : answered.error, answered);
-  const { usage } = answered.value;
+  const { usage, costSatang } = answered.value;
+  // The cost rides with the spend report because nothing else links a job to the meter's record of its call (the meter
+  // keeps no task or attempt id, by design: metadata only). It is the gateway's own price in whole satang, so the job
+  // list can show what a job cost without reading the meter. The agent-events decoder ignores a field it does not know.
   const spent = await port.report([{ type: "spend", tokens: usage.inputTokens + usage.outputTokens,
-    model: WORKER_MODEL }]);
+    model: WORKER_MODEL, costSatang }]);
   if (!spent.ok) return fail(spent.error, spent);
   return keep(answered.value.text, { ...(about ? { about } : {}), ...(send ? { send } : {}) });
 }
@@ -307,7 +311,7 @@ function bangkokYesterday(nowMs: number): string {
 }
 
 /// The shop's record, null when the tenant is not a pilot shop, undefined when it cannot be read.
-async function readShop(env: JobFlowEnv, tenant: string): Promise<PilotShopRecord | null | undefined> {
+async function readShop(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<PilotShopRecord | null | undefined> {
   try {
     const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${enc(tenant)}`);
     if (response.status === 404) {
@@ -437,17 +441,34 @@ function baht(satang: number): string {
   return `${sign}฿${grouped}${rest === 0 ? "" : `.${String(rest).padStart(2, "0")}`}`;
 }
 
+/// What a job's task is titled, in the runner's own words. The drafts list (`readJobs`, below) reads a job's kind back
+/// from the title, because a job that failed before it wrote anything has no draft to say what it was and the task
+/// holds no other record of its kind. One table writes the titles and reads them, so the two cannot drift apart.
+const TITLE_REPLY = "A reply to a customer";
+const TITLE_POST = "A post";
+const TITLE_SUMMARY = "Sales summary for ";
+
+export function taskTitle(job: WorkerJob, day: string): string {
+  return job.kind === "reply" ? TITLE_REPLY : job.kind === "post" ? TITLE_POST : `${TITLE_SUMMARY}${day}`;
+}
+
+function kindOfTitle(title: unknown): WorkerJob["kind"] | null {
+  if (title === TITLE_REPLY) return "reply";
+  if (title === TITLE_POST) return "post";
+  return typeof title === "string" && title.startsWith(TITLE_SUMMARY) ? "daily_summary" : null;
+}
+
 /// The job's own task, indexed for the shop before it is created, as `POST /v1/tasks` and the pilot's reply task are,
 /// so export and deletion always find it. It stays a draft: its attempts carry the work, and what they leave is drafts.
 /// The title and objective say what the job is and never quote a customer.
 async function createTask(env: JobFlowEnv, tenant: string, taskId: string, job: WorkerJob, day: string):
   Promise<boolean> {
-  const named = job.kind === "reply"
-    ? { title: "A reply to a customer", objective: "Draft a reply to a customer's message for the owner to read." }
-    : job.kind === "post"
-      ? { title: "A post", objective: `Draft a post about ${job.topic}, for the owner to read.` }
-      : { title: `Sales summary for ${day}`,
-        objective: `Write the owner a short summary of the sales recorded on ${day}.` };
+  const named = {
+    title: taskTitle(job, day),
+    objective: job.kind === "reply" ? "Draft a reply to a customer's message for the owner to read."
+      : job.kind === "post" ? `Draft a post about ${job.topic}, for the owner to read.`
+        : `Write the owner a short summary of the sales recorded on ${day}.`,
+  };
   try {
     const indexed = await tenantCall(env, tenant, "/index", { method: "POST",
       headers: { "content-type": "application/json" }, body: JSON.stringify({ tenant, taskId }) });
@@ -467,9 +488,225 @@ async function createTask(env: JobFlowEnv, tenant: string, taskId: string, job: 
   }
 }
 
+// ---------------------------------------------------------------------------
+// What the console reads back: a shop's jobs, newest first
+// ---------------------------------------------------------------------------
+
+/// How a job stands, said by the attempt that has it now. `running` is an attempt that can still act. `failed` carries
+/// the code the attempt ended with, or, for an attempt that can no longer act and that nothing has swept yet, the code the
+/// sweep will give it (`deadline` or `silent`). `awaiting_owner` is a worker that asked and stopped for the owner.
+/// `handed_over` is a job passed on to a member who has not taken it up. A job that was passed on and taken up shows the
+/// member who took it up, and `passedFrom`, and its ending is theirs.
+export type WorkerJobEnding =
+  | { state: "running" }
+  | { state: "done" }
+  | { state: "failed"; reason: string }
+  | { state: "awaiting_owner" }
+  | { state: "handed_over"; to: WorkerMember }
+  | { state: "cancelled" };
+
+/// One job of a shop, as the console lists it. A draft is what the member wrote, newest if there are several, and is
+/// not sent: sending a reply stays with the pilot's reply flow and the owner's approval. `costSatang` is what the job's
+/// model calls cost, in whole satang as the gateway priced them, and is absent for a job that called none.
+export type WorkerJobEntry = {
+  taskId: string;
+  member: WorkerMember;
+  passedFrom?: WorkerMember;
+  job: WorkerJob["kind"];
+  /// When the job started: when its first attempt was claimed.
+  at: string;
+  ending: WorkerJobEnding;
+  draft: { text: string; at: string; about?: Record<string, string>; send?: DraftJSON["send"] } | null;
+  costSatang?: number;
+};
+
+export type WorkerJobsPage = { tenant: string; jobs: WorkerJobEntry[]; next: string | null };
+
+/// Jobs one page reads when the caller does not say, and the most it may ask for. Each job is one read of its task
+/// object, and one request may make only so many calls to other objects, so the bound stays well inside it.
+const DEFAULT_JOBS = 10;
+const MAX_JOBS = 25;
+/// The ids the runner gives its tasks, which are also all a page's cursor may be.
+const JOB_TASK = /^worker-task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/// The page asked for, or null when the cursor is not a job's task id or the size is not a whole number in range.
+function jobsQuery(url: URL): { before: string | null; limit: number } | null {
+  const before = url.searchParams.get("before");
+  const rawLimit = url.searchParams.get("limit");
+  if (before !== null && !JOB_TASK.test(before)) return null;
+  const limit = rawLimit === null ? DEFAULT_JOBS : Number(rawLimit);
+  if (!/^\d+$/.test(rawLimit ?? "1") || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_JOBS) return null;
+  return { before, limit };
+}
+
+/// The ids of the shop's tasks, oldest first as the index keeps them, or null when the index cannot be read.
+async function readIndex(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<string[] | null> {
+  try {
+    const response = await tenantCall(env, tenant, `/index?tenant=${enc(tenant)}`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const { taskIds } = (await response.json()) as { taskIds?: unknown };
+    return Array.isArray(taskIds) ? taskIds.filter((id): id is string => typeof id === "string") : null;
+  } catch {
+    return null;
+  }
+}
+
+/// What one task's export holds that a job is made of: the task, its log, its attempts and the drafts kept on it.
+type TaskExport = { task?: TaskDocJSON; events?: TaskEventJSON[]; attempts?: AttemptJSON[]; drafts?: DraftJSON[] };
+
+/// One job read from its task, null when the task is not a job the runner made (there is no such task, or none of this
+/// shop's, since the task object answers another tenant's task as missing; it has no attempt, which a refused start can
+/// leave; or it names an executor or a title the runner never gives), and undefined when it cannot be read.
+async function readJob(env: Pick<TenantDataEnv, "TASK">, tenant: string, taskId: string, nowMs: number):
+  Promise<WorkerJobEntry | null | undefined> {
+  try {
+    const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request("https://task/export",
+      { headers: { "x-tenant": tenant } }));
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    return jobOf(taskId, (await response.json()) as TaskExport, nowMs);
+  } catch {
+    return undefined;
+  }
+}
+
+function jobOf(taskId: string, exported: TaskExport, nowMs: number): WorkerJobEntry | null {
+  const { task, events = [], attempts = [], drafts = [] } = exported;
+  const kind = kindOfTitle(task?.title);
+  if (!task || !kind || attempts.length === 0) return null;
+
+  // The attempts in the order they were claimed. The task keeps them by random id, and its log noted each claim.
+  const claims = new Map<string, { seq: number; at: string }>();
+  for (const event of events) {
+    const claimed = /^attempt:claim:(.+)$/.exec(event.via ?? "")?.[1];
+    if (claimed) claims.set(claimed, { seq: event.seq, at: event.at });
+  }
+  const claimedAt = (attempt: AttemptJSON) => claims.get(attempt.id)?.seq ?? Number.MAX_SAFE_INTEGER;
+  const runs: { attempt: AttemptJSON; member: WorkerMember }[] = [];
+  for (const attempt of [...attempts].sort((a, b) => claimedAt(a) - claimedAt(b) || a.deadline - b.deadline)) {
+    if (!isWorkerMember(attempt.executorId)) return null;
+    runs.push({ attempt, member: attempt.executorId });
+  }
+  const first = runs[0];
+  const last = runs.at(-1);
+  if (!first || !last) return null;
+
+  // A job taken up by another member shows who passed it: the attempt before reported the handover to that member.
+  const before = runs.at(-2);
+  const passedFrom = before && handoverOf(before.attempt.id, events) === last.member ? before.member : null;
+
+  const newest = [...drafts].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).at(-1);
+  const draft = newest && typeof newest.text === "string"
+    ? { text: newest.text, at: newest.at, ...(newest.about ? { about: newest.about } : {}),
+      ...(newest.send ? { send: newest.send } : {}) }
+    : null;
+
+  // The cost each spend report carries, added over the attempts. A report from before the cost was kept adds nothing.
+  let cost: number | null = null;
+  for (const event of events) {
+    const said = event.kind === "agent" && isRecord(event.event) && event.event.type === "spend"
+      ? event.event.costSatang : undefined;
+    if (typeof said === "number" && Number.isSafeInteger(said) && said >= 0) cost = (cost ?? 0) + said;
+  }
+
+  return {
+    taskId,
+    member: last.member,
+    ...(passedFrom ? { passedFrom } : {}),
+    job: kind,
+    at: claims.get(first.attempt.id)?.at ?? task.updatedAt,
+    ending: endingOf(last.attempt, handoverOf(last.attempt.id, events), nowMs / 1000),
+    draft,
+    ...(cost !== null ? { costSatang: cost } : {}),
+  };
+}
+
+/// The member an attempt passed its job to, by the newest `handoffNote` it reported, or null. A note that does not name
+/// one of the team is kept in the log for other readers and is not a handover here.
+function handoverOf(attemptId: string, events: readonly TaskEventJSON[]): WorkerMember | null {
+  for (const event of [...events].reverse()) {
+    if (event.kind !== "agent" || event.attemptId !== attemptId) continue;
+    const note = event.event;
+    if (isRecord(note) && note.type === "handoffNote" && isWorkerMember(note.to)) return note.to;
+  }
+  return null;
+}
+
+/// How the attempt that has the job now left it. An attempt still marked active whose deadline or lease has passed can no
+/// longer act (the task object refuses it), so it reads as the sweep will settle it, deadline first
+/// (`sweepAttempts` in task-object.ts), without this read writing anything. A finished attempt with no recorded outcome
+/// predates outcomes: it is never read as a success.
+function endingOf(attempt: AttemptJSON, handedTo: WorkerMember | null, nowS: number): WorkerJobEnding {
+  if (attempt.status === "active") {
+    const reason = attempt.deadline <= nowS ? "deadline" : attempt.leaseUntil <= nowS ? "silent" : null;
+    return reason ? { state: "failed", reason } : { state: "running" };
+  }
+  switch (attempt.outcome) {
+    case "done":
+      return handedTo ? { state: "handed_over", to: handedTo } : { state: "done" };
+    case "failed":
+      return { state: "failed", reason: attempt.reason ?? "unknown" };
+    case "awaiting_owner":
+      return { state: "awaiting_owner" };
+    case "cancelled":
+      return { state: "cancelled" };
+    default:
+      return { state: "failed", reason: "unknown" };
+  }
+}
+
+/// `GET /v1/admin/workers/drafts?tenant=&before=&limit=`: a shop's jobs, newest first, a page at a time, and the cursor
+/// of the page before it. The shop first (404 `shop_not_found` for a tenant that is no pilot shop), then its index of
+/// tasks: the jobs are the ones the runner made, which are the tasks named `worker-task-…`. A page reads up to `limit`
+/// jobs, going on past any task that is not one, so it can come back short or empty while `next` says there is more to
+/// read. A task that cannot be read fails the page (503 `drafts_unavailable`) rather than leave a job out of it. Nothing
+/// here writes or calls a model, and no cache may keep the answer, which holds the words of drafts.
+async function readJobs(url: URL, env: Pick<TenantDataEnv, "TENANT" | "TASK">): Promise<Response> {
+  const answer = (data: unknown, status = 200) =>
+    Response.json(data, { status, headers: { "cache-control": "no-store" } });
+  const tenant = url.searchParams.get("tenant") ?? "";
+  if (!isValidTenant(tenant)) return answer({ error: "tenant_required" }, 400);
+  const query = jobsQuery(url);
+  if (!query) return answer({ error: "invalid_request" }, 400);
+  const shop = await readShop(env, tenant);
+  if (shop === undefined) return answer({ error: "shop_unavailable" }, 503);
+  if (shop === null) return answer({ error: "shop_not_found" }, 404);
+  const index = await readIndex(env, tenant);
+  if (!index) return answer({ error: "drafts_unavailable" }, 503);
+
+  const candidates = index.filter((id) => JOB_TASK.test(id)).reverse();
+  let next = 0;
+  if (query.before !== null) {
+    const at = candidates.indexOf(query.before);
+    if (at < 0) return answer({ error: "invalid_request" }, 400);
+    next = at + 1;
+  }
+  const nowMs = Date.now();
+  const jobs: WorkerJobEntry[] = [];
+  while (jobs.length < query.limit && next < candidates.length) {
+    const chunk = candidates.slice(next, next + (query.limit - jobs.length));
+    const read = await Promise.all(chunk.map((id) => readJob(env, tenant, id, nowMs)));
+    if (read.includes(undefined)) return answer({ error: "drafts_unavailable" }, 503);
+    for (const job of read) if (job) jobs.push(job);
+    next += chunk.length;
+  }
+  const last = candidates[next - 1];
+  return answer({ tenant, jobs, next: next < candidates.length && last ? last : null } satisfies WorkerJobsPage);
+}
+
 /// `POST /v1/admin/workers/run` with `{ tenant, member, job }`, after the admin gate's exact ADMIN_METHODS entry
 /// (index.ts): starts one member's job for a shop and answers how it went, the draft included. The route calls no
-/// model: the runner does, through the gateway. Answers null for any other path.
+/// model: the runner does, through the gateway. `GET /v1/admin/workers/drafts` reads a shop's jobs back (`readJobs`).
+/// Answers null for any other path.
 export async function workersAdminRoute(
   request: Request,
   url: URL,
@@ -478,7 +715,9 @@ export async function workersAdminRoute(
   flags: JobFlags,
 ): Promise<Response | null> {
   if (!url.pathname.startsWith("/v1/admin/workers/")) return null;
-  if (`${request.method} ${url.pathname}` !== "POST /v1/admin/workers/run") return json({ error: "not_found" }, 404);
+  const route = `${request.method} ${url.pathname}`;
+  if (route === "GET /v1/admin/workers/drafts") return readJobs(url, env);
+  if (route !== "POST /v1/admin/workers/run") return json({ error: "not_found" }, 404);
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   const body = parsed.value;

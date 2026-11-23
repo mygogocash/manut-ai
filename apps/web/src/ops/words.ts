@@ -16,6 +16,8 @@ import {
   type ModelUsage,
   type PilotGate,
   type Shop,
+  type WorkerDraft,
+  type WorkerJobEnding,
 } from "../api";
 import { dayOffset, formatBaht, formatClock, formatDate, formatStamp } from "../format";
 
@@ -790,3 +792,186 @@ export function memoryErrorText(error: unknown): string {
   }
   return errorText(error);
 }
+
+/// The Drafts page: what Nam, Pim and Ton did for one shop (docs/pilot-api.md, "Workers' drafts"), newest first. A draft is
+/// only a draft: the page says so on every one, and nothing on it sends anything. A reply goes out only by being proposed
+/// on the Messages tab and approved by its owner, which is the path every reply takes. A code or a member this console does
+/// not know yet is shown as it is, never dropped. Sentences that hold a name or a figure are functions.
+export const draftsWords = {
+  nav: "Drafts",
+  title: "Drafts",
+  intro:
+    "What Nam, Pim and Ton wrote for this shop, newest first. Every one is only a draft: it has not been sent to anyone, and nothing on this page sends it. A reply goes out only when you propose it as a reply on the Messages tab and its owner approves it.",
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading drafts",
+  empty: "Nobody on the team has worked for this shop yet.",
+  emptyHint: "A job starts with POST /v1/admin/workers/run.",
+  noShops: "No shops yet.",
+  older: "Show older jobs",
+  loadingOlder: "Loading older jobs",
+  listLabel: (shop: string) => `${shop}'s worker jobs`,
+  unavailable: "The API could not read this shop's jobs. Try again.",
+  shopUnavailable: "The API could not read this shop's record. Try again.",
+
+  // One job
+  notSent: "Not sent",
+  notSentNote: "This is a draft. It has not been sent to anyone.",
+  noDraft: "No draft was written.",
+  notWritten: "No draft yet.",
+  passed: (from: string, to: string) => `${memberName(from)} passed this job to ${memberName(to)}.`,
+  /// The job's task id, for looking its records up, as the audit page names the ids an entry is about.
+  task: (id: string) => `task ${id}`,
+  cost: (satang: number) => `Model cost ${moneyText(satang)}`,
+} as const;
+
+const MEMBER_NAMES: Readonly<Record<string, string>> = { nam: "Nam", pim: "Pim", ton: "Ton" };
+const MEMBER_ROLES: Readonly<Record<string, string>> = { nam: "sales chat", pim: "content", ton: "books" };
+
+/// A member as people say them: "Nam". One this console does not know yet is shown as the API sent it.
+export function memberName(member: string): string {
+  return Object.hasOwn(MEMBER_NAMES, member) ? MEMBER_NAMES[member]! : member;
+}
+
+/// The part a member plays, or null for one this console does not know.
+export function memberRole(member: string): string | null {
+  return Object.hasOwn(MEMBER_ROLES, member) ? MEMBER_ROLES[member]! : null;
+}
+
+const JOB_KINDS: Readonly<Record<string, string>> = {
+  reply: "Reply to a customer",
+  post: "Post",
+  daily_summary: "Sales summary",
+};
+
+export function jobKindText(kind: string): string {
+  return Object.hasOwn(JOB_KINDS, kind) ? JOB_KINDS[kind]! : kind;
+}
+
+/// How a job stands, as a tag. A state a newer API sends is shown as it is.
+export function jobEndingTag(ending: WorkerJobEnding, ownerName: string): { label: string; className: string } {
+  switch (ending.state) {
+    case "running":
+      return { label: "Running", className: "tag run" };
+    case "done":
+      return { label: "Done", className: "tag ok" };
+    case "failed":
+      return { label: "Failed", className: "tag err" };
+    case "awaiting_owner":
+      return { label: `Waiting for ${ownerName}`, className: "tag warn" };
+    case "handed_over":
+      return { label: `Passed to ${memberName(ending.to)}`, className: "tag" };
+    case "cancelled":
+      return { label: "Cancelled", className: "tag" };
+    default:
+      return { label: String((ending as { state?: unknown }).state ?? "Unknown"), className: "tag" };
+  }
+}
+
+/// Why a job failed, in plain words. The job's own codes first; the attempt's (`budget`, `silent`, `deadline`) keep the
+/// audit page's words, and any other code is shown as it is.
+const JOB_REASONS: Readonly<Record<string, string>> = {
+  not_connected: "The shop's LINE connection to that customer is gone.",
+  not_my_job: "It was not this member's job, and it could not be passed on.",
+  empty_draft: "The model wrote nothing, so there is no draft.",
+  not_configured: "No model is set up yet.",
+  provider_error: "The model provider did not answer.",
+  memory_unavailable: "What the team knows about the shop could not be read.",
+  payments_unavailable: "The shop's recorded payments could not be read.",
+  vault_unavailable: "The shop's connections could not be read.",
+  unknown: "It ended without saying why.",
+};
+
+export function jobReasonText(reason: string): string {
+  return Object.hasOwn(JOB_REASONS, reason) ? JOB_REASONS[reason]! : auditReasonText(reason);
+}
+
+/// One line on how a job that did not simply finish stands, or null for one that did.
+export function jobEndingNote(ending: WorkerJobEnding): string | null {
+  switch (ending.state) {
+    case "running":
+      return "Still working on it.";
+    case "failed":
+      return jobReasonText(typeof ending.reason === "string" ? ending.reason : "unknown");
+    case "awaiting_owner":
+      return "Asked for an approval and stopped until it is answered.";
+    case "handed_over":
+      return `${memberName(ending.to)} has not taken it up yet.`;
+    case "cancelled":
+      return "It was stopped before it finished.";
+    default:
+      return null;
+  }
+}
+
+/// What a draft is about: the message a reply answers and the day a summary covers, or null when it names neither.
+export function jobAboutText(about: WorkerDraft["about"]): string | null {
+  const parts: string[] = [];
+  if (about?.messageId) parts.push(`Answers message ${about.messageId}`);
+  if (about?.date) {
+    parts.push(`Sales on ${Number.isNaN(Date.parse(about.date)) ? about.date : formatDate(new Date(about.date).toISOString())}`);
+  }
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+/// What sending a reply would take. Never a way to send it from here: it points at the Messages tab, where an operator
+/// proposes a reply and the owner approves it. Only a reply has such a note.
+export function draftSendText(send: WorkerDraft["send"], ownerName: string): string | null {
+  if (!send || send.kind !== "reply") return null;
+  if (send.answer === "ask") {
+    return `To send it, propose it as a reply on the Messages tab. ${ownerName} approves it before anything is sent.`;
+  }
+  if (send.answer === "draft_only") {
+    return "The shop's LINE connection is still in practice mode, so a reply can only be drafted for now.";
+  }
+  return null;
+}
+
+/// What the API said to reading a shop's jobs that read nothing: its own two 503s in words, and the console's usual
+/// words for the rest.
+export function draftsErrorText(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "drafts_unavailable") return draftsWords.unavailable;
+    if (error.code === "shop_unavailable") return draftsWords.shopUnavailable;
+  }
+  return errorText(error);
+}
+
+/// The Shops overview: every pilot shop on one page, from the routes the console already reads (the shop list, the pilot
+/// gate, each shop's model spend and its audit log), with a link to each of the shop's other pages. A part that could not
+/// be read is said so, with the shop it belongs to, and is never left out in silence.
+export const shopsWords = {
+  nav: "Shops",
+  title: "Shops",
+  intro:
+    "Every pilot shop at a glance: where its free trial stands, whether it has paid and is active, what its AI team has spent this month against the shop's cap, and when its audit log last changed. Each row opens that shop's other pages.",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading the shops overview",
+  noShops: "No shops yet.",
+  noShopsHint: "Add a shop with POST /v1/admin/pilot/shops, then connect its LINE account.",
+  tableLabel: "Every shop",
+  unreadable: "Could not be read",
+  nothingRecorded: "Nothing recorded",
+  gateFailed: "The pilot gate could not be read, so trials, payments and activity are not shown. Try again.",
+  parts: { usage: "model spend", audit: "audit log" },
+  shopsFailed: (failures: { name: string; parts: string[] }[]) =>
+    `Some shops could not be read in full: ${listOf(failures.map((failure) => `${failure.name} (${listOf(failure.parts)})`))}. Try again.`,
+  columns: {
+    shop: "Shop",
+    trial: "Trial",
+    paid: "Paid",
+    active: (day: number) => `Active on day ${day}`,
+    activeUnknown: "Active",
+    spend: "Model spend this month",
+    audit: "Audit log last changed",
+    open: "Open",
+  },
+  spendOf: (spentSatang: number, capSatang: number) => `${moneyText(spentSatang)} of ${moneyText(capSatang)}`,
+  /// The pages a shop's row opens, in the order its links are laid out.
+  open: { shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", model: "Model spend" },
+  openLabel: (page: string, shop: string) => `${page} for ${shop}`,
+} as const;

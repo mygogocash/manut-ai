@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useApiSetup } from "../api";
-import { AuditIcon, BrandMark, FlagIcon, MemoryIcon, SpendIcon, StoreIcon, useColorScheme } from "../ui/marks";
+import {
+  AuditIcon,
+  BrandMark,
+  DraftIcon,
+  FlagIcon,
+  MemoryIcon,
+  ShopsIcon,
+  SpendIcon,
+  StoreIcon,
+  useColorScheme,
+} from "../ui/marks";
 import { AuditView } from "./AuditView";
 import { DeletionNotices } from "./DeletionNotices";
+import { DraftsView } from "./DraftsView";
 import { GateView } from "./GateView";
 import { MemoryView } from "./MemoryView";
 import { MessagesTab } from "./MessagesTab";
@@ -10,23 +21,36 @@ import { ModelSpendView } from "./ModelSpendView";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
 import { ShopDataTab } from "./ShopDataTab";
+import { ShopsView, type ShopPage } from "./ShopsView";
 import { useLoad } from "./useLoad";
 import { deletionOf, useShopDeletion } from "./useShopDeletion";
-import { auditWords, errorText, gateWords, isAuthError, memoryWords, modelSpendWords, shopDataWords } from "./words";
+import {
+  auditWords,
+  draftsWords,
+  errorText,
+  gateWords,
+  isAuthError,
+  memoryWords,
+  modelSpendWords,
+  shopDataWords,
+  shopsWords,
+} from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
-/// the side menu, the chosen shop's messages, replies, payments and data in the main column. The Pilot gate,
-/// above the shops, puts every shop in the main column at once: where the pilot stands against its Phase 1 gate.
+/// the side menu, the chosen shop's messages, replies, payments and data in the main column. The Shops overview, first
+/// in the menu, lists every shop at a glance with a link to each of its pages. The Pilot gate puts every shop in the main
+/// column at once too: where the pilot stands against its Phase 1 gate.
 /// The Audit page beside it reads one shop's audit log: who did what for it, and when. The Memory page reads what the
-/// team knows about one shop, and is where an operator relays the owner's say over it. The Model spend page reads one
-/// shop's model spend for a month against its monthly cap, and sets or clears the cap.
+/// team knows about one shop, and is where an operator relays the owner's say over it. The Drafts page reads what Nam,
+/// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The Model spend page reads one shop's model
+/// spend for a month against its monthly cap, and sets or clears the cap.
 
 export const REFRESH_MS = 15000;
 
 type Tab = "messages" | "payments" | "data";
-/// What the main column shows: the chosen shop, the Pilot gate across all of them, or one shop's audit log, memory or
-/// model spend.
-type Page = "shop" | "gate" | "audit" | "memory" | "model";
+/// What the main column shows: the chosen shop, every shop at a glance, the Pilot gate across all of them, or one shop's
+/// audit log, memory, drafts or model spend.
+type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "model";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -75,6 +99,14 @@ export function OpsConsole() {
     return () => clearInterval(timer);
   }, [shop, page, reloadMessages, reloadActions]);
 
+  /// The overview's links: the page opens on that shop, a shop's own page on its messages.
+  const open = (target: string, next: ShopPage) => {
+    setTenant(target);
+    setPage(next);
+    if (next === "shop") setTab("messages");
+    deletion.dismissFinished();
+  };
+
   const forget = () => {
     forgetOperatorKey();
     setHasKey(false);
@@ -105,6 +137,16 @@ export function OpsConsole() {
               type="button"
               className="nav"
               style={{ width: "100%" }}
+              aria-current={page === "overview" ? "page" : undefined}
+              onClick={() => setPage("overview")}
+            >
+              <ShopsIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{shopsWords.nav}</span>
+            </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
               aria-current={page === "gate" ? "page" : undefined}
               onClick={() => setPage("gate")}
             >
@@ -130,6 +172,16 @@ export function OpsConsole() {
             >
               <MemoryIcon />
               <span style={{ flex: 1, minWidth: 0 }}>{memoryWords.nav}</span>
+            </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
+              aria-current={page === "drafts" ? "page" : undefined}
+              onClick={() => setPage("drafts")}
+            >
+              <DraftIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{draftsWords.nav}</span>
             </button>
             <button
               type="button"
@@ -193,12 +245,16 @@ export function OpsConsole() {
               setHasKey(true);
             }}
           />
+        ) : page === "overview" ? (
+          <ShopsView shops={shopList} listError={shops.error} onRetry={shops.reload} onOpen={open} onForget={forget} />
         ) : page === "gate" ? (
           <GateView onForget={forget} />
         ) : page === "audit" ? (
           <AuditView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "memory" ? (
           <MemoryView shops={shopList} tenant={tenant} onForget={forget} />
+        ) : page === "drafts" ? (
+          <DraftsView shops={shopList} tenant={tenant} listError={shops.error} onRetry={shops.reload} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (
