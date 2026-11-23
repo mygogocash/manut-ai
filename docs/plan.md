@@ -187,6 +187,8 @@ are not part of this task.
 Done when: a day across midnight in Bangkok, a month of 28, 30 and 31 days, both VAT settings, each flag, CSV
 quoting and the formula guard are tested.
 
+Done on cloud/books, 23 Nov 2026: `packages/books` with `dailySummary`, `monthBooks`, the Ton flags and `booksCsv` with quoting and the formula guard (48 tests).
+
 ### routine-rules
 `packages/routine-rules` (`@manut/routine-rules`). What a routine is, when it runs next, and how its timing is
 said, for the Routines list on the canvas board "Customize: memory and routines" ("Every day at 08:00: Morning
