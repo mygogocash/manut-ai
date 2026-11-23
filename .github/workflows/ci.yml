@@ -1,0 +1,146 @@
+# Every check a change has to pass, run on GitHub's machines so a developer's Mac stays free. The repository is
+# public, so GitHub-hosted standard runners (Linux, Windows and macOS) cost nothing. The jobs run side by side and
+# fail separately, so a red check names the part that broke.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "pilot/**", "cloud/**"]
+  workflow_dispatch:
+
+# A newer push to the same branch or pull request makes the run in progress pointless, so it is cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: no job here writes to the repository, its issues or its pull requests.
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm typecheck
+
+  api:
+    # vitest in real workerd, then the admin Access contract and the one-origin contract on a local Worker that
+    # wrangler starts (apps/api/package.json). Nothing reaches Cloudflare: both contracts refuse every outbound
+    # call, and no account or secret is used.
+    name: API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/api test
+        env:
+          WRANGLER_SEND_METRICS: "false"
+
+  web:
+    name: Web tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/web test
+
+  desktop:
+    name: Desktop tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm --filter @manut/desktop test
+
+  packages:
+    name: Package tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Every package under packages/ that has tests; ui-kit has none, and --if-present skips it.
+      - run: pnpm --filter "./packages/*" --if-present test
+
+  rust:
+    # The desktop app's Rust side, on Linux and on macOS. Linux needs Tauri's system libraries; macOS has what
+    # it needs. Neither needs the front end built: without the custom-protocol feature, Tauri compiles in dev
+    # mode and points at devUrl instead of embedding ../dist.
+    name: Desktop Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/tauri-linux-deps
+      # Both images ship rustup. No rust-toolchain file pins a version, so this takes the newest stable, which
+      # is usually the one already installed.
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      # Caches ~/.cargo and src-tauri/target. Only pushes save it: a pull request's cache is visible to that pull
+      # request alone, and Tauri's build cache is big enough to push the useful branch caches out.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          save-if: ${{ github.event_name == 'push' }}
+      # --locked fails when Cargo.lock no longer matches Cargo.toml, instead of quietly rewriting it.
+      - name: cargo check
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked
+      - name: cargo test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+  e2e:
+    # The Playwright suite inherited from Oh My Hermes (156 spec files). Some specs still expect screens the fork
+    # removed (apps/desktop/README.md), so this job may fail without failing the run. Its job summary has the
+    # counts and the failing tests. It is not one of the checks main will require.
+    name: Desktop Playwright
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Chromium only: the one WebKit spec runs on macOS alone and skips itself here.
+      - name: Install Chromium
+        working-directory: apps/desktop
+        run: pnpm exec playwright install --with-deps chromium
+      # --global-timeout ends the suite after 35 minutes with its report still written, so a hung run still
+      # leaves counts behind instead of being killed by the job's timeout.
+      - name: Run the suite
+        working-directory: apps/desktop
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results.json
+        run: pnpm exec playwright test --reporter=list,json --global-timeout=2100000
+      - name: Write the counts to the job summary
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/playwright-summary.mjs "$RUNNER_TEMP/playwright-results.json"
