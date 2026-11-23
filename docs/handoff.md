@@ -74,19 +74,23 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
+1. Three helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 11, the Playwright follow-up: the failing specs and a sharded CI job (`test/playwright-follow-up`, Sonnet);
-   - item 8a, the outpost's step channel in the API (`feat/outpost-step-channel`, Opus);
    - item 6, macOS notifications on `@manut/notify-rules` (`feat/macos-notifications`, Sonnet);
-   - several shops' console owner link and ending a shop session from the app (`feat/owner-link-console`, Sonnet).
-   Merged: items 2 and 3 (routines running, shop templates), item 5 (the desktop answering approvals), item 7
-   (several shops, the API side), item 9 (desktop leftovers), the Playwright revival (#15) and `notify-rules` (#16).
+   - item 11, the Playwright follow-up: the failing specs and a sharded CI job (`test/playwright-follow-up`, Sonnet;
+     it opens a draft pull request into `pilot/week-1`: watch its CI, merge when the Playwright shards are green);
+   - item 8b, the outpost in the desktop shell (`feat/desktop-outpost`, Opus; the first local Rust build, in the
+     shared target folder `~/Library/Caches/manut-ai-cargo-target`).
+   Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 7 (several shops,
+   the API side) and its console owner link and session end, 8a (the outpost's step channel), 9 (desktop
+   leftovers), the Playwright revival (#15) and `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - item 8b, the outpost in the desktop shell, after 8a (Opus);
    - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2),
-     after item 6, which changes the same approvals code (Opus: per-shop sessions).
+     after item 6, which changes the same approvals code (Opus: per-shop sessions);
+   - browser control's slice 2, submitting steps through approval-core with member-grants' decide first, after 8b.
+   - Before the next dev deploy: check that the new `OUTPOST_LIMITER` namespace ids in `apps/api/wrangler.jsonc`
+     (2026112329 to 2026112332) do not clash with another rate limiter in the Cloudflare account.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
