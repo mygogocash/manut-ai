@@ -21,7 +21,10 @@
     "wrangler": "^4.158.0"
   },
   "dependencies": {
+    "@manut/agent-prompts": "workspace:*",
     "@manut/approval-core": "workspace:*",
+    "@manut/books": "workspace:*",
+    "@manut/member-grants": "workspace:*",
     "@manut/shop-memory": "workspace:*"
   }
 }

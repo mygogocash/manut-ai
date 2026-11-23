@@ -177,9 +177,18 @@ importers:
 
   apps/api:
     dependencies:
+      '@manut/agent-prompts':
+        specifier: workspace:*
+        version: link:../../packages/agent-prompts
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
+      '@manut/books':
+        specifier: workspace:*
+        version: link:../../packages/books
+      '@manut/member-grants':
+        specifier: workspace:*
+        version: link:../../packages/member-grants
       '@manut/shop-memory':
         specifier: workspace:*
         version: link:../../packages/shop-memory
