@@ -2,7 +2,7 @@
 // page's own request command (the answer holds the outpost's credential, which only the shell may keep), reading where
 // the outpost stands, and telling the shell who is signed in.
 import { describe, expect, it } from "vitest";
-import { decodeView, followSignIn, registerThisMac, UNAVAILABLE, type OutpostShell, type OutpostView } from "./outpost";
+import { decodeView, followSignIn, registerThisMac, stopOnEnd, UNAVAILABLE, type OutpostShell, type OutpostView } from "./outpost";
 import { ApiSession } from "./session";
 import { clock, fakeApi, memoryVault, ORIGIN, storedSession, tokens, type FakeAnswer, type FakeApi } from "./testkit";
 
@@ -114,6 +114,30 @@ describe("the outpost follows the sign-in", () => {
     stop();
     await session.signOut();
     expect(told).toHaveLength(2);
+  });
+
+  it("stops the outpost as a sign-out begins, before it waits on the API", async () => {
+    const { outpost, told } = fakeShell(fakeApi());
+    let forgotten = 0;
+    let toldWhenAsked: string[] = [];
+    const api = fakeApi().on("DELETE", "/v1/auth/session", () => {
+      toldWhenAsked = [...told];
+      return { status: 200, json: {} };
+    });
+    const c = clock();
+    const session = new ApiSession({
+      origin: ORIGIN,
+      fetch: api.fetch,
+      vault: memoryVault(storedSession(c.now())),
+      now: c.now,
+      onEnd: stopOnEnd(outpost, () => {
+        forgotten += 1;
+      }),
+    });
+    await session.load();
+    await session.signOut();
+    expect(toldWhenAsked).toEqual(["out"]);
+    expect(forgotten).toBe(1);
   });
 
   it("stops the outpost when the API ends the session", async () => {

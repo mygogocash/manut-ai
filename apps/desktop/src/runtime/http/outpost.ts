@@ -139,6 +139,13 @@ export async function registerThisMac(session: ApiSession, shell: OutpostShell, 
   }
 }
 
+/** A session's `onEnd` that also stops this Mac's outpost. A sign-out calls it before it waits on the API to end the
+ *  session (which can take as long as the API takes to answer), so the outpost stops as the person signs out, not after;
+ *  `also` is what the session forgot at its end before (the saved read of the shop). */
+export function stopOnEnd(shell: OutpostShell, also: () => unknown): () => Promise<unknown> {
+  return () => Promise.all([also(), shell.signedOut()]);
+}
+
 /** The outpost follows `session`: while it is signed in to a shop the shell is told who, so this Mac's outpost runs if
  *  it is that shop's; when it signs out, or the API ends it, the outpost stops. `title` is the outpost's window title in
  *  the page's language, read each time it is sent. Answers how to stop following. */

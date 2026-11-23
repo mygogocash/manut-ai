@@ -17,7 +17,7 @@ import { OpError } from "../mock/host";
 import { readRuntimeSetting } from "../setting";
 import { ShopCache } from "./cache";
 import { HttpHost, type HostEvent, type LinkState } from "./host";
-import { followSignIn, shellOutpost } from "./outpost";
+import { followSignIn, shellOutpost, stopOnEnd } from "./outpost";
 import { ApiSession } from "./session";
 import { shellCacheStore, shellFetch, shellVault } from "./shell";
 
@@ -161,8 +161,9 @@ function stillConnectedTo(origin: string): boolean {
 export function sessionFor(origin: string): ApiSession {
   let session = sessions.get(origin);
   if (!session) {
-    sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault(), onEnd: forgetShop })));
-    followSignIn(session, shellOutpost(), () => t("outpost.windowTitle"));
+    const outpost = shellOutpost();
+    sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault(), onEnd: stopOnEnd(outpost, forgetShop) })));
+    followSignIn(session, outpost, () => t("outpost.windowTitle"));
   }
   return session;
 }
