@@ -11,6 +11,7 @@ import {
   type Decision,
   type NewApprovalRequest,
   type Role,
+  type Standing,
 } from "@manut/approval-core";
 import { readJsonBody } from "./body";
 import { isValidCompanyId } from "./companies";
@@ -808,6 +809,7 @@ export class TaskObject extends DurableObject {
       if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
+    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request);
     const requestItem = url.pathname.match(/^\/requests\/([^/]+)(\/decision)?$/);
     if (requestItem) {
       const requestId = requestItem[1];
@@ -1053,6 +1055,29 @@ export class TaskObject extends DurableObject {
       const standing = requestStanding(record, { seenRevision: record.request.revision,
         running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
       return { status: 200, body: { record, standing, action } };
+    }));
+  }
+
+  /// `GET /requests`: every approval-core record in this task the caller may read, each with where it stands now, at
+  /// its current revision and against the attempt holding the task, for a session's list of approvals (approvals.ts).
+  /// It walks the actions, because every request shares its action's id and an old reply's request exists only as the
+  /// one it would have opened. An action of another tenant is never listed, whatever task it sits in.
+  private async listRequests(request: Request): Promise<Response> {
+    const doc = await this.load();
+    if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const now = Date.now();
+      const running = { attemptId: this.runningAttemptSync(kv, now / 1000) };
+      const requests: { record: ApprovalRecord; standing: Standing }[] = [];
+      for (const [, action] of kv.list<ActionProposalJSON>({ prefix: "action:" })) {
+        if (this.foreignAction(action, request)) continue;
+        const record = this.decidingRecordSync(kv, action);
+        if (record === undefined) continue;
+        requests.push({ record, standing: requestStanding(record, { seenRevision: record.request.revision, running,
+          now }) });
+      }
+      return { status: 200, body: { requests } };
     }));
   }
 
