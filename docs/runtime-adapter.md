@@ -166,7 +166,8 @@ for GitHub), so the shell's `api_request` command runs the system's `curl`, whic
 The shared host's link is one of: connecting, open, signed out, offline, unavailable. Open is a live read of the API.
 A runtime with nothing to show in any other state is closed to the store, which marks its chats stale and ends any turn
 it was showing, and reads everything again when the runtime opens: after an outage nothing is replayed, the app's own
-re-read brings it back. With a kept read (below), offline and unavailable keep the runtime open instead.
+re-read brings it back, except that an ask which stopped waiting meanwhile is closed in Needs you (the store keeps the ask
+cards it already has). With a kept read (below), offline and unavailable keep the runtime open instead.
 
 - Offline (no network, no such host, nothing listening, too slow): the mode line says "Offline", the host tries again
   after 2 seconds, doubling up to a minute, and, with nothing kept to show, requests are refused with a translated
@@ -200,12 +201,14 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   line reads "Offline. Showing what was here at 14:05" ("Not answering. Showing what was here at 14:05" for an API that
   answers 5xx), with the day first for a read from another day ("Nov 22 14:05"). Buddy's row, Needs you, Home, History
   and Automations show the read as it was, which is what "at 14:05" qualifies. When the API answers again the host reads,
-  replaces the cache with the new read, and the runtime closes and opens once, so the store reads everything again.
+  replaces the cache with the new read, and the runtime closes and opens once, so the store reads everything again; an
+  ask the kept read showed that is not waiting now (decided or expired meanwhile, or its task gone) is closed in Needs you.
 - **Asks and writes.** An ask from the kept read is shown with its exact action in Needs you, Home and Buddy's chat, but
-  cannot be answered: answering needs the live record. The card offers no answer and says "Connect to answer this", and
-  the runtime refuses `approval.respond` with that same message. Every other write is refused with the offline message.
-  No write is ever queued or sent later; when the app is back online it reads again, and the person says it again. An ask
-  whose expiry passes while offline still shows as it was at the time of the read.
+  cannot be answered: answering needs the live record. The chat card's answers are greyed out and it says "Connect to
+  answer this", and the runtime refuses `approval.respond` with that same message, so Home's Approve, which is not greyed
+  out, is refused with the same words when it is pressed. Every other write is refused with the offline message. No write
+  is ever queued or sent later; when the app is back online it reads again, and the person does it again. An ask whose
+  expiry passes while offline still shows as it was at the time of the read.
 - **7 days.** A read more than 7 days old, counted from when it was read, is not shown: the line says "Offline. The saved
   copy is more than 7 days old, so it is not shown" and the runtime is closed, as with nothing kept. A read that was
   showing stops showing when it reaches 7 days. A file that is damaged, from another version of the app, for another

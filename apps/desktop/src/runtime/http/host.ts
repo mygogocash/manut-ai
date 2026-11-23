@@ -14,7 +14,7 @@
 // too old to show, or none), the mode line says so in words, and the runtime stays open. A runtime with nothing to show
 // is closed to the store, which marks its chats stale and reads everything again when the runtime opens (store.ts
 // `resync`); the runtime also closes and opens once when the API answers again after a kept read stood in, so a read
-// after an outage replays nothing: the app's own re-read brings everything back.
+// after an outage replays nothing but which asks are over: the app's own re-read brings everything else back.
 //
 // It changes nothing. Every write op answers `not_yet` until the approvals slice: answering an approval must go
 // through `packages/approval-core`'s settle-once rules, never a second way round (CLAUDE.md). While only a kept read is
@@ -155,6 +155,9 @@ export class HttpHost {
 
   private start(): void {
     this.running = true;
+    // A look at the disk that was on its way when the host last stopped can end after the stop and leave its answer here;
+    // by now the person may have signed out and deleted what it found, so a start never trusts an earlier look.
+    this.onDisk = null;
     this.offSession = this.session.subscribe((s) => this.onSession(s));
     void this.cycle();
   }
@@ -266,9 +269,14 @@ export class HttpHost {
     const was = this.snapshot;
     this.snapshot = r.snapshot;
     this.onDisk = null;
-    // Opening (the first read, or the first after an outage) replays nothing: the app reads everything on open.
-    if (this.link !== "open" || !was) this.show("open", NO_CACHE);
-    else this.emitChanges(was, r.snapshot);
+    // Opening (the first read, or the first after an outage) replays nothing: the app reads everything on open. One thing
+    // it cannot read again is an ask card it already holds: the store keeps those across a re-read, so an ask the read that
+    // stood in for the shop showed, and that is not waiting now (decided meanwhile, expired, its task gone), is said to be
+    // over here, or it would stay in Needs you.
+    if (this.link !== "open" || !was) {
+      this.show("open", NO_CACHE);
+      if (was) this.emitLeft(was, r.snapshot);
+    } else this.emitChanges(was, r.snapshot);
     this.schedule(POLL_MS);
     this.keep(r.snapshot, ticket);
   }
@@ -313,19 +321,23 @@ export class HttpHost {
     for (const fn of [...this.eventFns]) fn(ev);
   }
 
-  /** What changed between two reads, as the events the store already follows. */
-  private emitChanges(was: ShopSnapshot, now: ShopSnapshot): void {
-    const before = new Set(pendingAsks(was).map((a) => a.request_id));
-    const after = pendingAsks(now);
-    for (const ask of after) if (!before.has(ask.request_id)) this.emit(ask);
-    const still = new Set(after.map((a) => a.request_id));
-    for (const id of before) {
+  /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you. */
+  private emitLeft(was: ShopSnapshot, now: ShopSnapshot): void {
+    const still = new Set(pendingAsks(now).map((a) => a.request_id));
+    for (const { request_id: id } of pendingAsks(was)) {
       if (still.has(id)) continue;
       const action = now.tasks.flatMap((task) => task.actions).find((a) => a.id === id);
       // An action that ran out of time timed out; one that is gone with its task was cancelled; any other was decided.
       const reason = !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved";
       this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason });
     }
+  }
+
+  /** What changed between two reads, as the events the store already follows. */
+  private emitChanges(was: ShopSnapshot, now: ShopSnapshot): void {
+    const before = new Set(pendingAsks(was).map((a) => a.request_id));
+    for (const ask of pendingAsks(now)) if (!before.has(ask.request_id)) this.emit(ask);
+    this.emitLeft(was, now);
     const had = new Set(was.tasks.map((task) => task.id));
     const has = new Set(now.tasks.map((task) => task.id));
     for (const row of threadRows(now)) if (!had.has(row.thread)) this.emit({ event: "thread.added", bot: TEAM, thread: row.thread, title: row.title });

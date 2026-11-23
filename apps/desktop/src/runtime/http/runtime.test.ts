@@ -336,7 +336,7 @@ describe("staying current", () => {
     ]);
   });
 
-  it("keeps showing the last read when a read fails while open, and when the API answers again closes and opens once with nothing to replay: the app reads everything again", async () => {
+  it("keeps showing the last read when a read fails while open, and when the API answers again closes and opens once, replaying nothing but which ask is over: the app reads everything else again", async () => {
     const { api, rt, events, statuses, host } = setup();
     serveShop(api);
     await rt.connect();
@@ -350,7 +350,9 @@ describe("staying current", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(rt.status).toBe("open");
     expect(statuses).toEqual(["connecting", "open", "closed", "open"]);
-    expect(events).toEqual([]);
+    // the store keeps the cards it has when it reads again, so the ask the last read showed and this one no longer has is
+    // said to be over; no ask, thread or note is sent again, the app reads those itself
+    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "cancelled" }]);
   });
 
   it("closes signed out when the API ends the session, and says so", async () => {

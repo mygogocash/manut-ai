@@ -2,9 +2,11 @@
 // keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
 // shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
 // without a shell or a network.
-import type { CacheStore } from "./cache";
+import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
+import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
 import { LinkDown, VaultUnavailable } from "./shell";
+import { readShop } from "./shop";
 
 export const ORIGIN = "https://dev.manut.xyz";
 
@@ -268,4 +270,14 @@ export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: u
 export function clock(start = Date.UTC(2026, 10, 23, 3, 0, 0)) {
   const c = { ms: start, now: () => c.ms, pass: (ms: number) => void (c.ms += ms) };
   return c;
+}
+
+/** What an earlier run left on disk for the shop, as the shell holds it (the file's name, and its text): the read of
+ *  `serveShop(api, over)` as of `at`. */
+export async function savedRead(at: number, over: Parameters<typeof serveShop>[1] = {}): Promise<Record<string, string>> {
+  const api = serveShop(fakeApi(), over);
+  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(Date.now())) });
+  const read = await readShop(session, () => at);
+  if (!read.ok) throw new Error("the fixture's read failed");
+  return { [cacheKey(ORIGIN, "apple:owner-1")]: encodeSnapshot(read.snapshot) };
 }

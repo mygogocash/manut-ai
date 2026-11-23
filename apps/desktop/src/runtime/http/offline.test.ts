@@ -9,18 +9,18 @@ import type { BridgeError, BridgeEvent } from "../../lib/protocol";
 import { createRuntime } from "../index";
 import { MockRuntime } from "../mock";
 import { RUNTIME_KEY } from "../setting";
-import { CACHE_MAX_AGE_MS, ShopCache, cacheKey, decodeCached, encodeSnapshot } from "./cache";
+import { CACHE_MAX_AGE_MS, ShopCache, cacheKey, decodeCached } from "./cache";
 import { HttpHost, POLL_MS } from "./host";
 import { HttpRuntime, sessionFor, sharedHttpHost, shopCache } from "./index";
 import { ApiSession } from "./session";
 import { LinkDown, type FetchLike } from "./shell";
-import { readShop } from "./shop";
 import {
   actionJson,
   fakeApi,
   memoryCacheStore,
   memoryVault,
   ORIGIN,
+  savedRead,
   serveShop,
   storedSession,
   T0,
@@ -60,15 +60,6 @@ function setup(opts: Options = {}) {
   rt.onAny((ev) => events.push(ev));
   rt.onStatus((s) => statuses.push(s));
   return { api, store, cache, vault, session, host, rt, events, statuses };
-}
-
-/** The saved file as an earlier run left it: the shop's read at `at`. */
-async function savedAt(at: number): Promise<Record<string, string>> {
-  const api = serveShop(fakeApi());
-  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(NOW)) });
-  const read = await readShop(session, () => at);
-  if (!read.ok) throw new Error("the fixture's read failed");
-  return { [KEY]: encodeSnapshot(read.snapshot) };
 }
 
 const allOffline = (api: FakeApi) => api.on("GET", "/v1/tenant/export", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
@@ -166,7 +157,7 @@ describe("when the API cannot be reached", () => {
   });
 
   it("shows the read an earlier run kept, when the app starts with no way to the API, and when it was read", async () => {
-    const { api, rt, host, statuses, events } = setup({ files: await savedAt(EARLIER) });
+    const { api, rt, host, statuses, events } = setup({ files: await savedRead(EARLIER) });
     allOffline(api);
     await rt.connect();
     expect(statuses).toEqual(["connecting", "open"]);
@@ -187,8 +178,8 @@ describe("when the API cannot be reached", () => {
 
   it("reads the disk once for a whole outage, not on every try, whatever it finds there", async () => {
     const found: [string, Record<string, string>][] = [
-      ["a read it can show", await savedAt(EARLIER)],
-      ["a read too old to show", await savedAt(NOW - 8 * DAY)],
+      ["a read it can show", await savedRead(EARLIER)],
+      ["a read too old to show", await savedRead(NOW - 8 * DAY)],
       ["a damaged file", { [KEY]: "\u0000 not json" }],
       ["nothing", {}],
     ];
@@ -204,7 +195,7 @@ describe("when the API cannot be reached", () => {
   });
 
   it("does not answer an ask from the kept read: answering needs the live record", async () => {
-    const { api, rt } = setup({ files: await savedAt(EARLIER) });
+    const { api, rt } = setup({ files: await savedRead(EARLIER) });
     allOffline(api);
     await rt.connect();
     expect(await refusal(ask(rt)("approval.respond", { bot: "buddy", request_id: "action-1", choice: "once" }))).toEqual({
@@ -216,7 +207,7 @@ describe("when the API cannot be reached", () => {
   });
 
   it("queues no write while offline, and sends none when the API is back", async () => {
-    const { api, rt, host } = setup({ files: await savedAt(EARLIER) });
+    const { api, rt, host } = setup({ files: await savedRead(EARLIER) });
     allOffline(api);
     await rt.connect();
     for (const op of WRITE_OPS) {
@@ -232,7 +223,7 @@ describe("when the API cannot be reached", () => {
   });
 
   it("when the API is back, reads again, replaces what was kept, and has the app read everything again", async () => {
-    const { api, rt, host, statuses, store, events } = setup({ files: await savedAt(EARLIER) });
+    const { api, rt, host, statuses, store, events } = setup({ files: await savedRead(EARLIER) });
     allOffline(api);
     await rt.connect();
     expect(statuses).toEqual(["connecting", "open"]);
@@ -240,9 +231,10 @@ describe("when the API cannot be reached", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(host.link).toBe("open");
     expect(host.cache).toEqual({ kind: "none" });
-    // the store re-reads everything when the runtime opens again, as after any outage; nothing is replayed to it
+    // the store re-reads everything when the runtime opens again, as after any outage; only the ask the kept read showed,
+    // whose task is gone now, is said to be over, because the store keeps the cards it has
     expect(statuses).toEqual(["connecting", "open", "closed", "open"]);
-    expect(events).toEqual([]);
+    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "cancelled" }]);
     expect(await ask(rt)("thread.list", { bot: "buddy" })).toEqual({ threads: [expect.objectContaining({ thread: "task-7" })] });
     expect(decodeCached(store.files.get(KEY)!, NOW + 2_000)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + 2_000, tasks: [{ id: "task-7" }] } });
   });
@@ -262,7 +254,7 @@ describe("when the API cannot be reached", () => {
 describe("a kept read too old to show, or damaged", () => {
   it("does not show a read more than 7 days old, and says so", async () => {
     const at = NOW - CACHE_MAX_AGE_MS - 1;
-    const { api, rt, host, statuses } = setup({ files: await savedAt(at) });
+    const { api, rt, host, statuses } = setup({ files: await savedRead(at) });
     allOffline(api);
     start(rt);
     await settle();
@@ -276,7 +268,7 @@ describe("a kept read too old to show, or damaged", () => {
 
   it("shows a read that is exactly 7 days old", async () => {
     const at = NOW - CACHE_MAX_AGE_MS;
-    const { api, rt, host } = setup({ files: await savedAt(at) });
+    const { api, rt, host } = setup({ files: await savedRead(at) });
     allOffline(api);
     await rt.connect();
     expect(host.cache).toEqual({ kind: "showing", at });
@@ -314,7 +306,7 @@ describe("a kept read too old to show, or damaged", () => {
 
   it("never shows another shop's read", async () => {
     const other = cacheKey(ORIGIN, "apple:someone-else");
-    const files = Object.fromEntries(Object.values(await savedAt(EARLIER)).map((text) => [other, text]));
+    const files = Object.fromEntries(Object.values(await savedRead(EARLIER)).map((text) => [other, text]));
     const { api, rt, host } = setup({ files });
     allOffline(api);
     start(rt);
@@ -374,6 +366,39 @@ describe("forgetting what was kept", () => {
   });
 });
 
+describe("a look at the disk that ends late", () => {
+  it("does not bring back a read the person deleted: the host was stopped while it was being read, then they signed out and in again", async () => {
+    const { api, rt, host, store, session } = setup({ files: await savedRead(EARLIER) });
+    allOffline(api).on("DELETE", "/v1/auth/session", { status: 200, json: {} }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(2) });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => (reached = resolve));
+    const read = store.read.bind(store);
+    store.read = async (key) => {
+      reached();
+      await held;
+      return read(key);
+    };
+    start(rt);
+    await started; // the outage's one look at the disk is on its way
+    rt.close(); // the last client lets go: the host stops
+    release();
+    await settle(); // the look ends after the host stopped
+    await session.signOut(); // the saved read is deleted
+    expect(store.files.size).toBe(0);
+    store.read = read;
+    await session.signIn("eyJ.eyJ.sig", "nonce"); // the same shop again, with the API still out of reach
+    const again = new HttpRuntime(host);
+    start(again);
+    await settle();
+    expect(host.link).toBe("offline");
+    expect(host.cache).toEqual({ kind: "none" });
+    expect(again.status).toBe("closed");
+    again.close();
+  });
+});
+
 /** The desktop shell's commands in memory: the API through the fake, the keychain item, and the saved read. */
 function desktopShell(api: FakeApi, store: ReturnType<typeof memoryCacheStore>, keychain: string | null) {
   const calls: { cmd: string; args: Record<string, any> }[] = [];
@@ -415,7 +440,7 @@ function desktopShell(api: FakeApi, store: ReturnType<typeof memoryCacheStore>, 
 
 describe("Practice", () => {
   it("never reads or writes the saved read, whatever is on disk, and reaches no command of the shell at all", async () => {
-    const store = memoryCacheStore(await savedAt(EARLIER));
+    const store = memoryCacheStore(await savedRead(EARLIER));
     const shell = desktopShell(fakeApi(), store, storedSession(NOW));
     const rt = createRuntime({ mode: "practice" });
     expect(rt).toBeInstanceOf(MockRuntime);
