@@ -233,6 +233,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A member's role sits beside their name on the first line, as the canvas sets it, and what they are doing is the second line,
+   with how long it has run or how many more asks wait quietly at its end. Look first sits between the row and its menu. */
+.mpage .l1 .role {
+  margin-left: 6px;
+  color: var(--aui-muted);
+  font-weight: 400;
+}
+.mpage .l2.doing {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mpage .l2.doing .words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mpage .l2.doing .when {
+  flex: none;
+}
+.mpage .trow .look {
+  flex: none;
+  margin: 0 6px;
+}
 /* A pinned member's small dot after their name, as the sidebar's rows had one. */
 .mpage .pinmark {
   display: inline-block;

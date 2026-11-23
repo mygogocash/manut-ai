@@ -15,17 +15,22 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import "./mission.css";
 import { t, type Key } from "../i18n";
 import type { TeamState } from "../runtime/mission";
+import { useNow } from "../elsewhere/useNow";
 import { can } from "../runtime";
+import type { JobRow } from "../runtime/mission";
 import { getStore, selectAsks, selectSidebarBots, useStore, type Actions, type AppState } from "../state/store";
 import { MenuIcon } from "../sidebar/menuIcons";
 import { getRestarts, useRestart } from "../sidebar/restart";
+import { AskLine } from "../sidebar/Needs";
 import { RestartLine } from "../sidebar/RestartLine";
 import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { Avatar } from "../ui";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseStep, routinesLine, sinceText, type PauseUi } from "./pause";
+import { useJobs } from "./RecentWork";
 import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
+import { lineWords, teamLine, type TeamLine } from "./teamLine";
 
 /** One member as its row shows it. */
 export interface TeamRow {
@@ -39,6 +44,10 @@ export interface TeamRow {
   pinned?: boolean;
   /** what the member's menu offers, in order; a row without one has no More button */
   menu?: MemberMenuItem[];
+  /** what the member is doing, what waits for them or why they are not at work (teamLine.ts); none for a row that has nothing to add */
+  line?: TeamLine | null;
+  /** Look first, for a member whose ask waits: opens their chat on that ask */
+  look?: () => void;
 }
 
 /** Each status's word and the canvas's tag for it: amber waits on you, blue works, red could not finish. */
@@ -57,6 +66,10 @@ export interface TeamRowOptions {
   canRestart?: boolean;
   /** restarts the agent that serves a member: the restart every other place that offers one uses when not given */
   restart?: (bot: string) => void;
+  /** the runtime's jobs, which say what a working member runs and when an idle member's last job was; none when it has none to give */
+  jobs?: readonly JobRow[];
+  /** when Pause everyone began (seconds), while it holds */
+  pausedSince?: number | null;
 }
 
 /** The rows for the listed members, each opening that member's chat, with the menu of what else can be done with them. */
@@ -73,12 +86,18 @@ export function teamRows(s: AppState & Actions, opts: TeamRowOptions = {}): Team
       restart: () => restart(b.name),
       start: () => restart(b.name),
     };
+    const chat = s.chats[b.name];
+    const mine = asksOf(asks, b.name);
+    const status = memberStatus(b, chat, mine.length);
+    const newest = [...mine].sort((x, y) => y.ts - x.ts)[0];
     return {
       name: b.name,
       displayName: b.display_name,
       description: b.description,
-      status: memberStatus(b, s.chats[b.name], asksOf(asks, b.name).length),
+      status,
       open: () => void s.selectBot(b.name),
+      line: teamLine({ status, turn: chat?.turn, asks: mine, jobs: (opts.jobs ?? []).filter((j) => j.bot === b.name), error: chat?.lastTurn?.error, pausedSince: opts.pausedSince ?? null }),
+      ...(status === "needs" && newest ? { look: () => void s.jumpToAsk(newest.bot, newest.item.id) } : {}),
       ...(pinned ? { pinned } : {}),
       menu: memberActions({ pinned, offline: b.status === "offline", remote: !!b.host, canRestart }).map((action) => ({ action, run: run[action] })),
     };
@@ -200,6 +219,18 @@ function itemLabel(action: MemberAction, name: string): string {
   }
 }
 
+/** What a member is doing under their name, in the canvas's member states: the words (teamLine.ts) and, quietly beside them,
+ *  how long the turn has run or how many more asks wait. An ask's command is set as code, as Needs you sets it. */
+function TeamLineView({ name, line, nowMs }: { name: string; line: TeamLine; nowMs: number }) {
+  const w = lineWords(line, nowMs);
+  return (
+    <span className="l2 doing" data-testid={`team-line-${name}`} data-kind={line.kind}>
+      <span className="words">{line.kind === "asks" ? <AskLine text={w.words} /> : w.words}</span>
+      {w.meta && <span className="when">{w.meta}</span>}
+    </span>
+  );
+}
+
 /** "Restarting" beside a member's status while the agent that serves them restarts (sidebar/restart.ts keeps that). */
 function RestartWait({ name, start }: { name: string; start: boolean }) {
   const st = useRestart(name);
@@ -217,9 +248,12 @@ export function TeamView({
   menu = null,
   onMenu,
   error,
+  nowMs,
 }: {
   members: TeamRow[];
   pause?: TeamPauseProps;
+  /** the time the lines are told against (ms); the clock when not given */
+  nowMs?: number;
   /** the member whose menu is open */
   menu?: string | null;
   /** opens a member's menu, or closes the open one (null) */
@@ -244,6 +278,7 @@ export function TeamView({
         {t("pause.button")}
       </button>
     ));
+  const now = nowMs ?? pause?.nowMs ?? Date.now();
   const notice = error ? (
     <div className="banner err" role="alert" data-testid="team-action-error">
       {error}
@@ -264,12 +299,18 @@ export function TeamView({
                   <span className="l1">
                     {m.displayName}
                     {m.pinned && <span className="pinmark" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid={`team-pinned-${m.name}`} />}
+                    {m.description && <span className="role">{m.description}</span>}
                   </span>
-                  {m.description && <span className="l2">{m.description}</span>}
+                  {m.line && <TeamLineView name={m.name} line={m.line} nowMs={now} />}
                 </span>
                 {restarts && <RestartWait name={m.name} start={m.status === "offline"} />}
                 <span className={st.tag}>{t(st.word)}</span>
               </button>
+              {m.look && (
+                <button type="button" className="lk look" onClick={m.look} data-testid={`team-look-${m.name}`}>
+                  {t("home.look")}
+                </button>
+              )}
               {!!m.menu?.length && (
                 <button
                   type="button"
@@ -394,7 +435,12 @@ export function TeamPage() {
     setError(null);
     setError(await tryAction(getStore(), run));
   };
-  const members = teamRows(s).map((r) => ({ ...r, menu: r.menu?.map((item) => ({ ...item, run: () => report(item.run) })) }));
+  // The runtime's jobs tell what a working member runs and when an idle member last finished one; the clock moves a running
+  // turn's time on while a member works.
+  const jobs = useJobs();
+  const now = useNow(s.bots.some((b) => b.running || !!s.chats[b.name]?.turn), 5_000);
+  const pausedSince = state.kind === "ready" && state.value.paused ? state.value.since : null;
+  const members = teamRows(s, { jobs, pausedSince }).map((r) => ({ ...r, menu: r.menu?.map((item) => ({ ...item, run: () => report(item.run) })) }));
   // The team's state is read when the page opens and again whenever a member is paused or resumed, from anywhere.
   const held = s.bots.map((b) => (b.paused ? b.name : "")).join();
   useEffect(() => {
@@ -417,6 +463,7 @@ export function TeamPage() {
   return (
     <TeamView
       members={members}
+      nowMs={now}
       menu={menu}
       onMenu={setMenu}
       error={error}

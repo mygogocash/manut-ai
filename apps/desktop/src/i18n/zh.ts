@@ -2128,4 +2128,11 @@ export const zh: Record<Key, string> = {
   "home.recent": "最近的工作",
   "home.seeHistory": "查看历史记录",
   "pn.recentWork": "最近的工作",
+  // a member's line on the Team page: what they are doing, what waits for them, or why they are not at work
+  "team.line.working": "正在工作",
+  "team.line.pausedSince": "自 {since} 起已暂停，不会开始新工作。",
+  "team.line.paused": "已暂停，不会开始新工作。",
+  "team.line.stuck": "上一项工作中途停了下来。",
+  "team.line.idleLast": "现在没有要做的事。上一项工作：{when}。",
+  "team.line.idle": "现在没有要做的事。",
 };
