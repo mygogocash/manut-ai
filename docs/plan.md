@@ -61,7 +61,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | partial: the three-step first run is built (kept on this computer until sign-in exists); the offline cache and the runtime adapter are not yet (the approvals wire format the adapter needs is queued for the night build) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet (models cost money: the owner; Ton's books arithmetic is queued for the night build) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the rest need the owner's applications, `docs/connectors.md`) |
-| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, PromptPay payloads, the console; slip rules and reading PromptPay payloads are queued for the night build) |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, PromptPay payloads, the console; slip rules, reading PromptPay payloads and routine rules are queued for the night build) |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions) |
 
 ## Queue for cloud routines
@@ -178,3 +178,34 @@ are not part of this task.
 
 Done when: a day across midnight in Bangkok, a month of 28, 30 and 31 days, both VAT settings, each flag, CSV
 quoting and the formula guard are tested.
+
+### routine-rules
+`packages/routine-rules` (`@manut/routine-rules`). What a routine is, when it runs next, and how its timing is
+said, for the Routines list on the canvas board "Customize: memory and routines" ("Every day at 08:00: Morning
+brief", "Every Monday: Weekly growth brief", "When stock drops under 5: Tell me and draft a restock order", "On
+the last day of the month: Send the books to FlowAccount. Asks first.", "Every night after 21:00: Answer
+order-status questions"). Pure functions: running a routine is not part of this task. No function throws: a
+refusal is a result value.
+
+- A routine has an id, a name (1 to 80 characters), an action kind, a time zone (default `Asia/Bangkok`) and a
+  trigger: `daily` at a time; `weekly` on one or more weekdays (0 is Sunday) at a time; `monthly` on a day from
+  1 to 28 or on the last day, at a time; `window`, every day from one time to another, possibly past midnight
+  (21:00 to 08:00); or `stockBelow` a whole number (an event, so it has no next run).
+- Action kinds: `brief`, `draft` (something for the owner to look at), `reply` (to customers), `send` (a
+  message, a post, or the books to a service), `pay` and `delete`. A routine that replies, sends, pays or deletes
+  always asks first: `asksFirst` is true for those kinds and cannot be set false. `brief` and `draft` may run
+  without asking.
+- `nextRun(routine, now)`: the next start strictly after `now`, in ms; `null` for `stockBelow`.
+  `inWindow(routine, now)` says whether a `window` routine is running now.
+- `toSchedule(routine)`: the `{ hour, minute, weekdays, timeZone }` that `apps/api`'s schedule object
+  (`ScheduleJSON` in `apps/api/src/schedule-object.ts`, read it, do not change it) can run, for `daily` and
+  `weekly`; `null` for the kinds it cannot express.
+- `describeTrigger(routine)`, in English: `Every day at 08:00`, `Every Monday at 08:00`, `Every Monday and
+  Thursday at 09:30`, `On the 15th of each month at 09:00`, `On the last day of the month at 18:00`, `Every night
+  after 21:00` (a window that crosses midnight), `Every day from 09:00 to 17:00`, `When stock drops under 5`.
+- Time zones with daylight saving: a time that does not exist that day runs at the first minute after the gap;
+  a time that happens twice runs once, at the first.
+
+Done when: each trigger's next run around midnight, month ends of 28, 29, 30 and 31 days (29 February 2028), the
+last-day rule, windows across midnight, the asks-first rule, `toSchedule`, `describeTrigger`, each refusal, and
+one gap and one repeat in `Europe/London` are tested.

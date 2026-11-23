@@ -29,7 +29,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 | Orca (agent protocol code, worktrees) | https://github.com/stablyai/orca |
 | Night build (cloud routine) | https://claude.ai/code/routines/trig_01W1xtTKRySeLkPiqorkJohN |
 
-## Done and pushed (all green: about 2,440 tests plus two local-Worker contracts)
+## Done and pushed (all green: about 2,600 tests plus two local-Worker contracts)
 
 - `apps/api`: GoSpark's Workers backend lifted whole, plus the LINE connector, the owner's signed approval link
   and payment records.
@@ -55,25 +55,45 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - The desktop's Home page (the canvas's Main board), which the app now opens on; New and the brand mark open it.
 - Two real bugs behind flaky tests are fixed: pilot ids now keep their order within a millisecond, and the
   desktop's argv cache ignores a parent pid that could not be read (the macOS Rust job caught it).
+- The roadmap's phases are tracked in `docs/plan.md` ("Roadmap phases and coverage"). Since then:
+  - Phase 0 is answered in `docs/phase-0-spikes.md`.
+  - Phase 1's gate is measured: trial starts, subscription payments, owner activity, and a Pilot gate page in
+    the console (`GET /v1/admin/pilot/gate`).
+  - Phase 2's model gateway holds each call's worst case against the shop's monthly cap and settles it at what
+    the provider bills (`docs/model-gateway.md`). Nothing calls a model until the owner adds a key.
+  - Phase 3's desktop opens on a three-step first run on a new computer (Welcome, Your shop, One channel, Your
+    team).
+- Dev was redeployed on 23 Nov at 17:10 with all of the above, and smoke-tested.
+- The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
+  slip-rules.
 
 ## Next steps, in order
 
-1. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
+1. Four helpers are running, each on its own branch from `pilot/week-1`: the Playwright revival (it opens a
+   draft pull request into `pilot/week-1`, merge it when CI's Playwright job passes), the Phase 2 job flow with
+   an audit log (`feat/job-flow-audit-log`), Phase 1's LINE cards and morning brief for owners
+   (`feat/owner-line-cards`, behind a flag that stays off) and the Phase 3 runtime adapter
+   (`feat/desktop-runtime-adapter`, read-only first). Review each, merge it after the full root gate, add its
+   decisions to `docs/decisions.md` and mark the tracker.
+2. Review the night build's draft pull requests (`cloud/<task>`): slip-rules now, then promptpay-read,
+   approval-wire, shop-memory, books and routine-rules. Merge the good ones into `pilot/week-1`, never into
+   `main`.
+3. The next wave, from the tracker:
+   - Phase 2: memory in the API and the console, on `@manut/shop-memory`.
+   - Phase 3: answering approvals from the desktop through the approvals wire format, then the offline cache.
+   - Phase 4: Nam, Pim and Ton as workers on the job flow with the stand-in model, drafts only, every send
+     through an approval; FlowAccount and Google Sheets connectors behind interfaces, with no live calls.
+   - Phase 5: the routines page (on `@manut/routine-rules`), the owner's billing page with a PromptPay QR
+     (needs Manut AI's PromptPay id from the owner), two shop templates, the LINE client.
+   - Phase 6: several shops in one view, and more roles.
+   - Desktop: a home for the old member-row actions (new thread, pin, restart); richer Team, Needs you and
+     History pages.
+4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
    audit row. It waits for a test LINE Official Account. Turn on `officeInbound`, `officeCloud` and
    `officeExternalWrites` for dev only when that exists.
-2. Desktop, next slices:
-   - a home for the old member-row actions (new thread, pin, restart);
-   - richer Team, Needs you and History pages.
-   Revive the Playwright suite. 126 of its 156 specs expect a chat or the removed bot rows at start, so the shared
-   fixture must wait for `menu-new` and then open a chat: either `menu-team`, then `team-<bot>`, or `manut.resume`
-   in localStorage with `view: "chat"`.
-3. Deletion follow-ups:
-   - The owner reviews the English copy of `/delete/{token}`.
-   - A shop whose wipe stopped after its registry row went leaves the console's list. Only the owner's page
-     then shows it as deleting.
-4. Each morning: review the night build's `cloud/<task>` pull requests and merge the good ones into the
-   working branch, never into `main`. The queue still holds slip-rules, promptpay-read and approval-wire.
-5. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
+5. Deletion follow-up: a shop whose wipe stopped after its registry row went leaves the console's list; only
+   the owner's page then shows it as deleting.
+6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
 
 ## Needs the owner
 
@@ -91,6 +111,14 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - **From `docs/connectors.md`:** each approved reply is a LINE push, which counts against the shop's monthly
   quota (300 on the free plan). Shopee chat is closed to third parties. Lazada and Meta need applications started now.
 - **A look at the approval page on a real phone.**
+- **Model gateway (money):** an Anthropic API key from a paid account, as a Worker secret, only when models
+  should run; the exchange rate (default ฿35.00 a dollar) and each shop's monthly cap (default ฿200); a check of
+  the prices in `docs/model-gateway.md` against Anthropic's pricing page.
+- **The gate's rules:** shops that ask for deletion leave the cohort (keeping them needs a snapshot at deletion);
+  subscription payments are deleted with the shop (whether Manut AI must keep its own billing records is a legal
+  question); a payment before day 15 counts as paid.
+- **First run:** who writes the Thai copy; whether the Team screen gets the practice-mode switch that step 3's
+  canvas text promises.
 
 ## Known flaky tests (they fail only under heavy load)
 
@@ -105,8 +133,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - `pnpm install --frozen-lockfile` works on a clean checkout. `pnpm test` (about one minute) and `pnpm typecheck`
   must pass before every commit; push only after they pass (`pnpm test && git push`).
 - `pnpm --filter @manut/api dev` runs both Workers on one origin at localhost:8787.
-- Deploy dev from `apps/api`, with the token in `CLOUDFLARE_API_TOKEN` for the command only:
-  `wrangler deploy -c wrangler.web.jsonc --env dev`, then `wrangler deploy --env dev`.
+- Deploy dev from `apps/api`: `wrangler deploy -c wrangler.web.jsonc --env dev`, then `wrangler deploy --env dev`.
+  Wrangler on this Mac is signed in with the owner's Cloudflare login, which sees more than one account, so set
+  `CLOUDFLARE_ACCOUNT_ID` for the command (the value is in the GitHub `dev` environment's secrets). Run
+  `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
+  Worker whose name does not end in `-dev`.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
   `GH_TOKEN="$(gh auth token --user KunanonJ)"`; the default `gh` account cannot see the organisation.
 - Secrets never go into source, logs, tests or chat. A secret the owner gives arrives through T3 Code's secure
