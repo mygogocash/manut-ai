@@ -79,11 +79,11 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | running | 4. Console: the People page | | Sonnet |
-| running | The Playwright revival | | Haiku |
+| done locally | The Playwright revival: pull request #15, merged when CI's Playwright job passes | | Haiku |
+| running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
 | 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
-| 9 | Desktop leftovers: a home for the old chat-list actions; richer Team, Needs you and History pages | Customize | Sonnet |
 
 ## Queue for cloud routines
 
