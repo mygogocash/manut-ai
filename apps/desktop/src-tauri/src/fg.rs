@@ -162,7 +162,12 @@ impl ArgvClock {
     /// Whether to read process `pid`'s argv `now`; `same_exe`: its program is the one the last probe saw.
     fn due(&mut self, pid: u32, ppid: u32, same_exe: bool, now: std::time::Instant) -> bool {
         match &mut self.seen {
-            Some((p, pp, first, last)) if *p == pid && *pp == ppid && same_exe => {
+            // A parent pid of 0 is no answer (Linux never reads it; a loaded macOS can fail the read for a moment):
+            // only two known parents that differ mean a new process under a reused pid.
+            Some((p, pp, first, last)) if *p == pid && (*pp == ppid || *pp == 0 || ppid == 0) && same_exe => {
+                if *pp == 0 {
+                    *pp = ppid;
+                }
                 if now.saturating_duration_since(*first) < ARGV_FRESH || now.saturating_duration_since(*last) >= ARGV_EVERY {
                     *last = now;
                     return true;
@@ -688,6 +693,28 @@ mod tests {
         assert!(c.due(8, 2, true, at(10400)));
         assert!(c.due(8, 2, true, at(12300)));
         assert!(!c.due(8, 2, true, at(12500)));
+    }
+
+    /// A parent pid of 0 is no answer: a loaded macOS can fail `proc_pidinfo` for a moment, and Linux never reads
+    /// it. It never restarts the clock, so a failed read costs no extra argv read; a real new parent still does.
+    /// (CI's macOS runner read the argv 14 times over 60 probes instead of 13 because of exactly this.)
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_that_could_not_be_read_never_restarts_the_clock() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_millis(s);
+        let mut c = ArgvClock::default();
+        assert!(c.due(7, 100, false, at(0)), "first seen");
+        assert!(!c.due(7, 100, true, at(2500)), "past 2 s, before the next read");
+        assert!(!c.due(7, 0, true, at(2600)), "an unread parent is not a new process");
+        assert!(!c.due(7, 100, true, at(2700)), "the real parent again is still the same process");
+        assert!(c.due(7, 200, true, at(2800)), "a real new parent is a new process");
+        // first seen with no parent, then the real one: the same process, now known by its parent
+        let mut d = ArgvClock::default();
+        assert!(d.due(9, 0, false, at(0)));
+        assert!(!d.due(9, 300, true, at(2500)));
+        assert!(d.due(9, 301, true, at(2600)), "a real change after the parent became known");
     }
 
     /// 60 probes of one interpreter process a second apart (the poller's cadence while a terminal is busy): the argv
