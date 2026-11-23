@@ -54,7 +54,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | built: `GET /v1/admin/pilot/gate` and the console's Pilot gate page; the gate itself waits for real shops |
 | 1 Pilot | Audit log an operator can read | built: one log per shop, metadata only (`GET /v1/admin/audit`), and the console's Audit page |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` decides every send: replies, deletions and workers' requests; sessions read approvals as its wire records) |
-| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`); no model is called until the owner adds an Anthropic key and settles the rate and the cap |
+| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`), with the console's Model spend page; no model is called until the owner adds an Anthropic key and settles the rate and the cap |
 | 2 Control plane | Memory; the job queue; the audit log | built: the job flow, the audit log, and what the team knows (stored per shop, with the console's Memory page); workers read memory when they are built in Phase 4 |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | built: Home, the side menu and pages, the job view, the activity log and Pause everyone (in Practice; the connected runtime answers "not yet" until the API serves jobs) |
