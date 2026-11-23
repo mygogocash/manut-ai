@@ -1,6 +1,7 @@
 // What the in-process runtime starts with: Buddy and a small team, a few lines of history each, and the model list
 // the picker shows. Everything here is staged. The names follow the design canvas's team (Nam, Pim, Ton, Kit); the
 // models are labelled as a demo so nobody reads them as a real provider.
+import type { FactSource } from "@manut/shop-memory";
 import type { BotStatus, ModelProvider, Skill, SlashCommand } from "../../lib/protocol";
 import { OWNER, type ActivityEvent, type JobRecipient, type JobStage, type TraceStep } from "../mission";
 
@@ -289,4 +290,24 @@ export const ROUTINE_SEED: readonly string[] = [
   "Tell me and draft a restock order",
   "Send the books to FlowAccount",
   "Answer order-status questions",
+];
+
+/** A fact as it is staged: `ago` is the seconds before the runtime started. The runtime teaches them to the package one by
+ *  one with `propose`, so a customer's fact waits for the owner because the package says it does, and the ids are the ones
+ *  the package hands out (f1, f2, ...). The source is the package's own, so a document's date is in milliseconds here. */
+export interface MemorySeed {
+  text: string;
+  source: FactSource;
+  ago: number;
+}
+
+/** What the design canvas's Customize board shows: four facts the team may use, each with where it came from, and one that a
+ *  customer said and the owner has not confirmed. */
+export const MEMORY_SEED: readonly MemorySeed[] = [
+  // Noon UTC, so that the day reads as 3 November in every time zone from -12 to +11.
+  { text: "Free shipping on orders over ฿800", source: { kind: "document", name: "price list", date: Date.UTC(2026, 10, 3, 12) }, ago: 20 * DAY },
+  { text: "Reply warmly and end with ค่ะ", source: { kind: "edits", count: 12 }, ago: 9 * DAY },
+  { text: "Jasmine is the best seller", source: { kind: "orders", days: 90 }, ago: 3 * DAY },
+  { text: "A jasmine candle costs ฿118 to make", source: { kind: "connection", name: "Google Sheets", detail: "cost sheet" }, ago: 2 * DAY },
+  { text: "Closed on Mondays", source: { kind: "customer", chat: "line-chat-3" }, ago: 5 * HOUR },
 ];

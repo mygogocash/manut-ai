@@ -363,6 +363,13 @@ export class HttpHost {
       "team.state": notYetShow,
       "team.pause": notYet,
       "team.resume": notYet,
+      // What the team knows: the API serves a shop's memory to operators only (admin routes), so no session can read or
+      // change it. Nothing the owner types is sent anywhere.
+      "memory.list": notYetShow,
+      "memory.remember": notYet,
+      "memory.confirm": notYet,
+      "memory.correct": notYet,
+      "memory.forget": notYet,
     };
   })();
 }
