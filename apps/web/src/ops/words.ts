@@ -1,3 +1,4 @@
+import type { ApprovalKind } from "@manut/approval-core";
 import { formatMoney } from "@manut/format";
 import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
@@ -11,13 +12,16 @@ import {
   type DeletionRequest,
   type FactSource,
   type GateStatus,
+  type HelperRemoval,
+  type Identity,
   type ModelCap,
   type ModelCounts,
   type ModelUsage,
+  type People,
   type PilotGate,
   type Shop,
 } from "../api";
-import { dayOffset, formatBaht, formatClock, formatDate, formatStamp } from "../format";
+import { dayOffset, formatBaht, formatClock, formatDate, formatStamp, formatWeekdayDate } from "../format";
 
 /// The console's status words. Operators read them; the owner never does.
 export function stateTag(state: ApprovalState, ownerName: string): { label: string; className: string } {
@@ -326,17 +330,40 @@ export const auditWords = {
     `${missed.count} ${missed.count === 1 ? "entry" : "entries"} could not be written, so this log is not complete. The last was at ${formatStamp(missed.lastAt, now)} (${missed.lastAction}).`,
 } as const;
 
-/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name.
-export function auditActorText(actor: AuditActor, ownerName: string): string {
+/// Who the log's ids are, as far as the people list knows them: a helper's id, a removed helper's id and an invite's id, each
+/// by the name the owner gave. The log never holds a name itself (docs/pilot-api.md, "Audit log"); the console reads them
+/// from the people list when it shows an entry, so what a removed helper approved still says who they were.
+export type AuditNames = Readonly<Record<string, string>>;
+
+const NO_NAMES: AuditNames = {};
+
+/// The name for an id, or nothing. Only a name the list holds for that very id counts, never one every object inherits.
+function nameOf(names: AuditNames, id: string | undefined): string | undefined {
+  return id !== undefined && Object.hasOwn(names, id) ? names[id] : undefined;
+}
+
+/// The names in a shop's people list, by id: its helpers, the helpers who were removed and its invites. An id the API
+/// has no name for (it answers an empty one) is left out, so the log says the id rather than nothing.
+export function auditNamesOf(people: People): AuditNames {
+  return Object.fromEntries(
+    [...people.invites, ...people.removed, ...people.helpers].filter((one) => one.name !== "").map((one) => [one.id, one.name]),
+  );
+}
+
+/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name, a helper by the name
+/// the owner gave them when the people list knows it.
+export function auditActorText(actor: AuditActor, ownerName: string, names: AuditNames = NO_NAMES): string {
   switch (actor.kind) {
     case "operator":
       return actor.email ?? "An operator (no Access identity)";
     case "owner":
       return actor.id ? `${ownerName} (${actor.id})` : ownerName;
     case "helper":
-      return `Helper ${actor.id}`;
+      return nameOf(names, actor.id) ?? `Helper ${actor.id}`;
     case "worker":
       return `Worker attempt ${actor.attemptId.slice(0, 8)}`;
+    case "outpost":
+      return `Outpost ${actor.id.slice(0, 8)}`;
     case "system":
       return "Manut AI";
     default:
@@ -346,8 +373,11 @@ export function auditActorText(actor: AuditActor, ownerName: string): string {
 
 const amountOf = (entry: AuditEntry) => (entry.amountSatang === undefined ? "" : ` of ${formatBaht(entry.amountSatang)}`);
 
+/// What an action's words may name besides its entry: the owner, and the people the owner gave names.
+type AuditContext = { ownerName: string; names: AuditNames };
+
 /// What each action did, said after who did it.
-const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
+const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditContext) => string>> = {
   "shop.created": () => "created the shop",
   "line.connected": (entry) =>
     entry.subject.previousConnectionId ? "connected a new LINE account in place of the old one" : "connected the shop's LINE account",
@@ -374,12 +404,40 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
   "memory.confirmed": () => "confirmed a fact as true",
   "memory.corrected": () => "corrected a fact",
   "memory.forgotten": () => "made the team forget a fact",
+  // The owner's people (docs/people.md). The log holds ids only, so a name comes from the people list when it has one.
+  "invite.created": (entry, { names }) => `invited ${nameOf(names, entry.subject.inviteId) ?? "a helper"}`,
+  "invite.revoked": (entry, { names }) => {
+    const name = nameOf(names, entry.subject.inviteId);
+    return name ? `cancelled ${name}'s invite` : "cancelled an invite";
+  },
+  "helper.joined": () => "joined the shop through an invite",
+  "helper.session_opened": () => "signed in on another device",
+  "helper.removed": (entry, { names }) => `removed ${nameOf(names, entry.subject.helperId) ?? "a helper"}`,
+  "away.set": (entry, { ownerName, names }) =>
+    `set ${nameOf(names, entry.subject.helperId) ?? "a helper"} to cover messages while ${ownerName} is away`,
+  "away.cleared": (entry, { names }) => {
+    const name = nameOf(names, entry.subject.helperId);
+    return name ? `ended ${name}'s cover` : "ended the cover";
+  },
+  "request.passed_on": (_entry, { ownerName }) => `passed a request on to ${ownerName}`,
+  // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
+  // ids only, never a username or a password.
+  "signin.created": () => "added a site sign-in to the vault",
+  "signin.password_replaced": () => "replaced a site sign-in's password",
+  "signin.removed": () => "removed a site sign-in from the vault",
+  "outpost.registered": () => "registered an outpost",
+  "signin.requested": () => "asked to sign in to a site",
+  "signin.broken": () => "reported that a site refused a saved password",
+  "signin.redeemed": () => "asked for a sign-in to type into a site",
 };
 
-/// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290."
-export function auditSentence(entry: AuditEntry, ownerName: string): string {
-  const said = Object.hasOwn(AUDIT_ACTIONS, entry.action) ? AUDIT_ACTIONS[entry.action]!(entry) : `did ${entry.action}`;
-  return `${auditActorText(entry.actor, ownerName)} ${said}.`;
+/// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290." Given the people list's names, a helper
+/// is named as the owner named them.
+export function auditSentence(entry: AuditEntry, ownerName: string, names: AuditNames = NO_NAMES): string {
+  const said = Object.hasOwn(AUDIT_ACTIONS, entry.action)
+    ? AUDIT_ACTIONS[entry.action]!(entry, { ownerName, names })
+    : `did ${entry.action}`;
+  return `${auditActorText(entry.actor, ownerName, names)} ${said}.`;
 }
 
 /// The outcome as a tag, or nothing for an action simply done as asked.
@@ -426,6 +484,22 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   changed: "It had changed since it was shown.",
   not_offered: "That choice was not offered.",
   not_found: "There was no such request.",
+  // Why a sign-in step was refused: the vault's own answers, and the switches the job flow reads first.
+  sign_in_not_found: "That sign-in was not found, or it had been removed.",
+  member_not_allowed: "That member is not named on the sign-in.",
+  sign_in_broken: "The site had refused the saved password, so a new one was needed.",
+  outpost_not_found: "There was no such outpost.",
+  outpost_asleep: "The outpost was asleep.",
+  grant_not_found: "The shop had no such grant.",
+  wrong_outpost: "The grant was for another outpost.",
+  grant_used: "The grant had already been used.",
+  grant_expired: "The grant had run out of its 60 seconds.",
+  feature_disabled: "That kind of work was switched off.",
+  consent_required: "The owner had not allowed it, or had withdrawn permission.",
+  vault_unavailable: "The vault did not answer.",
+  vault_not_configured: "The vault has no key set.",
+  unseal_failed: "The vault could not open the saved password.",
+  task_unavailable: "The task could not be read.",
 };
 
 export function auditReasonText(reason: string): string {
@@ -445,6 +519,11 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["previousConnectionId", "replacing"],
   ["confirmationId", "confirmation"],
   ["factId", "fact"],
+  ["inviteId", "invite"],
+  ["helperId", "helper"],
+  ["signInId", "sign-in"],
+  ["outpostId", "outpost"],
+  ["grantId", "grant"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {
@@ -676,6 +755,190 @@ function countOf(n: number, one: string, many: string): string {
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/// A request's short name as a tag, by approval-core's kind. Typed to hold a name for every kind, so a kind added there
+/// cannot be left without one.
+const KIND_TAGS = {
+  message: "Message",
+  reply: "Reply",
+  money: "Money",
+  public_post: "Public post",
+  payment_confirmation: "Payment confirmation",
+  command: "Command",
+} as const satisfies Record<ApprovalKind, string>;
+
+/// The People page: who can use Manut AI for one shop, laid out from the design canvas's "Settings: people" and "States:
+/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts for the owner,
+/// who has no account in the pilot, so the words name the owner and say what a helper may and may not approve. What each
+/// role may approve is read from approval-core's `mayDecide`, and only named here. Sentences that hold a name or a date
+/// are functions.
+export const peopleWords = {
+  nav: "People",
+  title: "People",
+  intro: (owner: string) =>
+    `Who can use Manut AI for this shop. ${owner} has no account here in the pilot, so invite, cancel, remove and set cover only when ${owner} asks you to.`,
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading people",
+  noShops: "No shops yet.",
+  unavailable: "The API could not read this shop's people. Try again.",
+  saveUnavailable: "The API could not read or save this shop's people. Check the list, then try again.",
+  /// The API names the setting an invite's link needs: where the web app lives, or the secret that signs the link.
+  notConfigured: (setting?: string) =>
+    `The API cannot make invite links: ${setting ? `its setting ${setting}` : "one of its link settings"} is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.`,
+
+  // Who can use Manut AI
+  whoTitle: (shop: string) => `Who can use Manut AI for ${shop}`,
+  listLabel: (shop: string) => `${shop}'s people`,
+  count: (people: number, invited: number) =>
+    `${people} ${people === 1 ? "person" : "people"}${invited > 0 ? `, ${invited} invited` : ""}`,
+  ownerRole: "Owner",
+  helperRole: "Helper",
+  invitedTag: "Invited",
+  expiredTag: "Expired",
+  coveringTag: "Covering",
+  ownerCan: "Approves everything: messages and replies, money and public posts.",
+  helperCan: (owner: string) =>
+    `Approves messages and replies to customers. Money and public posts stay with ${owner}.`,
+  helperSince: (joinedAt: string) => `Helper since ${formatDate(joinedAt)}.`,
+  devices: (n: number) =>
+    n === 0 ? "Not signed in on any device." : `Signed in on ${n} ${n === 1 ? "device" : "devices"}.`,
+  identityText: (identity: Identity) => (identity.kind === "email" ? identity.address : `LINE ID ${identity.id}`),
+  noHelpers: (owner: string, shop: string) =>
+    `No helpers yet. ${owner} is the only person who can use Manut AI for ${shop}. Invite a helper to let someone approve messages and replies.`,
+  remove: "Remove",
+  cancelInvite: "Cancel invite",
+  copyLink: "Copy link",
+
+  // Removing a helper asks once more, in the board's own words
+  removeTitle: (name: string) => `Remove ${name}?`,
+  removeEffect: (name: string, shop: string) =>
+    `${name} can no longer sign in to ${shop}. Requests ${name} was looking at go back to you.`,
+  removeKept: (name: string) => `What ${name} approved stays in the activity log, with ${name}'s name.`,
+  removeYes: (name: string) => `Remove ${name}`,
+  removeNo: (name: string) => `Keep ${name}`,
+  removing: "Removing",
+  /// What the API's own answer says it did: it signed them out everywhere, and it may also have cancelled their invites and
+  /// ended their cover, which is said only when it happened.
+  removed: (name: string, result: HelperRemoval) => {
+    const parts = [`${name} was removed and signed out on every device.`];
+    const invites = result.invitesRevoked.length;
+    if (invites > 0) parts.push(`${invites} pending ${invites === 1 ? "invite" : "invites"} for them ${invites === 1 ? "was" : "were"} cancelled.`);
+    if (result.coverEnded) parts.push("Their cover has ended.");
+    return parts.join(" ");
+  },
+  removedNote: (names: string[]) =>
+    `Removed helpers: ${listOf(names)}. What they approved stays in the activity log, with their names.`,
+
+  // Inviting a helper: nothing is sent, so the operator gets a link to send
+  formTitle: "Invite a helper",
+  nameLabel: "Name",
+  nameHelp: "1 to 80 characters. A helper's name shows in the activity log.",
+  badName: "Write a name of 1 to 80 characters.",
+  contactLabel: "LINE ID or email",
+  identityHelp:
+    "A LINE ID, or an email address. Manut AI does not send the invite: you get a link to send yourself. It works once, for 7 days.",
+  signInNote:
+    "Signing in with LINE is not built yet, so an invite to a LINE ID cannot be opened until it is. An email invite opens only for someone whose Apple ID uses that email.",
+  inviteCan: (name: string, owner: string) =>
+    `${name || "A helper"} can approve messages and replies to customers. Money and public posts stay with ${owner}.`,
+  makeLink: "Make invite link",
+  makingLink: "Making the link",
+  cancel: "Cancel",
+  inviteReady: (name: string) => `The invite for ${name} is ready.`,
+  linkLabel: "Invite link",
+  sendYourself: "Send this link yourself; Manut AI does not send it.",
+  done: "Done",
+  inviteMade: (createdAt: string, expiresAt: string) =>
+    `Invite made ${formatDate(createdAt)} at ${formatClock(createdAt)}. It works once, until ${formatWeekdayDate(expiresAt)} at ${formatClock(expiresAt)}.`,
+  inviteRanOut: (expiresAt: string) =>
+    `This invite ran out on ${formatWeekdayDate(expiresAt)} at ${formatClock(expiresAt)}. Invite again for a new link.`,
+  noLink:
+    "The API could not make this invite's link just now. Cancel the invite and make a new one, or ask whoever deploys the API to check its link settings.",
+  inviteCancelled: (name: string) => `The invite for ${name} was cancelled.`,
+
+  // What each role may approve, read from approval-core's rule
+  rolesTitle: "What each role can approve",
+  rolesNote: (owner: string) =>
+    `A request a helper cannot approve waits for ${owner}, and the helper can pass it on with a note.`,
+  columns: { what: "What", owner: "Owner", helper: "Helper" },
+  yes: "Yes",
+  noAsks: (owner: string) => `No, asks ${owner}`,
+  kindRow: {
+    message: "Messages to customers",
+    reply: "Replies to customers",
+    money: "Money: refunds, discounts and payments",
+    public_post: "Public posts",
+    payment_confirmation: "Confirming that a payment arrived",
+    command: "Commands the team asks to run",
+  } satisfies Record<ApprovalKind, string>,
+  kindTag: KIND_TAGS,
+  /// A request's short name as a tag, or the kind as the API wrote it when this console does not know it yet.
+  kindOf: (kind: string) => (Object.hasOwn(KIND_TAGS, kind) ? KIND_TAGS[kind as ApprovalKind] : kind),
+
+  // While the owner is away
+  coverTitle: "While you are away",
+  coverNote: (owner: string) => `Money and public posts still wait for ${owner}.`,
+  coverInForce: (helper: string, until: string) =>
+    `You are away until ${formatWeekdayDate(until)}. ${helper} is covering messages.`,
+  coverOver: (helper: string, until: string) =>
+    `The cover for ${helper} ended on ${formatWeekdayDate(until)}. Nobody is covering now.`,
+  noCover: (owner: string) =>
+    `Nobody is covering. Choose a helper and a day to let them approve messages while ${owner} is away.`,
+  needHelper: (owner: string) =>
+    `Invite a helper first: cover needs someone to approve messages while ${owner} is away.`,
+  helperLabel: "Helper who covers",
+  untilLabel: "Away until",
+  untilHelp: "Cover lasts to the end of that day.",
+  dayPassed: "That day has already passed. Choose today or a later day.",
+  setCover: "Set cover",
+  settingCover: "Setting cover",
+  endCover: "End cover",
+  endingCover: "Ending cover",
+  coverSet: (helper: string, until: string) => `${helper} covers messages until ${formatWeekdayDate(until)}.`,
+  coverEnded: "The cover has ended.",
+
+  // The notes helpers passed on
+  notesTitle: "Notes helpers passed on",
+  notesNote: (owner: string) => `${owner} still decides`,
+  notesLabel: (shop: string) => `Notes passed on to ${shop}'s owner`,
+  notePassedBy: (name: string) => `Passed on by ${name}`,
+  noteWhen: (at: string) => `${formatDate(at)} at ${formatClock(at)}`,
+  noNotes: (owner: string) =>
+    `No notes yet. When a helper cannot approve a request, they can pass it to ${owner} with a note, and it shows here.`,
+} as const;
+
+/// What the API said to a change of the people that changed nothing: its own refusals in the page's words, and the console's
+/// usual words for the rest. Each refusal that says the list moved on is followed by the page reading the list again.
+export function peopleErrorText(error: unknown): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "already_invited":
+        return "That account already has an invite waiting. Send its link, or cancel it first.";
+      case "already_helper":
+        return "That person is already a helper.";
+      case "bad_identity":
+        return "Write a LINE ID, or an email address like name@example.com.";
+      case "invalid_request":
+        return "Write a name of 1 to 80 characters, and a LINE ID or an email address.";
+      case "unknown_invite":
+        return "That invite is already gone. The list was refreshed.";
+      case "not_pending":
+        return "That invite was already used or cancelled, so it cannot be cancelled. The list was refreshed.";
+      case "not_a_helper":
+        return "That person is no longer a helper. The list was refreshed.";
+      case "bad_date":
+        return "Choose a day that has not passed yet.";
+      case "people_unavailable":
+        return peopleWords.saveUnavailable;
+      case "not_configured":
+        return peopleWords.notConfigured(error.setting);
+    }
+  }
+  return errorText(error);
 }
 
 /// The Memory page: what Buddy's team knows about one shop, laid out as the design canvas's "Customize: memory and

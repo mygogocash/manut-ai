@@ -193,12 +193,13 @@ export type AwaitingOwner = { status: "awaiting_owner"; confirmUrl: string; expi
 
 /// Who an audit entry says acted: an operator by their Cloudflare Access identity (null for a service token, and in
 /// practice mode), the shop's owner (through a link, or with the id of their signed-in device), a helper, a worker by
-/// its attempt, or Manut AI's own system.
+/// its attempt, an outpost (a machine that runs the team's browser) by its id, or Manut AI's own system.
 export type AuditActor =
   | { kind: "operator"; email: string | null }
   | { kind: "owner"; id?: string }
   | { kind: "helper"; id: string }
   | { kind: "worker"; attemptId: string }
+  | { kind: "outpost"; id: string }
   | { kind: "system" };
 
 /// One entry of a shop's audit log (docs/pilot-api.md, "Audit log"): who did what and when, metadata only. `action`
@@ -210,7 +211,7 @@ export type AuditEntry = {
   actor: AuditActor;
   action: string;
   /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
-  /// `previousConnectionId`, `confirmationId`, `factId`.
+  /// `previousConnectionId`, `confirmationId`, `factId`, `inviteId`, `helperId`, `signInId`, `outpostId`, `grantId`.
   subject: Record<string, string>;
   outcome: string;
   reason?: string;

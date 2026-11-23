@@ -14,6 +14,7 @@
     "noEmit": true,
     "types": ["vite/client"],
     "paths": {
+      "@manut/approval-core": ["../../packages/approval-core/src/index.ts"],
       "@manut/format": ["../../packages/format/src/index.ts"],
       "@manut/people-rules": ["../../packages/people-rules/src/index.ts"],
       "@manut/promptpay": ["../../packages/promptpay/src/index.ts"]
