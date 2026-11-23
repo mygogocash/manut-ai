@@ -1,6 +1,7 @@
 import {
   ApiError,
   type ApprovalView,
+  type AuditPage,
   type AwaitingOwner,
   type CreatedLineConnection,
   type CreatedShop,
@@ -180,6 +181,19 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         })
       ).payments,
     getGate: () => request<PilotGate>({ method: "GET", path: "/v1/admin/pilot/gate", admin: true }),
+
+    // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
+    listAudit: (tenant, query = {}) =>
+      request<AuditPage>({
+        method: "GET",
+        path: "/v1/admin/audit",
+        query: {
+          tenant,
+          ...(query.before !== undefined ? { before: query.before } : {}),
+          ...(query.limit !== undefined ? { limit: String(query.limit) } : {}),
+        },
+        admin: true,
+      }),
   };
 }
 

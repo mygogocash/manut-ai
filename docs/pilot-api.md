@@ -131,6 +131,7 @@ type DeletionView = {
 | `POST /v1/admin/pilot/subscription-payments` | `{ tenant, amountSatang, slipRef, slipNote? }` | `SubscriptionPayment`. 409 `{ "error": "slip_already_recorded" }`, recording nothing, for a slip already recorded for the shop |
 | `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
 | `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
+| `GET /v1/admin/audit` | `?tenant=&before=&limit=` | `AuditPage`: one page of the shop's audit log, newest first ("Audit log", below) |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -205,10 +206,11 @@ type SubscriptionPayment = {
 // The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
 // attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, displayNames }`, where
 // `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
-// for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is there once the shop was deleted.
+// for the shop's customers, `{ lineUserId, displayName }[]`. `audit: { entries, missed }` is the shop's audit log,
+// oldest first ("Audit log", below). `deletedAt` is there once the shop was deleted.
 // Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
-// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "schedules",
+// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "audit", "schedules",
 // "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
 type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
@@ -331,6 +333,99 @@ type GateShop = {
   lastDecisionAt?: string;        // the owner's latest decision on a reply
 };
 ```
+
+## Audit log
+
+Each shop has one append-only log of who did what and when, kept in the shop's TenantObject beside its other
+records (`apps/api/src/audit-log.ts`). Operators read it a page at a time, the console's Audit page shows it, the
+tenant export carries it, and it goes with the shop when the shop is deleted. The deletion's own record is not in
+it: that record outlives the shop in AuthObject ("Export and deletion", above).
+
+### `GET /v1/admin/audit`
+
+Under the admin gate, as an exact `ADMIN_METHODS` entry like the routes above. The query names the shop and the page:
+
+- `tenant` (required, else 400 `tenant_required`). Any tenant can be read, not only pilot shops; one with no log, a
+  deleted shop's included, answers an empty page.
+- `before`: an entry's `id`; the page holds the entries stored before it. Anything else is 400 `invalid_request`.
+- `limit`: 1 to 200, 50 when absent. Anything else is 400 `invalid_request`.
+
+A log that cannot be read answers 503 `{ "error": "audit_unavailable" }`, never an empty page.
+
+```ts
+type AuditPage = {
+  tenant: string;
+  entries: AuditEntry[];        // newest first
+  next: string | null;          // `before` for the page before this one; null on the oldest page
+  missed: AuditMissed | null;   // what the log could not write; null when it never missed an entry
+};
+
+type AuditEntry = {
+  id: string;                   // "aud-<time>-<sequence>-<random>": sorts by when the log stored it
+  at: string;                   // when the log stored it
+  actor: AuditActor;
+  action: string;               // one of the actions below
+  subject: AuditSubject;        // ids only
+  outcome: string;              // one of the outcomes below
+  reason?: string;              // a code: why an attempt ended, why a decision was refused
+  amountSatang?: number;        // the money it was about: a payment recorded, a cap set
+};
+
+type AuditActor =
+  | { kind: "operator"; email: string | null }  // the Cloudflare Access identity; null for a service token
+  | { kind: "owner"; id?: string }               // through a signed link (no id), or a signed-in device's id
+  | { kind: "helper"; id: string }               // staff the owner trusts with conversations
+  | { kind: "worker"; attemptId: string }        // a worker, by the attempt it was given
+  | { kind: "system" };                          // the control plane or the broker, on its own
+
+type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
+  "connectionId" | "previousConnectionId" | "confirmationId", string>>;
+
+type AuditMissed = { count: number; lastAt: string; lastAction: string };
+```
+
+What is written, and by whom:
+
+| Action | Actor | Subject | Outcome |
+| --- | --- | --- | --- |
+| `shop.created` | operator | none | `ok` |
+| `line.connected` | operator | `connectionId`, and `previousConnectionId` when it replaced one | `ok` |
+| `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |
+| `payment.recorded`, `subscription_payment.recorded` | operator | `paymentId`, with `amountSatang` | `ok` |
+| `model.cap_set`, `model.cap_cleared` | operator | none; a cap set carries `amountSatang` | `ok` |
+| `deletion.requested` | operator | `confirmationId` for a live shop | `awaiting_owner` for a live shop; `ok` for one deleted at once, which the deletion then wipes with the rest |
+| `consent.given`, `consent.withdrawn` | owner | none | `ok` |
+| `reply.decided` | owner | `taskId`, `actionId` | `approved` or `declined` |
+| `deletion.decided` | owner | `confirmationId` | `approved` or `declined` |
+| `dispatch.started` | system | `taskId`, `actionId` | `ok` |
+| `dispatch.settled` | system | `taskId`, `actionId` | `confirmed`, `failed` or `unknown` |
+| `attempt.started` | system | `taskId`, `attemptId` | `ok` |
+| `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
+| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
+| `approval.decided` | owner or helper, with the id they decided as | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
+| `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
+
+The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
+section 3); a pilot shop has none until a worker runs for it.
+
+- **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
+  and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
+  amount is a whole number of satang, and a field it does not know is refused rather than dropped. A customer's
+  words, a draft's text, a note or a secret therefore cannot be written into it, even by mistake.
+- **It never blocks or fails the action it records.** When the record an entry describes lives in the shop's
+  TenantObject (the shop, its LINE pointer, a reply's record and its decision time, both kinds of payment, consent,
+  the model cap), the entry goes into the same storage write, so the two exist together or not at all; an entry that
+  cannot be kept as given (a malformed actor) is replaced in that write by a raised miss count, and the action goes
+  ahead. When the record lives in another object (a deletion's in AuthObject, a dispatch's and the job flow's in task
+  objects), the entry is appended after the action has succeeded, best effort: the action's own record is the
+  authority, and the log must not hold it up. An append that fails, or that the log refuses, is counted in `missed`
+  by a second, smaller write; if that fails too, the Worker logs the action and the tenant id, nothing else. A log
+  with misses says so, rather than letting a gap read as nothing having happened.
+- **Export and deletion.** The tenant export carries `audit: { entries, missed }`, oldest first, and names `audit`
+  in `export_incomplete` when it cannot be read. The tenant deletion wipes the log and its miss count with the
+  shop's other records; entries written while the deletion runs, the owner's yes among them, go with it.
+- **The console** shows one shop's log at a time on its Audit page, newest first, with "Show older entries" for the
+  next page. The practice-mode fake keeps the same log for its sample shops, by the same rules.
 
 ## One origin
 

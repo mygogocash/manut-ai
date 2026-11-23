@@ -82,6 +82,13 @@ export const FlagIcon = () => (
   </Icon>
 );
 
+/// A page of lines: the record of who did what.
+export const AuditIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h7a1 1 0 011 1v9a1 1 0 01-1 1h-7a1 1 0 01-1-1v-9a1 1 0 011-1zM6 6h4M6 8.5h4M6 11h2.5" />
+  </Icon>
+);
+
 /// The viewer's light or dark setting, kept current while the page is open.
 export function useColorScheme(): "light" | "dark" {
   const query = "(prefers-color-scheme: dark)";

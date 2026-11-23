@@ -379,3 +379,117 @@ describe("the fake's pilot gate, measured as the API measures it", () => {
     expect((await api.getGate()).shops).toHaveLength(2);
   });
 });
+
+describe("the fake's audit log, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 in Bangkok
+  const ENTRY_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
+  const operator = { kind: "operator", email: null };
+
+  /// The log oldest first, each entry as what it says, without its id and time.
+  async function trail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  it("records the operator's actions, the owner's consent and decisions, and each send as it settles", async () => {
+    let now = NOW;
+    const api = createFakeApi({ now: () => now, settleMs: 3000, webOrigin: "https://web.test" });
+    const { tenant } = await api.createShop({ name: "Kanom Jeen", ownerName: "Nok" });
+    const first = await api.createLineConnection({ tenant, channelId: "c1", botUserId: "Ukj", channelSecret: "s1",
+      channelAccessToken: "t1" });
+    const second = await api.createLineConnection({ tenant, channelId: "c1", botUserId: "Ukj", channelSecret: "s2",
+      channelAccessToken: "t2" });
+    const body = JSON.stringify({ events: [{ type: "message", webhookEventId: "kj-1", source: { userId: "Ucustomer" },
+      message: { type: "text", text: "ส่งของวันไหนคะ" } }] });
+    await api.deliverLineWebhook(second.connectionId, body, await lineSignature("s2", body));
+    const message = (await api.listMessages(tenant))[0]!;
+    const reply = await api.proposeReply({ tenant, messageId: message.id, text: "พรุ่งนี้ค่ะ" });
+    const token = tokenOf(reply.approvalUrl);
+    await api.giveConsent(token);
+    await api.decide(token, true);
+    now += 3000;
+    expect((await api.getApproval(token)).state).toBe("confirmed");
+    const payment = await api.recordPayment({ tenant, orderRef: "KJ-1", amountSatang: 12000, promptPayId: "0812345678" });
+    const subscription = await api.recordSubscriptionPayment({ tenant, amountSatang: 49900, slipRef: "KB-9" });
+
+    const about = { taskId: reply.taskId, actionId: reply.actionId };
+    expect(await trail(api, tenant)).toEqual([
+      { actor: operator, action: "shop.created", subject: {}, outcome: "ok" },
+      { actor: operator, action: "line.connected", subject: { connectionId: first.connectionId }, outcome: "ok" },
+      { actor: operator, action: "line.connected",
+        subject: { connectionId: second.connectionId, previousConnectionId: first.connectionId }, outcome: "ok" },
+      { actor: operator, action: "reply.proposed", subject: { ...about, messageId: message.id }, outcome: "ok" },
+      { actor: { kind: "owner" }, action: "consent.given", subject: {}, outcome: "ok" },
+      { actor: { kind: "owner" }, action: "reply.decided", subject: about, outcome: "approved" },
+      { actor: { kind: "system" }, action: "dispatch.started", subject: about, outcome: "ok" },
+      { actor: { kind: "system" }, action: "dispatch.settled", subject: about, outcome: "confirmed" },
+      { actor: operator, action: "payment.recorded", subject: { paymentId: payment.id }, outcome: "ok",
+        amountSatang: 12000 },
+      { actor: operator, action: "subscription_payment.recorded", subject: { paymentId: subscription.id }, outcome: "ok",
+        amountSatang: 49900 },
+    ]);
+    // Metadata only, as the API keeps it: no customer's words and no reply's text.
+    const written = JSON.stringify(await api.listAudit(tenant));
+    expect(written).not.toContain("ส่งของวันไหนคะ");
+    expect(written).not.toContain("พรุ่งนี้ค่ะ");
+  });
+
+  it("pages newest first with the API's cursor, and refuses a page it cannot read", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const all = await api.listAudit("shop_baanmali");
+    expect(all.tenant).toBe("shop_baanmali");
+    expect(all.missed).toBeNull();
+    expect(all.entries.length).toBeGreaterThan(4);
+    expect(all.entries.every((entry) => ENTRY_ID.test(entry.id))).toBe(true);
+    expect(all.entries.map((entry) => entry.id)).toEqual([...all.entries.map((entry) => entry.id)].sort().reverse());
+    // The sample shop's history: the replies of its sample world, newest first.
+    expect(all.entries[0]).toMatchObject({ action: "reply.proposed", subject: { actionId: "act_ploy" } });
+
+    const one = await api.listAudit("shop_baanmali", { limit: 2 });
+    expect(one.entries).toEqual(all.entries.slice(0, 2));
+    expect(one.next).toBe(all.entries[1]!.id);
+    const two = await api.listAudit("shop_baanmali", { before: one.next!, limit: 2 });
+    expect(two.entries).toEqual(all.entries.slice(2, 4));
+
+    for (const query of [{ limit: 0 }, { limit: 201 }, { limit: 1.5 }, { before: "pay_2301" }]) {
+      await expect(api.listAudit("shop_baanmali", query)).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    await expect(api.listAudit("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    expect(await api.listAudit("shop_nobody")).toEqual({ tenant: "shop_nobody", entries: [], next: null, missed: null });
+  });
+
+  it("records a deletion's request and its owner's answer, exports the log, and deletes it with the shop", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    const kept = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(kept.confirmUrl), false);
+    const deletions = (await trail(api, "shop_baanmali")).filter((entry) => entry.action.startsWith("deletion."));
+    expect(deletions).toEqual([
+      { actor: operator, action: "deletion.requested", subject: { confirmationId: expect.any(String) },
+        outcome: "awaiting_owner" },
+      { actor: { kind: "owner" }, action: "deletion.decided", subject: { confirmationId: expect.any(String) },
+        outcome: "declined" },
+    ]);
+    const exported = await api.exportShop("shop_baanmali");
+    expect(exported.audit).toEqual({ entries: (await api.listAudit("shop_baanmali", { limit: 200 })).entries.reverse(),
+      missed: null });
+
+    const again = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(again.confirmUrl), true);
+    expect(await api.listAudit("shop_baanmali")).toEqual({ tenant: "shop_baanmali", entries: [], next: null,
+      missed: null });
+  });
+
+  it("replaces a practice world saved before the audit log existed", async () => {
+    const saved = new Map([["manut.pilot.fake.v1", JSON.stringify({ version: 3, seq: 100, shops: [], connections: [],
+      messages: [], actions: [], payments: [], subscriptionPayments: [], deletions: [], confirmations: [],
+      expiredTokens: [] })]]);
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.listAudit("shop_baanmali")).entries.length).toBeGreaterThan(0);
+  });
+});

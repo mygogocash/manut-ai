@@ -1,3 +1,4 @@
+import { appendAudit } from "./audit-log";
 import { readConnectionSecret } from "./cred-broker";
 import { LINE_PUSH_OPERATION, lineReplyText, openLineCredentials, pushLineMessage } from "./connectors/line";
 import { checkGrant, ConnectorError } from "./connectors/types";
@@ -105,6 +106,23 @@ export type BeginDispatchResult =
   | { ok: true; proposal: ActionProposalJSON }
   | { ok: false; response: Response };
 
+/// Writes a dispatch's start or settlement to the owning shop's audit log, best effort and after the fact: the
+/// action's own record in its task object is the authority, and an entry that cannot be written is counted there
+/// rather than holding up the send (audit-log.ts). An environment without the tenant namespace, or an action with no
+/// tenant (the operator's own path), has no shop log to write to.
+async function auditDispatch(
+  env: ActionEnv,
+  proposal: Pick<ActionProposalJSON, "tenant">,
+  taskId: string,
+  actionId: string,
+  action: "dispatch.started" | "dispatch.settled",
+  outcome: "ok" | "confirmed" | "failed" | "unknown",
+): Promise<void> {
+  if (!env.TENANT || !proposal.tenant) return;
+  await appendAudit({ TENANT: env.TENANT }, proposal.tenant, { actor: { kind: "system" }, action,
+    subject: { taskId, actionId }, outcome });
+}
+
 /// Synchronous half of a dispatch: re-reads the authoritative proposal,
 /// checks approval freshness, grant revision, tenant, connection health, and
 /// task state through the object's begin gate, and consumes the one-use
@@ -170,7 +188,9 @@ export async function beginDispatchAction(
     }
     return { ok: false, response: taskStubBegin };
   }
-  return { ok: true, proposal: (await taskStubBegin.json()) as ActionProposalJSON };
+  const proposal = (await taskStubBegin.json()) as ActionProposalJSON;
+  await auditDispatch(env, proposal, taskId, actionId, "dispatch.started", "ok");
+  return { ok: true, proposal };
 }
 
 /// Background half of a dispatch: runs in `ctx.waitUntil` after the Worker
@@ -186,8 +206,10 @@ export async function finishDispatchAction(
   const taskStub = env.TASK.get(env.TASK.idFromName(taskId));
   const { proposal } = opts;
 
-  const settle = (outcome: string, extra: Record<string, unknown> = {}) =>
-    taskStub.fetch(
+  // Every way a dispatch ends goes through here, so each settlement is written to the shop's audit log once, with
+  // its outcome, after the task object has recorded it.
+  const settle = async (outcome: "confirmed" | "failed" | "unknown", extra: Record<string, unknown> = {}) => {
+    const settled = await taskStub.fetch(
       new Request(`https://task/actions/${actionId}/settle`, {
         method: "POST",
         headers: (() => {
@@ -201,6 +223,9 @@ export async function finishDispatchAction(
         body: JSON.stringify({ outcome, ...extra }),
       }),
     );
+    if (settled.ok) await auditDispatch(env, proposal, taskId, actionId, "dispatch.settled", outcome);
+    return settled;
+  };
 
   // The connection must be live and ours: per-tenant vault, tenant match
   // plus no revocation. The secret itself travels only from the vault to

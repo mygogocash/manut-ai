@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
 import { modelTenantRoute, wipeModelTenant } from "./model-meter";
@@ -55,6 +56,10 @@ export class TenantObject extends DurableObject {
     if (url.pathname.startsWith("/model/")) {
       return modelTenantRoute(this.ctx.storage, request, url);
     }
+    // The shop's audit log: who did what and when, metadata only (audit-log.ts).
+    if (url.pathname === "/audit" || url.pathname.startsWith("/audit/")) {
+      return auditTenantRoute(this.ctx.storage, request, url);
+    }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
       if (!tenant) return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -68,15 +73,25 @@ export class TenantObject extends DurableObject {
 
   /// Explicit cloud-work consent. Absent means not consented: an app upgrade
   /// or a new device never enables cloud processing by itself.
+  ///
+  /// Only the owner gives or withdraws it (a signed-in session, or the pilot
+  /// owner's approval link), so the audit log names the owner unless the
+  /// Worker says otherwise. The entry goes into the same write as the consent.
   private async consent(request: Request): Promise<Response> {
-    const parsed = await readJsonBody<{ tenant?: unknown; cloudWork?: unknown }>(request, MAX_BODY_BYTES);
+    const parsed = await readJsonBody<{ tenant?: unknown; cloudWork?: unknown; actor?: unknown }>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
     const body = parsed.value;
     if (typeof body.tenant !== "string" || !body.tenant || typeof body.cloudWork !== "boolean") {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
     const record = { cloudWork: body.cloudWork, updatedAt: new Date().toISOString() };
-    await this.ctx.storage.put(`consent:${body.tenant}`, record);
+    const action = body.cloudWork ? "consent.given" : "consent.withdrawn";
+    const actor = actorOr(body.actor, { kind: "owner" });
+    await this.ctx.storage.put({
+      [`consent:${body.tenant}`]: record,
+      ...(await auditPut(this.ctx.storage, body.tenant, actor ? { actor, action, subject: {}, outcome: "ok" } : null,
+        action)),
+    });
     return Response.json(record);
   }
 
@@ -171,9 +186,9 @@ export class TenantObject extends DurableObject {
   }
 
   /// Wipes the tenant's consent, task index, attention items, pilot records
-  /// (shop, customer messages, replies, payments) and model meter (cap
-  /// override, monthly totals, reservations, per-call records), then writes
-  /// a tombstone.
+  /// (shop, customer messages, replies, payments), model meter (cap
+  /// override, monthly totals, reservations, per-call records) and audit log
+  /// (entries and the miss count), then writes a tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
   /// afterwards as new, never restored.
@@ -193,6 +208,7 @@ export class TenantObject extends DurableObject {
     await this.ctx.storage.delete([`attention:${body.tenant}`, `attention-deliveries:${body.tenant}`]);
     await wipePilotTenant(this.ctx.storage, body.tenant);
     await wipeModelTenant(this.ctx.storage, body.tenant);
+    await wipeAuditTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
     return Response.json(tombstone);
