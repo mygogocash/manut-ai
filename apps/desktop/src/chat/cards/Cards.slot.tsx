@@ -12,19 +12,13 @@ import type { ApprovalChoice, AskSubagent, ClarifyAnswers, ClarifyQuestion } fro
 import { askOpen, getStore, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
 import { answerOf, EMPTY, type Pick } from "./answers";
 import { choiceIndexForKey, parseChoice } from "./choices";
+import { ALLOW_LABEL, respond, settleApproval } from "./respond";
 import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
 import { composing, holdImeEnter } from "../../lib/ime";
 
 export const slot = "cards";
-
-const ALLOW_LABEL: Record<ApprovalChoice, Key> = {
-  once: "card.allowedOnce",
-  session: "card.allowedSession",
-  always: "card.allowedAlways",
-  deny: "card.denied",
-};
 
 const EXPIRED_LABEL: Record<AskExpiry, Key> = {
   timeout: "card.timedOut",
@@ -57,16 +51,6 @@ function useFocusRequest(bot: string, id: string, ref: RefObject<HTMLElement | n
   }, [req, bot, id, open, ref]);
 }
 
-/** Runs a respond action. The store only marks the card answered after the bridge said ok, so a card that is
- *  still open afterwards failed; returns the store's error text then. */
-async function respond(bot: string, id: string, run: () => Promise<void>): Promise<string | null> {
-  await run();
-  const st = getStore().getState();
-  const it = st.chats[bot]?.items.find((i) => i.id === id);
-  const done = it?.kind === "approval" ? !!it.resolved : it?.kind === "clarify" ? it.answer !== undefined : true;
-  return done ? null : st.lastError || t("card.notTaken");
-}
-
 function Line({ icon, text, detail, testid }: { icon: string; text: string; detail?: string; testid: string }) {
   return (
     <div className="line card-line" data-testid={testid}>
@@ -85,7 +69,6 @@ function useOpen(bot: string, item: ApprovalItem | ClarifyItem): boolean {
 }
 
 function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
-  const s = useStore();
   const open = useOpen(bot, item);
   const [busy, setBusy] = useState<ApprovalChoice | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -103,7 +86,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     if (busy) return;
     setBusy(choice);
     setErr(null);
-    const e = await respond(bot, item.id, () => s.respondApproval(item.request_id, choice, bot));
+    // Home's Approve settles through this same call (respond.ts), so there is one way an approval is answered.
+    const e = await settleApproval(getStore(), bot, item, choice);
     setErr(e);
     setBusy(null);
   };
@@ -329,7 +313,7 @@ function Interview({ bot, item, cardRef }: { bot: string; item: ClarifyItem; car
     setBusy(true);
     setErr(null);
     const a = answers();
-    const e = await respond(bot, item.id, () => s.respondClarify(item.request_id, a, bot));
+    const e = await respond(getStore(), bot, item.id, () => s.respondClarify(item.request_id, a, bot));
     setErr(e);
     setBusy(false);
   };
@@ -415,7 +399,7 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
     if (!a.trim() || busy) return;
     setBusy(true);
     setErr(null);
-    const e = await respond(bot, item.id, () => s.respondClarify(item.request_id, a.trim(), bot));
+    const e = await respond(getStore(), bot, item.id, () => s.respondClarify(item.request_id, a.trim(), bot));
     setErr(e);
     setBusy(false);
   };

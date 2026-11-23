@@ -16,6 +16,7 @@ import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
 import { PluginsPage } from "../pages/Plugins";
 import { TasksPage } from "../tasks/TasksPage";
+import { HomePage } from "../pages/HomePage";
 import { NeedsPage } from "../pages/NeedsPage";
 import { TeamPage } from "../pages/TeamPage";
 import { CodePage } from "../pages/CodePage";
@@ -34,8 +35,9 @@ const SessionPanel = lazy(() => import("../sessions/SessionPlans").then((m) => (
 // The bottom terminal panel (Ctrl+`) loads the first time it opens, then stays mounted so hidden shells keep running.
 const TerminalPanel = lazy(() => import("../terminal/Panel").then((m) => ({ default: m.TerminalPanel })));
 
-/** The side menu's pages (src/sidebar/menu.ts), each filling the main column while it is the view. */
+/** The side menu's pages (src/sidebar/menu.ts), each filling the main column while it is the view. Home is New's page. */
 const MENU_PAGE_VIEWS: Record<MenuPage, () => React.JSX.Element> = {
+  home: HomePage,
   needs: NeedsPage,
   team: TeamPage,
   code: CodePage,

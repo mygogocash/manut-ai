@@ -57,8 +57,12 @@ describe("resume snapshot", () => {
     expect(back.session).toBe("s25");
   });
 
-  it("an open session is the view; Settings is not (a restart opens the chat behind it)", () => {
+  it("an open session is the view, and so is Home; Settings is not (a restart opens the chat behind it)", () => {
     expect(buildResume(input({ view: "session", session: "s2" }), T)).toMatchObject({ view: "session", session: "s2" });
+    expect(buildResume(input({ view: "home" }), T)).toMatchObject({ view: "home", session: null });
+    expect(parseResume(JSON.stringify(buildResume(input({ view: "home" }), T)))).toMatchObject({ view: "home", session: null });
+    // the other menu pages are places you pass through, as before: the chat behind them comes back
+    expect(buildResume(input({ view: "history" }), T)).toMatchObject({ view: "chat", session: null });
     expect(buildResume(input({ view: "settings" }), T)).toMatchObject({ view: "chat", session: null });
     // a session id that is not in the list
     expect(buildResume(input({ view: "session", session: "s7" }), T)).toMatchObject({ view: "chat", session: null });

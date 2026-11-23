@@ -369,9 +369,10 @@ export interface Look {
 }
 export const PALETTES: Palette[] = ["manut", "graphite", "ocean", "forest", "sunset", "rose"];
 
-/** The pages of the side menu (src/sidebar/menu.ts) that fill the main column, in the menu's order. They are places of
- *  their own, like the chat: a page opened from one of them (Settings, Automations, Plugins, Tasks) returns to it. */
-export const MENU_PAGES = ["needs", "team", "code", "artifacts", "customize", "history"] as const;
+/** The pages of the side menu (src/sidebar/menu.ts) that fill the main column, in the menu's order: Home, which the New
+ *  row and the brand mark open and where the app starts, then each row's own page. They are places of their own, like
+ *  the chat: a page opened from one of them (Settings, Automations, Plugins, Tasks) returns to it. */
+export const MENU_PAGES = ["home", "needs", "team", "code", "artifacts", "customize", "history"] as const;
 export type MenuPage = (typeof MENU_PAGES)[number];
 export const isMenuPage = (view: string): view is MenuPage => (MENU_PAGES as readonly string[]).includes(view);
 
@@ -2577,6 +2578,10 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
           const session = SESSIONS_ENTRY ? back.session : null;
           dispatch({ type: "ui.restore", ui: { panelOpen, panelTab, runsFull, runId, session } });
         } else if (back?.session && SESSIONS_ENTRY) dispatch({ type: "ui.session", id: back.session });
+        // Home is where the app starts: on a first run, after a restart that left Home open, and when the member saved
+        // before the restart is gone. The first member is still chosen above, so its chat, lists and drafts load behind
+        // Home. A chat or a terminal session the person left open comes back instead (resume.ts).
+        if (state.ui.view === "chat" && (!back?.bot || back.view === "home")) dispatch({ type: "ui.page", page: "home" });
         await loading;
         // Load the other listed chats too, so the sidebar can show previews and unread counts. A profile outside
         // the list is not opened as a chat (that would make its Bot Chat, and list it): it is only asked for the

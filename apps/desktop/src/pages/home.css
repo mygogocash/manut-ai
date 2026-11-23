@@ -1,0 +1,316 @@
+/* Home (HomePage.tsx), as the design canvas draws it (Main.dc.html): the canvas's ask-box rules from
+   packages/ui-kit/app.css (.hero, .lockup, .ask, .askin, .askrow, .modes, .mode, .send, .wide, .chips, .chip, .btn,
+   .lk, .think, .dotst and the touch targets of .btn, .chip and .mode) copied and scoped under Home's root class,
+   .home, as menu.css scopes the menu's. menuPages.css already gives the page's frame, bands, rows, tags and empty
+   state under .mpage. The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is
+   --aui-surface, --band is --aui-subtle, --mut is --aui-muted, --pri and --onpri are --aui-primary and
+   --aui-on-primary, --sh is --aui-shadow-card and --blue is --aui-blue. Lines that are the desktop's own rather than
+   the canvas's say so. */
+
+/* The centred column that holds the brand, the ask box and the lists (.hero). */
+.home {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 64px 20px 32px;
+}
+.home .lockup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 36px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+.home .lockup svg {
+  display: block;
+  border-radius: 12px;
+}
+.home .lockup .mut {
+  color: var(--aui-muted);
+  font-weight: 400;
+}
+
+/* The ask box: the field over a row of the modes and Send. */
+.home .ask {
+  width: 100%;
+  max-width: 696px;
+  margin: 0 auto;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-surface);
+  box-shadow: var(--aui-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The desktop's own: the focus ring goes round the box, not the borderless field inside it, as History's search box
+   does. */
+.home .ask:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.home .askin {
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  font-size: 15px;
+  /* The desktop's own: the field takes the page's ink and drops its own outline for the box's. */
+  color: var(--ink);
+  outline: 0;
+}
+.home .askin::placeholder {
+  color: var(--aui-placeholder);
+}
+/* The box's name, for screen readers only. sidebar.css has the same rule for the whole window; Home keeps its own copy
+   so that its label never shows where the menu's sheet is not loaded. */
+.home .vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.home .askrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.home .modes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  background: var(--soft);
+}
+.home .mode {
+  position: relative;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--rad-pill);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  transition: background 0.15s;
+}
+.home .mode[aria-pressed="true"] {
+  background: var(--aui-surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.home .send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+  transition: transform 0.2s;
+  /* The desktop's own: on the canvas, Careful pushes Send to the right; Careful is left out, so Send does it itself. */
+  margin-left: auto;
+}
+.home .send:active {
+  transform: scale(0.94);
+}
+
+/* The suggestions under the box. */
+.home .wide {
+  width: 100%;
+  max-width: 696px;
+}
+.home .sugg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.home .sugg-h {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.home .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.home .chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.home .chip:hover {
+  background: var(--hov);
+}
+
+/* Buttons and the quiet text link of a band. */
+.mpage .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.mpage .btn:hover {
+  background: var(--hov);
+}
+.mpage .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.mpage .btn.dark:hover {
+  opacity: 0.88;
+}
+.home .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.mpage .btn:disabled,
+.home .send:disabled,
+.home .chip:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+/* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
+.mpage .btn::after,
+.home .chip::after,
+.home .mode::after,
+.home .lk::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+.home .chip::after {
+  inset: -6px 0;
+}
+.home .mode::after {
+  inset: -8px 0;
+}
+
+/* Needs you and Working now: a band over its rows. */
+.home .part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.home .part:first-of-type {
+  /* The canvas's gap between the suggestions and the first list. */
+  margin-top: 14px;
+}
+/* The desktop's own: the bands' names are headings, set in the band's own type. */
+.home .band h2 {
+  margin: 0;
+  font: inherit;
+}
+/* The desktop's own: an approval's exact action, set as its chat card sets its command (cards.css .card-cmd): a
+   block in the mono face, wrapped and never cut, scrolling past 160px. Its ground is --soft, because the card's
+   --bg is the page's own ground here. */
+.home .act {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: var(--rad-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+/* The desktop's own: why an Approve or an ask did not go, in the card's error colour. On a row it takes a line of its
+   own; under the box it lines up with the field's text. */
+.home .err {
+  color: var(--aui-danger);
+  font-size: 13px;
+}
+.home .rowl .err {
+  flex-basis: 100%;
+}
+.home .ask .err {
+  padding: 0 8px 2px;
+}
+.home .tag.ok .ic {
+  width: 14px;
+  height: 14px;
+}
+/* The empty Needs you, as the canvas's first-day Home pads it (HomeEmpty.dc.html). Its heading is the desktop's own: an
+   h3 here, under the band's h2, in the empty state's type. */
+.home .empty {
+  padding: 20px;
+}
+.home .empty h3 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* A member at work: the pill holds a live dot, what the turn says, and for how long. */
+.home .think {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 14px 4px 10px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.home .think .when {
+  color: var(--aui-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.home .dotst {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-muted);
+}
+.home .dotst.run {
+  background: var(--aui-blue);
+  /* The desktop's own: the dot pulses as the canvas's working tag does, so the row reads as live. */
+  animation: pulse 1.6s ease-in-out infinite;
+}

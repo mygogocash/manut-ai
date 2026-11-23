@@ -1,9 +1,9 @@
 // The side menu, as the design canvas draws it (`<nav class="sb">` in Approvals.dc.html): the brand mark and Search,
 // then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and History, a Recent list of the
-// three newest threads, and the account row that opens Settings. It replaces the sidebar the fork took from Oh My
-// Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a foot of icon buttons), and each
-// of those now lives on one of the menu's pages (src/pages). The canvas's budget pill waits until the runtime has a
-// budget to show, and hiding the menu is not built yet.
+// three newest threads, and the account row that opens Settings. New and the brand mark open Home. It replaces the
+// sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a
+// foot of icon buttons), and each of those now lives on one of the menu's pages (src/pages). The canvas's budget pill
+// waits until the runtime has a budget to show, and hiding the menu is not built yet.
 //
 // menu.ts decides which row is current. `SideMenu` draws whatever it is given, so tests can draw any state, and
 // `Sidebar` feeds it from the app's store.
@@ -17,7 +17,7 @@ import { t, type Key } from "../i18n";
 import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, useStore } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
-import { currentRow, homeBot, MENU_ROWS, recentThreads, type MenuRow } from "./menu";
+import { currentRow, MENU_ROWS, recentThreads, rowPage, type MenuRow } from "./menu";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
 import { UpdateButton } from "./UpdateButton";
@@ -127,22 +127,17 @@ export function SideMenu({
 export function Sidebar() {
   const s = useStore();
   const members = selectSidebarBots(s).map((b) => b.name);
-  const home = homeBot(s.bots, members);
   const untitled = t("thread.untitled");
   const recent = recentThreads(s.threads, members).map((r) => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
   }));
-  const go = (row: MenuRow) => {
-    // New is Home, and the home member's main chat stands in for Home until Home exists.
-    if (row === "new") {
-      if (home) void s.selectBot(home);
-    } else s.openPage(row);
-  };
+  // New (and the brand mark) opens Home; every other row opens its own page.
+  const go = (row: MenuRow) => s.openPage(rowPage(row));
   return (
     <SideMenu
-      current={currentRow(s.ui, s.selectedBot, home)}
+      current={currentRow(s.ui, s.selectedBot)}
       needs={selectAsks(s).length}
       recent={recent}
       settings={s.ui.view === "settings"}
