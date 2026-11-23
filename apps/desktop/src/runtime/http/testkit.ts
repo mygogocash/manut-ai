@@ -2,6 +2,8 @@
 // keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
 // shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
 // without a shell or a network.
+import { decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
+import { vi } from "vitest";
 import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
 import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
@@ -10,7 +12,8 @@ import { readShop } from "./shop";
 
 export const ORIGIN = "https://dev.manut.xyz";
 
-/** Every op the connected runtime refuses because it only reads: each answers `not_yet` while connected and `offline` while only a kept read is shown. */
+/** Every op that writes. Each answers `offline` while only a kept read is shown (an ask: "Connect to answer this"); while
+ *  connected, `approval.respond` answers through the decide route and every other one answers `not_yet`. */
 export const WRITE_OPS = [
   "chat.send",
   "chat.steer",
@@ -267,12 +270,124 @@ export function storedSession(now: number, over: Record<string, unknown> = {}): 
   });
 }
 
-/** Serves the three routes a read of the shop makes. Later calls to `api.on` replace one of them. */
-export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown[]; attention?: unknown[] } = {}): FakeApi {
+/** What every request the API opens offers: approve or decline the exact action (`JOB_REQUEST_OPTIONS` in task-object.ts). */
+export const OPTIONS = [
+  { id: "approve", label: "Approve", effect: "approve" },
+  { id: "decline", label: "Decline", effect: "decline" },
+];
+
+/** What a LINE reply's request names (`replyRequest` in task-object.ts, `ReplyDetail` in docs/pilot-api.md). */
+export function replyDetail(id = "action-1", text = "Your order ships tomorrow morning.") {
+  return { actionId: id, operationType: "line.message.push", targetResourceId: "bot-user-1", recipient: "U-customer", text, payloadHash: "hash" };
+}
+
+export interface ApprovalOver {
+  id?: string;
+  taskId?: string;
+  kind?: string;
+  revision?: number;
+  status?: string;
+  options?: unknown[];
+  detail?: unknown;
+  createdAt?: number;
+  expiresAt?: number;
+  attemptId?: string;
+  decision?: Record<string, unknown>;
+  standing?: Record<string, unknown>;
+  passedOn?: Record<string, unknown>;
+}
+
+/** One entry of `GET /v1/approvals`: a request and where it stands, as approval-core's wire JSON, encoded the way the API
+ *  encodes it (`encodeRecord(decodeRecord(record))` in approvals.ts). By default a LINE reply waiting for the owner. */
+export function approvalJson(over: ApprovalOver = {}) {
+  const id = over.id ?? "action-1";
+  const request = {
+    id,
+    kind: over.kind ?? "reply",
+    options: over.options ?? OPTIONS,
+    revision: over.revision ?? 1,
+    createdAt: over.createdAt ?? T0 + 90_000,
+    expiresAt: over.expiresAt ?? T0 + 24 * 3600_000,
+    ...(over.attemptId ? { attemptId: over.attemptId } : {}),
+    detail: over.detail ?? replyDetail(id),
+  };
+  return {
+    taskId: over.taskId ?? "task-1",
+    record: encodeRecord(decodeRecord({ status: over.status ?? "pending", request, ...(over.decision ? { decision: over.decision } : {}) })),
+    standing: over.standing ?? encodeStanding({ state: "open", reason: "waiting" }),
+    ...(over.passedOn ? { passedOn: over.passedOn } : {}),
+  };
+}
+
+/** The open requests the API lists for these export entries' LINE replies: one per reply still proposed and not past its
+ *  expiry, as the task object opens a request with every reply and lists one stored before that as the request it would
+ *  have opened (docs/pilot-api.md, "Approvals for a session"). */
+function openReplies(tasks: unknown[], now: number) {
+  return tasks.flatMap((entry) => {
+    const { task, actions } = entry as { task: { id: string }; actions?: Record<string, unknown>[] };
+    return (actions ?? [])
+      .filter((a) => a.operationType === "line.message.push" && a.state === "proposed" && Date.parse(String(a.expiresAt)) > now)
+      .map((a) =>
+        approvalJson({
+          id: String(a.id),
+          taskId: task.id,
+          createdAt: Date.parse(String(a.proposedAt)),
+          expiresAt: Date.parse(String(a.expiresAt)),
+          detail: replyDetail(String(a.id), String((a.payload as { text?: unknown }).text)),
+        }),
+      );
+  });
+}
+
+/** Serves the four routes a read of the shop makes. Without `approvals`, the open approvals are the export's LINE replies
+ *  still waiting, as the API would list them. Later calls to `api.on` replace one of them. */
+export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown[]; attention?: unknown[]; approvals?: unknown[] } = {}): FakeApi {
+  const tasks = over.tasks ?? [taskJson()];
   return api
-    .on("GET", "/v1/tenant/export", { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(T0), tasks: over.tasks ?? [taskJson()], schedules: [], attention: [] } })
+    .on("GET", "/v1/tenant/export", { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(T0), tasks, schedules: [], attention: [] } })
     .on("GET", "/v1/schedules", { status: 200, json: { schedules: over.schedules ?? [scheduleJson()] } })
-    .on("GET", "/v1/inbound/attention", { status: 200, json: { items: over.attention ?? [attentionJson()] } });
+    .on("GET", "/v1/inbound/attention", { status: 200, json: { items: over.attention ?? [attentionJson()] } })
+    .on("GET", "/v1/approvals", () => ({ status: 200, json: { state: "open", approvals: over.approvals ?? openReplies(tasks, Date.now()) } }));
+}
+
+/** The desktop shell's commands in memory, stood in `window.__TAURI_INTERNALS__` as the app's shell stands: the API
+ *  through the fake, the keychain item, and the saved read. Every call is logged with its arguments. */
+export function desktopShell(api: FakeApi, store: ReturnType<typeof memoryCacheStore>, keychain: string | null) {
+  const calls: { cmd: string; args: Record<string, any> }[] = [];
+  let answered = 0;
+  let item = keychain;
+  const invoke = async (cmd: string, args: Record<string, any> = {}) => {
+    calls.push({ cmd, args });
+    switch (cmd) {
+      case "api_request": {
+        try {
+          const answer = await api.fetch(args.url, { method: args.method, headers: args.bearer ? { authorization: `Bearer ${args.bearer}` } : {}, ...(args.body ? { body: args.body } : {}) });
+          const body = await answer.text();
+          answered += 1;
+          return { status: answer.status, body };
+        } catch (e) {
+          throw e instanceof LinkDown && e.kind === "offline" ? "offline" : "failed";
+        }
+      }
+      case "api_session_read":
+        return item;
+      case "api_session_write":
+        item = args.value;
+        return null;
+      case "api_session_clear":
+        item = null;
+        return null;
+      case "shop_cache_write":
+        return store.write(args.key, args.text);
+      case "shop_cache_read":
+        return store.read(args.key);
+      case "shop_cache_clear":
+        return store.clear();
+    }
+    throw new Error(`no such command: ${cmd}`);
+  };
+  vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke } });
+  return { calls, commands: (name: string) => calls.filter((c) => c.cmd === name), answered: () => answered };
 }
 
 /** A clock a test moves by hand. */

@@ -8,7 +8,7 @@
 // Adapters today (`src/runtime/index.ts` picks one):
 //   - `mock`: an in-process runtime with staged data and scripted turns (`src/runtime/mock`). The default, which
 //     Settings › Developer calls Practice.
-//   - `http`: the read-only connected runtime over apps/api at one origin (`src/runtime/http`), chosen in Settings ›
+//   - `http`: the connected runtime over apps/api at one origin (`src/runtime/http`), chosen in Settings ›
 //     Developer as Connected. docs/runtime-adapter.md maps its ops to the API's routes.
 //   - `websocket`: the original loopback transport (`src/lib/bridge.ts`), used only when a URL is configured, which
 //     is how the Playwright suite reaches `e2e/mock-bridge.mjs`.

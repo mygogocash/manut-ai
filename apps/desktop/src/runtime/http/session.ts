@@ -198,7 +198,20 @@ export class ApiSession {
   }
 
   /** An authorised GET of `path` (`/v1/...`). */
-  async read(path: string): Promise<Answer> {
+  read(path: string): Promise<Answer> {
+    return this.authorised("GET", path);
+  }
+
+  /** An authorised POST of `body`, as JSON, to `path` (`/v1/...`): answering an ask. It is sent once, and once more only
+   *  after a 401, which the API answers from the session before it reads the body, so the first one decided nothing. A
+   *  request that got no answer is never sent again from here: the API may have it. */
+  write(path: string, body: unknown): Promise<Answer> {
+    return this.authorised("POST", path, body);
+  }
+
+  // ---- inside ---------------------------------------------------------------------------------------------------
+
+  private async authorised(method: "GET" | "POST", path: string, body?: unknown): Promise<Answer> {
     await this.load();
     let rec = this.record;
     if (!rec) return { kind: "signed_out" };
@@ -209,22 +222,23 @@ export class ApiSession {
       if (!rec) return { kind: "signed_out" };
     }
     const used = rec.accessToken;
-    let res = await this.send("GET", path, used);
-    if (res.kind === "answer" && res.status === 401) {
+    let res = await this.send(method, path, used, body);
+    if (res.kind === "answer" && res.status === 401 && !removed(res)) {
       const refreshed = await this.refreshFor(used);
       if (refreshed !== "ok") return { kind: refreshed };
       const again = this.record;
       if (!again) return { kind: "signed_out" };
-      res = await this.send("GET", path, again.accessToken);
-      if (res.kind === "answer" && res.status === 401) {
+      res = await this.send(method, path, again.accessToken, body);
+      if (res.kind === "answer" && res.status === 401 && !removed(res)) {
         await this.end();
         return { kind: "signed_out" };
       }
     }
+    // A helper the owner removed is signed out of the shop on every device at once (docs/people.md); no refresh brings
+    // that back. The session ends here too, with what was read with it, and the answer is kept so the card can say when.
+    if (removed(res)) await this.end();
     return answerOf(res);
   }
-
-  // ---- inside ---------------------------------------------------------------------------------------------------
 
   private set(s: SignInState): SignInState {
     this.state = s;
@@ -359,6 +373,12 @@ export class ApiSession {
       return { kind: e instanceof LinkDown && e.kind === "offline" ? "offline" : "unavailable" };
     }
   }
+}
+
+/** The API's 401 for a helper the owner removed (`removed`, with `removedAt`), as opposed to a session that only needs a
+ *  refresh. */
+function removed(res: Raw): boolean {
+  return res.kind === "answer" && res.status === 401 && (parse(res.text) as { error?: unknown } | undefined)?.error === "removed";
 }
 
 /** A raw answer as the runtime reads it: JSON on a 2xx, the API's error code on a 4xx, unavailable otherwise. */

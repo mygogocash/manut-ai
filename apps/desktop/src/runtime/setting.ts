@@ -1,5 +1,5 @@
 // Which runtime this computer chose in Settings › Developer: Practice, the in-process demo (`src/runtime/mock`), or
-// Connected, the read-only runtime over `apps/api` at one origin (`src/runtime/http`). Practice is the default, so a
+// Connected, the runtime over `apps/api` at one origin (`src/runtime/http`). Practice is the default, so a
 // fresh install never reaches a network, and Practice never shows real shop data.
 //
 // The choice is kept in `manut.runtime` on this computer. It holds the mode and the origin and never a token: the

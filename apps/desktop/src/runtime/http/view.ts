@@ -5,16 +5,19 @@
 //   does, and works while any task is being worked on.
 // - Each task is one of Buddy's threads (History and Recent list them). Opening one shows Buddy's notes: what the
 //   task is for, each action it asked for and how that settled, and where the task stands now.
-// - Each action that waits for the owner is an ask in Buddy's chat, naming the exact action, so it reaches Needs you
-//   and Home. Answering it is not built yet: the runtime answers "not yet" (index.ts).
+// - Each approval-core request still waiting is an ask in Buddy's chat, naming the exact action, so it reaches Needs
+//   you and Home. Its id carries the revision shown (approvals.ts), and the runtime answers it through the decide route
+//   (host.ts). One this build cannot answer is asked all the same, with no answer offered: update the app.
 // - Inbound attention items are notes in Buddy's chat. They say what changed and where, never what it says.
 // - Each schedule is an automation of Buddy's.
 //
 // Words a person reads come from the dictionaries. A state, an action or an event kind this app does not know is shown
 // as the API wrote it rather than hidden.
+import { isUnknown } from "@manut/approval-core";
 import { t, type Key } from "../../i18n";
 import type { Automation, Bot, EventOf, Msg, Routine } from "../../lib/protocol";
 import type { ThreadOpenResult, ThreadRow } from "../../threads/types";
+import { askId, choicesOf, detailOf, isAsk, type ShopApproval } from "./approvals";
 import type { Attention, ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
 
 /** Buddy's profile name: the one member the connected runtime lists. */
@@ -67,9 +70,8 @@ function attentionText(item: Attention): string {
 const titleOf = (task: ShopTask) => task.title || t("rt.untitled");
 const working = (snapshot: ShopSnapshot) => snapshot.tasks.some((task) => WORKING.has(task.state));
 
-/** An action still waiting for the owner: proposed, and not past its expiry, after which it can no longer be decided
- *  even when the API has not yet marked it expired. */
-const waiting = (a: ShopAction, at: number) => a.state === "proposed" && (a.expiresAt === null || a.expiresAt > at);
+/** The tasks with a request still waiting for an answer. */
+const asking = (snapshot: ShopSnapshot) => new Set(snapshot.approvals.filter(isAsk).map((a) => a.taskId));
 
 /** The team: Buddy, online once the shop has been read, working while any task is. */
 export function team(snapshot: ShopSnapshot | null): Bot[] {
@@ -93,8 +95,9 @@ function lastOf(task: ShopTask, fallback: number): number {
   return Math.max(task.updatedAt ?? 0, task.createdAt ?? 0, ...task.actions.map((a) => a.proposedAt ?? 0)) || fallback;
 }
 
-/** Every task as one of Buddy's threads, newest activity first. */
+/** Every task as one of Buddy's threads, newest activity first; `needs` marks one with a request waiting for an answer. */
 export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
+  const needs = asking(snapshot);
   return snapshot.tasks
     .map((task) => {
       const last = lastOf(task, snapshot.readAt);
@@ -105,7 +108,7 @@ export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
         started_at: sec(task.createdAt ?? last),
         last: sec(last),
         running: WORKING.has(task.state),
-        needs: task.actions.some((a) => waiting(a, snapshot.readAt)),
+        needs: needs.has(task.id),
         message_count: 2 + task.actions.length,
         preview: task.objective,
       };
@@ -132,17 +135,41 @@ export function taskOpen(task: ShopTask, readAt = Date.now()): ThreadOpenResult 
   return { thread: task.id, session_id: task.id, title: titleOf(task), cwd: "", messages, running: false, model: "", provider: "", reasoning: "" };
 }
 
-/** Every action waiting for the owner, as the ask Needs you and Home show. The only answers are yes once and no:
- *  an exact action is approved for itself, never for a session or for always. */
+/** The exact action a request asks for, in words: a reply's own words, as its request carries them; else the action of
+ *  its task it decides, which carries a worker's words; else what the request names, as the API wrote it. */
+export function askText(a: ShopApproval, task: ShopTask | undefined): string {
+  const request = a.record.request;
+  const detail = detailOf(request);
+  if (detail.operationType === "line.message.push" && detail.text !== undefined) return t("rt.op.linePush", { text: detail.text });
+  const action = task?.actions.find((x) => x.id === (detail.actionId ?? request.id));
+  if (action) return actionText(action);
+  const op = detail.operationType || (isUnknown(request.kind) ? request.kind.raw : request.kind);
+  return detail.targetResourceId ? t("rt.op.other", { op, target: detail.targetResourceId }) : op;
+}
+
+const byAsked = (a: ShopApproval, b: ShopApproval) =>
+  a.record.request.createdAt - b.record.request.createdAt || (a.record.request.id < b.record.request.id ? -1 : a.record.request.id > b.record.request.id ? 1 : 0);
+
+/** Every request still waiting for an answer, oldest first, as the ask Needs you and Home show. The only answers are yes
+ *  once and no: an exact action is approved for itself, never for a session or for always. One this build cannot answer
+ *  offers neither and is marked `outdated`. */
 export function pendingAsks(snapshot: ShopSnapshot): EventOf<"approval.request">[] {
-  const asks: EventOf<"approval.request">[] = [];
-  for (const task of snapshot.tasks) {
-    for (const a of task.actions) {
-      if (!waiting(a, snapshot.readAt)) continue;
-      asks.push({ event: "approval.request", bot: TEAM, request_id: a.id, title: titleOf(task), command: actionText(a), choices: ["once", "deny"] });
-    }
-  }
-  return asks;
+  return snapshot.approvals
+    .filter(isAsk)
+    .sort(byAsked)
+    .map((a) => {
+      const task = snapshot.tasks.find((x) => x.id === a.taskId);
+      const choices = choicesOf(a);
+      return {
+        event: "approval.request",
+        bot: TEAM,
+        request_id: askId(a),
+        title: task ? titleOf(task) : "",
+        command: askText(a, task),
+        choices,
+        ...(choices.length ? {} : { outdated: true }),
+      };
+    });
 }
 
 /** The inbound attention items as notes in Buddy's chat, oldest first. */

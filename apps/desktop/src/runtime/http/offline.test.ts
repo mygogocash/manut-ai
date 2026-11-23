@@ -13,9 +13,10 @@ import { CACHE_MAX_AGE_MS, ShopCache, cacheKey, decodeCached } from "./cache";
 import { HttpHost, POLL_MS } from "./host";
 import { HttpRuntime, sessionFor, sharedHttpHost, shopCache } from "./index";
 import { ApiSession } from "./session";
-import { LinkDown, type FetchLike } from "./shell";
+import type { FetchLike } from "./shell";
 import {
   actionJson,
+  desktopShell,
   fakeApi,
   memoryCacheStore,
   memoryVault,
@@ -172,7 +173,7 @@ describe("when the API cannot be reached", () => {
     ]);
     expect(await ask(rt)("chat.open", { bot: "buddy" })).toMatchObject({ messages: [expect.objectContaining({ text: "A Linear issue was changed (issue-9)." })] });
     await settle();
-    expect(events).toEqual([expect.objectContaining({ event: "approval.request", request_id: "action-1", command: "Send on LINE: “Your order ships tomorrow morning.”" })]);
+    expect(events).toEqual([expect.objectContaining({ event: "approval.request", request_id: "action-1@1", command: "Send on LINE: “Your order ships tomorrow morning.”" })]);
     expect(await ask(rt)("automations.list")).toEqual({ automations: [expect.objectContaining({ id: "sched-1", name: "Morning brief", schedule: "30 8 * * 1-5" })] });
   });
 
@@ -198,7 +199,7 @@ describe("when the API cannot be reached", () => {
     const { api, rt } = setup({ files: await savedRead(EARLIER) });
     allOffline(api);
     await rt.connect();
-    expect(await refusal(ask(rt)("approval.respond", { bot: "buddy", request_id: "action-1", choice: "once" }))).toEqual({
+    expect(await refusal(ask(rt)("approval.respond", { bot: "buddy", request_id: "action-1@1", choice: "once" }))).toEqual({
       code: "offline",
       message: t("rt.connectToAnswer"),
     });
@@ -211,7 +212,7 @@ describe("when the API cannot be reached", () => {
     allOffline(api);
     await rt.connect();
     for (const op of WRITE_OPS) {
-      const out = await refusal(ask(rt)(op, { bot: "buddy", request_id: "action-1", choice: "once", text: "hi", job: "sched-1" }));
+      const out = await refusal(ask(rt)(op, { bot: "buddy", request_id: "action-1@1", choice: "once", text: "hi", job: "sched-1" }));
       expect(out, op).toEqual({ code: "offline", message: t(op === "approval.respond" ? "rt.connectToAnswer" : "rt.offline") });
     }
     serveShop(api);
@@ -234,7 +235,7 @@ describe("when the API cannot be reached", () => {
     // the store re-reads everything when the runtime opens again, as after any outage; only the ask the kept read showed,
     // whose task is gone now, is said to be over, because the store keeps the cards it has
     expect(statuses).toEqual(["connecting", "open", "closed", "open"]);
-    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "cancelled" }]);
+    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" }]);
     expect(await ask(rt)("thread.list", { bot: "buddy" })).toEqual({ threads: [expect.objectContaining({ thread: "task-7" })] });
     expect(decodeCached(store.files.get(KEY)!, NOW + 2_000)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + 2_000, tasks: [{ id: "task-7" }] } });
   });
@@ -399,45 +400,6 @@ describe("a look at the disk that ends late", () => {
   });
 });
 
-/** The desktop shell's commands in memory: the API through the fake, the keychain item, and the saved read. */
-function desktopShell(api: FakeApi, store: ReturnType<typeof memoryCacheStore>, keychain: string | null) {
-  const calls: { cmd: string; args: Record<string, any> }[] = [];
-  let answered = 0;
-  let item = keychain;
-  const invoke = async (cmd: string, args: Record<string, any> = {}) => {
-    calls.push({ cmd, args });
-    switch (cmd) {
-      case "api_request": {
-        try {
-          const answer = await api.fetch(args.url, { method: args.method, headers: args.bearer ? { authorization: `Bearer ${args.bearer}` } : {}, ...(args.body ? { body: args.body } : {}) });
-          const body = await answer.text();
-          answered += 1;
-          return { status: answer.status, body };
-        } catch (e) {
-          throw e instanceof LinkDown && e.kind === "offline" ? "offline" : "failed";
-        }
-      }
-      case "api_session_read":
-        return item;
-      case "api_session_write":
-        item = args.value;
-        return null;
-      case "api_session_clear":
-        item = null;
-        return null;
-      case "shop_cache_write":
-        return store.write(args.key, args.text);
-      case "shop_cache_read":
-        return store.read(args.key);
-      case "shop_cache_clear":
-        return store.clear();
-    }
-    throw new Error(`no such command: ${cmd}`);
-  };
-  vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke } });
-  return { calls, commands: (name: string) => calls.filter((c) => c.cmd === name), answered: () => answered };
-}
-
 describe("Practice", () => {
   it("never reads or writes the saved read, whatever is on disk, and reaches no command of the shell at all", async () => {
     const store = memoryCacheStore(await savedRead(EARLIER));
@@ -477,7 +439,7 @@ describe("through the desktop shell", () => {
     // Settings moved the saved choice to Practice: this page runs on, reading as before, but keeps nothing more
     saved.set(RUNTIME_KEY, JSON.stringify({ mode: "practice" }));
     await vi.advanceTimersByTimeAsync(POLL_MS);
-    await vi.waitFor(() => expect(shell.answered()).toBe(6), PATIENT);
+    await vi.waitFor(() => expect(shell.answered()).toBe(8), PATIENT);
     await settle();
     expect(keep).toHaveBeenCalledTimes(1);
     // back to this shop: it is kept again from the next read
