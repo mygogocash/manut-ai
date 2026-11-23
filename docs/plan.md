@@ -125,6 +125,8 @@ whose output the decoders read back unchanged.
 
 Done when: round trips, missing fields, unknown values and a non-object input are tested.
 
+Done on cloud/approval-wire, 23 Nov 2026: `wire.ts` in `packages/approval-core` with never-throwing decoders and matching encoders for requests, decisions, records and standings (unknowns kept explicitly; 20 tests).
+
 ### shop-memory
 `packages/shop-memory` (`@manut/shop-memory`). The rules for what Buddy's team knows about one shop: the design
 canvas board "Customize: memory and routines" ("What your team knows", "Where it came from", Correct, Forget,
