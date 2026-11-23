@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { ApiProvider, createApi, type ApiSetup } from "./api";
-import { DEMO_TOKENS } from "./api/fake";
+import { DEMO_DELETION_TOKENS, DEMO_TOKENS } from "./api/fake";
 import { ApprovePage } from "./approve/ApprovePage";
+import { DeletePage } from "./delete/DeletePage";
 import { OpsConsole } from "./ops/OpsConsole";
 import { Link, matchRoute, usePathname } from "./router";
 import { BrandMark, useColorScheme } from "./ui/marks";
@@ -13,6 +14,8 @@ export function App({ setup }: { setup?: ApiSetup }) {
     <ApiProvider value={api}>
       {route.name === "approve" ? (
         <ApprovePage key={route.token} token={route.token} />
+      ) : route.name === "delete" ? (
+        <DeletePage key={route.token} token={route.token} />
       ) : route.name === "ops" ? (
         <OpsConsole />
       ) : (
@@ -22,15 +25,21 @@ export function App({ setup }: { setup?: ApiSetup }) {
   );
 }
 
-const DEMO_LINKS: { token: string; label: string }[] = [
-  { token: DEMO_TOKENS.waiting, label: "Waiting for you, with the one-time permission step" },
-  { token: DEMO_TOKENS.failed, label: "Approve, then the send fails" },
-  { token: DEMO_TOKENS.unknown, label: "Approve, then nobody can tell if it was sent" },
-  { token: DEMO_TOKENS.sent, label: "Already sent" },
-  { token: DEMO_TOKENS.declined, label: "Already declined" },
-  { token: DEMO_TOKENS.expiredRequest, label: "Nobody answered in time" },
-  { token: DEMO_TOKENS.expiredLink, label: "Link expired" },
-  { token: "not-a-real-link", label: "Link that does not work" },
+const DEMO_LINKS: { href: string; label: string }[] = [
+  { href: `/approve/${DEMO_TOKENS.waiting}`, label: "Waiting for you, with the one-time permission step" },
+  { href: `/approve/${DEMO_TOKENS.failed}`, label: "Approve, then the send fails" },
+  { href: `/approve/${DEMO_TOKENS.unknown}`, label: "Approve, then nobody can tell if it was sent" },
+  { href: `/approve/${DEMO_TOKENS.sent}`, label: "Already sent" },
+  { href: `/approve/${DEMO_TOKENS.declined}`, label: "Already declined" },
+  { href: `/approve/${DEMO_TOKENS.expiredRequest}`, label: "Nobody answered in time" },
+  { href: `/approve/${DEMO_TOKENS.expiredLink}`, label: "Link expired" },
+  { href: "/approve/not-a-real-link", label: "Link that does not work" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.waiting}`, label: "Delete a shop's data: waiting for you" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.deleting}`, label: "Delete a shop's data: being deleted" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.deleted}`, label: "Delete a shop's data: already deleted" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.kept}`, label: "Delete a shop's data: data kept" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.unanswered}`, label: "Delete a shop's data: nobody answered in time" },
+  { href: `/delete/${DEMO_DELETION_TOKENS.expiredLink}`, label: "Delete a shop's data: link expired" },
 ];
 
 /// What anyone who lands outside a link sees. In practice mode it also lists a link for every state of the
@@ -59,8 +68,8 @@ function Home({ setup, notFound }: { setup: ApiSetup; notFound: boolean }) {
                 </Link>
               </li>
               {DEMO_LINKS.map((demo) => (
-                <li key={demo.token}>
-                  <Link className="lk" href={`/approve/${demo.token}`}>
+                <li key={demo.href}>
+                  <Link className="lk" href={demo.href}>
                     {demo.label}
                   </Link>
                 </li>

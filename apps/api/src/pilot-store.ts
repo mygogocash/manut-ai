@@ -17,6 +17,18 @@
 /// URI-encoded tenant, like the object's other keys, so no prefix scan can
 /// reach another tenant's rows.
 
+import {
+  decideTransition,
+  openTransition,
+  requestStanding,
+  ROLES,
+  withdrawTransition,
+  type ApprovalOption,
+  type ApprovalRecord,
+  type DecideResult,
+  type Role,
+} from "@manut/approval-core";
+import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
 import { isExpired, RETENTION } from "./retention";
@@ -175,6 +187,8 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
       }
       case "GET /pilot/context":
         return readContext(storage, tenant, url.searchParams.get("actionId") ?? "");
+      case "GET /pilot/summary":
+        return readSummary(storage, tenant);
       case "GET /pilot/payments":
         return json({
           payments: await values<Payment>(storage, keys.payments(tenant), { reverse: true, limit: MAX_LISTED_PAYMENTS }),
@@ -382,6 +396,18 @@ async function readContext(storage: DurableObjectStorage, tenant: string, action
   return json({ shop: shop ?? null, reply: reply ?? null, message: message ?? null });
 }
 
+/// What a deletion of the shop would take, counted now: the shop itself (null once it is gone), and how many
+/// customer messages, reply records and payments it holds. The owner's deletion page shows these.
+async function readSummary(storage: DurableObjectStorage, tenant: string) {
+  const count = async (prefix: string) => (await storage.list({ prefix })).size;
+  return json({
+    shop: (await storage.get<PilotShopRecord>(keys.shop(tenant))) ?? null,
+    messages: await count(keys.messages(tenant)),
+    replies: await count(keys.replies(tenant)),
+    payments: await count(keys.payments(tenant)),
+  });
+}
+
 async function exportPilot(storage: DurableObjectStorage, tenant: string) {
   const names = await storage.list<NameRecord>({ prefix: keys.names(tenant) });
   return {
@@ -458,37 +484,232 @@ export async function pilotRegistryRoute(storage: DurableObjectStorage, request:
 }
 
 /// One pilot shop's deletion, kept by AuthObject apart from the shop's own
-/// objects so it outlives them: whose request it was (the operator's Access
-/// identity, when Access gives one), when it was asked for, and once the wipe
-/// finished, when and what it removed. Operators share one bearer key, so the
-/// Access identity is the only name an operator can be known by.
+/// objects so it outlives them: whose request it was (`deletedBy`: the
+/// operator's Access identity, when Access gives one), when it was asked for,
+/// and once the wipe finished, when and what it removed. Operators share one
+/// bearer key, so the Access identity is the only name an operator can be
+/// known by. For a live shop the record is written when the operator asks,
+/// together with the owner confirmation it names (`confirmationId`), and the
+/// wipe waits for the owner's answer.
 export type PilotDeletionRecord = {
   tenant: string;
   name: string;
   requestedAt: string;
   deletedBy: string | null;
+  confirmationId?: string;
   deletedAt?: string;
   counts?: Record<string, number>;
 };
+
+/// What a deletion takes, as the owner's page shows it.
+export type DeletionGoes = { messages: number; replies: number; payments: number; lineConnected: boolean };
+
+/// What the owner is asked about (approval-core's `detail`), fixed when the
+/// confirmation opens: which shop, and what it held then. The page counts
+/// afresh while the shop's data is still there and shows these once it is gone.
+export type DeletionDetail = { tenant: string; shopName: string; goes: DeletionGoes };
+
+/// The two choices a confirmation offers. approval-core records the option
+/// chosen and, apart from its label, what it does, so the record says whether
+/// the deletion was approved without anyone reading a label.
+export const DELETION_OPTIONS: readonly ApprovalOption[] = [
+  { id: "delete", label: "Delete everything", effect: "approve" },
+  { id: "keep", label: "Keep my data", effect: "decline" },
+];
+
+/// Confirmations are never revised: a changed request is a new confirmation
+/// with a link of its own. So the one revision an owner can have seen is the
+/// first, and every decision names it; a revision added later would make every
+/// older link's decision refused as changed, never applied to something unseen.
+export const CONFIRMATION_REVISION = 1;
+
+/// Deleting a shop's data changes the shop's own records, which approval-core
+/// calls a `command`: an owner-only kind, so no helper may decide it, approving
+/// or declining.
+const CONFIRMATION_KIND = "command";
 
 export function pilotDeletionKey(tenant: string): string {
   return `pilot-deletion:${enc(tenant)}`;
 }
 
-/// `/pilot-deletions` on AuthObject: read one shop's record (`?tenant=`), or
-/// write it. Writing needs the Worker's `x-admin` header, like the registry.
+export function pilotDeletionConfirmationKey(tenant: string, id: string): string {
+  return `pilot-deletion-confirmation:${enc(tenant)}:${enc(id)}`;
+}
+
+function isCount(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isDeletionDetail(value: unknown): value is DeletionDetail {
+  if (value === null || typeof value !== "object") return false;
+  const detail = value as Record<string, unknown>;
+  const goes = detail.goes as Record<string, unknown> | null | undefined;
+  return bounded(detail.tenant) && bounded(detail.shopName, 200) && goes !== null && typeof goes === "object" &&
+    isCount(goes.messages) && isCount(goes.replies) && isCount(goes.payments) && typeof goes.lineConnected === "boolean";
+}
+
+/// Whether the owner said yes. The option's effect decides, not its id or label.
+export function approvedDeletion(record: ApprovalRecord | null | undefined): boolean {
+  if (record?.status !== "decided") return false;
+  const chosen = record.request.options.find((option) => option.id === record.decision.optionId);
+  return chosen?.effect === "approve";
+}
+
+/// Whether the owner can still answer: approval-core's standing, at the one revision a confirmation has.
+export function confirmationOpen(record: ApprovalRecord, now: number): boolean {
+  return requestStanding(record, { seenRevision: CONFIRMATION_REVISION, running: {}, now }).state === "open";
+}
+
+/// A shop's deletion record with one of its confirmations: `id` names it, or
+/// else the one the record points at.
+export type StoredDeletion = { deletion: PilotDeletionRecord | null; confirmation: ApprovalRecord | null };
+
+/// `/pilot-deletions` on AuthObject:
+/// - `GET ?tenant=`: the shop's deletion record and its current confirmation;
+/// - `GET /confirmation?tenant=&id=`: the record and one confirmation, for the owner's link;
+/// - `POST`: write the record, for a shop that never went live;
+/// - `POST /open`: open the owner's confirmation, or answer the one already open;
+/// - `POST /decide`: settle the owner's answer.
+///
+/// Writes need the Worker's `x-admin` header, like the registry. Opening and
+/// deciding each read, apply approval-core's transition and write in one
+/// storage transaction, so of any number of concurrent calls exactly one opens
+/// or settles and every other one reads what it wrote (transitions.ts and
+/// store.ts in approval-core).
 export async function pilotDeletionRoute(storage: DurableObjectStorage, request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const tenant = url.searchParams.get("tenant") ?? "";
   if (request.method === "GET") {
-    const tenant = new URL(request.url).searchParams.get("tenant") ?? "";
-    return json({ deletion: (await storage.get<PilotDeletionRecord>(pilotDeletionKey(tenant))) ?? null });
+    if (!bounded(tenant)) return json({ error: "invalid_request" }, 400);
+    if (url.pathname === "/pilot-deletions") return json(await readDeletionState(storage, tenant, null));
+    if (url.pathname === "/pilot-deletions/confirmation") {
+      const id = url.searchParams.get("id") ?? "";
+      if (!bounded(id)) return json({ error: "invalid_request" }, 400);
+      return json(await readDeletionState(storage, tenant, id));
+    }
+    return json({ error: "not_found" }, 404);
   }
   if (request.method !== "POST") return json({ error: "not_found" }, 404);
   if (request.headers.get("x-admin") !== "1") return json({ error: "forbidden" }, 403);
-  const parsed = await readJsonBody<PilotDeletionRecord>(request, MAX_BODY_BYTES);
+  const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
-  if (!bounded(parsed.value?.tenant)) return json({ error: "invalid_request" }, 400);
-  await storage.put(pilotDeletionKey(parsed.value.tenant), parsed.value);
-  return json({ recorded: true });
+  const body = parsed.value;
+  if (body === null || typeof body !== "object" || Array.isArray(body) || !bounded(body.tenant)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  switch (url.pathname) {
+    case "/pilot-deletions":
+      await storage.put(pilotDeletionKey(body.tenant), body);
+      return json({ recorded: true });
+    case "/pilot-deletions/open":
+      return openConfirmation(storage, body.tenant, body);
+    case "/pilot-deletions/decide":
+      return decideConfirmation(storage, body.tenant, body);
+  }
+  return json({ error: "not_found" }, 404);
+}
+
+async function readDeletionState(storage: DurableObjectStorage, tenant: string, id: string | null): Promise<StoredDeletion> {
+  const deletion = (await storage.get<PilotDeletionRecord>(pilotDeletionKey(tenant))) ?? null;
+  const which = id ?? deletion?.confirmationId;
+  const confirmation = which
+    ? ((await storage.get<ApprovalRecord>(pilotDeletionConfirmationKey(tenant, which))) ?? null)
+    : null;
+  return { deletion, confirmation };
+}
+
+/// What `POST /pilot-deletions/open` did: `approved`, the owner already said
+/// yes and nothing was written (the Worker finishes that deletion); `open`, the
+/// confirmation already waiting is answered unchanged; `opened`, a new one.
+export type OpenedConfirmation = {
+  outcome: "approved" | "open" | "opened";
+  deletion: PilotDeletionRecord;
+  confirmation: ApprovalRecord;
+};
+
+/// Opens the owner's confirmation of deleting the shop and records who asked,
+/// in one write, or answers the one already open. A confirmation that expired
+/// unanswered is withdrawn as the new one opens, so a shop never has two that a
+/// decision could settle. Who asked and when are those of the request that
+/// opened the confirmation; asking again while it waits changes neither.
+async function openConfirmation(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  const { name, deletedBy, detail } = body;
+  if (!bounded(name, 200) || (deletedBy !== null && !bounded(deletedBy)) || !isDeletionDetail(detail) ||
+      detail.tenant !== tenant) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const answer = await storage.transaction(async (txn): Promise<OpenedConfirmation> => {
+    const now = Date.now();
+    const deletion = await txn.get<PilotDeletionRecord>(pilotDeletionKey(tenant));
+    const currentKey = deletion?.confirmationId ? pilotDeletionConfirmationKey(tenant, deletion.confirmationId) : null;
+    const current = currentKey ? await txn.get<ApprovalRecord>(currentKey) : undefined;
+    if (deletion && current && approvedDeletion(current)) return { outcome: "approved", deletion, confirmation: current };
+    if (deletion && current?.status === "pending") {
+      if (confirmationOpen(current, now)) return { outcome: "open", deletion, confirmation: current };
+      const withdrawn = withdrawTransition(current, now).next;
+      if (withdrawn && currentKey) await txn.put(currentKey, withdrawn);
+    }
+    const id = crypto.randomUUID();
+    const key = pilotDeletionConfirmationKey(tenant, id);
+    const opened = openTransition(await txn.get<ApprovalRecord>(key), {
+      id,
+      kind: CONFIRMATION_KIND,
+      options: DELETION_OPTIONS,
+      expiresAt: now + DELETION_LINK_TTL_MS,
+      detail,
+    }, now);
+    if (!opened.result.ok || !opened.next) throw new Error("confirmation_not_opened");
+    const record: PilotDeletionRecord = {
+      tenant,
+      name,
+      requestedAt: new Date(now).toISOString(),
+      deletedBy,
+      confirmationId: id,
+    };
+    await txn.put({ [pilotDeletionKey(tenant)]: record, [key]: opened.next });
+    return { outcome: "opened", deletion: record, confirmation: opened.next };
+  });
+  return json(answer);
+}
+
+/// What `POST /pilot-deletions/decide` did, with the records as they now stand.
+export type DecidedConfirmation = {
+  result: DecideResult;
+  deletion: PilotDeletionRecord | null;
+  confirmation: ApprovalRecord | null;
+};
+
+function isRole(value: unknown): value is Role {
+  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
+}
+
+/// Settles one confirmation through approval-core's rules, in their order: a
+/// decided one answers who decided; then who may decide its kind; then
+/// whether it is still open (a withdrawn one is superseded, an expired one
+/// expired); then whether the option was offered. The decision is in storage
+/// before this answers, so the Worker starts a wipe only once it is recorded.
+/// Opening withdraws an expired confirmation before it opens the next, so the
+/// one confirmation a decision can settle is always the shop's current one.
+async function decideConfirmation(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  const { id, approve, role, decidedBy } = body;
+  if (!bounded(id) || typeof approve !== "boolean" || !isRole(role) || !bounded(decidedBy)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const answer = await storage.transaction(async (txn): Promise<DecidedConfirmation> => {
+    const key = pilotDeletionConfirmationKey(tenant, id);
+    const stored = await txn.get<ApprovalRecord>(key);
+    const { result, next } = decideTransition(stored, {
+      requestId: id,
+      optionId: approve ? "delete" : "keep",
+      seenRevision: CONFIRMATION_REVISION,
+      decidedBy,
+      role,
+    }, { running: {}, now: Date.now() });
+    if (next) await txn.put(key, next);
+    const deletion = (await txn.get<PilotDeletionRecord>(pilotDeletionKey(tenant))) ?? null;
+    return { result, deletion, confirmation: next ?? stored ?? null };
+  });
+  return json(answer);
 }
 
 /// The broker's view of a reply: which message, author and connection the

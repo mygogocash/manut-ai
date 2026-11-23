@@ -148,6 +148,63 @@ describe("the API client", () => {
     expect((second as ApiError).view).toEqual(decided);
   });
 
+  it("answers a live shop's deletion with the link for its owner, and reads and answers that link keyless", async () => {
+    const asked = { status: "awaiting_owner", confirmUrl: "https://web.test/delete/tok", expiresAt: "2026-11-24T03:00:00Z" };
+    const view = { shopName: "Baan Mali", goes: { messages: 7, replies: 6, payments: 2, lineConnected: true },
+      state: "awaiting_owner", expiresAt: "2026-11-24T03:00:00Z" };
+    const { api, calls } = harness("op-key-123", (url) =>
+      url.includes("/admin/") ? json(asked, 202) : json(view),
+    );
+
+    expect(await api.deleteShop({ tenant: "t1", confirmName: "Baan Mali" })).toEqual(asked);
+    expect(await api.getDeletion("tok/en")).toEqual(view);
+    expect(await api.decideDeletion("tok/en", true)).toEqual(view);
+    expect(await api.decideDeletion("tok/en", false)).toEqual(view);
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "POST https://api.example.test/v1/admin/pilot/deletions",
+      "GET https://api.example.test/v1/pilot/deletions/tok%2Fen",
+      "POST https://api.example.test/v1/pilot/deletions/tok%2Fen/decision",
+      "POST https://api.example.test/v1/pilot/deletions/tok%2Fen/decision",
+    ]);
+    for (const call of calls.slice(1)) {
+      expect(call.headers.has("authorization")).toBe(false);
+      expect(call.credentials).toBe("omit");
+    }
+    expect(calls[2]?.body).toEqual({ approve: true });
+    expect(calls[3]?.body).toEqual({ approve: false });
+  });
+
+  it("keeps what a deletion's error answers carry: what failed, when and by whom, and the settled page", async () => {
+    const settled = { shopName: "Baan Mali", goes: { messages: 7, replies: 6, payments: 2, lineConnected: true },
+      state: "declined", expiresAt: "2026-11-24T03:00:00Z", decidedAt: "2026-11-23T05:00:00Z" };
+    const answers: Record<string, Response> = {
+      partial: json({ error: "wipe_incomplete", tasksWiped: 0, failed: ["task-1", "connections"] }, 500),
+      gone: json({ error: "tenant_deleted", deletedAt: "2026-11-23T04:00:00Z", deletedBy: "ops@manut.test" }, 404),
+      token: json({ error: "tenant_deleted", deletedAt: "2026-11-23T04:00:00Z", deletedBy: null }, 404),
+    };
+    const { api } = harness("op-key-123", (url) =>
+      url.includes("/decision") ? json({ error: "already_decided", view: settled }, 409) : json({}),
+    );
+    const failing = (key: string) => {
+      const { api: each } = harness("op-key-123", () => answers[key]!);
+      return each.deleteShop({ tenant: "t1", confirmName: "Baan Mali" }).catch((e: unknown) => e as ApiError);
+    };
+
+    expect(await failing("partial")).toMatchObject({ status: 500, code: "wipe_incomplete",
+      failed: ["task-1", "connections"] });
+    expect(await failing("gone")).toMatchObject({ status: 404, code: "tenant_deleted",
+      deletedAt: "2026-11-23T04:00:00Z", deletedBy: "ops@manut.test" });
+    const byToken = await failing("token");
+    expect(byToken).toMatchObject({ code: "tenant_deleted", deletedAt: "2026-11-23T04:00:00Z" });
+    expect((byToken as ApiError).deletedBy).toBeNull();
+
+    const twice = (await api.decideDeletion("tok", true).catch((e: unknown) => e)) as ApiError;
+    expect(twice).toMatchObject({ status: 409, code: "already_decided" });
+    expect(twice.deletionView).toEqual(settled);
+    expect(twice.view).toBeUndefined();
+  });
+
   it("reports a request that never got an answer as status 0", async () => {
     const api = createHttpApi({
       origin: "https://api.example.test",

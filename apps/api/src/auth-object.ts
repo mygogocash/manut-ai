@@ -127,8 +127,9 @@ export class AuthObject extends DurableObject {
     if (url.pathname === "/pilot-shops") {
       return pilotRegistryRoute(this.ctx.storage, request);
     }
-    // Pilot shop deletions, kept here so the record outlives the shop's own objects.
-    if (url.pathname === "/pilot-deletions") {
+    // Pilot shop deletions and the owners' confirmations of them, kept here so
+    // both outlive the shop's own objects.
+    if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
       return pilotDeletionRoute(this.ctx.storage, request);
     }
     if (url.pathname === "/flags") {

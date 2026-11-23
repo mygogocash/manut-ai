@@ -7,7 +7,7 @@ import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorK
 import { PaymentsTab } from "./PaymentsTab";
 import { ShopDataTab } from "./ShopDataTab";
 import { useLoad } from "./useLoad";
-import { useShopDeletion } from "./useShopDeletion";
+import { deletionOf, useShopDeletion } from "./useShopDeletion";
 import { errorText, isAuthError, shopDataWords } from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
@@ -32,6 +32,8 @@ export function OpsConsole() {
     [shops.data, deletion.gone],
   );
   const shop = shopList?.find((s) => s.tenant === tenant) ?? null;
+  // A live shop's deletion waits for its owner: the header says so, and the Shop data tab shows the link.
+  const shopDeletion = shop ? deletionOf(shop, deletion.asked) : null;
   const messages = useLoad(shop ? () => api.listMessages(shop.tenant) : null, `messages:${shop?.tenant ?? ""}`);
   const actions = useLoad(shop ? () => api.listActions(shop.tenant) : null, `actions:${shop?.tenant ?? ""}`);
   const { reload: reloadMessages } = messages;
@@ -148,6 +150,10 @@ export function OpsConsole() {
                   <span className={shop.consent ? "tag ok" : "tag warn"}>
                     {shop.consent ? "Owner allowed sending" : "Owner has not allowed sending yet"}
                   </span>
+                  {shopDeletion?.state === "awaiting_owner" && (
+                    <span className="tag warn">{shopDataWords.waitingTag(shop.ownerName)}</span>
+                  )}
+                  {shopDeletion?.state === "deleting" && <span className="tag err">{shopDataWords.unfinishedTag}</span>}
                 </>
               )}
               <div className="tabs" role="tablist" aria-label="Sections">
@@ -237,7 +243,9 @@ export function OpsConsole() {
                 <ShopDataTab
                   key={shop.tenant}
                   shop={shop}
+                  request={shopDeletion}
                   onDelete={(name) => deletion.run(shop.tenant, name)}
+                  onFinish={() => deletion.run(shop.tenant, shop.name, true)}
                 />
               )
             ) : null}

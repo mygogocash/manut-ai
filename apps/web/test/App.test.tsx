@@ -6,14 +6,27 @@ import { App } from "../src/App";
 import { matchRoute } from "../src/router";
 
 describe("routing", () => {
-  it("matches the three pages and nothing else", () => {
+  it("matches the four pages and nothing else", () => {
     expect(matchRoute("/approve/abc_DEF-123")).toEqual({ name: "approve", token: "abc_DEF-123" });
     expect(matchRoute("/approve/abc/")).toEqual({ name: "approve", token: "abc" });
+    expect(matchRoute("/delete/abc_DEF-123.mac")).toEqual({ name: "delete", token: "abc_DEF-123.mac" });
     expect(matchRoute("/ops")).toEqual({ name: "ops" });
     expect(matchRoute("/")).toEqual({ name: "home" });
     expect(matchRoute("/approve/")).toEqual({ name: "notFound" });
     expect(matchRoute("/approve/a/b")).toEqual({ name: "notFound" });
     expect(matchRoute("/approve/%E0%A4%A")).toEqual({ name: "notFound" });
+    expect(matchRoute("/delete/")).toEqual({ name: "notFound" });
+    expect(matchRoute("/delete/a/b")).toEqual({ name: "notFound" });
+  });
+
+  it("opens the owner's deletion page from its path, with a practice link for each state", async () => {
+    window.history.replaceState(null, "", "/");
+    render(<App setup={{ api: createFakeApi(), mode: "fake" }} />);
+    fireEvent.click(screen.getByRole("link", { name: "Delete a shop's data: waiting for you" }));
+    expect(window.location.pathname).toBe("/delete/demo-delete");
+    expect(await screen.findByRole("article", { name: "Delete everything Manut AI stores for Khao Soi Nimman?" }))
+      .toBeTruthy();
+    expect(screen.getByText("Practice mode. This page uses sample data and deletes nothing real.")).toBeTruthy();
   });
 
   it("uses the fake when VITE_API_ORIGIN is absent or empty", () => {

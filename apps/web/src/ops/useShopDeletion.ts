@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { ApiError, type DeletedShop, type PilotApi } from "../api";
+import {
+  ApiError,
+  isAwaitingOwner,
+  type AwaitingOwner,
+  type DeletedShop,
+  type DeletionRequest,
+  type PilotApi,
+  type Shop,
+} from "../api";
 import { isWipeIncomplete } from "./words";
 
 /// A deletion that stopped part way (`partial`), or whose answer never arrived. It is kept here, apart from
@@ -16,6 +24,9 @@ export type ShopDeletion = {
   gone: ReadonlySet<string>;
   finished: FinishedDeletion | null;
   unfinished: UnfinishedDeletion[];
+  /// Live shops whose owner this console has just been asked to confirm a deletion, with the API's link, by tenant.
+  /// The shop list carries the same request once it is read again; this shows the link at once.
+  asked: ReadonlyMap<string, AwaitingOwner>;
   /// Sends one deletion. Resolves to the API's refusal when nothing was deleted, for the caller to show next
   /// to the name that was typed; every other answer is kept here and shown by the console. `retry` marks a
   /// run of an unfinished deletion, whose refusals stay with it too.
@@ -23,10 +34,21 @@ export type ShopDeletion = {
   dismissFinished(): void;
 };
 
-/// The 404 codes that mean the shop has been deleted: `tenant_deleted` from apps/api, which answers it on every
-/// operator route once a deletion has run, and `unknown_tenant` from the practice-mode fake. The API's
-/// `shop_not_found` is not one of them: it means the tenant was never a pilot shop.
-const GONE_CODES = new Set(["tenant_deleted", "unknown_tenant"]);
+/// The 404 code that means the shop has been deleted: `tenant_deleted`, which the API and the practice fake answer
+/// on every operator route once a deletion has run. `shop_not_found` is not one: it means the tenant was never a
+/// pilot shop.
+const GONE_CODES = new Set(["tenant_deleted"]);
+
+/// The deletion request to show for a shop: the one this console was just answered with, until the shop list has
+/// read it back, and then the list's, which also carries the owner's answer. A list still holding an older request
+/// (another link) is older than the answer.
+export function deletionOf(shop: Shop, asked: ReadonlyMap<string, AwaitingOwner>): DeletionRequest | null {
+  const fresh = asked.get(shop.tenant);
+  if (fresh && shop.deletion?.confirmUrl !== fresh.confirmUrl) {
+    return { state: "awaiting_owner", confirmUrl: fresh.confirmUrl, expiresAt: fresh.expiresAt };
+  }
+  return shop.deletion ?? null;
+}
 
 /// What a deletion that did not answer with its result means for the shop's data.
 /// - `gone`: the shop has been deleted, which is what was asked for.
@@ -62,6 +84,7 @@ export function useShopDeletion(
   const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
   const [finished, setFinished] = useState<FinishedDeletion | null>(null);
   const [unfinished, setUnfinished] = useState<UnfinishedDeletion[]>([]);
+  const [asked, setAsked] = useState<ReadonlyMap<string, AwaitingOwner>>(() => new Map());
 
   function finish(tenant: string, name: string, result: DeletedShop | null): void {
     setGone((current) => new Set(current).add(tenant));
@@ -72,7 +95,15 @@ export function useShopDeletion(
 
   async function run(tenant: string, name: string, retry = false): Promise<unknown> {
     try {
-      finish(tenant, name, await api.deleteShop({ tenant, confirmName: name }));
+      const answer = await api.deleteShop({ tenant, confirmName: name });
+      if (isAwaitingOwner(answer)) {
+        // Nothing was deleted: the shop is live, and its owner decides through the link. An earlier attempt whose
+        // answer was lost is settled by this one, which says where things stand.
+        setAsked((current) => new Map(current).set(tenant, answer));
+        setUnfinished((list) => list.filter((entry) => entry.tenant !== tenant));
+        return null;
+      }
+      finish(tenant, name, answer);
       return null;
     } catch (error) {
       const kind = classifyDeleteError(error);
@@ -103,5 +134,5 @@ export function useShopDeletion(
     }
   }
 
-  return { gone, finished, unfinished, run, dismissFinished: () => setFinished(null) };
+  return { gone, finished, unfinished, asked, run, dismissFinished: () => setFinished(null) };
 }

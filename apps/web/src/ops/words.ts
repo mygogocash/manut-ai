@@ -1,5 +1,5 @@
-import { ApiError, type ApprovalState, type DeletedShop, type Shop } from "../api";
-import { dayOffset, formatClock, formatDate } from "../format";
+import { ApiError, type ApprovalState, type DeletedShop, type DeletionRequest, type Shop } from "../api";
+import { dayOffset, formatClock, formatDate, formatStamp } from "../format";
 
 /// The console's status words. Operators read them; the owner never does.
 export function stateTag(state: ApprovalState, ownerName: string): { label: string; className: string } {
@@ -82,7 +82,39 @@ export const shopDataWords = {
   keep: "Keep the shop",
   finish: "Finish deleting",
   runAgain: "Run it again",
+  // A live shop's deletion waits for its owner's yes, given through a link the operator sends on LINE.
+  askOwner: (owner: string) => `Ask ${owner} to confirm`,
+  asking: "Asking",
+  ownerStep: (shop: string, owner: string) =>
+    `${shop} is live, so ${owner} confirms the deletion. You get a link to send ${owner} on LINE, and nothing is deleted until ${owner} says yes.`,
+  linkTitle: (owner: string) => `Deletion link for ${owner}`,
+  linkLabel: "Deletion link",
+  waitingTag: (owner: string) => `Deletion waiting for ${owner}`,
+  unfinishedTag: "Deletion not finished",
 } as const;
+
+/// How to send the owner the deletion link, and until when it works.
+export function deletionLinkHelp(owner: string, expiresAt: string, now: number = Date.now()): string {
+  return `Send it to ${owner} on LINE. Nothing is deleted until ${owner} says yes. It works until ${formatStamp(expiresAt, now)}.`;
+}
+
+/// What became of a deletion put to the shop's owner, for every state but the waiting one, which shows its link,
+/// and the deleted one, whose shop has left the list.
+export function deletionRequestText(request: DeletionRequest, shop: Shop, now: number = Date.now()): string {
+  const when = request.decidedAt && !Number.isNaN(Date.parse(request.decidedAt)) ? ` ${whenText(request.decidedAt, now)}` : "";
+  switch (request.state) {
+    case "declined":
+      return `${shop.ownerName} chose to keep ${shop.name}'s data${when}. Nothing was deleted.`;
+    case "expired":
+      return `${shop.ownerName} did not answer within 24 hours, so nothing was deleted. Delete again for a new link.`;
+    case "deleting":
+      return `${shop.ownerName} said yes${when}, but deleting ${shop.name} did not finish. Part of its data is still stored. Run it again to finish the job.`;
+    case "awaiting_owner":
+      return `Waiting for ${shop.ownerName} to confirm deleting ${shop.name}.`;
+    case "deleted":
+      return `${shop.name} is deleted.`;
+  }
+}
 
 /// What a deletion removes, naming only what the shop has: a shop with no LINE account has no connection to
 /// lose, and an owner who never allowed sending has no permission to take back.

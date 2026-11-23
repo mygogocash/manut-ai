@@ -79,8 +79,9 @@ describe("the pages Worker", () => {
     }
   });
 
-  it("never lets a browser or proxy store the page an approval link opens", async () => {
+  it("never lets a browser or proxy store the page an approval or deletion link opens", async () => {
     expect((await page("/approve/tok_123")).response.headers.get("cache-control")).toBe("no-store");
+    expect((await page("/delete/tok_123")).response.headers.get("cache-control")).toBe("no-store");
     expect((await page("/ops")).response.headers.get("cache-control")).toBeNull();
   });
 

@@ -1,10 +1,16 @@
 import {
   ApiError,
+  isLiveShop,
   isSending,
   REPLY_MAX_LENGTH,
   type ApprovalState,
   type ApprovalView,
+  type AwaitingOwner,
   type DeletedShop,
+  type DeletionGoes,
+  type DeletionRequest,
+  type DeletionState,
+  type DeletionView,
   type InboundMessage,
   type Payment,
   type PilotApi,
@@ -14,12 +20,14 @@ import {
 
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
-/// lists come back newest first. It lets every screen run and be tested with no backend.
+/// lists come back newest first. Deleting a live shop asks its owner through a link that settles once, as the
+/// API does. It lets every screen run and be tested with no backend.
 ///
 /// Sample world: Baan Mali (owner Fon) on LINE, with customers asking about late parcels and a refund, and a
 /// second shop, Sabai Tea, with nothing connected yet. Demo links on the practice home page open the owner's
 /// page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined, demo-old and
-/// demo-expired; any other token is an invalid link.
+/// demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
+/// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -52,18 +60,45 @@ type FakeAction = Omit<ReplyAction, "approvalUrl"> & {
   expiresAt: string;
   outcome: Outcome;
 };
+/// The API's deletion record: who asked and when (the practice key has no Access identity, so nobody), the owner
+/// confirmation it names for a live shop, and when the wipe finished.
+type FakeDeletionRecord = {
+  tenant: string;
+  name: string;
+  requestedAt: string;
+  deletedBy: string | null;
+  confirmationId?: string;
+  deletedAt?: string;
+};
+/// One owner confirmation of deleting a shop, with what the shop held when it opened. It leaves `pending` once,
+/// into `decided` or `withdrawn` (expired and replaced by a newer request), as approval-core's records do.
+type FakeConfirmation = {
+  id: string;
+  tenant: string;
+  token: string;
+  shopName: string;
+  goes: DeletionGoes;
+  expiresAt: string;
+  status: "pending" | "decided" | "withdrawn";
+  approved?: boolean;
+  decidedAt?: string;
+};
 type FakeDb = {
-  version: 1;
+  version: 2;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
   messages: FakeMessage[];
   actions: FakeAction[];
   payments: Payment[];
+  deletions: FakeDeletionRecord[];
+  confirmations: FakeConfirmation[];
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
   expiredTokens: string[];
 };
 
+/// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
+/// is replaced by a fresh one rather than read without its confirmations.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -79,6 +114,15 @@ export const DEMO_TOKENS = {
   declined: "demo-declined",
   expiredRequest: "demo-old",
   expiredLink: "demo-expired",
+} as const;
+
+export const DEMO_DELETION_TOKENS = {
+  waiting: "demo-delete",
+  deleting: "demo-delete-deleting",
+  deleted: "demo-delete-done",
+  kept: "demo-delete-kept",
+  unanswered: "demo-delete-old",
+  expiredLink: "demo-delete-expired",
 } as const;
 
 export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(): void } {
@@ -98,7 +142,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 1 && Array.isArray(parsed.actions) ? parsed : null;
+      return parsed && parsed.version === 2 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations)
+        ? parsed
+        : null;
     } catch {
       return null;
     }
@@ -136,10 +182,140 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return `${prefix}_${db.seq}`;
   }
 
+  /// The API's answers for a shop that is not there: `tenant_deleted`, saying when and by whom, once it has been
+  /// deleted, and `shop_not_found` for a tenant that was never a shop.
   function shopOf(tenant: string): FakeShop {
     const shop = db.shops.find((s) => s.tenant === tenant);
-    if (!shop) throw new ApiError(404, "unknown_tenant");
-    return shop;
+    if (shop) return shop;
+    const record = db.deletions.find((d) => d.tenant === tenant);
+    if (record?.deletedAt) {
+      throw new ApiError(404, "tenant_deleted", undefined, { deletedAt: record.deletedAt, deletedBy: record.deletedBy });
+    }
+    throw new ApiError(404, "shop_not_found");
+  }
+
+  /// The API's rule: the same name when it differs only in outer spaces or in how an accented letter was composed.
+  function sameName(typed: string, stored: string): boolean {
+    return typed.normalize("NFC").trim() === stored.normalize("NFC").trim();
+  }
+
+  /// What deleting the shop would take now, or null once it is gone.
+  function goesOf(tenant: string): DeletionGoes | null {
+    const shop = db.shops.find((s) => s.tenant === tenant);
+    if (!shop) return null;
+    const mine = <T extends { tenant: string }>(item: T) => item.tenant === tenant;
+    return {
+      messages: db.messages.filter(mine).length,
+      replies: db.actions.filter(mine).length,
+      payments: db.payments.filter(mine).length,
+      lineConnected: Boolean(shop.lineConnectionId),
+    };
+  }
+
+  function recordOf(tenant: string): FakeDeletionRecord | undefined {
+    return db.deletions.find((d) => d.tenant === tenant);
+  }
+
+  function writeRecord(record: FakeDeletionRecord): FakeDeletionRecord {
+    db.deletions = [...db.deletions.filter((d) => d.tenant !== record.tenant), record];
+    return record;
+  }
+
+  function currentConfirmation(record: FakeDeletionRecord | undefined): FakeConfirmation | undefined {
+    return record?.confirmationId ? db.confirmations.find((c) => c.id === record.confirmationId) : undefined;
+  }
+
+  /// Everything stored for the shop goes at once, and the record says when.
+  function wipe(record: FakeDeletionRecord): DeletedShop {
+    const mine = <T extends { tenant: string }>(item: T) => item.tenant === record.tenant;
+    const deleted: DeletedShop = {
+      tasksWiped: new Set(db.actions.filter(mine).map((a) => a.taskId)).size,
+      connectionsWiped: db.connections.filter(mine).length,
+      schedulesWiped: 0,
+      occurrencesWiped: 0,
+      sessionsWiped: 0,
+      deletedAt: iso(now()),
+    };
+    db.shops = db.shops.filter((s) => !mine(s));
+    db.connections = db.connections.filter((c) => !mine(c));
+    db.messages = db.messages.filter((m) => !mine(m));
+    db.actions = db.actions.filter((a) => !mine(a));
+    db.payments = db.payments.filter((p) => !mine(p));
+    writeRecord({ ...record, deletedAt: deleted.deletedAt });
+    return deleted;
+  }
+
+  function deletionLinkOf(confirmation: FakeConfirmation): string {
+    return `${webOrigin.replace(/\/+$/, "")}/delete/${encodeURIComponent(confirmation.token)}`;
+  }
+
+  function awaiting(confirmation: FakeConfirmation): AwaitingOwner {
+    return { status: "awaiting_owner", confirmUrl: deletionLinkOf(confirmation), expiresAt: confirmation.expiresAt };
+  }
+
+  /// The confirmation already open, or a new one. One that expired unanswered is withdrawn as the new one opens.
+  function askOwner(shop: FakeShop, record: FakeDeletionRecord | undefined): AwaitingOwner {
+    const current = currentConfirmation(record);
+    if (current?.status === "pending") {
+      if (now() < Date.parse(current.expiresAt)) return awaiting(current);
+      current.status = "withdrawn";
+    }
+    const at = now();
+    const confirmation: FakeConfirmation = {
+      id: nextId("del"),
+      tenant: shop.tenant,
+      token: randomToken(),
+      shopName: shop.name,
+      goes: goesOf(shop.tenant)!,
+      expiresAt: iso(at + DAY_MS),
+      status: "pending",
+    };
+    db.confirmations.push(confirmation);
+    writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(at), deletedBy: null, confirmationId: confirmation.id });
+    return awaiting(confirmation);
+  }
+
+  function deletionStateOf(confirmation: FakeConfirmation): DeletionState {
+    if (confirmation.status === "decided") {
+      if (!confirmation.approved) return "declined";
+      const record = recordOf(confirmation.tenant);
+      return record?.confirmationId === confirmation.id && record.deletedAt ? "deleted" : "deleting";
+    }
+    if (confirmation.status === "withdrawn") return "expired";
+    return now() < Date.parse(confirmation.expiresAt) ? "awaiting_owner" : "expired";
+  }
+
+  function deletionViewOf(confirmation: FakeConfirmation): DeletionView {
+    const state = deletionStateOf(confirmation);
+    const view: DeletionView = {
+      shopName: confirmation.shopName,
+      goes: state === "deleted" ? confirmation.goes : (goesOf(confirmation.tenant) ?? confirmation.goes),
+      state,
+      expiresAt: confirmation.expiresAt,
+    };
+    if (confirmation.decidedAt) view.decidedAt = confirmation.decidedAt;
+    return view;
+  }
+
+  function deletionRequestOf(tenant: string): DeletionRequest | undefined {
+    const confirmation = currentConfirmation(recordOf(tenant));
+    if (!confirmation) return undefined;
+    const request: DeletionRequest = {
+      state: deletionStateOf(confirmation),
+      confirmUrl: deletionLinkOf(confirmation),
+      expiresAt: confirmation.expiresAt,
+    };
+    if (confirmation.decidedAt) request.decidedAt = confirmation.decidedAt;
+    return request;
+  }
+
+  /// A deletion link's confirmation. Its link expires with it, as the API signs both with one expiry.
+  function confirmationByToken(token: string): FakeConfirmation {
+    if (db.expiredTokens.includes(token)) throw new ApiError(410, "link_expired");
+    const confirmation = db.confirmations.find((c) => c.token === token);
+    if (!confirmation) throw new ApiError(404, "link_invalid");
+    if (now() >= Date.parse(confirmation.expiresAt)) throw new ApiError(410, "link_expired");
+    return confirmation;
   }
 
   /// A send that has had `settleMs` to finish settles on whoever reads it next.
@@ -263,7 +439,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops;
+        return db.shops.map((shop) => {
+          const deletion = deletionRequestOf(shop.tenant);
+          return deletion ? { ...shop, deletion } : shop;
+        });
       }),
 
     createLineConnection: (input) =>
@@ -404,26 +583,35 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         };
       }),
 
+    // As the API: the name first; then a deletion the owner already said yes to is finished without asking again;
+    // a live shop's owner is asked; a shop that never went live is deleted at once.
     deleteShop: (input) =>
-      run(() => {
+      run((): DeletedShop | AwaitingOwner => {
         admin();
         const shop = shopOf(input.tenant);
-        if (input.confirmName !== shop.name) throw new ApiError(409, "name_mismatch");
-        const mine = <T extends { tenant: string }>(item: T) => item.tenant === shop.tenant;
-        const deleted: DeletedShop = {
-          tasksWiped: new Set(db.actions.filter(mine).map((a) => a.taskId)).size,
-          connectionsWiped: db.connections.filter(mine).length,
-          schedulesWiped: 0,
-          occurrencesWiped: 0,
-          sessionsWiped: 0,
-          deletedAt: iso(now()),
-        };
-        db.shops = db.shops.filter((s) => !mine(s));
-        db.connections = db.connections.filter((c) => !mine(c));
-        db.messages = db.messages.filter((m) => !mine(m));
-        db.actions = db.actions.filter((a) => !mine(a));
-        db.payments = db.payments.filter((p) => !mine(p));
-        return deleted;
+        if (!sameName(input.confirmName, shop.name)) throw new ApiError(409, "name_mismatch");
+        const record = recordOf(shop.tenant);
+        const current = currentConfirmation(record);
+        if (record && current?.status === "decided" && current.approved) return wipe(record);
+        if (isLiveShop(shop)) return askOwner(shop, record);
+        return wipe(writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(now()), deletedBy: null }));
+      }),
+
+    getDeletion: (token) => run(() => deletionViewOf(confirmationByToken(token))),
+
+    decideDeletion: (token, approve) =>
+      run(() => {
+        const confirmation = confirmationByToken(token);
+        if (confirmation.status === "decided") {
+          throw new ApiError(409, "already_decided", undefined, { deletionView: deletionViewOf(confirmation) });
+        }
+        if (confirmation.status === "withdrawn") throw new ApiError(404, "link_invalid");
+        confirmation.status = "decided";
+        confirmation.approved = approve;
+        confirmation.decidedAt = iso(now());
+        const record = recordOf(confirmation.tenant);
+        if (approve && record?.confirmationId === confirmation.id) wipe(record);
+        return deletionViewOf(confirmation);
       }),
   };
 }
@@ -544,8 +732,44 @@ function seed(at: number): FakeDb {
     if (m) m.replyActionId = a.actionId;
   }
 
+  // The deletion page's demo links, each about its own copy of Khao Soi Nimman, a shop that is not on the console's
+  // list. Each copy has the deletion record its state needs, so answering one never changes another.
+  const goes: DeletionGoes = { messages: 12, replies: 9, payments: 3, lineConnected: true };
+  const demo = (
+    key: keyof typeof DEMO_DELETION_TOKENS,
+    state: Pick<FakeConfirmation, "status" | "approved" | "decidedAt">,
+    deletedAt?: string,
+  ) => {
+    const tenant = `shop_khaosoi_${key}`;
+    const confirmation: FakeConfirmation = {
+      id: `del_${key}`,
+      tenant,
+      token: DEMO_DELETION_TOKENS[key],
+      shopName: "Khao Soi Nimman",
+      goes,
+      expiresAt: later(24 * 60),
+      ...state,
+    };
+    const record: FakeDeletionRecord = {
+      tenant,
+      name: "Khao Soi Nimman",
+      requestedAt: ago(30),
+      deletedBy: null,
+      confirmationId: confirmation.id,
+      ...(deletedAt ? { deletedAt } : {}),
+    };
+    return { confirmation, record };
+  };
+  const demos = [
+    demo("waiting", { status: "pending" }),
+    demo("deleting", { status: "decided", approved: true, decidedAt: ago(20) }),
+    demo("deleted", { status: "decided", approved: true, decidedAt: ago(20) }, ago(20)),
+    demo("kept", { status: "decided", approved: false, decidedAt: ago(20) }),
+    demo("unanswered", { status: "withdrawn" }),
+  ];
+
   return {
-    version: 1,
+    version: 2,
     seq: 100,
     shops: [
       { tenant, name: "Baan Mali", ownerName: "Fon", lineConnectionId: connectionId, consent: false },
@@ -581,6 +805,8 @@ function seed(at: number): FakeDb {
         confirmedAt: ago(120),
       },
     ],
-    expiredTokens: [DEMO_TOKENS.expiredLink],
+    deletions: demos.map((entry) => entry.record),
+    confirmations: demos.map((entry) => entry.confirmation),
+    expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
   };
 }

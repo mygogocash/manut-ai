@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, isSending, useApiSetup, type ApprovalState, type ApprovalView } from "../api";
-import { dayOffset, formatClock, formatDate, langOf } from "../format";
+import { formatClock, langOf } from "../format";
 import { Face, type FaceState } from "../ui/Face";
 import { BrandMark, BrokenLinkIcon, CheckIcon, ClockIcon, CloudOffIcon, useColorScheme } from "../ui/marks";
+import { Loading, Notice, OWNER_CARD as CARD, OWNER_TOUCH as TOUCH, Pulse, whenText } from "../ui/owner";
 import { ownerStrings, type OwnerStrings } from "./strings";
 
 /// The owner's page, opened from a link in LINE. It shows one request and takes one answer. Approving may
@@ -12,9 +13,6 @@ export const POLL_MS = 2000;
 
 type Phase = "loading" | "loadError" | "invalid" | "linkExpired" | "ready";
 type Busy = null | "approve" | "decline" | "consent";
-
-const CARD: CSSProperties = { padding: 16, display: "flex", flexDirection: "column", gap: 12 };
-const TOUCH: CSSProperties = { minHeight: 44, flex: "1 1 0" };
 
 export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs?: number }) {
   const { api, mode } = useApiSetup();
@@ -166,7 +164,7 @@ export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs
   }
 
   let body: ReactNode;
-  if (phase === "loading") body = <Loading s={s} />;
+  if (phase === "loading") body = <Loading label={s.loading} />;
   else if (phase === "loadError")
     body = (
       <Notice icon={<CloudOffIcon />} title={s.loadErrorTitle} body={s.loadErrorBody}>
@@ -241,52 +239,6 @@ function phaseOf(err: unknown): Phase {
   if (err instanceof ApiError && err.status === 404) return "invalid";
   if (err instanceof ApiError && err.status === 410) return "linkExpired";
   return "loadError";
-}
-
-function whenText(s: OwnerStrings, iso: string): string {
-  const clock = formatClock(iso, s.locale);
-  const offset = dayOffset(iso, Date.now());
-  if (offset === 0) return s.whenToday(clock);
-  if (offset === 1) return s.whenTomorrow(clock);
-  return s.whenOn(clock, formatDate(iso, s.locale));
-}
-
-function Loading({ s }: { s: OwnerStrings }) {
-  return (
-    <div className="box" style={CARD} role="status" aria-busy="true">
-      <span className="vh">{s.loading}</span>
-      <div className="skel" style={{ width: "45%", height: 14 }} />
-      <div className="skel" style={{ width: "90%", height: 20 }} />
-      <div className="skel" style={{ width: "100%", height: 72 }} />
-      <div className="skel" style={{ width: "100%", height: 44 }} />
-    </div>
-  );
-}
-
-function Notice({ icon, title, body, children }: { icon: ReactNode; title: string; body: string; children?: ReactNode }) {
-  return (
-    <section className="box empty">
-      <span className="ico">{icon}</span>
-      <h2 style={{ margin: "4px 0 0", fontSize: 15, fontWeight: 600 }}>{title}</h2>
-      <p>{body}</p>
-      {children}
-    </section>
-  );
-}
-
-function Pulse() {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: 6,
-        height: 6,
-        borderRadius: "var(--rad-pill)",
-        background: "currentColor",
-        animation: "pulse 1.6s ease-in-out infinite",
-      }}
-    />
-  );
 }
 
 function Asker({ s, view, face, tag }: { s: OwnerStrings; view: ApprovalView; face: FaceState; tag: ReactNode }) {
