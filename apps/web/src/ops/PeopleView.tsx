@@ -154,6 +154,9 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
   const covering = people.away?.inForce ? people.away.helperId : null;
   const removedNames = people.removed.map((one) => one.name).filter((name) => name !== "");
   const locked = busy !== null;
+  // A refusal of a change made from a row (cancelling an invite, removing a helper) is said above the list, not in the row:
+  // the refusals that mean the list moved on are followed by a refresh that takes the row away, and the message must outlive it.
+  const listError = Object.entries(errors).find(([key]) => key.startsWith("helper:") || key.startsWith("invite:"))?.[1];
 
   /// One change. `work` makes the call and answers what to say where the operator is looking. When it did not happen, why is
   /// said where the change was asked for, and a refusal that means the list moved on also reads the list again.
@@ -216,6 +219,7 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
           <span>{W.count(1 + people.helpers.length, pending.length)}</span>
         </div>
         {notice?.place === "who" && <Said text={notice.text} />}
+        {listError && <Failed text={listError} />}
         <ul aria-label={W.listLabel(shop.name)} style={listStyle}>
           <li className="rowl" style={rowStyle}>
             <Avatar name={owner} tone={0} />
@@ -236,7 +240,6 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
               locked={locked}
               busy={busy === `helper:${helper.id}`}
               asking={removing === helper.id}
-              error={errors[`helper:${helper.id}`]}
               onAsk={() => setRemoving(helper.id)}
               onKeep={() => setRemoving(null)}
               onRemove={(name) => void remove(helper, name)}
@@ -257,7 +260,6 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
                 aria-busy={busy === `invite:${one.id}` ? true : undefined} onClick={() => void revoke(one)}>
                 {W.cancelInvite}
               </button>
-              {errors[`invite:${one.id}`] && <RowError text={errors[`invite:${one.id}`]!} />}
             </li>
           ))}
           {expired.map((one, index) => (
@@ -324,8 +326,8 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
           {APPROVAL_KINDS.map((kind) => (
             <div key={kind} className="tr" role="row" style={{ padding: "8px 10px", alignItems: "center" }}>
               <span className="grow" role="cell">{W.kindRow[kind]}</span>
-              <Allowed role="cell" yes={mayDecide("owner", kind)} no={W.no} />
-              <Allowed role="cell" yes={mayDecide("helper", kind)} no={W.noAsks(owner)} />
+              <Allowed yes={mayDecide("owner", kind)} no={W.no} />
+              <Allowed yes={mayDecide("helper", kind)} no={W.noAsks(owner)} />
             </div>
           ))}
         </div>
@@ -396,18 +398,18 @@ function Said({ text }: { text: string }) {
   );
 }
 
-function RowError({ text }: { text: string }) {
+function Failed({ text, wide }: { text: string; wide?: boolean }) {
   return (
-    <div className="banner err" role="alert" style={{ flexBasis: "100%" }}>
+    <div className="banner err" role="alert" style={wide ? { flexBasis: "100%" } : undefined}>
       <span className="grow">{text}</span>
     </div>
   );
 }
 
 /// One cell of the role table: a check and "Yes", or what a person who may not approve is told.
-function Allowed({ role, yes, no }: { role: "cell"; yes: boolean; no: string }) {
+function Allowed({ yes, no }: { yes: boolean; no: string }) {
   return (
-    <span role={role} style={columnStyle} className={yes ? undefined : "mut"}>
+    <span role="cell" style={columnStyle} className={yes ? undefined : "mut"}>
       {yes ? (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <CheckIcon />
@@ -422,7 +424,7 @@ function Allowed({ role, yes, no }: { role: "cell"; yes: boolean; no: string }) 
 
 /// A helper, as the board draws one: their account, since when and on how many devices, and what they may approve, with
 /// "Remove" at the right. Remove opens the board's dialog in the row and does nothing until it is answered yes.
-function HelperRow({ helper, tone, owner, shopName, covering, locked, busy, asking, error, onAsk, onKeep, onRemove }: {
+function HelperRow({ helper, tone, owner, shopName, covering, locked, busy, asking, onAsk, onKeep, onRemove }: {
   helper: PeopleHelper;
   tone: number;
   owner: string;
@@ -431,7 +433,6 @@ function HelperRow({ helper, tone, owner, shopName, covering, locked, busy, aski
   locked: boolean;
   busy: boolean;
   asking: boolean;
-  error: string | undefined;
   onAsk: () => void;
   onKeep: () => void;
   onRemove: (name: string) => void;
@@ -470,7 +471,6 @@ function HelperRow({ helper, tone, owner, shopName, covering, locked, busy, aski
           </div>
         </div>
       )}
-      {error && <RowError text={error} />}
     </li>
   );
 }
@@ -601,7 +601,7 @@ function CoverBoard({ people, owner, busy, locked, errors, onSet, onEnd }: {
           {helpers.length > 0 ? W.noCover(owner) : W.needHelper(owner)}
         </p>
       )}
-      {errors.clear && <RowError text={errors.clear} />}
+      {errors.clear && <Failed text={errors.clear} />}
       {helper && (
         <form aria-label={W.setCover} onSubmit={(event) => void submit(event)}
           style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 12, padding: "0 10px" }}>
@@ -624,7 +624,7 @@ function CoverBoard({ people, owner, busy, locked, errors, onSet, onEnd }: {
             {busy === "cover" ? W.settingCover : W.setCover}
           </button>
           <div id="cover-until-help" className="help" style={{ flexBasis: "100%" }}>{W.untilHelp}</div>
-          {errors.cover && <RowError text={errors.cover} />}
+          {errors.cover && <Failed text={errors.cover} wide />}
         </form>
       )}
     </>

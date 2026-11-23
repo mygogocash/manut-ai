@@ -463,6 +463,24 @@ describe("cancelling an invite", () => {
   });
 });
 
+describe("cancelling an invite that is already gone", () => {
+  it("keeps saying so after the refreshed list has no row left for the message to sit in", async () => {
+    const invite = { id: "inv-1", name: "Beam", identity: { kind: "line", id: "beam" } as const, status: "pending" as const,
+      createdAt: "2026-11-23T01:00:00.000Z", expiresAt: "2026-11-30T01:00:00.000Z", inviteUrl: "https://web.test/join/x" };
+    const getPeople = vi.fn()
+      .mockResolvedValueOnce(emptyPeople({ invites: [invite] }))
+      .mockResolvedValue(emptyPeople());
+    const revokeInvite = vi.fn(async () => { throw new ApiError(409, "not_pending"); });
+    peopleView(stubApi({ getPeople, revokeInvite }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel invite" }));
+    await waitFor(() => expect(getPeople).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel invite" })).toBeNull());
+    expect(screen.getByRole("alert").textContent)
+      .toBe("That invite was already used or cancelled, so it cannot be cancelled. The list was refreshed.");
+  });
+});
+
 describe("removing a helper", () => {
   it("asks once more in the board's words, and does nothing until the operator says yes", async () => {
     const api = peopleView();
@@ -501,15 +519,21 @@ describe("removing a helper", () => {
     expect(within(rowWith("Passed on by Mint", NOTES)).getByText("Money")).toBeTruthy();
   });
 
-  it("says the list moved on when the helper is already gone, and reads the list again", async () => {
-    const getPeople = vi.fn(async () => emptyPeople({ helpers: [MINT] }));
+  it("says the list moved on when the helper is already gone, reads the list again, and keeps saying so once the row is gone", async () => {
+    // The first read has Mint; by the second, someone else has removed Mint, so the refreshed list has no row for the message
+    // to sit in.
+    const getPeople = vi.fn()
+      .mockResolvedValueOnce(emptyPeople({ helpers: [MINT] }))
+      .mockResolvedValue(emptyPeople());
     const removeHelper = vi.fn(async (): Promise<HelperRemoval> => { throw new ApiError(404, "not_a_helper"); });
     peopleView(stubApi({ getPeople, removeHelper }), T1, "t1");
     await screen.findByRole("list", { name: PEOPLE });
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Mint" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("That person is no longer a helper. The list was refreshed.");
     await waitFor(() => expect(getPeople).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove" })).toBeNull());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("That person is no longer a helper. The list was refreshed.");
   });
 
   it("says what else the removal did: the invites it cancelled, and a cover it did not end", async () => {
