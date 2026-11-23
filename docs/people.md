@@ -136,8 +136,9 @@ helper.
 
 ## Not built yet
 
-- A helper's list of the shops they help, for a new device that has no shop id yet. Today the shop's id comes in the
-  `joined` answer.
+- (Built since, 24 Nov 2026: a helper's list of the shops they help is `GET /v1/shops`, with a session per shop from
+  `POST /v1/shops/session`; see `docs/several-shops.md`. A helper who joined before it is listed once they open the
+  shop again.)
 - The owner managing helpers from their own session; the operator routes do it in the pilot.
 - Telling the owner about a helper's new device (the canvas does it on LINE, which is parked). The audit log has it.
 - Showing on the owner's link page who decided a reply.
