@@ -1,3 +1,4 @@
+import { auditAdminRoute } from "./audit-log";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
@@ -193,6 +194,8 @@ const ADMIN_METHODS = new Set([
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
+  // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
+  "GET /v1/admin/audit",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -602,6 +605,11 @@ export default {
     // above already required both credentials and an exact method.
     const model = await modelAdminRoute(request, url, env, ctx);
     if (model) return model;
+
+    // The shop's audit log (audit-log.ts), read-only. The admin gate above already required both credentials and
+    // the exact method.
+    const audit = await auditAdminRoute(request, url, env);
+    if (audit) return audit;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
