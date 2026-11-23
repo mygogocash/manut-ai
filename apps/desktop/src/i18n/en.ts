@@ -2053,4 +2053,9 @@ export const en = {
   "pause.hint": "One button stops the whole team at the next safe point. Use it when something looks wrong and you want to look first.",
   "pause.not1": "It does not unsend anything.",
   "pause.not2": "It does not take your pages offline.",
+  // where a job's page and the activity log are opened from
+  "history.kind.job": "Job",
+  "home.recent": "Recent work",
+  "home.seeHistory": "See history",
+  "pn.recentWork": "Recent work",
 };

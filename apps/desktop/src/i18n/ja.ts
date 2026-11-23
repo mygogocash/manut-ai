@@ -2040,4 +2040,9 @@ export const ja: Record<Key, string> = {
   "pause.hint": "ボタン1つでチーム全体が次の安全なところで止まります。何かおかしいと感じて、まず確かめたいときに使ってください。",
   "pause.not1": "送信済みのものを取り消すことはありません。",
   "pause.not2": "ページを非公開にすることはありません。",
+  // where a job's page and the activity log are opened from
+  "history.kind.job": "仕事",
+  "home.recent": "最近の仕事",
+  "home.seeHistory": "履歴を見る",
+  "pn.recentWork": "最近の仕事",
 };

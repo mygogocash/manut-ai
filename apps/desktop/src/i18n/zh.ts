@@ -2040,4 +2040,9 @@ export const zh: Record<Key, string> = {
   "pause.hint": "一个按钮就能让整个团队在下一个安全点停下。当你觉得哪里不对、想先看一看时可以用它。",
   "pause.not1": "它不会撤回任何已发出的内容。",
   "pause.not2": "它不会让你的页面下线。",
+  // where a job's page and the activity log are opened from
+  "history.kind.job": "工作",
+  "home.recent": "最近的工作",
+  "home.seeHistory": "查看历史记录",
+  "pn.recentWork": "最近的工作",
 };

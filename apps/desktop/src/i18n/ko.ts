@@ -2040,4 +2040,9 @@ export const ko: Record<Key, string> = {
   "pause.hint": "버튼 하나로 팀 전체가 다음 안전한 지점에서 멈춰요. 뭔가 이상해서 먼저 살펴보고 싶을 때 쓰세요.",
   "pause.not1": "이미 보낸 것을 되돌리지는 않아요.",
   "pause.not2": "페이지를 내리지는 않아요.",
+  // where a job's page and the activity log are opened from
+  "history.kind.job": "작업",
+  "home.recent": "최근 작업",
+  "home.seeHistory": "기록 보기",
+  "pn.recentWork": "최근 작업",
 };

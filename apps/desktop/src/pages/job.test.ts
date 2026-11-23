@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang, t } from "../i18n";
 import type { Job, JobStage, RecipientStatus } from "../runtime/mission";
-import { initialOf, recipientTag, satangText, stageTag, stepTime, timeline, tookText, traceRows, traceText, traceTotal } from "./job";
+import { initialOf, recipientTag, satangText, stageTag, stepTime, timeline, tookText, traceRows, traceText, traceTotal, whenText } from "./job";
 
 const NOW = new Date(2026, 10, 22, 12, 0).getTime();
 const at = (day: number, h = 9, m = 14) => new Date(2026, 10, day, h, m).getTime() / 1000;
@@ -171,5 +171,14 @@ describe("the trace", () => {
 
   it("leaves the tokens out of the total line when none was used", () => {
     expect(traceText({ ...job, trace: [trace[0]] }).split("\n").at(-1)).toBe("Total · ฿0");
+  });
+});
+
+describe("when a job last moved, where a list names it", () => {
+  it("is the time today, and the day too on another day, so a list of work never reads ambiguously", () => {
+    expect(whenText(at(22, 9, 20), NOW)).toBe("09:20");
+    expect(whenText(at(21, 18, 40), NOW)).toBe("Yesterday 18:40");
+    expect(whenText(at(20, 11, 30), NOW)).toBe("Friday 11:30");
+    expect(whenText(new Date(2026, 10, 3, 3, 0).getTime() / 1000, NOW)).toBe("Nov 3 03:00");
   });
 });

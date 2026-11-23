@@ -79,6 +79,13 @@ const RECIPIENT: Record<RecipientStatus, { word: Key; cls: string }> = {
 
 export const recipientTag = (status: RecipientStatus): { word: Key; cls: string } => RECIPIENT[status];
 
+/** When a job last moved, as a list of work names it: the time today, and the day with the time on another day ("Yesterday
+ *  18:40"), so a list of work never reads ambiguously. */
+export function whenText(atSec: number, nowMs: number): string {
+  const time = hhmm(new Date(atSec * 1000));
+  return sameDay(atSec, nowMs / 1000) ? time : `${dayLabel(atSec, nowMs)} ${time}`;
+}
+
 /** The first letter of the given name, past Khun, for the small round face beside a customer. */
 export function initialOf(name: string): string {
   const given = name.trim().replace(/^(khun\s+|คุณ\s*)/i, "");
