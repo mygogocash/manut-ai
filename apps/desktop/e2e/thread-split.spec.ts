@@ -89,15 +89,15 @@ async function splitIntoTwo(page: Page) {
   await setup(page);
   await mock("mock.answer", { bot: "kami", text: SPLIT_ANSWER });
   await send(page, MAIN_ASK);
-  const tree = page.getByTestId("threads-kami");
-  await expect(tree.getByRole("treeitem")).toHaveCount(2);
+  // the two threads show as link lines under the answer; the tree of the bot's threads left with the sidebar (ThreadTree.tsx
+  // is no longer rendered), so the links stand for the threads: each carries its thread's id
   const links = page.getByTestId("thread-link");
   await expect(links).toHaveCount(2);
-  return { tree, links };
+  return { links };
 }
 
-test("two manut-thread blocks: two rows under Kami, two link lines, no raw block text, tasks sent to each", async ({ page }) => {
-  const { tree, links } = await splitIntoTwo(page);
+test("two manut-thread blocks: two link lines, no raw block text, tasks sent to each", async ({ page }) => {
+  const { links } = await splitIntoTwo(page);
   await expect(links.nth(0)).toContainText("OG 대시보드 502 원인 찾기");
   await expect(links.nth(1)).toContainText("v0.3 릴리스 노트 초안");
   await expect(page.getByTestId("timeline")).toContainText("두 갈래로 나눠서 스레드 두 개에서 진행할게요.");
@@ -109,7 +109,7 @@ test("two manut-thread blocks: two rows under Kami, two link lines, no raw block
   // the main send carried the threads note; each task went to its own thread, with no note
   const main = (await submits()).filter((x) => !x.session);
   expect(main.map((x) => [x.text, x.hint])).toEqual([[MAIN_ASK, true]]);
-  const ids = await tree.getByRole("treeitem").evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")));
+  const ids = await links.evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")));
   const tasks = await threadSubmits();
   expect(tasks.map((x) => x.text)).toEqual(["OG 대시보드 /v1/responses 502 원인을 gateway 로그에서 찾아줘", "v0.3 릴리스 노트 초안을 docs/RELEASE.md에 써줘"]);
   expect(new Set(tasks.map((x) => x.session))).toEqual(new Set(ids));
@@ -133,8 +133,6 @@ test("the real model's layout (JSON on the opening fence line, close on the next
   ].join("\n");
   await mock("mock.answer", { bot: "kami", text: answer });
   await send(page, "설정 페이지 dark-mode toggle 추가하고 v0.3 release notes도 써줘");
-  const tree = page.getByTestId("threads-kami");
-  await expect(tree.getByRole("treeitem")).toHaveCount(2);
   const links = page.getByTestId("thread-link");
   await expect(links).toHaveCount(2);
   await expect(links.nth(0)).toContainText("Settings dark-mode toggle");
@@ -149,12 +147,13 @@ test("the real model's layout (JSON on the opening fence line, close on the next
 });
 
 test("a route block asks first; Send there moves the message into that thread; still two rows", async ({ page }) => {
-  const { tree } = await splitIntoTwo(page);
-  const ids = await tree.getByRole("treeitem").evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")!));
+  const { links } = await splitIntoTwo(page);
+  const ids = await links.evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")!));
   const ogId = (await threadSubmits()).find((x) => x.text.includes("502"))!.session;
   expect(ids).toContain(ogId);
   // wait for both thread turns to finish before the next main turn
-  await expect.poll(async () => (await tree.getByRole("treeitem").evaluateAll((els) => els.map((e) => e.getAttribute("data-state"))))).toEqual(["done", "done"]);
+  // (the bridge's own list says whether a thread's turn is still running)
+  await expect.poll(async () => ((await mock("thread.list", { bot: "kami" })).threads as { running: boolean }[]).map((t) => t.running)).toEqual([false, false]);
   const before = (await calls("chat.send")).length;
   const ask = "로그 보니까 14:31부터 keep-alive 리셋이 몰려 있어";
   await mock("mock.answer", { bot: "kami", text: "이건 OG 대시보드 502 스레드에서 이어가는 게 좋겠어요.\n" + fence("manut-thread-route", { thread: ogId }) });
@@ -173,7 +172,7 @@ test("a route block asks first; Send there moves the message into that thread; s
   await expect.poll(async () => (await calls("chat.send")).slice(before + 1).map((c) => c.params)).toEqual([{ bot: "kami", session: ogId, text: ask }]);
   await expect(page.getByTestId("thread-route-done")).toBeVisible();
   await expect(page.getByTestId("thread-link")).toHaveCount(3);
-  await expect(tree.getByRole("treeitem")).toHaveCount(2); // a route never makes a thread
+  // a route never makes a thread: the bot still has two (the list the app reads, below)
   expect(((await mock("thread.list", { bot: "kami" })).threads as unknown[]).length).toBe(2);
   // the message is in that thread
   await page.getByTestId("thread-link").last().click();
@@ -196,7 +195,8 @@ test("Keep here moves nothing; a simple answer opens nothing; a route to an unkn
   await expect(page.getByTestId("thread-route")).toHaveCount(0);
   // a real thread, then a route to it: Keep here closes the card and sends nothing
   const { threads } = await mock("mock.threads", { bot: "kami", threads: [{ title: "Nightly 빌드 실패 원인", ago: 60 }] });
-  await expect(page.getByTestId("threads-kami").getByRole("treeitem")).toHaveCount(1);
+  // the bot's list holds the thread, which the app reads before the route can name it
+  await expect.poll(async () => ((await mock("thread.list", { bot: "kami" })).threads as unknown[]).length).toBe(1);
   const before = (await calls("chat.send")).length;
   await mock("mock.answer", { bot: "kami", text: "Nightly 스레드 이야기 같아요.\n" + fence("manut-thread-route", { thread: threads[0] }) });
   await send(page, "캐시 키 바꾼 뒤로 다시 깨졌어");

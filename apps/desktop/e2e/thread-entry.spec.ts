@@ -10,7 +10,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
+
+/** Why the tests of a bot's row (its thread tree, its + and its row menu) are skipped: those left with the sidebar.
+ *  BotRow.tsx and ThreadTree.tsx are no longer rendered. Threads are opened from the composer, listed on History and in
+ *  the side menu's Recent list. */
+const NO_BOT_ROW = "a bot's row in the sidebar, with its thread tree, its + and its row menu, left with the sidebar (BotRow.tsx and ThreadTree.tsx are no longer rendered)";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -76,7 +81,7 @@ test("./ lists ./thread first; ./thread alone opens an empty thread with the com
   const id = await created(page);
   expect((await calls("thread.create"))[0].params.bot).toBe("kami");
   await expect(page.getByTestId("thread-empty")).toBeVisible();
-  await expect(page.getByTestId(`thread-row-${id}`)).toBeVisible();
+  // (the thread's row was in its bot's tree in the sidebar, which left with it; the new thread is the open chat above)
   // nothing was sent anywhere, and the thread's composer has the focus
   expect(await calls("chat.send")).toEqual([]);
   await expect(page.getByTestId("composer")).toBeFocused();
@@ -94,7 +99,7 @@ test("./thread <text> opens a thread and sends <text> there as its first message
   await expect.poll(async () => (await calls("chat.send")).map((c) => c.params)).toEqual([{ bot: "kami", session: id, text: "OG 대시보드 502 원인 찾기" }]);
   await expect(page.getByTestId("thread-title")).toHaveText("OG 대시보드 502 원인 찾기");
   // the main chat got nothing: no bubble with the command or the text
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await expect(page.getByTestId("thread-chat")).toHaveCount(0);
   await expect(page.locator(".pane").getByText("OG 대시보드 502 원인 찾기")).toHaveCount(0);
   expect((await mock("mock.submits")).submits.filter((s: { session?: string }) => !s.session)).toEqual([]);
@@ -102,7 +107,7 @@ test("./thread <text> opens a thread and sends <text> there as its first message
 
 test("./thread mid-message, ./threads and a path go out as typed", async ({ page }) => {
   await setup(page);
-  await page.getByTestId("bot-friren").click(); // a bot with no turn running, so the send goes out at once
+  await openChat(page, "friren"); // a bot with no turn running, so the send goes out at once
   await page.getByTestId("composer").click();
   await page.keyboard.type("run ./thread later");
   await expect(page.getByTestId("thread-picker")).toHaveCount(0);
@@ -116,8 +121,10 @@ test("./thread mid-message, ./threads and a path go out as typed", async ({ page
 
 test("inside a thread, ./thread opens a sibling thread under the same bot", async ({ page }) => {
   await setup(page);
-  await page.getByTestId("bot-kami").click({ button: "right" });
-  await page.getByTestId("row-new-thread").click();
+  // the first thread: `./thread` alone in the main chat (the row menu's New thread left with the sidebar)
+  await page.getByTestId("composer").click();
+  await page.keyboard.type("./thread ");
+  await page.keyboard.press("Enter");
   const first = await created(page);
   await page.keyboard.type("./thread 두 번째 일");
   await page.keyboard.press("Enter");
@@ -126,10 +133,12 @@ test("inside a thread, ./thread opens a sibling thread under the same bot", asyn
   await expect(chat).not.toHaveAttribute("data-thread", first);
   const second = (await chat.getAttribute("data-thread"))!;
   await expect.poll(async () => (await calls("chat.send")).map((c) => c.params)).toEqual([{ bot: "kami", session: second, text: "두 번째 일" }]);
-  await expect(page.getByTestId("threads-kami").locator("[data-thread]")).toHaveCount(2);
+  // both threads are the bot's (the list the app reads; the tree in the sidebar left with it)
+  await expect.poll(async () => ((await mock("thread.list", { bot: "kami" })).threads as unknown[]).length).toBe(2);
 });
 
 test("no New thread line under a bot: the tree holds only its threads; the row's + is the way in", async ({ page }) => {
+  test.skip(true, NO_BOT_ROW);
   await setup(page);
   // khope (2026-11-19): a "+ New thread" line always under the bot is too much. Kami is open with no threads: nothing
   await expect(page.getByTestId("threads-kami")).toHaveCount(0);
@@ -149,6 +158,7 @@ test("no New thread line under a bot: the tree holds only its threads; the row's
 });
 
 test("the row's + opens a new thread; an offline bot has no + and no New thread in its menu", async ({ page }) => {
+  test.skip(true, NO_BOT_ROW);
   await setup(page);
   await page.getByTestId("bot-row-friren").hover();
   const plus = page.getByTestId("bot-new-friren");
@@ -174,6 +184,7 @@ test("the row's + opens a new thread; an offline bot has no + and no New thread 
 });
 
 test("the row menu sets New thread apart: its own group with an icon and a divider, then the management items", async ({ page }) => {
+  test.skip(true, NO_BOT_ROW);
   await setup(page);
   await page.getByTestId("bot-kami").click({ button: "right" });
   const menu = page.getByTestId("row-menu");
@@ -199,6 +210,7 @@ test("the row menu sets New thread apart: its own group with an icon and a divid
 });
 
 test("shots: sidebar with threads (no New thread line), the ./th picker, the row menu (ko, dark and light)", async ({ page }) => {
+  test.skip(true, NO_BOT_ROW);
   test.skip(!SHOTS, "MANUT_SHOTS not set");
   mkdirSync(SHOTS, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });
