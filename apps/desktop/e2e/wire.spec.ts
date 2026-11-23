@@ -557,11 +557,9 @@ test("folders: collapse persists across a reload; collapsed header shows count a
   await expect(page.locator(`[data-testid=term-group][data-cwd="${API}"]`)).toHaveAttribute("data-collapsed", "true");
 });
 
-// Opening a session of a collapsed folder reveals the folder. In this build it does not: the reveal runs in the session
-// list's effect (SessionsSection.tsx), which is mounted only on the Code page, and a session opened while its terminal is
-// in view never reveals its folder. Not fixed here.
-test.skip("folders: opening a session of a collapsed folder reveals its folder", async ({ page }) => {
-  test.skip(true, "app bug: a session opened while its terminal is in view does not reveal its collapsed folder (the reveal runs in the session list's effect, which is not mounted then), so the folder stays collapsed on the Code page");
+// Opening a session of a collapsed folder reveals the folder, even while its terminal is in view and the Code page's list is
+// not drawn (sessions/revealOpen.ts watches the open session, not the list).
+test("folders: opening a session of a collapsed folder reveals its folder", async ({ page }) => {
   test.setTimeout(90_000);
   await open(page, { keep: true });
   const b = await newTerm(page, "shell", API);

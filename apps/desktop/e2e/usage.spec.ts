@@ -113,11 +113,10 @@ test("hover shows the card: plan, then each window with % and reset", async ({ p
   await expect(page.getByTestId("usage-card")).toHaveCount(0);
 });
 
-// The card's caret, and its span over the footer's icon row, are checked apart: the caret falls short of the hovered
-// mark in this build (an app question, not fixed here), and the Automations count the span covered moved to the Customize
-// page, so the footer no longer has it to cover.
-test.skip("the caret points at the hovered mark", async ({ page }) => {
-  test.skip(true, "app: the usage card's caret (--caret, measured from the foot row) falls 3.5px short of the Codex mark in this build; not fixed here");
+// The card's caret, and its span over the footer's icon row, are checked apart: the Automations count the span covered moved
+// to the Customize page, so the footer no longer has it to cover. The caret is measured from the card's own inner edge
+// (usageFormat.ts `caretOffset`), so it points at the middle of the hovered mark whatever the card's inset.
+test("the caret points at the hovered mark", async ({ page }) => {
   await open(page);
   for (const id of ["codex", "claude"]) {
     await page.getByTestId(`usage-${id}`).hover();
