@@ -106,7 +106,8 @@ mod tests {
     const ACP_ARGS: [&[&str]; 2] = [&["acp"], &["--acp"]];
 
     /// Each row is one consistent agent: the id is the program, a chat, one of the two ACP arguments, the adapter
-    /// named the same, and its mark a file that ships.
+    /// named the same, and its mark a file name the desktop looks up. Manut AI ships none of the vendors' logos
+    /// (docs/decisions.md): the desktop draws a letter mark when the file is missing (src/ui/AgentIcon.tsx).
     #[test]
     fn every_row_is_one_agent() {
         let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/agents");
@@ -119,7 +120,8 @@ mod tests {
             assert!(ACP_ARGS.contains(&e.args), "{id}: {:?}", e.args);
             assert_eq!((e.acp.id, e.acp.label), (id, e.agent.label), "{id}");
             assert!(e.acp.skill_tool.is_none() && e.acp.rules.is_none(), "{id}: a generic agent has no rule probe");
-            assert!(assets.join(e.mark).is_file(), "{id}: {}", e.mark);
+            assert!(e.mark.ends_with(".svg") && !e.mark.contains('/'), "{id}: {}", e.mark);
+            assert!(!assets.join(e.mark).exists(), "{id}: {} ships, but the vendors' logos are left out", e.mark);
             assert!(e.install.starts_with("npm install -g "), "{id}");
             assert!(crate::sessions::AGENTS.iter().all(|a| a.id != id), "{id} is also a built-in");
         }
