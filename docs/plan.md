@@ -159,6 +159,8 @@ plain state object; storing it is not part of this task. No operation throws: a 
 
 Done when: each operation, each refusal, the customer rule, the fingerprint rule and Thai text are tested.
 
+Done on cloud/shop-memory, 23 Nov 2026: `packages/shop-memory` with remember, propose, confirm, correct, forget, usable and exportFacts, FNV-1a fingerprints for Forget and the customer-waits rule (28 tests).
+
 ### books
 `packages/books` (`@manut/books`). Ton's arithmetic for the daily sales summary and the month's books. It may
 use `@manut/format` (`workspace:*`) for `splitVat`. Reading orders from a shop and sending books to FlowAccount
