@@ -139,7 +139,26 @@ type Payment = {
   operator prune. Shops, reply records and payments stay until the shop is deleted.
 - **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute).
 - **CORS.** The approval routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator routes do
-  not answer CORS: the console must be served from the same origin as the API (see `docs/plan.md`).
+  not answer CORS and need none: the Worker serves the web app from its own origin (below).
+
+## One origin
+
+`apps/api`'s Worker also serves `apps/web` (`assets` and `build` in `apps/api/wrangler.jsonc`), so
+`WEB_ORIGIN` and `PUBLIC_API_ORIGIN` are both the Worker's own origin.
+
+- `/v1/*` and `/relay/*` always reach the Worker, even when a person opens one in a browser.
+- Every other path is the web app: a file when one matches, otherwise its one page, which picks the screen from
+  the path (`/approve/{token}`, `/ops`).
+- `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the
+  pages call the API that served them and a deploy never ships a missing or stale web app.
+- The pages' headers (`apps/web/public/_headers`): no framing (`X-Frame-Options: DENY`, `frame-ancestors
+  'none'`), `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Robots-Tag: noindex,
+  nofollow`; approval pages also `Cache-Control: no-store`. They never apply to the API's answers.
+- Cloudflare Access: one application on the Worker's host, covering `/ops` and `/v1/admin/*` and nothing else;
+  `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*` and `/v1/pilot/*`, LINE's `/v1/inbound/*` and
+  `/v1/health` stay public.
+- `pnpm --filter @manut/api test` checks the routing, the headers and the admin gate on a local Worker
+  (`scripts/one-origin-contract.mjs`, `scripts/admin-access-contract.mjs`).
 - **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body.
 
 Not built yet: an operator route to export or delete one shop's pilot data (the functions exist and are tested).

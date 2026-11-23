@@ -9,8 +9,9 @@
     "dev": "wrangler dev",
     "check": "wrangler deploy --dry-run --outdir=.wrangler/dry-run",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:access": "node scripts/admin-access-contract.mjs"
+    "test": "vitest run && node scripts/admin-access-contract.mjs && node scripts/one-origin-contract.mjs",
+    "test:access": "node scripts/admin-access-contract.mjs",
+    "test:origin": "node scripts/one-origin-contract.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
