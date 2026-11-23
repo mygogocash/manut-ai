@@ -6,6 +6,9 @@ calls only). Anything about money, legal, launch dates or customers goes to the 
 
 | Date | Decision | Why | By | Undo by |
 | --- | --- | --- | --- | --- |
+| 23 Nov 2026 | Tests run on GitHub Actions (Linux) for every pull request | Takes test runs off the 8 GB Mac; the organisation is on the free plan, whose included minutes stop at zero spend unless a limit is raised | Claude | Delete `.github/workflows/test.yml` |
+| 23 Nov 2026 | `.claude/settings.json` denies pushing to main, force pushes, merging pull requests and staging or production deploys | The owner's limits hold in every permission mode, not only by habit | Claude | Edit the deny list |
+| 23 Nov 2026 | A decision on an older revision is refused even when it is a decline; a helper can neither approve nor decline owner-only kinds | The person must act on the exact request they saw; stricter than GoSpark, which let a decline through | Claude | `evaluateDecision` in `packages/approval-core` |
 | 23 Nov 2026 | PromptPay QR refuses any id that is not a 10-digit mobile number, a 13-digit national or tax id, or a 15-digit e-wallet id, and any all-zero id | A guessed id sends a customer's money to someone else | Claude | Loosen `targetOf` in `packages/promptpay` |
 | 23 Nov 2026 | Pilot web pages use the design canvas's own CSS (`@manut/ui-kit`), not shadcn/ui; English first with every string in one table | Fastest route to pages that match the canvas; shadcn arrives with the desktop app in P3; Thai is parked | Claude | Swap the components when P3 starts |
 | 23 Nov 2026 | Owners have no accounts in week 1: each reply is approved through a signed, single-use link that expires in 24 hours, with consent asked once on that page | The pilot runs over LINE; a login would slow every approval | Claude | Add LINE Login and keep the link as a fallback |

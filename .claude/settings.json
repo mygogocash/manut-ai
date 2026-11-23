@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test*)",
+      "Bash(pnpm typecheck*)",
+      "Bash(pnpm build*)",
+      "Bash(pnpm install*)",
+      "Bash(pnpm -r *)",
+      "Bash(pnpm --filter *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git fetch*)",
+      "Bash(gh pr create --draft*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh run view*)",
+      "Bash(gh run list*)"
+    ],
+    "deny": [
+      "Bash(git push origin main*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh repo delete*)",
+      "Bash(wrangler deploy --env prod*)",
+      "Bash(wrangler deploy --env staging*)",
+      "Bash(pnpm exec wrangler deploy --env prod*)",
+      "Bash(pnpm exec wrangler deploy --env staging*)",
+      "Bash(npx wrangler deploy --env prod*)",
+      "Bash(npx wrangler deploy --env staging*)"
+    ]
+  }
+}

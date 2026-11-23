@@ -1,0 +1,15 @@
+{
+  "name": "@manut/approval-core",
+  "private": true,
+  "type": "module",
+  "description": "Settle-once approvals: who may decide, whether a decision still stands, and a store that settles each request once.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
