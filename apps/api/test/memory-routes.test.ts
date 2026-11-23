@@ -316,6 +316,15 @@ describe("a body the routes cannot use", () => {
     }
     expect(await post({ tenant: freshTenant("big"), text: "x".repeat(20_000) })).toEqual({ status: 413, body: { error: "body_too_large" } });
   });
+
+  it("answers invalid_text, not a failure, for words just inside the Worker's limit: what the Worker adds is not counted against the sender", async () => {
+    // The body the Worker forwards also carries the time and the operator, so it is a little larger than the one it read.
+    // All ASCII, so a string's length is its size in bytes: this body is eight bytes under the Worker's 16 KB.
+    const tenant = freshTenant("edge");
+    const text = "x".repeat(16 * 1024 - JSON.stringify({ tenant, text: "" }).length - 8);
+    expect(JSON.stringify({ tenant, text }).length).toBe(16 * 1024 - 8);
+    expect(await admin<Refused>("POST", "/v1/admin/memory/remember", { tenant, text })).toEqual({ status: 400, body: { error: "invalid_text" } });
+  });
 });
 
 describe("the limit of 200 facts", () => {

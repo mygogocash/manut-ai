@@ -228,6 +228,15 @@ describe("a shop's object that cannot answer", () => {
     }
   });
 
+  it("answers invalid_text for words too long to be a fact, and invalid_request for a proposal too large to send at all", async () => {
+    const tenant = freshTenant("large");
+    expect(await proposeFact(bindings, tenant, "x".repeat(20_000), ORDERS)).toEqual({ ok: false, reason: "invalid_text" });
+    expect(await proposeFact(bindings, tenant, "x".repeat(40_000), ORDERS)).toEqual({ ok: false, reason: "invalid_request" });
+    const { stand } = standIn(async () => Response.json({ error: "body_too_large" }, { status: 413 }));
+    expect(await proposeFact(stand, "memory-propose:large", "A fact", ORDERS)).toEqual({ ok: false, reason: "invalid_request" });
+    expect(await facts(tenant)).toEqual([]);
+  });
+
   it("is not asked at all for a tenant that is not one", async () => {
     const { stand, calls } = standIn(async () => Response.json({}, { status: 200 }));
     for (const tenant of ["", "t".repeat(257), undefined as unknown as string]) {

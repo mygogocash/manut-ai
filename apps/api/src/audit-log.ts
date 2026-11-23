@@ -12,7 +12,7 @@
 /// the action it records:
 ///
 /// - When that record lives in the same TenantObject (the shop, its LINE pointer, a reply's record and decision time,
-///   payments, consent, the model cap), the entry goes into the same storage write (`auditPut`, `auditPutSync`), so
+///   payments, consent, the model cap, what the team knows), the entry goes into the same storage write (`auditPut`, `auditPutSync`), so
 ///   the entry exists exactly when the record does. An entry that cannot be made as given (a malformed actor from a
 ///   caller) is not written; the shop's miss count goes up in that same write instead, and the action goes ahead.
 /// - When the record lives in another object (task objects, AuthObject), the entry is appended after the action

@@ -124,8 +124,8 @@ function isFact(value: unknown): value is Fact {
 /// There is no route for it, so no operator can make a worker's proposal, and no worker can confirm one.
 ///
 /// It never throws: the job it was called from is not the memory's to fail. The answer is the fact, or why it was
-/// not kept: a refusal of the package's, `invalid_request` for a tenant that is not one, or `unavailable` when the
-/// shop's object cannot be reached or does not answer as it should. `actor` is who the log names: the worker's attempt
+/// not kept: a refusal of the package's, `invalid_request` for a tenant that is not one or a proposal too large to send,
+/// or `unavailable` when the shop's object cannot be reached or does not answer as it should. `actor` is who the log names: the worker's attempt
 /// when the job flow gives it, Manut AI's system otherwise. `now` is the clock of the caller, for tests.
 export async function proposeFact(
   env: MemoryEnv,
@@ -142,6 +142,12 @@ export async function proposeFact(
       nowMs: (options.now ?? Date.now)(),
       ...(options.actor ? { actor: options.actor } : {}),
     });
+    // A proposal too large for the shop's object to read is not a fact or a source of any shop: it cannot be sent, which
+    // is not the object failing.
+    if (response.status === 413) {
+      await response.body?.cancel();
+      return { ok: false, reason: "invalid_request" };
+    }
     const answer: unknown = await response.json();
     if (response.status === 200 && isFact(answer)) return { ok: true, fact: answer };
     if (ANSWERED.has(response.status) && isRecord(answer) && typeof answer.error === "string" && REASONS.has(answer.error)) {

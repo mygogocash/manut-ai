@@ -27,7 +27,10 @@ import { actorOr, auditPutSync, type AuditAction, type AuditActor, type AuditOut
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 
-const MAX_BODY_BYTES = 16 * 1024;
+/// Twice what the Worker reads from an operator (memory.ts). The body the Worker forwards also carries the time and the
+/// operator, so with the same limit, words that were just inside the Worker's would be refused here as too large instead of
+/// as too long. A body larger than this is not a fact or a source of any shop, and is answered 413.
+const MAX_BODY_BYTES = 32 * 1024;
 /// The longest id the object looks up. The package's ids are `f1`, `f2` and so on: this is far past any real one.
 const MAX_ID = 64;
 /// The longest name, detail or chat reference a fact's source may hold. The package only checks that they are not
