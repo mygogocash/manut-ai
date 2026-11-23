@@ -1,0 +1,15 @@
+{
+  "name": "@manut/slip-rules",
+  "private": true,
+  "type": "module",
+  "description": "Pure rules that compare a read payment slip with an order. A match never marks an order paid.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
