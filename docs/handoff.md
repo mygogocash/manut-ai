@@ -96,8 +96,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the Playwright revival (#15) and `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - items 16 (the deletion follow-up) and 17 (the owner's pages as an installable web app), then 15 (a helper's new
-     device, after 13), as the plan lists them;
+   - item 16 (the deletion follow-up; Opus, since it changes the wipe's order), then 15 (a helper's new device,
+     after 13); item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - item 12, the desktop running an approved submit step, after 8b and browser control's slice 2; the cloud
      outpost after that.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
