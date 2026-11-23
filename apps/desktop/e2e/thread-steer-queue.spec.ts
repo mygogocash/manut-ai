@@ -122,9 +122,11 @@ test("removing a thread that holds messages never sends them; the main chat and 
   await mock("mock.steerMode", { bot: "kami", mode: "reject" });
   await page.reload();
   // threads open from History by title (their rows in the sidebar's tree left with the sidebar)
-  const titleOf: Record<string, string> = { [a]: "Removed", [b]: "Kept" };
+  // A Map, not an object literal: the ids come back from the mock server, and writing them as property names would let a
+  // reply such as "__proto__" reach the object's prototype (CodeQL js/remote-property-injection).
+  const titleOf = new Map<string, string>([[a, "Removed"], [b, "Kept"]]);
   const open = async (id: string) => {
-    await openThread(page, titleOf[id]);
+    await openThread(page, titleOf.get(id) ?? id);
     await expect(page.getByTestId("thread-chat")).toHaveAttribute("data-thread", id);
   };
   const heldRow = (text: string) => page.locator("[data-testid=bubble-user][data-held]", { hasText: text });
