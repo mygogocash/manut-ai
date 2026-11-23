@@ -14,6 +14,15 @@ import {
   type Standing,
 } from "@manut/approval-core";
 import { readJsonBody } from "./body";
+import {
+  BROWSER_SUBMIT,
+  SUBMIT_GRANT_REVISION,
+  SUBMIT_KINDS,
+  submitText,
+  submitWriteOf,
+  type SubmitDetail,
+  type SubmitPayload,
+} from "./browser-writes";
 import { isValidCompanyId } from "./companies";
 import { isValidLinePushProposal, LINE_PUSH_OPERATION, lineReplyText } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
@@ -177,6 +186,13 @@ function canTransition(from: string, to: string): boolean {
 /// dispatch share this one rule.
 function isSettled(doc: TaskDocJSON): boolean {
   return doc.state === "completed" || doc.state === "cancelled";
+}
+
+/// Why the begin gate will not move an action in `state` (anything but approved or dispatching): settled already,
+/// waiting for its decision, or decided against.
+function notBeginReason(state: ActionProposalJSON["state"]): string {
+  if (state === "confirmed" || state === "failed" || state === "unknown") return "already_settled";
+  return state === "proposed" ? "not_approved" : "already_decided";
 }
 
 /// Client-submittable lifecycle commands. Every edge is legal in the base
@@ -873,13 +889,14 @@ export class TaskObject extends DurableObject {
     if (request.method === "POST" && url.pathname === "/attempts/sweep") {
       return this.sweepAttempts(request);
     }
-    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|draft|end|outpost-events)$/);
+    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|ask-submit|draft|end|outpost-events)$/);
     if (request.method === "POST" && attemptJob) {
       const attemptId = attemptJob[1];
       if (!attemptId) return Response.json({ error: "invalid_request" }, { status: 400 });
       if (attemptJob[2] === "events") return this.reportEvents(request, attemptId);
       if (attemptJob[2] === "outpost-events") return this.outpostEvents(request, attemptId);
       if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
+      if (attemptJob[2] === "ask-submit") return this.askSubmit(request, attemptId);
       if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
@@ -1119,35 +1136,100 @@ export class TaskObject extends DurableObject {
       : undefined;
     if (!kind) return Response.json({ error: "unsupported_operation" }, { status: 400 });
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.openAskedSync(request, attemptId, parsed.value.fence, checked.fields, (proposal) => ({
+      kind,
+      detail: {
+        actionId: proposal.id,
+        operationType: proposal.operationType,
+        targetResourceId: proposal.targetResourceId,
+        payloadHash: proposal.payloadHash,
+      },
+    })));
+  }
+
+  /// `POST /attempts/:id/ask-submit` with exactly `{ fence, write, site, expiresAt }`: a worker's browser write
+  /// (browser-writes.ts), after the control plane ran member-grants' `decide` and checked the write's sign-in. The write
+  /// is checked again here and stored as an immutable proposal whose payload is the write with the site's name, and its
+  /// request opened in the same transaction: of the kind the fixed table gives the write's action, never one the caller
+  /// names (a body naming a kind, or anything else, is refused), with a detail naming the site, the page, the form and
+  /// every value, and the control plane's own sentence saying so. Only the attempt that holds the task may ask.
+  private async askSubmit(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const body = parsed.value;
+    const keys = isPlainObject(body) ? Object.keys(body) : [];
+    const write = isPlainObject(body) ? submitWriteOf(body.write) : "invalid_write";
+    const site = isPlainObject(body) && typeof body.site === "string" ? body.site.trim() : "";
+    const expiresAt = isPlainObject(body) && typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : Number.NaN;
+    const nowMs = Date.now();
+    if (keys.length !== 4 || !["fence", "write", "site", "expiresAt"].every((key) => keys.includes(key)) ||
+        typeof write === "string" || site.length === 0 || [...site].length > 80 || /[\u0000-\u001f\u007f]/.test(site) ||
+        !Number.isFinite(expiresAt) || expiresAt <= nowMs || expiresAt > nowMs + 30 * 24 * 3600 * 1000) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const origin = new URL(write.url).origin;
+    const payload: SubmitPayload = { ...write, site };
+    const fields: HashedActionFields = {
+      connectionId: write.signInId,
+      providerAccountId: write.signInId,
+      operationType: BROWSER_SUBMIT,
+      targetResourceId: origin,
+      resourceScope: [origin],
+      payload,
+      grantRevision: SUBMIT_GRANT_REVISION,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.openAskedSync(request, attemptId, body.fence, hashed, (proposal) => ({
+      kind: SUBMIT_KINDS[write.action],
+      detail: {
+        actionId: proposal.id,
+        operationType: BROWSER_SUBMIT,
+        action: write.action,
+        site,
+        signInId: write.signInId,
+        origin,
+        url: write.url,
+        form: write.form,
+        values: write.values,
+        text: submitText(write, site),
+        payloadHash: proposal.payloadHash,
+      } satisfies SubmitDetail,
+    })));
+  }
+
+  /// A worker's ask, in one transaction: the exact action stored as a proposal bound to its request, and the request
+  /// opened through approval-core with the two options, an expiry with the action's, and the stamp of the asking
+  /// attempt. Only the attempt that holds the task may ask, since a request from any other would be superseded the
+  /// moment it opened. `asked` gives the request's kind and detail from the stored proposal.
+  private openAskedSync(request: Request, attemptId: string, fence: unknown, fields: ProposalFields,
+    asked: (proposal: ActionProposalJSON) => { kind: ApprovalKind; detail: unknown }): SyncAnswer {
     const id = crypto.randomUUID();
-    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+    return this.ctx.storage.transactionSync((): SyncAnswer => {
       const kv = this.ctx.storage.kv;
       const doc = this.writableDocSync(kv, request);
       if ("status" in doc) return doc;
       const nowMs = Date.now();
       const nowS = nowMs / 1000;
-      const live = this.liveAttemptSync(kv, doc, attemptId, parsed.value.fence, nowS);
+      const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
       if (!live.ok) return live.answer;
       if (this.runningAttemptSync(kv, nowS) !== attemptId) return { status: 409, body: { error: "stale_attempt" } };
       const stamps = this.takeWriteStampSync(kv);
       if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
       const proposal: ActionProposalJSON = {
-        ...newProposal(id, doc.tenantId ?? request.headers.get("x-tenant") ?? "", doc.companyId, checked.fields,
+        ...newProposal(id, doc.tenantId ?? request.headers.get("x-tenant") ?? "", doc.companyId, fields,
           new Date(nowMs).toISOString()),
         requestId: id,
       };
+      const { kind, detail } = asked(proposal);
       const opened = openTransition(kv.get<ApprovalRecord>(`request:${id}`), {
         id,
         kind,
         options: JOB_REQUEST_OPTIONS,
         attemptId,
         expiresAt: Date.parse(proposal.expiresAt),
-        detail: {
-          actionId: id,
-          operationType: proposal.operationType,
-          targetResourceId: proposal.targetResourceId,
-          payloadHash: proposal.payloadHash,
-        },
+        detail,
       }, nowMs);
       if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };
       kv.put(`action:${id}`, proposal);
@@ -1156,7 +1238,7 @@ export class TaskObject extends DurableObject {
       kv.put("writeStamps", stamps);
       this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:propose:${id}` }]);
       return { status: 200, body: { action: proposal, request: opened.result.request } };
-    }));
+    });
   }
 
   /// The approval-core record that decides `action`: its stored request, or, for a reply stored before replies carried
@@ -1941,9 +2023,18 @@ export class TaskObject extends DurableObject {
   /// crash past five minutes is marked unknown rather than retried blindly.
   /// The copy handed over is only ever the content the human approved:
   /// begin recomputes payloadHash and answers payload_changed otherwise.
+  ///
+  /// A browser write (browser-writes.ts) is begun here too, and only by the control plane (`x-control`) as its step is
+  /// handed to an outpost, with the step's `{ revision, attemptId }`: no session's dispatch, no broker and no read begins
+  /// one. In the same step as the move it must still be approved at the revision the step names, and the step's attempt
+  /// must still hold the task, as a decision on its request would need.
   private async beginDispatch(request: Request, id: string): Promise<Response> {
     const action = await this.loadAction(request, id);
     if (action instanceof Response) return action;
+    const browserWrite = action.operationType === BROWSER_SUBMIT;
+    if (browserWrite && request.headers.get("x-control") !== "1") {
+      return Response.json({ error: "begin_by_step" }, { status: 409 });
+    }
     if (action.state === "dispatching") {
       const at = Date.parse(action.dispatch?.at ?? "");
       if (Number.isFinite(at) && Date.now() - at > 5 * 60 * 1000) {
@@ -1954,11 +2045,7 @@ export class TaskObject extends DurableObject {
       return Response.json({ error: "dispatch_in_flight" }, { status: 409 });
     }
     if (action.state !== "approved") {
-      const terminal = ["confirmed", "failed", "unknown"].includes(action.state);
-      return Response.json(
-        { error: terminal ? "already_settled" : action.state === "proposed" ? "not_approved" : "already_decided" },
-        { status: 409 },
-      );
+      return Response.json({ error: notBeginReason(action.state) }, { status: 409 });
     }
     if (Date.parse(action.expiresAt) <= Date.now()) {
       await this.ctx.storage.put(`action:${id}`, { ...action, state: "expired" });
@@ -1972,37 +2059,76 @@ export class TaskObject extends DurableObject {
     if ((await payloadHash(actionHashable(action))) !== action.payloadHash) {
       return Response.json({ error: "payload_changed" }, { status: 409 });
     }
-    let body: { grantRevision?: unknown };
+    let body: { grantRevision?: unknown; revision?: unknown; attemptId?: unknown };
     const begun = await readJsonBody<typeof body>(request, MAX_BODY_BYTES);
     if (!begun.ok) return Response.json({ error: begun.error }, { status: begun.status });
     body = begun.value;
     if (body.grantRevision !== action.grantRevision) {
       return Response.json({ error: "grant_changed", current: action.grantRevision }, { status: 409 });
     }
+    if (browserWrite && (typeof body.revision !== "number" || !Number.isSafeInteger(body.revision) ||
+        body.revision < 1 || typeof body.attemptId !== "string" || !body.attemptId)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
     const doc = await this.load();
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     if (isSettled(doc)) return Response.json({ error: "task_settled" }, { status: 409 });
-    const moving: ActionProposalJSON = {
-      ...action,
-      state: "dispatching",
-      dispatch: { at: new Date().toISOString() },
-    };
-    await this.ctx.storage.put(`action:${id}`, moving);
-    await this.appendEvent(doc, {
-      kind: "updated",
-      to: doc.state,
-      rev: doc.rev,
-      via: `action:dispatch:${id}`,
-    });
-    return Response.json(moving);
+    // Hashing and reading the body above let other requests in, so a second begin may have moved the action meanwhile.
+    // It is read again and moved in one transaction: of any number of begins at once, one moves it and the others hear
+    // that it is already moving.
+    const step = browserWrite ? { revision: body.revision as number, attemptId: body.attemptId as string } : null;
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const current = kv.get<ActionProposalJSON>(`action:${id}`);
+      const now = kv.get<TaskDocJSON>("task");
+      if (!current || !now) return { status: 404, body: { error: "not_found" } };
+      if (current.state === "dispatching") return { status: 409, body: { error: "dispatch_in_flight" } };
+      if (current.state !== "approved") return { status: 409, body: { error: notBeginReason(current.state) } };
+      if (current.payloadHash !== action.payloadHash) return { status: 409, body: { error: "payload_changed" } };
+      if (isSettled(now)) return { status: 409, body: { error: "task_settled" } };
+      if (step) {
+        const refused = this.writeStepRefusalSync(kv, id, step, Date.now() / 1000);
+        if (refused) return { status: 409, body: { error: refused } };
+      }
+      const moving: ActionProposalJSON = { ...current, state: "dispatching", dispatch: { at: new Date().toISOString() } };
+      kv.put(`action:${id}`, moving);
+      this.appendEventsSync(kv, now, [{ kind: "updated", via: `action:dispatch:${id}` }]);
+      return { status: 200, body: moving };
+    }));
+  }
+
+  /// Why a browser write's step may not begin it now, or null: its request is no longer approved at the revision the
+  /// step was bound to (`request_changed`; approval-core never revises a decided request, so this guards against a
+  /// change from anywhere else), or the step's attempt no longer runs or no longer holds the task (`attempt_ended`).
+  private writeStepRefusalSync(kv: SyncKvStorage, id: string, step: { revision: number; attemptId: string },
+    nowS: number): string | null {
+    const record = kv.get<ApprovalRecord>(`request:${id}`);
+    if (record?.status !== "decided" ||
+        record.request.options.find((option) => option.id === record.decision.optionId)?.effect !== "approve") {
+      return "not_approved";
+    }
+    if (record.request.revision !== step.revision || record.decision.seenRevision !== step.revision) {
+      return "request_changed";
+    }
+    const attempt = kv.get<AttemptJSON>(`attempt:${step.attemptId}`);
+    if (!attempt || attempt.status !== "active" || attempt.leaseUntil <= nowS || attempt.deadline <= nowS ||
+        this.runningAttemptSync(kv, nowS) !== step.attemptId) {
+      return "attempt_ended";
+    }
+    return null;
   }
 
   /// Settles a dispatching action. Confirmed carries the provider's
   /// operation id and receipt; failed carries finality; unknown carries
   /// deliberate ambiguity — and stays unknown until a human re-proposes.
+  ///
+  /// A browser write is settled only by the control plane (`x-control`), from its step's report (browser-writes.ts).
   private async settleDispatch(request: Request, id: string): Promise<Response> {
     const action = await this.loadAction(request, id);
     if (action instanceof Response) return action;
+    if (action.operationType === BROWSER_SUBMIT && request.headers.get("x-control") !== "1") {
+      return Response.json({ error: "settle_by_report" }, { status: 409 });
+    }
     if (action.state !== "dispatching") {
       return Response.json({ error: "not_dispatching" }, { status: 409 });
     }

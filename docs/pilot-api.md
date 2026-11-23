@@ -440,11 +440,11 @@ What is written, and by whom:
 | `consent.given`, `consent.withdrawn` | owner | none | `ok` |
 | `reply.decided` | owner | `taskId`, `actionId` | `approved` or `declined` |
 | `deletion.decided` | owner | `confirmationId` | `approved` or `declined` |
-| `dispatch.started` | system | `taskId`, `actionId` | `ok` |
-| `dispatch.settled` | system | `taskId`, `actionId` | `confirmed`, `failed` or `unknown` |
+| `dispatch.started` | system | `taskId`, `actionId` | `ok`; a browser write's when its step is handed out |
+| `dispatch.settled` | system | `taskId`, `actionId` | `confirmed`, `failed` or `unknown`; a browser write's from its step's report, or `failed` when it was begun but could not be handed out |
 | `attempt.started` | system | `taskId`, `attemptId` | `ok` |
 | `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
-| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
+| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId`; a browser write's `signInId`, and no `requestId` or `actionId` when none was opened | `ok`; for a browser write also `refused` with why (`not_my_job`, `not_connected`, `unknown_member`, `invalid_write`, `member_not_allowed` and so on), or `skipped` with `draft_only` in practice mode |
 | `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the linked account's id for an owner session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
@@ -463,8 +463,8 @@ What is written, and by whom:
 | `signin.broken` | worker | `signInId`, `taskId`, `attemptId` | `ok`, or `refused` (`member_not_allowed`, `sign_in_not_found`) |
 | `signin.redeemed` | outpost | `outpostId`; for a grant the vault found, also `signInId`, `taskId`, `attemptId`, `grantId` | `ok`, or `refused` with the refusal as the `reason` |
 | `outpost.removed`, `outpost.credential_rotated` | operator | `outpostId` | `ok` |
-| `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId` | `ok`, or `refused` with the refusal as the `reason` |
-| `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
+| `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok`, or `refused` with the refusal as the `reason` |
+| `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
 | `browser_step.reported` | outpost | `outpostId`; for a step the vault found, also `stepId`, `taskId`, `attemptId`, and a sign-in step's `signInId` and `grantId` | `done`, `failed` with the outpost's code (or `text_withheld`) as the `reason`, or `refused` with the refusal |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
@@ -782,9 +782,10 @@ the shop's vault object) and `apps/api/src/browser-control.ts` (the routes).
   has a credential of its own, given once when it is registered.
 - A **grant** is one outpost's permission to type one sign-in for one worker's attempt, once, within 60 seconds. A
   worker asks for it through the job flow's port (below); there is no route to ask for one.
-- A **browser step** is one thing a worker asks an outpost's browser to do in its attempt: open a page, read it, or
-  sign in with a grant. Reading only, for now. A worker queues it through the port; the outpost asks for its steps and
-  reports how each went, and the outcome lands in the attempt's events.
+- A **browser step** is one thing a worker asks an outpost's browser to do in its attempt: open a page, read it, sign
+  in with a grant, or submit a write the owner approved. A worker queues it through the port; the outpost asks for its
+  steps and reports how each went, and the outcome lands in the attempt's events. A write step (`submit`) can be queued
+  only for an approved approval-core request naming the exact write ("Submitting through a browser", below).
 
 The operator's routes are under the admin gate, each an exact `ADMIN_METHODS` entry, with the tenant and ids in the
 query or the body. The outposts' routes are public paths that need the outpost's credential as
@@ -822,16 +823,17 @@ type Outpost = {
 // A browser step as the worker that queued it sees it.
 type BrowserStep = {
   stepId: string;
-  kind: "open" | "read" | "sign_in";
+  kind: "open" | "read" | "sign_in" | "submit";
   outpostId: string;
   // queued until its outpost takes it, taken while it runs (and until its report has landed in the attempt's events),
   // then how it ended; expired when it did not end within its time
   state: "queued" | "taken" | "done" | "failed" | "refused" | "expired";
   queuedAt: string;
   expiresAt: string;             // two minutes after it was queued, or its grant's end if sooner
-  url?: string;                  // open: the page
+  url?: string;                  // open: the page; submit: the approved write's page
   selector?: string;             // read: the part of the page; absent reads the whole page
-  signInId?: string;             // sign_in: the grant's sign-in
+  signInId?: string;             // sign_in: the grant's sign-in; submit: the write's sign-in
+  requestId?: string;            // submit: the approved request it carries
   code?: string;                 // failed or refused: why
   text?: string;                 // a read that is done: what it read
 };
@@ -839,11 +841,15 @@ type BrowserStep = {
 // A browser step as its outpost is handed it.
 type OutpostStep = {
   stepId: string;
-  kind: "open" | "read" | "sign_in";
-  url?: string;                  // open
+  kind: "open" | "read" | "sign_in" | "submit";
+  url?: string;                  // open; submit: the page the write is made on
   selector?: string;             // read, when it reads part of the page
   grantId?: string;              // sign_in: redeem it, then type into the page that is open
-  origins: string[];             // the origins its browser may be on for this step; anywhere else stops it
+  action?: SubmitAction;         // submit: what the write is ("Submitting through a browser", below)
+  form?: string;                 // submit: the form it submits, or the control (a button) it presses, as a selector
+  values?: { field: string; value: string }[];  // submit: each field (a selector) and exactly what goes in it, in order
+  origins: string[];             // the origins its browser may be on for this step; anywhere else stops it; submit: the
+                                 // page's origin alone
   expiresAt: string;
 };
 ```
@@ -966,6 +972,18 @@ so a sign-in removed or broken since it was queued takes its origins with it, an
 
 With no step waiting the answer is `{ steps: [] }`, and the switches, consent and the audit log are not touched.
 
+A write step (`submit`) is checked further before it leaves. It needs `officeExternalWrites` too: while that switch is
+off it is refused for good (`feature_disabled`), and the outpost's read steps are still handed out. Its `origins` are
+its page's origin alone, while that is still an origin of the write's sign-in, working and naming the step's member
+(otherwise `sign_in_not_found`, `member_not_allowed`, `sign_in_broken` or `origin_not_allowed`). Once the vault has
+taken it, the task object's one-use begin gate, the one the broker uses, moves the approved write to dispatching, in one
+step with checking that its request is still approved at the revision the step names (`not_approved`,
+`request_changed`), that the write is neither begun nor past its time (`dispatch_in_flight`, `already_settled`,
+`action_expired`), and that the step's attempt still runs and holds the task (`attempt_ended`). A step the gate refuses
+is refused for good and never handed out; the write it carried stays approved, and a new step can carry it. Only a begun
+write's step is handed out, and its `action`, `url`, `form` and `values` are the approved copy's that the gate hands
+back, so the outpost gets exactly what the owner approved and nothing else.
+
 ### `POST /v1/outposts/steps/report`
 
 With the outpost's credential, `{ tenant, outpostId, stepId, outcome, code?, text? }` reports how a step it was handed
@@ -975,7 +993,14 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
   with no text); the other kinds carry no text.
 - `outcome: "failed"` with `code`, one of `origin_not_allowed` (a page was, or went, off the step's origins, and the
   outpost stopped there), `page_unavailable`, `selector_not_found`, `sign_in_refused` (the site refused the saved
-  password), `grant_refused` (the redeem was refused), `timed_out`, `browser_error`; and no text.
+  password), `grant_refused` (the redeem was refused), `submit_refused` (a write step's site refused what was submitted
+  and kept the form), `timed_out`, `browser_error`; and no text.
+
+A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
+id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
+`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`) is `failed`, and any other is `unknown`,
+since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
+attempt (the step then reads refused, as below). A write step brings back no text.
 
 The outcome lands in the attempt's events as two agent events, a tool call in the agent event contract:
 `{ type: "toolStarted", id: stepId, call: { kind: "web", title, output: "", status: "running", edits: [], startedAt } }`
@@ -1022,9 +1047,10 @@ No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), 
   is issued for the sign-in until a new password is typed. Only a member named on it can report it
   (`member_not_allowed`). A second report keeps the first's time and member.
 - `browserStep(step)` answers a `BrowserStep`, `queued`. The step is `{ kind: "open", outpostId, url }`,
-  `{ kind: "read", outpostId, selector? }` or `{ kind: "sign_in", outpostId, grantId }`. The port reads the switches,
-  consent and the attempt's own heartbeat as for `signIn`, and the member is the task object's record of the attempt.
-  Refusals: the port's own; `step_kind_not_allowed` (any other kind: a step that submits is the next slice);
+  `{ kind: "read", outpostId, selector? }`, `{ kind: "sign_in", outpostId, grantId }`, or a write,
+  `{ kind: "submit", outpostId, requestId, revision }` ("Submitting through a browser", below). The port reads the
+  switches, consent and the attempt's own heartbeat as for `signIn`, and the member is the task object's record of the
+  attempt. Refusals: the port's own; `step_kind_not_allowed` (any other kind);
   `invalid_request` (a field another kind takes); `outpost_not_found`, `outpost_asleep`; `invalid_url` (not https, an
   account in it, a space, over 2,048 characters); `origin_not_allowed` (an `open` whose origin is not one of a working
   sign-in the member is named on, or a `read` for a member named on none); `invalid_selector` (blank, over 256
@@ -1035,21 +1061,125 @@ No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), 
 - `browserStepOutcome(stepId)` answers the `BrowserStep` as it stands, with `code` once it failed or was refused and
   `text` once a read is done; `step_not_found` for another attempt's step. A step whose outpost reported
   `sign_in_refused` carries its `signInId`, for `signInBroken`.
+- `askSubmit(write)` asks to submit a write through a browser, and `browserStep({ kind: "submit", ... })` queues it once
+  it is approved: "Submitting through a browser", below.
 
 **Rules**
 
 - **No password anywhere else.** No answer, task event, browser step, log line, audit entry or export holds a
   password, except the redeem's answer to the outpost its grant names. A read whose text holds one is withheld. The
   tests search every answer, the vault's records and the export for it.
-- **Reading by default.** Browser steps open, read and sign in. A step that would submit anything other than a read
-  (an order, a reply, a refund, a post) is refused (`step_kind_not_allowed`) until it can go through member-grants'
-  `decide` and an approval-core request naming the exact action first, as every write does
-  (`docs/browser-control.md`).
+- **Reading by default.** Browser steps open, read and sign in from what a worker asks. A step that would submit
+  anything other than a read (an order, a reply, a refund, a post, a setting) goes through member-grants' `decide` and
+  an approval-core request naming the exact write first, as every write does, and the outpost submits it once, through
+  the broker's one-use begin gate ("Submitting through a browser", below; `docs/browser-control.md`).
 - **Audit.** `signin.*`, `outpost.*` and `browser_step.*`, with ids only ("Audit log", above).
 - **Export and deletion.** The tenant export carries `signIns` and `outposts` as the operator lists them. The tenant
   deletion wipes every sign-in (tombstones too), outpost, grant and browser step with the shop's vault. Grants and
   steps are not exported: they live a minute or two, the audit log keeps their history, and a step's outcome that
   landed is in its task's events, which are.
+
+### Submitting through a browser
+
+A step that writes (`docs/browser-control.md`, "Reading by default, and asking before submitting"). The code is
+`apps/api/src/browser-writes.ts`. There is no route: a worker asks and queues through the job flow's port, the owner
+decides through the approval routes ("Deciding from a session", below), and the outpost takes and reports a write step
+through its step routes (above).
+
+```ts
+type SubmitAction = "send_reply" | "place_order" | "change_order" | "refund" | "publish_post" | "change_setting";
+
+// What a worker asks to submit. Every field is required, and a field a write does not have is refused.
+type SubmitWrite = {
+  action: SubmitAction;
+  signInId: string;              // the site: one of the shop's sign-ins
+  url: string;                   // the page: https, on one of the sign-in's origins, as the URL parser writes it
+  form: string;                  // the form it submits, or the control (a button) it presses, as a selector
+  values: { field: string; value: string }[];  // 0 to 20: each field a distinct selector (1 to 256 characters, no
+                                 // control character), each value at most 5,000 characters (tabs and line breaks
+                                 // allowed), the whole write at most 12 KB as JSON
+};
+```
+
+**The action decides the kind**, through a fixed table in the control plane, never through the worker's word. A write
+naming a kind, or any other field, is refused (`invalid_write`), and an action off the list has no kind at all
+(`unknown_action`).
+
+| Action | Member-grants job | Approval kind | Who may approve |
+| --- | --- | --- | --- |
+| `send_reply`: a private answer in a conversation a customer started, such as the site's chat | Nam, `reply_customers` | `reply` | the owner or a helper; from a notification too |
+| `place_order` | Nam, `place_orders` | `money` | the owner |
+| `change_order`: its items, its address, or cancelling it | Nam, `change_orders` | `money` | the owner |
+| `refund` | Ton, `ask_refund` | `money` | the owner |
+| `publish_post`: anything the public sees, an answer to a public review included | Pim, `publish_posts` | `public_post` | the owner |
+| `change_setting`: one of the shop's own settings on the site | Kit, `run_command` | `command` | the owner |
+
+Anything the table does not know is `command`, the owner's only. Each job's kind in member-grants' roster is the table's
+kind for its action, and a disagreement is refused (`kind_mismatch`) rather than settled either way.
+
+**`askSubmit(write)`** answers `{ outcome: "asked", requestId, kind, revision, expiresAt }`, or
+`{ outcome: "draft_only", kind, draft }`. In order:
+
+1. The port's own checks, with `officeExternalWrites` as well as `officeCloud`, then the attempt's own heartbeat, which
+   gives the member.
+2. The write's shape: `invalid_write`, `unknown_action`.
+3. Member-grants' `decide` for the member and the action's job, through the write's sign-in as the connection: practice
+   mode runs three days from when the sign-in was added, and a sign-in the site refused, removed or never made is no
+   connection. `not_my_job` answers `{ ok: false, error: "not_my_job", member }` with the member whose job it is;
+   `not_connected` and `refused` (`unknown_member`, `unknown_capability`, `unknown_kind`) stop there too.
+4. The sign-in's own rules: the member is named on it (`member_not_allowed`), and the page is on one of its origins
+   (`origin_not_allowed`).
+5. In practice mode (`draft_only`), the write's text is kept as the attempt's draft, `{ member, job: action, text,
+   about: { signInId }, send: { answer: "draft_only", kind } }`, and no request is raised; a second in the same attempt
+   answers `draft_exists`, as for every draft.
+6. Otherwise the task object stores the exact write as an immutable proposal (`operationType: "browser.submit"`, its
+   payload the write with the site's name, hashed) and opens its approval-core request in the same step, stamped with
+   the attempt, of the table's kind, expiring with the proposal in 24 hours, its detail a `SubmitDetail` (below). Only
+   the attempt that holds the task may ask (`stale_attempt`).
+
+**`browserStep({ kind: "submit", outpostId, requestId, revision })`** queues the write for an outpost once it is
+approved, and answers a `BrowserStep`, `queued`, with `url`, `signInId` and `requestId`. The step carries no values: the
+outpost gets them from the approved write as it is begun. The port's own checks come first, with `officeExternalWrites`.
+Then: `invalid_request` (any other field, or a revision that is not a whole number from 1); `request_not_found` (no such
+request in the task, or one that is not a browser write); `not_approved` (still waiting, declined or withdrawn);
+`request_changed` (approved at another revision than the step names); `already_begun`; `action_expired`; and the
+vault's: `outpost_not_found`, `outpost_asleep`, `sign_in_not_found`, `member_not_allowed`, `sign_in_broken`,
+`origin_not_allowed`, `request_queued` (another step waiting or running carries the request), `too_many_steps`,
+`vault_unavailable`. A step lives two minutes.
+
+**Begun once, only as it is handed out.** The begin gate refuses a browser write from anywhere but the control plane at
+a hand-out (`409 begin_by_step`): a session's `POST /v1/tasks/:id/actions/:actionId/dispatch`, the broker's send after a
+decision, and a worker's read of how its request stands all leave it `approved`. Settling one is the control plane's
+too, from its step's report (`409 settle_by_report`). The begin gate reads the action again and moves it in one storage
+transaction, so of any number of begins at once one moves it (this holds for every action the broker sends).
+
+```ts
+// What a browser write's request names (`record.request.detail`). Its id is the write's action id.
+type SubmitDetail = {
+  actionId: string;
+  operationType: "browser.submit";
+  action: SubmitAction;
+  site: string;                  // the sign-in's name: "Shopee Seller Centre"
+  signInId: string;
+  origin: string;                // the page's origin
+  url: string;
+  form: string;
+  values: { field: string; value: string }[];
+  text: string;                  // what the owner reads, below
+  payloadHash: string;
+};
+```
+
+`text` is the control plane's own sentence and names every value exactly as it will be typed, each quoted as JSON so
+that quotes, line breaks and spaces at either end show: `Make a refund on Shopee Seller Centre
+(https://seller.shopee.co.th). On https://seller.shopee.co.th/portal/sale/return/2291, set input[name="amount"] to
+"500.00", set select[name="reason"] to "damaged", then submit form#refund.` A write with no values reads `On {url},
+submit {form}.`
+
+The desktop does not show a browser write's `text` yet: it reads a request's words from a LINE reply's fields or the
+task's action, so a browser write reads "browser.submit on {origin}". It must show `text` on its cards and
+notifications, and offer Approve in a notification only when it shows the text whole, before any outpost runs a write
+step (`docs/browser-control.md`, "Next slices").
 
 ## One origin
 
@@ -1108,7 +1238,9 @@ shop it was given for. It only reads: deciding is the next section.
   `encodeStanding` (`packages/approval-core/src/wire.ts`), so a client reads both with approval-core's own decoders.
   The standing is read now, at the record's current revision and against the attempt holding its task.
 - **Kinds.** The task object sets each request's kind from the operation it decides, never from whoever proposed it:
-  a LINE reply (`line.message.push`) is `reply`; a worker's `linear.issue.create` is `command`.
+  a LINE reply (`line.message.push`) is `reply`; a worker's `linear.issue.create` is `command`; a worker's browser
+  write (`browser.submit`) takes the kind its action has in the control plane's table ("Submitting through a browser",
+  above). Its detail is a `SubmitDetail`, which names the site, the page, the form and every value.
 - **`state`**, required: `open` lists every record whose standing is `open`, still waiting for a decision; `recent`
   lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
   (`request.createdAt`), then by id.
@@ -1178,7 +1310,8 @@ request id is the one the listing above gives (`record.request.id`).
   gates pass.
 - **Sent once, whichever path approved it.** An approved reply goes to the broker's one-use begin gate, the same gate
   the owner's link sends through, before the answer: the answer's `action` is where it stands then (`confirmed` once
-  LINE has it). A reply approved here is never sent again by its link, and the reverse.
+  LINE has it). A reply approved here is never sent again by its link, and the reverse. An approved browser write is
+  not sent here: it is begun only as its write step is handed to an outpost, so `action` answers `approved`.
 - **Nothing settles an action without its request.** Only approval-core requests are found here; a plain proposal no
   request decides answers 404.
 - **Scope.** The shop's own requests, found through the shop's index and read with the shop's tenant, so one shop's

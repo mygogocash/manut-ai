@@ -385,6 +385,21 @@ describe("action dispatch", () => {
     expect((await dispatch({ grantRevision: 1 })).status).toBe(409);
   });
 
+  it("begins an approved action once, however many begins arrive at the same time", async () => {
+    // The gate hashes the action and reads the body before it moves it, and both let other requests in; the move is
+    // checked again in one transaction, so only the first begin ever reaches a provider.
+    const id = freshID();
+    expect((await create(id, "act-race")).status).toBe(200);
+    const action = (await (await propose(id, proposal())).json()) as ActionProposalJSON;
+    expect((await decide(id, action.id, { approve: true, by: "founder" })).status).toBe(200);
+    const ns = namespaces();
+    const stub = ns.TASK.get(ns.TASK.idFromName(id)) as { fetch(request: Request): Promise<Response> };
+    const begin = () => stub.fetch(new Request(`https://task/actions/${action.id}/begin`, { method: "POST",
+      headers: { "content-type": "application/json", "x-tenant": TENANT }, body: JSON.stringify({ grantRevision: 1 }) }));
+    const answers = await Promise.all([begin(), begin(), begin()]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 409, 409]);
+  });
+
   it("keeps the proposal hash stable for records approved before the re-check", async () => {
     // Approved records already in storage were hashed at propose time. Begin
     // now re-hashes them, so the shape below must never drift: this is the

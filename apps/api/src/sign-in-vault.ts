@@ -39,8 +39,14 @@
 /// - `POST /browser-steps/report` `{ stepId, outpostId, credentialHash, outcome, code?, text? }`: the outpost's report,
 ///   once, held until the Worker has landed it in the attempt's events.
 /// - `POST /browser-steps/settle` `{ stepId, code? }`: the Worker's word on a held report: landed, or refused.
+/// - `POST /browser-steps/submit` `{ outpostId, requestId, revision, signInId, url, action, site, member, taskId,
+///   attemptId }`: a write step, for an approved request the Worker read from the task object (browser-writes.ts), never
+///   from the worker's word. It carries no values: the outpost gets them from the approved write as it is begun.
+/// - `POST /browser-steps/refuse` `{ stepId, code }`: the Worker could not begin a write step it had just taken, so the
+///   outpost never has it.
 
 import { DEFAULT_ROSTER } from "@manut/member-grants";
+import type { SubmitAction, SubmitValue } from "./browser-writes";
 import { appendAudit, type AuditActor, type AuditSubject } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
@@ -363,6 +369,10 @@ export async function signInVaultRoute(
       return reportStep(storage, vaultKeys, tenant, body);
     case "POST /browser-steps/settle":
       return settleStep(storage, tenant, body);
+    case "POST /browser-steps/submit":
+      return queueSubmit(storage, tenant, body);
+    case "POST /browser-steps/refuse":
+      return refuseTaken(storage, tenant, body);
     default:
       return json({ error: "not_found" }, 404);
   }
@@ -661,21 +671,24 @@ async function removeSignIn(storage: DurableObjectStorage, tenant: string, body:
 
 // The step channel: what a worker asks an outpost's browser to do, and how it went (docs/browser-control.md).
 
-/// The steps an outpost's browser may run in this slice, each of them reading: going to a page, reading its text, and
-/// signing in so that it can read. A step that would submit anything (an order, a reply, a refund, a post) goes through
-/// member-grants' `decide` and an approval-core request naming the exact action first. That is the next slice; until it
-/// is built, any kind but these is refused (`step_kind_not_allowed`).
-export const STEP_KINDS = ["open", "read", "sign_in"] as const;
+/// The steps a worker may queue in its own words, each of them reading: going to a page, reading its text, and signing in
+/// so that it can read. Any other kind is refused here (`step_kind_not_allowed`).
+export const READ_STEP_KINDS = ["open", "read", "sign_in"] as const;
+/// Every kind of step, with the one that writes: `submit`, a write an approved approval-core request names exactly
+/// (browser-writes.ts). It is queued only through its own path, with what the Worker read from the approved request.
+export const STEP_KINDS = [...READ_STEP_KINDS, "submit"] as const;
 export type StepKind = (typeof STEP_KINDS)[number];
+type ReadStepKind = (typeof READ_STEP_KINDS)[number];
 
 /// How an outpost may say a step failed: a fixed list, so a report can never carry free text, or anything a page or a
 /// sign-in held, into the task's events or the audit log. `origin_not_allowed`: a page was, or went, somewhere the
 /// step's origins do not include, and the outpost stopped there. `page_unavailable`: the page did not load.
 /// `selector_not_found`: nothing on the page matched the read's selector. `sign_in_refused`: the site refused the
 /// saved password, so the worker reports the sign-in broken (`signInBroken`). `grant_refused`: the redeem was refused,
-/// so there was nothing to type. `timed_out` and `browser_error`: anything else.
+/// so there was nothing to type. `submit_refused`: a write step's site refused what was submitted and kept the form, so
+/// nothing changed. `timed_out` and `browser_error`: anything else.
 export const STEP_FAILURES = ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused",
-  "grant_refused", "timed_out", "browser_error"] as const;
+  "grant_refused", "submit_refused", "timed_out", "browser_error"] as const;
 
 /// A step lives two minutes from when it is queued, or until its grant ends if that is sooner. An outpost asks for its
 /// steps every few seconds and a page loads in seconds, so a step normally ends well inside a minute; two leave room for
@@ -704,14 +717,20 @@ type StepRecord = {
   id: string;
   tenant: string;
   kind: StepKind;
-  /// `open`: the page, written as the URL parser writes it.
+  /// `open`: the page, written as the URL parser writes it. `submit`: the approved write's page.
   url: string | null;
   /// `read`: the part of the page to read; null reads the whole page.
   selector: string | null;
-  /// `sign_in`: the grant it carries, and the grant's sign-in and its site.
+  /// `sign_in`: the grant it carries, and the grant's sign-in and its site. `submit`: no grant; the write's sign-in and
+  /// its site.
   grantId: string | null;
   signInId: string | null;
   site: string | null;
+  /// `submit`: the approved request it carries, the revision it was approved at, and the write's action (for its title).
+  /// Absent on steps queued before write steps existed.
+  requestId?: string | null;
+  revision?: number | null;
+  action?: string | null;
   outpostId: string;
   taskId: string;
   attemptId: string;
@@ -735,7 +754,9 @@ type StepRecord = {
 export type NewBrowserStep =
   | { kind: "open"; outpostId: string; url: string }
   | { kind: "read"; outpostId: string; selector?: string }
-  | { kind: "sign_in"; outpostId: string; grantId: string };
+  | { kind: "sign_in"; outpostId: string; grantId: string }
+  /// A write: the approved request it carries and the revision it was approved at, nothing else (browser-writes.ts).
+  | { kind: "submit"; outpostId: string; requestId: string; revision: number };
 
 /// A step as the worker that queued it sees it. `expired` is a step that did not end within its time. A step reported
 /// but not yet landed in the attempt's events still reads `taken`, so a worker never acts on an outcome its attempt's
@@ -750,23 +771,31 @@ export type BrowserStepView = {
   url?: string;
   selector?: string;
   signInId?: string;
+  /// `submit`: the approved request it carries.
+  requestId?: string;
   code?: string;
   text?: string;
 };
 
-/// A step as its outpost is handed it: what to do, and the origins its browser may be on while doing it.
+/// A step as its outpost is handed it: what to do, and the origins its browser may be on while doing it. A `submit`
+/// step's action, form and values are the approved write's, added by the Worker as the write is begun.
 export type OutpostStep = {
   stepId: string;
   kind: StepKind;
   url?: string;
   selector?: string;
   grantId?: string;
+  action?: SubmitAction;
+  form?: string;
+  values?: SubmitValue[];
   origins: string[];
   expiresAt: string;
 };
 
-/// The ids a step is bound to, for the Worker's audit entries: never its page, what it read, or anything typed.
-export type StepBinding = { stepId: string; taskId: string; attemptId: string; signInId?: string; grantId?: string };
+/// The ids a step is bound to, for the Worker's audit entries: never its page, what it read, or anything typed. A write
+/// step's request is also its action (`requestId`, `actionId`: one id).
+export type StepBinding = { stepId: string; taskId: string; attemptId: string; signInId?: string; grantId?: string;
+  requestId?: string; actionId?: string };
 
 /// A reported step, as the Worker needs it to land its outcome in the attempt's events.
 export type ReportedStep = {
@@ -775,6 +804,8 @@ export type ReportedStep = {
   url: string | null;
   selector: string | null;
   site: string | null;
+  /// `submit`: the write's action, for its title.
+  action: string | null;
   queuedAt: string;
   outcome: "done" | "failed";
   code: string | null;
@@ -806,7 +837,7 @@ export function reportShapeError(fields: Record<string, unknown>): "invalid_repo
 
 /// A page to open, or null: an https URL with no account in it and no space, at most 2,048 characters as given and as
 /// the URL parser writes it.
-function urlOf(value: unknown): URL | null {
+export function urlOf(value: unknown): URL | null {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL || /[\s\u0000-\u001f\u007f]/.test(value)) {
     return null;
   }
@@ -825,7 +856,7 @@ function urlOf(value: unknown): URL | null {
 
 /// The part of a page to read: a selector of 1 to 256 characters with no control character, null for the whole page,
 /// or undefined for anything else.
-function selectorOf(value: unknown): string | null | undefined {
+export function selectorOf(value: unknown): string | null | undefined {
   if (value === undefined) return null;
   if (typeof value !== "string" || value.trim().length === 0 || [...value].length > MAX_SELECTOR || CONTROL.test(value)) {
     return undefined;
@@ -863,7 +894,8 @@ function refusedStep(step: StepRecord, code: string, at: string): StepRecord {
 function bindingOfStep(step: StepRecord): StepBinding {
   return { stepId: step.id, taskId: step.taskId, attemptId: step.attemptId,
     ...(step.signInId !== null ? { signInId: step.signInId } : {}),
-    ...(step.grantId !== null ? { grantId: step.grantId } : {}) };
+    ...(step.grantId !== null ? { grantId: step.grantId } : {}),
+    ...(typeof step.requestId === "string" ? { requestId: step.requestId, actionId: step.requestId } : {}) };
 }
 
 function workerView(step: StepRecord, nowMs: number): BrowserStepView {
@@ -881,6 +913,7 @@ function workerView(step: StepRecord, nowMs: number): BrowserStepView {
     ...(step.url !== null ? { url: step.url } : {}),
     ...(step.selector !== null ? { selector: step.selector } : {}),
     ...(step.signInId !== null ? { signInId: step.signInId } : {}),
+    ...(typeof step.requestId === "string" ? { requestId: step.requestId } : {}),
     ...(ended && step.code !== null ? { code: step.code } : {}),
     ...(ended && step.text !== null ? { text: step.text } : {}),
   };
@@ -898,8 +931,8 @@ function handedStep(step: StepRecord, origins: string[]): OutpostStep {
   };
 }
 
-/// The fields each kind takes besides the outpost, so nothing rides along that nothing reads.
-const STEP_FIELDS: Readonly<Record<StepKind, string>> = { open: "url", read: "selector", sign_in: "grantId" };
+/// The fields each read kind takes besides the outpost, so nothing rides along that nothing reads.
+const STEP_FIELDS: Readonly<Record<ReadStepKind, string>> = { open: "url", read: "selector", sign_in: "grantId" };
 
 /// A step for an outpost to run in the attempt's browser. The member, the task and the attempt come from the control
 /// plane, which read them from the task object; the kind, the outpost and what to do are what the worker asked for. In
@@ -915,7 +948,8 @@ async function queueStep(storage: DurableObjectStorage, tenant: string, body: Re
       !TASK_REF.test(attemptId)) {
     return json({ error: "invalid_request" }, 400);
   }
-  const kind = STEP_KINDS.find((known) => known === body.kind);
+  // A write is never queued from what a worker asked for: only through `/browser-steps/submit`.
+  const kind = READ_STEP_KINDS.find((known) => known === body.kind);
   if (!kind) return json({ error: "step_kind_not_allowed" }, 403);
   if (Object.values(STEP_FIELDS).some((field) => field !== STEP_FIELDS[kind] && body[field] !== undefined)) {
     return json({ error: "invalid_request" }, 400);
@@ -956,7 +990,8 @@ async function queueStep(storage: DurableObjectStorage, tenant: string, body: Re
   const step: StepRecord = { id: crypto.randomUUID(), tenant, kind, url, selector, grantId: carried?.grant.id ?? null,
     signInId: carried?.signIn.id ?? null, site: carried?.signIn.site ?? null, outpostId: outpost.id, taskId, attemptId,
     member, queuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(expiresMs).toISOString(), takenAt: null,
-    reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null };
+    reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null, requestId: null,
+    revision: null, action: null };
   await storage.put({ [keys.step(step.id)]: step,
     ...(carried ? { [keys.grant(carried.grant.id)]: { ...carried.grant, stepId: step.id } satisfies GrantRecord } : {}) });
   return json({ step: workerView(step, nowMs) });
@@ -1003,7 +1038,8 @@ async function pendingSteps(storage: DurableObjectStorage, tenant: string, body:
   const nowMs = Date.now();
   const waiting = (await stepsOf(storage, tenant)).filter((step) => step.outpostId === outpost.id &&
     step.state === "queued" && nowMs < Date.parse(step.expiresAt)).slice(0, MAX_FETCH_STEPS);
-  return json({ steps: waiting.map((step) => ({ stepId: step.id, taskId: step.taskId, attemptId: step.attemptId })) });
+  return json({ steps: waiting.map((step) => ({ stepId: step.id, kind: step.kind, taskId: step.taskId,
+    attemptId: step.attemptId })) });
 }
 
 /// Up to five step ids, or null.
@@ -1031,6 +1067,15 @@ function stepRefusalsOf(value: unknown): { stepId: string; code: string }[] | nu
 /// and a `sign_in` step's grant must still be unused and on time.
 async function allowedNow(storage: DurableObjectStorage, tenant: string, step: StepRecord, nowMs: number):
   Promise<{ origins: string[] } | { code: string }> {
+  if (step.kind === "submit") {
+    // A write's browser may be on its page's origin alone, and only while that is still an origin of the write's
+    // sign-in, working and naming the step's member.
+    const signIn = await liveSignIn(storage, tenant, step.signInId);
+    const refused = unusable(signIn, step.member);
+    if (refused || !signIn) return { code: refused?.error ?? "sign_in_not_found" };
+    const origin = step.url !== null ? new URL(step.url).origin : null;
+    return origin !== null && signIn.origins.includes(origin) ? { origins: [origin] } : { code: "origin_not_allowed" };
+  }
   if (step.kind === "sign_in") {
     const grant = step.grantId !== null ? await storage.get<GrantRecord>(keys.grant(step.grantId)) : undefined;
     if (!grant || grant.tenant !== tenant) return { code: "grant_not_found" };
@@ -1063,7 +1108,7 @@ async function takeSteps(storage: DurableObjectStorage, tenant: string, body: Re
   const nowMs = Date.now();
   const at = new Date(nowMs).toISOString();
   const writes: Record<string, StepRecord> = {};
-  const taken: { step: OutpostStep; binding: StepBinding }[] = [];
+  const taken: { step: OutpostStep; binding: StepBinding; revision?: number }[] = [];
   const refused: { code: string; binding: StepBinding }[] = [];
   const waiting = async (stepId: string) => {
     const step = await stepOf(storage, tenant, stepId);
@@ -1088,7 +1133,8 @@ async function takeSteps(storage: DurableObjectStorage, tenant: string, body: Re
     }
     const handed: StepRecord = { ...step, state: "taken", takenAt: at };
     writes[keys.step(step.id)] = handed;
-    taken.push({ step: handedStep(handed, allowed.origins), binding: bindingOfStep(step) });
+    taken.push({ step: handedStep(handed, allowed.origins), binding: bindingOfStep(step),
+      ...(typeof step.revision === "number" ? { revision: step.revision } : {}) });
   }
   await putAll(storage, writes);
   return json({ taken, refused });
@@ -1166,8 +1212,8 @@ async function reportStep(storage: DurableObjectStorage, vaultKeys: SignInVaultK
     ...(withheld ? { code: "text_withheld", text: null } : { code: said.code, text: said.text }) };
   await storage.put(keys.step(held.id), held);
   return json({ binding: bindingOfStep(held), step: { stepId: held.id, kind: held.kind, url: held.url,
-    selector: held.selector, site: held.site, queuedAt: held.queuedAt, outcome, code: held.code,
-    text: held.text } satisfies ReportedStep });
+    selector: held.selector, site: held.site, action: held.action ?? null, queuedAt: held.queuedAt, outcome,
+    code: held.code, text: held.text } satisfies ReportedStep });
 }
 
 /// The Worker's word on a reported step: landed in the attempt's events, so it stands as the outpost said; or, with a
@@ -1186,6 +1232,62 @@ async function settleStep(storage: DurableObjectStorage, tenant: string, body: R
     : { ...step, state: step.outcome, settledAt: at };
   await storage.put(keys.step(step.id), settled);
   return json({ step: { stepId: step.id, state: settled.state } });
+}
+
+/// A write step for an approved request (browser-writes.ts, `queueSubmitStep`). The request, its revision and the write's
+/// sign-in, page and action are what the Worker read from the task object's approved request, never the worker's word;
+/// the member, the task and the attempt are the control plane's. In order: the outpost (the shop's, and online); the
+/// sign-in (live, naming the member, working) and the page on one of its origins; no other step waiting or running for the
+/// same request, so a request is in one step at a time; and the outpost's room for another step. The values are not
+/// here: the outpost gets them from the approved write as the begin gate moves it, and only then.
+async function queueSubmit(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const { member, taskId, attemptId, requestId, revision, action, site } = body;
+  if (typeof member !== "string" || member.length === 0 || member.length > MAX_MEMBER ||
+      typeof taskId !== "string" || !TASK_REF.test(taskId) || typeof attemptId !== "string" ||
+      !TASK_REF.test(attemptId) || typeof requestId !== "string" || !UUID.test(requestId) ||
+      typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1 ||
+      typeof action !== "string" || !CODE.test(action) || typeof site !== "string" || siteOf(site) !== site) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const page = urlOf(body.url);
+  if (!page) return json({ error: "invalid_request" }, 400);
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const nowMs = Date.now();
+  if (outpostStatus(outpost.lastHeartbeatAt, nowMs) !== "online") return json({ error: "outpost_asleep" }, 409);
+  const signIn = await liveSignIn(storage, tenant, body.signInId);
+  const refused = unusable(signIn, member);
+  if (refused || !signIn) return json({ error: refused?.error ?? "sign_in_not_found" }, refused?.status ?? 404);
+  if (!signIn.origins.includes(page.origin)) return json({ error: "origin_not_allowed" }, 403);
+  const steps = await stepsOf(storage, tenant);
+  const live = (step: StepRecord) => (step.state === "queued" || step.state === "taken" || step.state === "reported") &&
+    nowMs < Date.parse(step.expiresAt);
+  if (steps.some((step) => step.requestId === requestId && live(step))) return json({ error: "request_queued" }, 409);
+  if (steps.filter((step) => step.outpostId === outpost.id && live(step)).length >= MAX_OPEN_STEPS) {
+    return json({ error: "too_many_steps" }, 409);
+  }
+  await pruneSteps(storage, nowMs);
+  const step: StepRecord = { id: crypto.randomUUID(), tenant, kind: "submit", url: page.href, selector: null,
+    grantId: null, signInId: signIn.id, site, outpostId: outpost.id, taskId, attemptId, member,
+    queuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + STEP_TTL_MS).toISOString(), takenAt: null,
+    reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null, requestId, revision,
+    action };
+  await storage.put(keys.step(step.id), step);
+  return json({ step: workerView(step, nowMs) });
+}
+
+/// The Worker's word that a write step it has just taken could not be begun, or begun and handed out, so the outpost
+/// never had it: it is refused with `code`. Only a write step that was taken and not reported can be refused this way.
+async function refuseTaken(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const step = await stepOf(storage, tenant, body.stepId);
+  if (!step) return json({ error: "step_not_found" }, 404);
+  if (typeof body.code !== "string" || !CODE.test(body.code)) return json({ error: "invalid_request" }, 400);
+  if (step.kind !== "submit" || step.state !== "taken") return json({ error: "step_not_taken" }, 409);
+  const refused = refusedStep(step, body.code, new Date().toISOString());
+  await storage.put(keys.step(step.id), refused);
+  return json({ step: { stepId: step.id, state: refused.state } });
 }
 
 /// `GET /browser-steps/view?stepId=&taskId=&attemptId=`: a step as the worker that queued it sees it. A step of another

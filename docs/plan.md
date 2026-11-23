@@ -79,6 +79,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 2 and 3. Routines running on schedule, and applying a shop template (runs wait for the owner's `officeRoutines` and `officeCloud` switches) | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | done | 8a. The outpost's step channel in the API: workers' browser steps (open, read, sign in) reach an outpost and land in the attempt's events; removing an outpost and replacing its credential; an ingress limit on the outpost routes | | Opus |
+| done | Browser control slice 2: submitting steps through approval-core (API). A write step (`submit`) is asked for through member-grants' decide and one approval-core request naming the exact site, page and values, of the kind a fixed table gives its action; once approved it is handed to its outpost once, through the broker's one-use begin gate, which now also holds against begins at the same time (`docs/browser-control.md`) | | Opus |
 | done | 4. Console: the People page | | Sonnet |
 | done | 7. Several shops in one view: the design and the API side (`docs/several-shops.md`); the desktop switcher is next | | Opus |
 | done | Several shops: the console's owner link, and ending a shop session (`docs/several-shops.md`, slices 3 and 5) | | Sonnet |
@@ -88,7 +89,6 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 6. macOS notifications on `@manut/notify-rules`: every notification and the Dock count follow its rules, Approve for messages and replies only, Hide details and quiet hours in Settings | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | running | 8b. The outpost in the desktop shell (this Mac): registering, heartbeat, fetching steps, typing a sign-in only on its origins, reporting | | Opus |
-| running | Browser control, slice 2: a write step (`submit`) asked for through member-grants' decide and one approval-core request naming the exact site, page and values (API) | | Opus |
 | running | Several shops, slice 2: the desktop's switcher in the account row, one Needs you across the shops with each decision sent with its own shop's session, and each shop's offline cache kept apart | | Opus |
 | 12 | The desktop outpost running an approved submit step | 8b, browser control slice 2 | Opus |
 | running | 13. Several shops, slice 4: an owner's shop session reaches the shop's consent, export and memory, and the owner manages helpers (invite, remove, cover) from it, each route its own decision (`docs/several-shops.md`, `docs/people.md` "Not built yet") | | Opus |

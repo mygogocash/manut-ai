@@ -417,7 +417,9 @@ describe("browser steps", () => {
     expect(await signIn(late)).toEqual({ ok: false, error: "grant_expired" });
   });
 
-  it.each(["submit", "click", "type", "post", "", undefined, 42])("refuses a %j step: this slice only reads", async (kind) => {
+  // A write is a `submit` step, queued only from an approved request (browser-submit.test.ts); any other kind is refused.
+  const notSteps = ["click", "type", "post", "SUBMIT", "", undefined, 42];
+  it.each(notSteps)("refuses a %j step: a worker's own words only read", async (kind) => {
     const s = await shop();
     await addSignIn(s.tenant);
     const mac = await outpost(s.tenant);

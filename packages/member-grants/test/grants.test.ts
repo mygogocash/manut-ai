@@ -19,7 +19,7 @@ describe("default roster", () => {
   const ids = (m: string) => DEFAULT_ROSTER.find((x) => x.id === m)!.capabilities.map((c) => c.id);
   it("gives each member its jobs", () => {
     expect(ids("buddy")).toEqual(["route_work"]);
-    expect(ids("nam")).toEqual(["read_orders", "order_status", "reply_customers"]);
+    expect(ids("nam")).toEqual(["read_orders", "order_status", "reply_customers", "place_orders", "change_orders"]);
     expect(ids("pim")).toEqual(["draft_posts", "publish_posts"]);
     expect(ids("ton")).toEqual(["read_payments", "check_slips", "draft_books", "confirm_payment", "send_books", "ask_refund"]);
     expect(ids("kit")).toEqual(["run_command"]);
@@ -34,6 +34,9 @@ describe("default roster", () => {
     expect(kind("confirm_payment")).toBe("payment_confirmation");
     expect(kind("send_books")).toBe("message");
     expect(kind("run_command")).toBe("command");
+    // An order placed or changed may spend, charge or refund the shop's money, so it asks as money: the owner's only.
+    expect(kind("place_orders")).toBe("money");
+    expect(kind("change_orders")).toBe("money");
   });
 });
 
@@ -49,11 +52,14 @@ describe("decide after practice", () => {
     expect(decide("ton", "ask_refund", fresh, now)).toEqual({ answer: "ask", kind: "money" });
     expect(decide("pim", "publish_posts", fresh, now)).toEqual({ answer: "ask", kind: "public_post" });
     expect(decide("kit", "run_command", fresh, now)).toEqual({ answer: "ask", kind: "command" });
+    expect(decide("nam", "place_orders", fresh, now)).toEqual({ answer: "ask", kind: "money" });
+    expect(decide("nam", "change_orders", fresh, now)).toEqual({ answer: "ask", kind: "money" });
   });
   it("says not_my_job naming the member whose job it is", () => {
     expect(decide("nam", "ask_refund", fresh, now)).toEqual({ answer: "not_my_job", member: "ton" });
     expect(decide("ton", "reply_customers", fresh, now)).toEqual({ answer: "not_my_job", member: "nam" });
     expect(decide("buddy", "publish_posts", fresh, now)).toEqual({ answer: "not_my_job", member: "pim" });
+    expect(decide("ton", "change_orders", fresh, now)).toEqual({ answer: "not_my_job", member: "nam" });
   });
   it("says not_connected without a usable connection", () => {
     expect(decide("nam", "reply_customers", null, now)).toEqual({ answer: "not_connected" });
@@ -72,6 +78,7 @@ describe("practice mode", () => {
     expect(decide("nam", "reply_customers", fresh, now)).toEqual({ answer: "draft_only", kind: "reply" });
     expect(decide("ton", "ask_refund", fresh, now)).toEqual({ answer: "draft_only", kind: "money" });
     expect(decide("pim", "publish_posts", fresh, now)).toEqual({ answer: "draft_only", kind: "public_post" });
+    expect(decide("nam", "place_orders", fresh, now)).toEqual({ answer: "draft_only", kind: "money" });
   });
   it("still allows reads", () => {
     expect(decide("nam", "read_orders", fresh, T0 + DAY)).toEqual({ answer: "allowed" });
@@ -129,7 +136,8 @@ describe("rules no data can change", () => {
   });
   it("asks or drafts for money and public posts, never allows", () => {
     for (const t of [T0, T0 + DAY, now, now + 100 * DAY]) {
-      for (const [m, c] of [["ton", "ask_refund"], ["pim", "publish_posts"]] as const) {
+      for (const [m, c] of [["ton", "ask_refund"], ["pim", "publish_posts"], ["nam", "place_orders"],
+        ["nam", "change_orders"]] as const) {
         expect(["ask", "draft_only"]).toContain(decide(m, c, fresh, t).answer);
       }
     }
