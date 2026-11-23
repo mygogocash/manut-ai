@@ -91,7 +91,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | running | Browser control, slice 2: a write step (`submit`) asked for through member-grants' decide and one approval-core request naming the exact site, page and values (API) | | Opus |
 | running | Several shops, slice 2: the desktop's switcher in the account row, one Needs you across the shops with each decision sent with its own shop's session, and each shop's offline cache kept apart | | Opus |
 | 12 | The desktop outpost running an approved submit step | 8b, browser control slice 2 | Opus |
-| 13 | Several shops, slice 4: an owner's shop session reaches the shop's consent, export and memory, and the owner manages helpers (invite, remove, cover) from it, each route its own decision (`docs/several-shops.md`, `docs/people.md` "Not built yet") | | Opus |
+| running | 13. Several shops, slice 4: an owner's shop session reaches the shop's consent, export and memory, and the owner manages helpers (invite, remove, cover) from it, each route its own decision (`docs/several-shops.md`, `docs/people.md` "Not built yet") | | Opus |
 | done | 14. Who decided: the owner's link page names the helper who approved or declined a reply, from the names the shop's people record keeps | | Opus (coordinator) |
 | 15 | A helper's new device: the owner's session reads the shop's new helper sessions, and the desktop shows notify-rules' `new_device` alert | 13 | Sonnet |
 | 16 | Deletion follow-up: a shop whose wipe stopped after its registry row went stays in the console's list as deleting, and its wipe can be resumed | | Sonnet |

@@ -72,6 +72,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 04:23 from `91fc300`, with the desktop's approvals contract, several shops, the console's
   owner link and the outpost's step channel (pages `d40cf7a7`, API `a20dfc84`, the new `OUTPOST_LIMITER` bound);
   smoke-tested: the step and shop-session routes answer 401 without a credential, the admin routes are behind Access.
+- Dev was redeployed on 24 Nov at 06:21 from `e2ab4e7`, with macOS notifications' package changes and the owner's link
+  page naming the helper who decided (pages `c2d41d40`, API `85c2dd36`); smoke-tested: a bad link answers 404, the
+  shops route 401 without a session, the approval page loads, the admin routes are behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -79,19 +82,24 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 11, the Playwright follow-up: the failing specs and a sharded CI job (`test/playwright-follow-up`, Sonnet;
-     it opens a draft pull request into `pilot/week-1`: watch its CI, merge when the Playwright shards are green);
    - item 8b, the outpost in the desktop shell (`feat/desktop-outpost`, Opus; the first local Rust build, in the
      shared target folder `~/Library/Caches/manut-ai-cargo-target`);
    - browser control's slice 2, submitting steps through approval-core (`feat/browser-submit-steps`, Opus, API only);
    - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2,
-     `feat/desktop-shop-switcher`, Opus).
+     `feat/desktop-shop-switcher`, Opus);
+   - item 13, an owner's shop session on the shop's memory, consent and export, and the owner managing helpers
+     (`feat/owner-session-routes`, Opus, API).
+   Item 11, the Playwright follow-up, is pull request #17 into `pilot/week-1`: merge it when its six shards are green.
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, 8a
-   (the outpost's step channel), 9 (desktop leftovers), the Playwright revival (#15) and `notify-rules` (#16).
+   (the outpost's step channel), 9 (desktop leftovers), 14 (the owner's link page naming the helper who decided),
+   the Playwright revival (#15) and `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - the desktop running submit steps, after 8b and browser control's slice 2; the cloud outpost after that.
+   - items 16 (the deletion follow-up) and 17 (the owner's pages as an installable web app), then 15 (a helper's new
+     device, after 13), as the plan lists them;
+   - item 12, the desktop running an approved submit step, after 8b and browser control's slice 2; the cloud
+     outpost after that.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
