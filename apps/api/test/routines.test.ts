@@ -257,6 +257,54 @@ describe("making, reading and changing routines", () => {
     expect((await change(s.tenant, "pause", "")).body).toEqual({ error: "invalid_request" });
   });
 
+  it("keeps a routine's schedule out of reach of the public schedule routes", async () => {
+    const tenant = `routines-session-${crypto.randomUUID()}`;
+    const owner = await tenantSession(tenant);
+    const created = await asSession<{ routine: RoutineView }>(owner, "POST", "/v1/routines",
+      { name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" } });
+    const id = created.body.routine.id;
+    // Listed with the shop's schedules, as its own data, and marked as the routine's.
+    const listed = await asSession<{ schedules: ScheduleJSON[] }>(owner, "GET", "/v1/schedules");
+    expect(listed.body.schedules.find((schedule) => schedule.id === id)).toMatchObject({ routineId: id, hour: 8 });
+    // Saved over, it would mint plain tasks in the routine's place; deleted, the routine would stop without a word.
+    expect(await asSession(owner, "POST", "/v1/schedules", { id, name: "Something else", prompt: "Do something else.",
+      hour: 9, minute: 0, weekdays: [1, 2, 3, 4, 5, 6, 7], timeZone: "Asia/Bangkok", hasSchedulingConsent: true }))
+      .toEqual({ status: 409, body: { error: "routine_schedule" } });
+    expect(await asSession(owner, "DELETE", `/v1/schedules/${id}`))
+      .toEqual({ status: 409, body: { error: "routine_schedule" } });
+    expect((await clockOf(tenant, id)).schedule).toMatchObject({ routineId: id, hour: 8, revision: 1 });
+  });
+
+  it("goes with its shop: the export carries the routines and their runs, and deletion takes them and their clocks",
+    async () => {
+      const created = await admin<{ tenant: string }>("POST", "/v1/admin/pilot/shops",
+        { name: "Short-lived shop", ownerName: "Fon" });
+      const tenant = created.body.tenant;
+      const monthly = await made(tenant, { name: "Month end", action: "brief",
+        trigger: { kind: "monthly", day: 1, at: "09:00" } });
+      await made(tenant, { name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" } });
+      await sweepAt(tenant, nextRun(rulesOf(monthly), Date.now())! + GRACE + MINUTE);
+      expect(await runsOf(tenant, monthly.id)).toHaveLength(1);
+      const exported = await admin<{ routines: { routines: unknown[]; runs: unknown[] } }>("GET",
+        `/v1/admin/pilot/export?tenant=${enc(tenant)}`);
+      expect(exported.status).toBe(200);
+      expect(exported.body.routines.routines).toHaveLength(2);
+      expect(exported.body.routines.runs).toEqual([expect.objectContaining({ routineId: monthly.id, status: "missed" })]);
+
+      // A shop that never went live is deleted at once, and nothing of its routines is left.
+      expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant, confirmName: "Short-lived shop" })).status)
+        .toBe(200);
+      await runInDurableObject(scheduleStub(bindings, tenant), async (_instance, state) => {
+        expect([...(await state.storage.list()).keys()]).toEqual([]);
+        expect(await state.storage.getAlarm()).toBeNull();
+      });
+      await runInDurableObject(bindings.TENANT.get(bindings.TENANT.idFromName(`t:${tenant}`)), async (_instance, state) => {
+        const left = [...(await state.storage.list()).keys()]
+          .filter((key) => key.startsWith("routines:") || key.startsWith("routine-run:"));
+        expect(left).toEqual([]);
+      });
+    });
+
   it("keeps a stock routine and says it waits for a stock feed", async () => {
     const s = await shop();
     const routine = await made(s.tenant, { name: "Tell me and draft a restock order", action: "draft",
@@ -488,6 +536,23 @@ describe("running routines", () => {
       instant: Date.now(), late: false });
     expect(outcome).toMatchObject({ status: "skipped", reason: "nothing_to_answer" });
     expect(await taskIds(s.tenant)).toEqual([]);
+  });
+
+  it("writes down a claimed run whose job broke as failed, and never runs it again", async () => {
+    const s = await shop();
+    const routine = await made(s.tenant, { name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" } });
+    // The switches read well for the gate, then cannot be read once the job has started.
+    let reads = 0;
+    const flaky = async () => {
+      reads += 1;
+      if (reads > 1) throw new Error("switches unreadable");
+      return { officeCloud: true, officeRoutines: true, officeExternalWrites: true };
+    };
+    const occurrence = { tenant: s.tenant, routineId: routine.id, instant: Date.now(), late: false };
+    expect(await runRoutineOccurrence(flowEnv, occurrence, { flags: flaky }))
+      .toMatchObject({ status: "failed", reason: "job_error" });
+    expect(await runRoutineOccurrence(flowEnv, occurrence)).toMatchObject({ status: "failed", reason: "job_error" });
+    expect(await runsOf(s.tenant, routine.id)).toEqual([expect.objectContaining({ status: "failed", reason: "job_error" })]);
   });
 
   it("drops the clock of a routine that is gone", async () => {

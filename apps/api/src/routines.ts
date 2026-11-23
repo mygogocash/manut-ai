@@ -360,19 +360,25 @@ export async function runRoutineOccurrence(env: RoutineEnv, occurrence: RoutineO
   const { routine, since } = claimed;
   const end = (ended: { status: "done" | "failed" | "skipped"; reason?: string; taskId?: string }) =>
     finish(env, tenant, routineId, instant, ended);
-  const job = await jobFor(env, tenant, routine, since);
-  if ("skip" in job) return end({ status: "skipped", reason: job.skip });
-  if ("fail" in job) return end({ status: "failed", reason: job.fail });
-  const run = await runWorker(env, { tenant, member: routine.member, job: job.job, startedBy: { kind: "system" } }, {
-    flags: async () => {
-      const current = await flags();
-      return { officeCloud: current.officeCloud, officeExternalWrites: current.officeExternalWrites };
-    },
-    ...(options.provider ? { provider: options.provider } : {}),
-  });
-  if (!run.ok) return end({ status: "failed", reason: codeOf(run.error) });
-  return end(run.outcome === "done" ? { status: "done", taskId: run.taskId }
-    : { status: "failed", taskId: run.taskId, reason: codeOf(run.reason) });
+  // The run is claimed now, so it never runs again: whatever happens from here is written down as how it ended, a
+  // throw included, rather than leaving it running for ever.
+  try {
+    const job = await jobFor(env, tenant, routine, since);
+    if ("skip" in job) return end({ status: "skipped", reason: job.skip });
+    if ("fail" in job) return end({ status: "failed", reason: job.fail });
+    const run = await runWorker(env, { tenant, member: routine.member, job: job.job, startedBy: { kind: "system" } }, {
+      flags: async () => {
+        const current = await flags();
+        return { officeCloud: current.officeCloud, officeExternalWrites: current.officeExternalWrites };
+      },
+      ...(options.provider ? { provider: options.provider } : {}),
+    });
+    if (!run.ok) return end({ status: "failed", reason: codeOf(run.error) });
+    return end(run.outcome === "done" ? { status: "done", taskId: run.taskId }
+      : { status: "failed", taskId: run.taskId, reason: codeOf(run.reason) });
+  } catch {
+    return end({ status: "failed", reason: "job_error" });
+  }
 }
 
 /// Why the switches or consent refuse a run now, as a code, or null when they allow it. The job flow's own gate reads
