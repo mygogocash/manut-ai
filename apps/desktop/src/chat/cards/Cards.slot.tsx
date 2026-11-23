@@ -74,6 +74,9 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   // The runtime can show only a kept read of the shop while the API cannot be reached: the ask is there to read, but
   // answering needs the live record, so no answer is offered (the runtime refuses one too).
   const kept = useShowingCache();
+  // An ask this version cannot answer (a kind or a state it does not know) offers no answer at all, connected or not:
+  // the runtime sends nothing for it, and the card says to update the app.
+  const outdated = !!item.outdated;
   const [busy, setBusy] = useState<ApprovalChoice | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -87,7 +90,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={item.command || item.title} testid="card-line" />;
 
   const pick = async (choice: ApprovalChoice) => {
-    if (busy || kept) return;
+    if (busy || kept || outdated) return;
     setBusy(choice);
     setErr(null);
     // Home's Approve settles through this same call (respond.ts), so there is one way an approval is answered.
@@ -115,7 +118,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       data-testid="card-approval"
       role="group"
       aria-label={title}
-      aria-keyshortcuts={kept ? undefined : shown.map((b) => b.key).join(" ")}
+      aria-keyshortcuts={kept || outdated ? undefined : shown.map((b) => b.key).join(" ")}
       onKeyDown={onKey}
     >
       <AskedBy who={item.subagent} />
@@ -144,7 +147,11 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
             {t(b.label)}
           </button>
         ))}
-        {kept ? (
+        {outdated ? (
+          <span className="card-note" data-testid="card-outdated">
+            {t("rt.updateToAnswer")}
+          </span>
+        ) : kept ? (
           <span className="card-note" data-testid="card-offline">
             {t("rt.connectToAnswer")}
           </span>

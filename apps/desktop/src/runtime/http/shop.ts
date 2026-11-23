@@ -1,15 +1,19 @@
-// One read of a shop from apps/api, for the connected runtime: its tasks with their exact-action approvals, its
-// schedules, and its inbound attention items. docs/runtime-adapter.md maps each to the screens.
+// One read of a shop from apps/api, for the connected runtime: its tasks with their exact actions, what waits for the
+// owner, its schedules, and its inbound attention items. docs/runtime-adapter.md maps each to the screens.
 //
 // - Tasks come from `GET /v1/tenant/export`, the only route a session can use today that lists its own tasks (each with
 //   its event log and its action proposals). It is heavy, so the runtime reads it at most once a minute; a task list
 //   route is the first thing the note asks the API for.
+// - What waits for the owner comes from `GET /v1/approvals?state=open`: approval-core's own records, read with its own
+//   decoders (approvals.ts). These, and nothing in the export, are the asks: every one of them is decided through
+//   approval-core, and an action no request decides is not the owner's to answer here.
 // - Schedules come from `GET /v1/schedules`, attention items from `GET /v1/inbound/attention`. With the API's inbound
 //   flag off, attention answers 403 `feature_disabled`, which reads as "no feed", not as a failure.
 //
 // Decoding never throws. A record keeps the API's whole object in `raw`, so a field this app does not know yet is
 // still there for a later slice; a state, an operation or an event kind it does not know is kept as written; and an
 // entry it cannot read at all (no id) goes to `unreadable` instead of vanishing.
+import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { ApiSession, Answer } from "./session";
 
 export interface ShopAction {
@@ -71,6 +75,8 @@ export interface Attention {
 
 export interface ShopSnapshot {
   tasks: ShopTask[];
+  /** approval-core's requests still waiting for an answer, as the API listed them */
+  approvals: ShopApproval[];
   schedules: ShopSchedule[];
   attention: Attention[];
   /** the API's inbound flag is off, so it keeps no attention items */
@@ -183,18 +189,21 @@ function bodyOf(a: Answer, allow: (status: number, code: string) => boolean): { 
 /** Reads the shop once. Any part that fails fails the whole read, with the worst reason: signed out, then offline,
  *  then unavailable. Half a shop is never shown as the whole one. */
 export async function readShop(session: ApiSession, now: () => number = Date.now): Promise<ShopRead> {
-  const [exported, scheduled, attended] = await Promise.all([
+  const [exported, asked, scheduled, attended] = await Promise.all([
     session.read("/v1/tenant/export"),
+    session.read("/v1/approvals?state=open"),
     session.read("/v1/schedules"),
     session.read("/v1/inbound/attention"),
   ]);
   // A deleted tenant's export answers 404 tenant_deleted: it has no tasks.
   const tasksBody = bodyOf(exported, (status, code) => status === 404 && code === "tenant_deleted");
+  // Nothing that waits for the owner is ever read as "nothing waits": the API answers 503 rather than leave one out.
+  const approvalsBody = bodyOf(asked, () => false);
   const schedulesBody = bodyOf(scheduled, () => false);
   const attentionBody = bodyOf(attended, (status, code) => status === 403 && code === "feature_disabled");
-  const failures = [tasksBody, schedulesBody, attentionBody].filter((b): b is ReadFailure => typeof b === "string");
+  const failures = [tasksBody, approvalsBody, schedulesBody, attentionBody].filter((b): b is ReadFailure => typeof b === "string");
   for (const worst of ["signed_out", "offline", "unavailable"] as const) if (failures.includes(worst)) return { ok: false, failure: worst };
-  const [t, s, a] = [tasksBody, schedulesBody, attentionBody] as { json: unknown; allowed?: boolean }[];
+  const [t, p, s, a] = [tasksBody, approvalsBody, schedulesBody, attentionBody] as { json: unknown; allowed?: boolean }[];
   const unreadable: unknown[] = [];
   const tasks = list(isObj(t.json) ? t.json.tasks : null)
     .map((v) => decodeTask(v, unreadable))
@@ -205,5 +214,6 @@ export async function readShop(session: ApiSession, now: () => number = Date.now
   const attention = list(isObj(a.json) ? a.json.items : null)
     .map((v) => decodeAttention(v, unreadable))
     .filter((x): x is Attention => !!x);
-  return { ok: true, snapshot: { tasks, schedules, attention, attentionOff: a.allowed === true, unreadable, readAt: now() } };
+  const approvals = decodeApprovals(p.json, unreadable);
+  return { ok: true, snapshot: { tasks, approvals, schedules, attention, attentionOff: a.allowed === true, unreadable, readAt: now() } };
 }

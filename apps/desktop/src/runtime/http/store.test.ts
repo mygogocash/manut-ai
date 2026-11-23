@@ -40,7 +40,7 @@ describe("the app's store on the connected runtime", () => {
     await vi.advanceTimersByTimeAsync(0);
     const state = store.getState();
     expect(state.bots.map((b) => b.name)).toEqual(["buddy"]);
-    expect(selectAsks(state).map((a) => [a.bot, a.item.kind, a.item.request_id])).toEqual([["buddy", "approval", "action-1"]]);
+    expect(selectAsks(state).map((a) => [a.bot, a.item.kind, a.item.request_id])).toEqual([["buddy", "approval", "action-1@1"]]);
     expect(state.threads.buddy?.map((r) => [r.thread, r.title, r.needs])).toEqual([["task-1", "Reply to Khun Mali", true]]);
     expect(state.automations?.map((a) => [a.id, a.name, a.paused])).toEqual([["sched-1", "Morning brief", false]]);
   });
@@ -84,7 +84,7 @@ describe("the app's store when the API cannot be reached", () => {
     const state = store.getState();
     expect(state.conn).toBe("open");
     expect(state.bots.map((b) => b.name)).toEqual(["buddy"]);
-    expect(selectAsks(state).map((a) => [a.bot, a.item.kind, a.item.request_id])).toEqual([["buddy", "approval", "action-1"]]);
+    expect(selectAsks(state).map((a) => [a.bot, a.item.kind, a.item.request_id])).toEqual([["buddy", "approval", "action-1@1"]]);
     expect(state.threads.buddy?.map((r) => [r.thread, r.title, r.needs])).toEqual([["task-1", "Reply to Khun Mali", true]]);
     expect(state.automations?.map((a) => [a.id, a.name, a.paused])).toEqual([["sched-1", "Morning brief", false]]);
     const [ask] = selectAsks(state);
@@ -97,7 +97,7 @@ describe("the app's store when the API cannot be reached", () => {
     const { api, store } = offlineStore(await savedRead(EARLIER));
     await store.actions.init();
     await settled();
-    expect(selectAsks(store.getState()).map((a) => a.item.request_id)).toEqual(["action-1"]);
+    expect(selectAsks(store.getState()).map((a) => a.item.request_id)).toEqual(["action-1@1"]);
     // meanwhile the owner approved action-1 from the link on LINE, and the shop has made a new task with an ask of its own
     serveShop(api, {
       tasks: [
@@ -111,8 +111,8 @@ describe("the app's store when the API cannot be reached", () => {
     await settled();
     const state = store.getState();
     expect(state.conn).toBe("open");
-    expect(selectAsks(state).map((a) => a.item.request_id)).toEqual(["action-9"]);
-    const old = state.chats.buddy?.items.find((i) => i.kind === "approval" && i.request_id === "action-1");
+    expect(selectAsks(state).map((a) => a.item.request_id)).toEqual(["action-9@1"]);
+    const old = state.chats.buddy?.items.find((i) => i.kind === "approval" && i.request_id === "action-1@1");
     expect(old).toMatchObject({ kind: "approval", expired: "resolved" });
     expect(state.threads.buddy?.map((r) => r.thread).sort()).toEqual(["task-1", "task-7"]);
     expect(state.automations ?? []).toEqual([]);
@@ -127,7 +127,7 @@ describe("the app's store when the API cannot be reached", () => {
     await settled();
     const state = store.getState();
     expect(selectAsks(state)).toEqual([]);
-    expect(state.chats.buddy?.items.find((i) => i.kind === "approval" && i.request_id === "action-1")).toMatchObject({ expired: "cancelled" });
+    expect(state.chats.buddy?.items.find((i) => i.kind === "approval" && i.request_id === "action-1@1")).toMatchObject({ expired: "cancelled" });
     expect(state.threads.buddy ?? []).toEqual([]);
   });
 });

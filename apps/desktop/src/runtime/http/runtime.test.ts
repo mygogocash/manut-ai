@@ -64,7 +64,7 @@ describe("connecting", () => {
     expect(rt.status).toBe("open");
     expect(host.link).toBe("open");
     expect(statuses).toEqual(["connecting", "open"]);
-    expect(gets(api).sort()).toEqual(["/v1/inbound/attention", "/v1/schedules", "/v1/tenant/export"]);
+    expect(gets(api).sort()).toEqual(["/v1/approvals", "/v1/inbound/attention", "/v1/schedules", "/v1/tenant/export"]);
     for (const call of api.calls) expect(call.bearer).toBe("access-1");
   });
 
@@ -84,7 +84,7 @@ describe("connecting", () => {
     const a = new HttpRuntime(host);
     const b = new HttpRuntime(host);
     await Promise.all([a.connect(), b.connect()]);
-    expect(gets(api)).toHaveLength(3);
+    expect(gets(api)).toHaveLength(4);
   });
 
   it("waits signed out, closed, until someone signs in, then reads and opens", async () => {
@@ -186,7 +186,7 @@ describe("reading", () => {
       {
         event: "approval.request",
         bot: "buddy",
-        request_id: "action-1",
+        request_id: "action-1@1",
         title: "Reply to Khun Mali",
         command: "Send on LINE: “Your order ships tomorrow morning.”",
         choices: ["once", "deny"],
@@ -255,10 +255,10 @@ describe("reading", () => {
     serveShop(api);
     await rt.connect();
     await rt.request("automations.list", {});
-    expect(gets(api)).toHaveLength(3);
+    expect(gets(api)).toHaveLength(4);
     await vi.advanceTimersByTimeAsync(20_000);
     await rt.request("automations.list", {});
-    expect(gets(api)).toHaveLength(6);
+    expect(gets(api)).toHaveLength(8);
   });
 });
 
@@ -269,7 +269,7 @@ describe("writing", () => {
     await rt.connect();
     const req = rt.request.bind(rt) as unknown as (op: string, p: unknown) => Promise<unknown>;
     for (const op of WRITE_OPS)
-      expect(await refusal(req(op, { bot: "buddy", request_id: "action-1", choice: "once", text: "hi", job: "sched-1" })), op).toEqual({
+      expect(await refusal(req(op, { bot: "buddy", request_id: "action-1@1", choice: "once", text: "hi", job: "sched-1" })), op).toEqual({
         code: "not_yet",
         message: t("rt.notYet"),
       });
@@ -293,8 +293,8 @@ describe("staying current", () => {
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ event: "approval.request", request_id: "action-2", command: "Send on LINE: “It is on its way.”" }),
-        { event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "resolved" },
+        expect.objectContaining({ event: "approval.request", request_id: "action-2@1", command: "Send on LINE: “It is on its way.”" }),
+        { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "resolved" },
         { event: "thread.added", bot: "buddy", thread: "task-2", title: "Weekend post" },
         { event: "routines.update", bot: "buddy" },
         { event: "bots.update", bot: "buddy" },
@@ -310,7 +310,7 @@ describe("staying current", () => {
     serveShop(api, { tasks: [taskJson({ actions: [actionJson({ state: "expired" })] })] });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(events).toEqual([
-      { event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "timeout" },
+      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "timeout" },
       { event: "thread.removed", bot: "buddy", thread: "task-2" },
     ]);
   });
@@ -331,7 +331,7 @@ describe("staying current", () => {
     serveShop(api, { tasks: [] });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(events).toEqual([
-      { event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "cancelled" },
+      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" },
       { event: "thread.removed", bot: "buddy", thread: "task-1" },
     ]);
   });
@@ -352,7 +352,7 @@ describe("staying current", () => {
     expect(statuses).toEqual(["connecting", "open", "closed", "open"]);
     // the store keeps the cards it has when it reads again, so the ask the last read showed and this one no longer has is
     // said to be over; no ask, thread or note is sent again, the app reads those itself
-    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1", reason: "cancelled" }]);
+    expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" }]);
   });
 
   it("closes signed out when the API ends the session, and says so", async () => {

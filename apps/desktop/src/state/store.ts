@@ -229,6 +229,9 @@ export type ApprovalItem = {
   /** Asked while no turn ran in a coding-agent session (a background subagent after the turn's end): no turn's end
    *  closes it. */
   outside?: boolean;
+  /** This app cannot answer it (a kind or a state this version does not know): no answer is offered, and the card says
+   *  to update the app. */
+  outdated?: boolean;
   resolved?: ApprovalChoice;
   expired?: AskExpiry;
 };
@@ -1214,6 +1217,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
           ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),
           ...(ev.subagent?.id ? { subagent: ev.subagent } : {}),
           ...(c.turn || !bot.startsWith("agent:") ? {} : { outside: true }),
+          ...(ev.outdated ? { outdated: true } : {}),
         };
         return withItems(base, [...base.items, item]);
       });

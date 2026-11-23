@@ -681,6 +681,9 @@ export type BridgeEvent =
       timeout_s?: number;
       /** The plan the agent asks to start on (Claude Code's plan mode), as the markdown it wrote. */
       plan?: string;
+      /** This app cannot answer it: its kind, an answer it offers or where it stands is one this version does not know.
+       *  It is shown, with no answer offered, and says to update the app (the connected runtime's approvals). */
+      outdated?: boolean;
     })
   | (EventBase & {
       event: "clarify.request";

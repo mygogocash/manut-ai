@@ -1,11 +1,18 @@
 // How one read of a shop shows in the app's own protocol: Buddy as the team, each task as one of Buddy's threads,
-// each action waiting for the owner as an ask, each schedule as an automation.
+// each request waiting for an answer as an ask, each schedule as an automation.
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../../i18n";
+import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+import { approvalJson, OPTIONS, type ApprovalOver } from "./testkit";
 import { actionText, attentionRows, automationRows, cronOf, pendingAsks, stateText, taskOpen, team, TEAM, threadRows } from "./view";
 
 const T0 = Date.UTC(2026, 10, 23, 1, 0, 0);
+
+/** A request as the API lists it, decoded as a read decodes it. */
+function approval(over: ApprovalOver = {}): ShopApproval {
+  return decodeApprovals({ state: "open", approvals: [approvalJson(over)] }, [])[0];
+}
 
 function action(over: Partial<ShopAction> = {}): ShopAction {
   return {
@@ -57,7 +64,7 @@ function schedule(over: Partial<ShopSchedule> = {}): ShopSchedule {
 }
 
 function snap(over: Partial<ShopSnapshot> = {}): ShopSnapshot {
-  return { tasks: [task()], schedules: [schedule()], attention: [], attentionOff: false, unreadable: [], readAt: T0 + 600_000, ...over };
+  return { tasks: [task()], approvals: [approval()], schedules: [schedule()], attention: [], attentionOff: false, unreadable: [], readAt: T0 + 600_000, ...over };
 }
 
 afterEach(() => setLang("en"));
@@ -93,6 +100,13 @@ describe("tasks as Buddy's threads", () => {
     ]);
   });
 
+  it("marks a task as waiting for the owner by its requests, not by the actions the export lists as proposed", () => {
+    expect(threadRows(snap({ approvals: [] }))[0].needs).toBe(false);
+    expect(threadRows(snap({ tasks: [task({ actions: [] })] }))[0].needs).toBe(true);
+    // a request this build cannot answer still waits for someone
+    expect(threadRows(snap({ approvals: [approval({ kind: "refund_partial" })] }))[0].needs).toBe(true);
+  });
+
   it("opens a task as Buddy's notes: what it is for, what it asked, and where it stands", () => {
     const decided = action({ id: "action-0", state: "confirmed", proposedAt: T0 + 30_000, payload: { text: "Thanks!" } });
     const open = taskOpen(task({ actions: [action(), decided] }));
@@ -121,20 +135,54 @@ describe("tasks as Buddy's threads", () => {
 });
 
 describe("what waits for the owner", () => {
-  it("is each proposed action, asked as the exact action, answered once or not at all", () => {
-    const settled = action({ id: "action-0", state: "rejected" });
-    // past its expiry an action can still read `proposed` until the API next touches it; it can no longer be decided
-    const lapsed = action({ id: "action-2", expiresAt: T0 + 600_000 });
-    expect(pendingAsks(snap({ tasks: [task({ actions: [settled, action(), lapsed] })] }))).toEqual([
+  it("is each open request, asked as the exact action at the revision shown, answered once or not at all", () => {
+    expect(pendingAsks(snap())).toEqual([
       {
         event: "approval.request",
         bot: TEAM,
-        request_id: "action-1",
+        request_id: "action-1@1",
         title: "Reply to Khun Mali",
         command: "Send on LINE: “Your order ships tomorrow morning.”",
         choices: ["once", "deny"],
       },
     ]);
+  });
+
+  it("is never an action the export lists as proposed with no request to decide it: that is not the owner's to answer here", () => {
+    expect(pendingAsks(snap({ approvals: [] }))).toEqual([]);
+  });
+
+  it("names a worker's command by its action's words, which its request does not carry", () => {
+    const issue = action({ id: "req-7", operationType: "linear.issue.create", targetResourceId: "project-1", payload: { title: "Restock jasmine gift sets" } });
+    const asked = approval({ id: "req-7", kind: "command", attemptId: "attempt-2", detail: { actionId: "req-7", operationType: "linear.issue.create", targetResourceId: "project-1", payloadHash: "h" } });
+    expect(pendingAsks(snap({ tasks: [task({ actions: [issue] })], approvals: [asked] }))).toEqual([
+      expect.objectContaining({ request_id: "req-7@1", command: "Create a Linear issue: “Restock jasmine gift sets”", choices: ["once", "deny"] }),
+    ]);
+    // with no action to read the words from, it says what the request names
+    expect(pendingAsks(snap({ tasks: [], approvals: [asked] }))).toEqual([expect.objectContaining({ title: "", command: "linear.issue.create on project-1" })]);
+  });
+
+  it("asks a request of a kind this build does not know, and offers no answer: update the app to answer it", () => {
+    const refund = approval({ id: "req-9", kind: "refund_partial", detail: {} });
+    expect(pendingAsks(snap({ approvals: [refund] }))).toEqual([
+      { event: "approval.request", bot: TEAM, request_id: "req-9@1", title: "Reply to Khun Mali", command: "refund_partial", choices: [], outdated: true },
+    ]);
+    const unknownState = approval({ standing: { state: "paused_by_owner" } });
+    expect(pendingAsks(snap({ approvals: [unknownState] }))).toEqual([expect.objectContaining({ request_id: "action-1@1", choices: [], outdated: true })]);
+    const snooze = approval({ options: [...OPTIONS, { id: "later", label: "Later", effect: "snooze" }] });
+    expect(pendingAsks(snap({ approvals: [snooze] }))).toEqual([expect.objectContaining({ choices: [], outdated: true })]);
+  });
+
+  it("does not ask what is no longer waiting", () => {
+    const decided = approval({ standing: { state: "decided", reason: "decided", decision: { requestId: "action-1", optionId: "approve", seenRevision: 1, decidedBy: "owner-link", role: "owner", decidedAt: T0 } } });
+    const expired = approval({ standing: { state: "expired", reason: "expired", expiredAt: T0 } });
+    expect(pendingAsks(snap({ approvals: [decided, expired] }))).toEqual([]);
+  });
+
+  it("asks the oldest first, as they were asked", () => {
+    const later = approval({ id: "action-2", createdAt: T0 + 200_000, detail: { operationType: "line.message.push", text: "Second" } });
+    const first = approval({ id: "action-3", createdAt: T0 + 100_000, detail: { operationType: "line.message.push", text: "First" } });
+    expect(pendingAsks(snap({ tasks: [], approvals: [later, first] })).map((a) => a.command)).toEqual(["Send on LINE: “First”", "Send on LINE: “Second”"]);
   });
 
   it("names every kind of action, and one it does not know by what the API calls it", () => {

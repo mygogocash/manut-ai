@@ -24,6 +24,7 @@ import type { BridgeEvent, OpMap } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
+import { isAsk, parseAskId } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { shopRoutines } from "./customize";
 import type { ApiSession, SignInState } from "./session";
@@ -83,6 +84,14 @@ const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
+
+/** Why an ask that left the open approvals stopped waiting, as `now` tells it. */
+function leftHow(askRef: string, now: ShopSnapshot): "timeout" | "cancelled" | "resolved" {
+  const ref = parseAskId(askRef);
+  if (ref && now.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return "cancelled";
+  const action = ref ? now.tasks.flatMap((task) => task.actions).find((a) => a.id === ref.id) : undefined;
+  return !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved";
+}
 
 /** The signature of what a schedule shows, so a read that changed none of them stays quiet. */
 const scheduleSig = (s: ShopSnapshot) =>
@@ -326,15 +335,15 @@ export class HttpHost {
     for (const fn of [...this.eventFns]) fn(ev);
   }
 
-  /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you. */
+  /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you, read from `now`:
+   *  a request asked again at another revision changed, and its new version is an ask of its own; otherwise its action
+   *  says how it went. An action that ran out of time timed out, one that is gone with its task was cancelled, any other
+   *  was decided. */
   private emitLeft(was: ShopSnapshot, now: ShopSnapshot): void {
     const still = new Set(pendingAsks(now).map((a) => a.request_id));
     for (const { request_id: id } of pendingAsks(was)) {
       if (still.has(id)) continue;
-      const action = now.tasks.flatMap((task) => task.actions).find((a) => a.id === id);
-      // An action that ran out of time timed out; one that is gone with its task was cancelled; any other was decided.
-      const reason = !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved";
-      this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason });
+      this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason: leftHow(id, now) });
     }
   }
 
