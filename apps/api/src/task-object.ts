@@ -179,6 +179,13 @@ function isSettled(doc: TaskDocJSON): boolean {
   return doc.state === "completed" || doc.state === "cancelled";
 }
 
+/// Why the begin gate will not move an action in `state` (anything but approved or dispatching): settled already,
+/// waiting for its decision, or decided against.
+function notBeginReason(state: ActionProposalJSON["state"]): string {
+  if (state === "confirmed" || state === "failed" || state === "unknown") return "already_settled";
+  return state === "proposed" ? "not_approved" : "already_decided";
+}
+
 /// Client-submittable lifecycle commands. Every edge is legal in the base
 /// table except replan, which returns a paused or failed task to draft for a
 /// new plan: a deliberate, recorded extension, not a silent extra.
@@ -1954,11 +1961,7 @@ export class TaskObject extends DurableObject {
       return Response.json({ error: "dispatch_in_flight" }, { status: 409 });
     }
     if (action.state !== "approved") {
-      const terminal = ["confirmed", "failed", "unknown"].includes(action.state);
-      return Response.json(
-        { error: terminal ? "already_settled" : action.state === "proposed" ? "not_approved" : "already_decided" },
-        { status: 409 },
-      );
+      return Response.json({ error: notBeginReason(action.state) }, { status: 409 });
     }
     if (Date.parse(action.expiresAt) <= Date.now()) {
       await this.ctx.storage.put(`action:${id}`, { ...action, state: "expired" });
@@ -1982,19 +1985,23 @@ export class TaskObject extends DurableObject {
     const doc = await this.load();
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     if (isSettled(doc)) return Response.json({ error: "task_settled" }, { status: 409 });
-    const moving: ActionProposalJSON = {
-      ...action,
-      state: "dispatching",
-      dispatch: { at: new Date().toISOString() },
-    };
-    await this.ctx.storage.put(`action:${id}`, moving);
-    await this.appendEvent(doc, {
-      kind: "updated",
-      to: doc.state,
-      rev: doc.rev,
-      via: `action:dispatch:${id}`,
-    });
-    return Response.json(moving);
+    // Hashing and reading the body above let other requests in, so a second begin may have moved the action meanwhile.
+    // It is read again and moved in one transaction: of any number of begins at once, one moves it and the others hear
+    // that it is already moving.
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const current = kv.get<ActionProposalJSON>(`action:${id}`);
+      const now = kv.get<TaskDocJSON>("task");
+      if (!current || !now) return { status: 404, body: { error: "not_found" } };
+      if (current.state === "dispatching") return { status: 409, body: { error: "dispatch_in_flight" } };
+      if (current.state !== "approved") return { status: 409, body: { error: notBeginReason(current.state) } };
+      if (current.payloadHash !== action.payloadHash) return { status: 409, body: { error: "payload_changed" } };
+      if (isSettled(now)) return { status: 409, body: { error: "task_settled" } };
+      const moving: ActionProposalJSON = { ...current, state: "dispatching", dispatch: { at: new Date().toISOString() } };
+      kv.put(`action:${id}`, moving);
+      this.appendEventsSync(kv, now, [{ kind: "updated", via: `action:dispatch:${id}` }]);
+      return { status: 200, body: moving };
+    }));
   }
 
   /// Settles a dispatching action. Confirmed carries the provider's
