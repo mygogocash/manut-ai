@@ -6,6 +6,7 @@ import {
   DraftIcon,
   FlagIcon,
   MemoryIcon,
+  PeopleIcon,
   ShopsIcon,
   SpendIcon,
   StoreIcon,
@@ -20,6 +21,7 @@ import { MessagesTab } from "./MessagesTab";
 import { ModelSpendView } from "./ModelSpendView";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
+import { PeopleView } from "./PeopleView";
 import { ShopDataTab } from "./ShopDataTab";
 import { ShopsView, type ShopPage } from "./ShopsView";
 import { useLoad } from "./useLoad";
@@ -32,6 +34,7 @@ import {
   isAuthError,
   memoryWords,
   modelSpendWords,
+  peopleWords,
   shopDataWords,
   shopsWords,
 } from "./words";
@@ -42,15 +45,16 @@ import {
 /// column at once too: where the pilot stands against its Phase 1 gate.
 /// The Audit page beside it reads one shop's audit log: who did what for it, and when. The Memory page reads what the
 /// team knows about one shop, and is where an operator relays the owner's say over it. The Drafts page reads what Nam,
-/// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The Model spend page reads one shop's model
-/// spend for a month against its monthly cap, and sets or clears the cap.
+/// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The People page reads who can use Manut AI for
+/// one shop, and is where an operator invites, removes and sets cover on the owner's word. The Model spend page reads one
+/// shop's model spend for a month against its monthly cap, and sets or clears the cap.
 
 export const REFRESH_MS = 15000;
 
 type Tab = "messages" | "payments" | "data";
 /// What the main column shows: the chosen shop, every shop at a glance, the Pilot gate across all of them, or one shop's
-/// audit log, memory, drafts or model spend.
-type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "model";
+/// audit log, memory, drafts, people or model spend.
+type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -187,6 +191,16 @@ export function OpsConsole() {
               type="button"
               className="nav"
               style={{ width: "100%" }}
+              aria-current={page === "people" ? "page" : undefined}
+              onClick={() => setPage("people")}
+            >
+              <PeopleIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{peopleWords.nav}</span>
+            </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
               aria-current={page === "model" ? "page" : undefined}
               onClick={() => setPage("model")}
             >
@@ -255,6 +269,8 @@ export function OpsConsole() {
           <MemoryView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "drafts" ? (
           <DraftsView shops={shopList} tenant={tenant} listError={shops.error} onRetry={shops.reload} onForget={forget} />
+        ) : page === "people" ? (
+          <PeopleView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (

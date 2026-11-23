@@ -2,13 +2,18 @@ import {
   ApiError,
   type ApprovalView,
   type AuditPage,
+  type AwayView,
   type AwaitingOwner,
+  type CreatedInvite,
   type CreatedLineConnection,
   type CreatedShop,
   type DeletedShop,
   type DeletionView,
   type Fact,
+  type HelperRemoval,
+  type Identity,
   type InboundMessage,
+  type InviteView,
   type Memory,
   type ModelCap,
   type ModelUsage,
@@ -19,6 +24,7 @@ import {
   type NewShop,
   type NewSubscriptionPayment,
   type Payment,
+  type People,
   type PilotApi,
   type PilotGate,
   type ProposedReply,
@@ -213,6 +219,40 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
     forgetFact: (input) =>
       request<{ id: string }>({ method: "POST", path: "/v1/admin/memory/forget", body: input, admin: true }),
 
+    // The owner's people. A change sends the tenant and exactly what its route takes, built field by field so nothing a caller
+    // adds ever travels (a `role` above all), and answers what the API answers; a refusal is an ApiError with the API's code.
+    getPeople: (tenant) => request<People>({ method: "GET", path: "/v1/admin/people", query: { tenant }, admin: true }),
+    createInvite: (input) =>
+      request<CreatedInvite>({
+        method: "POST",
+        path: "/v1/admin/people/invites",
+        body: { tenant: input.tenant, name: input.name, identity: identityBody(input.identity) },
+        admin: true,
+      }),
+    revokeInvite: (input) =>
+      request<{ invite: InviteView }>({
+        method: "POST",
+        path: "/v1/admin/people/invites/revoke",
+        body: { tenant: input.tenant, inviteId: input.inviteId },
+        admin: true,
+      }),
+    removeHelper: (input) =>
+      request<HelperRemoval>({
+        method: "POST",
+        path: "/v1/admin/people/remove",
+        body: { tenant: input.tenant, helperId: input.helperId },
+        admin: true,
+      }),
+    setAway: (input) =>
+      request<{ away: AwayView }>({
+        method: "POST",
+        path: "/v1/admin/people/away",
+        body: { tenant: input.tenant, helperId: input.helperId, until: input.until },
+        admin: true,
+      }),
+    clearAway: (input) =>
+      request<{ away: null }>({ method: "POST", path: "/v1/admin/people/away/clear", body: { tenant: input.tenant }, admin: true }),
+
     // The month goes in the query only when asked for: the API's own current Bangkok month decides otherwise.
     getModelUsage: (tenant, month) =>
       request<ModelUsage>({
@@ -244,6 +284,11 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         admin: true,
       }),
   };
+}
+
+/// An identity with only the fields its kind has, so nothing else can ride along into an invite.
+function identityBody(identity: Identity): Identity {
+  return identity.kind === "line" ? { kind: "line", id: identity.id } : { kind: "email", address: identity.address };
 }
 
 /// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
