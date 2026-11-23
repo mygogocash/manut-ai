@@ -135,6 +135,14 @@ async function modelCalls(s: Shop) {
   return ((await usage.json()) as { totals: { ok: number; refused: number } }).totals;
 }
 
+/// What the meter charged for each call it recorded this month, in whole satang, newest first: the one figure a job's
+/// reported cost has to agree with.
+async function meteredSatang(s: Shop): Promise<number[]> {
+  const usage = await tenantCall(bindings, s.tenant,
+    `/model/usage?tenant=${encodeURIComponent(s.tenant)}&month=${bangkokMonth(Date.now())}`);
+  return ((await usage.json()) as { calls: { satang: number }[] }).calls.map((call) => call.satang);
+}
+
 async function indexed(s: Shop): Promise<string[]> {
   const response = await tenantCall(bindings, s.tenant, `/index?tenant=${encodeURIComponent(s.tenant)}`);
   return ((await response.json()) as { taskIds: string[] }).taskIds;
@@ -169,9 +177,13 @@ describe("Nam, sales chat", () => {
     expect(exported.actions).toEqual([]);
     expect(exported.requests).toEqual([]);
     expect(exported.attempts).toEqual([expect.objectContaining({ executorId: "nam", status: "done", outcome: "done" })]);
+    // The spend report names what the call cost, in whole satang as the gateway priced it: the same figure the meter
+    // recorded for that call, so the drafts page can show a job's cost without reading the meter.
+    const [charged] = await meteredSatang(s);
+    expect(charged).toBeGreaterThan(0);
     expect(agentEvents(exported)).toEqual([
       { type: "turnStarted" },
-      { type: "spend", tokens: expect.any(Number), model: WORKER_MODEL },
+      { type: "spend", tokens: expect.any(Number), model: WORKER_MODEL, costSatang: charged },
       { type: "turnCompleted", status: "completed" },
     ]);
     expect(await indexed(s)).toContain(result.taskId);

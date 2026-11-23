@@ -294,9 +294,12 @@ async function work(
   if (!built.ok) return fail(built.reason);
   const answered = await port.callModel(built.request);
   if (!answered.ok) return fail(answered.error === "budget_exceeded" ? "budget" : answered.error, answered);
-  const { usage } = answered.value;
+  const { usage, costSatang } = answered.value;
+  // The cost rides with the spend report because nothing else links a job to the meter's record of its call (the meter
+  // keeps no task or attempt id, by design: metadata only). It is the gateway's own price in whole satang, so the job
+  // list can show what a job cost without reading the meter. The agent-events decoder ignores a field it does not know.
   const spent = await port.report([{ type: "spend", tokens: usage.inputTokens + usage.outputTokens,
-    model: WORKER_MODEL }]);
+    model: WORKER_MODEL, costSatang }]);
   if (!spent.ok) return fail(spent.error, spent);
   return keep(answered.value.text, { ...(about ? { about } : {}), ...(send ? { send } : {}) });
 }
