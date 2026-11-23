@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerSlot, answerSoFar, activityText, chatRoute, createStore, folderKey, setChatRoute, initialState, reduce, replyChipFor, selectTimeline, type Action, type AppState, type BridgeLike, type MessageItem } from "./store";
+import { answerSlot, answerSoFar, activityText, chatRoute, createStore, folderKey, setChatRoute, initialState, MENU_PAGES, reduce, replyChipFor, selectTimeline, type Action, type AppState, type BridgeLike, type MessageItem } from "./store";
 import type { Away, BridgeEvent, ChatOpenResult } from "../lib/protocol";
 import type { BridgeStatus } from "../lib/bridge";
 
@@ -890,6 +890,68 @@ describe("store", () => {
     store.actions.openSettings();
     store.actions.closeSettings();
     expect(store.getState().ui.view).toBe("chat");
+  });
+
+  it("the menu's pages each fill the main column, and choosing a member brings the chat back", async () => {
+    const f = fakeBridge();
+    const store = createStore(f.bridge, { now: () => T0 });
+    await store.actions.init();
+    expect(MENU_PAGES).toEqual(["needs", "team", "code", "artifacts", "customize", "history"]);
+    for (const page of MENU_PAGES) {
+      store.actions.openPage(page);
+      expect(store.getState().ui.view).toBe(page);
+    }
+    await store.actions.selectBot("kami");
+    expect(store.getState().ui).toMatchObject({ view: "chat", thread: null });
+  });
+
+  it("a page opened from a menu page returns to that menu page: Settings, Automations, Plugins and Tasks", () => {
+    const store = createStore(fakeBridge().bridge);
+    store.actions.openPage("history");
+    store.actions.openSettings();
+    store.actions.closeSettings();
+    expect(store.getState().ui.view).toBe("history");
+    // page to page, the first page's way back holds
+    store.actions.openPage("customize");
+    store.actions.openAutomations();
+    store.actions.openPlugins("kami");
+    store.actions.closeSettings();
+    expect(store.getState().ui.view).toBe("customize");
+    store.actions.openPage("code");
+    store.actions.openTasks();
+    store.actions.closeSettings();
+    expect(store.getState().ui.view).toBe("code");
+  });
+
+  it("leaving a menu page the way the chat's shortcuts do (closeSettings) lands on the chat, never on another page", () => {
+    const store = createStore(fakeBridge().bridge);
+    store.actions.openPage("history");
+    store.actions.openSettings();
+    store.actions.openPage("team");
+    store.actions.closeSettings();
+    expect(store.getState().ui.view).toBe("chat");
+  });
+
+  it("Search opens History and asks its box for the focus on every press; the History row does not", () => {
+    const store = createStore(fakeBridge().bridge);
+    const seq = store.getState().ui.findSeq;
+    store.actions.openPage("history", { find: true });
+    expect(store.getState().ui).toMatchObject({ view: "history", findSeq: seq + 1 });
+    store.actions.openPage("history", { find: true });
+    expect(store.getState().ui.findSeq).toBe(seq + 2);
+    store.actions.openPage("history");
+    expect(store.getState().ui.findSeq).toBe(seq + 2);
+  });
+
+  it("a draft put in from Settings opened on a menu page lands in the chat, where its composer is", async () => {
+    const f = fakeBridge();
+    const store = createStore(f.bridge, { now: () => T0 });
+    await store.actions.init();
+    store.actions.openPage("history");
+    store.actions.openSettings("agents");
+    store.actions.prefill("set up an agent");
+    expect(store.getState().ui.view).toBe("chat");
+    expect(store.getState().ui.draft).toMatchObject({ bot: "kami", text: "set up an agent" });
   });
 
   it("Reply there: the chip goes along as reply_to once, then clears; a turn end re-reads the places", async () => {

@@ -1767,14 +1767,18 @@ body.split-dragging .xterm {
   display: grid;
   place-items: center;
 }
+/* The running colour of a terminal's mark, wherever its rows are listed: the old sidebar, a header, the dock, and the
+   Code page (.mpage), which lists them now. */
 .side,
 .head,
-.dock {
+.dock,
+.mpage {
   --term-run: #f2b705;
 }
 [data-theme="light"] .side,
 [data-theme="light"] .head,
-[data-theme="light"] .dock {
+[data-theme="light"] .dock,
+[data-theme="light"] .mpage {
   --term-run: #c48a00;
 }
 .tst.busy {

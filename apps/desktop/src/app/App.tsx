@@ -3,7 +3,7 @@ import "../theme/fonts.css";
 import "../theme/tokens.css";
 import "../theme/base.css";
 import "./app.css";
-import { getStore, useStore } from "../state/store";
+import { getStore, isMenuPage, useStore, type MenuPage } from "../state/store";
 import { MentionContext, type Mentions } from "../chat/parts/Mention";
 import { botResolver } from "../chat/parts/mentions";
 import { slots } from "../features";
@@ -16,6 +16,12 @@ import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
 import { PluginsPage } from "../pages/Plugins";
 import { TasksPage } from "../tasks/TasksPage";
+import { NeedsPage } from "../pages/NeedsPage";
+import { TeamPage } from "../pages/TeamPage";
+import { CodePage } from "../pages/CodePage";
+import { ArtifactsPage } from "../pages/ArtifactsPage";
+import { CustomizePage } from "../pages/CustomizePage";
+import { HistoryPage } from "../pages/HistoryPage";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
@@ -27,6 +33,16 @@ const SessionView = lazy(() => import("../sessions/SessionView").then((m) => ({ 
 const SessionPanel = lazy(() => import("../sessions/SessionPlans").then((m) => ({ default: m.SessionPanel })));
 // The bottom terminal panel (Ctrl+`) loads the first time it opens, then stays mounted so hidden shells keep running.
 const TerminalPanel = lazy(() => import("../terminal/Panel").then((m) => ({ default: m.TerminalPanel })));
+
+/** The side menu's pages (src/sidebar/menu.ts), each filling the main column while it is the view. */
+const MENU_PAGE_VIEWS: Record<MenuPage, () => React.JSX.Element> = {
+  needs: NeedsPage,
+  team: TeamPage,
+  code: CodePage,
+  artifacts: ArtifactsPage,
+  customize: CustomizePage,
+  history: HistoryPage,
+};
 
 export function App() {
   const s = useStore();
@@ -69,13 +85,14 @@ export function App() {
   const panelMax = panelOpen && !onSession && s.ui.panelMax;
   const Details = slots.detailsPanel;
   const close = () => s.togglePanel(false);
+  const MenuPageView = isMenuPage(s.ui.view) ? MENU_PAGE_VIEWS[s.ui.view] : null;
 
   return (
     <MentionContext.Provider value={mentions}>
     <div className={`window${panelOpen ? " panel-open" : ""}${panelMax ? " panel-max" : ""}`} data-testid="window" lang={s.ui.lang}>
       <Sidebar />
       <main className="main" inert={panelMax} aria-hidden={panelMax || undefined}>
-        {s.ui.view === "settings" ? <SettingsView /> : s.ui.view === "automations" ? (
+        {MenuPageView ? <MenuPageView /> : s.ui.view === "settings" ? <SettingsView /> : s.ui.view === "automations" ? (
           <AutomationsPage />
         ) : s.ui.view === "plugins" ? (
           <PluginsPage />

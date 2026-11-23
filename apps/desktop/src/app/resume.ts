@@ -3,7 +3,7 @@
 // session, the right panel, the Plans full view, the composers' unsent text, and the SESSIONS list (agent,
 // folder, account, view, the agent's own conversation id, whether it was running, and the last messages of its
 // chat, which manut draws itself). These functions are pure; resumeBoot.ts reads, writes and applies them.
-import type { PanelTabId } from "../state/store";
+import type { PanelTabId, Ui } from "../state/store";
 import { continues, isAgentId, type AgentId } from "../sessions/agents";
 import { isLinkId } from "../sessions/termLink";
 import { cleanShellId } from "../sessions/term/settings";
@@ -182,7 +182,7 @@ export function forBots(snap: ResumeSnap, bots: readonly string[]): ResumeSnap {
 export interface ResumeInput {
   bot: string | null;
   bots: readonly string[];
-  view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks";
+  view: Ui["view"];
   session: string | null;
   panelOpen: boolean;
   panelTab: PanelTabId;

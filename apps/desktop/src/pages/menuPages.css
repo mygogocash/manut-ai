@@ -1,0 +1,264 @@
+/* The side menu's pages (src/pages/*Page.tsx): the design canvas's screen frame and the component classes those pages
+   use, copied from the canvas's own sheet (packages/ui-kit/app.css: .top, .acts, .col, .pane, .band, .rowl, .grow,
+   .tag, .empty, .ic) and scoped under .mpage, so they cannot reach the rest of the app. The canvas's short token
+   names map onto the desktop's (src/theme/tokens.css): --mut is --aui-muted, --band is --aui-subtle, and the canvas's
+   surface --bg is --aui-surface, because the desktop's own --bg is the page ground. Lines that are the desktop's own
+   rather than the canvas's say so. */
+
+.mpage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--main);
+  color: var(--ink);
+  /* The canvas's root type (.r): the desktop's body text is 13px, and the canvas's screens are 14px. */
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mpage .ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The top bar holds the page's name, then what acts on the page at its right. */
+.mpage .top {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 52px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.mpage .top h1 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.mpage .acts {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* The desktop's own: the page scrolls under its top bar, which stays. */
+.mpage-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A page is laid out as a centred reading column or as a list across the page. */
+.mpage .col {
+  width: 100%;
+  max-width: 736px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mpage .pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The desktop's own: a list of rows inside either layout, as tight as the canvas's .pane. */
+.mpage .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A grey section header, and a row: a whole row is one button that opens what it names. */
+.mpage .band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The desktop's own: History's days, each a band over its rows, 12px apart as the canvas spaces them. */
+.mpage .day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mpage .day + .day {
+  margin-top: 12px;
+}
+/* The desktop's own: one quiet line where a list has nothing to show for what was asked of it. */
+.mpage .none {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.mpage .rowl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  /* The desktop's own: rows are buttons here, not the canvas's links. */
+  width: 100%;
+  text-align: left;
+}
+.mpage button.rowl:hover {
+  background: var(--hov);
+}
+.mpage .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+/* The desktop's own: a row's two lines, its quiet trailing words, and the chevron of a row that opens a page. */
+.mpage .l1 {
+  display: block;
+  font-weight: 500;
+}
+.mpage .l2 {
+  display: block;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.mpage .when {
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.mpage .rowl > .ic:last-child {
+  color: var(--aui-muted);
+}
+.mpage .l1 code,
+.mpage .l2 code {
+  font-size: 12px;
+}
+
+/* Status words, coloured as the canvas colours them. */
+.mpage .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.mpage .tag.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+.mpage .tag.run {
+  background: var(--bluebg);
+  color: var(--aui-info);
+}
+.mpage .tag.run::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rad-pill);
+  background: currentColor;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.mpage .tag.warn {
+  background: var(--warnbg);
+}
+.mpage .tag.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+
+/* An empty page shows its row's drawing, what will be here, and why it is empty. The heading is an h2 under the
+   page's h1, because the canvas's h3 would skip a level here. */
+.mpage .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 20px;
+  text-align: center;
+}
+.mpage .empty .ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+}
+.mpage .empty h2 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.mpage .empty p {
+  margin: 0;
+  max-width: 40ch;
+  color: var(--aui-muted);
+  font-size: 13.5px;
+}
+
+/* History's search box, as the canvas's History board draws it: a bordered box holding the magnifier and the field.
+   The focus ring goes round the box, not the borderless field inside it */
+.mpage .find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--aui-muted);
+}
+.mpage .find:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.mpage .find input {
+  width: 220px;
+  max-width: 100%;
+  min-height: 32px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+.mpage .find input::placeholder {
+  color: var(--aui-placeholder);
+}
+
+/* The desktop's own: the Code page holds the terminal list the sidebar used to, as its own section. */
+.mpage .terms {
+  display: flex;
+  flex-direction: column;
+}
