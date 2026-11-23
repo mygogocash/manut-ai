@@ -18,7 +18,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openCode } from "./start";
+import { chatOpen, homeOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -63,7 +63,9 @@ async function open(page: Page, lang = "en", folders: { collapsed: string[]; ord
     [lang, NEW, folders ? JSON.stringify(folders) : null] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot: the app starts on Home; TERMINALS is on the Code page
+  await homeOpen(page);
+  await openCode(page);
 }
 
 const pick = (page: Page, folder: string | null) => page.evaluate((f) => ((window as unknown as Record<string, unknown>).__manutPickFolder = f), folder);
@@ -150,9 +152,10 @@ test("the background menu makes a folder group that survives a reload; the heade
   await page.mouse.move(700, 500);
   await shot(page, "folder-create-group");
 
-  // 3. still there after a reload
+  // 3. still there after a reload (which comes back to the chat: the Code page is a place passed through)
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(page);
+  await openCode(page);
   await expect(group(page, NEW)).toBeVisible();
   await expect(group(page, NEW).getByTestId("term-group-empty")).toBeVisible();
   expect(await groups(page)).toEqual([NEW]);
@@ -208,12 +211,14 @@ test("the background menu makes a folder group that survives a reload; the heade
   expect(await groups(page)).toEqual([NEW]);
   expect((await saved(page)).added).toEqual([NEW]);
 
-  // New terminal here: the Shell starts in the added folder, and its row takes the quiet line's place
+  // New terminal here: the Shell starts in the added folder and fills the main column; back on the Code page, its
+  // row takes the quiet line's place
   await head.click({ button: "right" });
   await page.getByTestId("term-folder-new").click();
+  await expect(page.getByTestId("terminal")).toBeVisible();
+  await openCode(page);
   await expect(group(page, NEW).locator(".ss-row.tr")).toHaveCount(1);
   await expect(group(page, NEW).getByTestId("term-group-empty")).toHaveCount(0);
-  await expect(page.getByTestId("terminal")).toBeVisible();
   // the row shows before the mock host logs the start (it awaits the shell list first): wait for the log
   await expect.poll(async () => (await starts(page)).length).toBe(1);
   expect(await groups(page)).toEqual([NEW]);
@@ -271,6 +276,8 @@ test("a folder listed under another spelling of its path is that one group: pick
   await pick(page, `${WEB}/`);
   await page.getByTestId("session-choose").click();
   await page.getByTestId("session-agent-shell").click();
+  await expect(page.getByTestId("terminal")).toBeVisible();
+  await openCode(page);
   await expect(group(page, WEB).locator(".ss-row.tr")).toHaveCount(1);
   await expect(group(page, WEB).getByTestId("term-group-empty")).toHaveCount(0);
   expect(await groups(page)).toEqual([NOTES, WEB]);
@@ -316,13 +323,15 @@ for (const [lang, words] of Object.entries(GONE_WORDS)) {
     await expect
       .poll(() => page.evaluate(() => ((window as unknown as { __manutShellCalls?: { op: string; cwd?: string | null; at?: string }[] }).__manutShellCalls ?? []).filter((c) => c.op === "start").map(({ cwd, at }) => ({ cwd, at }))))
       .toEqual([{ cwd: GONE, at: HOME }]);
+    // both places say why: the terminal once (it fills the main column now), the folder's group on the Code page for as
+    // long as it is listed
+    await expect(page.getByTestId("terminal").locator(".xterm-rows")).toContainText(words.term);
+    await openCode(page);
     // the row is listed under the folder it runs in, never under the dead folder's header
     await expect(group(page, HOME).locator(".ss-row.tr")).toHaveCount(1);
     await expect(group(page, GONE).locator(".ss-row.tr")).toHaveCount(0);
     // (home is not in the saved order, so its group follows the two that are)
     expect(await groups(page)).toEqual([GONE, NEW, HOME]);
-    // both places say why: the terminal once, the folder's group for as long as it is listed
-    await expect(page.getByTestId("terminal").locator(".xterm-rows")).toContainText(words.term);
     const note = group(page, GONE).getByTestId("term-group-gone");
     await expect(note).toHaveText(words.group);
     await expect(group(page, GONE).getByTestId("term-group-empty")).toHaveCount(0);
@@ -336,15 +345,19 @@ for (const [lang, words] of Object.entries(GONE_WORDS)) {
     // a folder that is there starts its shell in it, with no notice
     await group(page, NEW).getByTestId("term-group-head").click({ button: "right" });
     await page.getByTestId("term-folder-new").click();
+    await expect(page.getByTestId("terminal").locator(".xterm-rows")).toContainText(`login shell in ${NEW}`);
+    await expect(page.getByTestId("terminal").locator(".xterm-rows")).not.toContainText("no longer exists");
+    await openCode(page);
     await expect(group(page, NEW).locator(".ss-row.tr")).toHaveCount(1);
     await expect(page.getByTestId("term-group-gone")).toHaveCount(1);
-    await expect(page.getByTestId("terminal").locator(".xterm-rows")).not.toContainText("no longer exists");
 
     // collapsed, the dead folder opens when it is found gone again, so its notice shows
     await group(page, GONE).getByTestId("term-group-toggle").click();
     await expect(group(page, GONE)).toHaveAttribute("data-collapsed", "true");
     await group(page, GONE).getByTestId("term-group-head").click({ button: "right" });
     await page.getByTestId("term-folder-new").click();
+    await expect(page.getByTestId("terminal")).toBeVisible();
+    await openCode(page);
     await expect(group(page, HOME).locator(".ss-row.tr")).toHaveCount(2);
     await expect(group(page, GONE)).not.toHaveAttribute("data-collapsed", "true");
     await expect(note).toBeVisible();
@@ -353,6 +366,8 @@ for (const [lang, words] of Object.entries(GONE_WORDS)) {
     await page.evaluate((f) => (window as unknown as { __manutShellFolders: string[] }).__manutShellFolders.push(f), GONE);
     await group(page, GONE).getByTestId("term-group-head").click({ button: "right" });
     await page.getByTestId("term-folder-new").click();
+    await expect(page.getByTestId("terminal")).toBeVisible();
+    await openCode(page);
     await expect(group(page, GONE).locator(".ss-row.tr")).toHaveCount(1);
     await expect(page.getByTestId("term-group-gone")).toHaveCount(0);
     await page.evaluate((f) => {
@@ -361,6 +376,8 @@ for (const [lang, words] of Object.entries(GONE_WORDS)) {
     }, GONE);
     await group(page, GONE).getByTestId("term-group-head").click({ button: "right" });
     await page.getByTestId("term-folder-new").click();
+    await expect(page.getByTestId("terminal")).toBeVisible();
+    await openCode(page);
     await expect(group(page, HOME).locator(".ss-row.tr")).toHaveCount(3);
     await expect(note).toBeVisible();
 

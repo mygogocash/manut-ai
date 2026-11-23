@@ -1,9 +1,10 @@
 // Shell: sidebar, timeline bubbles, composer send/stop, theme, header right side, screenshots.
 import { expect, test, type Page } from "@playwright/test";
+import { tokenColor } from "./tokens";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -39,8 +40,7 @@ async function setTheme(page: Page, theme: "system" | "dark" | "light") {
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
-  // init selects the first bot and opens its chat
+  // the start opens Kami's chat (playwright.config.ts)
   await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
@@ -50,6 +50,7 @@ test.beforeEach(async () => {
 });
 
 test("sidebar lists the mock bots and search filters them", async ({ page }) => {
+  test.skip(true, "the sidebar's bot list, live ring and bot search left with it; Team lists the members, Customize holds Automations and Plugins, History has the search");
   await open(page);
   const side = page.getByTestId("sidebar");
   for (const name of ["Kami", "Friren", "Hermes"]) await expect(side.getByText(name, { exact: true })).toBeVisible();
@@ -71,24 +72,25 @@ test("sidebar lists the mock bots and search filters them", async ({ page }) => 
 
 test("select Kami shows history as filled bubbles; switching bots swaps the chat", async ({ page }) => {
   await open(page);
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByTestId("timeline").getByText("Summarise the Tauri 2 updater docs.")).toBeVisible();
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   const tl = page.getByTestId("timeline");
   await expect(tl.getByText("gateway 502 로그 좀 봐줄래?")).toBeVisible();
   await expect(tl.getByText("Thanks. Ping me when the retry fix is up.")).toBeVisible();
   // markdown: inline code inside the bot bubble
   await expect(tl.getByTestId("bubble-bot").locator("code").first()).toHaveText("/v1/responses");
-  // filled bubbles, no border, radius <= 10px
+  // filled bubbles, no border, the corner --r-bubble (the design kit's 16px since the fork's restyle)
   const style = await tl.getByTestId("bubble-bot").first().locator(".b").evaluate((el) => {
     const cs = getComputedStyle(el);
     return { bg: cs.backgroundColor, border: cs.borderTopWidth, radius: parseFloat(cs.borderTopLeftRadius) };
   });
-  expect(style.bg).toBe("rgb(29, 26, 32)"); // #1d1a20
+  // the default colour set's bubbles take the design tokens since the fork's restyle
+  expect(style.bg).toBe(await tokenColor(page, "--bub-bot"));
   expect(style.border).toBe("0px");
-  expect(style.radius).toBeLessThanOrEqual(10);
+  expect(style.radius).toBe(16);
   const me = await tl.getByTestId("bubble-user").first().locator(".b").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(me).toBe("rgb(60, 42, 59)"); // #3c2a3b (OMH soft tint)
+  expect(me).toBe(await tokenColor(page, "--bub-me"));
   await expect(page.getByTestId("header").getByText("Kami", { exact: true })).toBeVisible();
 });
 
@@ -166,7 +168,7 @@ test("theme follows the store; dark and light screenshots", async ({ page }) => 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   const bg = await page.getByTestId("bubble-bot").first().locator(".b").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(bg).toBe("rgb(242, 240, 244)"); // #f2f0f4
+  expect(bg).toBe(await tokenColor(page, "--bub-bot"));
   await page.getByTestId("composer").blur();
   await page.waitForTimeout(400); // let the 0.2s colour transitions settle
   await page.screenshot({ path: join(SHOTS, "shell-light.png") });

@@ -90,7 +90,7 @@ test("Settings › General: Sounds is on, Play previews the chime, Off disables 
   await seg.getByRole("radio", { name: "Off" }).click();
   await expect(play).toBeDisabled();
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(page);
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("sounds-seg").getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("sounds-play")).toBeDisabled();
@@ -104,7 +104,8 @@ test("off: a send, a reply, an approval and an error make no AudioContext", asyn
   await expect(page.getByTestId("bubble-bot").filter({ hasText: "keep-alive" }).first()).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(1600);
   await mock("mock.ask", { bot: "friren", kind: "approval" });
-  await expect(page.getByTestId("bot-friren").getByTestId("needs")).toBeVisible();
+  // the ask is in: the menu's Needs you row counts it (the bot row's dot did)
+  await expect(page.getByTestId("menu-needs-count")).toHaveText("1");
   await page.waitForTimeout(1600);
   await errorEnd("friren");
   await page.waitForTimeout(500);
@@ -134,8 +135,8 @@ test("first load with an ask already waiting is silent", async ({ page }) => {
   await mock("mock.ask", { bot: "friren", kind: "approval" });
   await fakeAudio(page);
   await open(page);
-  // the ask came back with the chat (the bridge's replay) ...
-  await expect(page.getByTestId("bot-friren").getByTestId("needs")).toBeVisible();
+  // the ask came back with the chat (the bridge's replay), and the menu's Needs you row counts it ...
+  await expect(page.getByTestId("menu-needs-count")).toHaveText("1");
   await page.waitForTimeout(2000);
   // ... and made no sound
   expect(await audio(page)).toEqual({ made: 0, started: 0 });
