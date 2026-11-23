@@ -58,6 +58,21 @@ export function sameName(a: string, b: string): boolean {
   return normalizeName(a) === normalizeName(b);
 }
 
+/** References compare without spaces or case: the same transfer read twice (by a person, or by a reader that
+ *  splits a long reference) must still count as used, so one transfer can never pay for two orders. */
+export function normalizeReference(reference: string): string {
+  return reference.normalize("NFC").replace(/\s+/gu, "").toUpperCase();
+}
+
+/** The order that already used this reference, if any. Only own keys count, never the object's prototype. */
+function earlierUse(usedReferences: Readonly<Record<string, string>>, reference: string): string | null {
+  const wanted = normalizeReference(reference);
+  for (const [used, orderRef] of Object.entries(usedReferences)) {
+    if (normalizeReference(used) === wanted) return orderRef;
+  }
+  return null;
+}
+
 function momentMs(value: string | null | undefined): number | null {
   if (typeof value !== "string") return null;
   const ms = Date.parse(value);
@@ -80,10 +95,18 @@ export function missingFields(slip: Slip): SlipField[] {
 
 /**
  * One verdict for a slip. When several apply the order is: unreadable, already used, other payee, amount
- * differs, older than order.
+ * differs, older than order. An order whose amount or time cannot be used throws a RangeError.
  */
 export function checkSlip(input: SlipCheckInput): SlipVerdict {
   const { slip, order, shopName, usedReferences } = input;
+
+  // The order comes from the shop's own records, not from a slip, so an order that cannot be used is a fault in
+  // the caller. It is refused outright: skipping the age check instead would let an old slip read as a match.
+  if (!Number.isSafeInteger(order.amountSatang) || order.amountSatang <= 0) {
+    throw new RangeError("order amount must be a positive whole number of satang");
+  }
+  const placedMs = momentMs(order.placedAt);
+  if (placedMs === null) throw new RangeError("order time must be an ISO 8601 moment");
 
   const missing = missingFields(slip);
   if (missing.length > 0) return { kind: "unreadable", missing };
@@ -95,9 +118,9 @@ export function checkSlip(input: SlipCheckInput): SlipVerdict {
   const paidMs = momentMs(slip.paidAt) as number;
 
   // The same slip may be checked again against the order it already settled; only another order's use counts.
-  if (Object.hasOwn(usedReferences, reference)) {
-    const earlier = usedReferences[reference] as string;
-    if (earlier !== order.orderRef) return { kind: "already_used", reference, earlierOrderRef: earlier };
+  const earlier = earlierUse(usedReferences, reference);
+  if (earlier !== null && earlier !== order.orderRef) {
+    return { kind: "already_used", reference, earlierOrderRef: earlier };
   }
 
   if (!sameName(payeeName, shopName)) return { kind: "other_payee", payeeName };
@@ -106,8 +129,7 @@ export function checkSlip(input: SlipCheckInput): SlipVerdict {
     return { kind: "amount_differs", slipSatang: amount, orderSatang: order.amountSatang };
   }
 
-  const placedMs = momentMs(order.placedAt);
-  if (placedMs !== null && paidMs < placedMs - CLOCK_SKEW_MS) {
+  if (paidMs < placedMs - CLOCK_SKEW_MS) {
     return { kind: "older_than_order", paidAt: slip.paidAt as string, placedAt: order.placedAt };
   }
 

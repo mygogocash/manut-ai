@@ -54,6 +54,28 @@ describe("each verdict", () => {
     i.usedReferences = { REF1: "A-0" };
     expect(checkSlip(i)).toEqual({ kind: "already_used", reference: "REF1", earlierOrderRef: "A-0" });
   });
+  it("already_used ignores spaces and capitals in the reference, as a slip read twice can differ", () => {
+    const i = base();
+    i.slip.reference = "ref 1";
+    i.usedReferences = { " REF1": "A-0" };
+    expect(checkSlip(i)).toEqual({ kind: "already_used", reference: "ref 1", earlierOrderRef: "A-0" });
+  });
+  it("accepts the reference written differently when it settled this same order", () => {
+    const i = base();
+    i.slip.reference = "Ref 1";
+    i.usedReferences = { REF1: "A-1" };
+    expect(checkSlip(i).kind).toBe("matches");
+  });
+  it("refuses an order whose time or amount cannot be used, rather than skip a check", () => {
+    const badTime = base();
+    badTime.order.placedAt = "yesterday";
+    expect(() => checkSlip(badTime)).toThrow(RangeError);
+    for (const amount of [0, -100, 12.5, Number.NaN]) {
+      const badAmount = base();
+      badAmount.order.amountSatang = amount;
+      expect(() => checkSlip(badAmount)).toThrow(RangeError);
+    }
+  });
   it("does not mistake object prototype keys for used references", () => {
     const i = base();
     i.slip.reference = "toString";
