@@ -374,6 +374,17 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
   "memory.confirmed": () => "confirmed a fact as true",
   "memory.corrected": () => "corrected a fact",
   "memory.forgotten": () => "made the team forget a fact",
+  "routine.created": () => "made a routine",
+  "routine.paused": () => "paused a routine",
+  "routine.resumed": () => "turned a routine back on",
+  "routine.removed": () => "removed a routine",
+  "routine.ran": (entry) =>
+    entry.outcome === "skipped" ? "skipped a routine's run" : entry.outcome === "missed" ? "missed a routine's run"
+      : "ran a routine",
+  "team.paused": () => "paused everyone",
+  "team.resumed": () => "resumed everyone",
+  "template.applied": () => "set the shop up from a template",
+  "question.answered": () => "recorded the owner's answer to a first-week question",
 };
 
 /// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290."
@@ -407,6 +418,10 @@ export function auditOutcomeTag(outcome: string, ownerName: string): { label: st
       return { label: "Cancelled", className: "tag" };
     case "superseded":
       return { label: "No longer open", className: "tag" };
+    case "skipped":
+      return { label: "Skipped", className: "tag" };
+    case "missed":
+      return { label: "Missed", className: "tag warn" };
     default:
       return { label: outcome, className: "tag" };
   }
@@ -426,6 +441,14 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   changed: "It had changed since it was shown.",
   not_offered: "That choice was not offered.",
   not_found: "There was no such request.",
+  // Why a routine's run did not start, or had nothing to do.
+  routine_paused: "The routine was paused.",
+  team_paused: "Everyone was paused.",
+  member_off: "Its team member is not on.",
+  consent_required: "The owner has not allowed cloud work.",
+  routines_off: "Routines are switched off.",
+  cloud_off: "Cloud work is switched off.",
+  nothing_to_answer: "No customer message was waiting.",
 };
 
 export function auditReasonText(reason: string): string {
@@ -445,6 +468,9 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["previousConnectionId", "replacing"],
   ["confirmationId", "confirmation"],
   ["factId", "fact"],
+  ["routineId", "routine"],
+  ["templateId", "template"],
+  ["questionId", "question"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {
@@ -676,6 +702,88 @@ function countOf(n: number, one: string, many: string): string {
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+const MEMBER_NAMES: Readonly<Record<string, string>> = { nam: "Nam", pim: "Pim", ton: "Ton", kit: "Kit" };
+
+/// The console's new-shop form (NewShopForm.tsx): a shop's name, its owner's name, and the shop template it starts from.
+/// A template's own words are the API's; these say what it sets up.
+export const newShopWords = {
+  button: "New shop",
+  title: "New shop",
+  nameLabel: "Shop's name",
+  ownerLabel: "Owner's name",
+  templateLabel: "Start from a template",
+  noTemplate: "No template",
+  noTemplateHelp: "Every team member on, no routines and no first-week questions.",
+  templatesUnavailable: "The API could not list the templates, so the shop can only start without one. Try again later.",
+  summaryLabel: (template: string) => `What ${template} sets up`,
+  teamLine: (team: string[]) => `Turns on ${listOf(team.map((id) => MEMBER_NAMES[id] ?? id))}. Buddy is always on.`,
+  routinesNote: "Each starts paused until the owner turns it on, so nothing runs by surprise. A run only ever drafts.",
+  routineLine: (routine: { when: string; does: string; asksFirst: boolean }) =>
+    `${routine.when}: ${routine.does}${routine.asksFirst ? ". Asks first." : ""}`,
+  questionsLine: (count: number, owner: string) =>
+    `${count} questions for Buddy to ask ${owner || "the owner"} in the first week.`,
+  create: "Create shop",
+  creating: "Creating",
+  cancel: "Cancel",
+  anotherKey: "Enter another key",
+};
+
+/// Why a shop was not made. Nothing is made when the API refuses.
+export function newShopErrorText(error: unknown): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "unknown_template":
+        return "The API does not know that template. Reload the page and choose again. No shop was made.";
+      case "invalid_request":
+      case "invalid_body":
+        return "Enter the shop's name and its owner's name, each up to 200 characters. No shop was made.";
+      case "shop_unavailable":
+        return "The API could not make the shop. No shop was made; try again.";
+    }
+  }
+  return errorText(error);
+}
+
+/// A shop's first week (QuestionsTab.tsx): what Buddy asks its owner, and each answer as the team now knows it.
+export const questionsWords = {
+  tab: "First week",
+  intro: (owner: string, template: string | null) =>
+    `${template ? `Made from the ${template} template. ` : ""}Ask ${owner} these in the first week, so what the team knows comes from ${owner}. Write each answer as a sentence that stands on its own: it becomes a fact ${owner} said, on the Memory page, where it can be corrected or forgotten.`,
+  listLabel: "First-week questions",
+  none: "This shop was not made from a template, so there are no first-week questions.",
+  answered: "Answered",
+  forgotten: (owner: string) => `Answered, then forgotten at ${owner}'s word. The team no longer knows it.`,
+  answerLabel: (owner: string) => `${owner}'s answer`,
+  answerHelp: (n: number) =>
+    `${n.toLocaleString("en-US")} of ${MAX_TEXT} characters. The team uses it as soon as you save it.`,
+  save: "Save answer",
+  saving: "Saving",
+  loading: "Loading the first-week questions",
+  unavailable: "The API could not read this shop's questions. Try again.",
+  tryAgain: "Try again",
+};
+
+/// Why an answer was not kept. Nothing is kept when the API refuses.
+export function questionErrorText(error: unknown): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "already_answered":
+        return "Already answered. To change the answer, correct its fact on the Memory page.";
+      case "already_known":
+        return "The team already knows exactly this. Nothing new was saved.";
+      case "invalid_text":
+        return `Write 1 to ${MAX_TEXT} characters.`;
+      case "full":
+        return memoryWords.full;
+      case "not_found":
+        return "This question is no longer on the shop. Refresh the page.";
+      case "questions_unavailable":
+        return "The API could not save the answer. Nothing was saved; try again.";
+    }
+  }
+  return errorText(error);
 }
 
 /// The Memory page: what Buddy's team knows about one shop, laid out as the design canvas's "Customize: memory and

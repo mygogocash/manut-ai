@@ -26,6 +26,10 @@ import {
   type Shop,
   type ShopDeletion,
   type ShopExport,
+  type ShopQuestion,
+  type ShopQuestions,
+  type ShopTemplate,
+  type NewAnswer,
   type SubscriptionPayment,
 } from "./types";
 
@@ -115,6 +119,13 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       request<CreatedShop>({ method: "POST", path: "/v1/admin/pilot/shops", body: input, admin: true }),
     listShops: async () =>
       (await request<{ shops: Shop[] }>({ method: "GET", path: "/v1/admin/pilot/shops", admin: true })).shops,
+    listTemplates: async () =>
+      (await request<{ templates: ShopTemplate[] }>({ method: "GET", path: "/v1/admin/templates", admin: true })).templates,
+    getQuestions: (tenant) =>
+      request<ShopQuestions>({ method: "GET", path: "/v1/admin/questions", query: { tenant }, admin: true }),
+    answerQuestion: async (input: NewAnswer) =>
+      (await request<{ question: ShopQuestion }>({ method: "POST", path: "/v1/admin/questions/answer", body: input,
+        admin: true })).question,
     createLineConnection: (input: NewLineConnection) =>
       request<CreatedLineConnection>({
         method: "POST",

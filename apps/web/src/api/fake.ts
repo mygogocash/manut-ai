@@ -38,6 +38,7 @@ import {
   type FakeModel,
   type FakeModelGateway,
 } from "./meter";
+import type { ShopQuestion, ShopTemplate } from "./types";
 
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
@@ -85,8 +86,11 @@ export type FakeApiOptions = {
 
 type Outcome = "confirmed" | "failed" | "unknown";
 
-/// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list.
-type FakeShop = Shop & { trialStartedAt?: string };
+/// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list. A shop
+/// made from a template keeps its first-week questions here, where the API keeps them beside its routines; a question
+/// holds only its answer's fact id, and the words are the fact's.
+type FakeShop = Shop & { trialStartedAt?: string; questions?: FakeQuestion[] };
+type FakeQuestion = { id: string; text: string; factId?: string; answeredAt?: string };
 type FakeConnection = {
   connectionId: string;
   tenant: string;
@@ -550,19 +554,60 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const name = input.name.trim();
         const ownerName = input.ownerName.trim();
         if (!name || !ownerName) throw new ApiError(400, "invalid_body");
-        const shop: FakeShop = { tenant: nextId("shop"), name, ownerName, consent: false };
+        // As the API: a template is checked before anything is made, and one that is not a template makes no shop.
+        const template = input.template === undefined ? null : (SHOP_TEMPLATES.find((t) => t.id === input.template) ?? null);
+        if (input.template !== undefined && !template) throw new ApiError(400, "unknown_template");
+        const shop: FakeShop = { tenant: nextId("shop"), name, ownerName, consent: false,
+          ...(template ? { template: template.id,
+            questions: template.questions.map((text, index) => ({ id: `q${index + 1}`, text })) } : {}) };
         db.shops.push(shop);
         audit(shop.tenant, PRACTICE_OPERATOR, "shop.created", {});
-        return { tenant: shop.tenant, name: shop.name, ownerName: shop.ownerName };
+        if (template) audit(shop.tenant, PRACTICE_OPERATOR, "template.applied", { templateId: template.id });
+        return { tenant: shop.tenant, name: shop.name, ownerName: shop.ownerName,
+          ...(template ? { template: template.id } : {}) };
       }),
 
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map(({ trialStartedAt: _trial, ...shop }) => {
+        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, ...shop }) => {
           const deletion = deletionRequestOf(shop.tenant);
           return deletion ? { ...shop, deletion } : shop;
         });
+      }),
+
+    listTemplates: () =>
+      run(() => {
+        admin();
+        return SHOP_TEMPLATES;
+      }),
+
+    // As the API: the template the shop was made from, and each question with its answer read from what the team knows,
+    // so an answer the owner had the team forget has no words.
+    getQuestions: (tenant) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        const facts = memoryOf(tenant).facts;
+        return {
+          tenant,
+          template: shop.template ?? null,
+          questions: (shop.questions ?? []).map((question) => questionView(question, facts)),
+        };
+      }),
+
+    answerQuestion: (input) =>
+      run(() => {
+        admin();
+        const shop = shopOf(input.tenant);
+        const question = shop.questions?.find((candidate) => candidate.id === input.questionId);
+        if (!question) throw new ApiError(404, "not_found");
+        if (question.factId !== undefined) throw new ApiError(409, "already_answered");
+        const fact = changeFact(input.tenant, "memory.remembered", (state) => shopMemory.remember(state, input.text, now()));
+        question.factId = fact.id;
+        question.answeredAt = iso(now());
+        audit(input.tenant, PRACTICE_OPERATOR, "question.answered", { questionId: question.id, factId: fact.id });
+        return questionView(question, memoryOf(input.tenant).facts);
       }),
 
     createLineConnection: (input) =>
@@ -1261,3 +1306,71 @@ function sampleMemory(at: number): MemoryState {
   keep(shopMemory.propose(state, "Customers expect 20% off when they buy 5 sets", { kind: "customer", chat: "line:Ufah" }, ago(50)));
   return state;
 }
+
+/// One first-week question as the API answers it: its answer's words read from what the team knows, null once the owner
+/// had the team forget them.
+function questionView(question: FakeQuestion, facts: readonly Fact[]): ShopQuestion {
+  if (question.factId === undefined) return { id: question.id, text: question.text, answer: null };
+  const fact = facts.find((candidate) => candidate.id === question.factId);
+  return { id: question.id, text: question.text,
+    answer: { factId: question.factId, text: fact?.text ?? null, answeredAt: question.answeredAt ?? "" } };
+}
+
+/// The three shop templates as the API serves them from `@manut/shop-templates` (`GET /v1/admin/templates`), copied for
+/// practice mode because the web app does not depend on that package: the same ids, words and order.
+const SHOP_TEMPLATES: ShopTemplate[] = [
+  {
+    id: "handmade",
+    name: "Handmade and gifts",
+    fits: "Candles, soap, crafts and gift sets, like Baan Mali.",
+    team: ["nam", "pim", "ton"],
+    routines: [
+      { when: "Every day at 08:00", does: "Morning brief", asksFirst: false },
+      { when: "Every Monday at 08:00", does: "Weekly growth brief", asksFirst: false },
+      { when: "When stock drops under 5", does: "Tell me and draft a restock order", asksFirst: false },
+      { when: "On the last day of the month at 18:00", does: "Send the books to FlowAccount", asksFirst: true },
+    ],
+    questions: [
+      "What is your price list?",
+      "What order total gets free shipping?",
+      "How long do pre-orders take?",
+      "Do you gift-wrap, and what does it cost?",
+    ],
+  },
+  {
+    id: "fashion",
+    name: "Clothes and accessories",
+    fits: "Shops selling clothes, bags and accessories in sizes.",
+    team: ["nam", "pim", "ton"],
+    routines: [
+      { when: "Every day at 08:00", does: "Morning brief", asksFirst: false },
+      { when: "Every Friday at 10:00", does: "Draft a new-arrivals post", asksFirst: true },
+      { when: "When a size drops under 3", does: "Tell me and draft a restock order", asksFirst: false },
+      { when: "On the last day of the month at 18:00", does: "Send the books to FlowAccount", asksFirst: true },
+    ],
+    questions: [
+      "What is your size chart?",
+      "Do you take exchanges, and for how long?",
+      "How do pre-orders work?",
+      "Which items are never discounted?",
+    ],
+  },
+  {
+    id: "food",
+    name: "Packaged food and drinks",
+    fits: "Shops selling packaged food and drinks that keep for a limited time.",
+    team: ["nam", "ton"],
+    routines: [
+      { when: "Every day at 08:00", does: "Morning brief", asksFirst: false },
+      { when: "Every day at 09:00", does: "List what expires within 7 days", asksFirst: false },
+      { when: "Every day at 15:00", does: "Remind me of today's delivery cut-off", asksFirst: false },
+      { when: "On the last day of the month at 18:00", does: "Send the books to FlowAccount", asksFirst: true },
+    ],
+    questions: [
+      "How long does each product keep?",
+      "Where do you deliver, and what is the day's cut-off time?",
+      "Which products must stay cold?",
+      "What should Buddy say when a customer asks about allergies? (Buddy never answers allergy questions from guesswork.)",
+    ],
+  },
+];
