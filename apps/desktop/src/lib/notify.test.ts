@@ -49,6 +49,33 @@ describe("noteFor: only what needs the person", () => {
   });
 });
 
+describe("noteFor: what notify-rules needs to know of a request", () => {
+  const approval = (over: Record<string, unknown> = {}) => ev({ event: "approval.request", request_id: "req-5@1", title: "Refund", command: "Send on LINE: “Thanks!”", choices: ["once", "deny"], kind: "reply", ...over });
+  it("carries the ask's id, its approval-core kind, who asks and how many wait, and says whether the card offers Allow once", () => {
+    expect(noteFor(approval(), { ...ctx(), waiting: () => 3 })?.ask).toEqual({ id: "req-5@1", approval: "reply", member: "Kami", canApprove: true, waiting: 3 });
+    // the member is the bot's name as the app shows it
+    expect(noteFor(approval(), { ...ctx(), name: () => "Nam" })?.ask?.member).toBe("Nam");
+  });
+  it("has no kind for an ask that has none, and no answer to approve for an ask the card cannot answer", () => {
+    expect(noteFor(approval({ kind: undefined }), ctx())?.ask).toMatchObject({ approval: "", canApprove: true });
+    expect(noteFor(approval({ choices: [], outdated: true }), ctx())?.ask).toMatchObject({ canApprove: false });
+    expect(noteFor(approval({ choices: ["deny"] }), ctx())?.ask).toMatchObject({ canApprove: false });
+  });
+  it("still notifies, and cannot be approved, when an ask arrives with no list of choices", () => {
+    const n = noteFor(approval({ choices: undefined }), ctx());
+    expect(n).toMatchObject({ body: "Send on LINE: “Thanks!”", ask: { canApprove: false } });
+  });
+  it("is a request too for a question, which nothing can approve", () => {
+    const n = noteFor(ev({ event: "clarify.request", request_id: "q1", question: "Which branch should I deploy?" }), ctx());
+    expect(n?.ask).toEqual({ id: "q1", approval: "", member: "Kami", canApprove: false, waiting: 1 });
+  });
+  it("is news, with no ask, for everything else: an answer, an error, an automation's answer", () => {
+    expect(noteFor(ev({ event: "message", id: "m", text: "Done!" }), ctx())).not.toHaveProperty("ask");
+    expect(noteFor(ev({ event: "turn.end", outcome: "error", error: "x" }), ctx(true))).not.toHaveProperty("ask");
+    expect(noteFor(ev({ event: "message", id: "m", text: "Hit", watch: { name: "deploys", ts: 1 } }), ctx())).not.toHaveProperty("ask");
+  });
+});
+
 describe("sessionRings: a program end notifies only when it went wrong", () => {
   const name = "web-app · Claude Code";
   it("exit 0 after a real run only marks the row; exit 1 notifies", () => {

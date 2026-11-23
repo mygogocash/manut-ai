@@ -19,6 +19,7 @@ import { TerminalPage } from "./terminal/TerminalPage";
 import { can } from "../runtime";
 import { setBar, useTasks } from "../tasks/state";
 import { DISK_WARN_CHOICES, diskWarn, setDiskWarn } from "../lib/disk";
+import { hideDetails, quietHours, setHideDetails, setQuietHours } from "../lib/outside";
 import { Toggle } from "../pages/kit";
 import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides } from "../lib/power";
 import { AgentsPage } from "./agents/AgentsPage";
@@ -429,6 +430,70 @@ function NotifyErrorsSeg() {
   );
 }
 
+/** "Hide details": a notification shows no names, amounts or customers, only how many requests need you. Off by default. */
+export function HideDetailsView({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return <Toggle on={on} label={t("out.hideDetails")} onChange={onChange} testId="set-hide-details" />;
+}
+
+export function HideDetailsToggle() {
+  const [on, setOn] = useState(hideDetails());
+  return (
+    <HideDetailsView
+      on={on}
+      onChange={(v) => {
+        setHideDetails(v);
+        setOn(v);
+      }}
+    />
+  );
+}
+
+/** A start and an end, as two time fields. An emptied field says nothing: the hours stay as they were. */
+export function QuietHoursView({ start, end, onStart, onEnd }: { start: string; end: string; onStart: (v: string) => void; onEnd: (v: string) => void }) {
+  return (
+    <span className="st-pair" data-testid="set-quiet">
+      <input type="time" className="dev-in st-time" aria-label={t("out.quietStart")} value={start} onChange={(e) => e.target.value && onStart(e.target.value)} data-testid="set-quiet-start" />
+      <span aria-hidden="true">{t("out.quietTo")}</span>
+      <input type="time" className="dev-in st-time" aria-label={t("out.quietEnd")} value={end} onChange={(e) => e.target.value && onEnd(e.target.value)} data-testid="set-quiet-end" />
+    </span>
+  );
+}
+
+export function QuietHoursInputs() {
+  const [hours, setHours] = useState(quietHours());
+  const save = (next: { start: string; end: string }) => {
+    setQuietHours(next);
+    setHours(next);
+  };
+  return <QuietHoursView start={hours.start} end={hours.end} onStart={(start) => save({ ...hours, start })} onEnd={(end) => save({ ...hours, end })} />;
+}
+
+/** The two choices about what the app shows outside its window, as the canvas's rows. */
+export function OutsideRows() {
+  return (
+    <>
+      <Row title={t("out.hideDetails")} hint={t("out.hideDetailsHint")}>
+        <HideDetailsToggle />
+      </Row>
+      <Row title={t("out.quiet")} hint={t("out.quietHint")}>
+        <QuietHoursInputs />
+      </Row>
+    </>
+  );
+}
+
+/** Under the notification choices: what quiet hours still let through, which clock they follow, and what the lock screen
+ *  does, which the app cannot see (macOS hides previews there by itself, so Hide details cannot be keyed to it). */
+export function OutsideNotes() {
+  return (
+    <>
+      <div className="st-note">{t("out.quietAlerts")}</div>
+      <div className="st-note">{t("out.quietZone")}</div>
+      <div className="st-note">{t("out.lockNote")}</div>
+    </>
+  );
+}
+
 function SoundsSeg() {
   const [on, setOn] = useState(soundsEnabled());
   return (
@@ -540,6 +605,7 @@ function GeneralPage() {
         <Row title={t("set.notifyErrors")} hint={t("set.notifyErrorsHint")}>
           <NotifyErrorsSeg />
         </Row>
+        <OutsideRows />
         <Row title={t("sounds.title")} hint={t("sounds.hint")}>
           <SoundsSeg />
         </Row>
@@ -547,6 +613,7 @@ function GeneralPage() {
           <DiskWarnSeg />
         </Row>
       </div>
+      <OutsideNotes />
       <div className="st-grp">
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />

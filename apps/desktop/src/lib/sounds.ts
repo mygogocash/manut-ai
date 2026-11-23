@@ -2,6 +2,7 @@
 // chat finishes out of sight, a rising chime when an approval or question arrives, and one low note when a turn
 // ends with an error. Settings › General turns them off; while off, no AudioContext is made or resumed.
 import type { BridgeEvent } from "./protocol";
+import { quietNow } from "./outside";
 
 export type Sound = "send" | "pop" | "chime" | "error";
 
@@ -86,6 +87,9 @@ export function soundFor(
 export interface SoundDeps {
   now: () => number;
   enabled: () => boolean;
+  /** Quiet hours are on now: "Nothing makes a sound". Held against every sound the app plays by itself; Settings' Play
+   *  button, which the person pressed to hear one, is not held. */
+  quiet?: () => boolean;
   /** Make the AudioContext (called once, on the first sound that plays). */
   audio: () => AudioLike | null;
   /** Run `fn` once on the person's next click or key. */
@@ -124,10 +128,13 @@ export class SoundBoard {
   /** Play `sound` unless a rule drops it; an ask (`chat` + request id) sounds at most once, ever. */
   offer(sound: Sound, ask?: { chat: string; id: string }): boolean {
     const t = this.deps.now();
+    // an ask that comes in quiet hours is used up, not kept: it waits in the app and does not ring when they end
+    if (this.deps.quiet?.() && !ask) return false;
     if (ask) {
       const key = `${ask.chat}\n${ask.id}`;
       if (this.asked.has(key)) return false;
       this.asked.add(key);
+      if (this.deps.quiet?.()) return false;
       if (t - (this.openedAt.get(ask.chat) ?? -Infinity) < SETTLE_MS) return false;
     }
     // the send tick is the person's own action: only the switch and the gap hold it
@@ -220,7 +227,7 @@ let board: SoundBoard | null = null;
 /** The app's one board; the first call starts watching for typing. */
 export function appSounds(): SoundBoard {
   if (board) return board;
-  const b = new SoundBoard({ now: Date.now, enabled: soundsEnabled, audio: browserAudio, onGesture: onNextGesture });
+  const b = new SoundBoard({ now: Date.now, enabled: soundsEnabled, quiet: () => quietNow(Date.now()), audio: browserAudio, onGesture: onNextGesture });
   if (typeof document !== "undefined") document.addEventListener("keydown", (e) => typedKey(e) && b.typed(), true);
   return (board = b);
 }

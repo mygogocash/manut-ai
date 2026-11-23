@@ -168,6 +168,8 @@ export function pendingAsks(snapshot: ShopSnapshot): EventOf<"approval.request">
         command: askText(a, task),
         choices,
         ...(choices.length ? {} : { outdated: true }),
+        // a kind this build does not know is the text the API sent, and a notification offers no Approve for it
+        kind: isUnknown(a.record.request.kind) ? a.record.request.kind.raw : a.record.request.kind,
       };
     });
 }

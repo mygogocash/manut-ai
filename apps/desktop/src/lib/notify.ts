@@ -3,8 +3,16 @@
 // mark their row; the body is what the bot said, as it would say it (`spoken`). In the desktop app this
 // goes through the Tauri notification plugin (macOS Notification Center, Windows toasts); in a plain
 // browser (dev, e2e) through the Web Notification API.
+//
+// Every notification goes through `showOutside`, which asks `@manut/notify-rules` (outside.ts) whether to show it, with
+// what sound and which buttons: quiet hours and Hide details apply to all of them. A request waiting for the owner may
+// carry Approve (a `message` or `reply` only, and never while details are hidden); a pressed Approve is answered by the
+// caller's own handler, which is the card's path (store.ts `approveFromNotification`), so there is no second way to
+// settle an approval. Look first opens the app on the request, Later only dismisses.
 import type { BridgeEvent } from "./protocol";
 import { t } from "../i18n";
+import { outsideSettings, presentOutside, routeAction, type Outside, type PresentContext, type Shown, type ShownAction } from "./outside";
+import { isMacPlatform } from "./power";
 
 export interface Note {
   title: string;
@@ -13,6 +21,22 @@ export interface Note {
   bot: string;
   /** Collapse repeats of the same kind for the same bot. */
   tag: string;
+  /** Set when this is a request waiting for the owner (an approval, a question), not news: what notify-rules needs to
+   *  rule on it (outside.ts). `body` is then the request's one-line summary. */
+  ask?: AskNote;
+}
+
+export interface AskNote {
+  /** The ask's id with the revision shown: the card's own. */
+  id: string;
+  /** approval-core's kind of the request as text; "" when the ask has none, which is owner-only. */
+  approval: string;
+  /** Who asks. */
+  member: string;
+  /** The card offers Allow once. */
+  canApprove: boolean;
+  /** How many requests wait for the owner now, this one included: all a notification says while details are hidden. */
+  waiting: number;
 }
 
 const clip = (s: string, n = 140) => {
@@ -76,7 +100,7 @@ const say = (text: string) => spoken(text) || clip(shortenRefs(text));
  *  A turn that ended with an error only marks its chat unless `ctx.errors` ("Also notify on errors"). Pure: no globals. */
 export function noteFor(
   ev: BridgeEvent,
-  ctx: { name: (bot: string) => string; watching: (bot: string) => boolean; errors?: boolean },
+  ctx: { name: (bot: string) => string; watching: (bot: string) => boolean; errors?: boolean; waiting?: () => number },
 ): Note | null {
   const bot = ev.bot;
   if (!bot || ctx.watching(bot)) return null;
@@ -91,9 +115,17 @@ export function noteFor(
         body: clip(shortenRefs(ev.command || ev.title || t("ask.allowThis"))),
         bot,
         tag: `${bot}:approval`,
+        // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only
+        ask: { id: ev.request_id, approval: ev.kind ?? "", member: who, canApprove: Array.isArray(ev.choices) && ev.choices.includes("once") && !ev.outdated, waiting: ctx.waiting?.() ?? 1 },
       };
     case "clarify.request":
-      return { title: t("note.question", { bot: who }), body: ev.question.trim() ? say(ev.question) : t("note.waiting"), bot, tag: `${bot}:clarify` };
+      return {
+        title: t("note.question", { bot: who }),
+        body: ev.question.trim() ? say(ev.question) : t("note.waiting"),
+        bot,
+        tag: `${bot}:clarify`,
+        ask: { id: ev.request_id, approval: "", member: who, canApprove: false, waiting: ctx.waiting?.() ?? 1 },
+      };
     case "turn.end":
       return ev.outcome === "error" && ctx.errors
         ? { title: t("note.error", { bot: who }), body: say(ev.error || t("note.failed")), bot, tag: `${bot}:error` }
@@ -193,26 +225,31 @@ export function createNoteGate(ms = HOLD_MS) {
 
 const isTauri = () => !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 
-let granted: boolean | null = null;
+type Plugin = typeof import("@tauri-apps/plugin-notification");
 
-async function permitted(): Promise<boolean> {
-  if (granted !== null) return granted;
+/** The desktop plugin, loaded once however many notifications arrive together. */
+let plugin: Promise<Plugin> | null = null;
+const loadPlugin = (): Promise<Plugin> => (plugin ??= import("@tauri-apps/plugin-notification"));
+
+async function askPermission(): Promise<boolean> {
   try {
     if (isTauri()) {
-      const n = await import("@tauri-apps/plugin-notification");
-      granted = (await n.isPermissionGranted()) || (await n.requestPermission()) === "granted";
-    } else if (typeof Notification !== "undefined") {
-      granted = Notification.permission === "granted" || (await Notification.requestPermission()) === "granted";
-    } else {
-      granted = false;
+      const n = await loadPlugin();
+      return (await n.isPermissionGranted()) || (await n.requestPermission()) === "granted";
     }
+    if (typeof Notification !== "undefined") return Notification.permission === "granted" || (await Notification.requestPermission()) === "granted";
+    return false;
   } catch {
-    granted = false;
+    return false;
   }
-  return granted ?? false;
 }
 
-/** The bot to open when manut next gets focus after a desktop notification (the desktop plugin reports no click). */
+/** Asked once, and what it said holds for the page: several notifications arriving together share the one question. */
+let permission: Promise<boolean> | null = null;
+const permitted = (): Promise<boolean> => (permission ??= askPermission());
+
+/** The bot to open when manut next gets focus after a desktop notification. The plugin reports a click only while its
+ *  listener works, and not every button brings the app forward, so this stays as the way a note still opens its chat. */
 let openOnFocus: (() => void) | null = null;
 let focusHooked = false;
 function armFocusOpen(open: () => void): void {
@@ -226,26 +263,164 @@ function armFocusOpen(open: () => void): void {
   });
 }
 
-/** Show `note`. `onClick` opens that bot's chat: on a click (browser build), or with `focusOpen` when the desktop app
- *  next gets focus after it was shown in the background. Never throws. */
-export async function showNote(note: Note, onClick?: () => void, focusOpen = false): Promise<void> {
-  if (!(await permitted())) return;
+// ---- what a pressed button does ---------------------------------------------------------------------------------------------
+
+/** What the caller does for a notification's buttons: Look first (and a click on the notification) and Approve. */
+export interface Handlers {
+  open?: () => void;
+  /** The card's own answer, Allow once. Only ever called for a notification that carried an Approve button. */
+  approve?: () => void | Promise<void>;
+}
+
+interface Delivered {
+  shown: Shown;
+  handlers: Handlers;
+  /** Approve was pressed: one answer per notification, whatever the system reports. */
+  answered: boolean;
+}
+
+/** The notifications shown to the system, by the id each was given, so a pressed button is read against what that
+ *  notification offered. Bounded: a notification nobody pressed is forgotten in the end. */
+const delivered = new Map<number, Delivered>();
+const KEEP = 100;
+let lastId = 0;
+
+/** Brings the window forward from wherever it is: hidden in the menu bar, minimised, or behind another app. A button on a
+ *  notification does not always bring the app forward by itself. Never throws. */
+export async function bringToFront(): Promise<void> {
   try {
-    if (isTauri()) {
-      const n = await import("@tauri-apps/plugin-notification");
-      n.sendNotification({ title: note.title, body: note.body });
-      if (focusOpen && onClick && !windowWatched()) armFocusOpen(onClick);
+    if (!isTauri()) {
+      window.focus();
       return;
     }
-    const n = new Notification(note.title, { body: note.body, tag: note.tag });
-    n.onclick = () => {
-      window.focus();
-      onClick?.();
-      n.close();
-    };
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const w = getCurrentWindow();
+    await w.unminimize();
+    await w.show();
+    await w.setFocus();
   } catch {
-    /* notifications are best effort */
+    /* no window to bring: the app opens on the request the next time the person opens it */
   }
+}
+
+/** The plugin reports a pressed button here: `tap` for a click on the notification itself, otherwise the button's id. */
+async function performed(e: { actionId?: unknown; notification?: { id?: unknown } | null } | null | undefined): Promise<void> {
+  const id = e?.notification?.id;
+  const rec = typeof id === "number" ? delivered.get(id) : undefined;
+  if (!rec || typeof e?.actionId !== "string") return;
+  const pressed = routeAction(e.actionId, rec.shown);
+  try {
+    if (pressed === "look") {
+      await bringToFront();
+      rec.handlers.open?.();
+    } else if (pressed === "approve" && rec.handlers.approve && !rec.answered) {
+      rec.answered = true;
+      await rec.handlers.approve();
+    } else if (pressed === "later" && openOnFocus && openOnFocus === rec.handlers.open) {
+      // Later only dismisses: the chat this note would have opened on the next focus stays closed
+      openOnFocus = null;
+    }
+    // anything this notification did not offer only dismisses
+  } catch {
+    /* a handler's failure is never the plugin's */
+  }
+}
+
+/** One listener for the page. Without one the system shows no buttons (tauri-plugin-notification: "Without a listener,
+ *  desktop notifications are shown without their actions"), so it exists before the first notification goes out. */
+let listening: Promise<boolean> | null = null;
+function listen(n: Plugin): Promise<boolean> {
+  return (listening ??= n.onAction(performed).then(
+    () => true,
+    () => false,
+  ));
+}
+
+/** The action types registered, and the words each was registered with, so a change of language registers it again. */
+const registered = new Map<string, string>();
+async function actionType(n: Plugin, actions: ShownAction[]): Promise<string | undefined> {
+  if (!actions.length) return undefined;
+  const id = `manut:${actions.map((a) => a.id).join("+")}`;
+  const words = actions.map((a) => a.title).join("\n");
+  if (registered.get(id) !== words) {
+    await n.registerActionTypes([{ id, actions: actions.map((a) => ({ id: a.id, title: a.title })) }]);
+    registered.set(id, words);
+  }
+  return id;
+}
+
+/** macOS names its sounds; the other systems have their own default, which a notification with a sound just gets. */
+const SOUND = "Ping";
+
+async function toSystem(shown: Shown, handlers: Handlers): Promise<void> {
+  const n = await loadPlugin();
+  // If the plugin cannot listen or register, the notification still shows, with no buttons: a click is Look first
+  const buttons = (await listen(n)) ? await actionType(n, shown.actions).catch(() => undefined) : undefined;
+  lastId = (lastId % 0x7fffffff) + 1;
+  const id = lastId;
+  delivered.set(id, { shown, handlers, answered: false });
+  if (delivered.size > KEEP) delivered.delete(delivered.keys().next().value as number);
+  n.sendNotification({
+    id,
+    title: shown.title,
+    body: shown.body,
+    ...(shown.sound && isMacPlatform() ? { sound: SOUND } : {}),
+    ...(buttons ? { actionTypeId: buttons } : {}),
+  });
+}
+
+// ---- showing ---------------------------------------------------------------------------------------------------------------
+
+/** When a "waited while the Mac slept" notice was last shown (the wake's time), so one wake shows it once. */
+let lastWaitedShownAt: number | undefined;
+
+/** Asks already given their one chance to notify. A request asked again (a replay of the shop after a reconnect) does not
+ *  ring again, and one that waited out quiet hours does not ring when they end: it waits in the app. */
+const notified = new Set<string>();
+
+/** The one way anything is shown outside the window: notify-rules rules on it (quiet hours, hidden details, sound and
+ *  buttons), then it goes to the system. True when it was shown. Never throws: notifications are best effort. */
+export async function showOutside(src: Outside, handlers: Handlers = {}, tag = "", focusOpen = false, waiting = 1): Promise<boolean> {
+  const settings = outsideSettings();
+  const context: PresentContext = { hideDetails: settings.hideDetails, quiet: settings.quiet, now: Date.now(), waiting, lastWaitedShownAt };
+  const shown = presentOutside(src, context);
+  if (!shown || !(await permitted())) return false;
+  try {
+    if (isTauri()) {
+      await toSystem(shown, handlers);
+      if (focusOpen && handlers.open && !windowWatched()) armFocusOpen(handlers.open);
+    } else {
+      const n = new Notification(shown.title, { body: shown.body, tag });
+      n.onclick = () => {
+        window.focus();
+        handlers.open?.();
+        n.close();
+      };
+    }
+    if (shown.wokeAt !== undefined) lastWaitedShownAt = shown.wokeAt;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Show `note`. `onClick` opens that bot's chat (or the request): on a click, or with `focusOpen` when the desktop app next
+ *  gets focus after it was shown in the background. `approve` answers Allow once, for a request that may be approved from
+ *  here. True when it was shown. Never throws. */
+export async function showNote(note: Note, onClick?: () => void, focusOpen = false, approve?: () => void | Promise<void>): Promise<boolean> {
+  if (note.ask) {
+    if (notified.has(note.ask.id)) return false;
+    notified.add(note.ask.id);
+  }
+  const src: Outside = note.ask
+    ? { kind: "request", approval: note.ask.approval, member: note.ask.member, summary: note.body, canApprove: note.ask.canApprove }
+    : { kind: "notice", title: note.title, body: note.body };
+  return showOutside(src, { open: onClick, approve }, note.tag, focusOpen, note.ask?.waiting ?? 1);
+}
+
+/** Work that waited while the Mac slept, shown once after it woke (`wokeAt`, ms) and only if something waited. */
+export function showWoke(count: number, wokeAt: number, open?: () => void): Promise<boolean> {
+  return showOutside({ kind: "slept", count, wokeAt }, { open }, "manut:slept");
 }
 
 /** True while the person can see the manut window. */
