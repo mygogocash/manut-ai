@@ -89,6 +89,13 @@ export const AuditIcon = () => (
   </Icon>
 );
 
+/// A bookmark: what the team keeps to remember.
+export const MemoryIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h7a1 1 0 011 1v10L8 10.2 3.5 13.5v-10a1 1 0 011-1z" />
+  </Icon>
+);
+
 /// A coin with a baht-like B: what the AI team spends on language models.
 export const SpendIcon = () => (
   <Icon>

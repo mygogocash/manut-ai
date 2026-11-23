@@ -5,12 +5,39 @@ import type { ReactNode } from "react";
 import type { MenuPage } from "../state/store";
 import "./menuPages.css";
 
-export function MenuPageFrame({ page, title, acts, children }: { page: MenuPage; title: string; acts?: ReactNode; children: ReactNode }) {
+/** The pages that use the frame: the menu's own, and the two places opened from them (a job's page and the activity log,
+ *  which return to where they were opened from and so carry a back arrow in `lead`). */
+export type FramePage = MenuPage | "job" | "activity";
+
+export function MenuPageFrame({
+  page,
+  title,
+  acts,
+  lead,
+  middle,
+  hideTitle,
+  children,
+}: {
+  page: FramePage;
+  title: string;
+  acts?: ReactNode;
+  /** before the title: a page opened from another carries its back arrow here */
+  lead?: ReactNode;
+  /** between the title and the acts: a tag, or the tabs that switch between two views of one place */
+  middle?: ReactNode;
+  /** the title is for screen readers only, as the activity log's is: its tabs name the place */
+  hideTitle?: boolean;
+  children: ReactNode;
+}) {
   const heading = `page-${page}-title`;
   return (
     <section className="mpage" aria-labelledby={heading} data-testid={`page-${page}`}>
       <header className="top">
-        <h1 id={heading}>{title}</h1>
+        {lead}
+        <h1 id={heading} className={hideTitle ? "vh" : undefined}>
+          {title}
+        </h1>
+        {middle}
         {acts && <div className="acts">{acts}</div>}
       </header>
       <div className="mpage-body">{children}</div>

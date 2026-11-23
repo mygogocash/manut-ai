@@ -1,5 +1,8 @@
+import type { Fact } from "@manut/shop-memory";
+
 /// The shapes in docs/pilot-api.md, word for word. Both sides build to that file, so a change here starts
-/// there. Times are ISO 8601 strings in UTC; money is integer satang.
+/// there. Times are ISO 8601 strings in UTC; money is integer satang. A fact's times are the one exception: epoch
+/// milliseconds, as `@manut/shop-memory` keeps them (see "Memory" there).
 
 export type ApprovalState =
   | "proposed"
@@ -207,7 +210,7 @@ export type AuditEntry = {
   actor: AuditActor;
   action: string;
   /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
-  /// `previousConnectionId`, `confirmationId`.
+  /// `previousConnectionId`, `confirmationId`, `factId`.
   subject: Record<string, string>;
   outcome: string;
   reason?: string;
@@ -223,6 +226,24 @@ export type AuditPage = { tenant: string; entries: AuditEntry[]; next: string | 
 /// Which page to read: the entries before the cursor `before` (an entry's id), at most `limit` of them (1 to 200; the
 /// API reads 50 when the console does not say).
 export type AuditQuery = { before?: string; limit?: number };
+
+/// What Buddy's team knows about a shop (docs/pilot-api.md, "Memory"). The facts, where each came from and the owner's
+/// say over them are `@manut/shop-memory`'s own shapes, so the console, the practice-mode fake and the API cannot
+/// disagree about them.
+export type { Fact, FactSource, FactStatus } from "@manut/shop-memory";
+
+/// Every fact the team holds for the shop, waiting ones included and oldest first, and how many texts it was told to
+/// forget. The fingerprints of those are never sent.
+export type Memory = { tenant: string; facts: Fact[]; forgottenCount: number };
+
+/// The owner's own fact, confirmed at once. `text` is 1 to 280 characters.
+export type NewFact = { tenant: string; text: string };
+
+/// A fact the owner has a say over: "It's true" or Forget.
+export type FactRef = { tenant: string; id: string };
+
+/// The owner's correction: new words for a fact.
+export type FactCorrection = { tenant: string; id: string; text: string };
 
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
@@ -341,6 +362,19 @@ export interface PilotApi {
   /// `GET /v1/admin/audit`: one page of a shop's audit log, newest first. Rejects with 400 `invalid_request` for a
   /// cursor that is not an entry's id or a size out of range.
   listAudit(tenant: string, query?: AuditQuery): Promise<AuditPage>;
+
+  /// `GET /v1/admin/memory`: everything the team holds for the shop, waiting facts included.
+  getMemory(tenant: string): Promise<Memory>;
+  /// The owner's say over what the team knows, relayed by the operator (docs/pilot-api.md, "Memory"). Each rejects with
+  /// the API's refusal, changing nothing: 400 `invalid_text`, 404 `not_found`, 409 `already_known` or `full`.
+  /// The owner's own fact, confirmed at once; the same words as a waiting fact confirm that fact instead.
+  rememberFact(input: NewFact): Promise<Fact>;
+  /// "It's true": a waiting fact becomes one the team uses. Confirming a confirmed fact changes nothing.
+  confirmFact(input: FactRef): Promise<Fact>;
+  /// New words for a fact, confirmed, marked as corrected.
+  correctFact(input: FactCorrection): Promise<Fact>;
+  /// Forget: the fact and its words are gone, and only a fingerprint is kept so the team does not learn them again.
+  forgetFact(input: FactRef): Promise<{ id: string }>;
 
   /// `GET /v1/admin/model/usage`: a shop's model spend, cap and calls for one Bangkok month (`YYYY-MM`), the current
   /// one when none is given. Rejects with 400 `tenant_required`, 400 `invalid_request` for a month that is not one, 503

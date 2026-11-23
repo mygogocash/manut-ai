@@ -1,0 +1,943 @@
+/* Mission Control's pages: a job's page (JobPage.tsx), the activity log (ActivityPage.tsx) and Pause everyone, which is
+   the Team page's own (TeamPage.tsx). They are the design canvas's Job.dc.html, Activity.dc.html and PauseAll.dc.html:
+   the canvas's rules from packages/ui-kit/app.css (.you, .steps, .prose, .acrow, .box, .tr, .side2, .h2, .hint, .chip,
+   .fchip, .dialog, .banner, .field, .input, .check, .lab, .help, .ask, .askin, .send, .av and the face colours) copied and
+   scoped under each page's own root class, as home.css scopes Home's. menuPages.css gives the frame, bands, rows, tags and
+   the empty state under .mpage, and home.css gives .mpage .btn and the quiet link; both load with the app's window. The
+   canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is --aui-surface, --band is
+   --aui-subtle, --mut is --aui-muted, --pri and --onpri are --aui-primary and --aui-on-primary, --sh is
+   --aui-shadow-card, --oki and --erri are --aui-success and --aui-danger. Lines that are the desktop's own rather than
+   the canvas's say so. */
+
+/* ---- a job's page --------------------------------------------------------------------------------------------------- */
+
+/* The page is the owner's side and, beside it, the developer's (the canvas's .split). The owner's column leads. */
+.jobv {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 100%;
+}
+.jobv .main {
+  flex: 3 1 440px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.jobv .mut {
+  color: var(--aui-muted);
+}
+/* What the owner asked for, set as their own words (the canvas's .you). */
+.jobv .you {
+  align-self: flex-end;
+  max-width: min(82%, 560px);
+  padding: 10px 14px;
+  border-radius: var(--rad-xl);
+  background: var(--soft);
+  font-size: 15px;
+}
+.jobv .steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--aui-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.jobv .prose {
+  font-family: var(--font-read);
+  font-size: 17px;
+  line-height: 1.65;
+}
+.jobv .prose p {
+  margin: 0 0 12px;
+}
+.jobv .to {
+  display: flex;
+  flex-direction: column;
+}
+/* The customers' round faces: initials on the canvas's pastel fills, the only literal colours the canvas allows. */
+.jobv .av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+  font-size: 11px;
+  font-weight: 600;
+  color: #111110;
+}
+.jobv .av.c0 {
+  background: #efd3cc;
+}
+.jobv .av.c1 {
+  background: #ede1b6;
+}
+.jobv .av.c2 {
+  background: #cddeeb;
+}
+.jobv .av.c3 {
+  background: #cedfce;
+}
+.jobv .acrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.jobv .acrow .v {
+  font-weight: 500;
+}
+.jobv .acrow .first {
+  margin-left: auto;
+}
+.jobv .chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.jobv .chip:hover {
+  background: var(--hov);
+}
+.jobv .chip::after {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+}
+.jobv .hint {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+.jobv .err {
+  margin: 0;
+  color: var(--aui-danger);
+  font-size: 13px;
+}
+
+/* The follow-up box stays at the bottom of the page (the canvas's .ask.follow). */
+.jobv .ask {
+  position: sticky;
+  bottom: 16px;
+  margin: auto auto 16px;
+  width: calc(100% - 40px);
+  max-width: 696px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-surface);
+  box-shadow: var(--aui-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The desktop's own: the focus ring goes round the box, not the borderless field inside it, as Home's ask box does. */
+.jobv .ask:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.jobv .askin {
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--rad);
+  background: transparent;
+  font-size: 15px;
+  color: var(--ink);
+  outline: 0;
+}
+.jobv .askin::placeholder {
+  color: var(--aui-placeholder);
+}
+.jobv .askrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.jobv .send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: var(--rad-pill);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+  transition: transform 0.2s;
+}
+.jobv .send:active {
+  transform: scale(0.94);
+}
+.jobv .send:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Under the hood: the same job as a table of steps in the mono face, for developers. */
+.jobv .side2 {
+  flex: 2 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+}
+.jobv .hoodh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.jobv .h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.jobv .box {
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+}
+.jobv .trace {
+  padding: 4px 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.jobv .tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.jobv .tr:first-child {
+  border-top: 0;
+}
+.jobv .tr .tool {
+  font-weight: 500;
+}
+.jobv .tr .found {
+  flex: 1 1 120px;
+}
+.jobv .tr.total {
+  font-weight: 500;
+}
+.jobv .res.pass {
+  color: var(--aui-success);
+}
+.jobv .res.fail {
+  color: var(--aui-danger);
+}
+.jobv .res.running {
+  color: var(--aui-info);
+}
+.jobv .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The desktop's own: a job the runtime cannot show says why, in the runtime's own words, in the middle of the page. */
+.jobv-off {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 48px 20px;
+  text-align: center;
+}
+.jobv-off h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.jobv-off p {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13.5px;
+}
+
+/* ---- buttons the three pages add to the .mpage .btn that home.css gives --------------------------------------------- */
+
+.mpage .btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--aui-muted);
+}
+.mpage .btn.ghost:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.mpage .btn.danger {
+  border-color: var(--aui-danger);
+  color: var(--aui-danger);
+}
+.mpage .btn.danger.solid,
+.mpage .btn.danger.solid:hover {
+  background: var(--aui-danger);
+  color: var(--aui-surface);
+}
+.mpage .btn.danger.solid:hover {
+  opacity: 0.88;
+}
+.mpage .btn[aria-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.mpage .ib {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+}
+.mpage .ib:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.mpage .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+
+/* ---- the activity log ----------------------------------------------------------------------------------------------- */
+
+.actv {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.actv .mut {
+  color: var(--aui-muted);
+}
+.actv .strong {
+  font-weight: 500;
+}
+.actv .small {
+  font-size: 13px;
+}
+
+/* History's two tabs, in the top bar beside the page's name (the canvas's .tabs and .tab). */
+.mpage .tabs {
+  display: flex;
+  gap: 20px;
+  align-self: stretch;
+  margin: -8px 0;
+}
+.mpage .tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.mpage .tab.on {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The filters: who, kind and date as chips, and the count of what they keep. */
+.actv .filters {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.actv .frow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.actv .lab {
+  flex: 0 0 40px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.actv .lab.datel {
+  flex: none;
+  margin-left: 14px;
+}
+.actv .fgroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.actv .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.actv .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.actv .fchip::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
+}
+.actv .pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.actv .input {
+  width: 140px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+.actv .count {
+  gap: 6px 14px;
+  font-size: 13px;
+}
+.actv .countline {
+  margin: 0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.actv .kept {
+  margin-left: auto;
+}
+/* The desktop's own: the owner's round initial where the canvas draws Fon's. */
+.actv .own {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--rad-pill);
+  background: #efd3cc;
+  color: #111110;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* The list of events, and the details beside it. */
+.actv .split {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+}
+.actv .list {
+  flex: 3 1 440px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 24px;
+  font-variant-numeric: tabular-nums;
+}
+.actv .list .day {
+  margin-top: 8px;
+}
+.actv .rowl.ev {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 10px;
+}
+.actv .rowl.ev.on {
+  background: var(--hov);
+}
+.actv .ev .when {
+  flex: 0 0 40px;
+  padding-top: 1px;
+}
+.actv .ev .who {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 24px;
+  padding-top: 1px;
+}
+.actv .evmain {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.actv .evtitle {
+  font-weight: 500;
+  text-align: left;
+}
+.actv .evsub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  font-size: 13px;
+}
+.actv .ev .tag {
+  margin-top: 1px;
+}
+.actv .side2 {
+  flex: 0 1 380px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+}
+.actv .dh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.actv .h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.actv .whoid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.actv .big {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.actv .dl {
+  margin: 0;
+  padding: 2px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+  font-size: 13.5px;
+}
+.actv .dl .tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.actv .dl .tr.first {
+  border-top: 0;
+}
+.actv .dl dt {
+  flex: 0 0 104px;
+}
+.actv .dl dd {
+  flex: 1 1 160px;
+  margin: 0;
+}
+.actv .note {
+  margin: 0;
+  font-size: 13.5px;
+}
+.actv .hint {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+.actv .soft {
+  padding: 12px 14px;
+  border-radius: var(--rad);
+  background: var(--soft);
+}
+.actv .hid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+.actv .hid .grow span {
+  display: block;
+}
+.actv .shown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.actv .lab2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.actv .lab2 .lk {
+  margin-left: auto;
+}
+.actv .shown .prose {
+  margin: 0;
+  font-family: var(--font-read);
+  font-size: 16px;
+  line-height: 1.65;
+}
+.actv .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Export to CSV: a dialog over the page, from the top bar's button. */
+.actv .dialog {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 4;
+  width: calc(100% - 32px);
+  max-width: 420px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-overlay);
+  box-shadow: var(--aui-shadow-card);
+}
+.actv .dialog h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.actv .dialog p {
+  margin: 0;
+  font-size: 13.5px;
+}
+.actv .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.actv .field > label,
+.actv .field > .lab {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+.actv .modes {
+  align-self: flex-start;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  background: var(--soft);
+}
+.actv .mode {
+  position: relative;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--rad-pill);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+}
+.actv .mode[aria-pressed="true"] {
+  background: var(--aui-surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.actv .dialog .pair {
+  gap: 10px;
+}
+.actv .dialog .pair .field {
+  flex: 1 1 140px;
+}
+.actv .dialog .input {
+  width: 100%;
+  min-height: 36px;
+}
+.actv .kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.actv .kind {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+.actv .check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--rad-sm);
+  border: 1.5px solid var(--aui-border-strong);
+  background: var(--aui-surface);
+  color: var(--aui-on-primary);
+}
+.actv .check svg {
+  opacity: 0;
+}
+.actv .check[aria-checked="true"] {
+  background: var(--aui-primary);
+  border-color: var(--aui-primary);
+}
+.actv .check[aria-checked="true"] svg {
+  opacity: 1;
+}
+.actv .textrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.actv .textrow .check {
+  margin-top: 2px;
+}
+.actv .textwords {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.actv .textwords .strong {
+  font-size: 13.5px;
+}
+.actv .help {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+.actv .dfoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.actv .dfoot .count {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.actv .dbtns {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* The desktop's own: a log the runtime cannot show says why, in the runtime's own words. */
+.actv .off {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 48px 20px;
+  text-align: center;
+}
+.actv .off h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.actv .off p {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13.5px;
+}
+
+/* ---- Pause everyone, on the Team page ------------------------------------------------------------------------------- */
+
+.teamp {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 100%;
+}
+.teamp .pane {
+  flex: 3 1 440px;
+  min-width: 0;
+  gap: 10px;
+}
+.teamp .side2 {
+  flex: 2 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+}
+.teamp .h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.teamp .side2 .h2:not(:first-child) {
+  margin-top: 10px;
+}
+.teamp .hint {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+}
+.teamp .tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.teamp .tr .line {
+  display: block;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.teamp .strong {
+  font-weight: 500;
+}
+.teamp .mut {
+  color: var(--aui-muted);
+}
+.teamp .small {
+  font-size: 13px;
+}
+.teamp .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.teamp .banner.warn {
+  border-color: transparent;
+  background: var(--warnbg);
+}
+.teamp .banner.ok {
+  border-color: transparent;
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+.teamp .banner.err {
+  border-color: transparent;
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+/* The question stands in the page, not over it: the canvas draws it as a card above the team. */
+.teamp .dialog {
+  width: 100%;
+  max-width: 520px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl);
+  background: var(--aui-overlay);
+  box-shadow: var(--aui-shadow-card);
+}
+.teamp .dialog h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.teamp .dialog p {
+  margin: 0;
+}
+.teamp .dialog .gone {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+.teamp .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- a member's Recent work, in the Details panel ------------------------------------------------------------------- */
+
+/* The panel's own rows are links and divs; Recent work's are buttons that open a page, so they take the same width and
+   leave the browser's button look behind. */
+.mw button.ew-ss {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  font: inherit;
+}
+/* The stage's tag, as the menu pages draw theirs (menuPages.css, scoped to .mpage), smaller for the panel. */
+.mw .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.mw .tag.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+.mw .tag.run {
+  background: var(--bluebg);
+  color: var(--aui-info);
+}
+.mw .tag.warn {
+  background: var(--warnbg);
+}
+.mw .tag.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}

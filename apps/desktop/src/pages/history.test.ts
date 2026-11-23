@@ -1,7 +1,7 @@
 // History's rules: every thread of the team, newest first, grouped by the day of its last activity (Today, Yesterday,
 // then dates), and a search box that filters by title.
 import { describe, expect, it } from "vitest";
-import { byDay, fullDate, historyEntries, matchTitle } from "./history";
+import { byDay, dayBand, fullDate, historyEntries, matchTitle } from "./history";
 import type { ThreadRow } from "../threads/types";
 
 /** Sunday 22 November 2026, 15:00 on this computer's clock. */
@@ -102,5 +102,26 @@ describe("a day's full date", () => {
 
   it("follows the language", () => {
     expect(fullDate(new Date(2026, 10, 22).getTime(), NOW, "ko")).toBe("11월 22일 일요일");
+  });
+});
+
+describe("a day band, for any list that groups by day", () => {
+  const now = new Date(2026, 10, 22, 12, 0).getTime();
+  const ts = (day: number) => new Date(2026, 10, day, 9, 0).getTime() / 1000;
+
+  it("groups entries of any shape that carry a time, newest first, as threads are grouped", () => {
+    const days = byDay([{ ts: ts(22), id: "a" }, { ts: ts(22) - 60, id: "b" }, { ts: ts(21), id: "c" }, { ts: ts(14), id: "d" }], now);
+    expect(days.map((d) => [d.when, d.entries.map((e) => e.id)])).toEqual([
+      ["today", ["a", "b"]],
+      ["yesterday", ["c"]],
+      ["earlier", ["d"]],
+    ]);
+  });
+
+  it("names a day as History's bands do: Today or Yesterday with its date beside, or the date alone", () => {
+    const [today, yesterday, earlier] = byDay([{ ts: ts(22) }, { ts: ts(21) }, { ts: ts(14) }], now);
+    expect(dayBand(today, now)).toEqual({ label: "Today", date: "Sunday 22 November" });
+    expect(dayBand(yesterday, now)).toEqual({ label: "Yesterday", date: "Saturday 21 November" });
+    expect(dayBand(earlier, now)).toEqual({ label: "Saturday 14 November", date: null });
   });
 });

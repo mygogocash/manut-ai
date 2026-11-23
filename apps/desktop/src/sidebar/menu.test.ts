@@ -120,3 +120,10 @@ describe("the Recent list", () => {
     expect(recentThreads(threads, ["buddy"], 2).map((r) => r.thread)).toEqual(["b4", "b3"]);
   });
 });
+
+describe("the places Mission Control adds", () => {
+  it("marks History for the activity log, which is History's own place, and no row for a job's page", () => {
+    expect(at("activity")).toBe("history");
+    expect(at("job")).toBeNull();
+  });
+});

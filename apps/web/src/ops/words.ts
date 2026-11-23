@@ -1,4 +1,5 @@
 import { formatMoney } from "@manut/format";
+import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
   ApiError,
   MODEL_CAP_MAX_SATANG,
@@ -8,6 +9,7 @@ import {
   type AuditMissed,
   type DeletedShop,
   type DeletionRequest,
+  type FactSource,
   type GateStatus,
   type ModelCap,
   type ModelCounts,
@@ -367,6 +369,11 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
   "approval.requested": () => "asked for approval of an action",
   "approval.decided": () => "decided an approval request",
   "approval.superseded": () => "closed an approval request",
+  "memory.remembered": () => "told the team something to remember",
+  "memory.proposed": () => "added something the team learned",
+  "memory.confirmed": () => "confirmed a fact as true",
+  "memory.corrected": () => "corrected a fact",
+  "memory.forgotten": () => "made the team forget a fact",
 };
 
 /// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290."
@@ -437,6 +444,7 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["connectionId", "LINE connection"],
   ["previousConnectionId", "replacing"],
   ["confirmationId", "confirmation"],
+  ["factId", "fact"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {
@@ -668,4 +676,117 @@ function countOf(n: number, one: string, many: string): string {
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/// The Memory page: what Buddy's team knows about one shop, laid out as the design canvas's "Customize: memory and
+/// routines" board. The titles and labels are the board's own words. The operator acts for the owner, so the words that say
+/// what an action does name the owner, and a fact is never shown again once it is forgotten.
+export const memoryWords = {
+  nav: "Memory",
+  title: "Memory",
+  intro: (owner: string) =>
+    `What Buddy's team knows about this shop, and where each fact came from. Correct or forget a fact only when ${owner} asks you to. What a customer said is not used until ${owner} says it is true.`,
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading what the team knows",
+  noShops: "No shops yet.",
+  unavailable: "The API could not read what the team knows. Try again.",
+
+  // The board's groups: each band has its title, and a note on what its rows are
+  knownTitle: "What your team knows",
+  sourceLabel: "Where it came from",
+  knownEmpty: "Nothing yet. Tell Buddy something to remember below.",
+  waitingTitle: "Waiting for your OK",
+  waitingNote: "Not used until you confirm",
+  /// The group's one name for a list or a screen reader: the band's two parts as the plan writes them.
+  waitingLabel: "Waiting for your OK: not used until you confirm",
+  tellTitle: "Tell Buddy something to remember",
+
+  // One fact
+  corrected: "Corrected",
+  notConfirmed: "Not confirmed",
+  confirm: "It's true",
+  correct: "Correct",
+  forget: "Forget",
+  correctLabel: "Corrected words",
+  saveCorrection: "Save correction",
+  saving: "Saving",
+  cancel: "Cancel",
+  forgetAsk: (owner: string) =>
+    `Forget this fact? The team stops using it and will not learn it again unless ${owner} says it again.`,
+  forgetYes: "Yes, forget it",
+  forgetNo: "Keep it",
+  forgottenNote: (n: number) =>
+    n === 1
+      ? "1 text was forgotten. Only a fingerprint of it is kept, so the team does not learn it again."
+      : `${n.toLocaleString("en-US")} texts were forgotten. Only a fingerprint of each is kept, so the team does not learn them again.`,
+
+  // Telling the team something new
+  tellHelp: (n: number) =>
+    `${n.toLocaleString("en-US")} of ${MAX_TEXT} characters. The team uses it as soon as you save it.`,
+  remember: "Remember",
+
+  // What an action did, and why one did not
+  remembered: "Remembered.",
+  confirmed: "Confirmed.",
+  correctedDone: "Corrected.",
+  forgotten: "Forgotten.",
+  alreadyKnown: "The team already knows this: a fact says the same.",
+  full: `The team already holds ${MAX_FACTS} facts. Forget one to make room.`,
+  invalidText: `Write between 1 and ${MAX_TEXT} characters.`,
+  gone: "That fact is already gone. The list was refreshed.",
+  saveUnavailable: "The API could not read or save what the team knows. Try again.",
+} as const;
+
+const UNKNOWN_SOURCE = "From somewhere this console does not know yet";
+
+/// A fact's source as the board says it: "From your price list, 3 November", "Learned from 12 of your edits", "From the
+/// last 90 days of orders", "From your cost sheet in Google Sheets". It never fails on what it cannot read: a date that is not one is left out, and a kind
+/// this console does not know yet is shown as it is.
+export function factSourceText(source: FactSource, ownerName: string): string {
+  if (typeof source !== "object" || source === null) return UNKNOWN_SOURCE;
+  switch (source.kind) {
+    case "owner":
+      return `Told to the team by ${ownerName}`;
+    case "document": {
+      const date = new Date(source.date);
+      return Number.isNaN(date.getTime()) ? `From ${source.name}` : `From ${source.name}, ${formatDate(date.toISOString())}`;
+    }
+    case "edits":
+      return `Learned from ${source.count} of your edits`;
+    case "orders":
+      return source.days === 1 ? "From the last day of orders" : `From the last ${source.days} days of orders`;
+    case "connection": {
+      const detail = source.detail.trim();
+      return detail ? `From your ${detail} in ${source.name}` : `From ${source.name}`;
+    }
+    case "customer":
+      return `A customer said it, in chat ${source.chat}`;
+    default: {
+      const kind: unknown = (source as { kind?: unknown }).kind;
+      return typeof kind === "string" && kind ? `From ${kind}` : UNKNOWN_SOURCE;
+    }
+  }
+}
+
+/// What the API said to a change in the team's memory that changed nothing: its own refusals in the board's words, and
+/// the console's usual words for the rest.
+export function memoryErrorText(error: unknown): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "already_known":
+        return memoryWords.alreadyKnown;
+      case "full":
+        return memoryWords.full;
+      case "invalid_text":
+        return memoryWords.invalidText;
+      case "not_found":
+        return memoryWords.gone;
+      case "memory_unavailable":
+        return memoryWords.saveUnavailable;
+    }
+  }
+  return errorText(error);
 }

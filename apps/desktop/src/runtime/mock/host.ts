@@ -17,16 +17,21 @@ import type {
 } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import { firstWords, type ThreadEvent, type ThreadOps } from "../../threads/types";
+import type { ActivityEvent, Job, PausedJob, TeamState } from "../mission";
 import {
+  ACTIVITY_KEPT_MONTHS,
+  ACTIVITY_SEED,
   APPROVAL_SEED,
   BOT_SEED,
   CLARIFY_SEED,
   COMMAND_SEED,
   HISTORY_SEED,
   INTERVIEW_SEED,
+  JOB_SEED,
   NORMAL_ANSWER,
   PROVIDERS,
   REASONING_LEVELS,
+  ROUTINE_SEED,
   SKILL_SEED,
   type BotSeed,
 } from "./seed";
@@ -78,6 +83,10 @@ interface Folder {
 
 const CHOICES: readonly ApprovalChoice[] = ["once", "session", "always", "deny"];
 const UNSUPPORTED = "The demo runtime does not do this yet.";
+const PAUSED = "The team is paused. Resume everyone first.";
+
+/** A copy no caller can change the host's own state through, as a frame that crossed a socket would be. */
+const copy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /** A folder chat's or thread's turn runs under its own key; its events go out as the bot's, tagged `session`. */
 const turnKey = (bot: string, session: string) => `${bot}\u0000${session}`;
@@ -110,6 +119,11 @@ export class MockHost {
   private threadHistory = new Map<string, Msg[]>();
   private late = new Set<Timer>();
   private seq = 0;
+  /** Mission Control: the staged jobs and activity log (times counted from the start), and Pause everyone. `stopped`
+   *  is the jobs that were running when it began, which stay "paused" until Resume everyone. */
+  private jobs: Job[] = [];
+  private activity: ActivityEvent[] = [];
+  private paused: { since: number; stopped: string[] } | null = null;
 
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
@@ -136,6 +150,27 @@ export class MockHost {
     this.folders = new Map();
     this.threadHistory = new Map();
     this.seq = 0;
+    this.paused = null;
+    this.jobs = JOB_SEED.map((j) => {
+      const steps = j.steps.map(([stage, ago]) => ({ stage, at: boot - ago }));
+      const last = steps[steps.length - 1];
+      return {
+        id: j.id,
+        title: j.title,
+        bot: j.bot,
+        stage: last.stage,
+        at: last.at,
+        goal: j.goal,
+        again: j.again,
+        steps,
+        summary: j.summary,
+        recipients: j.recipients.map((r) => ({ ...r })),
+        costSatang: j.costSatang,
+        tookSeconds: j.tookSeconds,
+        trace: j.trace.map((t) => ({ ...t })),
+      };
+    });
+    this.activity = ACTIVITY_SEED.map(({ ago, ...e }) => ({ ...e, text: e.text ? { ...e.text } : null, at: boot - ago }));
   }
 
   subscribe(fn: (ev: MockEvent) => void): () => void {
@@ -225,7 +260,52 @@ export class MockHost {
       model: m.model,
       provider: m.provider,
       avatar_rev: this.avatars[b.name]?.rev ?? null,
+      ...(this.stoppedByPause(b.name) ? { paused: true } : {}),
     };
+  }
+
+  // ---- Mission Control -------------------------------------------------------------------------------------------
+
+  /** Pause everyone stops every member but the lead, who keeps answering so the owner can ask why it is paused. */
+  private stoppedByPause(bot: string): boolean {
+    return !!this.paused && !!this.bots[bot] && !this.bots[bot].is_default;
+  }
+
+  private refusePaused(bot: string): void {
+    if (this.stoppedByPause(bot)) throw new OpError("paused", PAUSED);
+  }
+
+  /** A job as the runtime reports it now: one that Pause everyone stopped reads "paused" from the moment of the pause. */
+  private jobView(j: Job): Job {
+    if (!this.paused || !this.paused.stopped.includes(j.id)) return copy(j);
+    const since = this.paused.since;
+    return copy({ ...j, stage: "paused" as const, at: since, steps: [...j.steps, { stage: "paused" as const, at: since }] });
+  }
+
+  /** The jobs running now, or while paused the ones that were running when it began. */
+  private runningJobs(): Job[] {
+    return this.jobs.filter((j) => (this.paused ? this.paused.stopped.includes(j.id) : j.stage === "working"));
+  }
+
+  private teamState(): TeamState {
+    const running: PausedJob[] = this.runningJobs().map((j) => ({
+      id: j.id,
+      title: j.title,
+      bot: j.bot,
+      out: j.recipients.length ? { sent: j.recipients.filter((r) => r.status !== "waiting").length, total: j.recipients.length } : null,
+    }));
+    return {
+      paused: !!this.paused,
+      since: this.paused?.since ?? null,
+      members: Object.values(this.bots).filter((b) => !b.is_default).map((b) => b.name),
+      routines: ROUTINE_SEED.length,
+      running,
+    };
+  }
+
+  /** Every member the pause changed learns of it the way a real runtime would say a member changed. */
+  private tellMembers(): void {
+    for (const b of Object.values(this.bots)) if (!b.is_default) this.broadcast({ event: "bots.update", bot: b.name });
   }
 
   // ---- scripted turns ---------------------------------------------------------------------------------------
@@ -282,6 +362,14 @@ export class MockHost {
     if (drop) this.queues[key] = [];
     this.ev(key, "turn.end", { outcome });
     this.ev(key, "bot.status", { status: this.bots[bot].status, running: false });
+    // A member Pause everyone stopped starts nothing, so a message that waited behind this turn keeps waiting for
+    // Resume everyone (`startQueued` then sends it).
+    if (!this.stoppedByPause(bot)) this.startQueued(key);
+  }
+
+  /** The next held message of a chat starts its turn, once the reply to the request that ended the last one is out. */
+  private startQueued(key: string): void {
+    if (this.turns[key]) return;
     const next = this.queues[key]?.shift();
     if (next !== undefined) this.soon(() => !this.turns[key] && this.startTurn(key, next));
   }
@@ -421,6 +509,7 @@ export class MockHost {
     },
     "chat.send": (p) => {
       const b = this.needBot(p);
+      this.refusePaused(b.name);
       const text = this.needText(p.text, "text");
       const input_id = this.nextId("input");
       if (p.session !== undefined) {
@@ -459,6 +548,7 @@ export class MockHost {
     // An approval settles once: the first answer takes it out of `pending`, and any later answer is `not_found`.
     "approval.respond": (p) => {
       const key = this.target(p);
+      this.refusePaused(splitKey(key)[0]);
       const id = this.needText(p.request_id, "request_id");
       if (!CHOICES.includes(p.choice)) throw new OpError("bad_request", "bad choice");
       const wait = this.pending.get(id);
@@ -469,6 +559,7 @@ export class MockHost {
     },
     "clarify.respond": (p) => {
       const key = this.target(p);
+      this.refusePaused(splitKey(key)[0]);
       const id = this.needText(p.request_id, "request_id");
       const answers = p.answers;
       if (answers !== undefined) {
@@ -514,6 +605,7 @@ export class MockHost {
     },
     "thread.create": (p) => {
       const b = this.needBot(p);
+      this.refusePaused(b.name);
       if (p.title !== undefined && (typeof p.title !== "string" || !p.title.trim())) throw new OpError("bad_request", "title must be text");
       const ownKey = typeof p.key === "string" ? `${b.name}:${p.key}` : null;
       const old = ownKey ? [...this.folders.entries()].find(([, f]) => f.thread && f.key === ownKey) : undefined;
@@ -697,6 +789,44 @@ export class MockHost {
     "accounts.remove": () => this.unsupported(),
     "accounts.label": () => this.unsupported(),
     "accounts.discard": () => this.unsupported(),
+
+    // ---- Mission Control: jobs, the activity log and Pause everyone
+    "jobs.list": () => ({
+      jobs: this.jobs
+        .map((j) => this.jobView(j))
+        .map(({ id, title, bot, stage, at }) => ({ id, title, bot, stage, at }))
+        .sort((x, y) => y.at - x.at),
+    }),
+    "jobs.get": (p) => {
+      const id = this.needText(p.job, "job");
+      const job = this.jobs.find((j) => j.id === id);
+      if (!job) throw new OpError("not_found", `no job ${id}`);
+      return this.jobView(job);
+    },
+    "activity.list": () => ({ events: copy([...this.activity].sort((x, y) => y.at - x.at)), keptMonths: ACTIVITY_KEPT_MONTHS }),
+    "team.state": () => this.teamState(),
+    // Pausing is the one op here that acts. Every member but the lead stops at once, except a turn that waits on the
+    // owner's answer, which keeps waiting (nothing expires while paused). It touches nothing already done.
+    "team.pause": () => {
+      if (!this.paused) {
+        this.paused = { since: this.now(), stopped: this.runningJobs().map((j) => j.id) };
+        for (const key of Object.keys(this.turns)) {
+          if (!this.stoppedByPause(splitKey(key)[0])) continue;
+          if ([...this.pending.values()].some((w) => w.key === key)) continue;
+          this.endTurn(key, "interrupted");
+        }
+        this.tellMembers();
+      }
+      return this.teamState();
+    },
+    "team.resume": () => {
+      if (this.paused) {
+        this.paused = null;
+        this.tellMembers();
+        for (const key of Object.keys(this.queues)) this.startQueued(key);
+      }
+      return this.teamState();
+    },
   };
 
   private unsupported(): never {
