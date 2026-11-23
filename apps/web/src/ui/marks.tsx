@@ -96,6 +96,16 @@ export const MemoryIcon = () => (
   </Icon>
 );
 
+/// Four tiles: every shop at once.
+export const ShopsIcon = () => (
+  <Icon>
+    <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" />
+    <rect x="9" y="2.5" width="4.5" height="4.5" rx="0.8" />
+    <rect x="2.5" y="9" width="4.5" height="4.5" rx="0.8" />
+    <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" />
+  </Icon>
+);
+
 /// A page with its corner turned and a few lines: what the team wrote, for the owner to read.
 export const DraftIcon = () => (
   <Icon>

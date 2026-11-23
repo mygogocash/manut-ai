@@ -153,6 +153,13 @@ type DeletionView = {
 | `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
 | `GET /v1/admin/workers/drafts` | `?tenant=&before=&limit=` | `WorkerJobsPage`: one page of the shop's worker jobs, newest first, drafts and handovers included ("Workers' drafts", below) |
 
+The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
+reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
+shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
+spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
+have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages.
+
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
 `${WEB_ORIGIN}/approve/{token}`; `confirmUrl` is `${WEB_ORIGIN}/delete/{token}`. Both origins are Worker vars.
