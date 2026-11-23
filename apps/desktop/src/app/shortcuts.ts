@@ -1,11 +1,11 @@
 // App-wide keyboard shortcuts. ⌘ on macOS, Ctrl elsewhere:
-//   ⌘1…⌘9  open bot 1 to 9 (sidebar order)      ⌘K  focus the bot search (in a terminal on macOS it clears the
-//          terminal instead: engine-input.ts)
+//   ⌘1…⌘9  open team member 1 to 9 (the Team page's order)   ⌘K  the menu's Search: History with its search box
+//          focused (in a terminal on macOS it clears the terminal instead: engine-input.ts)
 //   ⌘.     show or hide Details                    ⌘,  Settings
 //   ⌘J     jump to the next approval or question waiting on you (any bot or SESSIONS chat)
 //   ⌘⇧G   maximise the side panel in place, or restore it (Esc restores; a closed panel opens on Plans)
-//   ⌘N ⌘T  the TERMINALS + menu (Shell or a CLI, in a terminal)
-//   ⌘⇧]    the next terminal session (sidebar order, wrapping)  ⌘⇧[  the previous one
+//   ⌘N ⌘T  the Code page's TERMINALS + menu (Shell or a CLI, in a terminal); the Code page opens first
+//   ⌘⇧]    the next terminal session (the Code page's order, wrapping)  ⌘⇧[  the previous one
 //   ⌘W     (the menu's Close Window) closes the focused split pane while a split has the keyboard, else the window
 //   Esc    stop the running answer (only when no popover, field or dialog wants Esc first)
 //   Ctrl+` the bottom terminal panel, show or hide, on every OS (Ctrl on macOS too, as in VS Code; a maximised side
@@ -75,12 +75,12 @@ export function nextAsk(asks: Ask[], last: FocusAsk | null): Ask | null {
 const inTerminal = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.(".xterm");
 
 /** Terminal session ids in TERMINALS order: one group per folder however its path is spelled (`folderGroups`, as the
- *  sidebar groups them), the groups in the saved order. */
+ *  Code page groups them), the groups in the saved order. */
 export function terminalOrder(rows: readonly { id: string; cwd: string }[], order: readonly string[]): string[] {
   return orderFolders(folderGroups(rows), order).flatMap((g) => g.rows.map((r) => r.id));
 }
 
-/** Open the next (1) or previous (-1) terminal session in TERMINALS order: the folder groups as the sidebar shows them. */
+/** Open the next (1) or previous (-1) terminal session in TERMINALS order: the folder groups as the Code page shows them. */
 function stepTerminal(step: 1 | -1) {
   const store = getStore();
   const s = store.getState();
@@ -163,6 +163,8 @@ export function useShortcuts(): void {
         const b = selectSidebarBots(s)[hit.index];
         if (b) void a.selectBot(b.name);
       } else if (hit.kind === "new-session") {
+        // the + menu lives on the Code page: away from it, the page opens and the menu opens as it mounts (newMenu.ts)
+        if (s.ui.view !== "code") a.openPage("code");
         openNewSessionMenu();
       } else if (hit.kind === "session") {
         stepTerminal(hit.step);
@@ -170,9 +172,8 @@ export function useShortcuts(): void {
         const n = nextAsk(selectAsks(s), s.ui.focusAsk);
         if (n) void a.jumpToAsk(n.bot, n.item.id);
       } else if (hit.kind === "search") {
-        const el = document.querySelector<HTMLInputElement>('[data-testid="bot-search"]');
-        el?.focus();
-        el?.select();
+        // what the menu's Search button does: History, its search box focused (HistoryPage.tsx reads ui.findSeq)
+        a.openPage("history", { find: true });
       } else if (hit.kind === "details") {
         // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first
         if (s.ui.view !== "chat" && s.ui.view !== "session") a.closeSettings();

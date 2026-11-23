@@ -1,234 +1,165 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getRestarts } from "./restart";
+// The side menu, as the design canvas draws it (`<nav class="sb">` in Approvals.dc.html): the brand mark and Search,
+// then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and History, a Recent list of the
+// three newest threads, and the account row that opens Settings. It replaces the sidebar the fork took from Oh My
+// Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a foot of icon buttons), and each
+// of those now lives on one of the menu's pages (src/pages). The canvas's budget pill waits until the runtime has a
+// budget to show, and hiding the menu is not built yet.
+//
+// menu.ts decides which row is current. `SideMenu` draws whatever it is given, so tests can draw any state, and
+// `Sidebar` feeds it from the app's store.
+import type { ReactNode } from "react";
+// sidebar.css still styles what the menu's foot carries (the disk chip, the usage meters, the update control) and
+// .vh; sessions.css styles the terminal view and the Code page's list
 import "./sidebar.css";
-import logo from "../assets/manut-mark.svg";
-import { selectAsks, selectSidebarBots, useStore } from "../state/store";
-import { can } from "../runtime";
-import { CalendarIcon, GearIcon, GridIcon, SearchIcon } from "../ui";
-import { BotRow, threadsLatest } from "./BotRow";
-import { threadKey } from "../threads/types";
-import { useRowDrag } from "./useRowDrag";
-import { Usage } from "./Usage";
-import { AccountsWatcher } from "../settings/accounts/useAccounts";
 import "../sessions/sessions.css";
-import { SessionList, SessionsHeader } from "../sessions/SessionsSection";
-import { SessionBackgroundMenu } from "../sessions/SessionBackgroundMenu";
-import { SESSIONS_ENTRY } from "../sessions/entry";
-import { NeedsStrip } from "./Needs";
-import { UpdateButton } from "./UpdateButton";
-import { FirstRunHint } from "../onboarding/FirstRun";
-import { t } from "../i18n";
-import { ThreadTree } from "../threads/ThreadTree";
-import { Dock } from "./Dock";
-import { useBotsAbove } from "./dockState";
-import { revealBotTop, revealPending } from "./revealBot";
-import { useEdgeFade } from "./edgeFade";
-import { SplitDivider, useSideSplit } from "./SideSplit";
-import { useAutoSplit } from "./autoSplit";
-import { TasksBar } from "../tasks/TasksBar";
+import "./menu.css";
+import { t, type Key } from "../i18n";
+import { can } from "../runtime";
+import { selectAsks, selectSidebarBots, useStore } from "../state/store";
+import { AccountsWatcher } from "../settings/accounts/useAccounts";
+import { currentRow, homeBot, MENU_ROWS, recentThreads, type MenuRow } from "./menu";
+import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
+import { UpdateButton } from "./UpdateButton";
+import { Usage } from "./Usage";
 
-const sessionBackground = (target: EventTarget) => target instanceof Element && !target.closest(".ss-row, .tg-h, button, input, textarea, select, a, [contenteditable], [role=menu], [role=menuitem]");
+const LABEL: Record<MenuRow, Key> = {
+  new: "menu.new",
+  needs: "menu.needs",
+  team: "menu.team",
+  code: "menu.code",
+  artifacts: "menu.artifacts",
+  customize: "menu.customize",
+  history: "menu.history",
+};
 
-/** The open bot or thread row scrolls into view inside BOTS (never moving TERMINALS). */
-function useRevealBot(bot: string | null, thread: string | null, inChat: boolean) {
-  useEffect(() => {
-    if (!inChat || !bot) return;
-    // a bot clicked in the sidebar or the dock rises to the top on its own (revealBot): no nearest-scroll under it
-    if (!thread && revealPending(bot)) return;
-    const sel = thread ? `[data-testid="thread-row-${CSS.escape(thread)}"]` : `[data-testid="bot-${CSS.escape(bot)}"]`;
-    document.querySelector(sel)?.scrollIntoView({ block: "nearest" });
-  }, [bot, thread, inChat]);
+/** A thread as Recent names it, and what opens it. */
+export interface RecentItem {
+  key: string;
+  title: string;
+  open: () => void;
+}
+
+export function SideMenu({
+  current,
+  needs,
+  recent,
+  settings,
+  onRow,
+  onSearch,
+  onAccount,
+  foot,
+}: {
+  /** the row marked current, or none (a thread, Settings) */
+  current: MenuRow | null;
+  /** how many asks wait on the person; no count shows at 0 */
+  needs: number;
+  recent: RecentItem[];
+  /** Settings is open: the account row is current, as on the canvas's Settings board */
+  settings: boolean;
+  onRow: (row: MenuRow) => void;
+  onSearch: () => void;
+  onAccount: () => void;
+  /** what the runtime and this computer add above the account row: the disk chip, usage meters, an update */
+  foot?: ReactNode;
+}) {
+  return (
+    <nav className="sb" aria-label={t("menu.label")} data-testid="sidebar">
+      <div className="brand">
+        {/* the mark leads where New does, as the canvas's mark links to Home */}
+        <button type="button" className="sb-home" aria-label={t("menu.home")} onClick={() => onRow("new")} data-testid="menu-home">
+          <BrandMark />
+        </button>
+        <button type="button" className="ib" aria-label={t("nav.search")} title={t("nav.search")} onClick={onSearch} data-testid="menu-search">
+          <SearchGlyph />
+        </button>
+      </div>
+      {MENU_ROWS.map((row) => (
+        <button
+          key={row}
+          type="button"
+          className={row === "new" ? "nav new" : "nav"}
+          aria-current={current === row ? "page" : undefined}
+          onClick={() => onRow(row)}
+          data-testid={`menu-${row}`}
+        >
+          <MenuIcon row={row} />
+          {t(LABEL[row])}
+          {row === "needs" && needs > 0 && (
+            <span className="cnt" data-testid="menu-needs-count">
+              {needs}
+            </span>
+          )}
+        </button>
+      ))}
+      {recent.length > 0 && (
+        <>
+          <div className="sb-h" id="menu-recent-h">
+            {t("menu.recent")}
+          </div>
+          <ul className="sb-recent" aria-labelledby="menu-recent-h">
+            {recent.map((r) => (
+              <li key={r.key}>
+                <button type="button" className="rec" title={r.title} onClick={r.open} data-testid="menu-recent">
+                  {r.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <div className="sb-foot">
+        {foot}
+        {/* who uses the app, and their settings. The canvas names the owner and the shop here; the runtime names
+            neither yet, so the row says "You" and adds nothing made up */}
+        <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
+          <span className="av" aria-hidden="true">
+            {Array.from(t("nav.you"))[0]}
+          </span>
+          <span className="acct-n">{t("nav.you")}</span>
+          <span className="vh">, {t("nav.settings")}</span>
+        </button>
+      </div>
+    </nav>
+  );
 }
 
 export function Sidebar() {
   const s = useStore();
-  const [q, setQ] = useState("");
-  const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; focus: HTMLElement } | null>(null);
-  const closeSessionMenu = useCallback(() => setSessionMenu(null), []);
-  const needle = q.trim().toLowerCase();
-  const listed = selectSidebarBots(s);
-  const bots = needle
-    ? listed.filter((b) => b.display_name.toLowerCase().includes(needle) || b.name.toLowerCase().includes(needle))
-    : listed;
-  const asks = selectAsks(s);
-  // hold a row to drag it; off while searching, where a row's place in the filtered list is not its sidebar place
-  const drag = useRowDrag(
-    listed.map((b) => b.name),
-    s.ui.pinned,
-    !needle,
-    (bot, to) => s.moveBot(bot, to),
-  );
-  const inSettings = s.ui.view === "settings";
-  const automations = s.automations?.length ?? 0;
-  const inChat = s.ui.view === "chat";
-  useRevealBot(s.selectedBot, s.ui.thread, inChat);
-  const botList = useRef<HTMLElement>(null);
-  const botNav = useEdgeFade<HTMLElement>(botList);
-  // the dock: the bots scrolled out of view at the top of BOTS (none at the top: no dock)
-  const above = useBotsAbove(botList);
-  // BOTS | TERMINALS: auto (each takes what its rows need and they share the rest) or the share the person dragged
-  const botSec = useRef<HTMLElement>(null);
-  const termSec = useRef<HTMLElement>(null);
-  const split = useSideSplit(botSec, termSec);
-  // auto (nothing dragged, no search): each region as tall as its rows, or cut on a whole row (autoSplit.ts)
-  useAutoSplit(botSec, termSec, SESSIONS_ENTRY && !needle && split.share === null);
-
+  const members = selectSidebarBots(s).map((b) => b.name);
+  const home = homeBot(s.bots, members);
+  const untitled = t("thread.untitled");
+  const recent = recentThreads(s.threads, members).map((r) => ({
+    key: `${r.bot}:${r.thread}`,
+    title: r.title || untitled,
+    open: () => void s.openThread(r.bot, r.thread),
+  }));
+  const go = (row: MenuRow) => {
+    // New is Home, and the home member's main chat stands in for Home until Home exists
+    if (row === "new") {
+      if (home) void s.selectBot(home);
+    } else s.openPage(row);
+  };
   return (
-    <aside className="side" data-testid="sidebar">
-      <div className="side-top">
-        <div className="brand">
-          <img src={logo} alt="" />
-          <b>Manut AI</b>
-        </div>
-        {/* No + here: it listed Hermes profiles to add and offered Hermes over SSH. The team comes from the runtime,
-            and every member is listed from the first run (store.ts seedRoster). */}
-      </div>
-      <label className="search">
-        <SearchIcon />
-        <input
-          type="search"
-          placeholder={t("nav.search")}
-          aria-label={t("nav.searchBots")}
-          data-testid="bot-search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === "Escape" && setQ("")}
-        />
-      </label>
-      <TasksBar />
-      <NeedsStrip asks={asks} />
-      <section ref={botSec} className={`side-sec${needle && bots.length === 0 ? " side-sec-fit" : ""}`} data-testid="side-bots" style={needle ? undefined : split.bots}>
-        <div className="side-sh">{t("nav.bots")}</div>
-        <nav ref={botNav} className="bot-list" aria-label={t("nav.bots")} role="tree">
-          {bots.map((b) => {
-            const pinned = s.ui.pinned.includes(b.name);
-            const hasThreads = (s.threads[b.name]?.length ?? 0) > 0;
-            // a new thread runs on this computer, on a bot that is up (host and offline bots get none, as in the menu)
-            const onNew = b.host || b.status === "offline" ? undefined : () => void s.newThread(b.name);
-            const groupId = `threads-of-${b.name.replace(/[^A-Za-z0-9_-]/g, "_")}`;
-            return (
-            <BotRow
-              key={b.name}
-              bot={b}
-              chat={s.chats[b.name]}
-              unread={s.unread[b.name] ?? 0}
-              active={inChat && s.selectedBot === b.name && !s.ui.thread}
-              asks={asks.filter((a) => a.bot === b.name)}
-              pinned={pinned}
-              onSelect={() => {
-                revealBotTop(b.name);
-                void s.selectBot(b.name);
-              }}
-              drag={drag.row(b.name)}
-              groupId={hasThreads ? groupId : undefined}
-              latest={hasThreads ? threadsLatest(s.threads[b.name]!, (th) => s.chats[threadKey(b.name, th)]) : null}
-              menu={{
-                onNewThread: onNew,
-                pinned,
-                onPin: () => s.pinBot(b.name, !pinned),
-                onEdit: () => s.openSettings(`bot:${b.name}`),
-                // restarting the process behind a member is the runtime's to offer
-                onRestart: can("restart") ? () => void getRestarts().press(b.name) : undefined,
-                offline: b.status === "offline",
-                onRemove: listed.length > 1 ? () => s.listBot(b.name, false) : undefined,
-              }}
-            >
-              {/* its threads; a new one opens from the row's + (hover), its menu, or ./thread */}
-              {hasThreads && <ThreadTree bot={b.name} id={groupId} />}
-            </BotRow>
-            );
-          })}
-          {needle && bots.length === 0 && <div className="bot-empty">{t("side.noBot", { q: q.trim() })}</div>}
-          {!needle && listed.length === 0 && <FirstRunHint text={t("onb.botsHint")} testId="onb-hint-bots" />}
-        </nav>
-      </section>
-      {SESSIONS_ENTRY && <SplitDivider share={split.share} onDrag={split.onDrag} onReset={split.reset} onKey={split.onKey} />}
-      {SESSIONS_ENTRY && (
-      <section
-        ref={termSec}
-        className="side-sec"
-        data-testid="side-sessions"
-        style={needle ? undefined : split.terms}
-        tabIndex={-1}
-        onPointerDown={(e) => {
-          // Keep the previous focus available for Escape, before the right press can blur it.
-          if (e.button === 2 && sessionBackground(e.target)) e.preventDefault();
-        }}
-        onContextMenu={(e) => {
-          // Rows own their menu; controls and text fields keep their native context menu.
-          if (!sessionBackground(e.target)) return;
-          e.preventDefault();
-          const focus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : e.currentTarget;
-          const box = e.currentTarget.getBoundingClientRect();
-          setSessionMenu({ x: e.clientX || box.left + 8, y: e.clientY || box.top + 8, focus });
-        }}
-      >
-        <SessionsHeader />
-        <SessionList needle={needle} query={q.trim()} />
-        {sessionMenu && <SessionBackgroundMenu at={sessionMenu} onClose={closeSessionMenu} />}
-      </section>
-      )}
-      <Dock above={needle ? [] : above} />
-      <div className="side-foot">
-        {/* little disk space left on the home folder's volume (src/lib/disk.ts); nothing while it is fine */}
-        <DiskChip />
-        {/* one compact row: Automations, Plugins and Settings as icon buttons (their names in the tooltip and to a
-            screen reader), the usage marks after them. Automations and Plugins show only when the runtime has them. */}
-        <div className="foot-row" data-testid="foot-row">
-          {can("automations") && (
-          <button
-            type="button"
-            className={`nav nav-i${s.ui.view === "automations" ? " on" : ""}`}
-            aria-current={s.ui.view === "automations" ? "page" : undefined}
-            title={automations > 0 ? `${t("nav.automations")} · ${automations}` : t("nav.automations")}
-            onClick={() => s.openAutomations()}
-            data-testid="nav-automations"
-          >
-            <CalendarIcon />
-            <span className="vh">{t("nav.automations")}</span>
-            {automations > 0 && <span className="nav-count">{automations}</span>}
-          </button>
-          )}
-          {can("plugins") && (
-          <button
-            type="button"
-            className={`nav nav-i${s.ui.view === "plugins" ? " on" : ""}`}
-            aria-current={s.ui.view === "plugins" ? "page" : undefined}
-            title={t("nav.plugins")}
-            onClick={() => s.openPlugins()}
-            data-testid="nav-plugins"
-          >
-            <GridIcon />
-            <span className="vh">{t("nav.plugins")}</span>
-          </button>
-          )}
-          <button
-            type="button"
-            className={`nav nav-i${inSettings && s.ui.settingsPage !== "accounts" ? " on" : ""}`}
-            title={t("nav.settings")}
-            onClick={() => (inSettings ? s.closeSettings() : s.openSettings())}
-            data-testid="nav-settings"
-          >
-            <GearIcon />
-            <span className="vh">{t("nav.settings")}</span>
-          </button>
+    <SideMenu
+      current={currentRow(s.ui, s.selectedBot, home)}
+      needs={selectAsks(s).length}
+      recent={recent}
+      settings={s.ui.view === "settings"}
+      onRow={go}
+      onSearch={() => s.openPage("history", { find: true })}
+      onAccount={() => s.openSettings()}
+      foot={
+        <>
+          {/* little disk space left on the home folder's volume (src/lib/disk.ts); nothing while it is fine */}
+          <DiskChip />
+          {/* the coding CLIs' subscription usage, which only a runtime that reads their logins has */}
           {can("accounts") && <Usage />}
-        </div>
-        {can("accounts") && <AccountsWatcher />}
-        <div className={`me${inSettings && s.ui.settingsPage === "accounts" ? " on" : ""}`} data-testid="me">
-          {/* "You" opens the coding-CLI logins, which only a runtime that keeps them has */}
-          {can("accounts") && (
-            <button type="button" className="me-btn" onClick={() => s.openSettings("accounts")} title={t("nav.accounts")}>
-              <span className="me-i" aria-hidden="true">
-                Y
-              </span>
-              <span>{t("nav.you")}</span>
-            </button>
-          )}
+          {can("accounts") && <AccountsWatcher />}
+          {/* a newer signed release; nothing until in-app updates are turned on (updater.ts) */}
           <UpdateButton />
-        </div>
-      </div>
-    </aside>
+        </>
+      }
+    />
   );
 }

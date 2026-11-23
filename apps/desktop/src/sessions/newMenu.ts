@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { getShellHost, type ShellInfo } from "../terminal/host";
 
 const openers = new Set<() => void>();
+/** A press made while no + menu was on screen. The menu lives on the Code page, so ⌘N elsewhere opens that page
+ *  first, and the header that mounts with it opens its menu at once. */
+let pending = false;
 
 let shellsAsked: Promise<ShellInfo[]> | null = null;
 /** The shells a Shell row may run here (the shell's `shells_available`, default first); [] when it cannot say. */
@@ -32,11 +35,19 @@ export function useShells(): ShellInfo[] | null {
 
 export function onOpenNewSessionMenu(f: () => void): () => void {
   openers.add(f);
+  if (pending) {
+    pending = false;
+    f();
+  }
   return () => {
     openers.delete(f);
   };
 }
 
 export function openNewSessionMenu(): void {
+  if (!openers.size) {
+    pending = true;
+    return;
+  }
   for (const f of [...openers]) f();
 }

@@ -1,0 +1,200 @@
+/* The side menu (Sidebar.tsx), as the design canvas draws it: the shell rules of packages/ui-kit/app.css, lines 43 to
+   59 (.sb, .brand, .nav, .rec, .cnt, .acct; .planp waits for a budget to show), with the canvas's .ic, .ib and .av,
+   copied and scoped under the menu's root class, .sb. The scope matters: the desktop already has global .brand and .nav
+   rules (sidebar.css, still loaded for the disk chip, the usage meters and .vh), so the copied rules also set back what
+   those would otherwise lend the menu; each such line says so. The canvas's short token names map onto the desktop's
+   (src/theme/tokens.css): --mut is --aui-muted. Lines that are the desktop's own rather than the canvas's say so. */
+
+.sb {
+  /* the canvas's root type (.r): the desktop's body text is 13px, the canvas's screens are 14px */
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+  /* the desktop's: a short window scrolls the menu instead of cutting off the account row */
+  overflow-y: auto;
+}
+.sb .ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* sets back sidebar.css's .nav svg, which greys every icon in a .nav */
+  color: inherit;
+}
+
+/* the brand mark and Search */
+.sb .brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 10px;
+  /* sets back sidebar.css's .brand */
+  gap: 0;
+  flex: none;
+}
+.sb .sb-home,
+.sb .sb-mark {
+  display: block;
+  border-radius: 7px;
+}
+.sb .ib {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+}
+.sb .ib:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+
+/* a menu row; New is always lit, as the canvas's first row */
+.sb .nav {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  color: var(--aui-muted);
+  transition: background 0.15s;
+  /* sets back sidebar.css's .nav (12px type, its own padding), and makes the row a full-width button */
+  flex: none;
+  width: 100%;
+  font-size: inherit;
+  text-align: left;
+}
+.sb .nav:hover,
+.sb .nav[aria-current="page"],
+.sb .nav.new {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .nav[aria-current="page"] {
+  font-weight: 500;
+}
+/* the count of open asks beside Needs you */
+.sb .cnt {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--rad-pill);
+  background: var(--warnbg);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recent: the heading the canvas writes in quiet 12px, then one line per thread */
+.sb .sb-h {
+  flex: none;
+  padding: 12px 10px 4px;
+  font-size: 12px;
+  color: var(--aui-muted);
+}
+.sb .sb-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sb .rec {
+  position: relative;
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--aui-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* the desktop's: a full-width button, not the canvas's link */
+  width: 100%;
+  text-align: left;
+}
+.sb .rec:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+/* the canvas's larger touch targets: each row and button reaches 5px past its top and bottom */
+.sb .nav::after,
+.sb .rec::after,
+.sb .ib::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+
+/* the foot: what the runtime and this computer add, then the account row */
+.sb .sb-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+}
+.sb .sb-foot .disk-chip {
+  /* the desktop's: the chip keeps its own width in a column, as it did in the old foot's grid */
+  align-self: flex-start;
+}
+.sb .acct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  /* the desktop's: a full-width button, not the canvas's link */
+  width: 100%;
+  text-align: left;
+}
+.sb .acct:hover,
+.sb .acct[aria-current="page"] {
+  background: var(--hov);
+}
+.sb .acct-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a person's round initial, in the owner's pastel fill from the canvas's sample world (one of the literal colours the
+   canvas allows), with its fixed dark ink */
+.sb .av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--rad-pill);
+  background: #efd3cc;
+  color: #111110;
+  font-size: 11px;
+  font-weight: 600;
+}
