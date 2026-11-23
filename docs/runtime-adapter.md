@@ -6,7 +6,8 @@ slice adds a second one, Connected, that reads one shop's work from `apps/api`. 
 nothing in the shop: every write answers "not yet".
 
 Status on 23 Nov 2026: built and tested on `feat/desktop-runtime-adapter`, behind a developer setting. Practice (the
-demo) stays the default, so a fresh install still reaches no network.
+demo) stays the default, so a fresh install still reaches no network. The offline cache (see Offline, below) is built and
+tested on `feat/desktop-offline-cache`, on top of it.
 
 ## Choosing it
 
@@ -14,10 +15,13 @@ Settings › Developer has a Runtime row: Practice or Connected. Connected asks 
 or plain `http://` to this computer only (`localhost`, `127.0.0.1`, `[::1]`), with no path and no user name
 (`src/runtime/setting.ts`). The choice is kept on this computer in `manut.runtime` (the mode and the origin, never a
 token) and applies at the next start, because the store is built around one runtime. The page offers Restart to
-apply; like any reload, that stops the terminals and coding sessions the app runs, and the page says so.
+apply; like any reload, that stops the terminals and coding sessions the app runs, and the page says so. Saving
+Practice, or another origin, also deletes the last read of the shop that was kept for offline use (`saveRuntimeChoice`
+in `src/runtime/link.ts` is the only code that saves the choice, and a test keeps it so).
 
 A quiet line above the account row says which runtime this is: "Practice mode", or "Connected to dev.manut.xyz", or
-how the link stands ("Signed out · …", "Offline · …", "Not answering · …"). Clicking it opens Settings › Developer.
+how the link stands ("Signed out · …", "Offline · …", "Not answering · …"); while the API cannot be reached and a read
+is kept, "Offline. Showing what was here at 14:05". Clicking it opens Settings › Developer.
 It is not drawn for a WebSocket runtime, which only the Playwright suite configures.
 
 ## What it reads, and how each call maps to the API
@@ -136,6 +140,8 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
 - In memory, in the page's one `ApiSession` per origin, while the app runs.
 - Never in localStorage (which holds only `manut.runtime`), a log, an address, or a command line. A session is never
   sent to any origin but its own.
+- Never in the offline cache's file either: it holds what the screens read of the shop and nothing from the session (see
+  Offline).
 - macOS only for now. On Windows and Linux the keychain commands answer `unavailable`, Settings says "This computer
   cannot keep a session yet", and Connected cannot sign in. The crates either would use are already in the build
   (`windows-sys` for Windows' Credential Manager, `zbus` for Linux's Secret Service); the code is not written.
@@ -157,18 +163,62 @@ for GitHub), so the shell's `api_request` command runs the system's `curl`, whic
 
 ## Offline, and other failures
 
-The shared host's link is one of: connecting, open, signed out, offline, unavailable. Anything but open is a closed
-runtime to the store, which marks its chats stale and ends any turn it was showing, and reads everything again when the
-runtime opens: after an outage nothing is replayed, the app's own re-read brings it back.
+The shared host's link is one of: connecting, open, signed out, offline, unavailable. Open is a live read of the API.
+A runtime with nothing to show in any other state is closed to the store, which marks its chats stale and ends any turn
+it was showing, and reads everything again when the runtime opens: after an outage nothing is replayed, the app's own
+re-read brings it back, except that an ask which stopped waiting meanwhile is closed in Needs you (the store keeps the ask
+cards it already has). With a kept read (below), offline and unavailable keep the runtime open instead.
 
-- Offline (no network, no such host, nothing listening, too slow): the mode line says "Offline", requests are refused
-  with a translated "Offline: the Manut AI API cannot be reached.", and the host tries again after 2 seconds, doubling up
-  to a minute.
+- Offline (no network, no such host, nothing listening, too slow): the mode line says "Offline", the host tries again
+  after 2 seconds, doubling up to a minute, and, with nothing kept to show, requests are refused with a translated
+  "Offline: the Manut AI API cannot be reached.".
 - Unavailable (a 5xx, an answer that is not JSON, any 4xx on a read the runtime needs): the same, as "Not answering".
 - Signed out (no session, or the API ended it): the host waits until someone signs in in Settings, then reads at once;
-  no restart is needed for that.
-- Nothing is kept between runs. The in-memory read is dropped when a read fails, so a stale shop is never shown as the
-  current one. Keeping the last read for offline use is a slice of its own.
+  no restart is needed for that. Nothing is shown and nothing is kept (the saved read is deleted).
+
+### The offline cache
+
+Built. When a read fails because the API is offline or not answering, the app shows the last good read of the shop
+instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`, `shop_cache.rs`).
+
+- **What is kept.** After every good read, the minute's poll included: the tasks with their actions (so what waits for
+  the owner), the schedules, the inbound attention items, whether that feed is off, and the time of the read, copied
+  field by field as the runtime already decodes them. The API's whole objects and the entries it could not read are left
+  out. Never a token, a refresh token, the device id or anything else from the keychain, and not the origin or the tenant
+  either: the file's name is the only link to them. It does hold the shop's own words in plain text: task titles, the
+  exact words of replies waiting for the owner and the LINE ids they go to, and schedule prompts. The file is the owner's
+  alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
+- **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one signed-in shop. The key is the SHA-256, in hex, of the
+  origin and the tenant, made by the page (`cacheKey`, with a small synchronous SHA-256 in `sha256.ts`, because the Web
+  Crypto digest is asynchronous and exists only in a secure context); the shell accepts nothing but 64 hex digits as a
+  name, never a path. It is written to a temporary file and renamed, so a crash never leaves half a file; at most 8 MiB;
+  never through a link; and writing one shop's file removes any other's. Three shell commands do it (`shop_cache_write`,
+  `shop_cache_read`, `shop_cache_clear`), reached only through `shellCacheStore` in `shell.ts`, and nothing there ever
+  raises: a disk that refuses is a cache that is empty. Calls to it run one at a time, in order.
+- **When it is shown.** On a failed read (offline or unavailable) the host answers every screen from the last good read of
+  this run, else from the file an earlier run kept, looked at once for the outage (an app that starts with no network).
+  The runtime stays open, so the screens show it; no request is made per screen, and the host keeps trying as above. The
+  line reads "Offline. Showing what was here at 14:05" ("Not answering. Showing what was here at 14:05" for an API that
+  answers 5xx), with the day first for a read from another day ("Nov 22 14:05"). Buddy's row, Needs you, Home, History
+  and Automations show the read as it was, which is what "at 14:05" qualifies. When the API answers again the host reads,
+  replaces the cache with the new read, and the runtime closes and opens once, so the store reads everything again; an
+  ask the kept read showed that is not waiting now (decided or expired meanwhile, or its task gone) is closed in Needs you.
+- **Asks and writes.** An ask from the kept read is shown with its exact action in Needs you, Home and Buddy's chat, but
+  cannot be answered: answering needs the live record. The chat card's answers are greyed out and it says "Connect to
+  answer this", and the runtime refuses `approval.respond` with that same message, so Home's Approve, which is not greyed
+  out, is refused with the same words when it is pressed. Every other write is refused with the offline message. No write
+  is ever queued or sent later; when the app is back online it reads again, and the person does it again. An ask whose
+  expiry passes while offline still shows as it was at the time of the read.
+- **7 days.** A read more than 7 days old, counted from when it was read, is not shown: the line says "Offline. The saved
+  copy is more than 7 days old, so it is not shown" and the runtime is closed, as with nothing kept. A read that was
+  showing stops showing when it reaches 7 days. A file that is damaged, from another version of the app, for another
+  origin or tenant, or dated more than 5 minutes ahead of this computer's clock is ignored as if none were kept, and one
+  bad entry ignores the whole file: half a shop is never shown as the whole one.
+- **Forgotten.** Signing out in Settings, a session the API ends, a new sign-in over another session (this origin's or
+  another's), and saving Practice or another origin in Settings › Developer all delete the file. A read that is on its
+  way when the person signs out is not kept afterwards. After the saved choice moves away from the origin the page runs,
+  it goes on reading until the next start but keeps nothing more, so the deletion is not undone. Practice never reads the
+  cache: its runtime reaches no command of the shell.
 
 ## Next slices
 
@@ -184,12 +234,10 @@ runtime opens: after an outage nothing is replayed, the app's own re-read brings
 2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
    shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
    re-read and lets a task's row change live.
-3. **An offline cache.** Keep the last read on this computer, without any token, and show it as "as of" a time, never as
-   current.
-4. **Asks of the API**, none built here: a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
+3. **Asks of the API**, none built here: a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
    replace the export; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
    provider; a tenant-wide event feed; approvals as wire records.
-5. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
+4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's.
 
 ## Undoing it
@@ -197,4 +245,9 @@ runtime opens: after an outage nothing is replayed, the app's own re-read brings
 Practice is the default and Connected is reached only through Settings › Developer. To take the slice out, remove
 `src/runtime/http/`, `src/runtime/setting.ts`, `src/runtime/link.ts`, `src/settings/DeveloperPage.tsx`,
 `src/sidebar/ModeLine.tsx`, the `rt.`, `dev.` and `mode.` dictionary keys, `src-tauri/src/api_link.rs` with its four
-commands in `lib.rs`, and the `security-framework` dependency in `Cargo.toml`.
+commands in `lib.rs`, and the `security-framework` dependency in `Cargo.toml`. To take only the offline cache out, remove
+`src/runtime/http/cache.ts` and `sha256.ts` with their tests, the `cache` and `keeping` options and the `cache` view in
+`host.ts` (a failed read then drops the shop again), the `onEnd` option in `session.ts`, `shopCache`, `forgetShop` and
+`shellCacheStore`, `saveRuntimeChoice` and `useShowingCache` in `link.ts`, the offline line in `Cards.slot.tsx`, the
+`rt.connectToAnswer`, `mode.cached*` and `mode.old*` keys, and `src-tauri/src/shop_cache.rs` with its three commands in
+`lib.rs`.

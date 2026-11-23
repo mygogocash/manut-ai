@@ -1802,6 +1802,7 @@ export const ko: Record<Key, string> = {
   "rt.offline": "오프라인: Manut AI API에 연결할 수 없어요.",
   "rt.unavailable": "지금은 Manut AI API가 응답하지 않아요.",
   "rt.signedOut": "로그아웃됐어요. 설정 › 개발자에서 로그인하세요.",
+  "rt.connectToAnswer": "답하려면 연결하세요",
   "rt.notFound": "이 가게에 더 이상 없는 항목이에요.",
   "rt.untitled": "제목 없는 작업",
   "rt.task": "**{title}**\n\n{objective}",
@@ -1874,6 +1875,10 @@ export const ko: Record<Key, string> = {
   "mode.signedOut": "로그아웃됨 · {host}",
   "mode.offline": "오프라인 · {host}",
   "mode.unavailable": "응답 없음 · {host}",
+  "mode.cachedOffline": "오프라인. {time}에 있던 내용을 보여 주고 있어요",
+  "mode.cachedUnavailable": "응답 없음. {time}에 있던 내용을 보여 주고 있어요",
+  "mode.oldOffline": "오프라인. 저장된 사본이 7일보다 오래되어 보여 주지 않아요",
+  "mode.oldUnavailable": "응답 없음. 저장된 사본이 7일보다 오래되어 보여 주지 않아요",
   "mode.open": "런타임 설정",
   // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
   "rt.notYetShow": "아직 안 돼요. 연결 모드에서는 지금은 이것을 볼 수 없어요. 다음 버전에 나와요.",

@@ -13,8 +13,8 @@ import { Seg } from "../chat/model/Seg";
 import { t, type Key } from "../i18n";
 import { sessionFor } from "../runtime/http";
 import type { SignInState } from "../runtime/http/session";
-import { pendingRestart, restartApp, useSignIn } from "../runtime/link";
-import { parseOrigin, readRuntimeSetting, writeRuntimeSetting, type OriginRefusal, type RuntimeSetting } from "../runtime/setting";
+import { pendingRestart, restartApp, saveRuntimeChoice, useSignIn } from "../runtime/link";
+import { parseOrigin, readRuntimeSetting, type OriginRefusal, type RuntimeSetting } from "../runtime/setting";
 
 type Mode = RuntimeSetting["mode"];
 
@@ -184,8 +184,9 @@ export function DeveloperPage() {
   const origin = saved.mode === "connected" ? saved.origin : null;
   const signIn = useSignIn(origin);
 
+  // Moving the choice off the shop (to Practice, or to another origin) also forgets the saved read of it.
   const save = (next: RuntimeSetting) => {
-    writeRuntimeSetting(next);
+    saveRuntimeChoice(saved, next);
     setSaved(next);
   };
 

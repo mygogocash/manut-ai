@@ -3,17 +3,24 @@
 // read of the shop and one timer, so the API is read once however many screens ask.
 //
 // Its status follows the host's link: open once the shop has been read; connecting before the first read; closed when
-// signed out, offline or facing an API that does not answer. A request while closed is refused with that reason, which
-// the chat shows as it shows any refusal.
+// signed out, or offline or facing an API that does not answer with nothing kept to show. A request while closed is
+// refused with that reason, which the chat shows as it shows any refusal.
+//
+// While the API cannot be reached and the host shows the last good read instead (offline cache, cache.ts), the status
+// stays open, so the screens show it instead of an empty screen. When the API answers again the status closes and opens
+// once: the store reads everything again when the runtime opens, as after any outage, and that is what replaces what
+// the kept read showed.
 import { t } from "../../i18n";
 import type { BridgeError, BridgeEvent, EventName, EventOf, Op, OpParams, OpResult } from "../../lib/protocol";
 import type { RuntimeAdapter, RuntimeCapabilities, RuntimeStatus } from "../adapter";
 import { OpError } from "../mock/host";
+import { readRuntimeSetting } from "../setting";
+import { ShopCache } from "./cache";
 import { HttpHost, type HostEvent, type LinkState } from "./host";
 import { ApiSession } from "./session";
-import { shellFetch, shellVault } from "./shell";
+import { shellCacheStore, shellFetch, shellVault } from "./shell";
 
-export { HttpHost, type LinkState } from "./host";
+export { HttpHost, type CacheView, type LinkState } from "./host";
 export { ApiSession } from "./session";
 
 /** What the connected runtime offers beyond chat: the shop's schedules, read-only, on the Automations page. The
@@ -34,6 +41,8 @@ export class HttpRuntime implements RuntimeAdapter {
   private release: (() => void) | null = null;
   private offEvents: (() => void) | null = null;
   private offLink: (() => void) | null = null;
+  /** The screens are being answered from the kept read, not from the API. */
+  private kept = false;
   private handlers = new Map<string, Set<(ev: never) => void>>();
   private statusHandlers = new Set<(s: RuntimeStatus) => void>();
   private waiting: { resolve: () => void; reject: (e: BridgeError) => void }[] = [];
@@ -48,9 +57,9 @@ export class HttpRuntime implements RuntimeAdapter {
     if (!this.release) {
       this.setStatus("connecting");
       this.offEvents = this.host.subscribe((ev) => this.deliver(ev));
-      this.offLink = this.host.onLink((l) => this.follow(l));
+      this.offLink = this.host.onLink(() => this.follow());
       this.release = this.host.attach();
-      this.follow(this.host.link);
+      this.follow();
     }
     return opened;
   }
@@ -69,7 +78,7 @@ export class HttpRuntime implements RuntimeAdapter {
   request<K extends Op>(op: K, params?: OpParams<K>): Promise<OpResult<K>> {
     if (!this.release) return Promise.reject<OpResult<K>>(REFUSAL.connecting());
     const link = this.host.link;
-    if (link !== "open") return Promise.reject<OpResult<K>>(REFUSAL[link]());
+    if (link !== "open" && !this.host.usable) return Promise.reject<OpResult<K>>(REFUSAL[link]());
     return this.host.handle(op, (params ?? {}) as Record<string, unknown>).then(
       (result) => result as OpResult<K>,
       (e: unknown) => {
@@ -95,10 +104,16 @@ export class HttpRuntime implements RuntimeAdapter {
     return () => this.statusHandlers.delete(handler);
   }
 
-  private follow(link: LinkState): void {
+  private follow(): void {
     if (!this.release) return;
-    this.setStatus(link === "open" ? "open" : link === "connecting" ? "connecting" : "closed");
-    if (link === "open") for (const w of this.waiting.splice(0)) w.resolve();
+    const link = this.host.link;
+    const kept = link !== "open" && this.host.usable;
+    // The kept read stood in for the shop, and the API answers again: close for a moment, so that opening makes the store
+    // read everything again instead of keeping what the kept read showed.
+    if (this.kept && link === "open") this.setStatus("closed");
+    this.kept = kept;
+    this.setStatus(link === "open" || kept ? "open" : link === "connecting" ? "connecting" : "closed");
+    if (this.status === "open") for (const w of this.waiting.splice(0)) w.resolve();
   }
 
   private setStatus(s: RuntimeStatus): void {
@@ -118,18 +133,39 @@ export class HttpRuntime implements RuntimeAdapter {
 
 const sessions = new Map<string, ApiSession>();
 const hosts = new Map<string, HttpHost>();
+let saved: ShopCache | null = null;
+
+/** The page's one saved read of the shop, over the desktop shell's file commands. One for the whole page, so every call
+ *  to the disk runs in turn, whichever origin it is for. */
+export function shopCache(): ShopCache {
+  return (saved ??= new ShopCache(shellCacheStore()));
+}
+
+/** Forgets the saved read of the shop. Signing out, a session the API ended, a new sign-in over another session, and
+ *  Settings moving the choice off the shop all call it. */
+export function forgetShop(): Promise<void> {
+  return shopCache().clear();
+}
+
+/** Whether the choice saved on this computer is still Connected to `origin`. */
+function stillConnectedTo(origin: string): boolean {
+  const choice = readRuntimeSetting();
+  return choice.mode === "connected" && choice.origin === origin;
+}
 
 /** The page's one session with the API at `origin`, over the desktop shell's request command and keychain. Settings
- *  signs in and out through it, and the runtime reads through it, so both always agree. */
+ *  signs in and out through it, and the runtime reads through it, so both always agree. When it ends, what was read
+ *  with it is forgotten. */
 export function sessionFor(origin: string): ApiSession {
   let session = sessions.get(origin);
-  if (!session) sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault() })));
+  if (!session) sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault(), onEnd: forgetShop })));
   return session;
 }
 
-/** The page's one host for the API at `origin`. */
+/** The page's one host for the API at `origin`. It keeps each good read in the saved file, but only while the choice
+ *  saved on this computer is still this origin. */
 export function sharedHttpHost(origin: string): HttpHost {
   let host = hosts.get(origin);
-  if (!host) hosts.set(origin, (host = new HttpHost({ session: sessionFor(origin) })));
+  if (!host) hosts.set(origin, (host = new HttpHost({ session: sessionFor(origin), cache: shopCache(), keeping: () => stillConnectedTo(origin) })));
   return host;
 }

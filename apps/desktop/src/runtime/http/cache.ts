@@ -1,0 +1,212 @@
+// The offline cache: the last good read of the shop, kept on this computer so that when the API cannot be reached the
+// app can show what was there instead of an empty screen, and say when that was (docs/runtime-adapter.md).
+//
+// Rules this module keeps:
+// - What is kept is what the screens read (tasks, the actions waiting for the owner, schedules, attention items), copied
+//   field by field. The API's whole objects (`raw`) and the entries it could not read are left out: the screens do not
+//   need them, and copying by name means nothing the API happened to carry beyond the decoded fields reaches the file.
+//   Nothing from the session is ever passed in here: no token, no refresh token, no keychain value.
+// - The file is named by a hash of the origin and the tenant, so each signed-in shop has its own and the name says
+//   neither. It holds no identity of its own: the name is the only link, and the desktop shell keeps only the one file
+//   of the one signed-in shop (src-tauri/src/shop_cache.rs).
+// - A kept read is shown for 7 days from the moment it was read and never after. One that is damaged, from another
+//   version of the app or dated ahead of this computer's clock is not believed: it reads as nothing kept. Half a shop
+//   is never shown as the whole one, so a single bad entry ignores the whole file.
+// - Nothing here raises. A disk that refuses is a cache that is empty, and a write that fails is a read that was not
+//   kept; the app is no worse off than before it had a cache.
+// - Calls to the disk run one at a time in the order they were made, and `clear` is final for any read that started
+//   before it (`ticket`): a read of the shop that finishes after the person signed out leaves no file behind.
+import { sha256Hex } from "./sha256";
+import type { Attention, ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+
+export const CACHE_VERSION = 1;
+/** A kept read is shown for this long after it was read. */
+export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
+const CLOCK_SLACK_MS = 5 * 60 * 1000;
+
+/** What a look at the saved file found: a read to show, one too old to show (and when it was read), or nothing usable
+ *  (none kept, damaged, from another version, or dated in the future). */
+export type CachedRead = { kind: "usable"; snapshot: ShopSnapshot } | { kind: "too_old"; at: number } | { kind: "none" };
+
+const NONE: CachedRead = { kind: "none" };
+
+/** The desktop shell's three file commands (src/runtime/http/shell.ts `shellCacheStore`), or a fake in the tests. */
+export interface CacheStore {
+  write(key: string, text: string): Promise<void>;
+  read(key: string): Promise<string | null>;
+  /** Removes whatever is kept. */
+  clear(): Promise<void>;
+}
+
+// ---- the file ---------------------------------------------------------------------------------------------------------
+
+/** A read as the text of the file, copied field by field (see the rules above). */
+export function encodeSnapshot(s: ShopSnapshot): string {
+  return JSON.stringify({
+    v: CACHE_VERSION,
+    snapshot: {
+      tasks: s.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        objective: task.objective,
+        state: task.state,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        events: task.events,
+        actions: task.actions.map((a) => ({
+          id: a.id,
+          taskId: a.taskId,
+          operationType: a.operationType,
+          targetResourceId: a.targetResourceId,
+          recipients: a.recipients,
+          payload: a.payload,
+          state: a.state,
+          proposedAt: a.proposedAt,
+          expiresAt: a.expiresAt,
+        })),
+      })),
+      schedules: s.schedules.map((x) => ({
+        id: x.id,
+        name: x.name,
+        prompt: x.prompt,
+        hour: x.hour,
+        minute: x.minute,
+        weekdays: x.weekdays,
+        timeZone: x.timeZone,
+        enabled: x.enabled,
+        revision: x.revision,
+        nextFire: x.nextFire,
+        createdAt: x.createdAt,
+      })),
+      attention: s.attention.map((x) => ({ id: x.id, connectionId: x.connectionId, eventType: x.eventType, issueId: x.issueId, receivedAt: x.receivedAt })),
+      attentionOff: s.attentionOff,
+      readAt: s.readAt,
+    },
+  });
+}
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
+const isStr = (v: unknown): v is string => typeof v === "string";
+const isId = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
+const intIn = (v: unknown, lo: number, hi: number): v is number => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
+const intOrNull = (v: unknown, lo: number, hi: number): v is number | null => v === null || intIn(v, lo, hi);
+
+function readAction(v: unknown): ShopAction | null {
+  if (!isObj(v)) return null;
+  const { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt } = v;
+  if (!isId(id) || !isStr(taskId) || !isStr(operationType) || !isStr(targetResourceId) || !isStr(state)) return null;
+  if (!Array.isArray(recipients) || !recipients.every(isStr) || !isObj(payload)) return null;
+  if (!numOrNull(proposedAt) || !numOrNull(expiresAt)) return null;
+  return { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt, raw: null };
+}
+
+function readTask(v: unknown): ShopTask | null {
+  if (!isObj(v)) return null;
+  const { id, title, objective, state, createdAt, updatedAt, events, actions } = v;
+  if (!isId(id) || !isStr(title) || !isStr(objective) || !isStr(state) || !numOrNull(createdAt) || !numOrNull(updatedAt) || !isNum(events)) return null;
+  if (!Array.isArray(actions)) return null;
+  const read = actions.map(readAction);
+  if (read.some((a) => !a)) return null;
+  return { id, title, objective, state, createdAt, updatedAt, events, actions: read as ShopAction[], raw: null };
+}
+
+function readSchedule(v: unknown): ShopSchedule | null {
+  if (!isObj(v)) return null;
+  const { id, name, prompt, hour, minute, weekdays, timeZone, enabled, revision, nextFire, createdAt } = v;
+  if (!isId(id) || !isStr(name) || !isStr(prompt) || !isStr(timeZone) || typeof enabled !== "boolean") return null;
+  if (!intOrNull(hour, 0, 23) || !intOrNull(minute, 0, 59) || !intOrNull(revision, 0, Number.MAX_SAFE_INTEGER)) return null;
+  if (!Array.isArray(weekdays) || !weekdays.every((d) => intIn(d, 1, 7)) || !numOrNull(nextFire) || !numOrNull(createdAt)) return null;
+  return { id, name, prompt, hour, minute, weekdays, timeZone, enabled, revision, nextFire, createdAt, raw: null };
+}
+
+function readAttention(v: unknown): Attention | null {
+  if (!isObj(v)) return null;
+  const { id, connectionId, eventType, issueId, receivedAt } = v;
+  if (!isId(id) || !isStr(connectionId) || !isStr(eventType) || !isStr(issueId) || !numOrNull(receivedAt)) return null;
+  return { id, connectionId, eventType, issueId, receivedAt, raw: null };
+}
+
+/** `list` read entry by entry, or null when it is not a list or any entry is not one. */
+function every<T>(list: unknown, read: (v: unknown) => T | null): T[] | null {
+  if (!Array.isArray(list)) return null;
+  const out = list.map(read);
+  return out.some((x) => x === null) ? null : (out as T[]);
+}
+
+/** The saved file as a read of the shop, at the clock `now`. */
+export function decodeCached(text: string | null, now: number): CachedRead {
+  if (!text) return NONE;
+  let file: unknown;
+  try {
+    file = JSON.parse(text);
+  } catch {
+    return NONE;
+  }
+  if (!isObj(file) || file.v !== CACHE_VERSION || !isObj(file.snapshot)) return NONE;
+  const s = file.snapshot;
+  const tasks = every(s.tasks, readTask);
+  const schedules = every(s.schedules, readSchedule);
+  const attention = every(s.attention, readAttention);
+  if (!tasks || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
+  const readAt = s.readAt;
+  if (readAt > now + CLOCK_SLACK_MS) return NONE;
+  if (now - readAt > CACHE_MAX_AGE_MS) return { kind: "too_old", at: readAt };
+  return { kind: "usable", snapshot: { tasks, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt } };
+}
+
+// ---- the name ---------------------------------------------------------------------------------------------------------
+
+/** The file's name for a shop: the SHA-256 of its origin and tenant, in hex. The two are hashed as a list, so a part of
+ *  one can never read as a part of the other. The shell accepts nothing but 64 hex digits as a name. */
+export function cacheKey(origin: string, tenant: string): string {
+  return sha256Hex(JSON.stringify([origin, tenant]));
+}
+
+// ---- the saved file ---------------------------------------------------------------------------------------------------
+
+export class ShopCache {
+  private epoch = 0;
+  private tail: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    private readonly store: CacheStore,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /** Taken when a read of the shop starts and handed to `keep` when it ends: a `clear` in between makes `keep` do
+   *  nothing, so a read that finished after the person signed out cannot bring the file back. */
+  ticket(): number {
+    return this.epoch;
+  }
+
+  /** Keeps `snapshot` as the shop's last good read, unless the cache was cleared since `ticket` was taken. */
+  keep(origin: string, tenant: string, snapshot: ShopSnapshot, ticket: number): Promise<void> {
+    return this.enqueue(async () => {
+      if (ticket !== this.epoch) return;
+      await this.store.write(cacheKey(origin, tenant), encodeSnapshot(snapshot));
+    }, undefined);
+  }
+
+  /** The shop's kept read, if one is kept for this origin and tenant and is neither damaged nor too old to show. */
+  load(origin: string, tenant: string): Promise<CachedRead> {
+    return this.enqueue(async () => decodeCached(await this.store.read(cacheKey(origin, tenant)), this.now()), NONE);
+  }
+
+  /** Forgets whatever is kept. Final for every read that started before it: the epoch moves at once, not when the
+   *  removal gets its turn, so a write still waiting behind another call is dropped. */
+  clear(): Promise<void> {
+    this.epoch += 1;
+    return this.enqueue(() => this.store.clear(), undefined);
+  }
+
+  /** One call at a time, in order. A call that fails is `fallback`, and never stops the ones behind it. */
+  private enqueue<T>(job: () => Promise<T>, fallback: T): Promise<T> {
+    const run = this.tail.then(job).catch(() => fallback);
+    this.tail = run;
+    return run;
+  }
+}
