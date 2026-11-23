@@ -1,6 +1,6 @@
 // Right panel tabs: Details · Terminal · Schedule · Worktrees · Diff · Runs, all read-only. Plus the default faces.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -115,7 +115,7 @@ test("tool tabs widen the panel; Details is the normal width again", async ({ pa
 
 test("a bot with nothing yet says so instead of an empty panel", async ({ page }) => {
   await open(page);
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await page.getByTestId("panel-tab-terminal").click();
   await expect(page.getByTestId("panel-terminal")).toContainText("has not run a command yet");
   await page.getByTestId("panel-tab-schedule").click();
@@ -126,12 +126,15 @@ test("a bot with nothing yet says so instead of an empty panel", async ({ page }
 
 test("default faces are drawn whole (not cropped to a circle); an uploaded picture is round", async ({ page }) => {
   await page.goto("/");
-  const av = page.getByTestId("bot-kami").locator("img.ui-av");
+  await chatOpen(page);
+  // the Team page draws each member's face, as the sidebar's rows did
+  await page.getByTestId("menu-team").click();
+  const av = page.getByTestId("team-kami").locator("img.ui-av");
   await expect(av).toHaveAttribute("src", /face-blob|data:image\/svg/);
   expect(await av.evaluate((e) => getComputedStyle(e).borderRadius)).toBe("0px");
   // the three bots with a fixed face each have their own (a fourth bot draws one of the four faces by name)
   const srcs = await page
-    .locator('[data-testid="bot-kami"] img.ui-av, [data-testid="bot-friren"] img.ui-av, [data-testid="bot-default"] img.ui-av')
+    .locator('[data-testid="team-kami"] img.ui-av, [data-testid="team-friren"] img.ui-av, [data-testid="team-default"] img.ui-av')
     .evaluateAll((els) => els.map((e) => (e as HTMLImageElement).src));
   expect(srcs.length).toBe(3);
   expect(new Set(srcs).size).toBe(srcs.length);
@@ -165,8 +168,9 @@ test("the closed panel takes no focus; it comes after the chat in tab order", as
   await expect(page.getByTestId("composer")).toBeFocused();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  // the next stop is the page's first control: the side menu's brand mark (the sidebar's Add a bot before)
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Add a bot" })).toBeFocused();
+  await expect(page.getByTestId("menu-home")).toBeFocused();
   // walk the whole page: no stop lands inside the closed panel
   for (let i = 0; i < 40; i++) {
     expect(await page.evaluate(() => !!document.activeElement?.closest("[data-testid=details]"))).toBe(false);
@@ -186,7 +190,8 @@ test("the closed panel takes no focus; it comes after the chat in tab order", as
 
 test("a bot with no other places opens Details from its name in the header", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("bot-default").click();
+  await chatOpen(page);
+  await openChat(page, "default");
   await expect(page.getByTestId("places")).toHaveCount(0);
   const who = page.getByTestId("who");
   await expect(who).toHaveAttribute("title", /^Details \((⌘|Ctrl\+)\.\)$/);

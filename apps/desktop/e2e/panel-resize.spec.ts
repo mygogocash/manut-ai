@@ -58,7 +58,7 @@ test("drag the panel's edge wider, it stays after a reload, and double-click bri
   await expect(page.getByTestId("window")).not.toHaveClass(/panel-dragging/);
 
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(page);
   await expect.poll(() => width(page)).toBe(420);
 
   await page.getByTestId("panel-resizer").dblclick();

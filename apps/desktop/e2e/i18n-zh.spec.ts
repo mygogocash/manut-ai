@@ -165,15 +165,21 @@ test("a first run takes the language from the system; an install that already ra
   const fresh = await browser.newContext({ locale: "zh-CN", colorScheme: "dark", storageState: { cookies: [], origins: [] } });
   const p1 = await fresh.newPage();
   await p1.goto("/");
-  // a fresh install opens on Home
-  await homeOpen(p1);
+  // a fresh install opens on the first-run setup's Welcome, in the system's language, which it keeps
+  await expect(p1.getByTestId("first-run")).toHaveAttribute("data-screen", "welcome");
+  await expect(p1.getByTestId("frun-lang-zh")).toHaveAttribute("aria-pressed", "true");
   expect(await p1.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
-  await expect(p1.getByTestId("nav-settings")).toContainText("设置");
   expect(await p1.evaluate(() => localStorage.getItem("manut.lang"))).toBe("zh");
-  // there is no first-run panel: the language stays as picked, changed in Settings
+  // past the setup (Skip for now, on its first step) the app speaks it too
+  await p1.getByTestId("frun-continue").click();
+  await p1.getByTestId("frun-skip").click();
+  await homeOpen(p1);
+  await expect(p1.getByTestId("nav-settings")).toContainText("设置");
+  // the setup does not come back, and the language stays as picked, changed in Settings
   await mock("mock.clearHistory", { bot: "kami" });
   await p1.reload();
   await expect(p1.getByTestId("nav-settings")).toContainText("设置");
+  await expect(p1.getByTestId("first-run")).toHaveCount(0);
   await expect(p1.getByTestId("onb-lang")).toHaveCount(0);
   await fresh.close();
 

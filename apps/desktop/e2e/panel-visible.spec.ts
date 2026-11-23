@@ -5,7 +5,7 @@
 // for a day is not live.
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const LIVE = "dag:20261102_235818_fcfb1bdd/codex-coexist-live";
@@ -34,7 +34,7 @@ const runsListCalls = async () => ((await mock("mock.calls")).calls as { op: str
 async function load(page: Page, bot = "kami") {
   await page.goto("/");
   await chatOpen(page);
-  if (bot !== "kami") await page.getByTestId(`bot-${bot}`).click();
+  if (bot !== "kami") await openChat(page, bot);
   await expect(page.getByTestId("header")).toBeVisible();
 }
 

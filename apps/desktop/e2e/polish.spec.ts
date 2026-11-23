@@ -2,7 +2,7 @@
 // runs.spec.ts.)
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
-import { chatOpen, openCode } from "./start";
+import { chatOpen, openChat, openSettings } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -28,6 +28,7 @@ test.beforeEach(async () => {
 });
 
 test("the first-run screen is drawn in the person's theme: light, though the app has not mounted", async ({ page }) => {
+  test.skip(true, "the Hermes setup gate (__MANUT_GATE__, setup-screen) left with the Hermes bridge; the first run is the setup in src/onboarding, inside the app");
   // `__MANUT_GATE__` stands in for the Tauri shell and reports Hermes missing: the setup screen shows and <App>
   // (which used to be the only place the theme was set) never mounts
   await page.addInitScript(() => {
@@ -49,6 +50,7 @@ test("the first-run screen is drawn in the person's theme: light, though the app
 });
 
 test("no bots: the empty pane says, in one line, that Hermes has no bot and where to connect one", async ({ page }) => {
+  test.skip(true, "Hermes' no-bot line and the + menu it pointed at were removed; with no team the app opens on Home, and Team says so (team-empty)");
   await page.routeWebSocket(/127\.0\.0\.1/, (ws) => {
     const server = ws.connectToServer();
     const ops = new Map<string, string>();
@@ -105,12 +107,12 @@ test("the bridge goes away: the composer says so and waits, then comes back by i
   await expect(composer).toHaveAttribute("placeholder", "Message Kami");
   drop!();
   await expect(composer).toBeDisabled();
-  await expect(composer).toHaveAttribute("placeholder", "Connecting to Hermes…");
+  await expect(composer).toHaveAttribute("placeholder", "Connecting…");
   await expect(page.getByTestId("send")).toBeDisabled();
   // it holds through the retries (250ms, 500ms, 1s…), not only until the first one
   await page.waitForTimeout(1500);
   await expect(composer).toBeDisabled();
-  await expect(composer).toHaveAttribute("placeholder", "Connecting to Hermes…");
+  await expect(composer).toHaveAttribute("placeholder", "Connecting…");
 });
 
 test("one divider across the window: the side panel's tab bar ends where the chat header ends", async ({ page }) => {
@@ -217,6 +219,7 @@ function contrast(a: string, b: string): number {
 }
 
 test("five asks: the Needs list ends on the third, whole, and a '+2 more' row opens the rest", async ({ page }) => {
+  test.skip(true, "the Needs strip's three rows and its '+N more' left with the sidebar; the Needs you page lists every ask");
   // one open ask per bot: five more bots (copies of Friren the mock does not know, so nothing re-reads their asks
   // away) ask at once
   const extra = ["n1", "n2", "n3", "n4", "n5"];
@@ -278,11 +281,11 @@ test("lines that carry information are 12px in --muted, not the 11px tertiary gr
   await open(page);
   const muted = await token(page, "--muted");
   const look = (sel: string) => page.locator(sel).first().evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).fontSize]);
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByTestId("chat-error")).toBeVisible();
   expect(await look("[data-testid=chat-error]")).toEqual([muted, "12px"]);
   // the key hint beside an approval's buttons
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await mock("mock.ask", { bot: "kami", kind: "approval" });
   await expect(page.getByTestId("card-approval")).toBeVisible();
   expect(await look(".card-keys")).toEqual([muted, "12px"]);
@@ -302,7 +305,7 @@ test("question cards: a clarify's choices are the interview's chips, one control
   const title = (sel: string) => page.locator(sel).first().evaluate((e) => getComputedStyle(e).fontWeight);
   expect(await title("[data-testid=card-clarify] .iv-title")).toBe("500");
   await mock("mock.ask", { bot: "friren", kind: "interview" });
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.locator(".iv-chip").first()).toBeVisible();
   const interview = await style(".iv-chips .iv-chip:not(.on)");
   expect(clarify).toBe(interview);
@@ -310,18 +313,13 @@ test("question cards: a clarify's choices are the interview's chips, one control
   expect(await title(".iv-chips .iv-chip:not(.on) .iv-title")).toBe("500");
 });
 
-test("text fields take one calm focus: a 1px edge in --muted, the sidebar search and the model search alike", async ({ page }) => {
+test("the model search takes one calm focus: a 1px edge in --muted", async ({ page }) => {
+  // The sidebar's search box this compared it with left with the sidebar; History's search box, which replaced it,
+  // takes the design canvas's own focus ring.
   for (const theme of ["dark", "light"] as const) {
     await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
     await open(page);
     const muted = await token(page, "--muted");
-    const side = page.locator(".search");
-    const before = await side.evaluate((e) => getComputedStyle(e).boxShadow);
-    await page.getByRole("searchbox", { name: "Search bots and terminals" }).focus();
-    const sideFocus = await side.evaluate((e) => ({ shadow: getComputedStyle(e).boxShadow, outline: getComputedStyle(e).outlineStyle }));
-    expect(sideFocus.shadow).not.toBe(before);
-    expect(sideFocus.shadow).toBe(`${muted} 0px 0px 0px 1px inset`);
-    expect(sideFocus.outline).toBe("none");
     await page.getByTestId("head-right").locator("button").first().click();
     const search = page.locator(".mp-search");
     await expect(page.getByTestId("model-search")).toBeFocused();
@@ -343,7 +341,6 @@ test.skip("a running terminal session's dot: 6px, solid, inside its tile, readab
       theme,
     );
     await open(page);
-    await openCode(page);
     await page.getByTestId("session-new").click();
     await page.getByTestId("session-agent-grok").click();
     await page.getByTestId("session-folder").click();
@@ -436,7 +433,7 @@ test("Accounts: every leading mark sits in one 16px slot, one column", async ({ 
     };
   });
   await open(page);
-  await page.getByTestId("me").click();
+  await openSettings(page, "accounts");
   await expect(page.getByTestId("accounts-codex")).toBeVisible();
   const marks = await page.evaluate(() =>
     [...document.querySelectorAll(".acc-gh-i .agent-ic, .acc-ring .agent-ic")].map((e) => {
@@ -457,7 +454,7 @@ test("the window never scrolls sideways: a scroll into view cannot shift the app
       const w = document.querySelector<HTMLElement>(".window")!;
       w.scrollLeft = 50;
       document.querySelector(".details")?.scrollIntoView();
-      return [w.scrollLeft, document.querySelector(".side")!.getBoundingClientRect().left];
+      return [w.scrollLeft, document.querySelector("[data-testid=sidebar]")!.getBoundingClientRect().left];
     });
     expect(left, `${width}px`).toEqual([0, 0]);
   }

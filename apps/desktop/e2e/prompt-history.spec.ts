@@ -4,7 +4,7 @@
 // (Alt+arrow recalls from any line).
 // A prompt held in manut's queue joins the history once it is sent; text the app puts in the box ends a walk.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -34,7 +34,8 @@ test.beforeEach(async () => {
 
 async function openFriren(page: Page) {
   await page.goto("/");
-  await page.getByTestId("bot-friren").click();
+  await chatOpen(page);
+  await openChat(page, "friren");
   await expect(page.getByTestId("header").getByText("Friren", { exact: true })).toBeVisible();
   await expect(page.getByTestId("composer")).toBeEnabled();
   await page.getByTestId("composer").click();
@@ -96,8 +97,8 @@ test("leaving the chat mid-walk keeps the unsent draft, not the prompt on show",
   await box.fill("my unsent draft");
   await box.press("ArrowUp");
   await expect(box).toHaveValue("an earlier prompt");
-  await page.getByTestId("bot-kami").click();
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "kami");
+  await openChat(page, "friren");
   await expect(page.getByTestId("composer")).toHaveValue("my unsent draft");
 });
 

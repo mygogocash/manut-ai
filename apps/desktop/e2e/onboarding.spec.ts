@@ -1,6 +1,6 @@
-// First run (no `manut.onboarded` in localStorage, a fresh install): there is no first-run panel. The sidebar lists
-// one bot, the default profile. An empty chat shows just the chat (its timeline and composer), a chat with history
-// shows its history, and the empty Sessions section stays one New session row with its hint in the tooltip.
+// First run (no `manut.onboarded` in localStorage, a fresh install), as Oh My Hermes had it: no first-run panel, the
+// sidebar listing the default profile alone, and an empty chat that shows just the chat. Manut AI's first run is the
+// full-window setup instead (src/onboarding/Onboarding.tsx, tested in Onboarding.test.tsx and flow.test.ts), then Home.
 import { expect, test } from "@playwright/test";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
@@ -24,7 +24,7 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-// chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
+// A first run now opens the first-run setup and then Home, not a chat with no panel over it.
 test.skip("first run: an empty chat shows just the chat, with no first-run panel over it", async ({ page }) => {
   await page.addInitScript(() => localStorage.removeItem("manut.sessions.recent"));
   await mock("mock.clearHistory", { bot: "friren" });

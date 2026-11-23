@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen, openSettings } from "./start";
+import { chatOpen, chatResume, openSettings } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS_DIR || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -162,6 +162,13 @@ test("screenshots: the new row and the version, dark and light", async ({ page }
     await page.getByTestId("autoswitch-codex").click();
     await page.mouse.move(5, 5);
     await page.screenshot({ path: join(SHOTS, `accounts-reset-first-off-${theme}.png`), animations: "disabled" });
-    await page.evaluate(() => localStorage.clear());
+    // a clean slate for the next theme, as playwright.config.ts starts every spec: past the first-run setup, the team
+    // listed, Kami's chat left open
+    await page.evaluate((resume) => {
+      localStorage.clear();
+      localStorage.setItem("manut.onboarded", "1");
+      localStorage.setItem("manut.roster", JSON.stringify(["kami", "friren", "default", "omh-tui"]));
+      localStorage.setItem("manut.resume", resume);
+    }, chatResume("kami"));
   }
 });
