@@ -206,6 +206,17 @@ describe("tenant export fan-out", () => {
     });
   }
 
+  it("tells every cache not to keep the export, whole or incomplete", async () => {
+    // The export holds customers' words, their LINE display names, what the team knows and drafts, so a browser
+    // or a proxy must never keep a copy of it.
+    const whole = await tenantExport(stubEnv().env, TENANT);
+    expect(whole.status).toBe(200);
+    expect(whole.headers.get("cache-control")).toBe("no-store");
+    const incomplete = await tenantExport(stubEnv({ "TASK:task-b GET /export": fail }).env, TENANT);
+    expect(incomplete.status).toBe(500);
+    expect(incomplete.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("skips a phantom task that answers 404", async () => {
     // The create route indexes before creating, so a failed create leaves an
     // id with no task behind it. That is not missing data.

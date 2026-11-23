@@ -232,6 +232,7 @@ type SubscriptionPayment = {
 // the parts ("index", a task id, "connections", "signIns", "outposts", "consent", "attention", "pilot", "model",
 // "audit", "memory", "schedules", "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
+// Every export answer, whole or not, carries `cache-control: no-store`: it holds customers' words.
 type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
 
 type DeletedShop = {

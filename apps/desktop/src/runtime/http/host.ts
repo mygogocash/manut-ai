@@ -25,6 +25,7 @@ import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
+import { shopRoutines } from "./customize";
 import type { ApiSession, SignInState } from "./session";
 import { readShop, type ReadFailure, type ShopRead, type ShopSnapshot } from "./shop";
 import { attentionRows, automationRows, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
@@ -485,6 +486,18 @@ export class HttpHost {
       "team.state": notYetShow,
       "team.pause": notYet,
       "team.resume": notYet,
+      // What the team knows: the API serves a shop's memory to operators only (admin routes), so no session can read or
+      // change it. Nothing the owner types is sent anywhere.
+      "memory.list": notYetShow,
+      "memory.remember": notYet,
+      "memory.confirm": notYet,
+      "memory.correct": notYet,
+      "memory.forget": notYet,
+      // The team's routines are the shop's schedules, read as they are. Changing one is not built yet.
+      "routine.list": async () => ({ routines: shopRoutines(await this.current()) }),
+      "routine.create": notYet,
+      "routine.pause": notYet,
+      "routine.resume": notYet,
     };
   })();
 }
