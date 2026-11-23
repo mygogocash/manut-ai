@@ -117,6 +117,8 @@ payload whose CRC, lengths, GUID, country or currency is wrong.
 
 Done when: round trips for every id kind with and without an amount are tested, and each refusal has a test.
 
+Done on cloud/promptpay-read, 23 Nov 2026: `readPromptPayPayload` in `packages/promptpay` reads back every payload the writer makes and refuses a bad CRC, length, GUID, country, currency, id or amount (51 tests in the package).
+
 ### approval-wire
 In `packages/approval-core` (already exists; add to it without changing its rules): a JSON wire format for
 requests, decisions, records and standings, with decoders that never throw (a missing or unreadable field
