@@ -1,17 +1,18 @@
-/// What Buddy's team knows about a shop, from the Worker's side: the operator routes that read it and that act on the
-/// owner's say over each fact, and `proposeFact`, the one way a worker adds to it. The rules are `@manut/shop-memory`'s;
-/// the shop's state, its one transaction per change and its audit entry are memory-store.ts's, in the shop's
-/// TenantObject.
+/// What Buddy's team knows about a shop, from the Worker's side: the routes that read it and that act on the owner's
+/// say over each fact, and `proposeFact`, the one way a worker adds to it. The rules are `@manut/shop-memory`'s; the
+/// shop's state, its one transaction per change and its audit entry are memory-store.ts's, in the shop's TenantObject.
 ///
-/// In the pilot the owner has no account, so the operator relays the owner's word: "It's true" on a waiting fact,
-/// Correct, Forget, and "Tell Buddy something to remember" (docs/pilot-api.md, "Memory"). A worker never does these. It
-/// proposes what it learned, and what a customer said waits for the owner. So `proposeFact` is a function the job flow
-/// calls, and no route leads to it.
+/// The owner's say is "It's true" on a waiting fact, Correct, Forget, and "Tell Buddy something to remember"
+/// (docs/pilot-api.md, "Memory"). The owner says it from their own shop session once the operator has linked their
+/// account (docs/several-shops.md, slice 4), and until then the operator relays it through the console. Both make each
+/// change through the same operation of the shop's object. A worker never does these. It proposes what it learned, and
+/// what a customer said waits for the owner. So `proposeFact` is a function the job flow calls, and no route leads to it.
 
 import { emptyState, usable, type Fact, type FactSource, type Refusal } from "@manut/shop-memory";
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
+import { callerOf, hasExactly, ownerActor, queryNamesSession, type PeopleEnv } from "./people";
 import { operatorIdentity } from "./pilot";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
@@ -19,13 +20,22 @@ type MemoryEnv = Pick<TenantDataEnv, "TENANT">;
 
 const MAX_BODY_BYTES = 16 * 1024;
 
-/// The operator routes that change a shop's memory, and the object path each one is. A proposal is not among them.
-const WRITES: Readonly<Record<string, string>> = {
-  "POST /v1/admin/memory/remember": "/memory/remember",
-  "POST /v1/admin/memory/confirm": "/memory/confirm",
-  "POST /v1/admin/memory/correct": "/memory/correct",
-  "POST /v1/admin/memory/forget": "/memory/forget",
+/// The owner's changes to what the team knows, by the last part of their path (`/v1/admin/memory/<path>` for the
+/// operator, `/v1/memory/<path>` for the owner's session): the object path each one is, and the exact body the owner's
+/// session sends for it (the operator's also names the shop's `tenant`). A proposal is not among them.
+type Change = { path: string; keys: readonly string[] };
+
+const CHANGES: Readonly<Record<string, Change>> = {
+  remember: { path: "/memory/remember", keys: ["text"] },
+  confirm: { path: "/memory/confirm", keys: ["id"] },
+  correct: { path: "/memory/correct", keys: ["id", "text"] },
+  forget: { path: "/memory/forget", keys: ["id"] },
 };
+
+/// The change at `path`, or null. Only a path the table names as its own: never a name every object inherits.
+function changeAt(path: string): Change | null {
+  return Object.hasOwn(CHANGES, path) ? CHANGES[path] ?? null : null;
+}
 
 /// What the shop's object answers to a write that was understood: a fact, or a refusal. Anything else is the object
 /// failing, and is not passed on as if it were an answer.
@@ -48,26 +58,32 @@ function memoryWrite(env: MemoryEnv, tenant: string, path: string, body: Record<
 }
 
 /// `/v1/admin/memory` and `/v1/admin/memory/*`, after the admin gate, which already required both credentials and an
-/// exact method. Answers null for any other path.
-export async function memoryAdminRoute(
+/// exact method; and `/v1/memory` and the owner's changes under it, from a shop session. Answers null for any other path,
+/// so no route leads to a worker's proposal.
+export async function memoryRoute(
   request: Request,
   url: URL,
-  env: MemoryEnv,
+  env: PeopleEnv,
   ctx: ExecutionContext,
 ): Promise<Response | null> {
+  if (url.pathname === "/v1/memory") return sessionRoute(request, url, env, null);
+  if (url.pathname.startsWith("/v1/memory/")) {
+    const change = changeAt(url.pathname.slice("/v1/memory/".length));
+    return change ? sessionRoute(request, url, env, change) : null;
+  }
   if (url.pathname !== "/v1/admin/memory" && !url.pathname.startsWith("/v1/admin/memory/")) return null;
-  const route = `${request.method} ${url.pathname}`;
-  if (route === "GET /v1/admin/memory") return readMemory(env, url);
-  const path = WRITES[route];
-  if (path) return writeMemory(request, env, ctx, path);
-  return json({ error: "not_found" }, 404);
+  if (request.method === "GET" && url.pathname === "/v1/admin/memory") {
+    const tenant = url.searchParams.get("tenant") ?? "";
+    return isValidTenant(tenant) ? readMemory(env, tenant) : json({ error: "tenant_required" }, 400);
+  }
+  const change = request.method === "POST" && url.pathname.startsWith("/v1/admin/memory/")
+    ? changeAt(url.pathname.slice("/v1/admin/memory/".length)) : null;
+  return change ? operatorChange(request, env, ctx, change) : json({ error: "not_found" }, 404);
 }
 
-/// `GET /v1/admin/memory?tenant=`: every fact the team holds for the shop, waiting ones included, oldest first, and how
-/// many texts it was told to forget. Never the fingerprints of those: the count is all the owner or an operator needs.
-async function readMemory(env: MemoryEnv, url: URL): Promise<Response> {
-  const tenant = url.searchParams.get("tenant") ?? "";
-  if (!isValidTenant(tenant)) return json({ error: "tenant_required" }, 400);
+/// Every fact the team holds for the shop, waiting ones included, oldest first, and how many texts it was told to
+/// forget. Never the fingerprints of those: the count is all the owner or an operator needs.
+async function readMemory(env: MemoryEnv, tenant: string): Promise<Response> {
   try {
     const response = await tenantCall(env, tenant, `/memory?tenant=${encodeURIComponent(tenant)}`);
     if (!response.ok) {
@@ -81,18 +97,45 @@ async function readMemory(env: MemoryEnv, url: URL): Promise<Response> {
   }
 }
 
-/// `POST /v1/admin/memory/{remember,confirm,correct,forget}` with `{ tenant, ... }`: the operator's change, recorded in
-/// the shop's audit log under the operator's Access identity (none for a service token). Answers what the shop's object
-/// answers: the fact on success, or the package's refusal with its status.
-async function writeMemory(request: Request, env: MemoryEnv, ctx: ExecutionContext, path: string): Promise<Response> {
+/// `POST /v1/admin/memory/{remember,confirm,correct,forget}` with `{ tenant, ... }`: the operator relays the owner's
+/// change, recorded in the shop's audit log under the operator's Access identity (none for a service token).
+async function operatorChange(request: Request, env: MemoryEnv, ctx: ExecutionContext, change: Change): Promise<Response> {
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   const body = parsed.value;
   if (!isRecord(body)) return json({ error: "invalid_request" }, 400);
   if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
-  const actor: AuditActor = { kind: "operator", email: await operatorIdentity(ctx) };
+  return writeMemory(env, body.tenant, change, body, { kind: "operator", email: await operatorIdentity(ctx) });
+}
+
+/// `GET /v1/memory` and `POST /v1/memory/{remember,confirm,correct,forget}` (`change` null for the read): the owner's say
+/// over what the team knows, from their own shop session (docs/several-shops.md, slice 4), or the shop's own session.
+/// The shop and the role come from the session alone (`callerOf`), so the body names neither, and the log names the
+/// owner's linked account by its id (`ownerActor`). A helper's session is told the route is the owner's rather than that
+/// it ended, as on the team's routines: what the team knows can hold the owner's costs and suppliers, and a helper's
+/// work is the conversations.
+///
+/// The order is who is asking (401 or 503), then the role (403), the method (405), and the query and the body (400).
+async function sessionRoute(request: Request, url: URL, env: PeopleEnv, change: Change | null): Promise<Response> {
+  const caller = await callerOf(request, env);
+  if (caller instanceof Response) return caller;
+  if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
+  if (request.method !== (change ? "POST" : "GET")) return json({ error: "method_not_allowed" }, 405);
+  if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+  if (!change) return readMemory(env, caller.shop);
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  const body = parsed.value;
+  if (!isRecord(body) || !hasExactly(body, change.keys)) return json({ error: "invalid_request" }, 400);
+  return writeMemory(env, caller.shop, change, body, ownerActor(caller));
+}
+
+/// One change in the shop's object, recorded in its audit log under `actor`. Answers what the object answers: the fact
+/// on success (Forget answers its id), or the package's refusal with its status.
+async function writeMemory(env: MemoryEnv, tenant: string, change: Change, body: Record<string, unknown>,
+  actor: AuditActor): Promise<Response> {
   try {
-    const response = await memoryWrite(env, body.tenant, path, { text: body.text, id: body.id, nowMs: Date.now(), actor });
+    const response = await memoryWrite(env, tenant, change.path, { text: body.text, id: body.id, nowMs: Date.now(), actor });
     if (!ANSWERED.has(response.status)) {
       await response.body?.cancel();
       return json({ error: "memory_unavailable" }, 503);

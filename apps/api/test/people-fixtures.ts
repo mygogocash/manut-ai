@@ -290,3 +290,74 @@ export async function auditEntries(tenant: string) {
   expect(page.status).toBe(200);
   return page.body.entries;
 }
+
+/// A link code from `person`'s own signed-in session, as the app shows it for the owner to send their operator
+/// (docs/several-shops.md).
+export async function ownerCode(person: SignedIn): Promise<string> {
+  const made = await asSession<{ code: string; expiresAt: string }>(person.headers, "POST", "/v1/shops/owner-code");
+  expect(made.status).toBe(200);
+  return made.body.code;
+}
+
+/// `person`'s account linked by the operator as `shop`'s owner, with a fresh code from their app: the link's id.
+export async function linkAccount(shop: { tenant: string }, person: SignedIn): Promise<string> {
+  const linked = await admin<{ ownerAccount: { id: string } }>("POST", "/v1/admin/shops/owner",
+    { tenant: shop.tenant, code: await ownerCode(person) });
+  expect(linked.status).toBe(200);
+  return linked.body.ownerAccount.id;
+}
+
+/// A device of `person` opening `shop` as its owner: the headers that carry the owner session.
+export async function ownerSession(person: SignedIn, shop: { tenant: string }): Promise<{ authorization: string }> {
+  const opened = await asSession<{ role: string; session: { accessToken: string } }>(person.headers, "POST",
+    "/v1/shops/session", { shop: shop.tenant });
+  expect(opened.status).toBe(200);
+  expect(opened.body.role).toBe("owner");
+  return { authorization: `Bearer ${opened.body.session.accessToken}` };
+}
+
+export type Owner = { person: SignedIn; accountId: string; headers: { authorization: string } };
+
+/// The shop's owner: signed in with Apple (as `person` when given), the account linked to the shop by the operator, and
+/// one device holding an owner session for it.
+export async function linkedOwner(shop: { tenant: string }, person?: SignedIn): Promise<Owner> {
+  const signedIn = person ?? await signIn();
+  const accountId = await linkAccount(shop, signedIn);
+  return { person: signedIn, accountId, headers: await ownerSession(signedIn, shop) };
+}
+
+/// The Worker's bindings with one object namespace failing the requests `fails` picks, as if that object could not be
+/// reached: answering 500, or with `throws`, throwing as a call to an object that is down does. Every other request
+/// reaches the real object.
+export function failingWhere(name: "AUTH" | "TENANT", fails: (request: Request) => boolean, throws = false):
+  typeof bindings {
+  const namespace = bindings[name];
+  return { ...bindings, [name]: {
+    idFromName: (id: string) => namespace.idFromName(id),
+    get: (id: DurableObjectId) => {
+      const stub = namespace.get(id);
+      return { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (!fails(request)) return stub.fetch(request);
+        if (throws) throw new Error("fixture: object unreachable");
+        return Response.json({ error: "fixture" }, { status: 500 });
+      } };
+    },
+  } as unknown as DurableObjectNamespace };
+}
+
+/// A request to the Worker with other bindings, as the operator console (with Access) or a signed-in app sends it.
+export async function callWith(target: typeof bindings, path: string, init: { method?: string;
+  headers?: { authorization?: string }; body?: unknown; operator?: boolean }) {
+  const context = createExecutionContext();
+  if (init.operator) {
+    Object.defineProperty(context, "access", { value: { aud: bindings.ADMIN_ACCESS_AUD, getIdentity: async () => undefined },
+      configurable: true });
+  }
+  const headers = { "content-type": "application/json", ...(init.operator ? { authorization: "Bearer test-key" } : {}),
+    ...init.headers };
+  const response = await worker.fetch(new Request(`https://api.manut.test${path}`, { method: init.method ?? "GET", headers,
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }), target, context);
+  await waitOnExecutionContext(context);
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}

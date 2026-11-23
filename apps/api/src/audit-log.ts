@@ -51,8 +51,8 @@ export const AUDIT_ACTIONS = [
   "approval.requested",
   "approval.decided",
   "approval.superseded",
-  // What the team knows about the shop (memory-store.ts): the operator's changes through the console, and what a worker
-  // learned. Each names the fact by its id and never by its words.
+  // What the team knows about the shop (memory-store.ts): the owner's changes from their own session or relayed by an
+  // operator through the console, and what a worker learned. Each names the fact by its id and never by its words.
   "memory.remembered",
   "memory.proposed",
   "memory.confirmed",
@@ -70,8 +70,8 @@ export const AUDIT_ACTIONS = [
   "team.resumed",
   "template.applied",
   "question.answered",
-  // The people around the shop (people-store.ts): the owner's changes through the console, and what a helper did. Each
-  // names an invite, a helper or a request by its id, never a name, a note or an identity's value.
+  // The people around the shop (people-store.ts): the owner's changes from their own session or through the console, and
+  // what a helper did. Each names an invite, a helper or a request by its id, never a name, a note or an identity's value.
   "invite.created",
   "invite.revoked",
   "helper.joined",

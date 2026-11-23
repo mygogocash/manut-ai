@@ -25,7 +25,16 @@
 import { decodeRecord, encodeRecord, encodeStanding, type ApprovalRecord, type Standing } from "@manut/approval-core";
 import { readJsonBody } from "./body";
 import { decideRequest, type JobFlags, type JobFlowEnv } from "./job-flow";
-import { callerOf, hasExactly, passOnToOwner, readPeople, type Caller, type PeopleEnv } from "./people";
+import {
+  callerOf,
+  hasExactly,
+  OWNER_SESSION,
+  passOnToOwner,
+  queryNamesSession,
+  readPeople,
+  type Caller,
+  type PeopleEnv,
+} from "./people";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
 /// How many recent approvals one answer holds when the query does not say, and the most it may ask for.
@@ -34,11 +43,6 @@ const MAX_RECENT = 200;
 const MAX_BODY_BYTES = 16 * 1024;
 /// The longest request id a route looks up: every request shares its action's id, a UUID.
 const MAX_REQUEST_ID = 128;
-/// Who the decision names when the shop's own session decides, as `owner-link` names the owner's link (pilot.ts). An
-/// owner session of a linked account names that account's id instead (docs/several-shops.md).
-export const OWNER_SESSION = "owner-session";
-/// What only the session decides: a request naming any of these in the listing's query is refused.
-const SESSION_DECIDES = ["shop", "tenant", "role"] as const;
 
 type Found = { taskId: string; record: ApprovalRecord; standing: Standing };
 
@@ -64,7 +68,7 @@ export async function approvalsRoute(request: Request, url: URL, env: ApprovalsE
     if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
     // The session names the shop and the role. A query naming either is refused, so it never even looks as if it were
     // read.
-    if (SESSION_DECIDES.some((name) => url.searchParams.has(name))) return json({ error: "invalid_request" }, 400);
+    if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
     return listApprovals(env, caller.shop, url);
   }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);

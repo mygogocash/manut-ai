@@ -39,10 +39,12 @@ invite and helper, and the SHA-256 of every helper session token. Every change i
 record, apply one rule, write the record and its audit entry, with no `await` between, so two clicks on one shop are
 decided one after the other. A refusal writes nothing.
 
-People exist for pilot shops today: the operator routes need the shop's record, which gives the shop's name for the
-invite and its answers. In the pilot the owner cannot yet manage helpers from their own session (an account the operator
-links reaches only the approval routes and the team's routines, `docs/several-shops.md`), so the operator console invites,
-removes and sets cover on the owner's word, as it already does for memory.
+People exist for pilot shops today: the routes need the shop's record, which gives the shop's name for the invite and
+its answers. The owner manages helpers from their own shop session once the operator has linked their account
+(`docs/several-shops.md`, slice 4): `GET /v1/people`, and inviting, revoking, removing and cover under it. Until then the
+operator console does the same on the owner's word, as it does for memory. Both make each change through the same
+operation of the shop's record, so there is one way to make it, and the log says who: the owner's linked account by its
+id, or the operator's Access identity.
 
 ## Who is deciding: the role comes from the session
 
@@ -88,8 +90,10 @@ shop's people record, with the helper's id, the session's id and its end, 30 day
 same signed-in identity, gives a new one.
 
 - **Scoped to the shop, as a helper.** It is accepted only by the approval routes (list, decide, pass on) for its own
-  shop. The lifted AuthObject has no record of it, so every other session route (tasks, consent, export, deletion,
-  connections, schedules) answers 401 to it, and no helper can act as the shop.
+  shop. The owner's routes that take a shop session (the team's routines, what the team knows, the shop's consent,
+  export and people) answer it 403 `owner_only`, so the helper's app does not read its session as ended. The lifted
+  AuthObject has no record of it, so every other session route (tasks, deletion, connections, schedules) answers 401 to
+  it, and no helper can act as the shop.
 - **Removing a helper signs them out on every device at once.** `removeHelper` names every session of theirs, and the
   same storage write that removes the helper marks each one ended. From then on a request with any of their tokens
   answers 401 `removed` with the time, so their app can say "Fon removed you on Sunday 22 November", and a decision
@@ -100,8 +104,9 @@ same signed-in identity, gives a new one.
 ## Invites
 
 An invite is for one LINE account id (compared exactly) or one email (compared without case), works once, and lasts
-7 days. The operator makes it with a name and that identity, and gets a link to copy: `${WEB_ORIGIN}/join/<token>`.
-The API never sends it: LINE and email sending are parked by the owner. The token is an HMAC-SHA256 under
+7 days. The owner makes it from their session, or the operator on the owner's word, with a name and that identity, and
+gets a link to copy: `${WEB_ORIGIN}/join/<token>`. The API never sends it: LINE and email sending are parked by the
+owner, so the owner sends the link themselves. The token is an HMAC-SHA256 under
 `APPROVAL_LINK_SECRET` in its own domain, `manut-ai/pilot-invite/v1.`, over the shop's tenant, the invite's id and its
 expiry, so no approval or deletion link can pass for an invite, and the reverse. Minting is deterministic, so the
 console shows the same link again for a pending invite.
@@ -115,9 +120,9 @@ Accepting needs a signed-in session whose verified identity matches. The answers
 
 ## Cover while the owner is away
 
-The operator sets cover on the owner's word: until a date, one current helper covers. Cover adds no power: approval-core
-decides with the same rule whoever covers, so money, public posts, payment confirmations and commands still wait for
-the owner. The people list shows the cover and whether it is in force (`coverAt`). Removing the covering helper ends
+The owner sets cover from their session, or the operator on their word: until a date, one current helper covers. Cover
+adds no power: approval-core decides with the same rule whoever covers, so money, public posts, payment confirmations
+and commands still wait for the owner. The people list shows the cover and whether it is in force (`coverAt`). Removing the covering helper ends
 the cover.
 
 ## Passing a request on
@@ -129,7 +134,8 @@ wherever the shop's approvals are listed and in the operator's people list. A re
 
 ## The audit log
 
-Every change writes one entry, metadata only: the actor (the operator's Access identity, or the helper's id), a fixed
+Every change writes one entry, metadata only: the actor (the owner's linked account by its id when the owner made the
+change from their session, the operator's Access identity, or the helper's id), a fixed
 action (`invite.created`, `invite.revoked`, `helper.joined`, `helper.session_opened`, `helper.session_ended` when a
 device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_on`) and ids (`inviteId`, `helperId`,
 `requestId`, `taskId`). Never a name, a note or an identity's value. A decision from a session is the job flow's
@@ -140,6 +146,7 @@ device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_
 - (Built since, 24 Nov 2026: a helper's list of the shops they help is `GET /v1/shops`, with a session per shop from
   `POST /v1/shops/session`; see `docs/several-shops.md`. A helper who joined before it is listed once they open the
   shop again.)
-- The owner managing helpers from their own session; the operator routes do it in the pilot.
+- (Built since, 24 Nov 2026: the owner manages helpers from their own shop session, `GET /v1/people` and the changes
+  under it; see `docs/pilot-api.md`, "The owner's own routes". The API is there; the app's screens for it are not yet.)
 - Telling the owner about a helper's new device (the canvas does it on LINE, which is parked). The audit log has it.
 - Showing on the owner's link page who decided a reply.
