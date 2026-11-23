@@ -89,6 +89,13 @@ export const AuditIcon = () => (
   </Icon>
 );
 
+/// A bookmark: what the team keeps to remember.
+export const MemoryIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h7a1 1 0 011 1v10L8 10.2 3.5 13.5v-10a1 1 0 011-1z" />
+  </Icon>
+);
+
 /// The viewer's light or dark setting, kept current while the page is open.
 export function useColorScheme(): "light" | "dark" {
   const query = "(prefers-color-scheme: dark)";

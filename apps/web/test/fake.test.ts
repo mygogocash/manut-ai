@@ -493,3 +493,171 @@ describe("the fake's audit log, kept as the API keeps it", () => {
     expect((await api.listAudit("shop_baanmali")).entries.length).toBeGreaterThan(0);
   });
 });
+
+describe("the fake's memory, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z");
+  const fresh = () => createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+  const operator = { kind: "operator", email: null };
+
+  /// The memory entries of a shop's log, oldest first, as what they say: no id, no time.
+  async function memoryTrail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().filter((entry) => entry.action.startsWith("memory.")).map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  it("starts Baan Mali with what its sample world taught the team, a customer's two facts waiting, and Sabai Tea with nothing", async () => {
+    const api = fresh();
+    const memory = await api.getMemory("shop_baanmali");
+    expect(memory.tenant).toBe("shop_baanmali");
+    expect(memory.facts.map((fact) => [fact.id, fact.status, fact.source.kind])).toEqual([
+      ["f1", "confirmed", "owner"], ["f2", "confirmed", "document"], ["f3", "confirmed", "edits"],
+      ["f4", "confirmed", "orders"], ["f5", "confirmed", "connection"], ["f6", "waiting", "customer"],
+      ["f7", "waiting", "customer"],
+    ]);
+    expect(memory.forgottenCount).toBe(0);
+    expect(await api.getMemory("shop_sabaitea")).toEqual({ tenant: "shop_sabaitea", facts: [], forgottenCount: 0 });
+    // Any tenant can be read, as in the API: one the team knows nothing about is an empty memory.
+    expect(await api.getMemory("shop_nobody")).toEqual({ tenant: "shop_nobody", facts: [], forgottenCount: 0 });
+  });
+
+  it("remembers the owner's fact trimmed and confirmed, and refuses as the package and the API do", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    expect(await api.rememberFact({ tenant, text: "  We close on Mondays " })).toEqual({ id: "f1", text: "We close on Mondays",
+      status: "confirmed", createdAt: NOW, updatedAt: NOW, source: { kind: "owner" } });
+    await expect(api.rememberFact({ tenant, text: " we  close on MONDAYS" })).rejects.toMatchObject({ status: 409, code: "already_known" });
+    for (const text of ["", "   ", "x".repeat(281), 5 as unknown as string]) {
+      await expect(api.rememberFact({ tenant, text })).rejects.toMatchObject({ status: 400, code: "invalid_text" });
+    }
+    expect((await api.getMemory(tenant)).facts).toHaveLength(1);
+    // A waiting fact is confirmed by saying it, not added twice.
+    const waiting = (await api.getMemory("shop_baanmali")).facts.find((fact) => fact.status === "waiting")!;
+    const confirmed = await api.rememberFact({ tenant: "shop_baanmali", text: waiting.text.toUpperCase() });
+    expect(confirmed).toMatchObject({ id: waiting.id, status: "confirmed" });
+    expect((await api.getMemory("shop_baanmali")).facts).toHaveLength(7);
+  });
+
+  it("holds at most 200 facts, and Forget makes room", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    for (let i = 0; i < 200; i++) await api.rememberFact({ tenant, text: `fact ${i}` });
+    await expect(api.rememberFact({ tenant, text: "one more" })).rejects.toMatchObject({ status: 409, code: "full" });
+    await api.forgetFact({ tenant, id: "f1" });
+    expect(await api.rememberFact({ tenant, text: "one more" })).toMatchObject({ id: "f201" });
+  });
+
+  it("says 'It's true' to a waiting fact, and answering a confirmed fact changes nothing", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const first = await api.confirmFact({ tenant, id: "f6" });
+    expect(first).toMatchObject({ id: "f6", status: "confirmed", updatedAt: NOW, source: { kind: "customer" } });
+    expect(await api.confirmFact({ tenant, id: "f6" })).toEqual(first);
+    await expect(api.confirmFact({ tenant, id: "f99" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+    for (const id of ["", "f".repeat(65), 7 as unknown as string]) {
+      await expect(api.confirmFact({ tenant, id })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    expect((await api.getMemory(tenant)).facts.filter((fact) => fact.status === "waiting").map((fact) => fact.id)).toEqual(["f7"]);
+  });
+
+  it("corrects a fact: new words, confirmed, marked as corrected, keeping where it came from", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const before = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f7")!;
+    const corrected = await api.correctFact({ tenant, id: "f7", text: " The large candle costs the same on Shopee " });
+    expect(corrected).toEqual({ ...before, text: "The large candle costs the same on Shopee", status: "confirmed", updatedAt: NOW, correctedAt: NOW });
+    const other = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f1")!;
+    await expect(api.correctFact({ tenant, id: "f7", text: other.text.toLowerCase() })).rejects.toMatchObject({ status: 409, code: "already_known" });
+    await expect(api.correctFact({ tenant, id: "f7", text: "" })).rejects.toMatchObject({ status: 400, code: "invalid_text" });
+    await expect(api.correctFact({ tenant, id: "f99", text: "anything" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("forgets by keeping only a fingerprint: gone from the memory, the export and the log, and not reused as an id", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    const text = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f2")!.text;
+    expect(await api.forgetFact({ tenant, id: "f2" })).toEqual({ id: "f2" });
+    await expect(api.forgetFact({ tenant, id: "f2" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+    const after = await api.getMemory(tenant);
+    expect(after.facts.map((fact) => fact.id)).not.toContain("f2");
+    expect(after.forgottenCount).toBe(1);
+    for (const kept of [JSON.stringify(after), JSON.stringify(await api.exportShop(tenant)), JSON.stringify(await api.listAudit(tenant, { limit: 200 }))]) {
+      expect(kept).not.toContain(text);
+    }
+    // The owner saying it again lifts the Forget; the new fact has a new id.
+    expect(await api.rememberFact({ tenant, text })).toMatchObject({ id: "f8", status: "confirmed" });
+    expect((await api.getMemory(tenant)).forgottenCount).toBe(0);
+  });
+
+  it("writes an audit entry for each change, by the fact's id and never its words, and none for a refusal or a no-op", async () => {
+    const api = fresh();
+    const tenant = "shop_sabaitea";
+    const made = await api.rememberFact({ tenant, text: "A secret supplier is Khun Somchai" });
+    await api.correctFact({ tenant, id: made.id, text: "A secret supplier is Khun Somsri" });
+    await api.confirmFact({ tenant, id: made.id }); // already confirmed: nothing changed
+    await api.rememberFact({ tenant, text: "a secret supplier is khun somsri" }).catch(() => undefined); // refused
+    await api.forgetFact({ tenant, id: made.id });
+    expect(await memoryTrail(api, tenant)).toEqual([
+      { actor: operator, action: "memory.remembered", subject: { factId: "f1" }, outcome: "ok" },
+      { actor: operator, action: "memory.corrected", subject: { factId: "f1" }, outcome: "ok" },
+      { actor: operator, action: "memory.forgotten", subject: { factId: "f1" }, outcome: "ok" },
+    ]);
+    expect(JSON.stringify(await api.listAudit(tenant))).not.toMatch(/Somchai|Somsri|supplier/);
+  });
+
+  it("gives each sample fact its entry, the waiting ones as waiting for the owner", async () => {
+    const api = fresh();
+    const trail = await memoryTrail(api, "shop_baanmali");
+    expect(trail.map((entry) => [entry.action, entry.subject.factId, entry.outcome])).toEqual([
+      ["memory.remembered", "f1", "ok"], ["memory.proposed", "f2", "ok"], ["memory.proposed", "f3", "ok"],
+      ["memory.proposed", "f4", "ok"], ["memory.proposed", "f5", "ok"], ["memory.proposed", "f6", "awaiting_owner"],
+      ["memory.proposed", "f7", "awaiting_owner"],
+    ]);
+    expect(trail.map((entry) => entry.actor.kind)).toEqual(["operator", "system", "system", "system", "system", "system", "system"]);
+  });
+
+  it("needs the operator key on every memory route, and a tenant", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    const tenant = "shop_baanmali";
+    await expect(api.getMemory(tenant)).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.rememberFact({ tenant, text: "x" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.confirmFact({ tenant, id: "f6" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.correctFact({ tenant, id: "f6", text: "x" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.forgetFact({ tenant, id: "f6" })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    const keyed = fresh();
+    await expect(keyed.getMemory("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    await expect(keyed.rememberFact({ tenant: "", text: "x" })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+  });
+
+  it("keeps the memory across tabs that share the saved world", async () => {
+    const saved = new Map<string, string>();
+    const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key) };
+    const one = createFakeApi({ now: () => NOW, storage });
+    const two = createFakeApi({ now: () => NOW, storage });
+    await one.rememberFact({ tenant: "shop_sabaitea", text: "Saved in one tab" });
+    expect((await two.getMemory("shop_sabaitea")).facts.map((fact) => fact.text)).toEqual(["Saved in one tab"]);
+    await two.forgetFact({ tenant: "shop_sabaitea", id: "f1" });
+    expect(await one.getMemory("shop_sabaitea")).toEqual({ tenant: "shop_sabaitea", facts: [], forgottenCount: 1 });
+  });
+
+  it("exports the memory with the shop, as the API's export does, and deletes it with the shop", async () => {
+    const api = fresh();
+    const tenant = "shop_baanmali";
+    await api.forgetFact({ tenant, id: "f2" });
+    const exported = (await api.exportShop(tenant)) as { memory?: unknown };
+    expect(exported.memory).toEqual(await api.getMemory(tenant).then(({ facts, forgottenCount }) => ({ facts, forgottenCount })));
+    const link = asked(await api.deleteShop({ tenant, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    expect(await api.getMemory(tenant)).toEqual({ tenant, facts: [], forgottenCount: 0 });
+  });
+
+  it("replaces a practice world saved before the team's memory existed", async () => {
+    const saved = new Map([["manut.pilot.fake.v1", JSON.stringify({ version: 4, seq: 100, shops: [], connections: [], messages: [],
+      actions: [], payments: [], subscriptionPayments: [], deletions: [], confirmations: [], expiredTokens: [], audit: [] })]]);
+    const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key) };
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.getMemory("shop_baanmali")).facts).toHaveLength(7);
+  });
+});

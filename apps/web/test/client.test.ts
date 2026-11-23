@@ -63,6 +63,11 @@ async function everyAdminRoute(api: PilotApi) {
   await api.listSubscriptionPayments("t1");
   await api.getGate();
   await api.listAudit("t1", { before: "aud-mi8x2k4c0-000-0a1b2c3d", limit: 20 });
+  await api.getMemory("t1");
+  await api.rememberFact({ tenant: "t1", text: "We close on Mondays" });
+  await api.confirmFact({ tenant: "t1", id: "f2" });
+  await api.correctFact({ tenant: "t1", id: "f2", text: "We close on Tuesdays" });
+  await api.forgetFact({ tenant: "t1", id: "f2" });
 }
 
 describe("the API client", () => {
@@ -85,6 +90,11 @@ describe("the API client", () => {
       "GET https://api.example.test/v1/admin/pilot/subscription-payments?tenant=t1",
       "GET https://api.example.test/v1/admin/pilot/gate",
       "GET https://api.example.test/v1/admin/audit?tenant=t1&before=aud-mi8x2k4c0-000-0a1b2c3d&limit=20",
+      "GET https://api.example.test/v1/admin/memory?tenant=t1",
+      "POST https://api.example.test/v1/admin/memory/remember",
+      "POST https://api.example.test/v1/admin/memory/confirm",
+      "POST https://api.example.test/v1/admin/memory/correct",
+      "POST https://api.example.test/v1/admin/memory/forget",
     ]);
     for (const call of calls) {
       expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
@@ -99,6 +109,44 @@ describe("the API client", () => {
       promptPayId: "0812345678",
     });
     expect(calls[9]?.body).toEqual({ tenant: "t1", confirmName: "Baan Mali" });
+    // Memory: the tenant and exactly what the route takes, nothing else.
+    expect(calls[15]?.body).toEqual({ tenant: "t1", text: "We close on Mondays" });
+    expect(calls[16]?.body).toEqual({ tenant: "t1", id: "f2" });
+    expect(calls[17]?.body).toEqual({ tenant: "t1", id: "f2", text: "We close on Tuesdays" });
+    expect(calls[18]?.body).toEqual({ tenant: "t1", id: "f2" });
+  });
+
+  it("reads what the team knows about a shop, and turns the memory routes' refusals into ApiError", async () => {
+    const fact = { id: "f1", text: "We close on Mondays", status: "confirmed", createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000, source: { kind: "owner" } };
+    const memory = { tenant: "pilot:1", facts: [fact], forgottenCount: 2 };
+    const refusals: Record<string, [number, string]> = {
+      "/v1/admin/memory/remember": [409, "already_known"],
+      "/v1/admin/memory/confirm": [404, "not_found"],
+      "/v1/admin/memory/correct": [400, "invalid_text"],
+      "/v1/admin/memory/forget": [409, "full"],
+    };
+    const { api, calls } = harness("op-key-123", (url) => {
+      const { pathname } = new URL(url);
+      const refusal = refusals[pathname];
+      return refusal ? json({ error: refusal[1] }, refusal[0]) : json(memory);
+    });
+
+    expect(await api.getMemory("pilot:1")).toEqual(memory);
+    expect(calls[0]?.url).toBe("https://api.example.test/v1/admin/memory?tenant=pilot%3A1");
+    await expect(api.rememberFact({ tenant: "pilot:1", text: "x" })).rejects.toMatchObject({ status: 409, code: "already_known" });
+    await expect(api.confirmFact({ tenant: "pilot:1", id: "f9" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+    await expect(api.correctFact({ tenant: "pilot:1", id: "f1", text: "" })).rejects.toMatchObject({ status: 400, code: "invalid_text" });
+    await expect(api.forgetFact({ tenant: "pilot:1", id: "f1" })).rejects.toMatchObject({ status: 409, code: "full" });
+  });
+
+  it("answers the fact on success and the id for Forget, as the memory routes do", async () => {
+    const fact = { id: "f1", text: "We close on Mondays", status: "confirmed", createdAt: 1, updatedAt: 1, source: { kind: "owner" } };
+    const { api } = harness("op-key-123", (url) => (url.endsWith("/forget") ? json({ id: "f1" }) : json(fact)));
+    expect(await api.rememberFact({ tenant: "t1", text: "We close on Mondays" })).toEqual(fact);
+    expect(await api.confirmFact({ tenant: "t1", id: "f1" })).toEqual(fact);
+    expect(await api.correctFact({ tenant: "t1", id: "f1", text: "We close on Mondays" })).toEqual(fact);
+    expect(await api.forgetFact({ tenant: "t1", id: "f1" })).toEqual({ id: "f1" });
   });
 
   it("never sends the key, or cookies, on the owner's routes or the LINE webhook", async () => {
