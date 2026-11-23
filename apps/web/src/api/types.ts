@@ -92,6 +92,58 @@ export type Payment = {
   confirmedAt: string;
 };
 
+/// The shop's own payment to Manut AI, recorded once the money is seen in Manut AI's bank account. `slipRef` is the
+/// reference printed on the bank slip; one slip is recorded once per shop.
+export type SubscriptionPayment = {
+  id: string;
+  tenant: string;
+  amountSatang: number;
+  slipRef: string;
+  slipNote?: string;
+  confirmedAt: string;
+};
+
+export type NewSubscriptionPayment = {
+  tenant: string;
+  amountSatang: number;
+  slipRef: string;
+  slipNote?: string;
+};
+
+/// "not_yet" before day 14, and on day 14 until a decision in its window arrives or the day ends.
+export type ActiveOnDay14 = "yes" | "no" | "not_yet";
+
+/// One shop in the Phase 1 gate (docs/pilot-api.md, "The pilot gate").
+export type GateShop = {
+  tenant: string;
+  name: string;
+  /// Null until the shop's LINE account is connected, which starts the trial.
+  trialStartedAt: string | null;
+  /// Today's day of the trial, counted on Bangkok's calendar from 1; null before it starts.
+  day: number | null;
+  /// Day 14 has passed. Only these shops are counted.
+  trialEnded: boolean;
+  paid: boolean;
+  /// When the shop's subscription payments first reached the price.
+  paidAt?: string;
+  paidSatang: number;
+  activeOnDay14: ActiveOnDay14;
+  lastDecisionAt?: string;
+};
+
+/// One of the gate's two shares: `percent` is rounded down, and null while no shop is counted. `met` compares the
+/// exact counts with the line.
+export type GateMeasure = { count: number; percent: number | null; thresholdPercent: number; met: boolean };
+
+export type GateStatus = "not_enough_data" | "on_track" | "below_line";
+
+export type PilotGate = {
+  asOf: string;
+  rules: { trialDays: number; priceSatang: number; activeWindowDays: number };
+  shops: GateShop[];
+  cohort: { counted: number; paid: GateMeasure; active: GateMeasure; status: GateStatus };
+};
+
 export type NewShop = { name: string; ownerName: string };
 export type CreatedShop = { tenant: string; name: string; ownerName: string };
 
@@ -182,6 +234,13 @@ export interface PilotApi {
   /// The owner's deletion link: `GET /v1/pilot/deletions/{token}` and its decision.
   getDeletion(token: string): Promise<DeletionView>;
   decideDeletion(token: string, approve: boolean): Promise<DeletionView>;
+
+  /// The shop's own payments to Manut AI. Rejects with 409 `slip_already_recorded`, recording nothing, for a slip
+  /// already recorded for the shop.
+  recordSubscriptionPayment(input: NewSubscriptionPayment): Promise<SubscriptionPayment>;
+  listSubscriptionPayments(tenant: string): Promise<SubscriptionPayment[]>;
+  /// The Phase 1 gate: every shop's trial, payment and activity, and the cohort against the gate's two lines.
+  getGate(): Promise<PilotGate>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.

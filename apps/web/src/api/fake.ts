@@ -16,17 +16,21 @@ import {
   type PilotApi,
   type ReplyAction,
   type Shop,
+  type SubscriptionPayment,
 } from "./types";
+import { pilotGate } from "./gate";
 
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
 /// lists come back newest first. Deleting a live shop asks its owner through a link that settles once, as the
-/// API does. It lets every screen run and be tested with no backend.
+/// API does. The pilot gate is measured by the API's rules (gate.ts): a trial starts at the shop's first LINE
+/// connection, and the owner's decisions are the times recorded on its replies. It lets every screen run and be
+/// tested with no backend.
 ///
-/// Sample world: Baan Mali (owner Fon) on LINE, with customers asking about late parcels and a refund, and a
-/// second shop, Sabai Tea, with nothing connected yet. Demo links on the practice home page open the owner's
-/// page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined, demo-old and
-/// demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
+/// Sample world: Baan Mali (owner Fon) on LINE, on day 14 of its trial, with customers asking about late parcels
+/// and a refund, and a second shop, Sabai Tea, with nothing connected yet. Demo links on the practice home page
+/// open the owner's page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined,
+/// demo-old and demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
 /// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
 
 export type FakeApiOptions = {
@@ -45,7 +49,8 @@ export type FakeApiOptions = {
 
 type Outcome = "confirmed" | "failed" | "unknown";
 
-type FakeShop = Shop;
+/// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list.
+type FakeShop = Shop & { trialStartedAt?: string };
 type FakeConnection = {
   connectionId: string;
   tenant: string;
@@ -84,13 +89,14 @@ type FakeConfirmation = {
   decidedAt?: string;
 };
 type FakeDb = {
-  version: 2;
+  version: 3;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
   messages: FakeMessage[];
   actions: FakeAction[];
   payments: Payment[];
+  subscriptionPayments: SubscriptionPayment[];
   deletions: FakeDeletionRecord[];
   confirmations: FakeConfirmation[];
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
@@ -98,7 +104,8 @@ type FakeDb = {
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
-/// is replaced by a fresh one rather than read without its confirmations.
+/// (version 1) or before trial starts and subscription payments were kept (version 2) is replaced by a fresh one
+/// rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -142,7 +149,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 2 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations)
+      return parsed && parsed.version === 3 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+        Array.isArray(parsed.subscriptionPayments)
         ? parsed
         : null;
     } catch {
@@ -207,7 +215,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return {
       messages: db.messages.filter(mine).length,
       replies: db.actions.filter(mine).length,
-      payments: db.payments.filter(mine).length,
+      // Both ledgers, as the API counts them: the deletion takes both.
+      payments: db.payments.filter(mine).length + db.subscriptionPayments.filter(mine).length,
       lineConnected: Boolean(shop.lineConnectionId),
     };
   }
@@ -241,6 +250,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.messages = db.messages.filter((m) => !mine(m));
     db.actions = db.actions.filter((a) => !mine(a));
     db.payments = db.payments.filter((p) => !mine(p));
+    db.subscriptionPayments = db.subscriptionPayments.filter((p) => !mine(p));
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
   }
@@ -439,7 +449,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map((shop) => {
+        return db.shops.map(({ trialStartedAt: _trial, ...shop }) => {
           const deletion = deletionRequestOf(shop.tenant);
           return deletion ? { ...shop, deletion } : shop;
         });
@@ -461,6 +471,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           botUserId: input.botUserId,
           channelSecret: input.channelSecret,
         });
+        // The first connection starts the shop's trial; a later one never moves it.
+        if (!shop.trialStartedAt && !shop.lineConnectionId) shop.trialStartedAt = iso(now());
         shop.lineConnectionId = connectionId;
         return { connectionId, webhookUrl: `${FAKE_API_ORIGIN}/v1/inbound/line/${connectionId}` };
       }),
@@ -579,6 +591,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
               .filter((a) => a.tenant === tenant)
               .map(({ token: _token, outcome: _outcome, ...reply }) => reply),
             payments: db.payments.filter((p) => p.tenant === tenant),
+            subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === tenant),
           },
         };
       }),
@@ -612,6 +625,61 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const record = recordOf(confirmation.tenant);
         if (approve && record?.confirmationId === confirmation.id) wipe(record);
         return deletionViewOf(confirmation);
+      }),
+
+    // As the API: the shop first, then a positive whole number of satang, a slip reference of 1 to 128 characters
+    // once trimmed, and a slip not yet recorded for the shop, compared without spaces or capitals.
+    recordSubscriptionPayment: (input) =>
+      run(() => {
+        admin();
+        shopOf(input.tenant);
+        const slipRef = input.slipRef.trim();
+        if (!Number.isSafeInteger(input.amountSatang) || input.amountSatang <= 0 || slipRef.length < 1 ||
+            slipRef.length > 128 || (input.slipNote !== undefined && input.slipNote.length > 1000)) {
+          throw new ApiError(400, "invalid_request");
+        }
+        const plain = (ref: string) => ref.replace(/\s+/g, "").toUpperCase();
+        if (db.subscriptionPayments.some((p) => p.tenant === input.tenant && plain(p.slipRef) === plain(slipRef))) {
+          throw new ApiError(409, "slip_already_recorded");
+        }
+        const payment: SubscriptionPayment = {
+          id: nextId("sub"),
+          tenant: input.tenant,
+          amountSatang: input.amountSatang,
+          slipRef,
+          confirmedAt: iso(now()),
+        };
+        const note = input.slipNote?.trim();
+        if (note) payment.slipNote = note;
+        db.subscriptionPayments.push(payment);
+        return payment;
+      }),
+
+    listSubscriptionPayments: (tenant) =>
+      run(() => {
+        admin();
+        shopOf(tenant);
+        return newestFirst(
+          db.subscriptionPayments.filter((p) => p.tenant === tenant),
+          (p) => p.confirmedAt,
+        );
+      }),
+
+    // Every shop, in the order they were created, with the owner's decisions as the times recorded on its replies,
+    // approvals and declines alike, as the API reads them.
+    getGate: () =>
+      run(() => {
+        admin();
+        return pilotGate(
+          db.shops.map((shop) => ({
+            tenant: shop.tenant,
+            name: shop.name,
+            trialStartedAt: shop.trialStartedAt ?? null,
+            decisions: db.actions.flatMap((a) => (a.tenant === shop.tenant && a.decidedAt ? [a.decidedAt] : [])),
+            subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === shop.tenant),
+          })),
+          now(),
+        );
       }),
   };
 }
@@ -769,10 +837,18 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 2,
+    version: 3,
     seq: 100,
     shops: [
-      { tenant, name: "Baan Mali", ownerName: "Fon", lineConnectionId: connectionId, consent: false },
+      // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
+      {
+        tenant,
+        name: "Baan Mali",
+        ownerName: "Fon",
+        lineConnectionId: connectionId,
+        consent: false,
+        trialStartedAt: ago(13 * 24 * 60),
+      },
       { tenant: "shop_sabaitea", name: "Sabai Tea", ownerName: "Dao", consent: false },
     ],
     connections: [
@@ -805,6 +881,7 @@ function seed(at: number): FakeDb {
         confirmedAt: ago(120),
       },
     ],
+    subscriptionPayments: [],
     deletions: demos.map((entry) => entry.record),
     confirmations: demos.map((entry) => entry.confirmation),
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],

@@ -11,13 +11,16 @@ import {
   type NewPayment,
   type NewReply,
   type NewShop,
+  type NewSubscriptionPayment,
   type Payment,
   type PilotApi,
+  type PilotGate,
   type ProposedReply,
   type ReplyAction,
   type Shop,
   type ShopDeletion,
   type ShopExport,
+  type SubscriptionPayment,
 } from "./types";
 
 export type HttpApiOptions = {
@@ -159,6 +162,24 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
     getDeletion: (token) => request<DeletionView>({ method: "GET", path: deletion(token) }),
     decideDeletion: (token, approve) =>
       request<DeletionView>({ method: "POST", path: `${deletion(token)}/decision`, body: { approve } }),
+
+    recordSubscriptionPayment: (input: NewSubscriptionPayment) =>
+      request<SubscriptionPayment>({
+        method: "POST",
+        path: "/v1/admin/pilot/subscription-payments",
+        body: input,
+        admin: true,
+      }),
+    listSubscriptionPayments: async (tenant) =>
+      (
+        await request<{ payments: SubscriptionPayment[] }>({
+          method: "GET",
+          path: "/v1/admin/pilot/subscription-payments",
+          query: { tenant },
+          admin: true,
+        })
+      ).payments,
+    getGate: () => request<PilotGate>({ method: "GET", path: "/v1/admin/pilot/gate", admin: true }),
   };
 }
 

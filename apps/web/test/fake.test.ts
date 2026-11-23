@@ -235,3 +235,147 @@ describe("the in-memory fake's LINE webhook", () => {
     expect(stored[0]?.text).toBe("ยังไม่ได้ของเลยค่ะ");
   });
 });
+
+describe("the fake's pilot gate, measured as the API measures it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 in Bangkok
+
+  /// A new shop connected to LINE at `now`, whose customers can write through the fake's webhook.
+  async function connectedShop(api: ReturnType<typeof createFakeApi>, name: string) {
+    const { tenant } = await api.createShop({ name, ownerName: "Nok" });
+    const secret = `${name}-secret`;
+    const { connectionId } = await api.createLineConnection({ tenant, channelId: "c1", botUserId: `U${name}`,
+      channelSecret: secret, channelAccessToken: "token" });
+    return { tenant, connectionId, secret };
+  }
+
+  /// A customer writes and the owner declines Nam's reply through the link, both at `now`.
+  async function ownerDeclines(api: ReturnType<typeof createFakeApi>, shop: Awaited<ReturnType<typeof connectedShop>>,
+    text: string) {
+    const body = JSON.stringify({ events: [{ type: "message", webhookEventId: `${shop.tenant}-${text}`,
+      source: { userId: "Ucustomer" }, message: { type: "text", text } }] });
+    await api.deliverLineWebhook(shop.connectionId, body, await lineSignature(shop.secret, body));
+    const message = (await api.listMessages(shop.tenant)).find((m) => m.text === text)!;
+    const reply = await api.proposeReply({ tenant: shop.tenant, messageId: message.id, text: "ok" });
+    await api.decide(tokenOf(reply.approvalUrl), false);
+  }
+
+  it("puts Baan Mali on day 14 of its trial, active from today's decisions, and Sabai Tea not started", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const gate = await api.getGate();
+    expect(gate.rules).toEqual({ trialDays: 14, priceSatang: 49900, activeWindowDays: 7 });
+    expect(gate.asOf).toBe("2026-11-23T03:00:00.000Z");
+    expect(gate.shops).toEqual([
+      { tenant: "shop_baanmali", name: "Baan Mali", trialStartedAt: "2026-11-10T03:00:00.000Z", day: 14,
+        trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "yes", lastDecisionAt: "2026-11-22T22:18:00.000Z" },
+      { tenant: "shop_sabaitea", name: "Sabai Tea", trialStartedAt: null, day: null, trialEnded: false, paid: false,
+        paidSatang: 0, activeOnDay14: "not_yet" },
+    ]);
+    expect(gate.cohort).toEqual({ counted: 0, paid: { count: 0, percent: null, thresholdPercent: 25, met: false },
+      active: { count: 0, percent: null, thresholdPercent: 50, met: false }, status: "not_enough_data" });
+    // The shop list stays the contract's Shop: the trial start is the gate's to answer.
+    expect((await api.listShops()).every((shop) => !("trialStartedAt" in shop))).toBe(true);
+  });
+
+  it("counts Baan Mali once its day 14 has passed, and puts it on track once it pays ฿499", async () => {
+    let now = NOW;
+    const api = createFakeApi({ now: () => now });
+    now = Date.parse("2026-11-23T16:59:59.999Z"); // the last moment of day 14 in Bangkok
+    expect((await api.getGate()).cohort.status).toBe("not_enough_data");
+    now += 1; // midnight in Bangkok: day 15 begins
+    const ended = await api.getGate();
+    expect(ended.shops[0]).toMatchObject({ day: 15, trialEnded: true, activeOnDay14: "yes", paid: false });
+    expect(ended.cohort).toEqual({ counted: 1, paid: { count: 0, percent: 0, thresholdPercent: 25, met: false },
+      active: { count: 1, percent: 100, thresholdPercent: 50, met: true }, status: "below_line" });
+
+    const payment = await api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 49900,
+      slipRef: "KB-1" });
+    const paid = await api.getGate();
+    expect(paid.shops[0]).toMatchObject({ paid: true, paidAt: payment.confirmedAt, paidSatang: 49900 });
+    expect(paid.cohort.status).toBe("on_track");
+  });
+
+  it("starts a trial at the first LINE connection, turns its days at midnight in Bangkok, and keeps its start", async () => {
+    let now = Date.parse("2026-12-07T16:59:59.999Z"); // 23:59:59.999 in Bangkok
+    const api = createFakeApi({ now: () => now });
+    const { tenant } = await api.createShop({ name: "Kanom Jeen", ownerName: "Lek" });
+    const row = async () => (await api.getGate()).shops.find((shop) => shop.tenant === tenant)!;
+    expect(await row()).toMatchObject({ trialStartedAt: null, day: null, activeOnDay14: "not_yet" });
+    const connection = { tenant, channelId: "c1", botUserId: "Ukanom", channelSecret: "s", channelAccessToken: "t" };
+    await api.createLineConnection(connection);
+    expect(await row()).toMatchObject({ trialStartedAt: "2026-12-07T16:59:59.999Z", day: 1 });
+    now += 1; // 00:00 in Bangkok
+    expect((await row()).day).toBe(2);
+    await api.createLineConnection({ ...connection, channelAccessToken: "rotated" });
+    expect((await row()).trialStartedAt).toBe("2026-12-07T16:59:59.999Z");
+  });
+
+  it("counts a decision in the seven Bangkok days up to and including day 14, to the millisecond", async () => {
+    let now = Date.parse("2026-12-07T03:00:00.000Z"); // day 1 is 7 December
+    const api = createFakeApi({ now: () => now, webOrigin: "https://web.test" });
+    const late = await connectedShop(api, "late");
+    const early = await connectedShop(api, "early");
+    now = Date.parse("2026-12-13T16:59:59.999Z"); // the last moment of day 7
+    await ownerDeclines(api, late, "on day 7");
+    now = Date.parse("2026-12-13T17:00:00.000Z"); // the first moment of day 8
+    await ownerDeclines(api, early, "on day 8");
+    now = Date.parse("2026-12-20T17:00:00.000Z"); // day 15
+    const gate = await api.getGate();
+    expect(gate.shops.find((shop) => shop.tenant === late.tenant)).toMatchObject({ day: 15, activeOnDay14: "no",
+      lastDecisionAt: "2026-12-13T16:59:59.999Z" });
+    expect(gate.shops.find((shop) => shop.tenant === early.tenant)).toMatchObject({ day: 15, activeOnDay14: "yes" });
+  });
+
+  it("records subscription payments in integer satang against a slip, once per slip, newest first", async () => {
+    let now = NOW;
+    const api = createFakeApi({ now: () => now });
+    const first = await api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 24900,
+      slipRef: "  KB-1 ", slipNote: "KBank 10:02" });
+    expect(first).toEqual({ id: expect.any(String), tenant: "shop_baanmali", amountSatang: 24900, slipRef: "KB-1",
+      slipNote: "KBank 10:02", confirmedAt: "2026-11-23T03:00:00.000Z" });
+    now += 60_000;
+    await api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 25000, slipRef: "SCB-7" });
+    for (const bad of [{ amountSatang: 0 }, { amountSatang: -100 }, { amountSatang: 12.5 }, { amountSatang: Number.NaN },
+      { slipRef: "  " }, { slipRef: "x".repeat(129) }, { slipNote: "x".repeat(1001) }]) {
+      await expect(api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 100, slipRef: "KB-9", ...bad }))
+        .rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    await expect(api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 100, slipRef: " kb-1" }))
+      .rejects.toMatchObject({ status: 409, code: "slip_already_recorded" });
+    await expect(api.recordSubscriptionPayment({ tenant: "shop_nobody", amountSatang: 100, slipRef: "KB-2" }))
+      .rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    expect((await api.listSubscriptionPayments("shop_baanmali")).map((payment) => payment.slipRef))
+      .toEqual(["SCB-7", "KB-1"]);
+    // Customers' order payments are a different ledger.
+    expect((await api.listPayments("shop_baanmali")).map((payment) => payment.orderRef)).toEqual(["SP-2301", "SP-2288"]);
+    await expect(createFakeApi({ operatorKey: () => null }).getGate()).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("exports subscription payments with the shop, counts them in what a deletion takes, and deletes them", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    await api.recordSubscriptionPayment({ tenant: "shop_baanmali", amountSatang: 49900, slipRef: "KB-1" });
+    const exported = await api.exportShop("shop_baanmali");
+    expect(exported.pilot).toMatchObject({ shop: { trialStartedAt: "2026-11-10T03:00:00.000Z" },
+      subscriptionPayments: [expect.objectContaining({ slipRef: "KB-1", amountSatang: 49900 })] });
+
+    const link = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    const token = deletionTokenOf(link.confirmUrl);
+    expect((await api.getDeletion(token)).goes).toEqual({ messages: 7, replies: 6, payments: 3, lineConnected: true });
+    await api.decideDeletion(token, true);
+    await expect(api.listSubscriptionPayments("shop_baanmali")).rejects.toMatchObject({ code: "tenant_deleted" });
+    expect((await api.getGate()).shops.map((shop) => shop.tenant)).toEqual(["shop_sabaitea"]);
+  });
+
+  it("replaces a practice world saved before the gate's records existed", async () => {
+    const saved = new Map([["manut.pilot.fake.v1", JSON.stringify({ version: 2, seq: 100, shops: [], connections: [],
+      messages: [], actions: [], payments: [], deletions: [], confirmations: [], expiredTokens: [] })]]);
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect(await api.listSubscriptionPayments("shop_baanmali")).toEqual([]);
+    expect((await api.getGate()).shops).toHaveLength(2);
+  });
+});
