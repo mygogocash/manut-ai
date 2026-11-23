@@ -57,6 +57,8 @@ test("a row dragged above another row of its folder moves there, and the order s
   const a = await start(page, "/w/web");
   const b = await start(page, "/w/web");
   const c = await start(page, "/w/web");
+  // the rows are on the Code page
+  await openCode(page);
   await expect.poll(() => shown(page, [a, b, c])).toEqual([c, b, a]);
   // a (the bottom row) onto the upper half of c (the top row): a goes first
   await dragRow(page, a, c, "upper");
@@ -68,6 +70,8 @@ test("a row dragged above another row of its folder moves there, and the order s
   // the saved list is written a moment later
   await expect.poll(() => page.evaluate(() => localStorage.getItem("manut.resume") ?? "")).toMatch(new RegExp(`"${a}".*"${b}".*"${c}"`));
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect.poll(() => shown(page, [a, b, c])).toEqual([a, b, c]);
 });
 
@@ -75,6 +79,7 @@ test("a row of another folder takes no drop, and a press that does not move open
   await openApp(page);
   const a = await start(page, "/w/web");
   const b = await start(page, "/w/api");
+  await openCode(page);
   await dragRow(page, a, b, "upper", { line: false });
   expect(await order(page, "/w/web")).toEqual([a]);
   await openCode(page);
