@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/api";
 import { createFakeApi } from "../src/api/fake";
 import { App } from "../src/App";
@@ -20,6 +20,14 @@ describe("routing", () => {
     expect(createApi(undefined).mode).toBe("fake");
     expect(createApi("  ").mode).toBe("fake");
     expect(createApi("https://api.example.test").mode).toBe("live");
+  });
+
+  it("calls the API that served the page when VITE_API_ORIGIN is same-origin", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
+    const setup = createApi(" same-origin ");
+    expect(setup.mode).toBe("live");
+    await setup.api.getApproval("tok");
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(`${window.location.origin}/v1/pilot/approvals/tok`);
   });
 
   it("opens the owner's page from its path, and moves between pages without a reload", async () => {
