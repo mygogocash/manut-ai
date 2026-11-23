@@ -403,3 +403,5 @@ No function throws: a refusal is a result value.
 
 Done when: each event kind, the Approve rule for every approval kind, hidden details on the lock screen and by the
 setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.
+
+Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).

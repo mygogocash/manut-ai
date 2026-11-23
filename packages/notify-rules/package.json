@@ -1,0 +1,15 @@
+{
+  "name": "@manut/notify-rules",
+  "private": true,
+  "type": "module",
+  "description": "What the app may show outside its window: notifications, buttons, quiet hours, hidden details and the Dock badge.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
