@@ -1,0 +1,15 @@
+{
+  "name": "@manut/routine-rules",
+  "private": true,
+  "type": "module",
+  "description": "What a routine is, when it runs next, and how its timing is said: pure rules for the Routines list.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

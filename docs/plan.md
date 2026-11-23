@@ -218,6 +218,8 @@ Done when: each trigger's next run around midnight, month ends of 28, 29, 30 and
 last-day rule, windows across midnight, the asks-first rule, `toSchedule`, `describeTrigger`, each refusal, and
 one gap and one repeat in `Europe/London` are tested.
 
+Done on cloud/routine-rules, 23 Nov 2026: `packages/routine-rules` with `createRoutine`, `nextRun`, `inWindow`, `toSchedule` and `describeTrigger`, daylight saving handled in any zone (47 tests).
+
 ### member-grants
 `packages/member-grants` (`@manut/member-grants`). Which team member does which job, and what each job may do
 without asking, from the canvas: "Nam uses it for orders and chat. Ton uses it for refunds, and always asks
