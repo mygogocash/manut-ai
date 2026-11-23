@@ -1,5 +1,6 @@
 mod accounts;
 mod acp_agents;
+mod api_link;
 mod acp_chat;
 mod agent_chat;
 mod app_menu;
@@ -36,6 +37,7 @@ use platform::Os;
 use sessions::{AgentInfo, Output, Sessions};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use zeroize::Zeroizing;
 
 /// What the commands share. Oh My Hermes also kept its Python bridge and its SSH links to other computers' bridges
 /// here; Manut AI's runtime lives in the page behind `src/runtime`, so the shell owns only local processes.
@@ -393,6 +395,38 @@ struct ShellStarted {
 #[tauri::command]
 fn host_name() -> String {
     this_host::name()
+}
+
+/// The connected runtime's one way to reach apps/api (api_link.rs): the page names the address, the method, the
+/// session token and the body, and gets back the status and the body, or `offline` / `failed`. The shell checks the
+/// address itself (https, or plain http on this computer; `/v1/` paths only), whatever the page sends.
+#[tauri::command]
+async fn api_request(url: String, method: String, bearer: Option<String>, body: Option<String>) -> Result<api_link::ApiAnswer, String> {
+    let bearer = bearer.map(Zeroizing::new);
+    tauri::async_runtime::spawn_blocking(move || api_link::request(&url, &method, bearer.as_ref().map(|b| b.as_str()), body.as_deref()))
+        .await
+        .map_err(|_| "failed".to_string())?
+        .map_err(api_link::LinkError::wire)
+}
+
+/// The API session the keychain holds for the connected runtime, or none (api_link.rs). Off the main thread: a locked
+/// keychain asks the person first.
+#[tauri::command]
+async fn api_session_read() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(api_link::session_read).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Replaces the API session the keychain holds.
+#[tauri::command]
+async fn api_session_write(value: String) -> Result<(), String> {
+    let value = Zeroizing::new(value);
+    tauri::async_runtime::spawn_blocking(move || api_link::session_write(&value)).await.map_err(|_| "keychain".to_string())?
+}
+
+/// Removes the API session from the keychain (signing out, or a session the API ended).
+#[tauri::command]
+async fn api_session_clear() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(api_link::session_clear).await.map_err(|_| "keychain".to_string())?
 }
 
 /// Keystrokes (and pastes) from the terminal view into session `id`.
@@ -941,6 +975,10 @@ pub fn run() {
             window_close,
             power_busy,
             window_prefs,
+            api_request,
+            api_session_read,
+            api_session_write,
+            api_session_clear,
             term_link::term_link_take,
             disk::disk_watch
         ])
