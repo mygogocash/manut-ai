@@ -158,6 +158,92 @@
   font-size: 12px;
 }
 
+/* The desktop's own: a member's row on the Team page. The row opens the member's chat, and a More button beside it opens
+   the member's menu (a new thread, Pin to top, Restart), which hangs under the row. */
+.mpage .tli {
+  position: relative;
+}
+.mpage .trow {
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 0 4px 0 0;
+}
+.mpage .trow:hover {
+  background: var(--hov);
+}
+.mpage .trow .rowmain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 6px 8px 10px;
+  border-radius: var(--rad);
+  text-align: left;
+}
+.mpage .trow .more {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.mpage .trow .more[aria-expanded="true"] {
+  background: var(--hov);
+  color: var(--ink);
+}
+.mpage .tmenu {
+  position: absolute;
+  z-index: 20;
+  right: 8px;
+  top: calc(100% - 6px);
+  width: 208px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  box-shadow: var(--pop-shadow);
+}
+.mpage .tmenu-i {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: var(--rad-sm);
+  color: var(--body);
+  font-size: 13px;
+  text-align: left;
+}
+.mpage .tmenu-i:hover,
+.mpage .tmenu-i:focus-visible {
+  background: var(--hov);
+  color: var(--ink);
+  outline: 0;
+}
+.mpage .tmenu-i .nt-ic {
+  flex: none;
+  color: var(--aui-muted);
+}
+.mpage .tmenu-l {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A pinned member's small dot after their name, as the sidebar's rows had one. */
+.mpage .pinmark {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 0 2px 6px;
+  border-radius: 50%;
+  background: var(--aui-muted);
+  vertical-align: middle;
+}
+
 /* Status words, coloured as the canvas colours them. */
 .mpage .tag {
   display: inline-flex;

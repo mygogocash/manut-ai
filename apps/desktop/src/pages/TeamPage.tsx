@@ -2,22 +2,30 @@
 // face, name, what they do and status, opening their chat. The status is team.ts's, in the design canvas's words. The faces
 // are the app's own avatars: the canvas's drawn faces (AUTHORING.md, Team faces) are not in the app yet.
 //
+// Each row has a More button and a menu, the home of the actions the sidebar's member rows had before the side menu: a new
+// thread with the member, Pin to top, and, where the runtime can restart an agent, Restart. team.ts decides what a member's
+// menu offers; the rows below carry what each entry does.
+//
 // Pause everyone is this page's too, as on the canvas's "Team: pause everyone" (PauseAll.dc.html): a button in the top bar,
 // a question that names whom it stops, a banner while everyone is paused, each member's Paused tag, and a side panel for what
 // was running and what still happens. Pausing is the runtime's to do (`team.pause`): the demo runtime stops its members,
 // and the connected one answers "not yet", which the page shows in the runtime's own words instead of a question it could
 // not act on. Pausing never unsends anything and never takes a page offline; the rules and words are pause.ts's.
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import "./mission.css";
 import { t, type Key } from "../i18n";
 import type { TeamState } from "../runtime/mission";
+import { can } from "../runtime";
 import { getStore, selectAsks, selectSidebarBots, useStore, type Actions, type AppState } from "../state/store";
 import { MenuIcon } from "../sidebar/menuIcons";
+import { getRestarts, useRestart } from "../sidebar/restart";
+import { RestartLine } from "../sidebar/RestartLine";
+import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { Avatar } from "../ui";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseStep, routinesLine, sinceText, type PauseUi } from "./pause";
-import { asksOf, memberStatus, type MemberStatus } from "./team";
+import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
 
 /** One member as its row shows it. */
 export interface TeamRow {
@@ -27,6 +35,10 @@ export interface TeamRow {
   description: string;
   status: MemberStatus;
   open: () => void;
+  /** pinned to the top of the list */
+  pinned?: boolean;
+  /** what the member's menu offers, in order; a row without one has no More button */
+  menu?: MemberMenuItem[];
 }
 
 /** Each status's word and the canvas's tag for it: amber waits on you, blue works, red could not finish. */
@@ -39,16 +51,38 @@ const STATUS: Record<MemberStatus, { word: Key; tag: string }> = {
   idle: { word: "thread.st.idle", tag: "tag" },
 };
 
-/** The rows for the listed members, each opening that member's chat. */
-export function teamRows(s: AppState & Actions): TeamRow[] {
+/** What the rows need from outside the store: whether the runtime can restart an agent, and how. */
+export interface TeamRowOptions {
+  /** the runtime's own `restart` capability when not given */
+  canRestart?: boolean;
+  /** restarts the agent that serves a member: the restart every other place that offers one uses when not given */
+  restart?: (bot: string) => void;
+}
+
+/** The rows for the listed members, each opening that member's chat, with the menu of what else can be done with them. */
+export function teamRows(s: AppState & Actions, opts: TeamRowOptions = {}): TeamRow[] {
   const asks = selectAsks(s);
-  return selectSidebarBots(s).map((b) => ({
-    name: b.name,
-    displayName: b.display_name,
-    description: b.description,
-    status: memberStatus(b, s.chats[b.name], asksOf(asks, b.name).length),
-    open: () => void s.selectBot(b.name),
-  }));
+  const canRestart = opts.canRestart ?? can("restart");
+  const restart = opts.restart ?? ((bot: string) => void getRestarts().press(bot));
+  return selectSidebarBots(s).map((b) => {
+    const pinned = s.ui.pinned.includes(b.name);
+    const run: Record<MemberAction, () => void | Promise<unknown>> = {
+      new: () => s.newThread(b.name),
+      pin: () => s.pinBot(b.name, true),
+      unpin: () => s.pinBot(b.name, false),
+      restart: () => restart(b.name),
+      start: () => restart(b.name),
+    };
+    return {
+      name: b.name,
+      displayName: b.display_name,
+      description: b.description,
+      status: memberStatus(b, s.chats[b.name], asksOf(asks, b.name).length),
+      open: () => void s.selectBot(b.name),
+      ...(pinned ? { pinned } : {}),
+      menu: memberActions({ pinned, offline: b.status === "offline", remote: !!b.host, canRestart }).map((action) => ({ action, run: run[action] })),
+    };
+  });
 }
 
 /** What Pause everyone needs of the page that draws it: the runtime's word on the team, what the page itself holds (the
@@ -139,7 +173,60 @@ function PauseQuestion({ p, state }: { p: TeamPauseProps; state: TeamState }) {
   );
 }
 
-export function TeamView({ members, pause }: { members: TeamRow[]; pause?: TeamPauseProps }) {
+/** The three dots of the More button. */
+function MoreGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="19" cy="12" r="1.8" />
+    </svg>
+  );
+}
+
+/** What a menu entry says, in the words the sidebar's member rows used. */
+function itemLabel(action: MemberAction, name: string): string {
+  switch (action) {
+    case "new":
+      return t("thread.new", { name });
+    case "pin":
+      return t("row.pin");
+    case "unpin":
+      return t("row.unpin");
+    case "restart":
+      return t("row.restart");
+    case "start":
+      return t("row.start");
+  }
+}
+
+/** "Restarting" beside a member's status while the agent that serves them restarts (sidebar/restart.ts keeps that). */
+function RestartWait({ name, start }: { name: string; start: boolean }) {
+  const st = useRestart(name);
+  if (st.step !== "restarting") return null;
+  return (
+    <span className="tag run" role="status" data-testid={`team-restarting-${name}`}>
+      {t(start ? "rs.starting" : "rs.restarting")}
+    </span>
+  );
+}
+
+export function TeamView({
+  members,
+  pause,
+  menu = null,
+  onMenu,
+  error,
+}: {
+  members: TeamRow[];
+  pause?: TeamPauseProps;
+  /** the member whose menu is open */
+  menu?: string | null;
+  /** opens a member's menu, or closes the open one (null) */
+  onMenu?: (name: string | null) => void;
+  /** why the last action was not taken, in the runtime's own words */
+  error?: string | null;
+}) {
   const state = pause?.state.kind === "ready" ? pause.state.value : null;
   const paused = !!state?.paused;
   const loading = pause?.state.kind === "loading";
@@ -157,20 +244,84 @@ export function TeamView({ members, pause }: { members: TeamRow[]; pause?: TeamP
         {t("pause.button")}
       </button>
     ));
+  const notice = error ? (
+    <div className="banner err" role="alert" data-testid="team-action-error">
+      {error}
+    </div>
+  ) : null;
   const list = members.length ? (
     <ul className="rows">
       {members.map((m) => {
         const st = STATUS[m.status];
+        const open = menu === m.name && !!m.menu?.length;
+        const restarts = !!m.menu?.some((a) => a.action === "restart" || a.action === "start");
         return (
-          <li key={m.name}>
-            <button type="button" className="rowl" onClick={m.open} data-testid={`team-${m.name}`}>
-              <Avatar bot={m.name} size={40} />
-              <span className="grow">
-                <span className="l1">{m.displayName}</span>
-                {m.description && <span className="l2">{m.description}</span>}
-              </span>
-              <span className={st.tag}>{t(st.word)}</span>
-            </button>
+          <li key={m.name} className="tli" data-testid={`team-row-${m.name}`}>
+            <div className="rowl trow">
+              <button type="button" className="rowmain" onClick={m.open} data-testid={`team-${m.name}`}>
+                <Avatar bot={m.name} size={40} />
+                <span className="grow">
+                  <span className="l1">
+                    {m.displayName}
+                    {m.pinned && <span className="pinmark" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid={`team-pinned-${m.name}`} />}
+                  </span>
+                  {m.description && <span className="l2">{m.description}</span>}
+                </span>
+                {restarts && <RestartWait name={m.name} start={m.status === "offline"} />}
+                <span className={st.tag}>{t(st.word)}</span>
+              </button>
+              {!!m.menu?.length && (
+                <button
+                  type="button"
+                  className="ib more"
+                  aria-label={t("row.more", { name: m.displayName })}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  onClick={() => onMenu?.(open ? null : m.name)}
+                  data-testid={`team-more-${m.name}`}
+                >
+                  <MoreGlyph />
+                </button>
+              )}
+            </div>
+            {open && m.menu && (
+              <div
+                className="tmenu"
+                role="menu"
+                aria-label={t("row.actions", { name: m.displayName })}
+                data-testid={`team-menu-${m.name}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    onMenu?.(null);
+                    return;
+                  }
+                  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+                  e.preventDefault();
+                  const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+                  const at = items.indexOf(document.activeElement as HTMLButtonElement);
+                  items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+                }}
+              >
+                {m.menu.map((item) => (
+                  <button
+                    key={item.action}
+                    type="button"
+                    role="menuitem"
+                    className="tmenu-i"
+                    onClick={() => {
+                      onMenu?.(null);
+                      void item.run();
+                    }}
+                    data-testid={`team-menu-${item.action}-${m.name}`}
+                  >
+                    {item.action === "new" && <NewThreadIcon size={14} />}
+                    <span className="tmenu-l">{itemLabel(item.action, m.displayName)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {restarts && <RestartLine bot={{ name: m.name, display_name: m.displayName }} testId={`team-restart-line-${m.name}`} />}
           </li>
         );
       })}
@@ -181,7 +332,10 @@ export function TeamView({ members, pause }: { members: TeamRow[]; pause?: TeamP
   if (!pause)
     return (
       <MenuPageFrame page="team" title={t("menu.team")}>
-        <div className="pane">{list}</div>
+        <div className="pane">
+          {notice}
+          {list}
+        </div>
       </MenuPageFrame>
     );
   return (
@@ -204,6 +358,7 @@ export function TeamView({ members, pause }: { members: TeamRow[]; pause?: TeamP
               {t("pause.back")}
             </div>
           )}
+          {notice}
           {list}
         </div>
         <aside className="side2" data-testid="pause-side">
@@ -218,6 +373,28 @@ export function TeamPage() {
   const s = useStore();
   const [state, setState] = useState<Load<TeamState>>(LOADING);
   const [ui, dispatch] = useReducer(pauseReduce, PAUSE_START);
+  const [menu, setMenu] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // A press anywhere but the open menu and its button closes it. The focus goes to the first entry as the menu opens and
+  // back to its button when it closes, unless the person has already put it somewhere else.
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (menu) document.querySelector<HTMLElement>(`[data-testid="team-menu-${menu}"] button`)?.focus();
+    else if (opened.current && (!document.activeElement || document.activeElement === document.body)) document.querySelector<HTMLElement>(`[data-testid="team-more-${opened.current}"]`)?.focus();
+    opened.current = menu;
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest(`[data-testid="team-menu-${menu}"], [data-testid="team-more-${menu}"]`)) setMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menu]);
+  // An action the runtime does not take (a new thread on the connected runtime, for now) says so in the runtime's words.
+  const report = async (run: () => void | Promise<unknown>) => {
+    setError(null);
+    setError(await tryAction(getStore(), run));
+  };
+  const members = teamRows(s).map((r) => ({ ...r, menu: r.menu?.map((item) => ({ ...item, run: () => report(item.run) })) }));
   // The team's state is read when the page opens and again whenever a member is paused or resumed, from anywhere.
   const held = s.bots.map((b) => (b.paused ? b.name : "")).join();
   useEffect(() => {
@@ -239,7 +416,10 @@ export function TeamPage() {
 
   return (
     <TeamView
-      members={teamRows(s)}
+      members={members}
+      menu={menu}
+      onMenu={setMenu}
+      error={error}
       pause={{
         state,
         ui,

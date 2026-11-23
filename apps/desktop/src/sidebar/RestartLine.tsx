@@ -46,7 +46,7 @@ export function workRows(work: WorkUnit[], who: (u: WorkUnit) => string | undefi
 }
 
 /** Hermes' refusal (what is running on that gateway) and a failure, for `bot`; nothing while idle or restarting. */
-export function RestartLine({ bot, testId = "restart-line", pop = false }: { bot: Bot; testId?: string; pop?: boolean }) {
+export function RestartLine({ bot, testId = "restart-line", pop = false }: { bot: Pick<Bot, "name" | "display_name">; testId?: string; pop?: boolean }) {
   const st = useRestart(bot.name);
   const r = getRestarts();
   if (st.step === "idle" || st.step === "restarting") return null;
@@ -98,7 +98,7 @@ export function RestartLine({ bot, testId = "restart-line", pop = false }: { bot
 }
 
 /** One press in place: "Restart" (or "Start" for an offline bot), outlined, then the same line as the row's. */
-export function RestartAction({ bot, start = false, label, testId = "restart-press" }: { bot: Bot; start?: boolean; label?: string; testId?: string }) {
+export function RestartAction({ bot, start = false, label, testId = "restart-press" }: { bot: Pick<Bot, "name" | "display_name">; start?: boolean; label?: string; testId?: string }) {
   const st = useRestart(bot.name);
   if (st.step === "restarting") {
     return (

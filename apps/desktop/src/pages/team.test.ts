@@ -1,6 +1,6 @@
 // The Team page's status word for each member, decided from what the store already holds.
 import { describe, expect, it } from "vitest";
-import { asksOf, memberStatus } from "./team";
+import { asksOf, memberActions, memberStatus } from "./team";
 import type { Ask, Chat } from "../state/store";
 
 const bot = (over: { status?: "online" | "offline"; running?: boolean; paused?: boolean } = {}) => ({
@@ -54,5 +54,29 @@ describe("a member's asks", () => {
     const asks = [ask("nam"), ask("fold:nam:t1"), ask("pim"), ask("fold:pim:t2"), ask("agent:s1")];
     expect(asksOf(asks, "nam").map((a) => a.bot)).toEqual(["nam", "fold:nam:t1"]);
     expect(asksOf(asks, "kit")).toEqual([]);
+  });
+});
+
+// The old member rows in the sidebar had a menu: a new thread with the member, pin to top, restart. The Team page's rows
+// have it now, and this is the rule for what each member's menu offers.
+describe("a member's menu", () => {
+  const m = (over: Partial<Parameters<typeof memberActions>[0]> = {}) => ({ pinned: false, offline: false, remote: false, canRestart: false, ...over });
+
+  it("opens with a new thread, then pinning, then a restart where the runtime can restart", () => {
+    expect(memberActions(m())).toEqual(["new", "pin"]);
+    expect(memberActions(m({ canRestart: true }))).toEqual(["new", "pin", "restart"]);
+  });
+
+  it("offers a pinned member Unpin in the place of Pin", () => {
+    expect(memberActions(m({ pinned: true, canRestart: true }))).toEqual(["new", "unpin", "restart"]);
+  });
+
+  it("offers a member the runtime cannot reach no new thread, and Start in the place of Restart", () => {
+    expect(memberActions(m({ offline: true, canRestart: true }))).toEqual(["pin", "start"]);
+    expect(memberActions(m({ offline: true }))).toEqual(["pin"]);
+  });
+
+  it("offers no new thread to a member that runs on another computer", () => {
+    expect(memberActions(m({ remote: true, canRestart: true }))).toEqual(["pin", "restart"]);
   });
 });
