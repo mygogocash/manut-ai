@@ -90,11 +90,11 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | running | 8b. The outpost in the desktop shell (this Mac): registering, heartbeat, fetching steps, typing a sign-in only on its origins, reporting | | Opus |
 | running | Several shops, slice 2: the desktop's switcher in the account row, one Needs you across the shops with each decision sent with its own shop's session, and each shop's offline cache kept apart | | Opus |
-| 12 | The desktop outpost running an approved submit step | 8b, browser control slice 2 | Opus |
+| 12 | The desktop outpost running an approved submit step. First, the desktop's cards and notifications show a request's whole text (the site, the page and every value), and a notification offers Approve only when that whole text is shown: today a browser write shows as "browser.submit on <site>", and a `send_reply` write is a `reply`, which a helper and a notification may approve (`docs/browser-control.md`, "Next slices") | 8b | Opus |
 | running | 13. Several shops, slice 4: an owner's shop session reaches the shop's consent, export and memory, and the owner manages helpers (invite, remove, cover) from it, each route its own decision (`docs/several-shops.md`, `docs/people.md` "Not built yet") | | Opus |
 | done | 14. Who decided: the owner's link page names the helper who approved or declined a reply, from the names the shop's people record keeps | | Opus (coordinator) |
 | 15 | A helper's new device: the owner's session reads the shop's new helper sessions, and the desktop shows notify-rules' `new_device` alert | 13 | Sonnet |
-| 16 | Deletion follow-up: a shop whose wipe stopped after its registry row went stays in the console's list as deleting, and its wipe can be resumed. Today `tenantDelete` (`tenant-data.ts`) wipes the sessions and the registry row together (`auth-object.ts` `tenantWipe`) before the shop's own object, so a failure there leaves the shop unlisted | | Opus |
+| running | 16. Deletion follow-up: a shop whose wipe stopped after its registry row went stays in the console's list as deleting, and its wipe can be resumed. Today `tenantDelete` (`tenant-data.ts`) wipes the sessions and the registry row together (`auth-object.ts` `tenantWipe`) before the shop's own object, so a failure there leaves the shop unlisted | | Opus |
 | 17 | The owner's pages as an installable web app on a phone (a manifest, icons and an offline page; no app store). An installed app opens on a home page, and an owner has none until they can sign in: today each page is a one-time link | sign-in (owner) | Sonnet |
 
 ## Queue for cloud routines
