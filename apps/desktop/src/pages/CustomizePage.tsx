@@ -1,4 +1,7 @@
-// Customize: memory and routines, as the design canvas draws it (Brain.dc.html). On the left, what the team knows, each fact
+// Customize: two tabs in the top bar, as the canvas has them: Memory and routines, and Connections (this Mac as one of the
+// shop's outposts, OutpostPane.tsx).
+//
+// Memory and routines, as the design canvas draws it (Brain.dc.html). On the left, what the team knows, each fact
 // with where it came from and the owner's Correct and Forget, what waits for the owner's OK and is not used until they
 // confirm it, and a box to tell Buddy something to remember. On the right, the team's routines, each as its timing and what it
 // does, with a switch, and a short form for a new one. The Automations and Plugins pages stay its entries when the runtime
@@ -21,6 +24,7 @@ import { getStore, useStore } from "../state/store";
 import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import { OutpostPane, useOutpost, type OutpostPaneProps } from "./OutpostPane";
 import { correctionReady, groupFacts, MEMORY_START, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
 import {
   FORM_ACTIONS,
@@ -474,19 +478,74 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
   );
 }
 
-export function CustomizeView({ memory, routines, automations, plugins }: { memory: MemoryPaneProps; routines: RoutinesPaneProps } & CustomizeEntries): ReactNode {
+/** The page's two tabs, as the canvas draws them in the top bar (Brain.dc.html, Connections.dc.html). The canvas's third,
+ *  Budget and plan, waits for the owner's billing page. */
+export type CustomizeTab = "memory" | "connections";
+
+const TABS: readonly CustomizeTab[] = ["memory", "connections"];
+
+export function CustomizeView({
+  memory,
+  routines,
+  automations,
+  plugins,
+  tab = "memory",
+  onTab,
+  connections,
+}: {
+  memory: MemoryPaneProps;
+  routines: RoutinesPaneProps;
+  /** the tab shown; Memory and routines unless told */
+  tab?: CustomizeTab;
+  /** with it, the tabs are drawn and switch the page */
+  onTab?: (tab: CustomizeTab) => void;
+  /** the Connections tab's Outposts box */
+  connections?: OutpostPaneProps;
+} & CustomizeEntries): ReactNode {
+  const tabs = onTab && (
+    <div className="tabs" role="tablist" aria-label={t("menu.customize")}>
+      {TABS.map((id) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          className={tab === id ? "tab on" : "tab"}
+          aria-selected={tab === id}
+          onClick={() => onTab(id)}
+          data-testid={`customize-tab-${id}`}
+        >
+          {id === "memory" ? t("customize.tab.memory") : t("customize.tab.connections")}
+        </button>
+      ))}
+    </div>
+  );
+  const showConnections = tab === "connections" && connections !== undefined;
   return (
-    <MenuPageFrame page="customize" title={t("menu.customize")} acts={<span className="mut small">{t("memory.lead")}</span>}>
-      <div className="brain">
-        <MemoryPane {...memory} />
-        <RoutinesPane p={routines} automations={automations} plugins={plugins} />
-      </div>
+    <MenuPageFrame
+      page="customize"
+      title={t("menu.customize")}
+      hideTitle={!!tabs}
+      middle={tabs || undefined}
+      acts={showConnections ? undefined : <span className="mut small">{t("memory.lead")}</span>}
+    >
+      {showConnections ? (
+        <div className="brain conn" data-testid="connections">
+          <OutpostPane {...connections} />
+        </div>
+      ) : (
+        <div className="brain">
+          <MemoryPane {...memory} />
+          <RoutinesPane p={routines} automations={automations} plugins={plugins} />
+        </div>
+      )}
     </MenuPageFrame>
   );
 }
 
 export function CustomizePage() {
   const s = useStore();
+  const [tab, setTab] = useState<CustomizeTab>("memory");
+  const outpost = useOutpost();
   const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
   const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);
   const [memoryUi, memoryDispatch] = useReducer(memoryReduce, MEMORY_START);
@@ -550,6 +609,9 @@ export function CustomizePage() {
       routines={routines}
       automations={can("automations") ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
       plugins={can("plugins") ? { open: () => s.openPlugins() } : undefined}
+      tab={tab}
+      onTab={setTab}
+      connections={outpost}
     />
   );
 }
