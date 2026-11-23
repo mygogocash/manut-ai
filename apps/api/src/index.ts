@@ -8,6 +8,7 @@ import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
+import { modelAdminRoute } from "./model-gateway";
 import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
@@ -72,6 +73,17 @@ export interface Env {
   /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
   /// Unbound, those paths answer this Worker's own 404.
   WEB?: Fetcher;
+  /// The model gateway (model-gateway.ts, docs/model-gateway.md). Anthropic's
+  /// API key is a Worker secret the owner adds (`wrangler secret put
+  /// ANTHROPIC_API_KEY`); never in config, and without it every model call is
+  /// refused with 503 not_configured. The exchange rate (satang per US dollar)
+  /// and the default monthly cap per shop (satang) are Worker vars with
+  /// documented defaults in model-price.ts; both are the owner's decision.
+  /// MODEL_PROVIDER is `stand-in` only for local runs.
+  ANTHROPIC_API_KEY?: string;
+  MODEL_SATANG_PER_USD?: string;
+  MODEL_DEFAULT_CAP_SATANG?: string;
+  MODEL_PROVIDER?: string;
 }
 
 /// The paths this Worker answers itself. Everything else is a page of the web app.
@@ -175,6 +187,12 @@ const ADMIN_METHODS = new Set([
   "GET /v1/admin/pilot/messages", "POST /v1/admin/pilot/replies", "GET /v1/admin/pilot/actions",
   "POST /v1/admin/pilot/payments", "GET /v1/admin/pilot/payments",
   "GET /v1/admin/pilot/export", "POST /v1/admin/pilot/deletions",
+  // The Phase 1 gate: the shop's own subscription payments, and the measurement.
+  "POST /v1/admin/pilot/subscription-payments", "GET /v1/admin/pilot/subscription-payments",
+  "GET /v1/admin/pilot/gate",
+  // The model gateway (model-gateway.ts): read a shop's month of model spend,
+  // and set or clear its cap override. The tenant travels in the query or body.
+  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -579,6 +597,11 @@ export default {
     // them.
     const pilot = await pilotRoute(request, url, env, ctx, () => featureFlags(env));
     if (pilot) return pilot;
+
+    // The model gateway's operator routes (model-gateway.ts). The admin gate
+    // above already required both credentials and an exact method.
+    const model = await modelAdminRoute(request, url, env, ctx);
+    if (model) return model;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

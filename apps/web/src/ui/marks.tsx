@@ -75,6 +75,12 @@ export const StoreIcon = () => (
     <path d="M2.5 6.5L3.5 3h9l1 3.5M3 6.5v6.5h10V6.5M2.5 6.5a1.8 1.8 0 003.6 0 1.8 1.8 0 003.8 0 1.8 1.8 0 003.6 0M6.5 13v-3h3v3" />
   </Icon>
 );
+/// A flag on its pole: the gate a phase has to pass.
+export const FlagIcon = () => (
+  <Icon>
+    <path d="M3.5 14V2.5M3.5 3h8l-1.75 2.75L11.5 8.5h-8" />
+  </Icon>
+);
 
 /// The viewer's light or dark setting, kept current while the page is open.
 export function useColorScheme(): "light" | "dark" {

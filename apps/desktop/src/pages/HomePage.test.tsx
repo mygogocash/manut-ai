@@ -80,6 +80,13 @@ describe("Home's ask box", () => {
     expect(html).toMatch(/<button type="submit"[^>]*aria-label="Send"[^>]*disabled=""[^>]*data-testid="home-send"/);
   });
 
+  it("names the shop under the brand once the first-run setup took its name, and nothing before", () => {
+    const html = draw({ shop: "Baan Mali" });
+    expect(html).toMatch(/<div class="lockup">.*?<\/div><p class="for" data-testid="home-shop">For Baan Mali<\/p>/s);
+    expect(draw()).not.toContain('data-testid="home-shop"');
+    expect(draw({ shop: "" })).not.toContain('data-testid="home-shop"');
+  });
+
   it("says each mode's words and suggests the mode's four jobs", () => {
     const team = words(draw({ mode: "team" }));
     expect(team).toContain("Give the team a job");

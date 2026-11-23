@@ -46,6 +46,7 @@ import {
 } from "./connectors/line";
 import { readConnectionSecret } from "./cred-broker";
 import type { FeatureFlags } from "./index";
+import { pilotGate, type GateShopInput } from "./pilot-gate";
 import {
   approvedDeletion,
   confirmationOpen,
@@ -60,6 +61,7 @@ import {
   type PilotReplyRecord,
   type PilotShopRecord,
   type StoredDeletion,
+  type SubscriptionPayment,
 } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
@@ -656,11 +658,15 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   const route = `${request.method} ${url.pathname}`;
   if (request.method === "GET") {
     if (route === "GET /v1/admin/pilot/shops") return listShops(env);
+    if (route === "GET /v1/admin/pilot/gate") return readGate(env);
     const tenant = url.searchParams.get("tenant") ?? "";
     if (!isValidTenant(tenant)) return json({ error: "tenant_required" }, 400);
     if (!(await readShop(env, tenant))) return noShop(env, tenant);
     if (route === "GET /v1/admin/pilot/messages") return listFrom(env, tenant, "/pilot/messages", "messages");
     if (route === "GET /v1/admin/pilot/payments") return listFrom(env, tenant, "/pilot/payments", "payments");
+    if (route === "GET /v1/admin/pilot/subscription-payments") {
+      return listFrom(env, tenant, "/pilot/subscription-payments", "payments");
+    }
     if (route === "GET /v1/admin/pilot/actions") return listActions(env, tenant);
     // Everything stored for the shop, at its request: the same tenant export
     // a shop's own session gets, so LINE secrets never appear in it.
@@ -680,6 +686,7 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
+  if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body);
   if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body, ctx);
   return json({ error: "not_found" }, 404);
 }
@@ -713,7 +720,8 @@ function writeDeletion(env: PilotEnv, record: PilotDeletionRecord): Promise<Resp
 }
 
 /// The operator's Access identity. Access gives an email for a person and nothing for a service token.
-async function operatorIdentity(ctx: ExecutionContext): Promise<string | null> {
+/// The model gateway's cap route records it the same way (model-gateway.ts).
+export async function operatorIdentity(ctx: ExecutionContext): Promise<string | null> {
   try {
     const identity = (await ctx.access?.getIdentity()) as { email?: unknown } | undefined;
     return typeof identity?.email === "string" ? identity.email : null;
@@ -1170,4 +1178,78 @@ async function recordPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<
   });
   if (!recorded.ok) return json({ error: "payment_unavailable" }, 503);
   return json(((await recorded.json()) as { payment: Payment }).payment);
+}
+
+// ---------------------------------------------------------------------------
+// The pilot gate: the shop's own subscription payments, and the Phase 1 gate's measurement (pilot-gate.ts)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/admin/pilot/subscription-payments`: the operator records the
+/// shop's own payment to Manut AI once they see it arrive in Manut AI's bank
+/// account, as they record an order payment once it arrives in the shop's.
+/// Nothing is charged or moved here. Money is a positive whole number of
+/// satang; anything else, a float included, is refused rather than rounded.
+/// The slip's reference is trimmed as a person typed it, and a slip already
+/// recorded for the shop answers 409 and records nothing.
+async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>) {
+  const { amountSatang, slipNote } = body;
+  const slipRef = typeof body.slipRef === "string" ? body.slipRef.trim() : body.slipRef;
+  if (typeof amountSatang !== "number" || !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
+      !bounded(slipRef, 128) || (slipNote !== undefined && (typeof slipNote !== "string" || slipNote.length > 1000))) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const recorded = await pilotWrite(env, shop.tenant, "/pilot/subscription-payments", {
+    amountSatang,
+    slipRef,
+    ...(slipNote !== undefined ? { slipNote } : {}),
+  });
+  if (recorded.status === 409) return json({ error: "slip_already_recorded" }, 409);
+  if (!recorded.ok) return json({ error: "payment_unavailable" }, 503);
+  return json(((await recorded.json()) as { payment: SubscriptionPayment }).payment);
+}
+
+/// `GET /v1/admin/pilot/gate`: every pilot shop's trial, payment and activity,
+/// and the cohort's two shares against the gate's lines. A shop whose records
+/// cannot be read fails the whole answer rather than leaving the cohort: a
+/// shop missing from it would move both percentages without anyone seeing why.
+async function readGate(env: PilotEnv): Promise<Response> {
+  const registry = await authCall(env, "/pilot-shops");
+  if (!registry.ok) return json({ error: "gate_unavailable" }, 503);
+  const { tenants } = (await registry.json()) as { tenants: string[] };
+  const inputs = await Promise.all(tenants.map((tenant) => gateInput(env, tenant))).catch(() => null);
+  if (!inputs) return json({ error: "gate_unavailable" }, 503);
+  return json(pilotGate(inputs.filter((input) => input !== null), Date.now()));
+}
+
+/// One shop's records for the gate, or null for a registry row whose shop was
+/// deleted between the two reads.
+async function gateInput(env: PilotEnv, tenant: string): Promise<GateShopInput | null> {
+  const response = await tenantCall(env, tenant, `/pilot/gate?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) throw new Error(`gate_read_${response.status}`);
+  const records = (await response.json()) as { shop: PilotShopRecord | null; decisions: string[];
+    subscriptionPayments: SubscriptionPayment[] };
+  if (!records.shop) return null;
+  const legacy = !records.shop.trialStartedAt && Boolean(records.shop.lineConnectionId);
+  return {
+    tenant,
+    name: records.shop.name,
+    trialStartedAt: records.shop.trialStartedAt ?? (legacy ? await firstLineConnection(env, tenant) : null),
+    decisions: records.decisions,
+    subscriptionPayments: records.subscriptionPayments,
+  };
+}
+
+/// The trial start of a shop connected before trial starts were recorded on
+/// the shop: its first LINE connection, which the vault still knows even when
+/// a later connection revoked it. A connected shop with no such record is
+/// never guessed at; the gate answers 503 instead.
+async function firstLineConnection(env: PilotEnv, tenant: string): Promise<string> {
+  const response = await credStub(env, tenant).fetch(new Request(
+    `https://cred/first-connection?tenant=${encodeURIComponent(tenant)}&provider=line`,
+    { headers: { "x-tenant": tenant } },
+  ));
+  if (!response.ok) throw new Error(`first_connection_${response.status}`);
+  const { createdAt } = (await response.json()) as { createdAt: unknown };
+  if (typeof createdAt !== "string") throw new Error("first_connection_missing");
+  return createdAt;
 }

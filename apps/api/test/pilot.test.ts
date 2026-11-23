@@ -557,6 +557,8 @@ describe("operator routes", () => {
     ["POST", "/v1/admin/pilot/replies"], ["GET", "/v1/admin/pilot/actions"],
     ["POST", "/v1/admin/pilot/payments"], ["GET", "/v1/admin/pilot/payments"],
     ["GET", "/v1/admin/pilot/export"], ["POST", "/v1/admin/pilot/deletions"],
+    ["POST", "/v1/admin/pilot/subscription-payments"], ["GET", "/v1/admin/pilot/subscription-payments"],
+    ["GET", "/v1/admin/pilot/gate"],
   ] as const;
 
   async function send(method: string, path: string, options: { audience?: string; bearer?: string }) {
@@ -585,7 +587,8 @@ describe("operator routes", () => {
 
   it("refuses pilot admin methods that are not listed", async () => {
     for (const [method, path] of [["DELETE", "/v1/admin/pilot/shops"], ["GET", "/v1/admin/pilot/replies"],
-      ["GET", "/v1/admin/pilot/shops/extra"]] as const) {
+      ["GET", "/v1/admin/pilot/shops/extra"], ["POST", "/v1/admin/pilot/gate"],
+      ["DELETE", "/v1/admin/pilot/subscription-payments"], ["GET", "/v1/admin/pilot/gate/extra"]] as const) {
       expect(await send(method, path, { audience: bindings.ADMIN_ACCESS_AUD! })).toBe(404);
     }
   });

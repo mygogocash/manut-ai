@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useApiSetup } from "../api";
-import { BrandMark, StoreIcon, useColorScheme } from "../ui/marks";
+import { BrandMark, FlagIcon, StoreIcon, useColorScheme } from "../ui/marks";
 import { DeletionNotices } from "./DeletionNotices";
+import { GateView } from "./GateView";
 import { MessagesTab } from "./MessagesTab";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
 import { ShopDataTab } from "./ShopDataTab";
 import { useLoad } from "./useLoad";
 import { deletionOf, useShopDeletion } from "./useShopDeletion";
-import { errorText, isAuthError, shopDataWords } from "./words";
+import { errorText, gateWords, isAuthError, shopDataWords } from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
-/// the side menu, the chosen shop's messages, replies, payments and data in the main column.
+/// the side menu, the chosen shop's messages, replies, payments and data in the main column. The Pilot gate,
+/// above the shops, puts every shop in the main column at once: where the pilot stands against its Phase 1 gate.
 
 export const REFRESH_MS = 15000;
 
 type Tab = "messages" | "payments" | "data";
+/// What the main column shows: the chosen shop, or the Pilot gate across all of them.
+type Page = "shop" | "gate";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -23,6 +27,7 @@ export function OpsConsole() {
   const [hasKey, setHasKey] = useState(() => readOperatorKey() !== null);
   const [tenant, setTenant] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("messages");
+  const [page, setPage] = useState<Page>("shop");
 
   const shops = useLoad(hasKey ? () => api.listShops() : null, `shops:${hasKey}`);
   // After a deletion the operator lands on the next shop's messages, never on its delete button.
@@ -43,26 +48,31 @@ export function OpsConsole() {
     document.title = "Pilot console";
   }, []);
 
+  // Lands on the first shop when none (or a gone one) is chosen. The check runs against the choice at the moment
+  // the update applies, not the one this render saw: a click on a shop that arrives between the list's render and
+  // this effect must win, and with the render's own value the effect put the first shop back over the click.
   useEffect(() => {
     const first = shopList?.[0];
-    if (first && !shopList?.some((s) => s.tenant === tenant)) setTenant(first.tenant);
-  }, [shopList, tenant]);
+    if (!first) return;
+    setTenant((current) => (shopList.some((s) => s.tenant === current) ? current : first.tenant));
+  }, [shopList]);
 
-  // Owners answer from their phones, so the lists refresh themselves while the console is open.
+  // Owners answer from their phones, so the lists refresh themselves while the console shows them.
   useEffect(() => {
-    if (!shop) return;
+    if (!shop || page !== "shop") return;
     const timer = setInterval(() => {
       if (document.visibilityState === "hidden") return;
       reloadMessages();
       reloadActions();
     }, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [shop, reloadMessages, reloadActions]);
+  }, [shop, page, reloadMessages, reloadActions]);
 
   const forget = () => {
     forgetOperatorKey();
     setHasKey(false);
     setTenant(null);
+    setPage("shop");
   };
 
   const refresh = () => {
@@ -84,6 +94,16 @@ export function OpsConsole() {
         </div>
         {hasKey && (
           <>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
+              aria-current={page === "gate" ? "page" : undefined}
+              onClick={() => setPage("gate")}
+            >
+              <FlagIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{gateWords.nav}</span>
+            </button>
             <div className="mut" style={{ padding: "12px 10px 4px", fontSize: 12 }} id="shops-label">
               Shops
             </div>
@@ -95,9 +115,10 @@ export function OpsConsole() {
                       type="button"
                       className="nav"
                       style={{ width: "100%" }}
-                      aria-current={s.tenant === tenant ? "page" : undefined}
+                      aria-current={page === "shop" && s.tenant === tenant ? "page" : undefined}
                       onClick={() => {
                         setTenant(s.tenant);
+                        setPage("shop");
                         deletion.dismissFinished();
                       }}
                     >
@@ -135,6 +156,8 @@ export function OpsConsole() {
               setHasKey(true);
             }}
           />
+        ) : page === "gate" ? (
+          <GateView onForget={forget} />
         ) : (
           <>
             <div className="top">

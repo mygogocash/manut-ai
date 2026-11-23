@@ -24,6 +24,9 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     deleteShop: missing("deleteShop"),
     getDeletion: missing("getDeletion"),
     decideDeletion: missing("decideDeletion"),
+    recordSubscriptionPayment: missing("recordSubscriptionPayment"),
+    listSubscriptionPayments: missing("listSubscriptionPayments"),
+    getGate: missing("getGate"),
     ...overrides,
   };
 }

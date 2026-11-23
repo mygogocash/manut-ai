@@ -1,5 +1,13 @@
-import { ApiError, type ApprovalState, type DeletedShop, type DeletionRequest, type Shop } from "../api";
-import { dayOffset, formatClock, formatDate, formatStamp } from "../format";
+import {
+  ApiError,
+  type ApprovalState,
+  type DeletedShop,
+  type DeletionRequest,
+  type GateStatus,
+  type PilotGate,
+  type Shop,
+} from "../api";
+import { dayOffset, formatBaht, formatClock, formatDate, formatStamp } from "../format";
 
 /// The console's status words. Operators read them; the owner never does.
 export function stateTag(state: ApprovalState, ownerName: string): { label: string; className: string } {
@@ -186,6 +194,108 @@ function deleteAnswerText(error: unknown): string {
 
 export function isWipeIncomplete(error: unknown): boolean {
   return error instanceof ApiError && error.code === "wipe_incomplete";
+}
+
+/// The Pilot gate view: the roadmap's Phase 1 gate, measured from the shops' own records (docs/pilot-api.md, "The
+/// pilot gate"). Every number in a sentence comes from the API's answer, its rules and its lines, so the words can
+/// never disagree with what was measured.
+export const gateWords = {
+  nav: "Pilot gate",
+  title: "Pilot gate",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading the pilot gate",
+  sideLabel: "Subscription payments",
+  noShops: "No shops yet.",
+  measured: (iso: string, now: number = Date.now()) => `Measured ${formatStamp(iso, now)}`,
+  intro: (gate: PilotGate) => {
+    const days = gate.rules.trialDays;
+    return `Phase 1 passes when at least ${gate.cohort.paid.thresholdPercent}% of shops pay ${formatBaht(gate.rules.priceSatang)} after their ${days} free days, and at least ${gate.cohort.active.thresholdPercent}% are still active on day ${days}. A shop is counted once its day ${days} has passed.`;
+  },
+  status: {
+    not_enough_data: "Not enough data yet",
+    on_track: "On track",
+    below_line: "Below the line",
+  } satisfies Record<GateStatus, string>,
+  /// Why the status is what it is, naming the share that is under its line.
+  statusText: (gate: PilotGate): string => {
+    const { counted, paid, active, status } = gate.cohort;
+    const day = gate.rules.trialDays;
+    if (status === "not_enough_data") return `No shop has reached the end of day ${day} yet, so nothing is counted.`;
+    const shops = `counting ${counted} ${counted === 1 ? "shop" : "shops"}`;
+    if (status === "on_track") return `Both shares are at or above their lines, ${shops}.`;
+    if (!paid.met && !active.met) {
+      return `Paying shops are under ${paid.thresholdPercent}% and shops active on day ${day} under ${active.thresholdPercent}%, ${shops}.`;
+    }
+    if (!paid.met) return `Paying shops are under ${paid.thresholdPercent}%, ${shops}.`;
+    return `Shops active on day ${day} are under ${active.thresholdPercent}%, ${shops}.`;
+  },
+  unavailable:
+    "The API could not read every shop's records, so it did not measure the gate rather than leave a shop out. Try again.",
+
+  // The two shares
+  paidTitle: (priceSatang: number) => `Paid ${formatBaht(priceSatang)}`,
+  paidHelp: (priceSatang: number) => `The shop's payments to Manut AI add up to ${formatBaht(priceSatang)}.`,
+  activeTitle: (day: number) => `Active on day ${day}`,
+  activeHelp: (windowDays: number, day: number) =>
+    `The owner decided a reply in the ${windowDays} days up to and including day ${day}.`,
+  noShare: "No shops yet",
+  shareOf: (count: number, counted: number) =>
+    counted === 0 ? "No shop has finished its free days." : `${count} of ${counted} ${counted === 1 ? "shop" : "shops"}.`,
+  meets: (linePercent: number) => `At or above ${linePercent}%`,
+  under: (linePercent: number) => `Under ${linePercent}%`,
+
+  // The cohort table
+  shopsTitle: "Shops",
+  shopsNote: (counted: number, total: number) => `${counted} of ${total} counted`,
+  columns: {
+    shop: "Shop",
+    started: "Trial started",
+    today: "Today",
+    paid: "Paid",
+    active: (day: number) => `Active on day ${day}`,
+    lastDecision: "Owner's last decision",
+  },
+  notStarted: "Not started",
+  startsWhen: "Starts when LINE is connected",
+  dayOf: (day: number, trialDays: number) => `Day ${day} of ${trialDays}`,
+  dayAfter: (day: number) => `Day ${day}`,
+  trialEnded: "Trial ended",
+  paidTag: "Paid",
+  partly: (paidSatang: number, priceSatang: number) => `${formatBaht(paidSatang)} of ${formatBaht(priceSatang)}`,
+  notYet: "Not yet",
+  active: { yes: "Yes", no: "No", not_yet: "Not yet" },
+  noDecision: "None yet",
+
+  // Recording the shop's payment to Manut AI
+  formTitle: "Record a subscription payment",
+  formHint:
+    "The shop paying Manut AI, not a customer's order. Record it only after you see the money arrive in Manut AI's bank account. A slip photo alone is not proof.",
+  shopLabel: "Shop",
+  amountLabel: "Amount in baht",
+  slipLabel: "Slip reference",
+  slipHelp: "The reference number printed on the bank slip. Each slip is recorded once.",
+  noteLabel: "Note (optional)",
+  submit: "Record payment",
+  submitting: "Recording",
+  badAmount: "Write the amount in baht, like 499 or 499.50.",
+  noSlip: "Write the reference printed on the slip.",
+  recorded: (amountSatang: number, shop: string, slipRef: string) =>
+    `Recorded ${formatBaht(amountSatang)} from ${shop}, slip ${slipRef}.`,
+  alreadyRecorded: (shop: string) => `This slip is already recorded for ${shop}. Nothing was recorded again.`,
+  listTitle: (shop: string) => `${shop}'s payments to Manut AI`,
+  newestFirst: "Newest first",
+  listLoading: "Loading payments",
+  listEmpty: "None recorded yet.",
+  listItem: (amountSatang: number, slipRef: string) => `${formatBaht(amountSatang)}, slip ${slipRef}`,
+  listWhen: (iso: string, now: number = Date.now()) => `Recorded ${formatStamp(iso, now)}.`,
+} as const;
+
+/// What the API said to recording a subscription payment that recorded nothing.
+export function subscriptionErrorText(error: unknown, shop: string): string {
+  if (error instanceof ApiError && error.code === "slip_already_recorded") return gateWords.alreadyRecorded(shop);
+  return errorText(error);
 }
 
 /// "at 10:00" today, "on 23 November at 10:00" on any other day of the shop's calendar.

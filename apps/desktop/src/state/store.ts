@@ -12,6 +12,8 @@ import { forBots, parseResume, RESUME_KEY, type ResumeSnap } from "../app/resume
 import { getDraft } from "../app/drafts";
 import { moveInSidebar } from "./order";
 import { LANG_KEY, readLang, setLang, t as tr, type Key, type Lang } from "../i18n";
+import { firstRunEntry, flowReduce, ONBOARDED_KEY, startFlow, type FlowEvent, type FlowState } from "../onboarding/flow";
+import { cleanShop, parseShop, SHOP_KEY, type ShopProfile } from "../onboarding/shop";
 import type {
   Away,
   LinkPlaces,
@@ -411,6 +413,12 @@ export interface Ui {
   session: string | null;
   /** The thread under `selectedBot` the main column shows (`view` "chat"); null = the bot's main chat. */
   thread: string | null;
+  /** The person and their shop as the first-run setup took them, kept on this computer as `manut.shop`
+   *  (src/onboarding/shop.ts). The account row at the bottom of the menu names them, and Home names the shop. */
+  shop: ShopProfile;
+  /** The first-run setup while it fills the window (src/onboarding), or null. `view` stays where the app will be when
+   *  the setup ends, which is Home. */
+  firstRun: FlowState | null;
 }
 
 export interface FocusAsk {
@@ -605,7 +613,27 @@ export function readTheme(): Theme {
   return "system";
 }
 
+/** What this computer keeps under `key`, or null when it keeps nothing there or has no storage to read. */
+function readStored(key: string): string | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(key, value);
+  } catch {
+    /* no storage, or full: the state still holds it for this run */
+  }
+}
+
 export function initialState(): AppState {
+  const shop = parseShop(readStored(SHOP_KEY));
+  // A first run opens on the setup's Welcome, holding whatever an earlier run kept before it was quit halfway.
+  const entry = firstRunEntry(readStored(ONBOARDED_KEY));
   return {
     conn: "closed",
     hello: null,
@@ -641,6 +669,8 @@ export function initialState(): AppState {
       automation: null,
       pluginsBot: null,
       lang: readLang(),
+      shop,
+      firstRun: entry ? startFlow(entry, shop) : null,
     },
   };
 }
@@ -954,6 +984,10 @@ export type Action =
   /** A page of the side menu fills the main column; `find` also asks History's search box for the focus. */
   | { type: "ui.page"; page: MenuPage; find?: boolean }
   | { type: "ui.lang"; lang: Lang }
+  /** The person and their shop as now kept on this computer (the first-run setup). */
+  | { type: "ui.shop"; shop: ShopProfile }
+  /** The first-run setup moved, opened again from Settings, or ended (null). */
+  | { type: "ui.firstRun"; flow: FlowState | null }
   | { type: "models"; bot: string; options: ModelOptions }
   | { type: "model.set"; bot: string; current: ModelCurrent }
   | { type: "ui.panel"; open?: boolean }
@@ -1521,6 +1555,10 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, view: a.page, back: "chat", ...(a.find ? { findSeq: state.ui.findSeq + 1 } : {}) } };
     case "ui.lang":
       return { ...state, ui: { ...state.ui, lang: a.lang } };
+    case "ui.shop":
+      return { ...state, ui: { ...state.ui, shop: a.shop } };
+    case "ui.firstRun":
+      return { ...state, ui: { ...state.ui, firstRun: a.flow } };
     case "models":
       return { ...state, models: { ...state.models, [a.bot]: a.options } };
     case "model.set": {
@@ -1950,6 +1988,14 @@ export interface Actions {
   pluginsRemove(bot: string, name: string): Promise<void>;
   /** Settings › General › Language: saved on this computer, applied at once (no restart). */
   setLanguage(lang: Lang): void;
+  /** First-run setup (src/onboarding/flow.ts): one move. A Next that leaves a step keeps what was typed so far on this
+   *  computer, so quitting halfway loses nothing; Back and typing write nothing. */
+  firstRunDo(e: FlowEvent): void;
+  /** Skip for now, and Open Manut AI on the last step: keeps what was typed, marks the setup done so it never opens on
+   *  its own again, and opens Home. */
+  firstRunEnd(): void;
+  /** Settings › General: open the setup again on Your shop, holding what was saved. */
+  openFirstRun(): void;
   loadModels(bot?: string): Promise<void>;
   peek(sessionId: string, limit?: number, bot?: string): Promise<void>;
   /** Change the main chat's model (the selected bot's, or `bot`'s). */
@@ -2173,6 +2219,13 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     for (const l of [...listeners]) l();
     opts.onAction?.(a, state);
     flushQueues();
+  };
+  // The first-run setup's profile as it is kept: cleaned (no stray spaces, known places only), in the state for the
+  // account row and Home, and on this computer for the next start.
+  const keepShop = (draft: ShopProfile) => {
+    const shop = cleanShop(draft);
+    dispatch({ type: "ui.shop", shop });
+    writeStored(SHOP_KEY, JSON.stringify(shop));
   };
   // Thread chats (`fold:<bot>:<thread>` keys threadRoute made) and the ones removed here: a removed thread's held
   // rows never go out, not even when the archive itself ends its turn
@@ -2827,6 +2880,25 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       setLang(lang);
       dispatch({ type: "ui.lang", lang });
     },
+    firstRunDo(e) {
+      const cur = state.ui.firstRun;
+      if (!cur) return;
+      const next = flowReduce(cur, e);
+      if (next === cur) return;
+      dispatch({ type: "ui.firstRun", flow: next });
+      // Welcome holds nothing typed, so only a step's own Next keeps anything.
+      if (e.type === "next" && cur.screen !== "welcome" && next.screen !== cur.screen) keepShop(next.draft);
+    },
+    firstRunEnd() {
+      const cur = state.ui.firstRun;
+      if (!cur) return;
+      keepShop(cur.draft);
+      writeStored(ONBOARDED_KEY, "1");
+      dispatch({ type: "ui.firstRun", flow: null });
+      // The setup ends on Home, as the canvas's Open Manut AI does, wherever the app was behind it.
+      dispatch({ type: "ui.page", page: "home" });
+    },
+    openFirstRun: () => dispatch({ type: "ui.firstRun", flow: startFlow("shop", state.ui.shop) }),
     async peek(sessionId, limit, bot) {
       const b =
         bot ?? Object.keys(state.elsewhere).find((n) => state.elsewhere[n].some((a) => a.id === sessionId)) ?? state.selectedBot;

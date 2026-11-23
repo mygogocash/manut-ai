@@ -1,9 +1,11 @@
 // The first screen, drawn once on the in-process runtime: the claim of this fork in one test. The app's own store
-// starts on the runtime `createRuntime()` picks (no bridge, no Hermes, no other process), and the first screen shows
-// Manut AI's side menu and Home, Buddy's chat is a press away, the Team page shows the team, and none of the old
-// product's words are left.
+// starts on the runtime `createRuntime()` picks (no bridge, no Hermes, no other process). A first run opens on the
+// first-run setup's Welcome; once it is skipped the app shows Manut AI's side menu and Home, Buddy's chat is a press
+// away, the Team page shows the team, and none of the old product's words are left. The test node has no storage, as a
+// fresh install has nothing saved, so the first screen is the same on every run.
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
+import { App } from "./App";
 import { Sidebar } from "../sidebar/Sidebar";
 import { Chat } from "../chat/Chat";
 import { HomePage } from "../pages/HomePage";
@@ -17,7 +19,7 @@ import { runtimeKind } from "../runtime";
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
 
 describe("the app on its default runtime", () => {
-  it("starts with no bridge and draws the side menu and Home, then Buddy's chat and, on its page, the team", async () => {
+  it("starts with no bridge on the setup's Welcome, then, once it is skipped, draws the side menu and Home, Buddy's chat and the team", async () => {
     expect(runtimeKind()).toBe("mock");
     setLang("en");
     const store = getStore();
@@ -25,7 +27,17 @@ describe("the app on its default runtime", () => {
     const s = store.getState();
     expect(s.conn).toBe("open");
     expect(s.lastError).toBeNull();
+    // A first run fills the window with the setup's Welcome, and Home waits behind it.
+    expect(s.ui.firstRun?.screen).toBe("welcome");
     expect(s.ui.view).toBe("home");
+    const first = renderToString(<App />);
+    expect(first).toContain('data-testid="first-run"');
+    expect(words(first)).toContain("Continue on this computer");
+    expect(first).not.toContain('data-testid="sidebar"');
+    // Skip for now on the setup's first step lands on Home, which is what the rest of this test draws.
+    store.actions.firstRunDo({ type: "next" });
+    store.actions.firstRunEnd();
+    expect(store.getState().ui).toMatchObject({ firstRun: null, view: "home" });
 
     // the two columns a person sees first (the window frame around them measures the real window, so it is not drawn here)
     const html = renderToString(
@@ -67,6 +79,6 @@ describe("the app on its default runtime", () => {
     expect(html).toContain('data-testid="nav-settings"');
 
     // none of the old product's names reach the screen, in words or in tooltips
-    expect(html + chat + team + customize).not.toMatch(/omher|oh-my-hermes|Oh My Hermes|Hermes/);
+    expect(first + html + chat + team + customize).not.toMatch(/omher|oh-my-hermes|Oh My Hermes|Hermes/);
   });
 });
