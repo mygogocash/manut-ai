@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "manut-api-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-16",
+  "access": { "dev": { "aud": "test-admin-audience" } },
+  "vars": {
+    "ADMIN_ACCESS_AUD": "test-admin-audience",
+    "CLOUD_API_KEY": "test-key",
+    "APPLE_CLIENT_ID": "test-client",
+    "CRED_KEY": "48b0c940489d799edf8202d721c46affd57351019df8ccc01579fbb82d2b2569",
+    "OFFICE_CLOUD": "1",
+    "OFFICE_ROUTINES": "1",
+    "OFFICE_EXTERNAL_WRITES": "1",
+    "LINEAR_WEBHOOK_SECRET": "test-linear-webhook-secret",
+    "RELAY_ENABLED": "1",
+    "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
+  },
+  "ratelimits": [
+    {
+      "name": "AUTH_EXCHANGE_LIMITER",
+      "namespace_id": "2026100491",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "AUTH_SESSION_LIMITER",
+      "namespace_id": "2026100492",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "LINEAR_INBOUND_LIMITER",
+      "namespace_id": "2026100493",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_HOST_LIMITER",
+      "namespace_id": "2026100494",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_PHONE_LIMITER",
+      "namespace_id": "2026100495",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TASK",
+        "class_name": "TaskObject"
+      },
+      {
+        "name": "AUTH",
+        "class_name": "AuthObject"
+      },
+      {
+        "name": "CRED",
+        "class_name": "CredObject"
+      },
+      {
+        "name": "SCHEDULES",
+        "class_name": "ScheduleObject"
+      },
+      {
+        "name": "TENANT",
+        "class_name": "TenantObject"
+      },
+      {
+        "name": "COMPANY",
+        "class_name": "CompanyObject"
+      },
+      {
+        "name": "RELAY",
+        "class_name": "RelayObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TaskObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AuthObject"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["CredObject"]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["ScheduleObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["TenantObject"]
+    },
+    {
+      "tag": "v6",
+      "new_sqlite_classes": ["CompanyObject"]
+    },
+    {
+      "tag": "v7",
+      "new_sqlite_classes": ["RelayObject"]
+    }
+  ]
+}

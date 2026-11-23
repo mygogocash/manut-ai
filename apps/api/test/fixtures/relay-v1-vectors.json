@@ -1,0 +1,83 @@
+{
+  "about": "Relay protocol v1 test vectors, specified in docs/relay-protocol-v1.md. TEST ONLY: every key, token, nonce and signature in this file was generated once with CryptoKit for these vectors. They sign nothing outside the tests, and no build uses them.",
+  "testOnly": true,
+  "wire": {
+    "version": 1,
+    "maxMessageBytes": 65536,
+    "streamHeaderBytes": 4,
+    "maxPayloadBytes": 65532,
+    "deviceTokenBytes": 32
+  },
+  "closeCodes": {
+    "badRequest": 4400,
+    "unauthenticated": 4401,
+    "revoked": 4403,
+    "hostUnavailable": 4404,
+    "replaced": 4409,
+    "tooLarge": 4413,
+    "overBudget": 4429,
+    "disabled": 4503
+  },
+  "httpErrors": [
+    { "status": 503, "body": { "error": "relay_disabled" } },
+    { "status": 400, "body": { "error": "invalid_host_id" } },
+    { "status": 426, "body": { "error": "upgrade_required" } },
+    { "status": 429, "body": { "error": "rate_limited" }, "retryAfter": "60" },
+    { "status": 404, "body": { "error": "not_found" } }
+  ],
+  "hostKey": {
+    "privateJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "ib4IYB2I05R5eSGPoGQYYa5fikBQPHuN_FW2mvDAWps",
+      "y": "WwwTFjoML5S42ZLKXTw3B9rhDJgQakFJ53yDPYXnlnE",
+      "d": "ND3D5rH1njNLwBqTX5kqQnpFLNKx73U6tRrpFvS5o1g"
+    },
+    "publicKeyX963": "BIm-CGAdiNOUeXkhj6BkGGGuX4pAUDx7jfxVtprwwFqbWwwTFjoML5S42ZLKXTw3B9rhDJgQakFJ53yDPYXnlnE",
+    "hostID": "GnOvYLqZ2OHWO6ttlRtTcGTPJe7LvdxH1_QGvKsS3b8"
+  },
+  "hostChallenge": {
+    "nonce": "x-zdxt1ft5j89tFMjyzj8E5P3egK4zsukMoSWAXYFWs",
+    "message": "gospark-relay-v1|host|GnOvYLqZ2OHWO6ttlRtTcGTPJe7LvdxH1_QGvKsS3b8|x-zdxt1ft5j89tFMjyzj8E5P3egK4zsukMoSWAXYFWs",
+    "signature": "pzraaa8GE5yaccH-AkRN1OUQlkn3HPZgTkYoQa7k_EiXSaxVC6K5dQiSsmRVDOZQD7QIFNLpMIluj6gGoMBOuw"
+  },
+  "deviceToken": {
+    "device": "7EF9FC45-3101-4233-9523-F73161EA2057",
+    "token": "YuSt4-HwDB192SRfDDvezlDCabVGK4yNXLgaRcUEQa4",
+    "tokenHash": "okZozeX-5QrWGv0EoFHBLlAgh6-UCySRqSr_W8iAhqw"
+  },
+  "streamFrames": [
+    { "stream": 16909060, "payload": "0908", "frame": "010203040908" },
+    { "stream": 4275878552, "payload": "", "frame": "fedcba98" },
+    { "stream": 0, "payload": "16030300", "frame": "0000000016030300" }
+  ],
+  "messages": {
+    "hostOutbound": [
+      { "t": "hello", "v": 1, "key": "BIm-CGAdiNOUeXkhj6BkGGGuX4pAUDx7jfxVtprwwFqbWwwTFjoML5S42ZLKXTw3B9rhDJgQakFJ53yDPYXnlnE", "sig": "pzraaa8GE5yaccH-AkRN1OUQlkn3HPZgTkYoQa7k_EiXSaxVC6K5dQiSsmRVDOZQD7QIFNLpMIluj6gGoMBOuw" },
+      { "t": "device", "v": 1, "id": "7EF9FC45-3101-4233-9523-F73161EA2057", "tokenHash": "okZozeX-5QrWGv0EoFHBLlAgh6-UCySRqSr_W8iAhqw" },
+      { "t": "revoke", "v": 1, "id": "7EF9FC45-3101-4233-9523-F73161EA2057" },
+      { "t": "status", "v": 1, "state": "paused", "at": 1789000000 },
+      { "t": "close", "v": 1, "stream": 4275878552 },
+      { "t": "push", "v": 1, "kind": "decision" },
+      { "t": "pushToken", "v": 1, "id": "7EF9FC45-3101-4233-9523-F73161EA2057", "token": "50208d856fff100556a5919cb473f67af75f69f2f0c110cc28e8a2f6ddec7f76", "env": "production" },
+      { "t": "pushToken", "v": 1, "id": "7EF9FC45-3101-4233-9523-F73161EA2057", "token": null, "env": "sandbox" }
+    ],
+    "hostInbound": [
+      { "t": "challenge", "v": 1, "nonce": "x-zdxt1ft5j89tFMjyzj8E5P3egK4zsukMoSWAXYFWs" },
+      { "t": "ready", "v": 1, "devices": ["7EF9FC45-3101-4233-9523-F73161EA2057"] },
+      { "t": "open", "v": 1, "stream": 4275878552, "device": "7EF9FC45-3101-4233-9523-F73161EA2057" },
+      { "t": "close", "v": 1, "stream": 4275878552, "reason": "replaced" },
+      { "t": "error", "v": 1, "code": "device_limit" }
+    ],
+    "phoneOutbound": [
+      { "t": "hello", "v": 1, "device": "7EF9FC45-3101-4233-9523-F73161EA2057", "token": "YuSt4-HwDB192SRfDDvezlDCabVGK4yNXLgaRcUEQa4" }
+    ],
+    "phoneInbound": [
+      { "t": "ready", "v": 1 },
+      { "t": "host", "v": 1, "state": "offline", "at": 1789003600 },
+      { "t": "host", "v": 1, "state": "offline" },
+      { "t": "host", "v": 1, "state": "paused", "at": 1789000000 },
+      { "t": "error", "v": 1, "code": "over_budget" }
+    ]
+  }
+}

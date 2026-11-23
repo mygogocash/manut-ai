@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "manut-api",
+  // Tenant routes require a revocable device session. The operator bearer
+  // secret (`wrangler secret put CLOUD_API_KEY`) works only on exact admin
+  // methods behind a platform Access context matching ADMIN_ACCESS_AUD.
+  // No admin audience is configured here: the owner must configure each
+  // protected environment before use. Missing Access configuration denies.
+  // Health stays public; auth exchange/refresh require ingress admission.
+  // Inbound Linear webhooks verify against LINEAR_WEBHOOK_SECRET, also a
+  // Wrangler secret (`wrangler secret put LINEAR_WEBHOOK_SECRET`), and stay
+  // unreachable until the operator turns officeInbound on (OFFICE_INBOUND is
+  // deliberately unset here). OFFICE_SHARING is unset for the same reason:
+  // every OFC-21 sharing route refuses until officeSharing is turned on.
+  // RELAY_ENABLED is deliberately unset in every environment: until the owner
+  // turns the relay on at gate G3, every /relay/ route answers 503
+  // relay_disabled (docs/relay-protocol-v1.md, the kill switch).
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-16",
+  "workers_dev": false,
+  "preview_urls": false,
+  // Metadata-only logs (task id, state, duration, status) — never bodies.
+  // Sampling stays at 100% until the first production traffic is understood.
+  "observability": {
+    "enabled": true
+  },
+  // Separate objects per environment from the first deploy: retrofitting
+  // environments after production objects hold data is the expensive version.
+  "env": {
+    "dev": {
+      "name": "manut-api-dev",
+      "durable_objects": {
+        "bindings": [
+          {"name": "TASK", "class_name": "TaskObject"},
+          {"name": "AUTH", "class_name": "AuthObject"},
+          {"name": "CRED", "class_name": "CredObject"},
+          {"name": "SCHEDULES", "class_name": "ScheduleObject"},
+          {"name": "TENANT", "class_name": "TenantObject"},
+          {"name": "COMPANY", "class_name": "CompanyObject"},
+          {"name": "RELAY", "class_name": "RelayObject"}
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "AUTH_EXCHANGE_LIMITER",
+          "namespace_id": "2026112306",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "AUTH_SESSION_LIMITER",
+          "namespace_id": "2026112307",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        },
+        {
+          "name": "LINEAR_INBOUND_LIMITER",
+          "namespace_id": "2026112308",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        // Relay upgrade gates, keyed per IPv4 address or IPv6 /64 (A4b).
+        // Proposed ids, unverified against the account like the rest.
+        {
+          "name": "RELAY_HOST_LIMITER",
+          "namespace_id": "2026112309",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "RELAY_PHONE_LIMITER",
+          "namespace_id": "2026112310",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        }
+      ]
+    },
+    "staging": {
+      "name": "manut-api-staging",
+      "durable_objects": {
+        "bindings": [
+          {"name": "TASK", "class_name": "TaskObject"},
+          {"name": "AUTH", "class_name": "AuthObject"},
+          {"name": "CRED", "class_name": "CredObject"},
+          {"name": "SCHEDULES", "class_name": "ScheduleObject"},
+          {"name": "TENANT", "class_name": "TenantObject"},
+          {"name": "COMPANY", "class_name": "CompanyObject"},
+          {"name": "RELAY", "class_name": "RelayObject"}
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "AUTH_EXCHANGE_LIMITER",
+          "namespace_id": "2026112311",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "AUTH_SESSION_LIMITER",
+          "namespace_id": "2026112312",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        },
+        {
+          "name": "LINEAR_INBOUND_LIMITER",
+          "namespace_id": "2026112313",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        // Relay upgrade gates, keyed per IPv4 address or IPv6 /64 (A4b).
+        // Proposed ids, unverified against the account like the rest.
+        {
+          "name": "RELAY_HOST_LIMITER",
+          "namespace_id": "2026112314",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "RELAY_PHONE_LIMITER",
+          "namespace_id": "2026112315",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        }
+      ]
+    },
+    "prod": {
+      "name": "manut-api-prod",
+      "durable_objects": {
+        "bindings": [
+          {"name": "TASK", "class_name": "TaskObject"},
+          {"name": "AUTH", "class_name": "AuthObject"},
+          {"name": "CRED", "class_name": "CredObject"},
+          {"name": "SCHEDULES", "class_name": "ScheduleObject"},
+          {"name": "TENANT", "class_name": "TenantObject"},
+          {"name": "COMPANY", "class_name": "CompanyObject"},
+          {"name": "RELAY", "class_name": "RelayObject"}
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "AUTH_EXCHANGE_LIMITER",
+          "namespace_id": "2026112316",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "AUTH_SESSION_LIMITER",
+          "namespace_id": "2026112317",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        },
+        {
+          "name": "LINEAR_INBOUND_LIMITER",
+          "namespace_id": "2026112318",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
+        },
+        // Relay upgrade gates, keyed per IPv4 address or IPv6 /64 (A4b).
+        // Proposed ids, unverified against the account like the rest.
+        {
+          "name": "RELAY_HOST_LIMITER",
+          "namespace_id": "2026112319",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        {
+          "name": "RELAY_PHONE_LIMITER",
+          "namespace_id": "2026112320",
+          "simple": {
+            "limit": 60,
+            "period": 60
+          }
+        }
+      ]
+    }
+  },
+  // Proposed namespace IDs are distinct within this source tree. Before any
+  // deploy, the owner must check account-wide allocation and replace conflicts
+  // in every environment. This patch has not queried a Cloudflare account.
+  // The relay limiters (2026100404/05, and 14/15, 24/25 and 34/35 in dev,
+  // staging and prod) are proposed the same way and are equally unverified.
+  "ratelimits": [
+    {
+      "name": "AUTH_EXCHANGE_LIMITER",
+      "namespace_id": "2026112301",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "AUTH_SESSION_LIMITER",
+      "namespace_id": "2026112302",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      "name": "LINEAR_INBOUND_LIMITER",
+      "namespace_id": "2026112303",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    // Relay upgrade gates, keyed per IPv4 address or IPv6 /64 (A4b).
+    // Proposed ids, unverified against the account like the rest.
+    {
+      "name": "RELAY_HOST_LIMITER",
+      "namespace_id": "2026112304",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_PHONE_LIMITER",
+      "namespace_id": "2026112305",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TASK",
+        "class_name": "TaskObject"
+      },
+      {
+        "name": "AUTH",
+        "class_name": "AuthObject"
+      },
+      {
+        "name": "CRED",
+        "class_name": "CredObject"
+      },
+      {
+        "name": "SCHEDULES",
+        "class_name": "ScheduleObject"
+      },
+      {
+        "name": "TENANT",
+        "class_name": "TenantObject"
+      },
+      {
+        "name": "COMPANY",
+        "class_name": "CompanyObject"
+      },
+      {
+        "name": "RELAY",
+        "class_name": "RelayObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TaskObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AuthObject"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["CredObject"]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["ScheduleObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["TenantObject"]
+    },
+    {
+      "tag": "v6",
+      "new_sqlite_classes": ["CompanyObject"]
+    },
+    {
+      "tag": "v7",
+      "new_sqlite_classes": ["RelayObject"]
+    }
+  ]
+}
