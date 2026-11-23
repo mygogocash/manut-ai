@@ -55,7 +55,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 1 Pilot | Audit log an operator can read | built: one log per shop, metadata only (`GET /v1/admin/audit`), and the console's Audit page |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` decides every send: replies, deletions and workers' requests; sessions read approvals as its wire records) |
 | 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`); no model is called until the owner adds an Anthropic key and settles the rate and the cap |
-| 2 Control plane | Memory; the job queue; the audit log | partial: the job flow and the audit log are built; what the team knows is `@manut/shop-memory`, not yet stored by the API |
+| 2 Control plane | Memory; the job queue; the audit log | built: the job flow, the audit log, and what the team knows (stored per shop, with the console's Memory page); workers read memory when they are built in Phase 4 |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | partial (Home, side menu and pages; sessions from the fork) |
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | partial: the three-step first run and a read-only connected runtime (Settings › Developer) are built; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked); the offline cache is not yet |
