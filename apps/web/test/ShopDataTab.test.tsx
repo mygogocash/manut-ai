@@ -349,8 +349,10 @@ describe("deleting a live shop: waiting for its owner", () => {
     expect(within(box).getByText("Deletion link for Fon")).toBeTruthy();
     const link = within(box).getByLabelText("Deletion link") as HTMLInputElement;
     expect(link.value).toMatch(/^https:\/\/web\.test\/delete\/.+/);
-    expect(box.textContent).toContain(
-      "Send it to Fon on LINE. Nothing is deleted until Fon says yes. It works until 24 November 10:00.");
+    // The link expires at 10:00 on 24 November, which the console writes as "10:00" when the browser's clock says it is
+    // that day, so both forms are accepted, as for DELETED_SABAI_TEA.
+    expect(box.textContent).toMatch(
+      /Send it to Fon on LINE\. Nothing is deleted until Fon says yes\. It works until (24 November )?10:00\./);
     fireEvent.click(within(box).getByRole("button", { name: "Copy deletion link" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(link.value));
     // The form has closed, focus is back on the button that opened it, and the shop says it is waiting.
