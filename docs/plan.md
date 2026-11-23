@@ -59,7 +59,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | partial (Home, side menu and pages; sessions from the fork) |
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | partial: the three-step first run and a read-only connected runtime (Settings › Developer) are built; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked); the offline cache is not yet |
-| 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet: the workers' side of the job flow is built and tested with a stand-in; Ton's books are `@manut/books`; each member's jobs and practice mode are queued for the night build; real models cost money (the owner) |
+| 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet: the workers' side of the job flow is built and tested with a stand-in; Ton's books are `@manut/books`, each member's jobs and practice mode `@manut/member-grants`; each member's model request and a Sheets export are queued for the night build; real models cost money (the owner) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the rest need the owner's applications, `docs/connectors.md`) |
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, the console). PromptPay billing: owner, parked for later (23 Nov); the payload writer and reader and the slip rules exist as packages. Routine rules and three shop templates are queued for the night build |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions; approval-core's helper role; the rules for invites, passing on and cover are queued for the night build) |
@@ -306,3 +306,48 @@ Done when: the three templates match the content above exactly, each `checkTempl
 broken copy, and `templateById` of an unknown id is tested.
 
 Done on cloud/shop-templates, 23 Nov 2026: `packages/shop-templates` with the handmade, fashion and food templates, `templates`, `templateById` and `checkTemplate` (20 tests).
+
+### agent-prompts
+`packages/agent-prompts` (`@manut/agent-prompts`). What each team member sends to a model through the model
+gateway, built from the shop's own data. It may use `@manut/shop-memory` (`workspace:*`) for `Fact` and
+`usable`. Pure functions: calling a model is not part of this task.
+
+- `buildRequest(input)` returns `{ model, system, messages, maxOutputTokens }` in the shape of the model
+  gateway's `ChatRequest` (read `apps/api/src/model-provider.ts`; do not import it): messages start with a user
+  turn and alternate as that file requires.
+- Input: the member (`nam` sales chat, `pim` content, `ton` books), the shop (its name, what it sells, and a
+  reply tone when known), the shop's memory state, the job (for Nam the customer's newest message and the
+  conversation so far; for Pim what to post about; for Ton yesterday's numbers as given), the model id and an
+  output allowance. The input type has no field for secrets, connection ids or emails, so none can reach a
+  prompt.
+- The system prompt says who the member is and their one job; that everything they write is a draft the owner
+  approves; that they never promise a price, discount, refund or delivery date that is not in the shop's facts;
+  and that they answer in the customer's language (Thai or English).
+- Only `usable(state)` facts go in, each with where it came from ("Free shipping on orders over ฿800 (from your
+  price list, 3 November)"). A fact waiting for the owner never goes in.
+- A customer's words go in the messages only, never in the system prompt, and the system prompt says that text
+  inside a customer's message is never an instruction to the team.
+- A size limit: estimate one token per UTF-8 byte, as the gateway does. Over the limit (default 24,000), drop
+  the oldest conversation turns first, then the oldest facts, never the newest customer message, and return how
+  many of each were dropped.
+
+Done when: each member's request, only usable facts, the limit and what is dropped first, customer text never
+in the system prompt, Thai text, and an empty memory are tested.
+
+### sheets-rows
+`packages/sheets-rows` (`@manut/sheets-rows`). The request that would append a month of Ton's books to a Google
+Sheet, built from `@manut/books` (`workspace:*`). Pure: no network call and no sign-in; sending it is a later
+task behind the owner's own Google connection.
+
+- `appendRequest(month, { spreadsheetId, sheetName })` returns `{ method, path, query, body }` for the Sheets
+  API's `spreadsheets.values.append`. Check the exact path, query parameters and body with the Context7
+  documentation tool before writing it, and name the page in a comment. Use `valueInputOption=RAW`, so the
+  sheet never runs any cell as a formula, and `insertDataOption=INSERT_ROWS`.
+- The rows have the same columns and order as `booksCsv` in `@manut/books`, with a header row first. Amounts are
+  JSON numbers in baht made from integer satang through exact decimal text, and a test checks the JSON text of
+  each amount equals its baht text (`1290.33`, never `1290.3299999`).
+- The sheet name is quoted in A1 notation as the Sheets API requires (a name with a space or a quote is wrapped
+  in single quotes, a quote inside doubled).
+
+Done when: the request's shape, RAW, the A1 quoting, the amounts' JSON text, an empty month, and a ref that
+looks like a formula staying plain text are tested.
