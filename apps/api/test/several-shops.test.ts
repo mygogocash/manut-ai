@@ -591,6 +591,23 @@ describe("the operator's link", () => {
     expect((await linkOwner(another, code)).status).toBe(200);
   });
 
+  it("stays when a helper joins the same shop, with every session of the owner's account", async () => {
+    const fon = await signIn();
+    const shop = await setupShop();
+    const accountId = await linkAsOwner(shop, fon);
+    const asOwner = await shopSession(fon, shop, "owner");
+    // Mint joins Fon's own shop through an invite, which rewrites the shop's people record.
+    const mintEmail = `mint-${crypto.randomUUID()}@example.test`;
+    const made = await invite(shop, "Mint", { kind: "email", address: mintEmail });
+    expect((await accept(await signIn(mintEmail), inviteToken(made.body.inviteUrl))).status).toBe(200);
+    // The link and the owner's session are still there, and Fon still owns the shop.
+    expect((await asSession(asOwner, "GET", "/v1/approvals?state=open")).status).toBe(200);
+    const people = await admin<{ owner: { account: { id: string; devices: number } | null } }>("GET",
+      `/v1/admin/people?tenant=${encodeURIComponent(shop.tenant)}`);
+    expect(people.body.owner.account).toMatchObject({ id: accountId, devices: 1 });
+    expect((await myShops(fon)).body.shops.map((one) => [one.id, one.role])).toEqual([[shop.tenant, "owner"]]);
+  });
+
   it("stands in the shop's record when the owner's list cannot be written, and linking again lists the shop", async () => {
     const fon = await signIn();
     const shop = await setupShop();

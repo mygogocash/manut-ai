@@ -308,7 +308,10 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     const name = record.names[body.inviteId] ?? "";
     return {
       answer: { status: 200, body: { answer: "joined", helperId: answered.helper.id, name } },
+      // The rest of the record is kept as it was: a helper joining must never drop the owner's linked account or its
+      // sessions (docs/several-shops.md).
       next: {
+        ...record,
         state: answered.state,
         names: { ...record.names, [answered.helper.id]: name },
         sessions: { ...record.sessions, [fresh.hash]: fresh.session },
