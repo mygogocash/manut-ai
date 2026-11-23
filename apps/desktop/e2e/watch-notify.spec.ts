@@ -57,21 +57,22 @@ async function setup(page: Page, seen?: number) {
 }
 
 const notes = (page: Page) => page.evaluate(() => (window as any).__notes.map((n: any) => ({ title: n.title, body: n.body })));
-// The unread count the app badge shows (the badge calls below) is checked; the count drawn on a bot's row left with the
-// sidebar, so no row is read for it.
+// The Dock badge counts the requests waiting on the person and nothing else, so an automation's answer nobody has read yet
+// never reaches it: the badge calls below stay at the one opening call, 0. (The count drawn on a bot's row left with the
+// sidebar, so no row is read for the unread count.)
 const badgeCalls = (page: Page) => page.evaluate(() => [...(window as any).__badgeCalls]);
 
 test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("a hit on a bot that is not open: one notification, unread 1, one badge call; click opens that bot", async ({ page }) => {
+test("a hit on a bot that is not open: one notification, no badge call; click opens that bot", async ({ page }) => {
   await setup(page);
   await expect.poll(() => badgeCalls(page)).toEqual([0]);
   await mock("mock.watchRun", { bot: "friren", name: "deploys", kind: "hit", text: "**Deploy failed** on main\nsecond line" });
   await expect.poll(() => notes(page)).toEqual([{ title: "Friren · deploys", body: "Deploy failed on main" }]);
-  await expect.poll(() => badgeCalls(page)).toEqual([0, 1]);
   await page.waitForTimeout(300);
+  expect(await badgeCalls(page)).toEqual([0]); // an unread answer is not a request waiting
   expect(await notes(page)).toHaveLength(1); // the delivered run's routine.ran adds no second note
 
   // the notification opens friren: the answer sits under one "Watch · deploys" line, no bubble from the person
@@ -82,7 +83,7 @@ test("a hit on a bot that is not open: one notification, unread 1, one badge cal
   await expect(page.getByTestId("bubble-bot").filter({ hasText: "Deploy failed" })).toHaveCount(1);
   await expect(page.getByTestId("bubble-user").filter({ hasText: "Cronjob" })).toHaveCount(0);
   await expect(page.getByTestId("routine-line")).toHaveCount(0);
-  await expect.poll(() => badgeCalls(page)).toEqual([0, 1, 0]);
+  expect(await badgeCalls(page)).toEqual([0]);
 
   // "Not useful" tells the bot once
   await page.getByTestId("watch-not-useful").click();
@@ -108,13 +109,13 @@ test("a silent run: no notification, no unread, no badge call, no line", async (
   await expect(page.getByTestId("routine-line")).toHaveCount(0);
 });
 
-test("40 answers that came in while manut was closed: one summary notification, unread 40", async ({ page }) => {
+test("40 answers that came in while manut was closed: one summary notification, and no badge", async ({ page }) => {
   await mock("mock.watchQueued", { bot: "friren", name: "deploys", n: 40 });
   await setup(page, 1);
   await expect.poll(() => notes(page)).toEqual([{ title: "Friren: 40 watch alerts", body: expect.stringContaining("match 40") }]);
-  await expect.poll(() => badgeCalls(page)).toContain(40);
   await page.waitForTimeout(300);
   expect(await notes(page)).toHaveLength(1);
+  expect(await badgeCalls(page)).toEqual([0]);
 });
 
 test("a first start with no record of what was seen does not flood", async ({ page }) => {

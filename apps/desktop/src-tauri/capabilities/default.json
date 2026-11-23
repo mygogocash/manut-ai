@@ -1,1 +1,1 @@
-{ "identifier": "default", "windows": ["main"], "permissions": ["core:default", "notification:default", "dialog:allow-open", "process:allow-restart"] }
+{ "identifier": "default", "windows": ["main"], "permissions": ["core:default", "notification:default", "dialog:allow-open", "process:allow-restart", "core:window:allow-set-badge-count", "core:window:allow-unminimize", "core:window:allow-show", "core:window:allow-set-focus"] }
