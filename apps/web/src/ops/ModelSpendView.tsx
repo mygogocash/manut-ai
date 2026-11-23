@@ -163,6 +163,11 @@ function MonthPanel({ usage, current }: { usage: ModelUsage; current: boolean })
       <p className="hint" style={{ margin: 0 }}>
         {status}
       </p>
+      {!current && (
+        <p className="mut" style={{ margin: 0, fontSize: 13 }}>
+          {modelSpendWords.pastNote}
+        </p>
+      )}
       <div className="grid">
         <Tile id="model-tile-spent" label={modelSpendWords.spentLabel} value={moneyText(usage.spentSatang)}
           help={modelSpendWords.spentHelp(usage.tokens)} />

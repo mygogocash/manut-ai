@@ -262,14 +262,21 @@ describe("the Model spend page", () => {
     expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("t2");
   });
 
-  it("speaks of a month that is over in the past tense, since nothing is being refused in it now", async () => {
+  it("speaks of a month that is over in the past tense, and says its cap is today's, since the API keeps no history", async () => {
+    const PAST_NOTE = "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.";
     renderPage(async (_tenant, month) => usage({ month: month ?? "2026-11", remainingSatang: 0 }));
     await screen.findByRole("region", { name: "November 2026" });
     expect(screen.getByText("New calls are refused until the cap is raised or the month turns.")).toBeTruthy();
+    expect(screen.queryByText(PAST_NOTE)).toBeNull();
     fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-10" } });
     await screen.findByRole("region", { name: "October 2026" });
     expect(screen.getByText("That month's spend and holds reached the cap.")).toBeTruthy();
+    expect(screen.getByText(PAST_NOTE)).toBeTruthy();
     expect(screen.queryByText("New calls are refused until the cap is raised or the month turns.")).toBeNull();
+    // Back on this month the note goes again.
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "" } });
+    await screen.findByRole("region", { name: "November 2026" });
+    expect(screen.queryByText(PAST_NOTE)).toBeNull();
   });
 
   it("starts on the shop chosen in the side menu", async () => {

@@ -577,6 +577,9 @@ export const modelSpendWords = {
       : current
         ? "New calls are refused until the cap is raised or the month turns."
         : "That month's spend and holds reached the cap.",
+  /// The API keeps one cap per shop, not one per month, so an earlier month is read against the cap as it is now.
+  pastNote:
+    "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.",
 
   // The four figures
   spentLabel: "Spent",

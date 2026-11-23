@@ -297,6 +297,9 @@ describe("the model spend page's words", () => {
     expect(modelSpendWords.atCapText(true, 30000)).toBe("New calls are refused until the cap is raised or the month turns.");
     expect(modelSpendWords.atCapText(false, 30000)).toBe("That month's spend and holds reached the cap.");
     expect(modelSpendWords.atCapText(true, 0)).toBe("The cap is ฿0, so every call is refused.");
+    // The API keeps one cap per shop, not one per month, so an earlier month is read against today's cap.
+    expect(modelSpendWords.pastNote).toBe(
+      "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.");
   });
 
   it("says whether the cap is the default or an operator's, and who set it and when", () => {
