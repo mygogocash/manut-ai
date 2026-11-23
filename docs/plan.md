@@ -105,6 +105,8 @@ with an order. Reading the image is not part of this task.
 
 Done when: each verdict and the precedence between them is tested.
 
+Done on cloud/slip-rules, 23 Nov 2026: `packages/slip-rules` with `checkSlip`, name matching and the five verdicts in their precedence (18 tests).
+
 ### promptpay-read
 In `packages/promptpay` (already exists; add to it without changing what is there): `readPromptPayPayload(text)`
 that takes a QR payload apart into its fields (id kind, id digits as typed locally, amount in satang if any,
