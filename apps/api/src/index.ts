@@ -18,6 +18,7 @@ import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
+import { shopsRoute } from "./shops";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
@@ -213,6 +214,9 @@ const ADMIN_METHODS = new Set([
   // sent), revoke an invite, remove a helper, and set or clear cover. The tenant travels in the query or the body.
   "GET /v1/admin/people", "POST /v1/admin/people/invites", "POST /v1/admin/people/invites/revoke",
   "POST /v1/admin/people/remove", "POST /v1/admin/people/away", "POST /v1/admin/people/away/clear",
+  // Several shops (shops.ts): link the account a code names to a shop as its owner, and unlink it. The tenant and the
+  // code travel in the body.
+  "POST /v1/admin/shops/owner", "POST /v1/admin/shops/owner/unlink",
   // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
   // add one, replace a password, remove one; register an outpost, list them. The tenant and the ids travel in the
   // query or the body.
@@ -647,6 +651,10 @@ export default {
     // joining and opening the shop on another device, which need a signed-in session.
     const people = await peopleRoute(request, url, env, ctx);
     if (people) return people;
+    // Several shops (shops.ts): a signed-in person's shops, a shop session for one of them and the owner's link code,
+    // which need the person's own session; and the operator's link and unlink of an owner's account, under the gate above.
+    const shops = await shopsRoute(request, url, env, ctx);
+    if (shops) return shops;
     // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
     // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
     const vault = await vaultAdminRoute(request, url, env, ctx);

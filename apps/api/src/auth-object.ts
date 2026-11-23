@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
 import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
+import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 
 type AuthEnv = {
   APPLE_CLIENT_ID?: string;
@@ -136,6 +137,11 @@ export class AuthObject extends DurableObject {
     // both outlive the shop's own objects.
     if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
       return pilotDeletionRoute(this.ctx.storage, request);
+    }
+    // Several shops (shops-store.ts): which shops each signed-in person is in, and owners' one-use link codes.
+    if (url.pathname === "/identity-shops" || url.pathname.startsWith("/identity-shops/") ||
+        url.pathname === "/owner-codes" || url.pathname.startsWith("/owner-codes/")) {
+      return shopsAuthRoute(this.ctx.storage, request, url);
     }
     if (url.pathname === "/flags") {
       if (request.method === "GET") {
@@ -544,6 +550,8 @@ export class AuthObject extends DurableObject {
       if (kept.length === 0) await this.ctx.storage.delete(key);
       else await this.ctx.storage.put(key, kept);
     }
+    // Every person's index rows that name a deleted shop go too, and a person's own waiting link code (shops-store.ts).
+    wipeShopsTenant(this.ctx.storage, body.tenant);
     return Response.json({ sessionsWiped: sessionKeys.length });
   }
 }

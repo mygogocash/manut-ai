@@ -14,6 +14,9 @@
 ///   Removing a helper marks each of their sessions ended in the same write that removes them, which is how removal signs
 ///   them out on every device at once. An ended or lapsed session is dropped at the next change after the time it would
 ///   have run out, so the record stays small.
+/// - `ownerAccount` and `ownerSessions`: the account the shop's owner signs in with, once the operator linked it, and
+///   every owner shop session, by the SHA-256 of its token (docs/several-shops.md). Unlinking the account marks each of
+///   its sessions ended in the same write, as removal does for a helper's. Both are absent until an account is linked.
 ///
 /// Atomicity. As in memory-store.ts, every change runs inside `transactionSync` with the synchronous KV API of
 /// SQLite-backed objects: it reads the record, applies one rule and writes the result and its audit entry without a
@@ -49,20 +52,40 @@ export const OWNER_ID = "owner";
 /// ended by the helper's removal.
 export type HelperSession = { sessionId: string; helperId: string; expiresAt: number; endedAt?: number };
 
+/// The account the shop's owner signs in with, linked by the operator (docs/several-shops.md): the link's id, which the
+/// audit log and the owner's decisions name; the verified provider subject the account signs in as (`apple:<sub>`, the
+/// lifted session's tenant), which only the shop's own export carries out of the backend; and when it was linked.
+export type OwnerAccount = { id: string; subject: string; linkedAt: number };
+
+/// One owner shop session: the linked account it belongs to, when it runs out, and when unlinking ended it.
+export type OwnerSession = { sessionId: string; accountId: string; expiresAt: number; endedAt?: number };
+
 export type PeopleRecord = {
   state: PeopleState;
   names: Record<string, string>;
   sessions: Record<string, HelperSession>;
+  /// Absent until the operator links the owner's account, and again once they unlink it.
+  ownerAccount?: OwnerAccount;
+  /// Absent on a record no owner session was ever opened for.
+  ownerSessions?: Record<string, OwnerSession>;
 };
 
-/// What the Worker reads: the rules' state, the names, and how many sessions each helper has running now. Never a hash.
-export type PeopleView = { state: PeopleState; names: Record<string, string>; devices: Record<string, number> };
+/// What the Worker reads: the rules' state, the names, how many sessions each helper has running now, and the owner's
+/// linked account with how many of its sessions run now. Never a hash.
+export type PeopleView = { state: PeopleState; names: Record<string, string>; devices: Record<string, number>;
+  ownerAccount: OwnerAccount | null; ownerDevices: number };
 
 /// What checking a helper session answers.
 export type SessionCheck =
   | { ok: true; helperId: string; sessionId: string; name: string }
   | { ok: false; error: "unauthorized" }
   | { ok: false; error: "removed"; removedAt: number };
+
+/// What checking an owner shop session answers: whose it is, or that unlinking ended it and when.
+export type OwnerSessionCheck =
+  | { ok: true; accountId: string; sessionId: string }
+  | { ok: false; error: "unauthorized" }
+  | { ok: false; error: "unlinked"; unlinkedAt: number };
 
 type Answer = { status: number; body: unknown };
 
@@ -104,9 +127,9 @@ export function keptIdentity(value: unknown): Identity | null {
   return null;
 }
 
-/// The sessions still worth keeping at `nowMs`: every one that has not reached its end. A session removal ended is kept
-/// until then too, so a late request with it is told why it no longer works.
-function livingSessions(sessions: Record<string, HelperSession>, nowMs: number): Record<string, HelperSession> {
+/// The sessions still worth keeping at `nowMs`: every one that has not reached its end. A session removal or unlinking
+/// ended is kept until then too, so a late request with it is told why it no longer works.
+function livingSessions<T extends { expiresAt: number }>(sessions: Record<string, T>, nowMs: number): Record<string, T> {
   return Object.fromEntries(Object.entries(sessions).filter(([, session]) => session.expiresAt > nowMs));
 }
 
@@ -119,6 +142,15 @@ function devicesOf(record: PeopleRecord, nowMs: number): Record<string, number> 
   return devices;
 }
 
+/// Whether an owner session still works at `nowMs`: not ended, not run out, and of the account linked now.
+function ownerSessionLive(record: PeopleRecord, session: OwnerSession, nowMs: number): boolean {
+  return session.endedAt === undefined && session.expiresAt > nowMs && session.accountId === record.ownerAccount?.id;
+}
+
+function ownerDevicesOf(record: PeopleRecord, nowMs: number): number {
+  return Object.values(record.ownerSessions ?? {}).filter((session) => ownerSessionLive(record, session, nowMs)).length;
+}
+
 /// `/people` and `/people/*` on a TenantObject. Reads need only the tenant; writes need the Worker's `x-people` header.
 export async function peopleTenantRoute(storage: DurableObjectStorage, request: Request, url: URL): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
@@ -127,10 +159,15 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
     if (!isValidTenant(tenant)) return json({ error: "invalid_request" }, 400);
     const record = readRecord(storage.kv, tenant);
     if (route === "GET /people") {
-      return json({ state: record.state, names: record.names, devices: devicesOf(record, Date.now()) } satisfies PeopleView);
+      const nowMs = Date.now();
+      return json({ state: record.state, names: record.names, devices: devicesOf(record, nowMs),
+        ownerAccount: record.ownerAccount ?? null, ownerDevices: ownerDevicesOf(record, nowMs) } satisfies PeopleView);
     }
-    // The export carries who the people are and what they passed on, never a session's hash.
-    if (route === "GET /people/export") return json({ state: record.state, names: record.names });
+    // The export carries who the people are, the owner's linked account and what helpers passed on, never a session's
+    // hash.
+    if (route === "GET /people/export") {
+      return json({ state: record.state, names: record.names, ownerAccount: record.ownerAccount ?? null });
+    }
     return json({ error: "not_found" }, 404);
   }
   if (request.headers.get("x-people") !== "1") return json({ error: "forbidden" }, 403);
@@ -147,7 +184,9 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
     const before = readRecord(kv, tenant);
     const done = operation(before, body, nowMs);
     if (done.next) {
-      kv.put(key(tenant), { ...done.next, sessions: livingSessions(done.next.sessions, nowMs) } satisfies PeopleRecord);
+      const { ownerSessions } = done.next;
+      kv.put(key(tenant), { ...done.next, sessions: livingSessions(done.next.sessions, nowMs),
+        ...(ownerSessions ? { ownerSessions: livingSessions(ownerSessions, nowMs) } : {}) } satisfies PeopleRecord);
       const { record, missed } = done.audit ?? {};
       if (missed) auditPutSync(kv, tenant, record ?? null, missed);
     }
@@ -183,11 +222,17 @@ export function keptName(value: unknown): string | null {
   return name.length > 0 && [...name].length <= MAX_NAME && !/\p{Cc}/u.test(name) ? name : null;
 }
 
-/// A new helper session for `helperId`, from the hash, the id and the end the Worker chose.
-function newSession(body: Record<string, unknown>, helperId: string): { hash: string; session: HelperSession } | null {
+/// The hash, the id and the end the Worker chose for a new session, or null when they are not one.
+function sessionFields(body: Record<string, unknown>): { hash: string; sessionId: string; expiresAt: number } | null {
   const { tokenHash, sessionId, expiresAt } = body;
   if (typeof tokenHash !== "string" || !SHA256_HEX.test(tokenHash) || !text(sessionId) || !isTime(expiresAt)) return null;
-  return { hash: tokenHash, session: { sessionId, helperId, expiresAt } };
+  return { hash: tokenHash, sessionId, expiresAt };
+}
+
+/// A new helper session for `helperId`, from the hash, the id and the end the Worker chose.
+function newSession(body: Record<string, unknown>, helperId: string): { hash: string; session: HelperSession } | null {
+  const fields = sessionFields(body);
+  return fields ? { hash: fields.hash, session: { sessionId: fields.sessionId, helperId, expiresAt: fields.expiresAt } } : null;
 }
 
 const OPERATIONS: Readonly<Record<string, Operation>> = {
@@ -342,6 +387,76 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
       next: { ...record, state: rules.clearAway(record.state) },
       audit: entry(body.actor, SYSTEM, "away.cleared", { helperId: covering }),
     };
+  },
+
+  /// `{ accountId, subject, actor }`: the operator links the account the owner signs in with (docs/several-shops.md),
+  /// named by the code the owner sent them. A shop has one linked account at a time: another is refused until the
+  /// operator unlinks this one, and the same one again changes and records nothing.
+  "POST /people/link-owner": (record, body, nowMs) => {
+    if (!text(body.accountId) || !text(body.subject)) return refused(400, "invalid_request");
+    const current = record.ownerAccount;
+    if (current) {
+      return current.subject === body.subject ? { answer: { status: 200, body: { ownerAccount: current } } }
+        : refused(409, "already_linked");
+    }
+    const ownerAccount: OwnerAccount = { id: body.accountId, subject: body.subject, linkedAt: nowMs };
+    return {
+      answer: { status: 200, body: { ownerAccount } },
+      next: { ...record, ownerAccount },
+      audit: entry(body.actor, SYSTEM, "owner.linked", { ownerAccountId: ownerAccount.id }),
+    };
+  },
+
+  /// `{ actor }`: the operator unlinks the owner's account. Every one of its sessions still running ends in this same
+  /// write, so the account is signed out of this shop on every device at once. Nothing about another shop changes.
+  "POST /people/unlink-owner": (record, body, nowMs) => {
+    const current = record.ownerAccount;
+    if (!current) return refused(404, "not_linked");
+    let ended = 0;
+    const ownerSessions = Object.fromEntries(Object.entries(record.ownerSessions ?? {}).map(([hash, session]) => {
+      if (!ownerSessionLive(record, session, nowMs)) return [hash, session];
+      ended++;
+      return [hash, { ...session, endedAt: nowMs }];
+    }));
+    const { ownerAccount: _unlinked, ...rest } = record;
+    return {
+      // The subject goes back to the Worker only, which takes the shop out of that account's index (shops.ts).
+      answer: { status: 200, body: { unlinked: current.id, subject: current.subject, sessionsEnded: ended } },
+      next: { ...rest, ownerSessions },
+      audit: entry(body.actor, SYSTEM, "owner.unlinked", { ownerAccountId: current.id }),
+    };
+  },
+
+  /// `{ subject, sessionId, tokenHash, expiresAt }`: the linked account opens the shop on a device. Anyone else is not
+  /// this shop's owner, whatever they hold for another shop.
+  "POST /people/open-owner-session": (record, body) => {
+    const account = record.ownerAccount;
+    if (!text(body.subject) || !account || account.subject !== body.subject) return refused(403, "not_the_owner");
+    const fields = sessionFields(body);
+    if (!fields) return refused(400, "invalid_request");
+    const session: OwnerSession = { sessionId: fields.sessionId, accountId: account.id, expiresAt: fields.expiresAt };
+    return {
+      answer: { status: 200, body: { accountId: account.id } },
+      next: { ...record, ownerSessions: { ...(record.ownerSessions ?? {}), [fields.hash]: session } },
+      audit: entry({ kind: "owner", id: account.id }, SYSTEM, "owner.session_opened", { ownerAccountId: account.id }),
+    };
+  },
+
+  /// `{ tokenHash }`: whether an owner session still works, and whose it is. Reads only.
+  "POST /people/owner-session-check": (record, body, nowMs) => {
+    // Only a SHA-256 the record holds as its own key names a session: never a name every object inherits.
+    const hash = typeof body.tokenHash === "string" && SHA256_HEX.test(body.tokenHash) ? body.tokenHash : null;
+    const sessions = record.ownerSessions ?? {};
+    const session = hash !== null && Object.hasOwn(sessions, hash) ? sessions[hash] : undefined;
+    const unauthorized: OwnerSessionCheck = { ok: false, error: "unauthorized" };
+    if (!session) return { answer: { status: 200, body: unauthorized } };
+    if (session.endedAt !== undefined) {
+      const unlinked: OwnerSessionCheck = { ok: false, error: "unlinked", unlinkedAt: session.endedAt };
+      return { answer: { status: 200, body: unlinked } };
+    }
+    if (!ownerSessionLive(record, session, nowMs)) return { answer: { status: 200, body: unauthorized } };
+    const live: OwnerSessionCheck = { ok: true, accountId: session.accountId, sessionId: session.sessionId };
+    return { answer: { status: 200, body: live } };
   },
 };
 

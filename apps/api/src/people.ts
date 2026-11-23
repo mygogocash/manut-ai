@@ -7,11 +7,14 @@
 /// - A helper's own two routes, which need a signed-in session of the lifted auth: joining through an invite, and opening
 ///   the shop on another device. Each gives that device a helper session for the one shop.
 /// - `callerOf`, who is calling the shop's approval routes (approvals.ts): the shop's own session is its owner, a helper
-///   session is a helper of the shop it names. The role is never read from a request.
+///   session is a helper of the shop it names, and an owner session is the owner of the shop it names. The role is never
+///   read from a request.
 ///
 /// A helper session is a bearer token, `mhs1.<shop, base64url>.<64 hex characters>`. The shop's record keeps only its
 /// SHA-256. The lifted AuthObject has no record of it, so every lifted session route answers 401 to it: a helper can
-/// never act as the shop. Nothing here sends anything: an invite is a link the operator copies (LINE and email are parked).
+/// never act as the shop. An owner session (docs/several-shops.md) is the same shape under `mos1.`, given to the account
+/// the operator linked to the shop as its owner, and kept the same way under that account. Nothing here sends anything:
+/// an invite is a link the operator copies (LINE and email are parked).
 
 import { coverAt, type Identity, type Invite, type PeopleState } from "@manut/people-rules";
 import { mintInviteToken, openInviteToken } from "./approval-link";
@@ -20,8 +23,9 @@ import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { operatorIdentity } from "./pilot";
-import { keptIdentity, keptName, type PeopleView, type SessionCheck } from "./people-store";
+import { keptIdentity, keptName, type OwnerSessionCheck, type PeopleView, type SessionCheck } from "./people-store";
 import type { PilotShopRecord } from "./pilot-store";
+import { indexShop } from "./shops-store";
 import { authCall, tenantCall, type TenantDataEnv } from "./tenant-data";
 
 export type PeopleEnv = Pick<TenantDataEnv, "AUTH" | "TENANT"> & {
@@ -34,10 +38,13 @@ export type PeopleEnv = Pick<TenantDataEnv, "AUTH" | "TENANT"> & {
 };
 
 const MAX_BODY_BYTES = 16 * 1024;
-/// How long a helper session lasts. There is no refresh: the helper opens the shop again with their signed-in session,
-/// which the lifted auth keeps alive for up to 90 days. Removal ends a session at once, whatever is left of it.
+/// How long a helper session lasts, and an owner session as well. There is no refresh: the person opens the shop again
+/// with their signed-in session, which the lifted auth keeps alive for up to 90 days. Removal, or unlinking the owner's
+/// account, ends a session at once, whatever is left of it.
 export const HELPER_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 const HELPER_TOKEN = /^mhs1\.([A-Za-z0-9_-]{1,512})\.([0-9a-f]{64})$/;
+/// An owner session: the same shape under its own prefix, so the token says which of the shop's records holds it.
+const OWNER_TOKEN = /^mos1\.([A-Za-z0-9_-]{1,512})\.([0-9a-f]{64})$/;
 /// What the shop's object answers to a change it understood: the change, or a refusal of the rules'. Anything else is
 /// the object failing, and is not passed on as if it were an answer.
 const ANSWERED = new Set([200, 400, 403, 404, 409]);
@@ -59,7 +66,7 @@ export function hasExactly(value: Record<string, unknown>, keys: readonly string
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
-function bearer(request: Request): string {
+export function bearer(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
 }
@@ -108,9 +115,13 @@ function usableSecret(secret: string | undefined): secret is string {
 // Who is calling
 // ---------------------------------------------------------------------------
 
+/// A person signed in with the lifted auth: their tenant, which is the verified provider subject, and the email Apple
+/// verified when the session has one.
+export type SignedInPerson = { tenant: string; email?: string };
+
 /// Who is signed in with the lifted auth: the tenant, and the email Apple verified when the session has one
-/// (auth-object.ts). Null for no session, an ended one, and the operator key, which is never a session.
-async function signedInPerson(token: string, env: PeopleEnv): Promise<{ tenant: string; email?: string } | null> {
+/// (auth-object.ts). Null for no session, an ended one, a shop session and the operator key, which is never a session.
+export async function signedInPerson(token: string, env: PeopleEnv): Promise<SignedInPerson | null> {
   if (!token || (env.CLOUD_API_KEY && timingSafeEqual(token, env.CLOUD_API_KEY))) return null;
   const response = await authCall(env, "/verify", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ token }) });
@@ -126,31 +137,37 @@ function accountOf(person: { email?: string }): Identity | null {
   return person.email ? { kind: "email", address: person.email } : null;
 }
 
-function mintHelperToken(shop: string): string {
+/// A new shop session token for `shop`: a helper's under `mhs1`, an owner's under `mos1`.
+function mintToken(prefix: "mhs1" | "mos1", shop: string): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return `mhs1.${base64url(shop)}.${[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  return `${prefix}.${base64url(shop)}.${[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/// The shop a helper token names, or null when the token is not one. Naming a shop proves nothing: only that shop's
-/// record holding the token's hash does.
-function helperTokenShop(token: string): string | null {
-  const match = HELPER_TOKEN.exec(token);
+/// The shop a shop session token of `pattern`'s kind names, or null when the token is not one. Naming a shop proves
+/// nothing: only that shop's record holding the token's hash does.
+function tokenShop(pattern: RegExp, token: string): string | null {
+  const match = pattern.exec(token);
   const shop = match?.[1] ? fromBase64url(match[1]) : null;
   return shop !== null && isValidTenant(shop) ? shop : null;
 }
 
 /// Who is calling the shop's approval routes. The role comes from the credential alone:
+/// - an owner session is the `owner` of the shop it names, while that shop's record holds it under the account linked
+///   now, unended and unexpired (docs/several-shops.md); the decision names that account (`accountId`);
 /// - a helper session is a `helper` of the shop it names, while that shop's record holds it, unended and unexpired;
 /// - any other bearer is the lifted auth's session, whose tenant is the shop and its `owner` (the shop's own session).
 export type Caller =
-  | { role: "owner"; shop: string }
+  | { role: "owner"; shop: string; accountId?: string }
   | { role: "helper"; shop: string; helperId: string; name: string };
 
-/// The caller, or the refusal to send: 401 `unauthorized` for no session, and 401 `removed` with the time for a session
-/// whose helper the owner removed, so their app can say so.
+/// The caller, or the refusal to send: 401 `unauthorized` for no session, 401 `removed` with the time for a session
+/// whose helper the owner removed, and 401 `unlinked` with the time for an owner session whose account the operator
+/// unlinked, so the app can say which.
 export async function callerOf(request: Request, env: PeopleEnv): Promise<Caller | Response> {
   const token = bearer(request);
-  const shop = helperTokenShop(token);
+  const owned = tokenShop(OWNER_TOKEN, token);
+  if (owned !== null) return ownerCallerOf(env, owned, token);
+  const shop = tokenShop(HELPER_TOKEN, token);
   if (shop !== null) {
     const checked = await peopleCall(env, shop, "/people/session-check", { tokenHash: await sha256Hex(token) })
       .catch(() => null);
@@ -164,11 +181,23 @@ export async function callerOf(request: Request, env: PeopleEnv): Promise<Caller
   return person ? { role: "owner", shop: person.tenant } : json({ error: "unauthorized" }, 401);
 }
 
+/// The owner of `shop`, for an owner session the shop's record holds under its linked account, or the refusal to send.
+async function ownerCallerOf(env: PeopleEnv, shop: string, token: string): Promise<Caller | Response> {
+  const checked = await peopleCall(env, shop, "/people/owner-session-check", { tokenHash: await sha256Hex(token) })
+    .catch(() => null);
+  if (!checked?.ok) return json({ error: "people_unavailable" }, 503);
+  const session = (await checked.json()) as OwnerSessionCheck;
+  if (session.ok) return { role: "owner", shop, accountId: session.accountId };
+  if (session.error === "unlinked") return json({ error: "unlinked", unlinkedAt: iso(session.unlinkedAt) }, 401);
+  return json({ error: "unauthorized" }, 401);
+}
+
 // ---------------------------------------------------------------------------
 // The shop's record
 // ---------------------------------------------------------------------------
 
-function peopleCall(env: Pick<TenantDataEnv, "TENANT">, tenant: string, path: string, body: Record<string, unknown>) {
+/// A change to the shop's people record, with the Worker's `x-people` header (people-store.ts).
+export function peopleCall(env: Pick<TenantDataEnv, "TENANT">, tenant: string, path: string, body: Record<string, unknown>) {
   return tenantCall(env, tenant, path, { method: "POST", headers: { "content-type": "application/json", "x-people": "1" },
     body: JSON.stringify({ tenant, ...body }) });
 }
@@ -189,7 +218,7 @@ export async function readPeople(env: Pick<TenantDataEnv, "TENANT">, tenant: str
 
 /// The pilot shop, or null when the tenant is not one. Throws when the shop's object cannot be read, so no route takes
 /// a failed read for a missing shop.
-async function readShop(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<PilotShopRecord | null> {
+export async function readShop(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<PilotShopRecord | null> {
   const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
   if (response.status === 404) {
     await response.body?.cancel();
@@ -233,11 +262,12 @@ function awayView(state: PeopleState, names: Record<string, string>, nowMs: numb
     inForce: coverAt(state, nowMs) !== null };
 }
 
-/// `GET /v1/admin/people`: the owner, every helper with how many devices they have open, every invite (a pending one
-/// with its link to copy), the cover, the notes helpers passed on, and the helpers who were removed, by name, so what
-/// they did can still be read with their name.
+/// `GET /v1/admin/people`: the owner, with the account the operator linked and how many devices have it open, every
+/// helper with how many devices they have open, every invite (a pending one with its link to copy), the cover, the notes
+/// helpers passed on, and the helpers who were removed, by name, so what they did can still be read with their name.
+/// The owner's account is shown by its link's id, never by the subject it signs in as.
 async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleView) {
-  const { state, names, devices } = view;
+  const { state, names, devices, ownerAccount } = view;
   const nowMs = Date.now();
   const invites = await Promise.all(state.invites.map(async (invite) => {
     const shown = inviteView(invite, names[invite.id] ?? "", nowMs);
@@ -246,7 +276,8 @@ async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleVie
   }));
   return {
     tenant: shop.tenant,
-    owner: { name: shop.ownerName },
+    owner: { name: shop.ownerName, account: ownerAccount ? { id: ownerAccount.id, linkedAt: iso(ownerAccount.linkedAt),
+      devices: view.ownerDevices } : null },
     helpers: state.helpers.map((helper) => ({ id: helper.id, name: names[helper.id] ?? "", identity: helper.identity,
       joinedAt: iso(helper.joinedAt), devices: devices[helper.id] ?? 0 })),
     invites,
@@ -362,11 +393,12 @@ async function createInvite(env: PeopleEnv, shop: PilotShopRecord, body: Record<
   return json({ invite: inviteView(invite, name, Date.now()), inviteUrl: await inviteUrl(env, shop.tenant, invite) });
 }
 
-/// A helper session for `shop`: the token for the device, its hash for the shop's record, and its end.
-async function newSession(shop: string) {
-  const accessToken = mintHelperToken(shop);
-  return { accessToken, tokenHash: await sha256Hex(accessToken), sessionId: `hs-${crypto.randomUUID()}`,
-    expiresAt: Date.now() + HELPER_SESSION_TTL_MS };
+/// A shop session for `shop`, a helper's unless `prefix` says an owner's: the token for the device, its hash for the
+/// shop's record, and its end.
+async function newSession(shop: string, prefix: "mhs1" | "mos1" = "mhs1") {
+  const accessToken = mintToken(prefix, shop);
+  return { accessToken, tokenHash: await sha256Hex(accessToken),
+    sessionId: `${prefix === "mos1" ? "os" : "hs"}-${crypto.randomUUID()}`, expiresAt: Date.now() + HELPER_SESSION_TTL_MS };
 }
 
 /// The session a device is given, as it is sent: the token once, and its end.
@@ -411,6 +443,9 @@ async function acceptInvite(request: Request, env: PeopleEnv): Promise<Response>
     }
     const answer = (await response.json()) as { answer: string; helperId?: string; name?: string; invitedOn?: string };
     if (answer.answer === "joined") {
+      // The shop goes into the person's index, so their other devices find it (docs/several-shops.md). Best effort: the
+      // join stands either way, and opening the shop again writes the row.
+      if (answer.helperId) await indexShop(env, asked.person.tenant, { shop: shop.tenant, role: "helper", ref: answer.helperId });
       return json({ answer: "joined", shop: { id: shop.tenant, name: shop.name, ownerName: shop.ownerName },
         helper: { id: answer.helperId, name: answer.name }, session: sessionOf(session) });
     }
@@ -433,23 +468,50 @@ async function openSession(request: Request, env: PeopleEnv): Promise<Response> 
   try {
     const shop = await readShop(env, asked.value);
     if (!shop) return json({ error: "not_a_helper" }, 403);
-    const session = await newSession(shop.tenant);
-    const response = await peopleCall(env, shop.tenant, "/people/open-session", { account: accountOf(asked.person),
-      sessionId: session.sessionId, tokenHash: session.tokenHash, expiresAt: session.expiresAt });
-    if (response.status === 403) {
-      await response.body?.cancel();
-      return json({ error: "not_a_helper" }, 403);
-    }
-    if (!response.ok) {
-      await response.body?.cancel();
-      return json({ error: "people_unavailable" }, 503);
-    }
-    const helper = (await response.json()) as { helperId: string; name: string };
-    return json({ shop: { id: shop.tenant, name: shop.name, ownerName: shop.ownerName },
-      helper: { id: helper.helperId, name: helper.name }, session: sessionOf(session) });
+    const opened = await openHelperSession(env, asked.person, shop.tenant);
+    if (opened === "not_a_helper") return json({ error: "not_a_helper" }, 403);
+    if (!opened) return json({ error: "people_unavailable" }, 503);
+    return json({ shop: { id: shop.tenant, name: shop.name, ownerName: shop.ownerName }, ...opened });
   } catch {
     return json({ error: "people_unavailable" }, 503);
   }
+}
+
+type DeviceSession = { accessToken: string; expiresAt: string };
+
+/// A helper session of `shop` for `person`, as the identity they joined with: the helper and the session to send the
+/// device, `not_a_helper` for anyone else, or null when the shop's record cannot be reached. The shop goes into the
+/// person's index too, so their other devices find it (docs/several-shops.md).
+export async function openHelperSession(env: PeopleEnv, person: SignedInPerson, shop: string):
+  Promise<{ helper: { id: string; name: string }; session: DeviceSession } | "not_a_helper" | null> {
+  const session = await newSession(shop);
+  const response = await peopleCall(env, shop, "/people/open-session", { account: accountOf(person),
+    sessionId: session.sessionId, tokenHash: session.tokenHash, expiresAt: session.expiresAt });
+  if (!response.ok) {
+    await response.body?.cancel();
+    return response.status === 403 ? "not_a_helper" : null;
+  }
+  const helper = (await response.json()) as { helperId: string; name: string };
+  await indexShop(env, person.tenant, { shop, role: "helper", ref: helper.helperId });
+  return { helper: { id: helper.helperId, name: helper.name }, session: sessionOf(session) };
+}
+
+/// An owner session of `shop` for `person`, while their account is the one the operator linked to the shop
+/// (docs/several-shops.md): the account and the session to send the device, `not_the_owner` for anyone else, or null
+/// when the shop's record cannot be reached. The shop goes into the person's index again, which mends a row a failed
+/// write left out.
+export async function openOwnerSession(env: PeopleEnv, person: SignedInPerson, shop: string):
+  Promise<{ account: { id: string }; session: DeviceSession } | "not_the_owner" | null> {
+  const session = await newSession(shop, "mos1");
+  const response = await peopleCall(env, shop, "/people/open-owner-session", { subject: person.tenant,
+    sessionId: session.sessionId, tokenHash: session.tokenHash, expiresAt: session.expiresAt });
+  if (!response.ok) {
+    await response.body?.cancel();
+    return response.status === 403 ? "not_the_owner" : null;
+  }
+  const { accountId } = (await response.json()) as { accountId: string };
+  await indexShop(env, person.tenant, { shop, role: "owner", ref: accountId });
+  return { account: { id: accountId }, session: sessionOf(session) };
 }
 
 /// A helper passes a request on to the owner with a note (`@manut/people-rules`' `passOn`), from the facts of the request

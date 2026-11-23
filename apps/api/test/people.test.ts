@@ -470,8 +470,10 @@ describe("the shop's export and deletion", () => {
     const helper = await joinHelper(shop, "Mint");
     const exported = await tenantExport(bindings, shop.tenant);
     expect(exported.status).toBe(200);
-    const body = (await exported.json()) as { people?: { state: { helpers: { id: string }[] }; names: unknown } };
-    expect(Object.keys(body.people ?? {}).sort()).toEqual(["names", "state"]);
+    const body = (await exported.json()) as { people?: { state: { helpers: { id: string }[] }; names: unknown;
+      ownerAccount: unknown } };
+    expect(Object.keys(body.people ?? {}).sort()).toEqual(["names", "ownerAccount", "state"]);
+    expect(body.people?.ownerAccount).toBeNull();
     expect(body.people?.state.helpers.map((one) => one.id)).toEqual([helper.id]);
     expect(body.people?.names).toEqual({ [helper.id]: "Mint", [(await people(shop)).invites[0]!.id]: "Mint" });
     const secret = helper.headers.authorization.split(".")[2]!;
