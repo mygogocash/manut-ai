@@ -62,6 +62,14 @@ export async function tenantCall(
 /// indexes before creating, so the index can hold ids of tasks that never
 /// came to exist.
 export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<Response> {
+  const response = await assembleExport(env, tenant);
+  // The export holds customers' words, their LINE display names, what the team knows and its drafts, so no
+  // browser or proxy may keep a copy of it, whatever it answers: the whole export, an incomplete one or a deletion.
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
+
+async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Response> {
   const headers = new Headers();
   headers.set("x-tenant", tenant);
   const query = `tenant=${encodeURIComponent(tenant)}`;
