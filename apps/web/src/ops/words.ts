@@ -1239,6 +1239,6 @@ export const shopsWords = {
   },
   spendOf: (spentSatang: number, capSatang: number) => `${moneyText(spentSatang)} of ${moneyText(capSatang)}`,
   /// The pages a shop's row opens, in the order its links are laid out.
-  open: { shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", model: "Model spend" },
+  open: { shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", people: "People", model: "Model spend" },
   openLabel: (page: string, shop: string) => `${page} for ${shop}`,
 } as const;

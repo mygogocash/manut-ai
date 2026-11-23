@@ -121,6 +121,12 @@ describe("the Shops overview", () => {
     expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("shop_sabaitea");
 
     await openOverview();
+    fireEvent.click(screen.getByRole("button", { name: "People for Baan Mali" }));
+    expect(await screen.findByRole("heading", { name: "People" })).toBeTruthy();
+    expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("shop_baanmali");
+    await screen.findByRole("list", { name: "Baan Mali's people" });
+
+    await openOverview();
     fireEvent.click(screen.getByRole("button", { name: "Model spend for Baan Mali" }));
     expect(await screen.findByRole("heading", { name: "Model spend" })).toBeTruthy();
     expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("shop_baanmali");
@@ -271,7 +277,7 @@ describe("the Shops overview", () => {
   it("offers nothing that sends: the controls are Refresh and one link to each page of each shop", async () => {
     const { container } = renderWithApi(<ShopsView shops={SHOPS} onOpen={noop} onForget={noop} />, reads());
     await screen.findByRole("table", { name: "Every shop" });
-    const pages = ["Messages", "Drafts", "Audit", "Memory", "Model spend"];
+    const pages = ["Messages", "Drafts", "Audit", "Memory", "People", "Model spend"];
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Refresh", ...pages, ...pages]);
     expect(screen.queryByRole("button", { name: /send|post|publish|approve|propose|reply/i })).toBeNull();
     expect(container.querySelector("form, textarea, input, select")).toBeNull();
@@ -285,7 +291,9 @@ describe("the Shops overview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Messages for Baan Mali" }));
     fireEvent.click(screen.getByRole("button", { name: "Drafts for Baan Mali" }));
     fireEvent.click(screen.getByRole("button", { name: "Memory for Sabai Tea" }));
+    fireEvent.click(screen.getByRole("button", { name: "People for Sabai Tea" }));
     fireEvent.click(screen.getByRole("button", { name: "Model spend for Sabai Tea" }));
-    expect(onOpen.mock.calls).toEqual([["t2", "audit"], ["t1", "shop"], ["t1", "drafts"], ["t2", "memory"], ["t2", "model"]]);
+    expect(onOpen.mock.calls).toEqual([["t2", "audit"], ["t1", "shop"], ["t1", "drafts"], ["t2", "memory"], ["t2", "people"],
+      ["t2", "model"]]);
   });
 });

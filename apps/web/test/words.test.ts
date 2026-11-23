@@ -860,7 +860,7 @@ describe("the shops overview's words", () => {
     expect(shopsWords.spendOf(0, 20000)).toBe("฿0 of ฿200");
     expect(shopsWords.spendOf(5, 20000)).toBe("฿0.05 of ฿200");
     expect(shopsWords.openLabel("Audit", "Baan Mali")).toBe("Audit for Baan Mali");
-    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "Model spend"]);
+    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend"]);
   });
 
   it("says why nothing is shown for the trial, payment and activity when the gate could not be read", () => {
