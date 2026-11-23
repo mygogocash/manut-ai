@@ -45,6 +45,8 @@ export const WRITE_OPS = [
   "accounts.remove",
   "accounts.label",
   "accounts.discard",
+  "team.pause",
+  "team.resume",
 ] as const;
 
 
