@@ -72,6 +72,15 @@
 .home .askin::placeholder {
   color: var(--aui-placeholder);
 }
+/* The box's name, for screen readers only. sidebar.css has the same rule for the whole window; Home keeps its own copy
+   so that its label never shows where the menu's sheet is not loaded. */
+.home .vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .home .askrow {
   display: flex;
   flex-wrap: wrap;
@@ -231,25 +240,45 @@
   margin: 0;
   font: inherit;
 }
-/* An approval's exact action, set as its chat card sets it: in the mono face, wrapped, never cut. */
+/* The desktop's own: an approval's exact action, set as its chat card sets its command (cards.css .card-cmd): a
+   block in the mono face, wrapped and never cut, scrolling past 160px. Its ground is --soft, because the card's
+   --bg is the page's own ground here. */
 .home .act {
   display: block;
-  margin: 2px 0;
-  font-family: var(--aui-font-mono);
-  font-size: 12.5px;
+  margin: 4px 0;
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: var(--rad-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
 }
+/* The desktop's own: why an Approve or an ask did not go, in the card's error colour. On a row it takes a line of its
+   own; under the box it lines up with the field's text. */
 .home .err {
-  flex-basis: 100%;
   color: var(--aui-danger);
   font-size: 13px;
+}
+.home .rowl .err {
+  flex-basis: 100%;
+}
+.home .ask .err {
+  padding: 0 8px 2px;
 }
 .home .tag.ok .ic {
   width: 14px;
   height: 14px;
 }
-/* The desktop's own: the empty Needs you's heading is an h3 here, under the band's h2, in the empty state's type. */
+/* The empty Needs you, as the canvas's first-day Home pads it (HomeEmpty.dc.html). Its heading is the desktop's own: an
+   h3 here, under the band's h2, in the empty state's type. */
+.home .empty {
+  padding: 20px;
+}
 .home .empty h3 {
   margin: 4px 0 0;
   font-size: 15px;

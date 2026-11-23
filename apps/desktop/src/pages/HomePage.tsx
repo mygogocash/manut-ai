@@ -81,6 +81,8 @@ export interface HomeViewProps {
   onMode: (mode: HomeMode) => void;
   onText: (text: string) => void;
   onSubmit: () => void;
+  /** why the last ask did not go (the store's error); the box keeps its words */
+  sendError?: string | null;
   /** a suggestion was picked: its words go into the box, and nothing is sent until Send */
   onChip: (words: string) => void;
   inputRef?: Ref<HTMLInputElement>;
@@ -175,6 +177,11 @@ export function HomeView(p: HomeViewProps) {
               <SendGlyph />
             </button>
           </div>
+          {p.sendError && (
+            <p className="err" role="alert" data-testid="home-send-error">
+              {t("card.notSent", { error: p.sendError })}
+            </p>
+          )}
         </form>
         <div className="wide sugg">
           <p className="sugg-h" id="home-sugg">
@@ -359,6 +366,7 @@ export function HomePage() {
   const mode = modes.includes(picked) ? picked : FIRST_MODE;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [done, setDone] = useState<DoneHere[]>([]);
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
   const input = useRef<HTMLInputElement>(null);
@@ -371,10 +379,16 @@ export function HomePage() {
     const words = text.trim();
     if (!words || !route || sending) return;
     setSending(true);
+    setSendError(null);
+    // The store reports a failed request only through lastError: clear it, then look after the call, as the model
+    // picker does.
+    const store = getStore();
+    store.dispatch({ type: "error", message: null });
     const sent = await sendAsk(s, route, words);
     setSending(false);
-    // A thread that could not be made leaves the words in the box, and the store says why.
+    // A thread that could not be made leaves the words in the box, with the store's reason under it.
     if (sent) setText("");
+    else setSendError(store.getState().lastError || t("card.notTaken"));
   };
 
   const approve = async (a: Ask) => {
@@ -396,8 +410,12 @@ export function HomePage() {
         setPicked(m);
         input.current?.focus();
       }}
-      onText={setText}
+      onText={(words) => {
+        setText(words);
+        setSendError(null);
+      }}
       onSubmit={() => void submit()}
+      sendError={sendError}
       onChip={(words) => {
         setText(words);
         input.current?.focus();

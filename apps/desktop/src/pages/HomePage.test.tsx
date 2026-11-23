@@ -94,6 +94,13 @@ describe("Home's ask box", () => {
     expect(count(code, 'data-testid="home-chip"')).toBe(4);
   });
 
+  it("says why an ask did not go, under the box that still holds its words", () => {
+    const html = draw({ text: "Translate a message", sendError: "Kit is not connected" });
+    expect(html).toContain('value="Translate a message"');
+    expect(html).toMatch(/role="alert"[^>]*data-testid="home-send-error"[^>]*>Not sent · Kit is not connected</);
+    expect(draw()).not.toContain('data-testid="home-send-error"');
+  });
+
   it("offers only the modes it is given, and lets Send go once there is someone to send to and words to send", () => {
     const html = draw({ modes: ["chat", "team"] });
     expect(html).not.toContain('data-testid="home-mode-code"');
