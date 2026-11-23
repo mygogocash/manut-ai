@@ -1,12 +1,12 @@
 // Split zoom follows focus (kasaterm "칸 머리 조작": the zoom moves with the keyboard; typing never goes to a hidden
 // pane). Zoomed (⌘⇧↩), every way the keyboard moves to another pane of the split shows that pane, still zoomed: ⌘] /
-// ⌘[ (Ctrl+Tab / Ctrl+Shift+Tab off macOS), ⌘⌥arrows, a click on that session's sidebar row, a click on its system
+// ⌘[ (Ctrl+Tab / Ctrl+Shift+Tab off macOS), ⌘⌥arrows, a click on that session's row on the Code page, a click on its system
 // notification. Splitting, closing or moving a pane while zoomed shows every pane again (tmux).
 // Off macOS: MANUT_E2E_PLATFORM=Win32.
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
-import { dragRowOnto, type Side } from "./split-drag-helpers";
+import { splitBeside, type Side } from "./split-drag-helpers";
 
 type Sessions = { startTerminal(a: string, cwd: string): string; ptyOf(id: string): number | null };
 type Call = { op: string; id?: number; data?: string };
@@ -20,6 +20,13 @@ const term = (page: Page, id: string) => page.locator(`[data-testid="terminal"][
 const textarea = (page: Page, id: string) => term(page, id).locator(".xterm-helper-textarea");
 const split = (page: Page) => page.getByTestId("session-split");
 const focusedTerm = (page: Page) => page.evaluate(() => document.activeElement?.closest('[data-testid="terminal"]')?.getAttribute("data-session") ?? null);
+/** The session the app has in view: what the Code page's row marks `active`. That list is not on screen while a split
+ *  fills the main column, so the mark is read from the store the row reads it from. */
+const uiSession = (page: Page) =>
+  page.evaluate(async () => {
+    const m = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { getState(): { ui: { session: string | null } } } };
+    return m.getStore().getState().ui.session;
+  });
 /** the session ids of the panes drawn now */
 const shown = (page: Page) => page.locator('[data-testid="split-pane"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-session")));
 const writesTo = (page: Page, pty: number) =>
@@ -52,9 +59,11 @@ async function sessions(page: Page, folders: string[]): Promise<string[]> {
   return ids;
 }
 
-/** `pick`'s TERMINALS row dragged onto the `side` part of `from`'s pane; `pick` has the keyboard. */
+/** `pick` in a new pane on the `side` of `from`'s pane; `pick` has the keyboard. A row can no longer be dragged onto an
+ *  open terminal (the list is on the Code page, which replaces the terminal in the main column), and what these specs
+ *  test is the zoom, not the drop, so the split is made by the store action the drop calls (`splitBeside`). */
 async function splitWith(page: Page, from: string, side: Side, pick: string) {
-  await dragRowOnto(page, pick, from, side);
+  await splitBeside(page, from, pick, side);
   await expect.poll(() => focusedTerm(page)).toBe(pick);
 }
 
@@ -93,7 +102,7 @@ test("zoomed: ⌘] / ⌘[ and ⌘⌥arrows move the zoom to the new pane, and ty
   // ⌘] (next, wrapping): a, zoomed
   await page.keyboard.press(k.next);
   await expectZoomedOn(page, a);
-  await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
+  await expect.poll(() => uiSession(page)).toBe(a);
   // typing goes to a's program, nothing to the hidden panes
   const [pa, pb, pc] = [await ptyOf(page, a), await ptyOf(page, b), await ptyOf(page, c)];
   await page.keyboard.type("echo za");
@@ -122,7 +131,7 @@ test("zoomed: ⌘] / ⌘[ and ⌘⌥arrows move the zoom to the new pane, and ty
   for (const p of [pa, pb, pc]) expect(await writesTo(page, p)).not.toMatch(/\x1b\[|\t/);
 });
 
-test("zoomed: a click on another pane's sidebar row, or on its notification, shows that pane zoomed with the keyboard", async ({ page }) => {
+test("zoomed: a click on another pane's row on the Code page, or on its notification, shows that pane zoomed with the keyboard", async ({ page }) => {
   await page.addInitScript(() => {
     const w = window as unknown as { __notes: { title: string; n: { onclick: null | (() => void) } }[]; Notification: unknown };
     w.__notes = [];
@@ -141,7 +150,7 @@ test("zoomed: a click on another pane's sidebar row, or on its notification, sho
   const [a, b, c] = ids;
   await page.keyboard.press(k.zoom);
   await expectZoomedOn(page, c);
-  // the sidebar row of a (a pane of this split)
+  // the Code page's row of a (a pane of this split)
   await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expectZoomedOn(page, a);
@@ -187,7 +196,7 @@ test("zoomed: splitting, closing the zoomed pane or moving it shows every pane a
   await expect.poll(async () => writesTo(page, await ptyOf(page, heir!))).toContain("heir");
   // move the zoomed pane: unzoomed, it keeps the keyboard
   await term(page, a).click();
-  await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
+  await expect.poll(() => uiSession(page)).toBe(a);
   await expect.poll(() => focusedTerm(page)).toBe(a);
   await page.keyboard.press(k.zoom);
   await expectZoomedOn(page, a);
@@ -195,7 +204,8 @@ test("zoomed: splitting, closing the zoomed pane or moving it shows every pane a
   await expect(split(page)).toHaveAttribute("data-zoom", "false");
   await expect(page.getByTestId("terminal")).toHaveCount(3);
   await expect.poll(() => focusedTerm(page)).toBe(a);
-  // the closed pane's session is still listed
+  // the closed pane's session is still listed (on the Code page, where the list is now)
+  await openCode(page);
   await expect(page.getByTestId(`session-${d}`)).toHaveCount(1);
   void b;
 });

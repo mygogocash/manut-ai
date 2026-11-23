@@ -1,6 +1,7 @@
 // The verifier's Tasks probes on PR #2908 (missing gh, repository attacks, terminal here, a 50 KB body, and a
 // token-like string in an issue: masked in the list, the drawer, the error line and Start in thread's text).
 import {test,expect,type Page} from '@playwright/test';
+import {chatOpen,openCode,openThread} from './start';
 const PORT=Number(process.env.MANUT_MOCK_PORT||5308);
 const REPO='rlaope/oh-my-hermes', CWD='/home/you/code/oh-my-hermes';
 async function mock(op:string,params:Record<string,unknown>={}) { const ws=new WebSocket(`ws://127.0.0.1:${PORT}/?token=e2e`); await new Promise<void>((r,j)=>{ws.onopen=()=>r();ws.onerror=()=>j(Error('ws'));}); const out=await new Promise<any>(r=>{ws.onmessage=m=>{const x=JSON.parse(String(m.data));if(x.id==='v7')r(x);};ws.send(JSON.stringify({id:'v7',op,...params}));});ws.close();expect(out.ok).toBe(true);return out.result; }
@@ -11,8 +12,9 @@ async function setup(page:Page, opts:{missing?:boolean,body?:string,title?:strin
  const row={number:1,title:opts.title||'Independent probe',state:'open',url:`https://github.com/${repo}/issues/1`,labels:[],author:'tester',created:1700000000,updated:1700000000,checks:null};
  (window as any).__manutTasks={status:{github:{installed:!opts.missing,signed_in:!opts.missing}},items:{[`github:${repo}:issues`]:[row]},details:{[`github:${repo}:issues:1`]:{body:opts.body||'body',comments:[{author:'p',body:opts.body||'c',created:1700000000}],checks:[]}},remotes:{[cwd]:{source:'github',repo}},errors:opts.error?{[`github:${repo}`]:opts.error}:{}};
  },{repo:REPO,cwd:CWD,opts});
- await page.goto('/');await expect(page.getByTestId('bot-kami')).toBeVisible();await page.getByTestId('bot-kami').click();
- await page.locator('[role="treeitem"][aria-level="2"]',{hasText:'Verify7 folder'}).click();
+ // the thread's folder is the page's context: opened from History (the thread trees left with the sidebar), and the
+ // Tasks row's marks are on the Code page now
+ await page.goto('/');await chatOpen(page);await openThread(page,'Verify7 folder');await openCode(page);
  await page.getByTestId('tasks-bar-github').click();
 }
 test('independent missing gh and malformed repositories',async({page})=>{

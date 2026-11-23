@@ -7,11 +7,14 @@
 // 4. the account chips filter to one account; group by repository;
 // 5. keys: j / k move, Enter opens the drawer (read as that row's account), o opens the browser;
 // 6. one account failing ("sign in again") leaves the other's rows; GitHub's rate limit shows "try again soon";
-// 7. the sidebar's Tasks row counts the review requests of the shown accounts.
+// 7. the Tasks row counts the review requests of the shown accounts.
+// The Tasks row is on the Code page now, where the sidebar's row was, and the Tasks page replaces Code in the main
+// column. So each spec opens Code before it presses the row, and the row's badge is read on Code (`badge` below).
 // Shots (MANUT_SHOTS=<dir>): tasks-me-dark, tasks-me-light, accounts-github.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -120,7 +123,18 @@ async function setup(page: Page, opts: { chosen?: boolean; scope?: "me" | "repo"
     [opts.theme ?? "dark", tasks, saved] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(page);
+  await openCode(page);
+}
+
+/** The Tasks row's review badge (`null`: none), read where it is. The row is on the Code page, which the Tasks page
+ *  replaces, so this opens Code, reads the badge, and goes back to the Tasks page, which keeps its scope and chips. */
+async function badge(page: Page, count: string | null) {
+  await openCode(page);
+  if (count === null) await expect(page.getByTestId("tasks-badge")).toHaveCount(0);
+  else await expect(page.getByTestId("tasks-badge")).toHaveText(count);
+  await page.getByTestId("tasks-open").click();
+  await expect(page.getByTestId("tasks-page")).toBeVisible();
 }
 
 const taskCalls = (page: Page) => page.evaluate(() => ((window as unknown as { __manutTaskCalls?: any[] }).__manutTaskCalls ?? []));
@@ -152,7 +166,7 @@ test("with no GitHub account chosen, 나 shows one Connect GitHub button that op
   await page.getByTestId("tasks-scope-me").click();
   await expect(page.getByTestId("me-connect")).toBeVisible();
   await expect(page.getByTestId("me-connect").getByRole("button")).toHaveCount(1);
-  await expect(page.getByTestId("tasks-badge")).toHaveCount(0);
+  await badge(page, null);
   await page.getByTestId("me-connect-btn").click();
   await expect(page.getByTestId("accounts-page")).toBeVisible();
   await expect(page.getByTestId("accounts-github")).toBeVisible();
@@ -193,7 +207,7 @@ test("Settings › Accounts › GitHub adds gh's accounts and runs gh's own sign
   expect(writes.map((w: any) => w.data).join("")).toBe("\r");
 });
 
-test("the scope toggle, both accounts' rows sorted by attention, chips and the sidebar badge", async ({ page }) => {
+test("the scope toggle, both accounts' rows sorted by attention, chips and the Tasks row's badge", async ({ page }) => {
   await setup(page, { scope: "repo" });
   await page.getByTestId("tasks-open").click();
   await expect(page.getByTestId("tasks-scope-repo")).toHaveAttribute("aria-pressed", "true");
@@ -215,8 +229,8 @@ test("the scope toggle, both accounts' rows sorted by attention, chips and the s
   await expect(page.getByTestId("me-sec-mentions").locator(".tk-me-row")).toHaveCount(0);
   await page.getByTestId("me-sec-mentions-toggle").click();
   await expect(page.getByTestId("me-row-acme/site#41")).toBeVisible();
-  // the sidebar counts the review requests of both accounts
-  await expect(page.getByTestId("tasks-badge")).toHaveText("3");
+  // the Tasks row counts the review requests of both accounts
+  await badge(page, "3");
   await shot(page, "tasks-me-dark");
   // every call carried only an account id, a section and a page number
   for (const c of (await taskCalls(page)).filter((c) => c.op === "me")) {
@@ -233,9 +247,9 @@ test("the account chips filter to one account, the badge follows, and the list g
   await expect(page.getByTestId("me-acct-octo-work")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("me-row-octo/app#12")).toHaveCount(0);
   await expect(page.locator(".tk-me-row")).toHaveCount(2);
-  await expect(page.getByTestId("tasks-badge")).toHaveText("1");
+  await badge(page, "1");
   await page.getByTestId("me-acct-all").click();
-  await expect(page.getByTestId("tasks-badge")).toHaveText("3");
+  await badge(page, "3");
   await page.getByTestId("me-group-repo").click();
   // the repository holding a CI failure comes first; each repository is one group
   const groups = await page.locator(".tk-me-sec").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
@@ -275,7 +289,7 @@ test("one account that must sign in again leaves the other's rows", async ({ pag
   await expect(page.getByTestId("me-acct-octo-work")).toHaveAttribute("data-state", "relogin");
   await expect(page.getByTestId("me-row-octo/app#12")).toBeVisible();
   await expect(page.getByTestId("me-row-work/api#61")).toHaveCount(0);
-  await expect(page.getByTestId("tasks-badge")).toHaveText("2");
+  await badge(page, "2");
 });
 
 test("GitHub's rate limit says try again soon instead of failing", async ({ page }) => {

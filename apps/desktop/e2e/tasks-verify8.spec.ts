@@ -1,6 +1,7 @@
 // The verifier's V4 probes on PR #2908 (a code block and a link href, and a token split over a line break: masked in
 // the drawer and the text Start in thread sends), kept as regression tests.
 import {test,expect,type Page} from '@playwright/test';
+import {chatOpen,openCode,openThread} from './start';
 const PORT=Number(process.env.MANUT_MOCK_PORT||5308), REPO='rlaope/oh-my-hermes', CWD='/home/you/code/oh-my-hermes';
 async function mock(op:string,params:Record<string,unknown>={}) { const ws=new WebSocket(`ws://127.0.0.1:${PORT}/?token=e2e`); await new Promise<void>((r,j)=>{ws.onopen=()=>r();ws.onerror=()=>j(Error('ws'));}); const out=await new Promise<any>(r=>{ws.onmessage=m=>{const x=JSON.parse(String(m.data));if(x.id==='v8')r(x);};ws.send(JSON.stringify({id:'v8',op,...params}));}); ws.close();expect(out.ok).toBe(true);return out.result; }
 async function setup(page:Page,body:string) {
@@ -10,8 +11,10 @@ async function setup(page:Page,body:string) {
   const row={number:1,title:'Independent neighbour',state:'open',url:`https://github.com/${repo}/issues/1`,labels:[],author:'tester',created:1700000000,updated:1700000000,checks:null};
   (window as any).__manutTasks={status:{github:{installed:true,signed_in:true}},items:{[`github:${repo}:issues`]:[row]},details:{[`github:${repo}:issues:1`]:{body,comments:[{author:'tester',body,created:1700000000}],checks:[]}},remotes:{[cwd]:{source:'github',repo}}};
  },{repo:REPO,cwd:CWD,body});
- await page.goto('/');await expect(page.getByTestId('bot-kami')).toBeVisible();await page.getByTestId('bot-kami').click();
- await page.locator('[role="treeitem"][aria-level="2"]',{hasText:'Verify8'}).click();await page.getByTestId('tasks-bar-github').click();await page.getByTestId('tasks-row-1').click();
+ // the thread's folder is the page's context: opened from History (the thread trees left with the sidebar), and the
+ // Tasks row's marks are on the Code page now
+ await page.goto('/');await chatOpen(page);await openThread(page,'Verify8');await openCode(page);
+ await page.getByTestId('tasks-bar-github').click();await page.getByTestId('tasks-row-1').click();
 }
 test('v8 code block and actual link href masked with readable neighbours',async({page})=>{
  const fake='ghp_'+'X'.repeat(36);let logged=false;page.on('console',m=>{if(m.text().includes(fake))logged=true;});
