@@ -26,6 +26,8 @@
     "@manut/books": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/people-rules": "workspace:*",
-    "@manut/shop-memory": "workspace:*"
+    "@manut/routine-rules": "workspace:*",
+    "@manut/shop-memory": "workspace:*",
+    "@manut/shop-templates": "workspace:*"
   }
 }

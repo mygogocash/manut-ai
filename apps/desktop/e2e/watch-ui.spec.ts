@@ -6,6 +6,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openCustomize } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.CW_SHOTS || "";
@@ -47,8 +48,9 @@ async function openAutomations(page: Page, opts: { lang?: string; theme?: string
     { lang: opts.lang ?? "", theme: opts.theme ?? "" },
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
-  await page.getByTestId("nav-automations").click();
+  await chatOpen(page);
+  // Automations is an entry of the Customize page now (the sidebar's foot button left with the sidebar)
+  await openCustomize(page, "automations");
   await expect(page.getByTestId("auto-list")).toBeVisible();
   await expect(page.getByTestId(`auto-row-${UNREAD}`)).toBeVisible();
 }
@@ -139,7 +141,7 @@ test("+ New watch sends one sentence to that bot's chat, opens it, and makes no 
   await expect(page.getByTestId("watch-form-sentence")).toHaveText(sentence);
   await page.getByTestId("watch-form-send").click();
 
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("bubble-user").last()).toContainText("Watch Discord #deploys");
   await expect.poll(() => submitted("friren")).toEqual([sentence]);
   expect(await submitted("kami")).toEqual([]);
@@ -151,7 +153,7 @@ test("+ New watch sends one sentence to that bot's chat, opens it, and makes no 
 test("Not useful on a watch result sends one message naming the watch and quoting the item", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("manut.roster", JSON.stringify(["kami", "friren"])));
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.watchRun", { bot: "kami", name: "og-outage", kind: "hit", text: "og down: `__init__` failed in #og\nsee the thread" });
   await expect(page.getByTestId("watch-line")).toHaveCount(1);
   await page.getByTestId("watch-not-useful").click();

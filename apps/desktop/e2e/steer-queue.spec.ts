@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -38,7 +39,7 @@ test.beforeEach(async () => {
 /** kami's chat with a turn running (the mock runs no script: the test ends it). */
 async function running(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   await say(page, "Refactor the gateway retry code");
   await expect(page.getByTestId("stop")).toBeVisible();
@@ -364,7 +365,7 @@ test.describe("steer ack shots", () => {
         localStorage.setItem("manut.lang", "ko");
       }, [theme]);
       await page.goto("/");
-      await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+      await chatOpen(page);
       await expect(page.getByTestId("bubble-user").first()).toBeVisible();
       await say(page, "게이트웨이 재시도 코드 리팩터링해줘");
       await expect(page.getByTestId("stop")).toBeVisible();

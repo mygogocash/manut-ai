@@ -12,6 +12,8 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
+test.skip(true, "Oh My Hermes' site and its hero preview (site/, tools/build_manut_preview.sh) were not copied with the fork; Manut AI has no site in this repository");
+
 const SITE = process.env.MANUT_SITE_DIR || fileURLToPath(new URL("../../../site/", import.meta.url));
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",

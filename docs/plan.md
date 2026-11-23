@@ -61,7 +61,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a read-only connected runtime (Settings › Developer) and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
-| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines running and applying a template are being built; the outpost's browser is next. Parked by the owner: PromptPay billing and the LINE client |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines run on the schedule object and a shop made from a template gets its routines and first-week questions (runs wait for the owner's switches); the outpost's browser is next. Parked by the owner: PromptPay billing and the LINE client |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial: more roles built (the owner's helpers, deciding from a session by role); three shop kinds as templates; the desktop fork's terminals and coding sessions; several shops in one view and computer control are in the December plan; phone apps wait for the desktop |
 
 ## December engineering (the owner's go, 23 Nov 2026)
@@ -76,14 +76,16 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 1. Console: the workers' drafts and a shops overview | | Sonnet |
 | running | 5. The desktop answering approvals | | Opus |
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
-| running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
+| done | 2 and 3. Routines running on schedule, and applying a shop template (runs wait for the owner's `officeRoutines` and `officeCloud` switches) | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
-| running | 4. Console: the People page | | Sonnet |
-| running | The Playwright revival | | Haiku |
+| done | 4. Console: the People page | | Sonnet |
+| running | 7. Several shops in one view: the design and the API side (the desktop switcher after item 5) | | Opus |
+| done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
+| 11 | Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Haiku |
+| running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
-| 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
+| 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
-| 9 | Desktop leftovers: a home for the old chat-list actions; richer Team, Needs you and History pages | Customize | Sonnet |
 
 ## Queue for cloud routines
 
@@ -401,3 +403,5 @@ No function throws: a refusal is a result value.
 
 Done when: each event kind, the Approve rule for every approval kind, hidden details on the lock screen and by the
 setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.
+
+Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).

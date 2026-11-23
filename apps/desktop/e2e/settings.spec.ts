@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -33,7 +34,7 @@ const callsOf = async (op: string) =>
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -108,7 +109,7 @@ test("unsupported: one gray note, the old value stays", async ({ page }) => {
   const pop = page.getByTestId("model-pop");
   await pop.getByRole("radio", { name: "Low" }).click();
   const note = page.getByTestId("model-note");
-  await expect(note).toHaveText("Change it in Hermes for now");
+  await expect(note).toHaveText("This cannot be changed here yet");
   await expect(page.getByTestId("reasoning-label")).toHaveText("high");
   await expect(pop.getByRole("radio", { name: "high", exact: true })).toHaveAttribute("aria-checked", "true");
   const color = await note.evaluate((el) => getComputedStyle(el).color);
@@ -116,7 +117,7 @@ test("unsupported: one gray note, the old value stays", async ({ page }) => {
   expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(24); // gray, not a colour
 });
 
-test("settings opens and closes; theme Light sets data-theme; bot and provider pages", async ({ page }) => {
+test("settings opens and closes; theme Light sets data-theme; bot pages", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(() => localStorage.removeItem("manut.theme"));
   await open(page);
@@ -124,7 +125,8 @@ test("settings opens and closes; theme Light sets data-theme; bot and provider p
   const view = page.getByTestId("settings-view");
   await expect(view).toBeVisible();
   await expect(page.getByTestId("composer")).toHaveCount(0);
-  for (const label of ["Kami", "Friren", "Hermes", "General", "Providers", "Computer"])
+  // (no Providers: the fork removed it with Hermes' sign-in)
+  for (const label of ["Kami", "Friren", "Hermes", "General", "Computer"])
     await expect(view.locator(".st-nav").getByRole("button", { name: label, exact: true })).toBeVisible();
 
   // General: theme
@@ -145,13 +147,6 @@ test("settings opens and closes; theme Light sets data-theme; bot and provider p
   await expect(body).toContainText("medium");
   await expect(body).toContainText("friren");
 
-  // Providers: read-only list from models.options
-  await page.getByTestId("settings-nav-providers").click();
-  const list = page.getByTestId("providers-list");
-  await expect(list).toContainText("Claude (proxy)");
-  await expect(list).toContainText("OpenAI");
-  await expect(list.locator("input, select, textarea")).toHaveCount(0);
-
   await page.getByTestId("settings-nav-computer").click();
   await expect(page.getByTestId("settings-page-computer")).toContainText("Soon");
 
@@ -164,11 +159,14 @@ test("settings opens and closes; theme Light sets data-theme; bot and provider p
   await page.getByTestId("model-pill").click();
   await page.getByRole("button", { name: "Bot settings" }).click();
   await expect(page.getByTestId("settings-page-bot-kami")).toBeVisible();
-  await page.getByTestId("nav-settings").click();
+  // the menu's account row only opens Settings; ⌘, closes it again, as the sidebar's Settings button did
+  const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
+  await page.keyboard.press(`${mod}+Comma`);
   await expect(page.getByTestId("settings-view")).toHaveCount(0);
 });
 
 test("add bot: lists the profiles not in the list; Add attaches one, re-reads bots.list and opens it", async ({ page }) => {
+  test.skip(true, "the sidebar's + Add a bot popover left with the sidebar; Settings › All bots adds a member to the team (bot-addlist-*) without opening its chat");
   // Kami alone in the list; the default profile shows as not connected until something attaches it (models.options).
   await page.addInitScript(() => {
     if (sessionStorage.getItem("addbot-e2e")) return;

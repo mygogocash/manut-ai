@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat, openSettings } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS_DIR || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -68,8 +69,8 @@ async function openAccounts(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.addInitScript(installHost);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
-  await page.getByTestId("me").click();
+  await chatOpen(page);
+  await openSettings(page, "accounts");
   await expect(page.getByTestId("accounts-page")).toBeVisible();
 }
 
@@ -79,12 +80,13 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("the user row opens Accounts: one plain header line, CLIs on this computer only", async ({ page }) => {
+test("the account row opens Settings, and Accounts there: one plain header line, CLIs on this computer only", async ({ page }) => {
   await openAccounts(page);
   await expect(page.getByTestId("settings-nav-accounts")).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".st-nav button").first()).toHaveText("Accounts");
-  await expect(page.getByTestId("me")).toHaveClass(/\bon\b/);
-  await expect(page.getByTestId("accounts-lead")).toHaveText("Logins manut uses when it runs Claude Code, Codex or pi for you. Bots are set up under Bots.");
+  // the menu's account row is current while Settings is open, as on the design canvas's Settings board
+  await expect(page.getByTestId("nav-settings")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("accounts-lead")).toHaveText("Logins Manut AI uses when it runs Claude Code, Codex or pi for you. Bots are set up under Bots.");
   // the coding CLIs found here, then the GitHub accounts Tasks › Me reads as (GithubAccounts.tsx)
   await expect(page.locator(".acc-g")).toHaveCount(4);
   await expect(page.locator(".acc-g .acc-gh b")).toHaveText(["Claude Code", "Codex", "pi", "GitHub"]);
@@ -205,7 +207,7 @@ test("+ Add account runs the CLI's own sign-in; when it ends signed in, the row 
   await expect(g.getByTestId("signin-panel")).toHaveCount(0);
   const work = row(page, "claude", "work");
   await expect(work.getByTestId("account-name")).toContainText("work@example.com");
-  await expect(work.getByTestId("account-name")).toContainText("Work · Added in manut");
+  await expect(work.getByTestId("account-name")).toContainText("Work · Added in Manut AI");
   await expect(work.getByTestId("account-plan")).toHaveText("Pro");
   await expect(work.getByTestId("account-pill")).toHaveCount(0); // signed in, not in use
   expect(await callsOf("accounts.discard")).toEqual([]);
@@ -257,7 +259,7 @@ test("remove asks first; cancel keeps the row, confirm deletes only that account
   const g = page.getByTestId("accounts-codex");
   await row(page, "codex", "work").getByTestId("account-menu").click();
   await page.getByRole("button", { name: "Remove…" }).click();
-  await expect(g.getByTestId("remove-confirm")).toContainText("Remove Work from manut?");
+  await expect(g.getByTestId("remove-confirm")).toContainText("Remove Work from Manut AI?");
   await g.getByTestId("remove-confirm").getByRole("button", { name: "Cancel" }).click();
   await expect(g.getByTestId("account-row")).toHaveCount(2);
   expect(await callsOf("accounts.remove")).toEqual([]);
@@ -278,7 +280,7 @@ test("auto-switch: the in-use account hits its limit → the next one, a toast a
   const toast = page.getByTestId("accounts-codex").getByTestId("accounts-toast");
   await expect(toast).toHaveText(/^Switched Codex to Work for new sessions \(limit on This computer, resets .+\)$/);
   expect((await callsOf("accounts.set_active")).map((c) => c.params)).toEqual([{ cli: "codex", account: "work" }]);
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   const line = page.getByTestId("system-line");
   await expect(line).toHaveCount(1);
   await expect(line).toHaveText(/^Switched Codex to Work/);

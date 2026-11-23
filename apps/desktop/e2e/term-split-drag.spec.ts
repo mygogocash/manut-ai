@@ -4,8 +4,9 @@
 // split shows no drop zone and takes nothing. A split pane's grip (top centre) drags the pane itself to another pane's
 // side, and a click on it opens the pane's menu (zoom, even out, close, each with its key). One pane alone has no grip.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
-import { dragGripOnto, dragRowOnto } from "./split-drag-helpers";
+import { dragGripOnto, dragRowOnto, NO_ROW_DRAG, splitBeside } from "./split-drag-helpers";
 
 type Sessions = { startTerminal(a: string, cwd: string): string };
 type Call = { op: string };
@@ -31,6 +32,7 @@ test.beforeEach(async () => {
 });
 
 test("a row dropped on the right half goes right, on the bottom half below; a row in the split moves its pane; Escape cancels", async ({ page }) => {
+  test.skip(true, NO_ROW_DRAG);
   await openApp(page);
   const [a, b, c] = await sessions(page, ["/w/a", "/w/b", "/w/c"]);
   // c is open alone; a's row onto its right half: a right of c, with the keyboard
@@ -65,8 +67,10 @@ test("a row dropped on the right half goes right, on the bottom half below; a ro
 });
 
 test("a full split shows no drop zone and takes no fifth session", async ({ page }) => {
+  test.skip(true, NO_ROW_DRAG);
   await openApp(page);
   const [a, b, c, d, e] = await sessions(page, ["/w/a", "/w/b", "/w/c", "/w/d", "/w/e"]);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await dragRowOnto(page, b, a, "right");
   await dragRowOnto(page, c, a, "down");
@@ -92,7 +96,8 @@ test("a pane's grip drags the pane to another pane's side, a click opens its men
   // b alone: no split, no grip
   await expect(term(page, b)).toBeVisible();
   await expect(page.getByTestId("split-grip")).toHaveCount(0);
-  await dragRowOnto(page, a, b, "right");
+  // a beside b, by the store action the drop calls: a row cannot be dragged onto b any more (see NO_ROW_DRAG)
+  await splitBeside(page, b, a, "right");
   expect(await order(page)).toEqual([b, a]);
   await expect(page.getByTestId("split-grip")).toHaveCount(2);
   // the grip sits at the pane's top centre, over the terminal
@@ -111,7 +116,8 @@ test("a pane's grip drags the pane to another pane's side, a click opens its men
   const ga = (await page.locator(`[data-testid="split-grip"][data-session="${a}"]`).boundingBox())!;
   await page.mouse.move(ga.x + ga.width / 2, ga.y + ga.height / 2);
   await page.mouse.down();
-  const side = (await page.getByTestId("side-sessions").boundingBox())!;
+  // the side menu, outside the main column: a place that is no pane (the TERMINALS list it used to hold is on the Code page)
+  const side = (await page.getByTestId("sidebar").boundingBox())!;
   await page.mouse.move(side.x + side.width / 2, side.y + 20, { steps: 10 });
   await expect(page.getByTestId("split-drop")).toHaveCount(0);
   await page.mouse.up();
@@ -135,5 +141,7 @@ test("a pane's grip drags the pane to another pane's side, a click opens its men
   await page.locator(`[data-testid="split-grip"][data-session="${b}"]`).click();
   await page.getByTestId("split-menu-close").click();
   await expect(page.getByTestId("session-split")).toHaveCount(0);
+  // b keeps running: its row is on the Code page
+  await openCode(page);
   await expect(page.getByTestId(`session-${b}`)).toHaveAttribute("data-status", "running");
 });

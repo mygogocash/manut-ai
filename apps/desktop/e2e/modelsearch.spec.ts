@@ -1,6 +1,7 @@
 // Model picker: search field (focused on open, compact matching, Up/Down/Enter, Esc) and vendor chips.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS; // set to an absolute dir to save picker screenshots
@@ -30,7 +31,7 @@ const setModelCalls = async () =>
 
 async function openPicker(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("model-pill").click();
   const pop = page.getByTestId("model-pop");
   await expect(pop.getByTestId("model-opt").first()).toBeVisible();
@@ -194,7 +195,7 @@ test("long model id ellipsizes and stays inside the header at 900x700 with the p
   const long = "openrouter-preview/anthropic/claude-opus-5-5-thinking-extended-2026-11-01";
   await mock("chat.set_model", { bot: "kami", model: long });
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await check(long);
   const label = page.getByTestId("model-label");
   expect(await label.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");

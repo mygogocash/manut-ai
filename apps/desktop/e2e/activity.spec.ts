@@ -2,6 +2,8 @@
 // to "Worked for … · N steps" with step details on click. Tool calls never get their own timeline rows.
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
+import { chatOpen } from "./start";
+import { tokenColor } from "./tokens";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS_DIR || "test-results/activity-shots";
@@ -29,7 +31,7 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -162,7 +164,7 @@ test("a failed step shows red in the details; elapsed ticks each second", async 
     failed.locator(".v").evaluate((e) => getComputedStyle(e).color),
     act.locator("[data-testid=activity-step][data-ok=true] .v").evaluate((e) => getComputedStyle(e).color),
   ]);
-  expect(bad).toBe("rgb(240, 138, 138)"); // --danger (dark)
+  expect(bad).toBe(await tokenColor(page, "--danger"));
   expect(good).not.toBe(bad);
 });
 

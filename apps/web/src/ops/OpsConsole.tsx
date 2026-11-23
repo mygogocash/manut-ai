@@ -6,6 +6,7 @@ import {
   DraftIcon,
   FlagIcon,
   MemoryIcon,
+  PeopleIcon,
   ShopsIcon,
   SpendIcon,
   StoreIcon,
@@ -18,8 +19,11 @@ import { GateView } from "./GateView";
 import { MemoryView } from "./MemoryView";
 import { MessagesTab } from "./MessagesTab";
 import { ModelSpendView } from "./ModelSpendView";
+import { NewShopForm } from "./NewShopForm";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
+import { PeopleView } from "./PeopleView";
+import { QuestionsTab } from "./QuestionsTab";
 import { ShopDataTab } from "./ShopDataTab";
 import { ShopsView, type ShopPage } from "./ShopsView";
 import { useLoad } from "./useLoad";
@@ -32,6 +36,9 @@ import {
   isAuthError,
   memoryWords,
   modelSpendWords,
+  newShopWords,
+  peopleWords,
+  questionsWords,
   shopDataWords,
   shopsWords,
 } from "./words";
@@ -42,15 +49,17 @@ import {
 /// column at once too: where the pilot stands against its Phase 1 gate.
 /// The Audit page beside it reads one shop's audit log: who did what for it, and when. The Memory page reads what the
 /// team knows about one shop, and is where an operator relays the owner's say over it. The Drafts page reads what Nam,
-/// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The Model spend page reads one shop's model
-/// spend for a month against its monthly cap, and sets or clears the cap.
+/// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The People page reads who can use Manut AI for
+/// one shop, and is where an operator invites, removes and sets cover on the owner's word. The Model spend page reads one
+/// shop's model spend for a month against its monthly cap, and sets or clears the cap.
 
 export const REFRESH_MS = 15000;
 
-type Tab = "messages" | "payments" | "data";
+/// `questions` is a shop's first week, for a shop made from a template.
+type Tab = "messages" | "payments" | "data" | "questions";
 /// What the main column shows: the chosen shop, every shop at a glance, the Pilot gate across all of them, or one shop's
-/// audit log, memory, drafts or model spend.
-type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "model";
+/// audit log, memory, drafts, people or model spend.
+type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -59,6 +68,8 @@ export function OpsConsole() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("messages");
   const [page, setPage] = useState<Page>("shop");
+  /// The new-shop form, open at the top of the shop page.
+  const [creating, setCreating] = useState(false);
 
   const shops = useLoad(hasKey ? () => api.listShops() : null, `shops:${hasKey}`);
   // After a deletion the operator lands on the next shop's messages, never on its delete button.
@@ -88,6 +99,11 @@ export function OpsConsole() {
     setTenant((current) => (shopList.some((s) => s.tenant === current) ? current : first.tenant));
   }, [shopList]);
 
+  // Only a shop made from a template has a first week; another shop opens on its messages.
+  useEffect(() => {
+    if (tab === "questions" && shop && !shop.template) setTab("messages");
+  }, [tab, shop]);
+
   // Owners answer from their phones, so the lists refresh themselves while the console shows them.
   useEffect(() => {
     if (!shop || page !== "shop") return;
@@ -104,6 +120,7 @@ export function OpsConsole() {
     setTenant(target);
     setPage(next);
     if (next === "shop") setTab("messages");
+    setCreating(false);
     deletion.dismissFinished();
   };
 
@@ -187,14 +204,37 @@ export function OpsConsole() {
               type="button"
               className="nav"
               style={{ width: "100%" }}
+              aria-current={page === "people" ? "page" : undefined}
+              onClick={() => setPage("people")}
+            >
+              <PeopleIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{peopleWords.nav}</span>
+            </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
               aria-current={page === "model" ? "page" : undefined}
               onClick={() => setPage("model")}
             >
               <SpendIcon />
               <span style={{ flex: 1, minWidth: 0 }}>{modelSpendWords.nav}</span>
             </button>
-            <div className="mut" style={{ padding: "12px 10px 4px", fontSize: 12 }} id="shops-label">
-              Shops
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 10px 4px" }}>
+              <span className="mut" style={{ flex: 1, fontSize: 12 }} id="shops-label">
+                Shops
+              </span>
+              <button
+                type="button"
+                className="lk"
+                style={{ fontSize: 12 }}
+                onClick={() => {
+                  setPage("shop");
+                  setCreating(true);
+                }}
+              >
+                {newShopWords.button}
+              </button>
             </div>
             {shopList ? (
               <ul aria-labelledby="shops-label" style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -208,6 +248,7 @@ export function OpsConsole() {
                       onClick={() => {
                         setTenant(s.tenant);
                         setPage("shop");
+                        setCreating(false);
                         deletion.dismissFinished();
                       }}
                     >
@@ -255,6 +296,8 @@ export function OpsConsole() {
           <MemoryView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "drafts" ? (
           <DraftsView shops={shopList} tenant={tenant} listError={shops.error} onRetry={shops.reload} onForget={forget} />
+        ) : page === "people" ? (
+          <PeopleView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (
@@ -312,6 +355,19 @@ export function OpsConsole() {
                 >
                   {shopDataWords.tab}
                 </button>
+                {shop?.template && (
+                  <button
+                    type="button"
+                    role="tab"
+                    id="tab-questions"
+                    className="tab"
+                    aria-selected={tab === "questions"}
+                    aria-controls="panel-questions"
+                    onClick={() => setTab("questions")}
+                  >
+                    {questionsWords.tab}
+                  </button>
+                )}
               </div>
               <div className="acts">
                 <button type="button" className="btn ghost" onClick={refresh}>
@@ -320,6 +376,19 @@ export function OpsConsole() {
               </div>
             </div>
             <DeletionNotices deletion={deletion} />
+            {(creating || shopList?.length === 0) && (
+              <NewShopForm
+                onCreated={(created) => {
+                  setCreating(false);
+                  setTenant(created.tenant);
+                  // A shop made from a template opens on what Buddy asks its owner first.
+                  setTab(created.template ? "questions" : "messages");
+                  shops.reload();
+                }}
+                onCancel={shopList && shopList.length > 0 ? () => setCreating(false) : null}
+                onForget={forget}
+              />
+            )}
             {authFailed && (
               <div style={{ padding: "12px 16px 0" }}>
                 <div className="banner err" role="alert">
@@ -345,10 +414,12 @@ export function OpsConsole() {
                   <StoreIcon />
                 </span>
                 <h3>No shops yet</h3>
-                <p>Add a shop with POST /v1/admin/pilot/shops, then connect its LINE account.</p>
+                <p>Add one with the form above, then connect its LINE account.</p>
               </div>
             ) : shop ? (
-              tab === "messages" ? (
+              tab === "questions" && shop.template ? (
+                <QuestionsTab key={shop.tenant} shop={shop} />
+              ) : tab === "messages" || tab === "questions" ? (
                 <MessagesTab
                   key={shop.tenant}
                   shop={shop}

@@ -9,6 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { mock, usePlatform } from "./term-find-helpers";
+import { homeOpen, openCode, startDone } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || "";
 const FOLDER = "/home/you/code/web-app";
@@ -43,10 +44,12 @@ async function open(page: Page, o: { theme?: "dark" | "light"; shells?: unknown[
     [FOLDER, o.theme ?? "", o.shells ?? null] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot: the app starts on Home
+  await homeOpen(page);
 }
 
 async function plusMenu(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await expect(page.getByTestId("session-agent-shell")).toBeVisible();
@@ -146,6 +149,9 @@ test("Settings › Terminal › Default shell: kept, used by the plain Shell row
     localStorage.setItem("manut.term", JSON.stringify({ ...r, defaultShell: "" }));
   });
   await page.reload();
+  // the rows are on the Code page; open it once the start is done, so the start cannot move the view after
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   const paused = page.locator(`[data-testid="split-pane"][data-session="${a}"]`).getByTestId("session-paused").or(page.getByTestId("session-paused").first());

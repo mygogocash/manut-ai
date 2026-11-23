@@ -1,6 +1,7 @@
 // Bot mentions: `@name` of a known bot in a chat opens that bot's chat (click, Enter, Space) and moves the sidebar
 // selection; it never sends. The open chat's own bot is not a link, and unknown names stay text.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -26,7 +27,7 @@ const sends = async () => (await mock("mock.calls")).calls.filter((c: any) => c.
 
 async function openKami(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   const bubble = page.getByTestId("bubble-bot").filter({ hasText: "keep-alive 문서는" });
   await expect(bubble).toBeVisible();
   return bubble;
@@ -36,7 +37,7 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("a mention in a bot bubble opens that bot's chat and moves the sidebar selection", async ({ page }) => {
+test("a mention in a bot bubble opens that bot's chat, whose header then names it", async ({ page }) => {
   const bubble = await openKami(page);
   const m = bubble.getByTestId("mention");
   await expect(m).toHaveText(["@friren", "@hermes", "@omh-tui", "@kami"]);
@@ -51,8 +52,7 @@ test("a mention in a bot bubble opens that bot's chat and moves the sidebar sele
 
   const before = await sends();
   await bubble.locator('[data-bot="friren"]').click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
-  await expect(page.getByTestId("bot-kami")).not.toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("timeline")).toContainText("The updater checks a signed manifest");
   expect(await sends()).toBe(before);
 });
@@ -64,13 +64,12 @@ test("Enter and Space on a focused mention open the chat; the composer sends not
   const hermes = bubble.locator('[data-bot="default"]');
   await hermes.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "default");
 
-  await page.getByTestId("bot-kami").click();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await openChat(page, "kami");
   await page.getByTestId("bubble-bot").filter({ hasText: "keep-alive 문서는" }).locator('[data-bot="omh-tui"]').focus();
   await page.keyboard.press("Space");
-  await expect(page.getByTestId("bot-omh-tui")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "omh-tui");
   expect(await sends()).toBe(before);
 });
 
@@ -80,7 +79,7 @@ test("the open chat's own bot is not a link; unknown names and code stay text", 
   await expect(self).toHaveClass(/self/);
   await expect(self).not.toHaveAttribute("tabindex", /.*/);
   await self.click();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 
   await mock("mock.emit", {
     events: [{ event: "message", bot: "kami", id: "mn-unknown", text: "Ask @foo, mail kami@friren.dev, run `@friren`, or @file:notes.md." }],
@@ -97,5 +96,5 @@ test("mentions in your own bubble open the chat too", async ({ page }) => {
   const mine = page.getByTestId("bubble-user").filter({ hasText: "이거 같이 봐줘" });
   await expect(mine.getByTestId("mention")).toHaveText("@friren");
   await mine.getByTestId("mention").click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
 });

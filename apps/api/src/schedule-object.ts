@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
+import { checkRoutine, nextRun, toSchedule, type Routine } from "@manut/routine-rules";
 import { readJsonBody } from "./body";
+import { runRoutineOccurrence, type OccurrenceOutcome, type RoutineEnv } from "./routines";
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -23,6 +25,10 @@ export type ScheduleJSON = {
   nextFire: number;
   lastOccurrence?: string;
   createdAt: string;
+  /// Set on the clock of a daily or weekly routine (routines.ts): its id is the routine's, and a firing runs the
+  /// routine (a worker's job through the job flow) instead of minting a plain cloud task. Only the routine routes write
+  /// such a schedule, through `/routine-clocks`; the public schedule routes cannot save over it or delete it.
+  routineId?: string;
 };
 
 export type OccurrenceJSON = {
@@ -30,9 +36,19 @@ export type OccurrenceJSON = {
   scheduleId: string;
   tenant?: string;
   taskId?: string;
-  status: "created" | "missed" | "skipped" | "blocked";
+  /// A routine's run that started and failed is `failed`; the rest are as they are for any schedule.
+  status: "created" | "missed" | "skipped" | "blocked" | "failed";
   at: string;
 };
+
+/// The clock of a monthly or window routine, which `ScheduleJSON` cannot express: the routine as routine-rules has it,
+/// timed by its `nextRun`, with the same rules as a schedule's (one run per intended instant, missed past the grace).
+/// Stored as `rclock:${routineId}`, its runs as `rocc:${occurrenceId}`.
+export type RoutineClock = { routine: Routine; tenant: string; createdAt: string };
+
+/// A month and a day: how far back the routine timer looks for its latest instant, so a monthly routine still finds
+/// its own after a long silence (the alarm only ever runs the latest; older ones are not caught up).
+const ROUTINE_LOOKBACK_MS = 32 * 24 * 3600 * 1000;
 
 /// Grace after an occurrence instant inside which a late alarm still fires.
 /// Past it, the run is recorded missed rather than executed late.
@@ -177,6 +193,14 @@ export class ScheduleObject extends DurableObject {
     if (request.method === "POST" && url.pathname === "/tenant-wipe") {
       return this.tenantWipe(request);
     }
+    // Routines' clocks (routines.ts), behind the Worker's `x-routine` header, which no public route forwards.
+    if (request.method === "POST" && url.pathname === "/routine-clocks") {
+      return this.saveRoutineClocks(request);
+    }
+    const clock = url.pathname.match(/^\/routine-clocks\/([^/]+)$/);
+    if (clock && request.method === "DELETE") {
+      return this.removeRoutineClock(request, decodeURIComponent(clock[1] ?? ""));
+    }
     return new Response("Method Not Allowed", { status: 405 });
   }
 
@@ -196,7 +220,9 @@ export class ScheduleObject extends DurableObject {
     // sweep reads consent for the object owner's tenant only.)
     let needsRetry = false;
     const schedules = await this.ctx.storage.list<ScheduleJSON>({ prefix: "sched:" });
-    const owner = [...schedules.values()].find((schedule) => schedule.tenant)?.tenant;
+    // A shop whose only routines are monthly or window ones has timers and no schedules; either names its tenant.
+    const owner = [...schedules.values()].find((schedule) => schedule.tenant)?.tenant ??
+      [...(await this.ctx.storage.list<RoutineClock>({ prefix: "rclock:" })).values()].find((clock) => clock.tenant)?.tenant;
     const consent = owner ? await this.liveConsent(owner).catch(() => false) : false;
     for (const [, schedule] of schedules) {
       try {
@@ -211,6 +237,8 @@ export class ScheduleObject extends DurableObject {
         needsRetry = true;
       }
     }
+    // The routine timer runs under the same switches and the same consent as the schedules above.
+    if (consent && (await this.routineSweep(Date.now()))) needsRetry = true;
     const soonest = await this.rearm();
     if (needsRetry) {
       const retryAt = Date.now() + 60_000;
@@ -232,6 +260,10 @@ export class ScheduleObject extends DurableObject {
     for (const [, schedule] of await this.ctx.storage.list<ScheduleJSON>({ prefix: "sched:" })) {
       if (!schedule.enabled || !schedule.hasSchedulingConsent) continue;
       const next = nextFire(schedule.hour, schedule.minute, schedule.weekdays, schedule.timeZone, now);
+      if (next !== null && (soonest === null || next < soonest)) soonest = next;
+    }
+    for (const [, clock] of await this.ctx.storage.list<RoutineClock>({ prefix: "rclock:" })) {
+      const next = nextRun(clock.routine, now);
       if (next !== null && (soonest === null || next < soonest)) soonest = next;
     }
     if (soonest === null) await this.ctx.storage.deleteAlarm();
@@ -284,6 +316,8 @@ export class ScheduleObject extends DurableObject {
     if (prior && this.foreign(prior.tenant, request)) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
+    // A routine's clock changes with its routine only: saved over here, it would mint plain tasks in its place.
+    if (prior?.routineId) return Response.json({ error: "routine_schedule" }, { status: 409 });
     const revision = (prior?.revision ?? 0) + 1;
     const next = nextFire(hour, minute, weekdays, timeZone, Date.now());
     // A zone the quarter-hour grid can never match, such as the raw offset
@@ -351,6 +385,8 @@ export class ScheduleObject extends DurableObject {
     if (!schedule || this.foreign(schedule.tenant, request)) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
+    // A routine's clock goes when its routine is removed (routines.ts), never on its own.
+    if (schedule.routineId) return Response.json({ error: "routine_schedule" }, { status: 409 });
     await this.ctx.storage.delete(`sched:${id}`);
     // Occurrence records stay as the audit trail; re-arming leaves the
     // deleted schedule out, so the alarm never fires for it again.
@@ -375,6 +411,20 @@ export class ScheduleObject extends DurableObject {
     if (instant === null) return;
     const occurrenceId = occurrenceID(schedule.id, instant, schedule.revision);
     if (await this.ctx.storage.get(`occ:${occurrenceId}`)) return;
+    if (schedule.routineId) {
+      // A routine's run: the routine's own records decide skipped, missed or run, and claim the instant once
+      // whatever this schedule's revision (routine-store.ts). Nothing is claimed when the shop's object cannot be
+      // reached, so the sweep's retry comes back for it inside the grace, and after it the run is recorded missed.
+      const outcome = await this.runRoutine(schedule.tenant, schedule.routineId, instant, now - instant > OCCURRENCE_GRACE_MS);
+      if (outcome.status === "unavailable") throw new Error("routine_unavailable");
+      if (outcome.status === "gone") {
+        await this.ctx.storage.delete(`sched:${schedule.id}`);
+        return;
+      }
+      await this.ctx.storage.put(`occ:${occurrenceId}`, routineOccurrence(occurrenceId, schedule.id, schedule.tenant, outcome));
+      await this.pruneOccurrences(schedule.id);
+      return;
+    }
     if (now - instant > OCCURRENCE_GRACE_MS) {
       await this.ctx.storage.put(`occ:${occurrenceId}`, {
         occurrenceId,
@@ -484,11 +534,12 @@ export class ScheduleObject extends DurableObject {
 
   /// Keeps each schedule's occurrence history bounded: the read path shows
   /// only the latest few, so anything past the cap is audit residue. Scoped
-  /// by key prefix to the one schedule, never a full-store scan.
-  private async pruneOccurrences(scheduleId: string, keep = 30): Promise<void> {
+  /// by key prefix to the one schedule, never a full-store scan. A routine
+  /// timer's runs are kept the same way under `rocc:`.
+  private async pruneOccurrences(scheduleId: string, keep = 30, prefix = "occ:"): Promise<void> {
     const entries: { key: string; at: string }[] = [];
     for (const [key, entry] of await this.ctx.storage.list<OccurrenceJSON>({
-      prefix: `occ:${scheduleId.toLowerCase()}-`,
+      prefix: `${prefix}${scheduleId.toLowerCase()}-`,
     })) {
       entries.push({ key, at: entry.at });
     }
@@ -539,18 +590,130 @@ export class ScheduleObject extends DurableObject {
     if (typeof body.tenant !== "string" || !body.tenant) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
+    // Routine timers count as schedules and their runs as occurrences: the tenant's clocks all go.
     let schedulesWiped = 0;
-    for (const [key] of await this.ctx.storage.list({ prefix: "sched:" })) {
-      await this.ctx.storage.delete(key);
-      schedulesWiped++;
+    for (const prefix of ["sched:", "rclock:"]) {
+      for (const [key] of await this.ctx.storage.list({ prefix })) {
+        await this.ctx.storage.delete(key);
+        schedulesWiped++;
+      }
     }
     let occurrencesWiped = 0;
-    for (const [key] of await this.ctx.storage.list({ prefix: "occ:" })) {
-      await this.ctx.storage.delete(key);
-      occurrencesWiped++;
+    for (const prefix of ["occ:", "rocc:"]) {
+      for (const [key] of await this.ctx.storage.list({ prefix })) {
+        await this.ctx.storage.delete(key);
+        occurrencesWiped++;
+      }
     }
     await this.rearm();
     return Response.json({ schedulesWiped, occurrencesWiped });
+  }
+
+  /// `POST /routine-clocks` `{ tenant, routines }`, routine-rules routines: a clock for each, a schedule for a daily or
+  /// weekly one through `toSchedule` and a timer for a monthly or window one. A clock this object already keeps is
+  /// left as it is, so asking again never moves an instant or starts a new revision. One write for all of them.
+  private async saveRoutineClocks(request: Request): Promise<Response> {
+    if (request.headers.get("x-routine") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const tenant = this.tenantOf(request);
+    if (!tenant) return Response.json({ error: "tenant_required" }, { status: 400 });
+    const parsed = await readJsonBody<{ routines?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const routines = parsed.value.routines;
+    if (!Array.isArray(routines) || routines.length > 64 || !routines.every((routine) =>
+      checkRoutine(routine) === null && /^rt-[0-9a-z-]{1,64}$/.test((routine as Routine).id) &&
+      (routine as Routine).trigger.kind !== "stockBelow")) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const now = Date.now();
+    const createdAt = new Date(now).toISOString();
+    const writes: Record<string, ScheduleJSON | RoutineClock> = {};
+    for (const routine of routines as Routine[]) {
+      const shape = toSchedule(routine);
+      if (shape) {
+        const prior = await this.ctx.storage.get<ScheduleJSON>(`sched:${routine.id}`);
+        if (prior) {
+          if (prior.tenant !== tenant || !prior.routineId) return Response.json({ error: "conflict" }, { status: 409 });
+          continue;
+        }
+        const next = nextFire(shape.hour, shape.minute, shape.weekdays, shape.timeZone, now);
+        // A zone the quarter-hour grid can never match would keep a clock that never runs, as save() refuses.
+        if (next === null) return Response.json({ error: "invalid_request" }, { status: 400 });
+        writes[`sched:${routine.id}`] = {
+          id: routine.id,
+          tenant,
+          roleId: "",
+          name: routine.name,
+          prompt: routine.name,
+          hour: shape.hour,
+          minute: shape.minute,
+          weekdays: shape.weekdays,
+          timeZone: shape.timeZone,
+          funding: "cloudBYOK",
+          enabled: true,
+          // Consent is read live at every sweep and again by the run itself.
+          hasSchedulingConsent: true,
+          revision: 1,
+          nextFire: next,
+          createdAt,
+          routineId: routine.id,
+        };
+      } else if (!(await this.ctx.storage.get(`rclock:${routine.id}`))) {
+        writes[`rclock:${routine.id}`] = { routine, tenant, createdAt };
+      }
+    }
+    if (Object.keys(writes).length > 0) await this.ctx.storage.put(writes);
+    await this.rearm();
+    return Response.json({ ok: true });
+  }
+
+  /// `DELETE /routine-clocks/{routineId}`: the routine's schedule or timer. Its occurrence records stay, as a deleted
+  /// schedule's do, until the tenant is wiped.
+  private async removeRoutineClock(request: Request, routineId: string): Promise<Response> {
+    if (request.headers.get("x-routine") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const tenant = this.tenantOf(request);
+    const schedule = await this.ctx.storage.get<ScheduleJSON>(`sched:${routineId}`);
+    if (schedule?.routineId && !this.foreign(schedule.tenant, request)) await this.ctx.storage.delete(`sched:${routineId}`);
+    const clock = await this.ctx.storage.get<RoutineClock>(`rclock:${routineId}`);
+    if (clock && clock.tenant === tenant) await this.ctx.storage.delete(`rclock:${routineId}`);
+    await this.rearm();
+    return Response.json({ removed: true });
+  }
+
+  /// The routine timer's sweep at `nowMs`: each monthly or window routine's latest instant, run once, recorded missed
+  /// past the grace, as `fireDue` does for a schedule. The alarm calls it with the current time; a test can choose the
+  /// moment. Answers whether something should be tried again soon (a run whose shop could not be reached).
+  async routineSweep(nowMs: number): Promise<boolean> {
+    let needsRetry = false;
+    for (const [key, clock] of await this.ctx.storage.list<RoutineClock>({ prefix: "rclock:" })) {
+      try {
+        const instant = latestRoutineInstant(clock.routine, nowMs, Date.parse(clock.createdAt));
+        if (instant === null) continue;
+        const occurrenceId = occurrenceID(clock.routine.id, instant, 1);
+        if (await this.ctx.storage.get(`rocc:${occurrenceId}`)) continue;
+        const outcome = await this.runRoutine(clock.tenant, clock.routine.id, instant, nowMs - instant > OCCURRENCE_GRACE_MS);
+        if (outcome.status === "unavailable") {
+          needsRetry = true;
+          continue;
+        }
+        if (outcome.status === "gone") {
+          await this.ctx.storage.delete(key);
+          continue;
+        }
+        await this.ctx.storage.put(`rocc:${occurrenceId}`,
+          routineOccurrence(occurrenceId, clock.routine.id, clock.tenant, outcome));
+        await this.pruneOccurrences(clock.routine.id, 30, "rocc:");
+      } catch (error) {
+        // As for a schedule: one routine's failure never stops the sweep, and the error is logged with the routine's
+        // id and nothing else.
+        console.error("routine timer failed", clock.routine.id, error);
+        needsRetry = true;
+      }
+    }
+    return needsRetry;
+  }
+
+  private runRoutine(tenant: string, routineId: string, instant: number, late: boolean): Promise<OccurrenceOutcome> {
+    return runRoutineOccurrence(this.env as unknown as RoutineEnv, { tenant, routineId, instant, late });
   }
 
   private async taskState(taskId: string, tenant: string): Promise<string | null> {
@@ -611,4 +774,32 @@ export function nextOccurrences(schedule: ScheduleJSON, count: number): number[]
 
 function publicSchedule(schedule: ScheduleJSON): ScheduleJSON {
   return schedule;
+}
+
+/// The latest instant at or before `nowMs` a monthly or window routine was meant to start (a window starts at its
+/// first minute), by routine-rules' `nextRun`. Like `latestDueInstant`, it looks back a month and a day but never
+/// before one grace window ahead of when the clock was made, so a new routine catches a slot it just missed once and
+/// never opens with old misses. Null when nothing is due, and for a stock routine, which has no instants.
+export function latestRoutineInstant(routine: Routine, nowMs: number, createdAtMs: number): number | null {
+  // `nextRun` answers strictly after its moment, so start a millisecond before the earliest instant allowed.
+  let cursor = Math.max(nowMs - ROUTINE_LOOKBACK_MS, createdAtMs - OCCURRENCE_GRACE_MS) - 1;
+  let instant: number | null = null;
+  // A window routine starts once a day: 33 instants fit in the look-back, so 40 steps always reach now.
+  for (let i = 0; i < 40; i++) {
+    const next = nextRun(routine, cursor);
+    if (next === null || next > nowMs) break;
+    instant = next;
+    cursor = next;
+  }
+  return instant;
+}
+
+/// A routine's run as its clock records the occurrence: a job started (`created`, with its task), a job that started
+/// and failed, or a run that was skipped or missed.
+function routineOccurrence(occurrenceId: string, scheduleId: string, tenant: string, outcome: OccurrenceOutcome):
+  OccurrenceJSON {
+  const status: OccurrenceJSON["status"] = outcome.status === "missed" ? "missed" : outcome.status === "skipped" ? "skipped"
+    : outcome.status === "failed" ? "failed" : "created";
+  const taskId = "taskId" in outcome ? outcome.taskId : undefined;
+  return { occurrenceId, scheduleId, tenant, status, at: new Date().toISOString(), ...(taskId ? { taskId } : {}) };
 }

@@ -12,10 +12,11 @@
 //    and Korean takes two cells.
 // Shots (dark, 1440x900) when MANUT_SHOTS=<dir>: termexit-back-to-shell.png, termexit-codex-after.png,
 // termexit-korean-font.png.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { S, webkit2Set } from "./ime-helpers";
+import { chatOpen, openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -53,7 +54,8 @@ async function open(page: Page) {
     w.__manutMockAgents = ["claude", "codex", "grok", "opencode", "omh", "pi"];
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 const list = (page: Page) => page.evaluate(() => (window as any).__manutSessions.getState().list as { id: string; agent: string; status: string; error?: string }[]);
@@ -65,6 +67,7 @@ const screen = (page: Page) => page.locator('[data-testid="terminal"] .xterm-row
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder`; its session id once its program printed. */
 async function newTerm(page: Page, agent: string, folder: string): Promise<string> {
   const before = (await list(page)).map((r) => r.id);
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -80,6 +83,17 @@ async function newTerm(page: Page, agent: string, folder: string): Promise<strin
   const id = (await list(page)).find((r) => !before.includes(r.id))!.id;
   await expect(screen(page)).toContainText("(mock)");
   return id;
+}
+
+/** `id`'s TERMINALS row, checked on the Code page; then, with `back`, its terminal is shown again from that row. The
+ *  sidebar showed a row beside its terminal; the Code page and the terminal take turns in the main column. */
+async function onRow(page: Page, id: string, check: (row: Locator) => Promise<void>, back = true) {
+  await openCode(page);
+  const row = page.getByTestId(`session-${id}`);
+  await check(row);
+  if (!back) return;
+  await row.locator(".ss-open").click();
+  await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 }
 
 async function typeLine(page: Page, text: string) {
@@ -102,24 +116,27 @@ test("a Shell row closes when its shell exits: the row, its tab and view go, and
   await open(page);
   const keep = await newTerm(page, "shell", API);
   const gone = await newTerm(page, "shell", WEB);
-  await expect(page.getByTestId(`session-${gone}`)).toBeVisible();
+  await onRow(page, gone, (r) => expect(r).toBeVisible());
   await typeLine(page, "exit");
-  await expect(page.getByTestId(`session-${gone}`)).toHaveCount(0);
-  expect((await list(page)).map((r) => r.id)).toEqual([keep]);
-  // no Ended leftover anywhere; the other terminal is the one shown now
+  // no Ended leftover anywhere; the other terminal is the one shown now (the sidebar also marked its row active, which a
+  // row is only beside its terminal)
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", keep);
-  await expect(page.getByTestId(`session-${keep}`)).toHaveClass(/active/);
   await expect(page.getByTestId("session-ended")).toHaveCount(0);
+  expect((await list(page)).map((r) => r.id)).toEqual([keep]);
+  await openCode(page);
+  await expect(page.getByTestId(`session-${gone}`)).toHaveCount(0);
+  await onRow(page, keep, (r) => expect(r).toBeVisible());
   // its shell is not closed twice (it is gone already)
   const id = (await shellCalls(page)).filter((c) => c.op === "start")[1].id;
   expect((await shellCalls(page)).filter((c) => c.op === "close" && c.id === id)).toEqual([]);
 
   // a non-zero exit after typing closes it too; then nothing is left and the bot chat shows
   await typeLine(page, "exit 3");
-  await expect(page.getByTestId(`session-${keep}`)).toHaveCount(0);
   await expect(page.getByTestId("terminal")).toHaveCount(0);
+  await chatOpen(page);
+  await openCode(page);
+  await expect(page.getByTestId(`session-${keep}`)).toHaveCount(0);
   await expect(page.getByTestId("session-none")).toBeVisible();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
 });
 
 test("Ctrl+D at the prompt closes the Shell row; one ending while another session is open closes without moving you", async ({ page }) => {
@@ -148,18 +165,21 @@ test("a shell that cannot start stays listed with its error; one that dies at on
   const a = await newTerm(page, "shell", WEB).catch(() => null);
   const rows = await list(page);
   const failed = a ?? rows[0].id;
-  await expect(page.getByTestId(`session-${failed}`)).toBeVisible();
-  await expect(page.getByTestId(`session-${failed}`)).toHaveAttribute("data-term-status", "err");
   await expect(screen(page)).toContainText("no login shell");
   expect((await list(page)).find((r) => r.id === failed)).toMatchObject({ status: "failed", error: "no login shell: /bin/nosuch is not in /etc/shells" });
+  await onRow(page, failed, async (r) => {
+    await expect(r).toBeVisible();
+    await expect(r).toHaveAttribute("data-term-status", "err");
+  }, false);
 
   await page.evaluate(() => ((window as any).__manutShellDie = { code: 1 }));
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-shell`).click();
   await expect(screen(page)).toContainText("could not read its profile");
   const died = (await list(page))[0];
-  await expect(page.getByTestId(`session-${died.id}`)).toHaveAttribute("data-term-status", "err");
   expect(died.status).toBe("exited");
+  await onRow(page, died.id, (r) => expect(r).toHaveAttribute("data-term-status", "err"), false);
 });
 
 // ---- 2. a CLI that ends goes back to the shell in the same row --------------------------------------------------------
@@ -168,7 +188,7 @@ test("Claude Code /exit: the same row and terminal go on as the login shell, the
   await open(page);
   const id = await newTerm(page, "claude", WEB);
   const row = page.getByTestId(`session-${id}`);
-  await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude");
+  await onRow(page, id, (r) => expect(r.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "claude"));
   const firstPty = await pty(page, id);
   await typeLine(page, "remember PLUM-42");
   await typeLine(page, "/exit");
@@ -181,10 +201,12 @@ test("Claude Code /exit: the same row and terminal go on as the login shell, the
   expect(starts).toEqual([expect.objectContaining({ cwd: WEB })]);
   expect((await agentCalls(page)).filter((c) => c.op === "start").map((c) => c.agent)).toEqual(["claude"]);
   // the same row, now a shell: shell icon, name Shell, running, the same terminal element
-  await expect(page.getByTestId(`session-${id}`)).toHaveCount(1);
-  await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
-  await expect(row.getByTestId("session-name")).toHaveText("Shell");
-  await expect(row).toHaveAttribute("data-term-status", /idle|busy/);
+  await onRow(page, id, async (r) => {
+    await expect(page.getByTestId(`session-${id}`)).toHaveCount(1);
+    await expect(r.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
+    await expect(r.getByTestId("session-name")).toHaveText("Shell");
+    await expect(r).toHaveAttribute("data-term-status", /idle|busy/);
+  });
   expect((await list(page)).find((r) => r.id === id)).toMatchObject({ agent: "shell", status: "running" });
   const shellPty = await pty(page, id);
   expect(shellPty).not.toBe(firstPty);
@@ -195,8 +217,10 @@ test("Claude Code /exit: the same row and terminal go on as the login shell, the
   // the person starts codex in that shell: the shell reports it in front and the row follows it
   await typeLine(page, "codex");
   await page.evaluate((p) => (window as any).__manutEmitSessionFg({ id: p, agent: "codex" }), shellPty);
-  await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
-  await expect(row.getByTestId("session-name")).toHaveText("Codex");
+  await onRow(page, id, async (r) => {
+    await expect(r.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
+    await expect(r.getByTestId("session-name")).toHaveText("Codex");
+  });
   await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
   // Codex's own screen, as it draws it (the alternate screen, over the shell's)
   await page.evaluate(
@@ -211,10 +235,11 @@ test("Claude Code /exit: the same row and terminal go on as the login shell, the
   // codex quits: back to the shell icon; then exit closes the row
   await page.evaluate((p) => (window as any).__manutMockOut(p, "\x1b[?1049l"), shellPty);
   await page.evaluate((p) => (window as any).__manutEmitSessionFg({ id: p, agent: null }), shellPty);
-  await expect(row.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
+  await onRow(page, id, (r) => expect(r.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell"));
   await typeLine(page, "exit");
-  await expect(page.getByTestId(`session-${id}`)).toHaveCount(0);
-  expect(await list(page)).toEqual([]);
+  await expect.poll(() => list(page)).toEqual([]);
+  await openCode(page);
+  await expect(row).toHaveCount(0);
 });
 
 test("a CLI that crashes (exit 3) also goes back to the shell, saying how it ended; its input reaches the shell after", async ({ page }) => {
@@ -222,7 +247,7 @@ test("a CLI that crashes (exit 3) also goes back to the shell, saying how it end
   const id = await newTerm(page, "codex", WEB);
   await typeLine(page, "after 10 exit 3");
   await expect(screen(page)).toContainText("Codex ended with exit 3 — back to your shell");
-  await expect(page.getByTestId(`session-${id}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
+  await onRow(page, id, (r) => expect(r.getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell"));
   const shellPty = await pty(page, id);
   await expect.poll(async () => (await shellCalls(page)).some((c) => c.op === "start" && c.id === shellPty)).toBe(true);
   await typeLine(page, "pwd");

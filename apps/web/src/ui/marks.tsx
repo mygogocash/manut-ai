@@ -113,6 +113,14 @@ export const DraftIcon = () => (
   </Icon>
 );
 
+/// Two people: who can use Manut AI for a shop.
+export const PeopleIcon = () => (
+  <Icon>
+    <circle cx="6" cy="6" r="2.2" />
+    <path d="M2 13c.4-2.2 2-3.3 4-3.3s3.6 1.1 4 3.3M11 4.2a2 2 0 010 3.8M12 9.9c1.3.4 2 1.4 2.3 3.1" />
+  </Icon>
+);
+
 /// A coin with a baht-like B: what the AI team spends on language models.
 export const SpendIcon = () => (
   <Icon>

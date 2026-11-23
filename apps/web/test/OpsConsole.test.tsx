@@ -66,7 +66,9 @@ describe("the operator console", () => {
     const box = await screen.findByRole("status");
     const link = within(box).getByLabelText("Approval link") as HTMLInputElement;
     expect(link.value).toMatch(/^https:\/\/web\.test\/approve\/[A-Za-z0-9_-]+$/);
-    expect(within(box).getByText(/Send it to Fon on LINE\. It answers this one reply only and works until 24 November 10:00\./)).toBeTruthy();
+    // The link expires at 10:00 on 24 November, which the console writes as "10:00" when the browser's clock says it is
+    // that day, so both forms are accepted.
+    expect(within(box).getByText(/Send it to Fon on LINE\. It answers this one reply only and works until (24 November )?10:00\./)).toBeTruthy();
     expect(propose).toHaveBeenCalledWith({
       tenant: "shop_baanmali",
       messageId: "msg_arthit",

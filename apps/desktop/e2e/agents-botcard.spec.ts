@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -48,7 +49,7 @@ async function open(page: Page, theme = "dark") {
     w.__manutMockAgents = ["claude", "codex", "omh", "opencode", "gemini"];
   }, theme);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -58,6 +59,7 @@ async function reply(text: string, id = "bc-draft") {
 }
 
 async function plus(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await expect(page.getByTestId("session-agent-claude")).toBeVisible();
   await page.waitForFunction(() => document.querySelector(".ss-pop")?.getAnimations().every((a) => a.playState !== "running"));
@@ -153,6 +155,7 @@ test("Cancel writes nothing; two blocks make two chips; a refused draft's chip i
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("a SESSIONS agent's reply with a draft shows no chip", async ({ page }) => {
   await open(page);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-agent-claude").click();
   await page.getByTestId("session-folder").click();
@@ -174,7 +177,7 @@ test("Ask the bot fills the current bot's composer and sends nothing", async ({ 
   await page.getByTestId("agents-ask-bot").click();
   // back in the chat, the request is in the composer, focused, not sent
   await expect(page.getByTestId("settings")).toHaveCount(0);
-  await expect(page.getByTestId("composer")).toHaveValue(/^Add an ACP coding agent to manut Terminals for me \(reply with one manut-agent block/);
+  await expect(page.getByTestId("composer")).toHaveValue(/^Add an ACP coding agent to Manut AI Terminals for me \(reply with one manut-agent block/);
   await expect(page.getByTestId("composer")).toBeFocused();
   await page.waitForTimeout(300);
   expect((await mock("mock.submits")).submits.length).toBe(before);

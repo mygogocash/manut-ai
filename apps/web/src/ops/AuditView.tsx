@@ -3,6 +3,7 @@ import { ApiError, useApi, type AuditEntry, type Shop } from "../api";
 import { formatStamp } from "../format";
 import { useLoad } from "./useLoad";
 import {
+  auditNamesOf,
   auditOutcomeTag,
   auditReasonText,
   auditSentence,
@@ -10,18 +11,23 @@ import {
   auditWords,
   errorText,
   isAuthError,
+  type AuditNames,
 } from "./words";
 
 /// The Audit page: one shop's audit log as the API keeps it (`GET /v1/admin/audit`), newest first, a page at a time.
 /// The shop is chosen on the page, starting from the one chosen in the side menu, so the page stays open while the
 /// operator looks through several shops. Older pages are added below the newest; a refresh or another shop starts
 /// from the newest page again. When the API says entries could not be written, the page says the log is not
-/// complete rather than letting a gap read as nothing having happened.
+/// complete rather than letting a gap read as nothing having happened. The log holds ids only, so a helper (a removed one
+/// too) and an invite are named as the owner named them by reading the shop's people list beside it; when that cannot be
+/// read the page shows the ids and says nothing, because the log itself is what it is for.
 
 /// Entries each page asks for: the API's own default.
 export const AUDIT_PAGE_SIZE = 50;
 
 type Older = { tenant: string; entries: AuditEntry[]; next: string | null };
+
+const NO_NAMES: AuditNames = {};
 
 export function AuditView({ shops, tenant: chosen, onForget }: {
   shops: Shop[] | null;
@@ -33,6 +39,8 @@ export function AuditView({ shops, tenant: chosen, onForget }: {
   const shop = shops?.find((s) => s.tenant === tenant) ?? null;
   const first = useLoad(shop ? () => api.listAudit(shop.tenant, { limit: AUDIT_PAGE_SIZE }) : null,
     `audit:${shop?.tenant ?? ""}`);
+  const people = useLoad(shop ? () => api.getPeople(shop.tenant) : null, `audit-people:${shop?.tenant ?? ""}`);
+  const names = people.data ? auditNamesOf(people.data) : NO_NAMES;
   const [older, setOlder] = useState<Older | null>(null);
   const [olderBusy, setOlderBusy] = useState(false);
   const [olderError, setOlderError] = useState<unknown>(null);
@@ -113,6 +121,7 @@ export function AuditView({ shops, tenant: chosen, onForget }: {
             onClick={() => {
               startOver();
               first.reload();
+              people.reload();
             }}
           >
             {auditWords.refresh}
@@ -157,7 +166,7 @@ export function AuditView({ shops, tenant: chosen, onForget }: {
         ) : entries.length > 0 ? (
           <ul aria-label={auditWords.listLabel(shop.name)} style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {entries.map((entry) => (
-              <AuditRow key={entry.id} entry={entry} ownerName={shop.ownerName} now={now} />
+              <AuditRow key={entry.id} entry={entry} ownerName={shop.ownerName} names={names} now={now} />
             ))}
           </ul>
         ) : null}
@@ -190,13 +199,13 @@ function auditErrorText(error: unknown): string {
   return errorText(error);
 }
 
-function AuditRow({ entry, ownerName, now }: { entry: AuditEntry; ownerName: string; now: number }) {
+function AuditRow({ entry, ownerName, names, now }: { entry: AuditEntry; ownerName: string; names: AuditNames; now: number }) {
   const tag = auditOutcomeTag(entry.outcome, ownerName);
   const about = auditSubjectText(entry.subject);
   return (
     <li className="rowl" style={{ flexWrap: "nowrap", alignItems: "flex-start", borderTop: "1px solid var(--line)" }}>
       <div className="grow" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        <span>{auditSentence(entry, ownerName)}</span>
+        <span>{auditSentence(entry, ownerName, names)}</span>
         <span className="mut" style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>
           {about ? `${formatStamp(entry.at, now)} · ${about}` : formatStamp(entry.at, now)}
         </span>

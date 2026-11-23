@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (FACE_SHOTS dir, else Playwright's ignored test-results).
@@ -113,7 +114,7 @@ test.beforeEach(async () => {
 
 test("a bot's face stays put from send to answer: typing, a recalled-memories status, a tool, streaming, done", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   const tl = page.getByTestId("timeline");
   // the column every finished answer's face sits in
@@ -174,7 +175,8 @@ test.skip("a SESSIONS chat keeps the agent's mark in the face column the same wa
     (window as unknown as { __manutPickFolder: string }).__manutPickFolder = "/home/you/work/api";
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-agent-omh").click();
   await page.getByTestId("session-folder").click();
@@ -213,7 +215,7 @@ test.describe("screenshots", () => {
       mkdirSync(SHOTS, { recursive: true });
       await page.emulateMedia({ colorScheme: theme });
       await page.goto("/");
-      await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+      await chatOpen(page);
       const tl = page.getByTestId("timeline");
       await expect(tl.getByTestId("bubble-user").first()).toBeVisible();
       const shot = async (name: string) => {

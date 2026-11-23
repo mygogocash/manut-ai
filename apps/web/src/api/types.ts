@@ -59,6 +59,8 @@ export type Shop = {
   name: string;
   ownerName: string;
   lineConnectionId?: string;
+  /// The shop template it was made from, when it was.
+  template?: string;
   consent: boolean;
   deletion?: DeletionRequest;
 };
@@ -147,8 +149,31 @@ export type PilotGate = {
   cohort: { counted: number; paid: GateMeasure; active: GateMeasure; status: GateStatus };
 };
 
-export type NewShop = { name: string; ownerName: string };
-export type CreatedShop = { tenant: string; name: string; ownerName: string };
+/// `template` is a shop template's id (`GET /v1/admin/templates`); left out, the shop starts with none.
+export type NewShop = { name: string; ownerName: string; template?: string };
+export type CreatedShop = { tenant: string; name: string; ownerName: string; template?: string };
+
+/// A shop template a new shop can start from, in the API's own words (`@manut/shop-templates`): the members it turns
+/// on, its routines (each made paused until the owner turns it on), and what Buddy asks the owner in the first week.
+export type ShopTemplate = {
+  id: string;
+  name: string;
+  /// One line saying which shops it fits.
+  fits: string;
+  team: string[];
+  routines: { when: string; does: string; asksFirst: boolean }[];
+  questions: string[];
+};
+
+/// One first-week question and its answer as the team now knows it: the owner's fact, whose words are null once the
+/// owner had the team forget it.
+export type ShopQuestion = {
+  id: string;
+  text: string;
+  answer: { factId: string; text: string | null; answeredAt: string } | null;
+};
+export type ShopQuestions = { tenant: string; template: string | null; questions: ShopQuestion[] };
+export type NewAnswer = { tenant: string; questionId: string; text: string };
 
 export type NewLineConnection = {
   tenant: string;
@@ -193,12 +218,13 @@ export type AwaitingOwner = { status: "awaiting_owner"; confirmUrl: string; expi
 
 /// Who an audit entry says acted: an operator by their Cloudflare Access identity (null for a service token, and in
 /// practice mode), the shop's owner (through a link, or with the id of their signed-in device), a helper, a worker by
-/// its attempt, or Manut AI's own system.
+/// its attempt, an outpost (a machine that runs the team's browser) by its id, or Manut AI's own system.
 export type AuditActor =
   | { kind: "operator"; email: string | null }
   | { kind: "owner"; id?: string }
   | { kind: "helper"; id: string }
   | { kind: "worker"; attemptId: string }
+  | { kind: "outpost"; id: string }
   | { kind: "system" };
 
 /// One entry of a shop's audit log (docs/pilot-api.md, "Audit log"): who did what and when, metadata only. `action`
@@ -210,7 +236,7 @@ export type AuditEntry = {
   actor: AuditActor;
   action: string;
   /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
-  /// `previousConnectionId`, `confirmationId`, `factId`.
+  /// `previousConnectionId`, `confirmationId`, `factId`, `inviteId`, `helperId`, `signInId`, `outpostId`, `grantId`.
   subject: Record<string, string>;
   outcome: string;
   reason?: string;
@@ -244,6 +270,70 @@ export type FactRef = { tenant: string; id: string };
 
 /// The owner's correction: new words for a fact.
 export type FactCorrection = { tenant: string; id: string; text: string };
+
+/// The one account an invite or a helper is bound to (docs/pilot-api.md, "Helpers"): a LINE account id, compared exactly,
+/// or an email, compared without case.
+export type Identity = { kind: "line"; id: string } | { kind: "email"; address: string };
+
+/// `expired` is an invite never used in its 7 days. The API reads it from the clock, so a pending invite turns expired
+/// by itself.
+export type InviteStatus = "pending" | "used" | "revoked" | "expired";
+
+export type InviteView = {
+  id: string;
+  /// The name the owner gave, carried to the helper who joins through the invite.
+  name: string;
+  identity: Identity;
+  status: InviteStatus;
+  createdAt: string;
+  /// 7 days after `createdAt`.
+  expiresAt: string;
+  /// The link to copy, for a pending invite only, and only when the API can make links. Nothing sends it.
+  inviteUrl?: string;
+};
+
+export type PeopleHelper = {
+  id: string;
+  name: string;
+  identity: Identity;
+  joinedAt: string;
+  /// Sessions open now, one for each device signed in.
+  devices: number;
+};
+
+/// Cover while the owner is away: `helperId` covers messages until `until`. It is `inForce` until that time exactly; after
+/// it the cover stays on record, no longer in force, until an operator clears it.
+export type AwayView = { helperId: string; name: string; until: string; inForce: boolean };
+
+/// A note a helper passed on to the owner with a request they may not decide. `kind` is the request's approval-core kind;
+/// a kind this console does not know yet is shown as it is, so it is kept a string.
+export type PassedOnItem = { requestId: string; kind: string; by: string; name: string; note: string; at: string };
+
+/// `GET /v1/admin/people`: the owner, the helpers, every invite, the cover, the notes helpers passed on, and the helpers
+/// who were removed, so what they did in the activity log still has their name.
+export type People = {
+  tenant: string;
+  owner: { name: string };
+  helpers: PeopleHelper[];
+  invites: InviteView[];
+  away: AwayView | null;
+  passedOn: PassedOnItem[];
+  removed: { id: string; name: string }[];
+};
+
+/// `name` is 1 to 80 characters once trimmed.
+export type NewInvite = { tenant: string; name: string; identity: Identity };
+export type InviteRef = { tenant: string; inviteId: string };
+export type HelperRef = { tenant: string; helperId: string };
+/// `until` is any time the API can read, in the future.
+export type NewAway = { tenant: string; helperId: string; until: string };
+
+/// The invite as it now stands, and the link for the operator to copy: the API never sends it.
+export type CreatedInvite = { invite: InviteView; inviteUrl: string };
+
+/// What a removal did: the helper's sessions it ended, their pending invites it revoked (by id), and whether they were the
+/// one covering.
+export type HelperRemoval = { removed: string; sessionsEnded: number; invitesRevoked: string[]; coverEnded: boolean };
 
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
@@ -384,8 +474,16 @@ export interface PilotApi {
   giveConsent(token: string): Promise<ApprovalView>;
   decide(token: string, approve: boolean): Promise<ApprovalView>;
 
+  /// Rejects with 400 `unknown_template`, making no shop, for a template that is not one of the API's.
   createShop(input: NewShop): Promise<CreatedShop>;
   listShops(): Promise<Shop[]>;
+  /// `GET /v1/admin/templates`: the shop templates a new shop can start from.
+  listTemplates(): Promise<ShopTemplate[]>;
+  /// `GET /v1/admin/questions`: what Buddy asks a shop's owner in the first week, from its template, with each answer.
+  getQuestions(tenant: string): Promise<ShopQuestions>;
+  /// `POST /v1/admin/questions/answer`: the owner's answer, relayed by the operator, becomes the owner's own fact. Rejects
+  /// with 409 `already_answered`, 404 `not_found`, 400 `invalid_text`, or memory's 409 `already_known` or `full`.
+  answerQuestion(input: NewAnswer): Promise<ShopQuestion>;
   createLineConnection(input: NewLineConnection): Promise<CreatedLineConnection>;
   listMessages(tenant: string): Promise<InboundMessage[]>;
   proposeReply(input: NewReply): Promise<ProposedReply>;
@@ -425,6 +523,24 @@ export interface PilotApi {
   correctFact(input: FactCorrection): Promise<Fact>;
   /// Forget: the fact and its words are gone, and only a fingerprint is kept so the team does not learn them again.
   forgetFact(input: FactRef): Promise<{ id: string }>;
+
+  /// `GET /v1/admin/people`: who can use Manut AI for the shop, with each pending invite's link. Rejects with 400
+  /// `tenant_required`, 404 `shop_not_found` and 503 `people_unavailable`.
+  getPeople(tenant: string): Promise<People>;
+  /// The owner's say over who helps, relayed by the operator (docs/pilot-api.md, "Helpers"). Each rejects with the API's
+  /// refusal, changing nothing: 400 `invalid_request`, `bad_identity` or `bad_date`, 404 `shop_not_found`,
+  /// `unknown_invite` or `not_a_helper`, 409 `already_invited`, `already_helper` or `not_pending`, 503 `not_configured`
+  /// (naming the setting a link needs) or `people_unavailable`.
+  /// An invite for one LINE account or email, for 7 days, once. The API sends nothing: the link is for the operator to send.
+  createInvite(input: NewInvite): Promise<CreatedInvite>;
+  /// An invite that was not used yet stops working.
+  revokeInvite(input: InviteRef): Promise<{ invite: InviteView }>;
+  /// The helper is signed out on every device in the same step; their pending invites and any cover of theirs end.
+  removeHelper(input: HelperRef): Promise<HelperRemoval>;
+  /// One helper covers messages until `until`. Money and public posts still wait for the owner.
+  setAway(input: NewAway): Promise<{ away: AwayView }>;
+  /// The owner is back. Clearing when nobody covers changes nothing.
+  clearAway(input: { tenant: string }): Promise<{ away: null }>;
 
   /// `GET /v1/admin/model/usage`: a shop's model spend, cap and calls for one Bangkok month (`YYYY-MM`), the current
   /// one when none is given. Rejects with 400 `tenant_required`, 400 `invalid_request` for a month that is not one, 503

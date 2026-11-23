@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (LIVE_SHOTS dir, else Playwright's ignored test-results).
@@ -35,16 +36,20 @@ const emit = (...events: Record<string, unknown>[]) => mock("mock.emit", { event
 async function open(page: Page, theme: "dark" | "light" = "dark") {
   await page.emulateMedia({ colorScheme: theme });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
-  await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toContainText("updater");
+  await startDone(page);
 }
+
+/** Why the tests of the bot rows' live state are skipped. */
+const NO_ROWS = "the bot rows' live ring, typing dots, live-step preview and time slot left with the sidebar; Team says Working with no ring yet";
 
 test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
 test("sidebar: turn.start rings the face, the live step slides into the preview, turn.end clears it", async ({ page }) => {
+  test.skip(true, NO_ROWS);
   await open(page);
   const row = page.getByTestId("bot-friren");
   const sub = row.getByTestId("bot-sub");
@@ -159,6 +164,7 @@ test("sidebar: turn.start rings the face, the live step slides into the preview,
 });
 
 test("time slot: a busy row counts its elapsed time, an open ask says waiting, an idle row keeps its time", async ({ page }) => {
+  test.skip(true, NO_ROWS);
   await page.clock.install();
   await open(page);
   const row = page.getByTestId("bot-friren");
@@ -214,6 +220,7 @@ test("time slot: a busy row counts its elapsed time, an open ask says waiting, a
 });
 
 test("light: the ring keeps its 2.5px band and deeper stops with no glow; waiting stays a readable amber", async ({ page }) => {
+  test.skip(true, NO_ROWS);
   await open(page, "light");
   const row = page.getByTestId("bot-friren");
   await emit(ev("friren", "turn.start"));
@@ -231,6 +238,7 @@ test("light: the ring keeps its 2.5px band and deeper stops with no glow; waitin
 });
 
 test("needs you overrides the ring: an open ask shows the amber dot, answering it brings the ring back", async ({ page }) => {
+  test.skip(true, NO_ROWS);
   await open(page);
   const row = page.getByTestId("bot-friren");
   await emit(ev("friren", "turn.start"), ev("friren", "tool.start", { tool_id: "f1", name: "terminal", detail: "ls" }));
@@ -352,23 +360,14 @@ test("chat: an approval card replaces the typing bubble while the bot waits on y
 test("reduced motion: the arc and the dots stand still", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page);
-  await emit(ev("kami", "turn.start"), ev("friren", "turn.start"));
-  const ring = page.getByTestId("bot-friren").getByTestId("live-ring");
-  await expect(ring).toBeVisible();
-  await expect(ring).toHaveCSS("animation-name", "none");
-  // still an arc with its faded tail, not a full circle
-  expect(await ring.evaluate((e) => getComputedStyle(e, "::before").backgroundImage)).toMatch(
-    /^conic-gradient\(rgba\(0, 0, 0, 0\) 0deg, rgba\(0, 0, 0, 0\) 220deg, /,
-  );
-  for (const dot of await page.getByTestId("bot-friren").locator(".ui-typing i").all()) await expect(dot).toHaveCSS("animation-name", "none");
+  // The chat's typing bubble keeps its part; the bot row's ring, dots and live step it also checked left with the
+  // sidebar.
+  await emit(ev("kami", "turn.start"));
   const typing = page.getByTestId("typing");
+  await expect(typing.getByTestId("typing-ring")).toBeVisible();
   await expect(typing.getByTestId("typing-ring")).toHaveCSS("animation-name", "none");
   for (const dot of await typing.locator(".ui-typing i").all()) await expect(dot).toHaveCSS("animation-name", "none");
-  await emit(ev("friren", "tool.start", { tool_id: "r1", name: "read_file", detail: "a.txt" }));
-  const sub = page.getByTestId("bot-friren").getByTestId("bot-sub");
-  await expect(sub.getByTestId("tick-text")).toHaveText("Reading a.txt");
-  await expect(sub.locator(".ui-tick-t.in")).toHaveCSS("animation-name", "none");
-  await emit(ev("kami", "turn.end", { outcome: "done" }), ev("friren", "turn.end", { outcome: "done" }));
+  await emit(ev("kami", "turn.end", { outcome: "done" }));
 });
 
 // Retina, like the Macs manut runs on: a 1.5px arc at 1x is a blur of two half-lit pixels.
@@ -376,6 +375,7 @@ test.describe("screenshots", () => {
 test.use({ deviceScaleFactor: 2 });
 for (const theme of ["dark", "light"] as const) {
   test(`screenshot T12b-live-${theme}: sidebar rings, needs-you, typing bubble`, async ({ page }) => {
+    test.skip(true, "a shot of the sidebar's rings, needs-you dot and time slots, which left with the bot rows");
     mkdirSync(SHOTS, { recursive: true });
     await page.setViewportSize({ width: 1280, height: 820 });
     // a fake clock, so the still shows real elapsed times (Friren a minute in, Kami 12s) rather than two "0s"

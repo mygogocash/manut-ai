@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || join(homedir(), ".hermes/profiles/kami/cache/scratch/manut-v02");
@@ -75,7 +76,7 @@ async function shot(page: Page, name: string) {
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("places").click();
   await expect(page.getByTestId("details-panel").getByTestId("where-row")).toHaveCount(4);
 }

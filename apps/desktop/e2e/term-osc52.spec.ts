@@ -56,7 +56,8 @@ test("a copy with no key pressed, or from a terminal without the keyboard, is re
   await expect(note).toHaveCount(0, { timeout: 6000 });
   // a key pressed, then the keyboard moved out of the terminal: refused too
   await keyIn(page);
-  await page.getByTestId("bot-search").focus();
+  // on the side menu's Search button (the sidebar's search field this used left with it)
+  await page.getByTestId("menu-search").focus();
   await feed(page, osc52("while elsewhere"));
   await expect(note).toBeVisible();
   expect(await clipWrites(page)).toEqual([]);

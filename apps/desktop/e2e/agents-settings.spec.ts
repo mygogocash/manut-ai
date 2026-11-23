@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -46,7 +47,7 @@ async function open(page: Page, opts: { theme?: string; lang?: string; file?: un
     [opts.theme ?? "dark", opts.lang ?? "", opts.file ?? null] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function agentsPage(page: Page) {
@@ -64,6 +65,7 @@ async function fill(page: Page, label: string, program: string, args = "acp") {
 }
 
 async function plus(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await expect(page.getByTestId("session-agent-claude")).toBeVisible();
   await page.waitForFunction(() => document.querySelector(".ss-pop")?.getAnimations().every((a) => a.playState !== "running"));
@@ -73,9 +75,10 @@ test("the page lists every offered agent read-only with its tier and whether it 
   await open(page);
   await agentsPage(page);
   const rows = page.locator("[data-testid=agents-builtins] [data-testid^=agents-row-]");
-  await expect(rows).toHaveCount(14);
+  // every agent but oh-my-hermes, which the fork does not offer (README.md, what was removed)
+  await expect(rows).toHaveCount(13);
   expect(await rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")!.slice("agents-row-".length)))).toEqual([
-    "claude", "codex", "omo", "dsh", "omh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline",
+    "claude", "codex", "omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline",
   ]);
   await expect(page.getByTestId("agents-tier-claude")).toHaveText("Main");
   await expect(page.getByTestId("agents-tier-dsh")).toHaveText("Built-in");
@@ -85,10 +88,10 @@ test("the page lists every offered agent read-only with its tier and whether it 
   // nothing on the built-in rows can be changed
   await expect(page.locator("[data-testid=agents-builtins] button, [data-testid=agents-builtins] input")).toHaveCount(0);
   await expect(page.getByTestId("agents-mine")).toContainText("No agents of your own yet");
-  // the page sits between Terminal and Providers
+  // the page sits between Terminal and Computer (the fork removed Providers, which was Hermes' sign-in)
   const names = await page.locator(".st-nav button").allTextContents();
   expect(names.indexOf("Agents")).toBe(names.indexOf("Terminal") + 1);
-  expect(names.indexOf("Providers")).toBe(names.indexOf("Agents") + 1);
+  expect(names.indexOf("Computer")).toBe(names.indexOf("Agents") + 1);
 });
 
 test("Save opens the confirm card with the exact command; Cancel writes nothing", async ({ page }) => {

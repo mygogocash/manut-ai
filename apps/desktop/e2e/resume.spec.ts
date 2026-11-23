@@ -2,6 +2,7 @@
 // stands in for the updater (as in update.spec.ts), and a reload stands in for manut restarting (the page loads
 // again with the same storage, and the mock session host starts empty, as the shell does after a restart).
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, homeOpen, openChat } from "./start";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -61,7 +62,8 @@ async function setup(page: Page, folders: string[] = []) {
     }
   }, folders);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  // with no snapshot the app starts fresh, on Home
+  await homeOpen(page);
 }
 
 /** A New session chat on `agent` in the picker's next folder, started: a chat agent by its first message
@@ -178,25 +180,24 @@ test("no session running: the confirm has no sessions line", async ({ page }) =>
 
 test("after a restart: the bot, its draft and the open panel come back", async ({ page }) => {
   await setup(page);
-  await page.getByTestId("bot-friren").click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await openChat(page, "friren");
   await page.getByTestId("composer").fill("unsent line\nand a second");
   await page.getByTestId("who").click();
   await page.getByTestId("panel-tab-schedule").click();
   await expect(page.getByTestId("window")).toHaveClass(/\bpanel-open\b/);
   // another bot's draft is kept too
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await page.getByTestId("composer").fill("kami note");
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByTestId("composer")).toHaveValue("unsent line\nand a second");
   await expect.poll(async () => (await saved(page))?.drafts).toEqual({ friren: "unsent line\nand a second", kami: "kami note" });
 
   await page.reload();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("composer")).toHaveValue("unsent line\nand a second");
   await expect(page.getByTestId("window")).toHaveClass(/\bpanel-open\b/);
   await expect(page.getByTestId("panel-tab-schedule")).toHaveAttribute("aria-selected", "true");
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await expect(page.getByTestId("composer")).toHaveValue("kami note");
 });
 
@@ -210,12 +211,15 @@ test("a saved bot that is gone, or a bad snapshot, opens the app as a fresh star
       );
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  // a fresh start opens on Home, with no panel
+  await homeOpen(page);
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-open\b/);
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);
   await page.evaluate(() => sessionStorage.setItem("__step", "2"));
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await homeOpen(page);
+  // and the gone bot's draft went with it: Kami's composer is empty
+  await openChat(page, "kami");
   await expect(page.getByTestId("composer")).toHaveValue("");
 });
 

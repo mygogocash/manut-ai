@@ -4,6 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -46,8 +47,9 @@ async function open(page: Page, theme: "dark" | "light" = "dark") {
     localStorage.setItem("manut.theme", th);
   }, theme);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
-  await expect(page.getByTestId("bot-friren")).toBeVisible();
+  await chatOpen(page);
+  // Friren's chat is read too, so its turns are followed (the sidebar listed it before)
+  await startDone(page);
 }
 
 const notes = (page: Page) => page.evaluate(() => (window as unknown as { __manutNotes: unknown[] }).__manutNotes.slice());
@@ -69,7 +71,7 @@ test("a bot error marks its chat but raises no notification by default", async (
   await watched(page, false);
   await frirenFails(page);
   // the chat says the turn failed
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByText("Failed").first()).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(300);
   expect(await notes(page)).toEqual([]);

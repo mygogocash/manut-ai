@@ -10,6 +10,7 @@
 //      is the most visible one.
 // Chromium (Playwright's headless shell); nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
+import { openChat, openCode } from "./start";
 import { feed, mock, modKey, newTerminal, openApp, pointAt } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -30,6 +31,7 @@ const MESSAGE = 64 * 1024;
 const FLOW_HIGH = 2 * MIB;
 
 const show = async (page: Page, id: string) => {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 };
@@ -127,7 +129,7 @@ test.describe("credit through the engine's feed", () => {
     await show(page, a);
     const fedA = sum(await flow(page), "feed", idA);
     await run(page, "after 1500 flood 3");
-    await page.getByTestId("bot-kami").click();
+    await openChat(page, "kami");
     await expect(page.getByTestId("terminal")).toHaveCount(0);
     await expect.poll(async () => sum(await flow(page), "feed", idA), { timeout: 20_000 }).toBeGreaterThanOrEqual(fedA + 3 * MIB);
     await expect.poll(async () => sum(await flow(page), "ack", idA), { timeout: 20_000 }).toBe(sum(await flow(page), "feed", idA));
@@ -150,6 +152,7 @@ test.describe("the renderer, from Settings", () => {
   const inUse = (page: Page) => page.evaluate(async () => (await import("/src/sessions/term/engine.ts" as string)).rendererInUse() as "gpu" | "standard" | null);
   const canvases = (page: Page) => page.locator('[data-testid="terminal"] .xterm canvas').count();
   const back = async (page: Page) => {
+    await openCode(page);
     await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
     await expect(page.getByTestId("terminal")).toBeVisible();
   };
@@ -171,7 +174,7 @@ test.describe("the renderer, from Settings", () => {
 
     // Auto, the default, on the test browser's software WebGL (SwiftShader): the standard renderer, and the GPU
     // add-on is never fetched (on real hardware Auto draws with the GPU: engine-policy.test.ts)
-    await page.getByTestId("bot-kami").click();
+    await openChat(page, "kami");
     await newTerminal(page);
     expect(await inUse(page)).toBe("standard");
     expect(await canvases(page)).toBe(0);

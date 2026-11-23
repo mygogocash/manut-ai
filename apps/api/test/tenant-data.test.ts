@@ -23,6 +23,8 @@ function defaults(): Record<string, () => Response> {
     "TENANT GET /tombstone": () => Response.json({ tombstone: null }),
     "TENANT GET /attention": () => Response.json({ items: [{ id: "item-1" }] }),
     "TENANT GET /pilot/export": () => Response.json({ shop: null, messages: [], replies: [], payments: [], displayNames: [] }),
+    "TENANT GET /routines/export": () => Response.json({ team: { paused: false, since: null, members: null },
+      routines: [{ id: "rt-1", name: "Morning brief" }], questions: [], runs: [{ routineId: "rt-1", status: "done" }] }),
     "TENANT GET /model/export": () =>
       Response.json({ capOverride: null, months: [{ month: "2026-11", spentMillisatang: 4_200 }], calls: [], holds: [] }),
     "TENANT GET /audit/export": () =>
@@ -169,6 +171,7 @@ describe("tenant export fan-out", () => {
       audit?: { entries?: unknown[]; missed?: unknown };
       memory?: { facts?: unknown[]; forgottenCount?: number };
       people?: { state?: { helpers?: unknown[] }; names?: unknown };
+      routines?: { routines?: unknown[]; runs?: unknown[] };
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
@@ -189,6 +192,9 @@ describe("tenant export fan-out", () => {
     // The people around the shop: its helpers and the names the owner gave them.
     expect(body.people?.state?.helpers).toEqual([{ id: "helper-1" }]);
     expect(body.people?.names).toEqual({ "helper-1": "Mint" });
+    // The team's routines and how each run went.
+    expect(body.routines?.routines).toEqual([{ id: "rt-1", name: "Morning brief" }]);
+    expect(body.routines?.runs).toEqual([{ routineId: "rt-1", status: "done" }]);
   });
 
   for (const [route, part] of [
@@ -200,6 +206,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /tombstone", "tombstone"],
     ["TENANT GET /attention", "attention"],
     ["TENANT GET /pilot/export", "pilot"],
+    ["TENANT GET /routines/export", "routines"],
     ["TENANT GET /model/export", "model"],
     ["TENANT GET /audit/export", "audit"],
     ["TENANT GET /memory/export", "memory"],

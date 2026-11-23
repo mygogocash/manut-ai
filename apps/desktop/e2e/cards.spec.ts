@@ -2,6 +2,7 @@
 // collapse to one gray line.
 import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
+import { chatOpen, openNeed } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (CARDS_SHOTS dir, else Playwright's ignored test-results).
@@ -46,7 +47,7 @@ function recordEvents(page: Page): any[] {
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -225,8 +226,7 @@ test("clarify: the last number opens Other…, digits typed in its field stay te
 test("interview: a digit picks within the focused question only", async ({ page }) => {
   await open(page);
   await mock("mock.ask", { bot: "friren", kind: "interview" });
-  await page.getByTestId("needs-strip").click();
-  await page.getByTestId("needs-item").first().click();
+  await openNeed(page);
   const card = page.getByTestId("card-interview");
   await expect(card).toBeFocused();
   await page.keyboard.press("2"); // the card itself is focused, no question: nothing picked

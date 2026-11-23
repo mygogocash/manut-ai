@@ -2,6 +2,7 @@
 // returns the focus to where the person was typing before (a TERMINALS session or the chat composer), never to the
 // page body where keys go nowhere. A place clicked while the panel was open is left alone.
 import { expect, test, type Page } from "@playwright/test";
+import { openChat } from "./start";
 import { mock, newTerminal, openApp, platformIsMac } from "./term-find-helpers";
 
 const panel = (page: Page) => page.getByTestId("termpanel");
@@ -63,7 +64,7 @@ test("a place clicked while the panel was open keeps the keyboard when it hides"
   await page.locator('[data-testid="terminal"] .xterm-helper-textarea').focus();
   await toggle(page, true);
   // the person moves to the bot chat and types there, then hides the panel from the menu key
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await page.getByTestId("composer").focus();
   await page.evaluate(async () => {
     const m = (await import("/src/terminal/state.ts" as string)) as { toggleTerminal(): void };

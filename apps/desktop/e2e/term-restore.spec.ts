@@ -7,6 +7,7 @@
 // page's storage) and written back, dimmed, under a "--- restored <time> ---" line before the new output; closing
 // removes it; Settings > Terminal turns it off. The bottom panel's tabs come back with their folders and scrollback.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FOLDER = "/home/you/code/web-app";
@@ -41,11 +42,13 @@ async function open(page: Page) {
     w.__manutMockAgents = ["claude", "codex", "grok", "omh", "pi"];
   }, FOLDER);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `agent` from the TERMINALS + menu in FOLDER; its session id. */
 async function newTerm(page: Page, agent: string): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -78,10 +81,13 @@ test("a Claude Code terminal starts under an id manut made and continues it afte
   await expect.poll(async () => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)).toMatchObject({ agent: "claude", agentSession: conv, running: true });
 
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${id}`)).toBeVisible();
   // it starts by itself, continuing the same conversation in the same folder: no new id, no Resume button
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", cwd: FOLDER, resume: conv })]);
   expect((await starts(page))[0].sessionId).toBeUndefined();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect(page.getByTestId("session-paused")).toHaveCount(0);
@@ -109,6 +115,8 @@ async function holds(page: Page, id: string, conv: string) {
 const asks = (page: Page) => page.evaluate(() => ((window as unknown as { __manutPastReads?: { op: string; pty?: number }[] }).__manutPastReads ?? []).filter((r) => r.op === "own"));
 const conv = async (page: Page, id: string) => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)?.agentSession;
 async function closeRow(page: Page, id: string) {
+  // from its row's ×, on the Code page where the TERMINALS rows are now
+  await openCode(page);
   const card = page.getByTestId(`session-${id}`);
   await card.hover();
   await card.getByTestId("session-close").click();
@@ -132,6 +140,8 @@ test("a Codex terminal learns its conversation from its own Codex and continues 
   expect(await asks(page)).toEqual([{ op: "own", agent: "codex", pty }]);
 
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${id}`)).toBeVisible();
   // it starts by itself as `codex resume <id>` in the same folder, and asks for nothing again
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "codex", cwd: FOLDER, resume: A })]);
@@ -199,6 +209,7 @@ test("a Codex that exits to the shell gives its conversation to no other termina
   // the person types codex in that shell: the row shows Codex, but it is a shell row and asks nothing
   const shellPty = await ptyOf(page, b);
   await page.evaluate((p) => (window as unknown as { __manutEmitSessionFg(x: { id: number; agent: string }): void }).__manutEmitSessionFg({ id: p!, agent: "codex" }), shellPty);
+  await openCode(page);
   await expect(page.getByTestId(`session-${b}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
   // the first one asks after 5 s: its Codex holds nothing yet, so it learns nothing, and never the other's
   await expect.poll(async () => (await asks(page)).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
@@ -207,6 +218,8 @@ test("a Codex that exits to the shell gives its conversation to no other termina
   expect((await asks(page)).map((r) => r.pty)).toEqual([await ptyOf(page, a)]);
   // after a restart neither continues anything: both come back paused
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   await page.waitForTimeout(300);
   expect(await starts(page)).toEqual([]);
@@ -236,6 +249,7 @@ test("Resume right after a restart learns only the new Codex's own conversation"
   await flush(page);
   expect(await conv(page, a)).toBeUndefined();
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   expect(await starts(page)).toEqual([]);
@@ -257,6 +271,7 @@ test("an agent with no conversation of its own (Grok) still comes back paused an
   expect((await starts(page))[0].sessionId).toBeUndefined();
   await expect.poll(async () => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)?.running).toBe(true);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   await page.waitForTimeout(300);
@@ -269,6 +284,7 @@ test("a paused terminal shows what it showed before the restart, dimmed under th
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   await expect.poll(async () => (await calls(page)).some((c) => c.op === "history.save" && c.key === id && !!c.data?.includes("(mock)"))).toBe(true);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   const kept = page.getByTestId("session-paused-history").locator(".xterm-rows");
@@ -312,6 +328,7 @@ test("the scrollback comes back dimmed, under a divider, before the program's ne
   // a slow computer: the shell answers the history read late, and the program still starts only after it is in
   await page.addInitScript(() => ((window as unknown as Record<string, unknown>).__manutMockHistoryDelay = 400));
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toBeAttached();
   // the kept text holds the old banner too: wait for the new program's own banner, below the divider
@@ -338,6 +355,7 @@ test("the scrollback comes back dimmed, under a divider, before the program's ne
   expect((await history(page)).find((c) => c.op === "history.prune")?.keep).toContain(id);
 
   // closing the row removes its kept text
+  await openCode(page);
   await page.getByTestId(`session-${id}`).hover();
   await page.evaluate((i) => (window as unknown as { __manutSessions: { close(id: string): void } }).__manutSessions.close(i), id);
   await expect.poll(async () => (await history(page)).filter((c) => c.op === "history.remove").map((c) => c.key)).toEqual([id]);
@@ -357,6 +375,7 @@ test("Keep terminal history off: one clear, and no history call after it", async
   const before = (await history(page)).length;
   await flush(page);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toContainText("(mock)");
   await page.waitForTimeout(300);
@@ -418,7 +437,7 @@ test("the bottom panel's tabs come back after a restart in their folders, with t
   // a slow computer: the shell answers the history read late
   await page.addInitScript(() => ((window as unknown as Record<string, unknown>).__manutMockHistoryDelay = 400));
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await startDone(page);
   // nothing starts until the panel shows
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => (window as unknown as { __manutShellCalls?: unknown[] }).__manutShellCalls ?? [])).toEqual([]);

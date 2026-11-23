@@ -12,6 +12,7 @@
 // Chromium (Playwright's headless shell) on the mock host; nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
 import { mock, newTerminal, openApp } from "./term-find-helpers";
+import { openCode } from "./start";
 
 test.beforeEach(async () => {
   await mock("mock.reset");
@@ -25,8 +26,9 @@ const MIB = 1024 * 1024;
 /** FLOW_HIGH in src-tauri/src/sessions.rs: the shell stops reading a program this far ahead of the page. */
 const FLOW_HIGH = 2 * MIB;
 
-/** Show session `id` (its TERMINALS row). */
+/** Show session `id` (its TERMINALS row, on the Code page). */
 const show = async (page: Page, id: string) => {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 };
@@ -39,6 +41,7 @@ async function tagged(page: Page, gpu = false): Promise<string> {
   else {
     const term = page.getByTestId("terminal");
     const before = (await term.count()) ? await term.getAttribute("data-session") : null;
+    await openCode(page);
     await page.getByTestId("session-new").click();
     await page.getByTestId("session-folder").click();
     await page.getByTestId("session-choose").click();
@@ -241,11 +244,16 @@ test("the bell and an OSC 9 message from a hidden terminal still reach its row",
   };
   await type("after 1200 bell");
   const b = await tagged(page);
+  // the row is on the Code page, which shows no terminal while it is open
+  await openCode(page);
   await expect(row).toHaveAttribute("data-term-status", "bell", { timeout: 8000 });
   await show(page, a);
+  await openCode(page);
   await expect(row).not.toHaveAttribute("data-term-status", "bell");
+  await show(page, a);
   await type("after 1200 osc9");
   await show(page, b);
+  await openCode(page);
   await expect(row).toHaveAttribute("data-term-status", "bell", { timeout: 8000 });
 });
 

@@ -66,6 +66,7 @@ import {
   type StoredDeletion,
   type SubscriptionPayment,
 } from "./pilot-store";
+import { applyTemplate, checkedTemplate } from "./routine-setup";
 import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
@@ -886,21 +887,30 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
   const name = typeof body.name === "string" ? body.name.trim() : body.name;
   const ownerName = typeof body.ownerName === "string" ? body.ownerName.trim() : body.ownerName;
   if (!bounded(name, 200) || !bounded(ownerName, 200)) return json({ error: "invalid_request" }, 400);
+  // A shop template (routine-setup.ts) is checked before anything is made, so a shop never starts half set up. None,
+  // or null, is a shop as before templates: every worker on, nothing scheduled, nothing to ask.
+  const asked = body.template ?? null;
+  const template = asked === null ? null : checkedTemplate(asked);
+  if (asked !== null && !template) return json({ error: "unknown_template" }, 400);
   const tenant = `pilot:${crypto.randomUUID()}`;
   const created = await pilotWrite(env, tenant, "/pilot/shop", {
     name,
     ownerName,
     taskId: `pilot-task-${crypto.randomUUID()}`,
+    ...(template ? { template: template.id } : {}),
     actor,
   });
   if (!created.ok) return json({ error: "shop_unavailable" }, 503);
+  // Set up before it is listed: a shop whose setup could not be written is never registered, as one whose registry row
+  // could not be written is not, so the console never shows a shop half made, and asking again makes a whole one.
+  if (template && !(await applyTemplate(env, tenant, template, actor))) return json({ error: "shop_unavailable" }, 503);
   const registered = await authCall(env, "/pilot-shops", {
     method: "POST",
     headers: { "content-type": "application/json", "x-admin": "1" },
     body: JSON.stringify({ tenant }),
   });
   if (!registered.ok) return json({ error: "shop_unavailable" }, 503);
-  return json({ tenant, name, ownerName });
+  return json({ tenant, name, ownerName, ...(template ? { template: template.id } : {}) });
 }
 
 /// Every pilot shop, with its latest deletion request when it has one, so the
@@ -926,6 +936,7 @@ async function listShops(env: PilotEnv): Promise<Response> {
         name: shop.name,
         ownerName: shop.ownerName,
         ...(shop.lineConnectionId ? { lineConnectionId: shop.lineConnectionId } : {}),
+        ...(shop.template ? { template: shop.template } : {}),
         consent,
         ...(deletion ? { deletion } : {}),
       };
