@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { isSignInVaultPath, signInVaultRoute } from "./sign-in-vault";
 
 type CredEnv = {
   CRED_KEY?: string;
@@ -64,6 +65,8 @@ export class CredObject extends DurableObject {
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // The shop's site sign-ins for browser control (sign-in-vault.ts), sealed with the same keys as connections.
+    if (isSignInVaultPath(url.pathname)) return signInVaultRoute(this.ctx.storage, this.credEnv, request, url);
     if (request.method === "POST" && url.pathname === "/connections") {
       return this.store(request);
     }

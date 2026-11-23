@@ -4,6 +4,7 @@ import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
+import { vaultAdminRoute } from "./browser-control";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
@@ -206,6 +207,10 @@ const ADMIN_METHODS = new Set([
   // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
   // model through the gateway, never the route. The tenant travels in the body.
   "POST /v1/admin/workers/run",
+  // The vault's site sign-ins (browser-control.ts): list them without any secret, add one, replace a password, remove
+  // one. The tenant and the sign-in's id travel in the query or the body.
+  "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
+  "POST /v1/admin/vault/sign-ins/remove",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -630,6 +635,11 @@ export default {
     // runner reads the kill switches and the owner's consent before it creates anything.
     const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
     if (workers) return workers;
+
+    // The vault's site sign-ins (browser-control.ts). The admin gate above already required both credentials and the
+    // exact method.
+    const vault = await vaultAdminRoute(request, url, env, ctx);
+    if (vault) return vault;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
