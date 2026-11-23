@@ -1,0 +1,18 @@
+{
+  "name": "@manut/member-grants",
+  "private": true,
+  "type": "module",
+  "description": "Which team member does which job, and what each job may do without asking.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@manut/approval-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
