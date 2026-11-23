@@ -2,12 +2,12 @@
 // fills to the larger of its windows (only when the CLI's own files give a %; no % means no ring at all). Hover
 // or click opens a card pointing at its mark, with each window. Read-only: the numbers come from `usage.read`,
 // refreshed every minute.
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from "react";
 import type { UsageProvider } from "../lib/protocol";
 import { getStore, useStore } from "../state/store";
 import { AgentIcon } from "../ui";
 import { t } from "../i18n";
-import { PROVIDER_NAME, accountRow, meterDot, meterLabel, planText, ringLevel, stateText, topPercent, windowRow } from "./usageFormat";
+import { PROVIDER_NAME, accountRow, caretOffset, meterDot, meterLabel, planText, ringLevel, stateText, topPercent, windowRow } from "./usageFormat";
 
 const REFRESH_MS = 60_000;
 const R = 11.5;
@@ -30,10 +30,10 @@ export function Ring({ p }: { p: UsageProvider }) {
   );
 }
 
-function Card({ p, now, caret }: { p: UsageProvider; now: number; caret: number }) {
+function Card({ p, now, caret, cardRef }: { p: UsageProvider; now: number; caret: number; cardRef: Ref<HTMLDivElement> }) {
   const plan = planText(p.plan);
   return (
-    <div className="usage-card ui-pop ui-pop-top ui-pop-left" role="dialog" aria-label={t("use.card", { name: PROVIDER_NAME[p.id] ?? p.id })}
+    <div ref={cardRef} className="usage-card ui-pop ui-pop-top ui-pop-left" role="dialog" aria-label={t("use.card", { name: PROVIDER_NAME[p.id] ?? p.id })}
       style={{ "--caret": `${caret}px` } as CSSProperties} data-testid="usage-card">
       <div className="uc-head">
         <AgentIcon id={p.id} size={14} />
@@ -90,6 +90,8 @@ export function Usage() {
   const [now, setNow] = useState(() => Date.now() / 1000);
   const ref = useRef<HTMLDivElement>(null);
   const marks = useRef(new Map<string, HTMLButtonElement>());
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [caret, setCaret] = useState(0);
 
   const load = useCallback(() => {
     getStore()
@@ -124,12 +126,20 @@ export function Usage() {
     };
   }, [open?.pinned]);
 
-  if (providers.length === 0) return null;
   const shown = providers.find((p) => p.id === open?.id);
-  // the caret points at the middle of the open mark, measured from the card's own left edge (the card spans the
-  // footer row the marks sit in: both are placed against it)
-  const btn = shown ? marks.current.get(shown.id) : undefined;
-  const caret = btn ? btn.offsetLeft + btn.offsetWidth / 2 : 0;
+  const shownId = shown?.id;
+  // The caret points at the middle of the open mark, measured from the card's own inner edge as the screen shows both
+  // (usageFormat.ts `caretOffset`). The card is inset in the row the marks sit in, so measuring from that row, as
+  // `offsetLeft` does, pointed past the mark by the inset. Before paint, so the card never shows its caret elsewhere.
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const mark = shownId ? marks.current.get(shownId) : undefined;
+    if (!card || !mark) return;
+    const m = mark.getBoundingClientRect();
+    setCaret(caretOffset({ left: m.left, width: m.width }, { left: card.getBoundingClientRect().left }, card.clientLeft));
+  }, [shownId]);
+
+  if (providers.length === 0) return null;
   return (
     <div className="usage" ref={ref} data-testid="usage" onMouseLeave={() => !open?.pinned && setOpen(null)}>
       {providers.map((p) => (
@@ -154,7 +164,7 @@ export function Usage() {
           {meterDot(p) && <span className={`usage-dot st-${meterDot(p)}`} aria-hidden="true" />}
         </button>
       ))}
-      {shown && <Card p={shown} now={now} caret={caret} />}
+      {shown && <Card p={shown} now={now} caret={caret} cardRef={cardRef} />}
     </div>
   );
 }

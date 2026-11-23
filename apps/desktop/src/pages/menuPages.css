@@ -158,6 +158,168 @@
   font-size: 12px;
 }
 
+/* The desktop's own: a member's row on the Team page. The row opens the member's chat, and a More button beside it opens
+   the member's menu (a new thread, Pin to top, Restart), which hangs under the row. */
+.mpage .tli {
+  position: relative;
+}
+.mpage .trow {
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 0 4px 0 0;
+}
+.mpage .trow:hover {
+  background: var(--hov);
+}
+.mpage .trow .rowmain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 6px 8px 10px;
+  border-radius: var(--rad);
+  text-align: left;
+}
+.mpage .trow .more {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.mpage .trow .more[aria-expanded="true"] {
+  background: var(--hov);
+  color: var(--ink);
+}
+.mpage .tmenu {
+  position: absolute;
+  z-index: 20;
+  right: 8px;
+  top: calc(100% - 6px);
+  width: 208px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  box-shadow: var(--pop-shadow);
+}
+.mpage .tmenu-i {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: var(--rad-sm);
+  color: var(--body);
+  font-size: 13px;
+  text-align: left;
+}
+.mpage .tmenu-i:hover,
+.mpage .tmenu-i:focus-visible {
+  background: var(--hov);
+  color: var(--ink);
+  outline: 0;
+}
+.mpage .tmenu-i .nt-ic {
+  flex: none;
+  color: var(--aui-muted);
+}
+.mpage .tmenu-l {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The desktop's own: History's filter chips (the canvas's .fchip, scoped) beside the page's name, and a row's kind tag, a fixed
+   width so the titles line up. */
+.mpage .chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mpage .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.mpage .fchip:hover {
+  background: var(--hov);
+}
+.mpage .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.mpage .tag.kind {
+  flex: 0 0 52px;
+  justify-content: center;
+}
+/* Needs you: an ask's exact action sits under what is asked, as Home sets it, and Look first stands beside the row. */
+.mpage .need code.act {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: var(--rad-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.mpage .need .look {
+  flex: none;
+  margin: 0 6px;
+}
+
+/* A member's role sits beside their name on the first line, as the canvas sets it, and what they are doing is the second line,
+   with how long it has run or how many more asks wait quietly at its end. Look first sits between the row and its menu. */
+.mpage .l1 .role {
+  margin-left: 6px;
+  color: var(--aui-muted);
+  font-weight: 400;
+}
+.mpage .l2.doing {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mpage .l2.doing .words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mpage .l2.doing .when {
+  flex: none;
+}
+.mpage .trow .look {
+  flex: none;
+  margin: 0 6px;
+}
+/* A pinned member's small dot after their name, as the sidebar's rows had one. */
+.mpage .pinmark {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 0 2px 6px;
+  border-radius: 50%;
+  background: var(--aui-muted);
+  vertical-align: middle;
+}
+
 /* Status words, coloured as the canvas colours them. */
 .mpage .tag {
   display: inline-flex;

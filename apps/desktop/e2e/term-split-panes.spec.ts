@@ -11,12 +11,6 @@ import { openChat, openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
 import { splitBeside, type Side } from "./split-drag-helpers";
 
-/** Why the tests of ⌘W on a lone running terminal are skipped. This is an app bug, not a removed feature, and the app is
- *  not changed here: menuClose.ts hands a lone terminal to closeLone (SplitView.tsx), which checks that the close can be
- *  undone and then calls the store's `close`, which stops the program. The undo window's hold (`closeRow`'s
- *  `holdClosed` in sessions.ts) is what raises the undo toast, and closeLone never reaches it. */
-const LONE_CLOSE_BUG = "app bug: ⌘W on a lone running TERMINALS terminal stops its program at once and shows no undo toast (closeLone in SplitView.tsx calls the store's close, not the undo hold that closeRow uses); this test expects the toast";
-
 type Sessions = { startTerminal(a: string, cwd: string): string; ptyOf(id: string): number | null };
 type Call = { op: string; id?: number; agent?: string; cwd?: string | null; data?: string };
 const start = (page: Page, cwd: string, agent = "shell") => page.evaluate(([c, a]) => (window as unknown as { __manutSessions: Sessions }).__manutSessions.startTerminal(a, c), [cwd, agent] as const);
@@ -25,6 +19,9 @@ const ptyOf = async (page: Page, id: string) => {
   return (await page.evaluate((i) => (window as unknown as { __manutSessions: Sessions }).__manutSessions.ptyOf(i), id))!;
 };
 const out = (page: Page, id: number, d: string) => page.evaluate(([p, s]) => (window as unknown as { __manutMockOut(p: number, d: string): boolean }).__manutMockOut(p as number, s as string), [id, d] as const);
+/** Whether session `id` is in the store's list. The Code page's rows are not drawn while a terminal is in view, so a spec that
+ *  asks whether a session is still there while one is, asks the store. */
+const listed = (page: Page, id: string) => page.evaluate((i) => (window as unknown as { __manutSessions: { getState(): { list: { id: string }[] } } }).__manutSessions.getState().list.some((r) => r.id === i), id);
 const term = (page: Page, id: string) => page.locator(`[data-testid="terminal"][data-session="${id}"]`);
 const pane = (page: Page, id: string) => page.locator(`[data-testid="split-pane"][data-session="${id}"]`);
 const textarea = (page: Page, id: string) => term(page, id).locator(".xterm-helper-textarea");
@@ -386,7 +383,6 @@ test("panes have no title bar: a 1px line splits them, and the zoom and x show i
 });
 
 test("⌘W (the menu's Close Window) / Ctrl+Shift+W on a lone running terminal closes its session with undo; the program gets no ^W", async ({ page }) => {
-  test.skip(true, LONE_CLOSE_BUG);
   await openApp(page);
   const mac = await platformIsMac(page);
   await page.evaluate(() => void ((window as unknown as { __manutCloseGraceMs: number }).__manutCloseGraceMs = 10_000));
@@ -401,7 +397,6 @@ test("⌘W (the menu's Close Window) / Ctrl+Shift+W on a lone running terminal c
 });
 
 test("a held ⌘W closes one terminal, not one after another and then the window (macOS: the menu hears every repeat)", async ({ page }) => {
-  test.skip(true, LONE_CLOSE_BUG);
   await openApp(page);
   test.skip(!(await platformIsMac(page)), "the menu's Close Window and its key repeat are macOS's");
   await page.evaluate(() => void ((window as unknown as { __manutCloseGraceMs: number }).__manutCloseGraceMs = 10_000));
@@ -415,7 +410,8 @@ test("a held ⌘W closes one terminal, not one after another and then the window
   await page.keyboard.up("w");
   await page.keyboard.up("Meta");
   await expect(page.getByTestId(`close-toast-${b}`)).toBeVisible();
-  await expect(page.getByTestId(`session-${a}`)).toBeVisible();
+  // the other terminal is still there
+  expect(await listed(page, a)).toBe(true);
   expect(await page.evaluate(() => (window as unknown as { __manutWindowCloses?: number }).__manutWindowCloses ?? 0)).toBe(0);
   // a new press closes the next one
   await openCode(page);
@@ -428,5 +424,5 @@ test("a held ⌘W closes one terminal, not one after another and then the window
   await menuClose();
   await page.keyboard.up("w");
   await page.keyboard.up("Meta");
-  await expect(page.getByTestId(`session-${a}`)).toHaveCount(0);
+  await expect.poll(() => listed(page, a)).toBe(false);
 });

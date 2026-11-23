@@ -1691,7 +1691,7 @@ export const en = {
   "team.emptyTitle": "No team yet",
   "team.emptyText": "Buddy and the team show here when the app reaches them.",
   "history.find": "Search history",
-  "history.findPh": "Search by title",
+  "history.findPh": "Search titles and latest messages",
   "history.emptyTitle": "Nothing here yet",
   "history.emptyText": "Threads with Buddy and the team show here, newest first.",
   "history.none": "No thread matches “{q}”",
@@ -2167,4 +2167,15 @@ export const en = {
   "home.recent": "Recent work",
   "home.seeHistory": "See history",
   "pn.recentWork": "Recent work",
+  // a member's line on the Team page: what they are doing, what waits for them, or why they are not at work
+  "team.line.working": "Working now",
+  "team.line.pausedSince": "Paused {since}. Starts nothing new.",
+  "team.line.paused": "Paused. Starts nothing new.",
+  "team.line.stuck": "The last job stopped part way.",
+  "team.line.idleLast": "Nothing to do right now. Last job: {when}.",
+  "team.line.idle": "Nothing to do right now.",
+  // Needs you says since when an ask waits; History's chips and kinds
+  "needs.since": "Waiting since {when}",
+  "history.show": "Show",
+  "history.lane.all": "All",
 };

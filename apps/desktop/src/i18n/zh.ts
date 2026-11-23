@@ -1689,7 +1689,7 @@ export const zh: Record<Key, string> = {
   "team.emptyTitle": "还没有团队",
   "team.emptyText": "应用连接到 Buddy 和团队后，会显示在这里。",
   "history.find": "搜索历史记录",
-  "history.findPh": "按标题搜索",
+  "history.findPh": "搜索标题和最新消息",
   "history.emptyTitle": "还没有记录",
   "history.emptyText": "与 Buddy 和团队的线程会按从新到旧的顺序显示在这里。",
   "history.none": "没有与“{q}”匹配的线程",
@@ -2153,4 +2153,15 @@ export const zh: Record<Key, string> = {
   "home.recent": "最近的工作",
   "home.seeHistory": "查看历史记录",
   "pn.recentWork": "最近的工作",
+  // a member's line on the Team page: what they are doing, what waits for them, or why they are not at work
+  "team.line.working": "正在工作",
+  "team.line.pausedSince": "自 {since} 起已暂停，不会开始新工作。",
+  "team.line.paused": "已暂停，不会开始新工作。",
+  "team.line.stuck": "上一项工作中途停了下来。",
+  "team.line.idleLast": "现在没有要做的事。上一项工作：{when}。",
+  "team.line.idle": "现在没有要做的事。",
+  // Needs you says since when an ask waits; History's chips and kinds
+  "needs.since": "自 {when} 起等待",
+  "history.show": "显示",
+  "history.lane.all": "全部",
 };

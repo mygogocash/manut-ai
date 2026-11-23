@@ -28,7 +28,7 @@ import { groupOf, groupSessions, paneOf } from "./splitState";
 import type { Layout } from "../terminal/layout";
 import { usePendingRequests } from "./termShare";
 import { countRender, useAnyFlowing, useTermFace } from "./termActivity";
-import { addFolder, addedFolders, allCollapsed, collapseOthers, folderGroups, pathKey, folderSummary, isCollapsed, isTildePath, getFolderPrefs, moveFolder, orderFolders, removeFolder, revealFolder as openFolder, setAllFolders, setFolderGone, setFolderPrefs, toggleFolder, useFolderPrefs, useGoneFolders, withAdded } from "./folders";
+import { addFolder, addedFolders, allCollapsed, collapseOthers, folderGroups, pathKey, folderSummary, isCollapsed, isTildePath, getFolderPrefs, moveFolder, orderFolders, removeFolder, setAllFolders, setFolderGone, setFolderPrefs, toggleFolder, useFolderPrefs, useGoneFolders, withAdded } from "./folders";
 import { ChevronDown, ChevronRight } from "../ui/icons";
 import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
@@ -40,7 +40,6 @@ import { TermLinkGone } from "./termLinkOpen";
 import type { Account, AccountCli, AccountGroup } from "../lib/protocol";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
-import { CloseToasts } from "./CloseToasts";
 
 /** The Accounts CLI a new session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
 const SESSION_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
@@ -105,7 +104,6 @@ export function SessionsHeader() {
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={plus} />}
       </span>
       <TermLinkGone />
-      <CloseToasts />
     </div>
   );
 }
@@ -684,13 +682,10 @@ export function SessionList({ needle = "", query = "" }: { needle?: string; quer
     setRefocus(null);
   }, [refocus]);
   const folders = useFolderPrefs();
-  const currentCwd = current ? ss.list.find((r) => r.id === current)?.cwd : undefined;
-  // the open terminal's folder opens (reveal) and its row scrolls into view inside TERMINALS (never moving BOTS)
-  useEffect(() => {
-    if (currentCwd !== undefined) openFolder(currentCwd);
-  }, [current, currentCwd]);
-  // ...and stays in view when the region changes size (the dock gains a row, the window shrinks) or rows land above
-  // it (a newer folder lists first): only then, never against the person's own scrolling
+  // (the open terminal's folder opens wherever the person is, not here: sessions/revealOpen.ts)
+  // the open terminal's row scrolls into view inside TERMINALS (never moving BOTS) and stays in view when the region
+  // changes size (the dock gains a row, the window shrinks) or rows land above it (a newer folder lists first): only
+  // then, never against the person's own scrolling
   const nav = useRef<HTMLElement>(null);
   const navRef = useEdgeFade(nav);
   const rowsKey = ss.list.map((r) => r.id).join(",");

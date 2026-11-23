@@ -30,6 +30,46 @@ export function matchTitle(entries: readonly HistoryEntry[], query: string, unti
   return entries.filter((e) => (e.row.title || untitled).toLowerCase().includes(q));
 }
 
+/** The words an entry is found by: its title (or the name the page shows for a thread with none yet), the last thing said in
+ *  it when the runtime lists that (`preview`) and who it is with, in any case, with the spaces around the search ignored.
+ *  No search finds everything. */
+export function matchWords(e: { title: string; preview?: string; who: string }, query: string, untitled: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [e.title || untitled, e.preview ?? "", e.who].some((v) => v.toLowerCase().includes(q));
+}
+
+/** History's three kinds, as the design canvas's filter chips name them: a conversation (Chat), work the team did (Team) and
+ *  code (Code). */
+export type HistoryLane = "chat" | "team" | "code";
+
+/** The kinds in the order the chips show them. */
+export const LANES: readonly HistoryLane[] = ["chat", "team", "code"];
+
+/** The two members the kinds are told apart by: the lead that conversations go through (the runtime's default, Buddy) and the
+ *  engineer (Kit), each null while the team has none. */
+export interface LaneWho {
+  home: string | null;
+  kit: string | null;
+}
+
+/** The kind of a thread: one with the engineer is Code, one with the lead is Chat, and every other member's is Team. */
+export function threadLane(bot: string, who: LaneWho): HistoryLane {
+  if (bot === who.kit) return "code";
+  return bot === who.home ? "chat" : "team";
+}
+
+/** The kind of a job: the engineer's are Code and everyone else's are Team, the lead's too (the canvas lists Buddy's morning
+ *  brief under Team): a job is work the team did, not a conversation. */
+export function jobLane(bot: string, who: LaneWho): HistoryLane {
+  return bot === who.kit ? "code" : "team";
+}
+
+/** The kinds that have an entry among `lanes`, in the chips' order, each once. */
+export function lanesPresent(lanes: readonly HistoryLane[]): HistoryLane[] {
+  return LANES.filter((l) => lanes.includes(l));
+}
+
 const midnight = (ms: number) => {
   const d = new Date(ms);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();

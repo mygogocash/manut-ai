@@ -131,7 +131,7 @@ describe("History", () => {
 
   it("has a search box named for what it does, holding the words typed", () => {
     const html = draw(<HistoryView days={days} query="parcels" hasThreads onQuery={() => {}} />);
-    expect(html).toContain('placeholder="Search by title"');
+    expect(html).toContain('placeholder="Search titles and latest messages"');
     expect(html).toMatch(/<label[^>]*for="history-find"[^>]*>Search history<\/label>/);
     expect(html).toMatch(/<input[^>]*id="history-find"[^>]*value="parcels"/);
   });

@@ -1,7 +1,7 @@
 // History's rules: every thread of the team, newest first, grouped by the day of its last activity (Today, Yesterday,
 // then dates), and a search box that filters by title.
 import { describe, expect, it } from "vitest";
-import { byDay, dayBand, fullDate, historyEntries, matchTitle } from "./history";
+import { byDay, dayBand, fullDate, historyEntries, jobLane, lanesPresent, matchTitle, matchWords, threadLane } from "./history";
 import type { ThreadRow } from "../threads/types";
 
 /** Sunday 22 November 2026, 15:00 on this computer's clock. */
@@ -123,5 +123,53 @@ describe("a day band, for any list that groups by day", () => {
     expect(dayBand(today, now)).toEqual({ label: "Today", date: "Sunday 22 November" });
     expect(dayBand(yesterday, now)).toEqual({ label: "Yesterday", date: "Saturday 21 November" });
     expect(dayBand(earlier, now)).toEqual({ label: "Saturday 14 November", date: null });
+  });
+});
+
+// History's three kinds, as the canvas's filter chips name them: Chat, Team and Code.
+describe("History's kinds", () => {
+  const who = { home: "buddy", kit: "kit" };
+
+  it("put a thread with the lead under Chat, one with the engineer under Code, and the rest of the team's under Team", () => {
+    expect(threadLane("buddy", who)).toBe("chat");
+    expect(threadLane("kit", who)).toBe("code");
+    expect(["nam", "pim", "ton"].map((b) => threadLane(b, who))).toEqual(["team", "team", "team"]);
+  });
+
+  it("put every job under Team except the engineer's, which are Code, whoever the lead is", () => {
+    expect(jobLane("nam", who)).toBe("team");
+    expect(jobLane("buddy", who)).toBe("team");
+    expect(jobLane("kit", who)).toBe("code");
+  });
+
+  it("have no Code while the team has no engineer, and no Chat while it has no lead", () => {
+    expect(threadLane("nam", { home: "buddy", kit: null })).toBe("team");
+    expect(threadLane("buddy", { home: null, kit: null })).toBe("team");
+  });
+
+  it("offer the kinds that have an entry, in the order the chips show them", () => {
+    expect(lanesPresent(["code", "team", "team", "chat"])).toEqual(["chat", "team", "code"]);
+    expect(lanesPresent(["team", "team"])).toEqual(["team"]);
+    expect(lanesPresent([])).toEqual([]);
+  });
+});
+
+// The search box finds a thread by the words the runtime lists for it: its title, the last thing said in it and who it is with.
+describe("History's search", () => {
+  const e = { title: "Discount for a bulk order", preview: "We can do 8% off for twenty candles.", who: "Buddy" };
+
+  it("matches the words of the title, of the last message and of the member's name, in any case and with the spaces around ignored", () => {
+    for (const q of ["bulk", "  DISCOUNT ", "twenty candles", "8% off", "buddy"]) expect(matchWords(e, q, "Untitled"), q).toBe(true);
+  });
+
+  it("matches nothing for words that are in none of them, and everything for none", () => {
+    expect(matchWords(e, "refund", "Untitled")).toBe(false);
+    expect(matchWords(e, "", "Untitled")).toBe(true);
+    expect(matchWords(e, "   ", "Untitled")).toBe(true);
+  });
+
+  it("matches a thread with no title yet by the name the page shows for it, and one with no last message by its title", () => {
+    expect(matchWords({ title: "", who: "Kit" }, "untitled", "Untitled thread")).toBe(true);
+    expect(matchWords({ title: "Thai date format", who: "Kit" }, "date", "Untitled thread")).toBe(true);
   });
 });
