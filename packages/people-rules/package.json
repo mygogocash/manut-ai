@@ -1,0 +1,18 @@
+{
+  "name": "@manut/people-rules",
+  "private": true,
+  "type": "module",
+  "description": "The rules for the people around a shop: invites, passing a request on, cover while the owner is away, and removal.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@manut/approval-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
