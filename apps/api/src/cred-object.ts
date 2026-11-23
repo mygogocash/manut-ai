@@ -70,6 +70,9 @@ export class CredObject extends DurableObject {
     if (request.method === "GET" && url.pathname === "/connections") {
       return this.list(url, request);
     }
+    if (request.method === "GET" && url.pathname === "/first-connection") {
+      return this.firstConnection(url, request);
+    }
     const connectionRead = url.pathname.match(/^\/connections\/([^/]+)$/);
     if (request.method === "GET" && connectionRead) {
       // Metadata for one connection: the Mac inspector and the Linear read
@@ -196,6 +199,26 @@ export class CredObject extends DurableObject {
       if (!record.revokedAt) connections.push(this.public(record));
     }
     return Response.json({ connections });
+  }
+
+  /// When the tenant first connected one provider: the earliest creation time
+  /// among its connections to it, revoked ones included, since revocation keeps
+  /// the record (without its secret). Only that time leaves, nothing else about
+  /// any connection. The Manut AI pilot gate reads it as the trial start of a
+  /// shop that was connected before trial starts were recorded on the shop.
+  private async firstConnection(url: URL, request: Request): Promise<Response> {
+    const tenant = url.searchParams.get("tenant") ?? "";
+    const provider = url.searchParams.get("provider") ?? "";
+    if (!tenant || tenant !== this.tenantOf(request) || !KNOWN_PROVIDERS.has(provider)) {
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }
+    let first: { createdAt: string; ms: number } | null = null;
+    for (const [, record] of await this.ctx.storage.list<StoredConnectionRec>({ prefix: "conn:" })) {
+      if (record.tenant !== tenant || record.provider !== provider) continue;
+      const ms = Date.parse(record.createdAt);
+      if (Number.isFinite(ms) && (first === null || ms < first.ms)) first = { createdAt: record.createdAt, ms };
+    }
+    return Response.json({ createdAt: first?.createdAt ?? null });
   }
 
   private async revoke(url: URL, request: Request): Promise<Response> {

@@ -4,7 +4,8 @@
 /// - Per shop, in that shop's TenantObject (`t:${tenant}`): the shop profile,
 ///   inbound customer messages with their deduplication markers, cached LINE
 ///   display names, reply records binding each proposed reply to the message
-///   it answers, and payments. Tenant export reads them, tenant deletion wipes
+///   it answers, customers' order payments, and the shop's own subscription
+///   payments to Manut AI. Tenant export reads them, tenant deletion wipes
 ///   them with the rest of the tenant object, and the retention sweep ages
 ///   customer messages out after the source-snapshot window.
 /// - Globally, in AuthObject: one registry row per pilot shop, so the
@@ -31,6 +32,7 @@ import {
 import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
+import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
@@ -54,6 +56,10 @@ export type PilotShopRecord = {
   taskId: string;
   lineConnectionId?: string;
   createdAt: string;
+  /// When the shop's free trial started: its first LINE connection (pilot-gate.ts). Set once, by the connection
+  /// that first points the shop at LINE, and never moved by a later one. A shop connected before this field
+  /// existed has none, and the gate reads its first connection's time from the vault.
+  trialStartedAt?: string;
 };
 
 export type InboundMessage = {
@@ -93,6 +99,19 @@ export type Payment = {
   confirmedAt: string;
 };
 
+/// The shop's own payment to Manut AI for its subscription, recorded by an operator once the money is seen in
+/// Manut AI's bank account, as order payments are checked in the shop's. Nothing is charged or moved here.
+/// `slipRef` is the reference printed on the bank slip: every record names the slip it was checked against, and
+/// one slip is recorded once, so two halves of the price can never be counted as a whole by recording one twice.
+export type SubscriptionPayment = {
+  id: string;
+  tenant: string;
+  amountSatang: number;
+  slipRef: string;
+  slipNote?: string;
+  confirmedAt: string;
+};
+
 type NameRecord = { displayName: string; at: number };
 type EventMarker = { messageId: string; at: number };
 
@@ -117,6 +136,8 @@ const keys = {
   reply: (tenant: string, actionId: string) => `pilot-reply:${enc(tenant)}:${enc(actionId)}`,
   payments: (tenant: string) => `pilot-pay:${enc(tenant)}:`,
   payment: (tenant: string, id: string) => `pilot-pay:${enc(tenant)}:${id}`,
+  subscriptions: (tenant: string) => `pilot-sub:${enc(tenant)}:`,
+  subscription: (tenant: string, id: string) => `pilot-sub:${enc(tenant)}:${id}`,
 };
 
 /// The last clock and sequence an id was issued with, in this isolate.
@@ -193,6 +214,13 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
         return json({
           payments: await values<Payment>(storage, keys.payments(tenant), { reverse: true, limit: MAX_LISTED_PAYMENTS }),
         });
+      case "GET /pilot/subscription-payments":
+        return json({
+          payments: await values<SubscriptionPayment>(storage, keys.subscriptions(tenant), { reverse: true,
+            limit: MAX_LISTED_PAYMENTS }),
+        });
+      case "GET /pilot/gate":
+        return readGateRecords(storage, tenant);
       case "GET /pilot/export":
         return json(await exportPilot(storage, tenant));
     }
@@ -221,6 +249,8 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
       return recordDecided(storage, tenant, body);
     case "POST /pilot/payments":
       return recordPayment(storage, tenant, body);
+    case "POST /pilot/subscription-payments":
+      return recordSubscriptionPayment(storage, tenant, body);
     case "POST /pilot/prune":
       return pruneMessages(storage, tenant, body);
   }
@@ -245,11 +275,24 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
 
 /// Points the shop at its LINE connection and answers with the one it
 /// replaced, which the Worker then revokes.
+///
+/// The shop's first connection starts its free trial (pilot-gate.ts): it is
+/// when the service can start working for the shop, so days spent setting a
+/// shop up before its LINE account is connected never count against it. A
+/// later connection (a rotated token) never moves the start. A shop that was
+/// connected before trial starts were recorded is left without one here
+/// rather than given this connection's time; the gate reads its first
+/// connection's time from the vault instead.
 async function setShopConnection(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
   if (!bounded(body.lineConnectionId)) return json({ error: "invalid_request" }, 400);
   const shop = await storage.get<PilotShopRecord>(keys.shop(tenant));
   if (!shop) return json({ error: "not_found" }, 404);
-  await storage.put(keys.shop(tenant), { ...shop, lineConnectionId: body.lineConnectionId });
+  const first = shop.trialStartedAt === undefined && shop.lineConnectionId === undefined;
+  await storage.put(keys.shop(tenant), {
+    ...shop,
+    lineConnectionId: body.lineConnectionId,
+    ...(first ? { trialStartedAt: new Date().toISOString() } : {}),
+  });
   return json({ previous: shop.lineConnectionId ?? null });
 }
 
@@ -384,6 +427,61 @@ async function recordPayment(storage: DurableObjectStorage, tenant: string, body
   return json({ payment });
 }
 
+/// The same slip however its reference was typed: spaces and capitals aside.
+function sameSlip(a: string, b: string): boolean {
+  const plain = (ref: string) => ref.replace(/\s+/g, "").toUpperCase();
+  return plain(a) === plain(b);
+}
+
+/// Records one subscription payment, refusing a slip already recorded for the
+/// shop. The object's input gate holds other requests while this read and
+/// write are in flight, so two copies of one slip cannot both be stored.
+async function recordSubscriptionPayment(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  const { amountSatang, slipRef, slipNote } = body;
+  if (typeof amountSatang !== "number" || !Number.isSafeInteger(amountSatang) || amountSatang <= 0 ||
+      !bounded(slipRef, 128) || (slipNote !== undefined && (typeof slipNote !== "string" || slipNote.length > 1000))) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  for (const recorded of await values<SubscriptionPayment>(storage, keys.subscriptions(tenant))) {
+    if (sameSlip(recorded.slipRef, slipRef)) return json({ error: "slip_already_recorded" }, 409);
+  }
+  const now = Date.now();
+  const payment: SubscriptionPayment = {
+    id: sortableId("sub", now, 0),
+    tenant,
+    amountSatang,
+    slipRef,
+    ...(typeof slipNote === "string" && slipNote.length > 0 ? { slipNote } : {}),
+    confirmedAt: new Date(now).toISOString(),
+  };
+  await storage.put(keys.subscription(tenant, payment.id), payment);
+  return json({ payment });
+}
+
+/// What the pilot gate reads for the shop (pilot-gate.ts): the shop with its
+/// trial start, when its owner decided replies, and its subscription
+/// payments. Every reply record is read, not the console's newest 200, so a
+/// busy shop's day-14 decisions never fall out of the count. Only the latest
+/// decision of each Bangkok calendar day is answered: whether a day holds a
+/// decision, and when the latest one was, is all the gate asks, and one time
+/// a day keeps the answer small however many replies the shop has.
+async function readGateRecords(storage: DurableObjectStorage, tenant: string) {
+  const latestOfDay = new Map<number, { at: string; ms: number }>();
+  for (const { decidedAt } of await values<PilotReplyRecord>(storage, keys.replies(tenant))) {
+    if (decidedAt === undefined) continue;
+    const ms = Date.parse(decidedAt);
+    if (!Number.isFinite(ms)) continue;
+    const day = bangkokDay(ms);
+    const kept = latestOfDay.get(day);
+    if (!kept || ms > kept.ms) latestOfDay.set(day, { at: decidedAt, ms });
+  }
+  return json({
+    shop: (await storage.get<PilotShopRecord>(keys.shop(tenant))) ?? null,
+    decisions: [...latestOfDay.values()].sort((a, b) => a.ms - b.ms).map((decision) => decision.at),
+    subscriptionPayments: await values<SubscriptionPayment>(storage, keys.subscriptions(tenant)),
+  });
+}
+
 /// Everything a link view needs in one read: the shop, the reply record, and
 /// the message it answers. Any of them may be missing.
 async function readContext(storage: DurableObjectStorage, tenant: string, actionId: string) {
@@ -397,14 +495,16 @@ async function readContext(storage: DurableObjectStorage, tenant: string, action
 }
 
 /// What a deletion of the shop would take, counted now: the shop itself (null once it is gone), and how many
-/// customer messages, reply records and payments it holds. The owner's deletion page shows these.
+/// customer messages, reply records and payment records it holds. The owner's deletion page shows these. Payment
+/// records are both ledgers, customers' order payments and the shop's own subscription payments, because the
+/// deletion takes both.
 async function readSummary(storage: DurableObjectStorage, tenant: string) {
   const count = async (prefix: string) => (await storage.list({ prefix })).size;
   return json({
     shop: (await storage.get<PilotShopRecord>(keys.shop(tenant))) ?? null,
     messages: await count(keys.messages(tenant)),
     replies: await count(keys.replies(tenant)),
-    payments: await count(keys.payments(tenant)),
+    payments: (await count(keys.payments(tenant))) + (await count(keys.subscriptions(tenant))),
   });
 }
 
@@ -415,6 +515,7 @@ async function exportPilot(storage: DurableObjectStorage, tenant: string) {
     messages: await values<InboundMessage>(storage, keys.messages(tenant)),
     replies: await values<PilotReplyRecord>(storage, keys.replies(tenant)),
     payments: await values<Payment>(storage, keys.payments(tenant)),
+    subscriptionPayments: await values<SubscriptionPayment>(storage, keys.subscriptions(tenant)),
     displayNames: [...names].map(([key, record]) => ({
       lineUserId: key.slice(keys.names(tenant).length),
       displayName: record.displayName,
@@ -426,8 +527,8 @@ async function exportPilot(storage: DurableObjectStorage, tenant: string) {
 /// (`RETENTION.sourceSnapshotDays`, 7 days): the operator needs a message
 /// only long enough to answer it, and its link lives 24 hours. Their
 /// redelivery markers and cached display names age out on the same clock.
-/// Shop profiles, reply records (ids only) and payments stay until the
-/// tenant is deleted. The clock comes from the Worker's sweep; an unusable
+/// Shop profiles, reply records (ids only) and both kinds of payment stay
+/// until the tenant is deleted. The clock comes from the Worker's sweep; an unusable
 /// value falls back to the server clock and one ahead of it is clamped to
 /// it, so no caller can age a message out early.
 async function pruneMessages(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
@@ -455,7 +556,8 @@ async function pruneMessages(storage: DurableObjectStorage, tenant: string, body
 /// Part of the TenantObject's tenant wipe: every pilot row for the tenant.
 export async function wipePilotTenant(storage: DurableObjectStorage, tenant: string): Promise<void> {
   const doomed: string[] = [keys.shop(tenant)];
-  for (const prefix of [keys.messages(tenant), keys.events(tenant), keys.names(tenant), keys.replies(tenant), keys.payments(tenant)]) {
+  for (const prefix of [keys.messages(tenant), keys.events(tenant), keys.names(tenant), keys.replies(tenant),
+    keys.payments(tenant), keys.subscriptions(tenant)]) {
     doomed.push(...(await storage.list({ prefix })).keys());
   }
   await deleteAll(storage, doomed);

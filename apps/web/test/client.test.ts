@@ -38,6 +38,7 @@ const listAnswers = (url: string): Response => {
   if (url.includes("/messages")) return json({ messages: [] });
   if (url.includes("/actions")) return json({ actions: [] });
   if (url.includes("/payments")) return json({ payments: [] });
+  if (url.includes("/subscription-payments")) return json({ payments: [] });
   return json({});
 };
 
@@ -58,6 +59,9 @@ async function everyAdminRoute(api: PilotApi) {
   await api.listPayments("t1");
   await api.exportShop("t1");
   await api.deleteShop({ tenant: "t1", confirmName: "Baan Mali" });
+  await api.recordSubscriptionPayment({ tenant: "t1", amountSatang: 49900, slipRef: "KB-1", slipNote: "KBank 10:02" });
+  await api.listSubscriptionPayments("t1");
+  await api.getGate();
 }
 
 describe("the API client", () => {
@@ -76,11 +80,15 @@ describe("the API client", () => {
       "GET https://api.example.test/v1/admin/pilot/payments?tenant=t1",
       "GET https://api.example.test/v1/admin/pilot/export?tenant=t1",
       "POST https://api.example.test/v1/admin/pilot/deletions",
+      "POST https://api.example.test/v1/admin/pilot/subscription-payments",
+      "GET https://api.example.test/v1/admin/pilot/subscription-payments?tenant=t1",
+      "GET https://api.example.test/v1/admin/pilot/gate",
     ]);
     for (const call of calls) {
       expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
       expect(call.credentials).toBe("include");
     }
+    expect(calls[10]?.body).toEqual({ tenant: "t1", amountSatang: 49900, slipRef: "KB-1", slipNote: "KBank 10:02" });
     expect(calls[4]?.body).toEqual({ tenant: "t1", messageId: "m1", text: "Hello" });
     expect(calls[6]?.body).toEqual({
       tenant: "t1",
@@ -119,6 +127,29 @@ describe("the API client", () => {
     expect(calls[3]?.body).toEqual({ approve: false });
     expect(calls[4]?.headers.get("x-line-signature")).toBe("c2ln");
     expect(calls[4]?.raw).toBe('{"events":[]}');
+  });
+
+  it("reads the gate and a shop's subscription payments as the contract answers them", async () => {
+    const gate = {
+      asOf: "2026-12-21T03:00:00.000Z",
+      rules: { trialDays: 14, priceSatang: 49900, activeWindowDays: 7 },
+      shops: [{ tenant: "t1", name: "Baan Mali", trialStartedAt: "2026-12-07T03:00:00.000Z", day: 15,
+        trialEnded: true, paid: false, paidSatang: 0, activeOnDay14: "yes" }],
+      cohort: { counted: 1, paid: { count: 0, percent: 0, thresholdPercent: 25, met: false },
+        active: { count: 1, percent: 100, thresholdPercent: 50, met: true }, status: "below_line" },
+    };
+    const payment = { id: "sub-1", tenant: "t1", amountSatang: 49900, slipRef: "KB-1",
+      confirmedAt: "2026-12-21T03:00:00.000Z" };
+    const { api } = harness("op-key-123", (url) => {
+      if (url.includes("/gate")) return json(gate);
+      if (new URL(url).searchParams.get("tenant")) return json({ payments: [payment] });
+      return json({ error: "slip_already_recorded" }, 409);
+    });
+
+    expect(await api.getGate()).toEqual(gate);
+    expect(await api.listSubscriptionPayments("t1")).toEqual([payment]);
+    await expect(api.recordSubscriptionPayment({ tenant: "t1", amountSatang: 49900, slipRef: "KB-1" })).rejects
+      .toMatchObject({ status: 409, code: "slip_already_recorded" });
   });
 
   it("refuses an admin call with no key and sends nothing", async () => {

@@ -175,6 +175,9 @@ const ADMIN_METHODS = new Set([
   "GET /v1/admin/pilot/messages", "POST /v1/admin/pilot/replies", "GET /v1/admin/pilot/actions",
   "POST /v1/admin/pilot/payments", "GET /v1/admin/pilot/payments",
   "GET /v1/admin/pilot/export", "POST /v1/admin/pilot/deletions",
+  // The Phase 1 gate: the shop's own subscription payments, and the measurement.
+  "POST /v1/admin/pilot/subscription-payments", "GET /v1/admin/pilot/subscription-payments",
+  "GET /v1/admin/pilot/gate",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header

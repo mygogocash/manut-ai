@@ -100,6 +100,7 @@ a bad link 404 `link_invalid`. Nothing in the request chooses who decides: whoev
 type DeletionView = {
   shopName: string;
   // Counted afresh while the shop's data is there; once it is deleted, what the shop held when the operator asked.
+  // `payments` counts both ledgers the deletion takes: customers' order payments and the shop's subscription payments.
   goes: { messages: number; replies: number; payments: number; lineConnected: boolean };
   state: "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
   expiresAt: string;
@@ -127,6 +128,9 @@ type DeletionView = {
 | `GET /v1/admin/pilot/payments` | `?tenant=` | `{ payments: Payment[] }`, newest first |
 | `GET /v1/admin/pilot/export` | `?tenant=` | `ShopExport`: everything stored for the shop, LINE secrets never included |
 | `POST /v1/admin/pilot/deletions` | `{ tenant, confirmName }` | A shop that never went live: `DeletedShop`. A live shop: 202 `AwaitingOwner`, deleting nothing. Either way 409 `{ "error": "name_mismatch" }`, deleting nothing, unless `confirmName` is the shop's exact name |
+| `POST /v1/admin/pilot/subscription-payments` | `{ tenant, amountSatang, slipRef, slipNote? }` | `SubscriptionPayment`. 409 `{ "error": "slip_already_recorded" }`, recording nothing, for a slip already recorded for the shop |
+| `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
+| `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -186,10 +190,23 @@ type Payment = {
   confirmedAt: string;      // the operator confirms the slip against the shop's bank app
 };
 
+// The shop's own payment to Manut AI, recorded by an operator once the money is seen in Manut AI's bank account.
+// `slipRef` is the reference printed on the bank slip; one slip is recorded once per shop (compared without spaces
+// or capitals). Money is a positive whole number of satang; anything else is refused with 400, never rounded.
+type SubscriptionPayment = {
+  id: string;
+  tenant: string;
+  amountSatang: number;
+  slipRef: string;          // trimmed, 1 to 128 characters
+  slipNote?: string;        // up to 1,000 characters
+  confirmedAt: string;
+};
+
 // The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
-// attention items and `pilot: { shop, messages, replies, payments, displayNames }`, where `displayNames` is
-// the LINE display names cached for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is
-// there once the shop was deleted. Saved whole.
+// attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, displayNames }`, where
+// `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
+// for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is there once the shop was deleted.
+// Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
 // the parts ("index", a task id, "connections", "consent", "attention", "pilot", "schedules", "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
@@ -218,7 +235,7 @@ type DeletedShop = {
   through: the reply settles `confirmed`. Any other 4xx settles `failed` (LINE sends nothing on an error). A
   5xx, a timeout or a network error settles `unknown` and is never retried automatically.
 - **Retention.** Customer messages, duplicate markers and cached display names are removed after 7 days by the
-  operator prune. Shops, reply records and payments stay until the shop is deleted.
+  operator prune. Shops, reply records and both kinds of payment stay until the shop is deleted.
 - **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute), which
   counts the approval and deletion routes together, any method, per source address.
 - **CORS.** The approval and deletion routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator
@@ -227,8 +244,9 @@ type DeletedShop = {
   400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
-  every reply, the sealed LINE secrets and the webhook route, messages, payments, consent and the shop's
-  registry row. The owner's approval links answer `link_invalid` afterwards and the webhook answers 404.
+  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent
+  and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
+  answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
   - **A live shop also needs its owner's yes.** The operator's request deletes nothing: it records who asked
@@ -252,6 +270,66 @@ type DeletedShop = {
     tombstone, which the wipe writes last.
   - A partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request
     again finishes it.
+
+## The pilot gate (Phase 1)
+
+The roadmap's Phase 1 gate: at least 25% of pilot shops pay ฿499 after 14 free days, and at least 50% are still
+active on day 14. Only the owner passes a gate; `GET /v1/admin/pilot/gate` measures it from records the backend
+already keeps. The rules live in `apps/api/src/pilot-gate.ts`, each number a named constant there, and the
+practice-mode fake in `apps/web` keeps the same rules.
+
+- **Trial start.** A shop's first LINE connection starts its trial, because that is when the service can start
+  working for it; creating the shop does not. The first `POST /v1/admin/pilot/line-connections` for a shop sets
+  `trialStartedAt` on its record, and a later connection (a rotated token) never moves it. A shop connected
+  before this field existed has none on its record; its trial start is the creation time of its first LINE
+  connection in the credential vault, a revoked one included.
+- **Days.** Day numbers count calendar days in Asia/Bangkok (UTC+7 all year). Day 1 is the Bangkok date the
+  trial started on, day 2 begins at the next midnight in Bangkok, and so on. The 14 free days are days 1 to 14;
+  the trial has ended once day 15 begins.
+- **Paid.** A shop has paid once its subscription payments add up to at least ฿499 (49,900 satang), whenever they
+  were made: a shop that pays before its free days run out has paid for the days after them. `paidAt` is when the
+  running total, in the order payments were confirmed, first reached ฿499.
+- **Active.** A shop is active on day N when its owner decided at least one reply, approving or declining it
+  through the link, in the 7 calendar days up to and including day N (`ACTIVE_WINDOW_DAYS`). The decision's time
+  is the one the owner's link records on the reply. `activeOnDay14` is `not_yet` before day 14; on day 14 it is
+  `yes` once a decision in the window exists and `not_yet` until then; from day 15 it is `yes` or `no`.
+- **Cohort.** Only shops whose day 14 has passed (`trialEnded`) are counted. Each share is a whole percent rounded
+  down, so it never shows a line it has not reached, and `null` while no shop is counted; `met` compares the exact
+  counts with the line. The status is `not_enough_data` while no shop is counted, `on_track` when both shares meet
+  their lines, and `below_line` when either does not.
+- **Failures.** A shop whose records cannot be read, or a connected shop whose first connection the vault cannot
+  answer, fails the whole answer with 503 `{ "error": "gate_unavailable" }`: a shop is never left out of the
+  cohort and a trial start is never guessed.
+- **Deleted shops** leave the registry, and with it the gate.
+
+```ts
+type PilotGate = {
+  asOf: string;                                   // when it was measured
+  rules: { trialDays: 14; priceSatang: 49900; activeWindowDays: 7 };
+  shops: GateShop[];                              // every pilot shop, in the order they were created
+  cohort: {
+    counted: number;                              // shops whose day 14 has passed
+    paid: GateMeasure;                            // line 25
+    active: GateMeasure;                          // line 50
+    status: "not_enough_data" | "on_track" | "below_line";
+  };
+};
+
+type GateMeasure = { count: number; percent: number | null; thresholdPercent: number; met: boolean };
+
+type GateShop = {
+  tenant: string;
+  name: string;
+  trialStartedAt: string | null;  // null until LINE is connected
+  day: number | null;             // today's trial day; null before the trial starts
+  trialEnded: boolean;            // day 14 has passed
+  paid: boolean;
+  paidAt?: string;                // when the subscription payments first reached ฿499
+  paidSatang: number;             // everything the shop has paid Manut AI
+  activeOnDay14: "yes" | "no" | "not_yet";
+  lastDecisionAt?: string;        // the owner's latest decision on a reply
+};
+```
 
 ## One origin
 
