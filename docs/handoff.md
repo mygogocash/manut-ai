@@ -66,25 +66,27 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 23 Nov at 17:10, and again at 21:35 with the audit log, memory, Model spend, approvals
   through approval-core and the workers; both times smoke-tested (pages, Access on every operator route, the
   session approvals route refusing without a session, no-store and frame headers).
+- Dev was redeployed on 24 Nov at 03:40 from `2a8fb77`, with the People page, routines running, shop templates and
+  the drafts and shops pages (pages `55687ba9`, API `45d1a91e`); smoke-tested the same way, plus the routines and
+  team routes refusing without a session and the templates route behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Three December helpers are running (24 Nov, restarted on their own after the 1am usage-limit reset), each on
-   its own branch from `pilot/week-1`; review each, merge it after the full root gate, add its decisions to
-   `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 5, the desktop answering approvals (`feat/desktop-answers-approvals`, Opus);
+1. Four December helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it
+   after the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 7, several shops in one view, the design and the API side (`feat/several-shops`, Opus);
-   - item 9, desktop leftovers and three app bugs the Playwright revival found (`feat/desktop-leftovers`, Sonnet).
-   Items 2 and 3 (routines running, applying a shop template) and the Playwright revival (#15) are merged.
-2. The night build (Fronk's routine) built `notify-rules` (draft pull request #16 into `pilot/week-1`). Its queue
-   is then empty: add pure packages to `docs/plan.md` as the phases need them.
+   - item 9, desktop leftovers and three app bugs the Playwright revival found (`feat/desktop-leftovers`, Sonnet);
+   - item 8a, the outpost's step channel in the API (`feat/outpost-step-channel`, Opus);
+   - item 6, macOS notifications on `@manut/notify-rules` (`feat/macos-notifications`, Sonnet).
+   Merged: items 2 and 3 (routines running, shop templates), item 5 (the desktop answering approvals), the
+   Playwright revival (#15) and `notify-rules` (#16).
+2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - item 6, macOS notifications on `@manut/notify-rules` (Sonnet);
-   - item 8, the outpost's browser on this Mac, the first step of computer control (Opus);
-   - item 11, the Playwright follow-up: the 31 failing specs and sharding the CI job (Haiku);
-   - the desktop's switcher for several shops, after items 5 and 7.
+   - item 8b, the outpost in the desktop shell, after 8a (Opus);
+   - item 11, the Playwright follow-up: the 31 failing specs and sharding the CI job, after item 9 (Haiku);
+   - the desktop's switcher for several shops, after item 7.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an

@@ -229,8 +229,13 @@ export type ApprovalItem = {
   /** Asked while no turn ran in a coding-agent session (a background subagent after the turn's end): no turn's end
    *  closes it. */
   outside?: boolean;
+  /** This app cannot answer it (a kind or a state this version does not know): no answer is offered, and the card says
+   *  to update the app. */
+  outdated?: boolean;
   resolved?: ApprovalChoice;
   expired?: AskExpiry;
+  /** Why it stopped waiting, in words, when the runtime said more than the reason ("Already decided by Mint at 19:42"). */
+  expiredNote?: string;
 };
 export type ClarifyItem = {
   kind: "clarify";
@@ -1214,6 +1219,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
           ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),
           ...(ev.subagent?.id ? { subagent: ev.subagent } : {}),
           ...(c.turn || !bot.startsWith("agent:") ? {} : { outside: true }),
+          ...(ev.outdated ? { outdated: true } : {}),
         };
         return withItems(base, [...base.items, item]);
       });
@@ -1249,7 +1255,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         withItems(
           c,
           c.items.map((i) => {
-            if (i.kind === "approval" && i.request_id === ev.request_id && !i.resolved) return { ...i, expired: ev.reason };
+            if (i.kind === "approval" && i.request_id === ev.request_id && !i.resolved) return { ...i, expired: ev.reason, ...(ev.note ? { expiredNote: ev.note } : {}) };
             if (i.kind === "clarify" && i.request_id === ev.request_id && i.answer === undefined) return { ...i, expired: ev.reason };
             return i;
           }),

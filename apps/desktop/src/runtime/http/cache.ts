@@ -2,10 +2,12 @@
 // app can show what was there instead of an empty screen, and say when that was (docs/runtime-adapter.md).
 //
 // Rules this module keeps:
-// - What is kept is what the screens read (tasks, the actions waiting for the owner, schedules, attention items), copied
-//   field by field. The API's whole objects (`raw`) and the entries it could not read are left out: the screens do not
-//   need them, and copying by name means nothing the API happened to carry beyond the decoded fields reaches the file.
-//   Nothing from the session is ever passed in here: no token, no refresh token, no keychain value.
+// - What is kept is what the screens read (tasks and their actions, the requests waiting for an answer, schedules,
+//   attention items), copied field by field. The requests are written as approval-core's own wire JSON, their detail cut
+//   down to the words the card shows (approvals.ts), and read back with the same decoders the live read uses. The API's
+//   whole objects (`raw`) and the entries it could not read are left out: the screens do not need them, and copying by
+//   name means nothing the API happened to carry beyond the decoded fields reaches the file. Nothing from the session is
+//   ever passed in here: no token, no refresh token, no keychain value.
 // - The file is named by a hash of the origin and the tenant, so each signed-in shop has its own and the name says
 //   neither. It holds no identity of its own: the name is the only link, and the desktop shell keeps only the one file
 //   of the one signed-in shop (src-tauri/src/shop_cache.rs).
@@ -16,10 +18,14 @@
 //   kept; the app is no worse off than before it had a cache.
 // - Calls to the disk run one at a time in the order they were made, and `clear` is final for any read that started
 //   before it (`ticket`): a read of the shop that finishes after the person signed out leaves no file behind.
+import { encodeRecord, encodeStanding } from "@manut/approval-core";
+import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
 import { sha256Hex } from "./sha256";
 import type { Attention, ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
 
-export const CACHE_VERSION = 1;
+/** 2 since the asks are approval-core's records. A file of 1 holds none, so it is not read: what waits for the owner
+ *  would be missing from it. */
+export const CACHE_VERSION = 2;
 /** A kept read is shown for this long after it was read. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
@@ -79,6 +85,12 @@ export function encodeSnapshot(s: ShopSnapshot): string {
         nextFire: x.nextFire,
         createdAt: x.createdAt,
       })),
+      approvals: s.approvals.map((a) => ({
+        taskId: a.taskId,
+        record: encodeRecord(shownRecord(a.record)),
+        standing: encodeStanding(a.standing),
+        passedOn: a.passedOn && { by: a.passedOn.by, name: a.passedOn.name, note: a.passedOn.note, at: a.passedOn.at },
+      })),
       attention: s.attention.map((x) => ({ id: x.id, connectionId: x.connectionId, eventType: x.eventType, issueId: x.issueId, receivedAt: x.receivedAt })),
       attentionOff: s.attentionOff,
       readAt: s.readAt,
@@ -123,6 +135,20 @@ function readSchedule(v: unknown): ShopSchedule | null {
   return { id, name, prompt, hour, minute, weekdays, timeZone, enabled, revision, nextFire, createdAt, raw: null };
 }
 
+/** A kept request, read with the decoders the live read uses, but only when it is whole: approval-core's decoders read
+ *  anything, so the fields a card and an answer rest on are checked first. */
+function readApproval(v: unknown): ShopApproval | null {
+  if (!isObj(v)) return null;
+  const { taskId, record, standing, passedOn } = v;
+  if (!isStr(taskId) || !isObj(record) || !isStr(record.status) || !isObj(standing) || !isStr(standing.state)) return null;
+  const request = record.request;
+  if (!isObj(request) || !isId(request.id) || !intIn(request.revision, 1, Number.MAX_SAFE_INTEGER) || !isNum(request.createdAt) || !Array.isArray(request.options)) return null;
+  if (passedOn !== null && !(isObj(passedOn) && isStr(passedOn.by) && isStr(passedOn.name) && isStr(passedOn.note) && numOrNull(passedOn.at))) return null;
+  const unreadable: unknown[] = [];
+  const [read] = decodeApprovals({ approvals: [v] }, unreadable);
+  return read && !unreadable.length ? { ...read, raw: null } : null;
+}
+
 function readAttention(v: unknown): Attention | null {
   if (!isObj(v)) return null;
   const { id, connectionId, eventType, issueId, receivedAt } = v;
@@ -149,13 +175,14 @@ export function decodeCached(text: string | null, now: number): CachedRead {
   if (!isObj(file) || file.v !== CACHE_VERSION || !isObj(file.snapshot)) return NONE;
   const s = file.snapshot;
   const tasks = every(s.tasks, readTask);
+  const approvals = every(s.approvals, readApproval);
   const schedules = every(s.schedules, readSchedule);
   const attention = every(s.attention, readAttention);
-  if (!tasks || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
+  if (!tasks || !approvals || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
   const readAt = s.readAt;
   if (readAt > now + CLOCK_SLACK_MS) return NONE;
   if (now - readAt > CACHE_MAX_AGE_MS) return { kind: "too_old", at: readAt };
-  return { kind: "usable", snapshot: { tasks, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt } };
+  return { kind: "usable", snapshot: { tasks, approvals, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt } };
 }
 
 // ---- the name ---------------------------------------------------------------------------------------------------------

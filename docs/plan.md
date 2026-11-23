@@ -58,7 +58,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 2 Control plane | Memory; the job queue; the audit log | built: the job flow, the audit log, and what the team knows (stored per shop, with the console's Memory page); workers read memory when they are built in Phase 4 |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | built: Home, the side menu and pages, the job view, the activity log and Pause everyone (in Practice; the connected runtime answers "not yet" until the API serves jobs) |
-| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a read-only connected runtime (Settings › Developer) and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
+| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a connected runtime (Settings › Developer) that reads the shop and answers its approvals through the session decide route, and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines run on the schedule object and a shop made from a template gets its routines and first-week questions (runs wait for the owner's switches); the outpost's browser is next. Parked by the owner: PromptPay billing and the LINE client |
@@ -74,7 +74,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | --- | --- | --- | --- |
 | done | The desktop's Customize page (memory and routines) | | Sonnet |
 | done | 1. Console: the workers' drafts and a shops overview | | Sonnet |
-| running | 5. The desktop answering approvals | | Opus |
+| done | 5. The desktop answering approvals (through the session decide route; real use waits for sign-in) | | Opus |
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | done | 2 and 3. Routines running on schedule, and applying a shop template (runs wait for the owner's `officeRoutines` and `officeCloud` switches) | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
@@ -83,7 +83,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
 | 11 | Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Haiku |
 | running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
-| 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
+| running | 6. macOS notifications on `@manut/notify-rules` | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
 

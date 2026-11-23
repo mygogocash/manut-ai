@@ -272,6 +272,82 @@ describe("authorised reads", () => {
     expect(await session.read("/v1/schedules")).toEqual({ kind: "signed_out" });
     expect(api.calls).toEqual([]);
   });
+
+  it("ends the session at once for a helper the owner removed: no refresh can bring that back", async () => {
+    let ended = 0;
+    const { session, api, vault } = setup(stored(clock().now()), () => (ended += 1));
+    const removed = { error: "removed", removedAt: "2026-11-22T14:05:00.000Z" };
+    api.on("GET", "/v1/approvals", { status: 401, json: removed });
+    expect(await session.read("/v1/approvals?state=open")).toEqual({ kind: "refused", status: 401, code: "removed", json: removed });
+    expect(api.to("POST", "/v1/auth/refresh")).toEqual([]);
+    expect(session.state).toEqual({ kind: "signed_out", ended: "expired" });
+    expect(vault.value).toBeNull();
+    expect(ended).toBe(1);
+  });
+});
+
+describe("authorised writes", () => {
+  const PATH = "/v1/approvals/action-1/decision";
+  const BODY = { optionId: "approve", seenRevision: 1 };
+
+  it("sends the body as JSON with the access token, apart from the address, and reads the JSON answer", async () => {
+    const { session, api } = setup(stored(clock().now()));
+    api.on("POST", PATH, { status: 200, json: { result: { ok: true }, action: "confirmed" } });
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "ok", status: 200, json: { result: { ok: true }, action: "confirmed" } });
+    expect(api.calls).toEqual([expect.objectContaining({ method: "POST", url: `${ORIGIN}${PATH}`, bearer: "access-1", body: BODY })]);
+    noTokenInUrls(api);
+  });
+
+  it("refreshes before the access token expires, so an expired token is never sent", async () => {
+    const start = clock().now();
+    const { session, api, c } = setup(stored(start));
+    api.on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) }).on("POST", PATH, { status: 200, json: { result: { ok: true } } });
+    c.pass(3600_000 - REFRESH_EARLY_MS + 1);
+    expect((await session.write(PATH, BODY)).kind).toBe("ok");
+    expect(api.calls.map((r) => [r.method, r.path, r.bearer])).toEqual([
+      ["POST", "/v1/auth/refresh", null],
+      ["POST", PATH, "access-2"],
+    ]);
+  });
+
+  it("on a 401 refreshes once and sends the same body once more, never a third time", async () => {
+    // A 401 is the API refusing the session before it reads the body, so nothing was decided by the first one.
+    const { session, api, vault } = setup(stored(clock().now()));
+    api.on("POST", PATH, { status: 401, json: { error: "unauthorized" } }).on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) });
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "signed_out" });
+    expect(api.calls.map((r) => [r.path, r.bearer, r.body])).toEqual([
+      [PATH, "access-1", BODY],
+      ["/v1/auth/refresh", null, { refreshToken: "refresh-1", deviceId: "device-1" }],
+      [PATH, "access-2", BODY],
+    ]);
+    expect(vault.value).toBeNull();
+  });
+
+  it("ends the session at once for a removed helper, and keeps the API's answer so the card can say when", async () => {
+    const { session, api, vault } = setup(stored(clock().now()));
+    const removed = { error: "removed", removedAt: "2026-11-22T14:05:00.000Z" };
+    api.on("POST", PATH, { status: 401, json: removed });
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "refused", status: 401, code: "removed", json: removed });
+    expect(api.to("POST", PATH)).toHaveLength(1);
+    expect(api.to("POST", "/v1/auth/refresh")).toEqual([]);
+    expect(session.state).toEqual({ kind: "signed_out", ended: "expired" });
+    expect(vault.value).toBeNull();
+  });
+
+  it("sends it once when no answer comes back: the API may have it, so it is never sent again on its own", async () => {
+    const { session, api } = setup(stored(clock().now()));
+    api.on("POST", PATH, "offline");
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "offline" });
+    api.on("POST", PATH, { status: 503, json: { error: "approvals_unavailable" } });
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "unavailable", status: 503 });
+    expect(api.to("POST", PATH)).toHaveLength(2);
+  });
+
+  it("writes nothing while signed out", async () => {
+    const { session, api } = setup();
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "signed_out" });
+    expect(api.calls).toEqual([]);
+  });
 });
 
 describe("signing out", () => {

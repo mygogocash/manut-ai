@@ -16,14 +16,19 @@
 // `resync`); the runtime also closes and opens once when the API answers again after a kept read stood in, so a read
 // after an outage replays nothing but which asks are over: the app's own re-read brings everything else back.
 //
-// It changes nothing. Every write op answers `not_yet` until the approvals slice: answering an approval must go
-// through `packages/approval-core`'s settle-once rules, never a second way round (CLAUDE.md). While only a kept read is
+// The one write it makes is answering an ask (`approval.respond`), and only through the API's decide route, where
+// approval-core settles each request once with the role the session carries (`answer`; never a second way round,
+// CLAUDE.md). The answer names the option by what it does and the revision the card showed, nothing else; the card is
+// marked answered only when the API says so; and after any answer the shop is read again, so the card closes in the
+// API's words ("Already decided by Mint at 19:42"). Every other write answers `not_yet`. While only a kept read is
 // shown every write answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
 import { t } from "../../i18n";
-import type { BridgeEvent, OpMap } from "../../lib/protocol";
+import type { ApprovalChoice, BridgeEvent, OpMap } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
+import { decisionPath, outcomeOf, type Closing } from "./answer";
+import { answerable, isAsk, optionFor, parseAskId } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { shopRoutines } from "./customize";
 import type { ApiSession, SignInState } from "./session";
@@ -78,11 +83,19 @@ const notFound = () => new OpError("not_found", t("rt.notFound"));
 const notYet = (): never => {
   throw new OpError("not_yet", t("rt.notYet"));
 };
-/** A read the API cannot serve yet. It is not `notYet`'s words, which say that Connected only reads. */
+/** A read the API cannot serve yet. It is not `notYet`'s words, which say what Connected does so far. */
 const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
+
+/** How an ask that left the open approvals with no answer from here closes, as `now` tells it. */
+function leftHow(askRef: string, now: ShopSnapshot): Closing {
+  const ref = parseAskId(askRef);
+  if (ref && now.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { reason: "cancelled", note: t("rt.ask.changed") };
+  const action = ref ? now.tasks.flatMap((task) => task.actions).find((a) => a.id === ref.id) : undefined;
+  return { reason: !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved" };
+}
 
 /** The signature of what a schedule shows, so a read that changed none of them stays quiet. */
 const scheduleSig = (s: ShopSnapshot) =>
@@ -108,6 +121,9 @@ export class HttpHost {
   private offSession: (() => void) | null = null;
   private linkFns = new Set<(l: LinkState) => void>();
   private eventFns = new Set<(ev: HostEvent) => void>();
+  /** How the card of an ask the person answered here closes, in the API's words, kept until the ask leaves the shop's
+   *  open approvals (`emitLeft`). By ask id. */
+  private closings = new Map<string, Closing>();
 
   constructor(opts: HostOptions) {
     this.session = opts.session;
@@ -152,7 +168,8 @@ export class HttpHost {
     const handler = this.ops[op as keyof AllOps] as (p: unknown) => unknown;
     // Only a kept read answers while the API cannot be reached, so a write has nothing live to act on. It is refused, not
     // held to be sent later: an ask from the kept read needs the live record, and everything else the person says again.
-    if (handler === notYet && this.cache.kind === "showing") throw new OpError("offline", t(op === "approval.respond" ? "rt.connectToAnswer" : "rt.offline"));
+    const writes = handler === notYet || op === "approval.respond";
+    if (writes && this.cache.kind === "showing") throw new OpError("offline", t(op === "approval.respond" ? "rt.connectToAnswer" : "rt.offline"));
     return handler(params);
   }
 
@@ -174,6 +191,7 @@ export class HttpHost {
     this.offSession = null;
     this.snapshot = null;
     this.onDisk = null;
+    this.closings.clear();
     this.attempt = 0;
     this.show("connecting", NO_CACHE);
   }
@@ -187,6 +205,7 @@ export class HttpHost {
       this.clearTimer();
       this.snapshot = null;
       this.onDisk = null;
+      this.closings.clear();
       this.show("signed_out", NO_CACHE);
     }
   }
@@ -209,6 +228,14 @@ export class HttpHost {
   /** One read at a time: every caller that asks while one runs gets its answer. */
   private read(): Promise<ShopRead> {
     return (this.reading ??= this.fetchShop());
+  }
+
+  /** A read that starts after now. One already on its way may have been asked before what just changed (an answer), so it
+   *  is waited out first. */
+  private async refresh(): Promise<void> {
+    const before = this.reading;
+    if (before) await before;
+    if (this.running) await this.read();
   }
 
   private async fetchShop(): Promise<ShopRead> {
@@ -326,16 +353,42 @@ export class HttpHost {
     for (const fn of [...this.eventFns]) fn(ev);
   }
 
-  /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you. */
+  /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you. An ask the
+   *  person answered here closes in the words the API gave (`closings`). Any other is read from `now`: a request asked
+   *  again at another revision changed, and its new version is an ask of its own; otherwise its action says how it went.
+   *  An action that ran out of time timed out, one that is gone with its task was cancelled, any other was decided. */
   private emitLeft(was: ShopSnapshot, now: ShopSnapshot): void {
     const still = new Set(pendingAsks(now).map((a) => a.request_id));
     for (const { request_id: id } of pendingAsks(was)) {
       if (still.has(id)) continue;
-      const action = now.tasks.flatMap((task) => task.actions).find((a) => a.id === id);
-      // An action that ran out of time timed out; one that is gone with its task was cancelled; any other was decided.
-      const reason = !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved";
-      this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason });
+      const closing = this.closings.get(id) ?? leftHow(id, now);
+      this.closings.delete(id);
+      this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason: closing.reason, ...(closing.note ? { note: closing.note } : {}) });
     }
+  }
+
+  /** The person's answer to an ask, sent to the decide route as exactly the option that does what they chose and the
+   *  revision their card showed; the role is the session's, never sent. Refused here, with nothing sent, for an ask the
+   *  shop no longer holds, one the shop has moved to another revision since the card showed it, one this build cannot
+   *  answer, and a choice the request does not offer. Taken only when the API says it was decided; after any answer sent,
+   *  whatever came back, the shop is read again. */
+  private async answer(askRef: string, choice: ApprovalChoice): Promise<Record<string, never>> {
+    const ref = parseAskId(askRef);
+    const snapshot = this.snapshot;
+    const approval = ref && snapshot ? snapshot.approvals.find((a) => a.record.request.id === ref.id && isAsk(a)) : undefined;
+    if (!ref || !snapshot || !approval) throw notFound();
+    if (approval.record.request.revision !== ref.revision) throw new OpError("changed", t("rt.ask.changed"));
+    const request = answerable(approval);
+    if (!request) throw new OpError("update_app", t("rt.updateToAnswer"));
+    const option = optionFor(request, choice);
+    if (!option) throw new OpError("not_offered", t("rt.ask.notOffered"));
+    const answered = await this.session.write(decisionPath(request.id), { optionId: option.id, seenRevision: ref.revision });
+    const names = new Map(snapshot.approvals.flatMap((a) => (a.passedOn?.name ? [[a.passedOn.by, a.passedOn.name] as const] : [])));
+    const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now() });
+    if (!outcome.ok && outcome.closing) this.closings.set(askRef, outcome.closing);
+    void this.refresh().catch(() => undefined);
+    if (!outcome.ok) throw new OpError(outcome.code, outcome.words);
+    return {};
   }
 
   /** What changed between two reads, as the events the store already follows. */
@@ -445,11 +498,11 @@ export class HttpHost {
       "media.read": () => {
         throw notFound();
       },
-      // Writes: none until the approvals slice.
+      // Writes: answering an ask, through the decide route; nothing else yet.
+      "approval.respond": (p) => (member(p), this.answer(p.request_id, p.choice)),
       "chat.send": notYet,
       "chat.steer": notYet,
       "chat.interrupt": notYet,
-      "approval.respond": notYet,
       "clarify.respond": notYet,
       "chat.set_model": notYet,
       "chat.attach": notYet,

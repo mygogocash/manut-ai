@@ -1,14 +1,16 @@
-// Reading one shop from apps/api: its tasks with their exact-action approvals (the tenant export, the only session
-// route that lists a tenant's own tasks), its schedules and its inbound attention items. Decoding never throws, and
-// what this app does not know is kept as the API wrote it.
+// Reading one shop from apps/api: its tasks with their exact actions (the tenant export, the only session route that
+// lists a tenant's own tasks), what waits for the owner (approval-core's records, `GET /v1/approvals?state=open`), its
+// schedules and its inbound attention items. Decoding never throws, and what this app does not know is kept as the API
+// wrote it.
 import { describe, expect, it } from "vitest";
 import { ApiSession, type StoredSession } from "./session";
 import { readShop } from "./shop";
-import { attentionJson, clock, fakeApi, iso, memoryVault, ORIGIN, scheduleJson, T0, taskJson, type FakeApi } from "./testkit";
+import { approvalJson, attentionJson, clock, fakeApi, iso, memoryVault, ORIGIN, scheduleJson, T0, taskJson, type FakeApi } from "./testkit";
 
 const TASK = taskJson();
 const SCHEDULE = scheduleJson();
 const ATTENTION = attentionJson();
+const APPROVAL = approvalJson();
 
 function setup() {
   const api = fakeApi();
@@ -27,23 +29,26 @@ function setup() {
   return { api, c, session };
 }
 
-function serve(api: FakeApi, over: { tasks?: unknown; schedules?: unknown; attention?: Parameters<FakeApi["on"]>[2] } = {}) {
+function serve(api: FakeApi, over: { tasks?: unknown; schedules?: unknown; attention?: Parameters<FakeApi["on"]>[2]; approvals?: unknown } = {}) {
   api
     .on("GET", "/v1/tenant/export", { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(T0), tasks: over.tasks ?? [TASK], schedules: [], attention: [] } })
     .on("GET", "/v1/schedules", { status: 200, json: { schedules: over.schedules ?? [SCHEDULE] } })
-    .on("GET", "/v1/inbound/attention", over.attention ?? { status: 200, json: { items: [ATTENTION] } });
+    .on("GET", "/v1/inbound/attention", over.attention ?? { status: 200, json: { items: [ATTENTION] } })
+    .on("GET", "/v1/approvals", { status: 200, json: { state: "open", approvals: over.approvals ?? [APPROVAL] } });
 }
 
 describe("readShop", () => {
-  it("reads the three routes with the session's token", async () => {
+  it("reads the four routes with the session's token, and only what waits for an answer", async () => {
     const { api, session, c } = setup();
     serve(api);
     const out = await readShop(session, c.now);
     expect(api.calls.map((r) => [r.method, r.path, r.bearer]).sort()).toEqual([
+      ["GET", "/v1/approvals", "access-1"],
       ["GET", "/v1/inbound/attention", "access-1"],
       ["GET", "/v1/schedules", "access-1"],
       ["GET", "/v1/tenant/export", "access-1"],
     ]);
+    expect(api.to("GET", "/v1/approvals")[0].url).toBe(`${ORIGIN}/v1/approvals?state=open`);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     const { snapshot } = out;
@@ -92,6 +97,12 @@ describe("readShop", () => {
     ]);
     expect(snapshot.attention).toEqual([{ ...ATTENTION, receivedAt: T0 + 30_000, raw: ATTENTION }]);
     expect(snapshot.attentionOff).toBe(false);
+    // what waits for the owner, as approval-core's record and standing; the request's detail keeps the words it shows
+    const record = APPROVAL.record as { status: string; request: Record<string, unknown> & { detail: Record<string, unknown> } };
+    const { payloadHash: _hash, ...shown } = record.request.detail;
+    expect(snapshot.approvals).toEqual([
+      { taskId: "task-1", record: { ...record, request: { ...record.request, detail: shown } }, standing: { state: "open", reason: "waiting" }, passedOn: null, raw: APPROVAL },
+    ]);
     expect(snapshot.unreadable).toEqual([]);
   });
 
@@ -121,11 +132,13 @@ describe("readShop", () => {
     const { api, session, c } = setup();
     const noId = { task: { title: "no id" } };
     const badAction = { ...TASK, actions: [{ state: "proposed" }] };
-    serve(api, { tasks: [noId, badAction, 7], schedules: [{ name: "no id" }] });
+    const noRequestId = approvalJson({ id: "" });
+    serve(api, { tasks: [noId, badAction, 7], schedules: [{ name: "no id" }], approvals: [noRequestId, APPROVAL] });
     const out = await readShop(session, c.now);
     if (!out.ok) throw new Error("expected a snapshot");
     expect(out.snapshot.tasks.map((t) => [t.id, t.actions.length])).toEqual([["task-1", 0]]);
-    expect(out.snapshot.unreadable).toEqual([noId, { state: "proposed" }, 7, { name: "no id" }]);
+    expect(out.snapshot.approvals.map((a) => a.record.request.id)).toEqual(["action-1"]);
+    expect(out.snapshot.unreadable).toEqual([noId, { state: "proposed" }, 7, { name: "no id" }, noRequestId]);
   });
 
   it("reads odd shapes as empty rather than failing", async () => {
@@ -133,9 +146,10 @@ describe("readShop", () => {
     api
       .on("GET", "/v1/tenant/export", { status: 200, json: { tasks: "none" } })
       .on("GET", "/v1/schedules", { status: 200, json: [] })
-      .on("GET", "/v1/inbound/attention", { status: 200, json: { items: null } });
+      .on("GET", "/v1/inbound/attention", { status: 200, json: { items: null } })
+      .on("GET", "/v1/approvals", { status: 200, json: { approvals: "none" } });
     const out = await readShop(session, c.now);
-    expect(out).toMatchObject({ ok: true, snapshot: { tasks: [], schedules: [], attention: [], unreadable: [] } });
+    expect(out).toMatchObject({ ok: true, snapshot: { tasks: [], schedules: [], attention: [], approvals: [], unreadable: [] } });
   });
 
   it("reads the attention feed as off when the API has it switched off, not as a failure", async () => {
@@ -170,6 +184,10 @@ describe("readShop", () => {
       failure: "unavailable",
     });
     expect(await run({ "GET /v1/schedules": { status: 400, json: { error: "tenant_required" } } })).toEqual({ ok: false, failure: "unavailable" });
+    // what waits for the owner is never shown half read: the API answers 503 rather than leave one out
+    expect(await run({ "GET /v1/approvals": { status: 503, json: { error: "approvals_unavailable" } } })).toEqual({ ok: false, failure: "unavailable" });
+    expect(await run({ "GET /v1/approvals": { status: 400, json: { error: "invalid_state" } } })).toEqual({ ok: false, failure: "unavailable" });
+    expect(await run({ "GET /v1/approvals": "offline" })).toEqual({ ok: false, failure: "offline" });
     expect(await run({ "GET /v1/schedules": "offline", "GET /v1/tenant/export": { status: 503, json: {} } })).toEqual({ ok: false, failure: "offline" });
     expect(
       await run({

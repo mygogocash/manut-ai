@@ -681,6 +681,9 @@ export type BridgeEvent =
       timeout_s?: number;
       /** The plan the agent asks to start on (Claude Code's plan mode), as the markdown it wrote. */
       plan?: string;
+      /** This app cannot answer it: its kind, an answer it offers or where it stands is one this version does not know.
+       *  It is shown, with no answer offered, and says to update the app (the connected runtime's approvals). */
+      outdated?: boolean;
     })
   | (EventBase & {
       event: "clarify.request";
@@ -693,8 +696,9 @@ export type BridgeEvent =
       questions?: ClarifyQuestion[];
       timeout_s?: number;
     })
-  /** An approval or question is no longer waiting (timed out, withdrawn, or answered somewhere else). */
-  | (EventBase & { event: "prompt.expired"; request_id: string; reason: "timeout" | "cancelled" | "resolved" })
+  /** An approval or question is no longer waiting (timed out, withdrawn, or answered somewhere else). `note`, when the
+   *  runtime knows more than the reason, says it in words ("Already decided by Mint at 19:42"). */
+  | (EventBase & { event: "prompt.expired"; request_id: string; reason: "timeout" | "cancelled" | "resolved"; note?: string })
   /** `ended`: a SESSIONS agent exited cleanly (code 0) in the middle of a turn. */
   | (EventBase & { event: "turn.end"; outcome: "done" | "interrupted" | "ended" | "error"; error?: string })
   | (EventBase & { event: "bot.status"; status: BotStatus; running: boolean })
