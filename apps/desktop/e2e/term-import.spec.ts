@@ -5,7 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chatOpen, openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS ? join(process.env.MANUT_SHOTS) : "";
@@ -42,7 +42,8 @@ async function open(page: Page, { platform = "MacIntel", theme = "dark" }: { pla
     [platform, theme],
   );
   await page.goto("/");
-  await chatOpen(page);
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 async function terminalClaude(page: Page) {
@@ -109,6 +110,7 @@ test("Import from… iTerm2: menu, profile in the preview, Use -> the open termi
   await expect(page.getByTestId("term-themes-custom")).toContainText("Harbor Night");
 
   // the session's terminal takes it
+  await openCode(page);
   await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
   await expect.poll(async () => (await termLook(page, ".term-host"))?.bg).toBe("#14202b");
   expect((await termLook(page, ".term-host"))?.red).toBe("#e06c75");

@@ -7,7 +7,7 @@
 // page's storage) and written back, dimmed, under a "--- restored <time> ---" line before the new output; closing
 // removes it; Settings > Terminal turns it off. The bottom panel's tabs come back with their folders and scrollback.
 import { expect, test, type Page } from "@playwright/test";
-import { openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FOLDER = "/home/you/code/web-app";
@@ -42,7 +42,8 @@ async function open(page: Page) {
     w.__manutMockAgents = ["claude", "codex", "grok", "omh", "pi"];
   }, FOLDER);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `agent` from the TERMINALS + menu in FOLDER; its session id. */
@@ -84,6 +85,7 @@ test("a Claude Code terminal starts under an id manut made and continues it afte
   // it starts by itself, continuing the same conversation in the same folder: no new id, no Resume button
   await expect.poll(() => starts(page)).toEqual([expect.objectContaining({ agent: "claude", cwd: FOLDER, resume: conv })]);
   expect((await starts(page))[0].sessionId).toBeUndefined();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect(page.getByTestId("session-paused")).toHaveCount(0);
@@ -238,6 +240,7 @@ test("Resume right after a restart learns only the new Codex's own conversation"
   await flush(page);
   expect(await conv(page, a)).toBeUndefined();
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   expect(await starts(page)).toEqual([]);
@@ -259,6 +262,7 @@ test("an agent with no conversation of its own (Grok) still comes back paused an
   expect((await starts(page))[0].sessionId).toBeUndefined();
   await expect.poll(async () => (await saved(page))?.sessions?.find((s: { id: string }) => s.id === id)?.running).toBe(true);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   await page.waitForTimeout(300);
@@ -271,6 +275,7 @@ test("a paused terminal shows what it showed before the restart, dimmed under th
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   await expect.poll(async () => (await calls(page)).some((c) => c.op === "history.save" && c.key === id && !!c.data?.includes("(mock)"))).toBe(true);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   const kept = page.getByTestId("session-paused-history").locator(".xterm-rows");
@@ -314,6 +319,7 @@ test("the scrollback comes back dimmed, under a divider, before the program's ne
   // a slow computer: the shell answers the history read late, and the program still starts only after it is in
   await page.addInitScript(() => ((window as unknown as Record<string, unknown>).__manutMockHistoryDelay = 400));
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toBeAttached();
   // the kept text holds the old banner too: wait for the new program's own banner, below the divider
@@ -359,6 +365,7 @@ test("Keep terminal history off: one clear, and no history call after it", async
   const before = (await history(page)).length;
   await flush(page);
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(screen(page)).toContainText("(mock)");
   await page.waitForTimeout(300);

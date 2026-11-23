@@ -4,6 +4,7 @@
 // notification. Splitting, closing or moving a pane while zoomed shows every pane again (tmux).
 // Off macOS: MANUT_E2E_PLATFORM=Win32.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
 import { dragRowOnto, type Side } from "./split-drag-helpers";
 
@@ -62,6 +63,7 @@ async function threePanes(page: Page, extra: string[] = []) {
   const k = await keys(page);
   const ids = await sessions(page, ["/w/a", "/w/b", "/w/c", ...extra]);
   const [a, b, c] = ids;
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await splitWith(page, a, "right", b);
   await splitWith(page, b, "down", c);
@@ -140,6 +142,7 @@ test("zoomed: a click on another pane's sidebar row, or on its notification, sho
   await page.keyboard.press(k.zoom);
   await expectZoomedOn(page, c);
   // the sidebar row of a (a pane of this split)
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expectZoomedOn(page, a);
   await page.keyboard.type("row-a");

@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { termSample } from "../src/sessions/term/look-sample";
-import { chatOpen, openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -39,7 +39,8 @@ async function open(page: Page, theme: string, lang = "en") {
     [theme, lang],
   );
   await page.goto("/");
-  await chatOpen(page);
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 async function settings(page: Page) {
@@ -209,6 +210,7 @@ for (const theme of ["dark", "light"] as const) {
       }
       await page.getByTestId(`term-theme-${pick}`).click();
       await expect(page.getByTestId("term-preview")).toHaveAttribute("data-theme-id", pick);
+      await openCode(page);
       await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
       await expect(page.getByTestId("terminal")).toBeVisible();
       await expect(page.locator(".xterm-rows")).toContainText("42 passed");

@@ -17,7 +17,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -73,7 +73,8 @@ async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]
     [o.theme ?? null, o.roster ?? null, !!o.keep] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder`; its session id. */
@@ -159,10 +160,12 @@ async function seed(page: Page, o: { grok?: boolean } = {}) {
   const claude = await newTerm(page, "shell", WEB);
   await fg(page, claude, "claude");
   // pi ends (exit 0): its row goes on as the login shell
+  await openCode(page);
   await page.getByTestId(`session-${pi}`).locator(".ss-open").click();
   await page.locator(".xterm-helper-textarea").last().focus();
   await page.keyboard.type("exit\r");
   await expect(page.getByTestId(`session-${pi}`).getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");
+  await openCode(page);
   await page.getByTestId(`session-${claude}`).locator(".ss-open").click();
   await out(page, claude, CLAUDE_SCREEN);
   return { claude, codex, shellGrok, shell, pi };
@@ -415,6 +418,7 @@ test("session-fg: shell icon -> Claude mark with the live frame and tooltip -> s
   await fg(page, a, "htop");
   await expect(mark(a)).toHaveAttribute("data-agent", "generic");
   // the open session's header follows too
+  await openCode(page);
   await page.getByTestId(`session-${b}`).locator(".ss-open").click();
   await expect(page.getByTestId("header").getByTestId("term-row-mark")).toHaveAttribute("data-agent", "codex");
   // its shell exits: the row closes (term-exit.spec.ts)
@@ -500,6 +504,7 @@ test("the open session is always listed and in view, with a short TERMINALS regi
   const ids: string[] = [];
   for (let i = 0; i < 6; i++) ids.push(await newTerm(page, i % 2 ? "codex" : "claude", i % 3 === 0 ? WEB : API));
   // the first one opened, then the window gets shorter under it
+  await openCode(page);
   await page.getByTestId(`session-${ids[0]}`).locator(".ss-open").click();
   await page.setViewportSize({ width: 1440, height: 640 });
   await page.mouse.move(900, 600);

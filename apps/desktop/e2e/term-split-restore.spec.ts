@@ -3,6 +3,7 @@
 // that came back paused show paused in their pane, with Resume, which starts that one in place. Settings › Terminal ›
 // Dim unfocused panes changes how bright the panes without the keyboard are, in TERMINALS and the bottom panel alike.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 import { mock, usePlatform } from "./term-find-helpers";
 import { dragRowOnto, type Side } from "./split-drag-helpers";
 
@@ -21,7 +22,8 @@ async function open(page: Page) {
     }
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** `pick`'s TERMINALS row dragged onto the `side` part of `from`'s pane (`from` is on screen). */
@@ -43,6 +45,7 @@ test("the split comes back after a restart, its layout and sizes kept; paused se
     ids.push(id);
   }
   const [a, b, c] = ids;
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await split(page, a, "right", b);
   await split(page, b, "down", c);
@@ -60,6 +63,7 @@ test("the split comes back after a restart, its layout and sizes kept; paused se
   await page.reload();
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   // the shells come back paused; opening one shows the whole split again, each pane paused with Resume
+  await openCode(page);
   await page.getByTestId(`session-${b}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-split")).toHaveAttribute("data-panes", "3");
   for (const id of [a, b, c]) await expect(pane(page, id).getByTestId("session-paused")).toBeVisible();
@@ -124,6 +128,7 @@ test("Dim unfocused panes: the setting sets how bright panes without the keyboar
   await expect(page.getByTestId("term-dim").locator("input")).toHaveValue("0.68");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("manut.term") || "{}").dimUnfocused)).toBe(0.68);
   await expect.poll(() => boxOpacity(0)).toBe("0.68");
+  await openCode(page);
   await page.getByTestId(`session-${b}`).locator(".ss-open").click();
   await expect.poll(() => opacity(a)).toBe("0.68");
 });

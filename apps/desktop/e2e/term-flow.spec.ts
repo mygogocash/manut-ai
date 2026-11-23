@@ -3,7 +3,7 @@
 // with the size it ended on. In the app the shell reads a program only as far ahead of the page as these
 // acknowledgements allow (src-tauri/src/sessions.rs FLOW_HIGH / FLOW_LOW).
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen, openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 /** RESIZE_SETTLE_MS in src/sessions/sessions.ts. */
@@ -43,7 +43,8 @@ async function terminal(page: Page) {
     w.__manutMockAgents = ["claude", "codex", "omh", "grok"];
   });
   await page.goto("/");
-  await chatOpen(page);
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
   await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();

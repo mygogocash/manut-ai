@@ -4,7 +4,7 @@
 // seed and the many-rows seed (12 bots x 6 threads, 15 terminals); MANUT_MEASURE=<file> appends them as JSON lines.
 import { expect, test, type Page } from "@playwright/test";
 import { appendFileSync } from "node:fs";
-import { openCode } from "./start";
+import { homeOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const MEASURE = process.env.MANUT_MEASURE || "";
@@ -47,8 +47,12 @@ async function open(page: Page, o: { roster?: string[] } = {}) {
     [o.roster ?? null] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot: the app starts on Home
+  await homeOpen(page);
 }
+
+/** Why the tests of the sidebar's own layout are skipped. */
+const NO_SIDEBAR = "the sidebar's BOTS and TERMINALS regions, their divider and its footer row left with it; TERMINALS is a list on the Code page";
 
 async function newTerm(page: Page, agent: string, folder: string): Promise<string> {
   const before = await page.evaluate(() => (window as any).__manutSessions.getState().list.map((r: { id: string }) => r.id));
@@ -125,6 +129,7 @@ test.beforeEach(async () => {
 });
 
 test.describe("measure", () => {
+  test.skip(true, NO_SIDEBAR);
   test.use({ deviceScaleFactor: 1, viewport: { width: 1440, height: 900 } });
   test("measure: few rows (4 bots, Kami's 5 threads, 5 terminals in 2 folders) at 900 and 760", async ({ page }) => {
     test.setTimeout(120_000);
@@ -173,6 +178,11 @@ test("session cards: 4px apart, 10px+ between folders, rounded, two lines with t
   await out(page, b, `\x1b[2J\x1b[H${LONG}\r\n`);
   const c = await newTerm(page, "claude", WEB);
   await out(page, c, "Read 142 lines\r\n");
+  // the cards are on the Code page (the open terminal fills the main column until it is opened), as wide as the page
+  // where the sidebar's were narrow: hold the list to the sidebar's width, so the long line is wider than its card as
+  // it was there
+  await openCode(page);
+  await page.addStyleTag({ content: '[data-testid="side-sessions"] { max-width: 280px; }' });
   // the second line: the CLI, then the last line it printed (read a moment after output stops)
   await expect(page.getByTestId(`session-${b}`).getByTestId("term-line")).toHaveText(LONG);
   await expect(page.getByTestId(`session-${b}`).getByTestId("term-meta")).toContainText("codex");
@@ -236,13 +246,12 @@ test("session cards: 4px apart, 10px+ between folders, rounded, two lines with t
   await expect(page.getByTestId(`session-${b}`)).toHaveClass(/\brun\b/);
   expect(geo.lane).not.toBe("rgba(0, 0, 0, 0)");
   await expect(page.getByTestId(`session-${a}`)).not.toHaveClass(/\brun\b/);
-  // the selected card: a lighter fill and its edge
-  const sel = await page.getByTestId(`session-${c}`).evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e).borderTopColor]);
-  expect(sel[0]).not.toBe("rgba(0, 0, 0, 0)");
-  expect(sel[1]).not.toBe("rgba(0, 0, 0, 0)");
+  // (The sidebar also showed the selected card's lighter fill beside its open terminal. A card is selected while its
+  // terminal fills the main column, so the Code page, which takes that column, never shows one.)
 });
 
 test("BOTS | TERMINALS divider: a drag moves the line, keeps 120px each, persists across a reload; double-click goes back to auto", async ({ page }) => {
+  test.skip(true, NO_SIDEBAR);
   test.setTimeout(150_000);
   const { bots } = await mock("mock.manyBots", { n: 8 });
   await open(page, { roster: ["kami", ...(bots as string[])] });
@@ -294,6 +303,7 @@ test("BOTS | TERMINALS divider: a drag moves the line, keeps 120px each, persist
 });
 
 test("footer: Automations, Plugins and Settings in one row of icon buttons, named for a screen reader and in a tooltip, reachable by Tab; the whole footer at most 90px", async ({ page }) => {
+  test.skip(true, NO_SIDEBAR);
   await open(page);
   const row = page.getByTestId("foot-row");
   for (const [id, name] of [["nav-automations", "Automations"], ["nav-plugins", "Plugins"], ["nav-settings", "Settings"]] as const) {
@@ -388,6 +398,7 @@ function expectNoBand(b: Awaited<ReturnType<typeof bands>>, f: number) {
 }
 
 test.describe("auto split: no blank band", () => {
+  test.skip(true, NO_SIDEBAR);
   test.use({ deviceScaleFactor: 1, viewport: { width: 1440, height: 900 } });
   test("few rows at 900: every card shows, TERMINALS without a chevron, BOTS ends on a whole row; at 760 each region ends on a whole row; no band at any scroll", async ({ page }) => {
     test.setTimeout(120_000);

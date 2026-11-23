@@ -3,6 +3,7 @@
 // that does not ask, or any program with the setting off, gets `\r` as before. A terminal parked and made again
 // keeps what its program asked for. Option+drag selects inside a program that reports the mouse (macOS).
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { feed, mock, newTerminal, openApp, platformIsMac, pointAt, settle, typed } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -76,6 +77,7 @@ test("Settings > Terminal: Modern key encoding (Kitty) is on by default, and off
   await expect(sw.getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "true");
   await sw.getByRole("radio", { name: "Off" }).click();
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("manut.term"))) ?? "{}")).toMatchObject({ kittyKeys: false });
+  await openCode(page);
   await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   expect(await sends(page, "Shift+Enter")).toBe("\r");
@@ -89,6 +91,7 @@ test("a terminal parked and made again keeps the protocol its program asked for"
   await expect.poll(() => flags(page)).toBe(1);
   await newTerminal(page); // the first one leaves the page
   await expect.poll(() => page.evaluate(() => (window as unknown as { __manutPark: { parked(): number } }).__manutPark.parked()), { timeout: 10_000 }).toBeGreaterThan(0);
+  await openCode(page);
   await page.getByTestId(`session-${first}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", first);
   await expect.poll(() => flags(page)).toBe(1);
@@ -103,6 +106,7 @@ test("nested Kitty modes survive parking: popping after the remake goes back to 
   await expect.poll(() => flags(page)).toBe(3);
   await newTerminal(page); // the first one leaves the page
   await expect.poll(() => page.evaluate(() => (window as unknown as { __manutPark: { parked(): number } }).__manutPark.parked()), { timeout: 10_000 }).toBeGreaterThan(0);
+  await openCode(page);
   await page.getByTestId(`session-${first}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", first);
   await expect.poll(() => flags(page)).toBe(3);

@@ -4,6 +4,7 @@
 // split shows no drop zone and takes nothing. A split pane's grip (top centre) drags the pane itself to another pane's
 // side, and a click on it opens the pane's menu (zoom, even out, close, each with its key). One pane alone has no grip.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
 import { dragGripOnto, dragRowOnto } from "./split-drag-helpers";
 
@@ -67,6 +68,7 @@ test("a row dropped on the right half goes right, on the bottom half below; a ro
 test("a full split shows no drop zone and takes no fifth session", async ({ page }) => {
   await openApp(page);
   const [a, b, c, d, e] = await sessions(page, ["/w/a", "/w/b", "/w/c", "/w/d", "/w/e"]);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await dragRowOnto(page, b, a, "right");
   await dragRowOnto(page, c, a, "down");

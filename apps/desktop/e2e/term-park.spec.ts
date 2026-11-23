@@ -37,6 +37,7 @@ const fast = (page: Page) =>
 const parkedCount = (page: Page) => page.evaluate(() => (window as unknown as { __manutPark: { parked(): number } }).__manutPark.parked());
 
 const show = async (page: Page, id: string) => {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 };

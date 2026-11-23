@@ -14,7 +14,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -63,7 +63,8 @@ async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]
     [o.theme ?? null, FOLDERS, o.roster ?? null, !!o.keep] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder` (one of the recent folders, else the picker's). */
@@ -127,6 +128,7 @@ test.describe("shots", () => {
       await page.setViewportSize({ width: 1280, height: 900 });
       await open(page, { theme });
       const ids = await seedTerminals(page);
+      await openCode(page);
       await page.getByTestId(`session-${ids.claude}`).locator(".ss-open").click();
       // output flowing on claude: the spinner shows
       await typeIn(page, "after 0 progress");
@@ -226,6 +228,7 @@ test("rows: grouped by folder with the branch; two-line cards (status, mark, tit
   // a CLI that ended is a shell now (no check: the row goes on); output flowing = spinner, then idle; a shell that
   // could not start = x
   await expect(page.getByTestId(`session-${ids.done}`)).toHaveAttribute("data-term-status", "idle");
+  await openCode(page);
   await page.getByTestId(`session-${ids.codex}`).locator(".ss-open").click();
   await typeIn(page, "hello");
   await expect(page.getByTestId(`session-${ids.codex}`)).toHaveAttribute("data-term-status", "busy");
@@ -269,7 +272,8 @@ test("a saved chat-mode session is not listed; a saved terminal one is", async (
     }
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
   await expect(page.getByTestId("session-s2")).toBeVisible();
   await expect(page.getByTestId("session-s1")).toHaveCount(0);
 });
@@ -381,6 +385,7 @@ for (const [platform, mod] of [["Win32", "Control"], ["MacIntel", "Meta"]] as co
     await open(page);
     const a = await newTerm(page, "shell", FOLDERS[0]);
     const b = await newTerm(page, "shell", FOLDERS[0]);
+    await openCode(page);
     await page.getByTestId(`session-${a}`).locator(".ss-open").click();
     await expect(page.getByTestId(`session-${a}`)).toHaveClass(/active/);
     const area = page.locator(".xterm-helper-textarea").last();

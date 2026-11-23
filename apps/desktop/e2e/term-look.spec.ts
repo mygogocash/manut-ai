@@ -3,7 +3,7 @@
 // field filters the list, the preview is a real terminal, and the page fits a 900x700 window.
 import { expect, test, type Page } from "@playwright/test";
 import { feed } from "./term-find-helpers";
-import { chatOpen, openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -62,7 +62,8 @@ async function open(page: Page) {
     Object.defineProperty(navigator, "platform", { get: () => "MacIntel" });
   });
   await page.goto("/");
-  await chatOpen(page);
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 /** A Claude Code session opened as a terminal, its program's first output on screen. */
@@ -84,6 +85,7 @@ async function settings(page: Page) {
 
 /** Back from Settings to the session's terminal. */
 async function session(page: Page) {
+  await openCode(page);
   await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
   await expect(page.getByTestId("terminal")).toBeVisible();
 }

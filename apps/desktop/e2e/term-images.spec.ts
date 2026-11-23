@@ -3,6 +3,7 @@
 // nothing is printed as text. With Settings > Terminal > Show images off, the add-on is not loaded and the same
 // bytes leave no picture (and still no text). The store is capped at 32 MB a terminal.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { feed, mock, newTerminal, openApp } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -87,6 +88,7 @@ test("Settings > Terminal: Show images is on by default; off drops an open termi
   await expect(sw.getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "true");
   await sw.getByRole("radio", { name: "Off" }).click();
   expect(JSON.parse((await page.evaluate(() => localStorage.getItem("manut.term"))) ?? "{}")).toMatchObject({ images: false });
+  await openCode(page);
   await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect.poll(() => storageLimit(page)).toBeNull();

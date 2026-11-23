@@ -5,7 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openCode } from "./start";
+import { openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -50,7 +50,8 @@ async function open(page: Page, theme?: "dark" | "light") {
     [FOLDER, theme ?? ""] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 async function newTerm(page: Page, agent: string): Promise<string> {
@@ -211,6 +212,7 @@ test("a request to a paused terminal shows its card there: Deny, or Resume and s
   await expect.poll(async () => Object.keys(await files(page))).toContain(la);
   // manut restarts: the shell comes back paused, nothing runs
   await page.reload();
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-paused")).toBeVisible();
   await expect.poll(async () => (await files(page))[la]?.state).toBe("ended");
@@ -254,6 +256,7 @@ test.describe("shots", () => {
       const link = await linkId(page, id);
       await expect.poll(async () => Object.keys(await files(page))).toContain(link);
       await page.reload();
+      await openCode(page);
       await page.getByTestId(`session-${id}`).locator(".ss-open").click();
       await expect(page.getByTestId("session-paused")).toBeVisible();
       await ask(page, link, "Run the payment tests again and tell me which one fails:\npnpm test payments --reporter=dot");

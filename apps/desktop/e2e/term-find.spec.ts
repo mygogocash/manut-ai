@@ -4,7 +4,7 @@
 // program keeps its Ctrl+F (Ctrl+Shift+F is always find).
 import { expect, test, type Page } from "@playwright/test";
 import { feed, mock, modKey, newTerminal, openApp, platformIsMac, pointAt, settle, typed } from "./term-find-helpers";
-import { openCode } from "./start";
+import { openChat, openCode } from "./start";
 
 test.use({ colorScheme: "dark" });
 test.beforeEach(async () => {
@@ -124,14 +124,13 @@ test("the counter is not clipped and the bar stays inside a narrow window", asyn
   expect(r.fontPx).toBeGreaterThanOrEqual(12);
   expect(r.fontPx).toBeLessThanOrEqual(13);
   expect(r.shadow).toBe("none");
-  expect(r.radius).toBeGreaterThanOrEqual(4);
-  expect(r.radius).toBeLessThanOrEqual(6);
+  // the corner is --r, the design kit's 8px since the fork's restyle
+  expect(r.radius).toBe(8);
 });
 
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("the shortcut does nothing in a chat session", async ({ page }) => {
   await openApp(page);
-  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();
@@ -160,11 +159,10 @@ test("the shortcut does nothing in a bot chat", async ({ page }) => {
 
 test("a terminal that is not focused does not take the shortcut (the bar is for the terminal the keyboard is in)", async ({ page }) => {
   await terminalWithText(page);
-  // the keyboard is in the sidebar's search field, not the terminal. A click, not the search shortcut: off macOS
-  // Ctrl+K typed in a terminal is the program's (src/app/shortcuts.ts), so the shortcut would leave the keyboard
-  // where it was
-  await page.getByTestId("bot-search").click();
-  await expect(page.getByTestId("bot-search")).toBeFocused();
+  // the keyboard is on the side menu's Search button, not in the terminal (the sidebar's search field this used left
+  // with the sidebar). Focused, not pressed: a press opens History in the terminal's place
+  await page.getByTestId("menu-search").focus();
+  await expect(page.getByTestId("menu-search")).toBeFocused();
   await find(page);
   await settle(page);
   await expect(bar(page)).toHaveCount(0);
@@ -231,6 +229,8 @@ test("leaving the terminal with find open takes the highlights with the bar: bac
   await terminalWithText(page);
   const id = (await page.getByTestId("terminal").getAttribute("data-session")) as string;
   const back = async () => {
+    // its row is on the Code page
+    await openCode(page);
     await page.getByTestId(`session-${id}`).locator(".ss-open").click();
     await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
   };
@@ -243,7 +243,7 @@ test("leaving the terminal with find open takes the highlights with the bar: bac
 
   // to a bot's chat and back
   await search();
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await expect(page.getByTestId("terminal")).toHaveCount(0);
   await back();
   await expect(bar(page)).toHaveCount(0);
@@ -341,8 +341,9 @@ test("a click or a selection of your own made while find is open is yours: a the
   expect(after.filter((c) => before.includes(c))).toEqual([]);
 
   // leaving the terminal clears find and leaves that selection
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await expect(page.getByTestId("terminal")).toHaveCount(0);
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
   await expect(bar(page)).toHaveCount(0);

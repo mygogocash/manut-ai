@@ -7,6 +7,7 @@
 // Close Window does the same while a split has the keyboard, and closes the window otherwise). Rows in the split
 // carry a glyph, Plans draws the split small, and the split comes back after a restart. Bot chats never split.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { mock, openApp, platformIsMac } from "./term-find-helpers";
 import { dragRowOnto, type Side } from "./split-drag-helpers";
 
@@ -66,6 +67,7 @@ async function splitNew(page: Page, from: string, key: string): Promise<string> 
 /** Running session `pick` in a new pane on `from`'s `side`: `from` opened, then `pick`'s row dragged onto that part of
  *  its pane; `pick` has the keyboard. */
 async function splitWith(page: Page, from: string, pick: string, side: Side = "right") {
+  await openCode(page);
   await page.getByTestId(`session-${from}`).locator(".ss-open").click();
   await dragRowOnto(page, pick, from, side);
   await expect(pane(page, pick)).toHaveAttribute("data-focused", "true");
@@ -79,6 +81,7 @@ test("⌘D right and ⌘⇧D down: four TERMINALS sessions in a nested split, no
   await openApp(page);
   const k = await keys(page);
   const [a, b, e] = await sessions(page, ["/w/a", "/w/b", "/w/e"]);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   // ⌘D: a new Shell right of a, in a's folder, at once
   const n = await splitNew(page, a, k.right);
@@ -321,6 +324,7 @@ test("rows in a split carry a glyph (the focused one marked, a split out of view
   await expect(page.getByTestId(`session-${a}`)).toHaveAttribute("data-split", "focused");
   await expect.poll(() => focusedTerm(page)).toBe(a);
   // a session alone has no map; the split's rows keep their glyph, marked as a split not in view, and c has none
+  await openCode(page);
   await page.getByTestId(`session-${c}`).locator(".ss-open").click();
   await expect(page.getByTestId("split-map")).toHaveCount(0);
   await expect(page.getByTestId(`session-${a}`).getByTestId("term-split-glyph")).toBeVisible();
@@ -415,6 +419,7 @@ test("a held ⌘W closes one terminal, not one after another and then the window
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __manutWindowCloses?: number }).__manutWindowCloses ?? 0)).toBe(0);
   // a new press closes the next one
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await textarea(page, a).focus();
   // a person's next press comes later than the few ms by which the menu can hear a press before the page does

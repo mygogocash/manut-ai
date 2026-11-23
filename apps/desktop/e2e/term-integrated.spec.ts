@@ -10,6 +10,7 @@
 //      is the most visible one.
 // Chromium (Playwright's headless shell); nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 import { feed, mock, modKey, newTerminal, openApp, pointAt } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -30,6 +31,7 @@ const MESSAGE = 64 * 1024;
 const FLOW_HIGH = 2 * MIB;
 
 const show = async (page: Page, id: string) => {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 };
@@ -150,6 +152,7 @@ test.describe("the renderer, from Settings", () => {
   const inUse = (page: Page) => page.evaluate(async () => (await import("/src/sessions/term/engine.ts" as string)).rendererInUse() as "gpu" | "standard" | null);
   const canvases = (page: Page) => page.locator('[data-testid="terminal"] .xterm canvas').count();
   const back = async (page: Page) => {
+    await openCode(page);
     await page.locator("[data-testid=session-list] .ss-row .ss-open").first().click();
     await expect(page.getByTestId("terminal")).toBeVisible();
   };

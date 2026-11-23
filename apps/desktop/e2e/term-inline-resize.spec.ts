@@ -120,6 +120,7 @@ async function openTerminal(page: Page): Promise<string> {
 }
 
 const showSession = async (page: Page, id: string) => {
+  await openCode(page);
   await page.getByTestId(`session-${id}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", id);
 };

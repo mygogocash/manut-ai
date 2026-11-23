@@ -2,6 +2,7 @@
 // sessions.ts moveRow): a line shows where, letting go puts it there, and the order is what comes back after a
 // restart. A row of another folder takes no drop; a press that does not move stays a click.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode, startDone } from "./start";
 import { mock, openApp, usePlatform } from "./term-find-helpers";
 
 type W = { __manutSessions: { startTerminal(a: string, c: string): string; getState(): { list: { id: string; cwd: string }[] } } };
@@ -16,7 +17,8 @@ async function openKept(page: Page) {
     }
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 test.beforeEach(async () => {
@@ -75,6 +77,7 @@ test("a row of another folder takes no drop, and a press that does not move open
   const b = await start(page, "/w/api");
   await dragRow(page, a, b, "upper", { line: false });
   expect(await order(page, "/w/web")).toEqual([a]);
+  await openCode(page);
   await page.getByTestId(`session-${a}`).locator(".ss-open").click();
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
 });

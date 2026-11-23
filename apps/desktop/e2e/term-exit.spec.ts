@@ -16,7 +16,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { S, webkit2Set } from "./ime-helpers";
-import { chatOpen, openCode } from "./start";
+import { chatOpen, openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -54,7 +54,8 @@ async function open(page: Page) {
     w.__manutMockAgents = ["claude", "codex", "grok", "opencode", "omh", "pi"];
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // no snapshot on a first load: the app starts on Home (a reload comes back to what it saved)
+  await startDone(page);
 }
 
 const list = (page: Page) => page.evaluate(() => (window as any).__manutSessions.getState().list as { id: string; agent: string; status: string; error?: string }[]);
