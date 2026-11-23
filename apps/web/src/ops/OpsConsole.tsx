@@ -43,10 +43,14 @@ export function OpsConsole() {
     document.title = "Pilot console";
   }, []);
 
+  // Lands on the first shop when none (or a gone one) is chosen. The check runs against the choice at the moment
+  // the update applies, not the one this render saw: a click on a shop that arrives between the list's render and
+  // this effect must win, and with the render's own value the effect put the first shop back over the click.
   useEffect(() => {
     const first = shopList?.[0];
-    if (first && !shopList?.some((s) => s.tenant === tenant)) setTenant(first.tenant);
-  }, [shopList, tenant]);
+    if (!first) return;
+    setTenant((current) => (shopList.some((s) => s.tenant === current) ? current : first.tenant));
+  }, [shopList]);
 
   // Owners answer from their phones, so the lists refresh themselves while the console is open.
   useEffect(() => {
