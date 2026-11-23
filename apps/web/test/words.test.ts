@@ -538,6 +538,8 @@ describe("the People page's words", () => {
   it("says that an invite's link is sent by hand, and what an invite can and cannot do", () => {
     expect(peopleWords.sendYourself).toBe("Send this link yourself; Manut AI does not send it.");
     expect(peopleWords.inviteReady("Beam")).toBe("The invite for Beam is ready.");
+    expect(peopleWords.copyInviteOf("Beam")).toBe("for Beam's invite");
+    expect(peopleWords.copyNewInvite).toBe("for the new invite");
     expect(peopleWords.inviteCan("Beam", "Fon")).toBe(
       "Beam can approve messages and replies to customers. Money and public posts stay with Fon.");
     expect(peopleWords.inviteCan("", "Fon")).toBe(

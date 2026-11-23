@@ -252,7 +252,7 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
                 {!one.inviteUrl && <span className="mut" style={quiet}>{W.noLink}</span>}
               </span>
               <span className="tag">{W.invitedTag}</span>
-              {one.inviteUrl && <CopyButton text={one.inviteUrl} label={W.copyLink} what={`for ${one.name}'s invite`} />}
+              {one.inviteUrl && <CopyButton text={one.inviteUrl} label={W.copyLink} what={W.copyInviteOf(one.name)} />}
               <button type="button" className="lk" style={{ opacity: locked ? 0.5 : undefined }} disabled={locked}
                 aria-busy={busy === `invite:${one.id}` ? true : undefined} onClick={() => void revoke(one)}>
                 {W.cancelInvite}
@@ -547,7 +547,7 @@ function CreatedInviteBox({ created, onDone }: { created: { name: string; url: s
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           <input id="people-link" className="input" type="text" readOnly value={created.url} spellCheck={false}
             onFocus={(event) => event.currentTarget.select()} style={{ flex: "1 1 280px", width: "auto" }} />
-          <CopyButton text={created.url} label={W.copyLink} what="for the new invite" />
+          <CopyButton text={created.url} label={W.copyLink} what={W.copyNewInvite} />
         </div>
       </div>
       <p className="mut" style={{ margin: 0 }}>{W.sendYourself}</p>

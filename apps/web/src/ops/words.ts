@@ -812,6 +812,9 @@ export const peopleWords = {
   remove: "Remove",
   cancelInvite: "Cancel invite",
   copyLink: "Copy link",
+  /// What a copy button says it copies, after "Copy link": a waiting invite's, or the one just made.
+  copyInviteOf: (name: string) => `for ${name}'s invite`,
+  copyNewInvite: "for the new invite",
 
   // Removing a helper asks once more, in the board's own words
   removeTitle: (name: string) => `Remove ${name}?`,
