@@ -51,8 +51,8 @@ export async function tenantCall(
 }
 
 /// Assembles a tenant's task documents with their histories, connection
-/// metadata, schedules, consent, inbound attention items, pilot records, model
-/// meter, audit log, memory, people and deletion tombstone. Each task answers with its document, event
+/// metadata, site sign-ins and outposts (no secret), schedules, consent, inbound attention items, pilot records,
+/// model meter, audit log, memory, people and deletion tombstone. Each task answers with its document, event
 /// log, action proposals and attempts, so the export no longer leaves the
 /// history behind (the old "task record only" gap is closed below).
 ///
@@ -89,6 +89,14 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
   );
   if (!credResp.ok) failed.push("connections");
   const connections = (credResp.ok ? await credResp.json() : {}) as { connections?: unknown[] };
+  // The vault's site sign-ins and the outposts that type them (sign-in-vault.ts), as the operator lists them: never a
+  // password, a credential or its digest.
+  const signInsResp = await credStub(env, tenant).fetch(new Request("https://cred/sign-ins", { headers }));
+  if (!signInsResp.ok) failed.push("signIns");
+  const signIns = (signInsResp.ok ? await signInsResp.json() : {}) as { signIns?: unknown[] };
+  const outpostsResp = await credStub(env, tenant).fetch(new Request("https://cred/outposts", { headers }));
+  if (!outpostsResp.ok) failed.push("outposts");
+  const outposts = (outpostsResp.ok ? await outpostsResp.json() : {}) as { outposts?: unknown[] };
   const consentResp = await tenantCall(env, tenant, `/consent?${query}`);
   if (!consentResp.ok) failed.push("consent");
   const consent: unknown = consentResp.ok ? await consentResp.json() : null;
@@ -139,6 +147,8 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
     exportedAt: new Date().toISOString(),
     tasks,
     connections: connections.connections ?? [],
+    signIns: signIns.signIns ?? [],
+    outposts: outposts.outposts ?? [],
     schedules: schedules.schedules ?? [],
     consent,
     attention: attention.items ?? [],

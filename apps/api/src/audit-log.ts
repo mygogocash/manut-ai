@@ -68,6 +68,15 @@ export const AUDIT_ACTIONS = [
   "away.set",
   "away.cleared",
   "request.passed_on",
+  // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
+  // sign-in or the outpost by its id, never an account, a password or a credential.
+  "signin.created",
+  "signin.password_replaced",
+  "signin.removed",
+  "signin.broken",
+  "signin.requested",
+  "signin.redeemed",
+  "outpost.registered",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -101,6 +110,9 @@ export const AUDIT_SUBJECT_KEYS = [
   "factId",
   "inviteId",
   "helperId",
+  "signInId",
+  "outpostId",
+  "grantId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 
@@ -110,12 +122,14 @@ export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], s
 /// - the shop's owner, through a signed link (no id) or a signed-in surface (its account or device id);
 /// - a helper the owner trusts with conversations, by account or device id;
 /// - a worker, by the attempt it was given;
+/// - an outpost, by its id, for what it did with its own credential (browser-control.ts);
 /// - the system: the control plane or the broker acting on its own.
 export type AuditActor =
   | { kind: "operator"; email: string | null }
   | { kind: "owner"; id?: string }
   | { kind: "helper"; id: string }
   | { kind: "worker"; attemptId: string }
+  | { kind: "outpost"; id: string }
   | { kind: "system" };
 
 export type AuditEntry = {
@@ -186,6 +200,8 @@ export function isAuditActor(value: unknown): value is AuditActor {
       return hasOnly(value, ["kind", "id"]) && typeof value.id === "string" && ID.test(value.id);
     case "worker":
       return hasOnly(value, ["kind", "attemptId"]) && typeof value.attemptId === "string" && ID.test(value.attemptId);
+    case "outpost":
+      return hasOnly(value, ["kind", "id"]) && typeof value.id === "string" && ID.test(value.id);
     case "system":
       return hasOnly(value, ["kind"]);
     default:

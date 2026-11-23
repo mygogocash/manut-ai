@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";
 
 type CredEnv = {
   CRED_KEY?: string;
@@ -64,6 +65,8 @@ export class CredObject extends DurableObject {
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // The shop's site sign-ins for browser control (sign-in-vault.ts), sealed with the same keys as connections.
+    if (isSignInVaultPath(url.pathname)) return signInVaultRoute(this.ctx.storage, this.credEnv, request, url);
     if (request.method === "POST" && url.pathname === "/connections") {
       return this.store(request);
     }
@@ -323,13 +326,15 @@ export class CredObject extends DurableObject {
     if (typeof body.tenant !== "string" || !body.tenant) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
-    // The vault is per-tenant, so wiping is deleting every connection record.
+    // The vault is per-tenant, so wiping is deleting every connection record, and every site sign-in, outpost and
+    // sign-in grant (sign-in-vault.ts).
     const keys: string[] = [];
     for (const [key] of await this.ctx.storage.list({ prefix: "conn:" })) {
       keys.push(key);
     }
     await this.ctx.storage.delete(keys);
-    return Response.json({ connectionsWiped: keys.length });
+    const signIns = await wipeSignInVault(this.ctx.storage);
+    return Response.json({ connectionsWiped: keys.length, ...signIns });
   }
 
   private public(record: ConnectionRec): object {

@@ -41,6 +41,8 @@ function defaults(): Record<string, () => Response> {
       Response.json({ task: { id: "task-b" }, events: [], actions: [], attempts: [] }),
     "TASK DELETE /wipe": () => Response.json({ wiped: true }),
     "CRED GET /connections": () => Response.json({ connections: [{ id: "conn-1", provider: "linear" }] }),
+    "CRED GET /sign-ins": () => Response.json({ signIns: [{ id: "signin-1", site: "Shopee Seller Centre" }] }),
+    "CRED GET /outposts": () => Response.json({ outposts: [{ id: "outpost-1", kind: "this_mac" }] }),
     "CRED POST /tenant-wipe": () => Response.json({ connectionsWiped: 1 }),
     "SCHEDULES GET /schedules": () => Response.json({ schedules: [{ id: "sched-1" }] }),
     "SCHEDULES POST /tenant-wipe": () => Response.json({ schedulesWiped: 1, occurrencesWiped: 3 }),
@@ -158,6 +160,8 @@ describe("tenant export fan-out", () => {
       tenant?: string;
       tasks?: { task?: { id?: string }; events?: unknown[] }[];
       connections?: unknown[];
+      signIns?: unknown[];
+      outposts?: unknown[];
       schedules?: unknown[];
       consent?: { cloudWork?: boolean };
       attention?: unknown[];
@@ -170,6 +174,9 @@ describe("tenant export fan-out", () => {
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
     expect((body.tasks ?? []).map((entry) => entry.events)).toEqual([[{ seq: 1 }], []]);
     expect(body.connections).toHaveLength(1);
+    // The vault's site sign-ins and outposts, as the operator lists them.
+    expect(body.signIns).toEqual([{ id: "signin-1", site: "Shopee Seller Centre" }]);
+    expect(body.outposts).toEqual([{ id: "outpost-1", kind: "this_mac" }]);
     expect(body.schedules).toHaveLength(1);
     expect(body.consent?.cloudWork).toBe(true);
     expect(body.attention).toHaveLength(1);
@@ -186,6 +193,8 @@ describe("tenant export fan-out", () => {
 
   for (const [route, part] of [
     ["CRED GET /connections", "connections"],
+    ["CRED GET /sign-ins", "signIns"],
+    ["CRED GET /outposts", "outposts"],
     ["SCHEDULES GET /schedules", "schedules"],
     ["TENANT GET /consent", "consent"],
     ["TENANT GET /tombstone", "tombstone"],

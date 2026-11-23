@@ -4,6 +4,7 @@ import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
+import { outpostRoute, vaultAdminRoute } from "./browser-control";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
@@ -211,6 +212,11 @@ const ADMIN_METHODS = new Set([
   // sent), revoke an invite, remove a helper, and set or clear cover. The tenant travels in the query or the body.
   "GET /v1/admin/people", "POST /v1/admin/people/invites", "POST /v1/admin/people/invites/revoke",
   "POST /v1/admin/people/remove", "POST /v1/admin/people/away", "POST /v1/admin/people/away/clear",
+  // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
+  // add one, replace a password, remove one; register an outpost, list them. The tenant and the ids travel in the
+  // query or the body.
+  "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
+  "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -640,6 +646,12 @@ export default {
     // joining and opening the shop on another device, which need a signed-in session.
     const people = await peopleRoute(request, url, env, ctx);
     if (people) return people;
+    // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
+    // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
+    const vault = await vaultAdminRoute(request, url, env, ctx);
+    if (vault) return vault;
+    const outpost = await outpostRoute(request, url, env, () => featureFlags(env));
+    if (outpost) return outpost;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
