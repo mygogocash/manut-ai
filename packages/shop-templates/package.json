@@ -1,0 +1,15 @@
+{
+  "name": "@manut/shop-templates",
+  "private": true,
+  "type": "module",
+  "description": "Starting setups (team, routines, first-week questions) for three kinds of online seller.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
