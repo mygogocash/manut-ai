@@ -63,35 +63,41 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
     the provider bills (`docs/model-gateway.md`). Nothing calls a model until the owner adds a key.
   - Phase 3's desktop opens on a three-step first run on a new computer (Welcome, Your shop, One channel, Your
     team).
-- Dev was redeployed on 23 Nov at 17:10 with all of the above, and smoke-tested.
+- Dev was redeployed on 23 Nov at 17:10, and again at 21:35 with the audit log, memory, Model spend, approvals
+  through approval-core and the workers; both times smoke-tested (pages, Access on every operator route, the
+  session approvals route refusing without a session, no-store and frame headers).
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Three helpers are running, each on its own branch from `pilot/week-1`: the Playwright revival (draft pull
-   request #5 into `pilot/week-1`, merge it when CI's Playwright job passes), the Phase 2 job flow with an audit
-   log (`feat/job-flow-audit-log`) and the Phase 3 runtime adapter (`feat/desktop-runtime-adapter`, read-only
-   first). Review each, merge it after the full root gate, add its decisions to `docs/decisions.md` and mark the
-   tracker. LINE work is parked by the owner: `feat/owner-line-cards` (51b3a85) holds owner cards and the morning
-   brief behind the `ownerLine` flag (API, console, contract), not yet reviewed or merged; two unfinished test
-   edits are uncommitted in the checkout `~/.t3/worktrees/manut-ai/t3-fcdf6354-43bf14b50ea88b80`.
-2. Review the night build's draft pull requests (`cloud/<task>`): slip-rules now, then promptpay-read,
-   approval-wire, shop-memory, books and routine-rules. Merge the good ones into `pilot/week-1`, never into
-   `main`.
-3. The next wave, from the tracker:
-   - Phase 2: memory in the API and the console, on `@manut/shop-memory`.
-   - Phase 3: answering approvals from the desktop through the approvals wire format, then the offline cache.
-   - Phase 4: Nam, Pim and Ton as workers on the job flow with the stand-in model, drafts only, every send
-     through an approval; FlowAccount and Google Sheets connectors behind interfaces, with no live calls.
-   - Phase 5: the routines page (on `@manut/routine-rules`) and the shop templates. Parked by the owner for
-     later: payments (the owner's PromptPay billing page) and LINE (the LINE client, owner cards).
-   - Phase 6: several shops in one view, and more roles.
-   - Desktop: a home for the old member-row actions (new thread, pin, restart); richer Team, Needs you and
-     History pages.
+1. Four helpers are running (23 Nov, evening), each on its own branch from `pilot/week-1`; review each, merge it
+   after the full root gate, add its decisions to `docs/decisions.md` and mark the tracker:
+   - the desktop's Customize page, memory and routines from the canvas's Brain board
+     (`feat/desktop-customize-brain-2`, Sonnet);
+   - the Playwright revival (`test/desktop-e2e-revival-2`, Haiku), whose new draft pull request replaces #5:
+     merge it when CI's Playwright job passes;
+   - the owner's helpers and deciding approvals from a session by role (`feat/people-helpers`, Opus);
+   - browser control: vault sign-ins the AI never sees, and outposts (`feat/browser-control-vault`, Opus).
+   Three earlier runs stopped at a usage limit and were replaced by these; if one of the old branches
+   (`feat/desktop-customize-brain`, `test/fix-desktop-e2e-navigation`, `feat/shop-helpers-api`) moves again, an
+   old run came back on its own: stop it and keep the new branch.
+2. The night build (Fronk's routine) takes `notify-rules` tonight; review its draft pull request and merge it into
+   `pilot/week-1`, never into `main`. Its queue is then empty: add pure packages to `docs/plan.md` as the phases
+   need them.
+3. Next, from the tracker:
+   - Phase 5: applying a shop template when a shop is created (`@manut/shop-templates`), the desktop's routines
+     running on the schedule object, and the outpost's browser in the desktop shell after the vault slice.
+   - Phase 6: several shops in one view (design it on the helpers' identity model first).
+   - Phase 3: the desktop answering approvals through `/v1/approvals` and the session decide route, once real
+     sign-in exists.
+   - Phase 4: a console view of the workers' drafts and handovers; a `handoff` kind in `@manut/agent-events`.
+   - Desktop: a home for the old member-row actions (new thread, pin, restart).
+   Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
+   merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
    audit row. It waits for a test LINE Official Account. Turn on `officeInbound`, `officeCloud` and
-   `officeExternalWrites` for dev only when that exists.
+   `officeExternalWrites` for dev only when that exists. Redeploy dev after the next merges.
 5. Deletion follow-up: a shop whose wipe stopped after its registry row went leaves the console's list; only
    the owner's page then shows it as deleting.
 6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
