@@ -81,7 +81,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 4. Console: the People page | | Sonnet |
 | done | 7. Several shops in one view: the design and the API side (`docs/several-shops.md`); the desktop switcher is next | | Opus |
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
-| running | 11. Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Sonnet |
+| done | 11. Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job): all 31 fixed or deleted, and six shards run every spec | | Sonnet |
 | done | 9. Desktop leftovers (the Team page's member menu and lines, Needs you, History's chips) and three app bugs the revival found (the undo toast, the folder reveal, the usage caret) | | Sonnet |
 | running | 6. macOS notifications on `@manut/notify-rules` | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
