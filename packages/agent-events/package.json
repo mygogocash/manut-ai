@@ -1,0 +1,15 @@
+{
+  "name": "@manut/agent-events",
+  "private": true,
+  "type": "module",
+  "description": "The one event contract every agent reports through: the event union, its value types, tolerant decoders and a pure reducer that folds events into a timeline.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

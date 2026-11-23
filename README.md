@@ -15,6 +15,7 @@ spec is the Manut AI design canvas.
 | `apps/web` | The owner's approval page (`/approve/:token`) and the operator console (`/ops`) | The design canvas's classes and states |
 | `apps/desktop` | The desktop app, from week 2 | A fork of Oh My Hermes (`apps/omher`) |
 | `packages/approval-core` | Settle-once approval rules shared by every client | GoSpark's decision binding and Orca's settle-once journal |
+| `packages/agent-events` | The one event contract every agent reports through, with tolerant decoders and a timeline reducer | GoSpark's provider events (`ProviderSession.swift`) and their tests |
 | `packages/promptpay` | PromptPay QR payloads for manual payments | dtinth/promptpay-qr's format and test vectors |
 | `packages/ui-kit` | Design tokens and component classes | The design canvas (`app.css`, `tokens.json`) |
 | `docs/pilot-api.md` | The contract between `apps/api` and `apps/web` | |

@@ -29,8 +29,8 @@ Week 1, the pilot slice:
 Week 2, brought forward:
 
 - [ ] `apps/desktop`: fork of Oh My Hermes with the Hermes bridge removed (in progress on the Mac)
-- [ ] `packages/agent-events`: the agent event contract ported from GoSpark (in progress on the Mac)
-- [ ] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta (in progress on the Mac)
+- [x] `packages/agent-events`: the agent event contract ported from GoSpark (213 tests)
+- [x] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta
 - [ ] Dry run with two test shops (needs a dev deploy and the owner's Cloudflare token)
 
 ## Queue for cloud routines
