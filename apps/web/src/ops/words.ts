@@ -443,6 +443,12 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "signin.requested": () => "asked to sign in to a site",
   "signin.broken": () => "reported that a site refused a saved password",
   "signin.redeemed": () => "asked for a sign-in to type into a site",
+  "outpost.removed": () => "removed an outpost",
+  "outpost.credential_rotated": () => "gave an outpost a new credential",
+  // The step channel: a worker's browser steps, by id only, never a page or what it read.
+  "browser_step.queued": () => "asked an outpost to run a browser step",
+  "browser_step.fetched": () => "picked up a browser step",
+  "browser_step.reported": () => "reported how a browser step went",
 };
 
 /// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290." Given the people list's names, a helper
@@ -517,7 +523,7 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   outpost_not_found: "There was no such outpost.",
   outpost_asleep: "The outpost was asleep.",
   grant_not_found: "The shop had no such grant.",
-  wrong_outpost: "The grant was for another outpost.",
+  wrong_outpost: "It was for another outpost.",
   grant_used: "The grant had already been used.",
   grant_expired: "The grant had run out of its 60 seconds.",
   feature_disabled: "That kind of work was switched off.",
@@ -526,6 +532,26 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   vault_not_configured: "The vault has no key set.",
   unseal_failed: "The vault could not open the saved password.",
   task_unavailable: "The task could not be read.",
+  // Why a browser step was refused, and how an outpost may say one failed (docs/browser-control.md, the step channel).
+  step_kind_not_allowed: "Only steps that read are allowed so far.",
+  invalid_url: "The page's address was not a plain https address.",
+  origin_not_allowed: "The page was not on a site that member may use.",
+  invalid_selector: "The part of the page to read was not written as one.",
+  too_many_steps: "The outpost already had 20 steps waiting.",
+  grant_queued: "The grant was already in another step.",
+  step_not_found: "There was no such step.",
+  step_not_fetched: "The outpost had not been handed that step.",
+  step_reported: "The step had already been reported.",
+  step_expired: "The step had run out of its two minutes.",
+  invalid_report: "The report did not fit the step.",
+  outpost_removed: "The outpost had been removed.",
+  text_withheld: "What it read held a saved password, so it was kept nowhere.",
+  page_unavailable: "The page did not load.",
+  selector_not_found: "Nothing on the page matched what it was to read.",
+  sign_in_refused: "The site refused the saved password.",
+  grant_refused: "There was no sign-in to type.",
+  timed_out: "The step took too long.",
+  browser_error: "The browser stopped part way.",
 };
 
 export function auditReasonText(reason: string): string {
@@ -552,6 +578,7 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["helperId", "helper"],
   ["signInId", "sign-in"],
   ["outpostId", "outpost"],
+  ["stepId", "browser step"],
   ["grantId", "grant"],
 ];
 

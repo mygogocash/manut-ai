@@ -7,7 +7,8 @@
 /// - `workerPort` is everything the worker may do, bound to that one attempt. It reports agent events into the task's
 ///   own event log; calls a model only through the gateway, metered against the shop's cap; stops before an external
 ///   write to ask for the exact action; reads how its request settled; asks for a one-time grant for an outpost to
-///   type a site sign-in, or reports one broken (sign-in-vault.ts); and finishes. The port holds the environment and
+///   type a site sign-in, or reports one broken, and queues browser steps for an outpost and reads how they went
+///   (sign-in-vault.ts); and finishes. The port holds the environment and
 ///   the worker holds only the port, so a worker never holds a credential: the port has no method that returns one.
 /// - `decideRequest` is a person's decision on a worker's request, through approval-core in the task object, and on
 ///   approval the broker's one dispatch with the vault's credentials (`dispatchApproved`).
@@ -26,7 +27,16 @@ import { callModel, type ModelGatewayEnv } from "./model-gateway";
 import type { UsageState } from "./model-meter";
 import { bangkokMonth, effectiveCap, floorSatang, gatewaySettings, MILLISATANG_PER_SATANG } from "./model-price";
 import type { ChatRequest, ChatUsage, ModelProvider } from "./model-provider";
-import { issueSignInGrant, reportSignInBroken, type AttemptRef, type SignInGrant } from "./sign-in-vault";
+import {
+  issueSignInGrant,
+  queueBrowserStep,
+  readBrowserStep,
+  reportSignInBroken,
+  type AttemptRef,
+  type BrowserStepView,
+  type NewBrowserStep,
+  type SignInGrant,
+} from "./sign-in-vault";
 import {
   JOB_REQUEST_OPTIONS,
   type ActionProposalJSON,
@@ -110,6 +120,13 @@ export interface WorkerPort {
   signIn(signInId: string, outpostId: string): Promise<PortAnswer<SignInGrant>>;
   /// The site refused a sign-in's saved password: nobody uses it until the owner types a new one.
   signInBroken(signInId: string): Promise<PortAnswer<{ signInId: string; state: "broken" }>>;
+  /// A browser step for one of the shop's online outposts to run in this attempt: open a page, read it, or sign in with
+  /// a grant from `signIn`. Reading only; a step that would submit anything is refused. The step goes only to origins
+  /// of a working sign-in this attempt's member is named on, and lives two minutes at most.
+  browserStep(step: NewBrowserStep): Promise<PortAnswer<BrowserStepView>>;
+  /// How one of this attempt's browser steps stands; once it is done, what a read read. An outcome is here once it is
+  /// in the attempt's events.
+  browserStepOutcome(stepId: string): Promise<PortAnswer<BrowserStepView>>;
 }
 
 /// The provider each operation a worker may ask for writes to. The connection that carries it is the shop's live
@@ -315,9 +332,9 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
     const live = await beat();
     return live.ok ? { ok: true, value: { leaseUntil: live.value.leaseUntil } } : live;
   };
-  /// Where a browser control step happens, after the switches, consent and the heartbeat: the member comes from the
-  /// task object's record of the attempt, never from the worker's word.
-  const signInStep = async (): Promise<PortAnswer<AttemptRef>> => {
+  /// Where a browser control step happens (a grant, a broken sign-in, a browser step), after the switches, consent and
+  /// the heartbeat: the member comes from the task object's record of the attempt, never from the worker's word.
+  const browserControlAt = async (): Promise<PortAnswer<AttemptRef>> => {
     const refused = await gate();
     if (refused) return refused;
     const live = await beat();
@@ -445,13 +462,25 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
     /// The vault issues the grant (sign-in-vault.ts) if the member is named on a working sign-in and the outpost is
     /// online; only that outpost can redeem it, once, within a minute, with its own credential.
     async signIn(signInId, outpostId) {
-      const step = await signInStep();
-      return step.ok ? issueSignInGrant(env, step.value, signInId, outpostId) : step;
+      const at = await browserControlAt();
+      return at.ok ? issueSignInGrant(env, at.value, signInId, outpostId) : at;
     },
 
     async signInBroken(signInId) {
-      const step = await signInStep();
-      return step.ok ? reportSignInBroken(env, step.value, signInId) : step;
+      const at = await browserControlAt();
+      return at.ok ? reportSignInBroken(env, at.value, signInId) : at;
+    },
+
+    /// The vault queues the step (sign-in-vault.ts) for the outpost named, bound to this attempt and its member. Only
+    /// that outpost is handed it, once; what it did comes back into this attempt's events through the control plane.
+    async browserStep(step) {
+      const at = await browserControlAt();
+      return at.ok ? queueBrowserStep(env, at.value, step) : at;
+    },
+
+    async browserStepOutcome(stepId) {
+      const at = await browserControlAt();
+      return at.ok ? readBrowserStep(env, at.value, stepId) : at;
     },
   };
 }

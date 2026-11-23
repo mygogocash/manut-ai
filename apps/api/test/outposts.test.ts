@@ -222,7 +222,7 @@ describe("outposts", () => {
 
     const response = await remove(tenant, outpost.id);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ removed: true, outpostId: outpost.id, grantsRefused: 0 });
+    expect(await response.json()).toEqual({ removed: true, outpostId: outpost.id, stepsRefused: 0, grantsRefused: 0 });
     expect((await list(tenant)).outposts.map((entry) => entry.id)).toEqual([sibling.outpost.id]);
     expect((await heartbeat(tenant, outpost.id, credential)).status).toBe(401);
     expect(await runInDurableObject(vault(tenant), (_instance, state) => state.storage.get(`outpost:${outpost.id}`)))

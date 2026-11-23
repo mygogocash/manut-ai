@@ -728,7 +728,8 @@ describe("the audit log's words for the owner's people and for browser control",
     expect(auditReasonText("outpost_not_found")).toBe("There was no such outpost.");
     expect(auditReasonText("outpost_asleep")).toBe("The outpost was asleep.");
     expect(auditReasonText("grant_not_found")).toBe("The shop had no such grant.");
-    expect(auditReasonText("wrong_outpost")).toBe("The grant was for another outpost.");
+    // A grant's or a browser step's: either way, it was another outpost's.
+    expect(auditReasonText("wrong_outpost")).toBe("It was for another outpost.");
     expect(auditReasonText("grant_used")).toBe("The grant had already been used.");
     expect(auditReasonText("grant_expired")).toBe("The grant had run out of its 60 seconds.");
     expect(auditReasonText("feature_disabled")).toBe("That kind of work was switched off.");
@@ -740,6 +741,36 @@ describe("the audit log's words for the owner's people and for browser control",
     // The reasons that already had words keep them.
     expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
     expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
+  });
+
+  it("says what the step channel and an outpost's removal or new credential did, never by raw name", () => {
+    expect(said({ actor: op, action: "outpost.removed", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test removed an outpost.");
+    expect(said({ actor: op, action: "outpost.credential_rotated", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test gave an outpost a new credential.");
+    expect(said({ actor: worker, action: "browser_step.queued", subject: { stepId: "st1", outpostId: "o1" } }))
+      .toBe("Worker attempt 6f9d1f0e asked an outpost to run a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.fetched", subject: { stepId: "st1", outpostId: "o1" } }))
+      .toBe("Outpost b4c8d1e2 picked up a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: { stepId: "st1", outpostId: "o1" },
+      outcome: "done" })).toBe("Outpost b4c8d1e2 reported how a browser step went.");
+    expect(auditSubjectText({ outpostId: "o1", stepId: "st1", attemptId: "a1", taskId: "t1" }))
+      .toBe("task t1 · attempt a1 · outpost o1 · browser step st1");
+    for (const [reason, words] of [
+      ["step_kind_not_allowed", "Only steps that read are allowed so far."],
+      ["origin_not_allowed", "The page was not on a site that member may use."],
+      ["step_expired", "The step had run out of its two minutes."],
+      ["text_withheld", "What it read held a saved password, so it was kept nowhere."],
+      ["sign_in_refused", "The site refused the saved password."],
+      ["outpost_removed", "The outpost had been removed."],
+    ] as const) {
+      expect(auditReasonText(reason)).toBe(words);
+    }
+    for (const reason of ["invalid_url", "invalid_selector", "too_many_steps", "grant_queued", "step_not_found",
+      "step_not_fetched", "step_reported", "invalid_report", "page_unavailable", "selector_not_found", "grant_refused",
+      "timed_out", "browser_error"]) {
+      expect(auditReasonText(reason), reason).not.toContain(reason);
+    }
   });
 });
 

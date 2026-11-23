@@ -345,7 +345,7 @@ describe("the sign-in step", () => {
     const removed = await adminFetch(`${API}/v1/admin/outposts/remove`, { method: "POST", headers: OPERATOR,
       body: JSON.stringify({ tenant: s.tenant, outpostId: mac.id }) });
     expect(removed.status).toBe(200);
-    expect(await removed.json()).toEqual({ removed: true, outpostId: mac.id, grantsRefused: 1 });
+    expect(await removed.json()).toEqual({ removed: true, outpostId: mac.id, stepsRefused: 0, grantsRefused: 1 });
     // Used up in the same step as the removal, so nothing could ever redeem it.
     const grant = await runInDurableObject(vault(s.tenant), (_instance, state) =>
       state.storage.get<{ usedAt: string | null; openedAt: string | null }>(`signin-grant:${waiting}`));

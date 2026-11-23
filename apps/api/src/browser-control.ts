@@ -4,13 +4,15 @@
 /// - The operator's side of the shop's site sign-ins and outposts, after the admin gate's exact ADMIN_METHODS entries
 ///   (index.ts).
 /// - The outposts' own routes under `/v1/outposts/`, which need the outpost's credential as a bearer token and
-///   nothing else: neither an operator's key nor an owner's session opens them.
+///   nothing else: neither an operator's key nor an owner's session opens them. Besides the heartbeat and the redeem,
+///   the step channel: an outpost asks for the browser steps workers queued for it, and reports how each went, which
+///   lands in the attempt's events.
 ///
 /// Every change is written to the shop's audit log with ids only, after it has happened (`appendAudit`): the record
 /// lives in the vault object and the log in the TenantObject, so the entry is best effort and never holds the change
-/// up. No entry, and no answer here, holds a password.
+/// up. No entry, and no answer here but the redeem's, holds a password.
 
-import { appendAudit, type AuditAction, type AuditSubject } from "./audit-log";
+import { appendAudit, type AuditAction, type AuditOutcome, type AuditSubject } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
@@ -18,11 +20,15 @@ import { workGate, type JobFlags } from "./job-flow";
 import { operatorIdentity } from "./pilot";
 import { base64url } from "./relay";
 import {
+  reportShapeError,
   vaultAnswer,
   vaultCall,
   type GrantBinding,
+  type OutpostStep,
   type OutpostView,
+  type ReportedStep,
   type SignInView,
+  type StepBinding,
   type VaultEnv,
 } from "./sign-in-vault";
 import type { AttemptJSON, TaskDocJSON } from "./task-object";
@@ -80,6 +86,8 @@ export async function vaultAdminRoute(
 const OUTPOST_ROUTES: ReadonlySet<string> = new Set([
   "POST /v1/outposts/heartbeat",
   "POST /v1/outposts/redeem",
+  "POST /v1/outposts/steps",
+  "POST /v1/outposts/steps/report",
 ]);
 
 /// Whether a request is for one of the outposts' own routes.
@@ -94,7 +102,167 @@ export async function outpostRoute(request: Request, url: URL, env: RedeemEnv, f
   const route = `${request.method} ${url.pathname}`;
   if (!OUTPOST_ROUTES.has(route)) return null;
   if (route === "POST /v1/outposts/heartbeat") return outpostHeartbeat(request, env);
-  return redeemGrant(request, env, flags);
+  if (route === "POST /v1/outposts/redeem") return redeemGrant(request, env, flags);
+  if (route === "POST /v1/outposts/steps") return fetchSteps(request, env, flags);
+  return reportStep(request, env, flags);
+}
+
+/// An answer that names steps, which no cache on the way may keep: they say where the shop's browser goes.
+function stepsAnswer(steps: OutpostStep[]): Response {
+  return Response.json({ steps }, { headers: { "cache-control": "no-store" } });
+}
+
+/// `POST /v1/outposts/steps` with `{ tenant, outpostId }`: the outpost asks for the browser steps waiting for it. In
+/// order:
+///
+/// 1. The vault checks the outpost's credential and lists its steps waiting, oldest first, five at most. A request
+///    without the credential is refused 401 and writes nothing. With none waiting the answer is an empty list, and
+///    nothing else is read or written, so an outpost asking every few seconds costs little.
+/// 2. The switches and the owner's consent, as at every step of the job flow. Refused, every waiting step is refused
+///    with the same code, for good: the outpost never runs work the owner stopped.
+/// 3. Each step's attempt still runs, read from the task object without extending its lease. A step whose attempt
+///    ended is refused (`attempt_ended`); one whose task cannot be read is left waiting for the next ask.
+/// 4. The vault hands the rest out, once each, with the origins its browser may be on for each, read from the
+///    sign-ins again; one that may no longer run is refused there.
+///
+/// Each step handed out or refused writes `browser_step.fetched`, by the outpost, with ids only.
+async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
+  const read = await outpostRequest(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields, credentialHash } = read;
+  const proof = { outpostId: fields.outpostId, credentialHash };
+  const pending = await askVault(env, tenant, "/browser-steps/pending", proof);
+  if (!pending) return json({ error: "vault_unavailable" }, 503);
+  if (pending.status === 401) return json({ error: "unauthorized" }, 401);
+  if (pending.status !== 200 || !Array.isArray(pending.body.steps)) return json({ error: "vault_unavailable" }, 503);
+  const waiting = pending.body.steps as { stepId: string; taskId: string; attemptId: string }[];
+  if (waiting.length === 0) return stepsAnswer([]);
+
+  const gated = await workGate(env, tenant, flags, false);
+  const take: string[] = [];
+  const refuse: { stepId: string; code: string }[] = [];
+  if (gated) {
+    for (const step of waiting) refuse.push({ stepId: step.stepId, code: gated.error });
+  } else {
+    const runs = new Map<string, boolean | undefined>();
+    for (const step of waiting) {
+      const attempt = `${step.taskId} ${step.attemptId}`;
+      if (!runs.has(attempt)) runs.set(attempt, await attemptRuns(env, tenant, step.taskId, step.attemptId));
+      const running = runs.get(attempt);
+      if (running === true) take.push(step.stepId);
+      else if (running === false) refuse.push({ stepId: step.stepId, code: "attempt_ended" });
+    }
+  }
+  const handed = await askVault(env, tenant, "/browser-steps/take", { ...proof, take, refuse });
+  if (!handed) return json({ error: "vault_unavailable" }, 503);
+  if (handed.status === 401) return json({ error: "unauthorized" }, 401);
+  if (handed.status !== 200 || !Array.isArray(handed.body.taken) || !Array.isArray(handed.body.refused)) {
+    return json({ error: "vault_unavailable" }, 503);
+  }
+  // Past the vault's check the outpost is known, so its id is one the vault minted.
+  const outpostId = String(fields.outpostId);
+  const actor = { kind: "outpost", id: outpostId } as const;
+  const taken = handed.body.taken as { step: OutpostStep; binding: StepBinding }[];
+  for (const { binding } of taken) {
+    await appendAudit(env, tenant, { actor, action: "browser_step.fetched", subject: { ...binding, outpostId },
+      outcome: "ok" });
+  }
+  for (const { code, binding } of handed.body.refused as { code: string; binding: StepBinding }[]) {
+    await appendAudit(env, tenant, { actor, action: "browser_step.fetched", subject: { ...binding, outpostId },
+      outcome: "refused", reason: code });
+  }
+  if (gated) return json({ error: gated.error, ...(gated.feature ? { feature: gated.feature } : {}) }, gated.status);
+  return stepsAnswer(taken.map((entry) => entry.step));
+}
+
+/// `POST /v1/outposts/steps/report` with `{ tenant, outpostId, stepId, outcome, code?, text? }`: how a step the outpost
+/// was handed went, once. In order:
+///
+/// 1. The report's shape: `done`, or `failed` with a code from the fixed list; a read's text at most 4 KB as JSON. One
+///    that fails this is refused 400 before anything is read, and uses nothing up, so the outpost can cut its text and
+///    report again.
+/// 2. The vault checks the outpost's credential, that the step is its own, was handed out, is not yet reported and is
+///    on time, and holds the report: from here a second report is refused, whatever comes next. A read whose text holds
+///    a sign-in's password is held as failed, `text_withheld`, with no text.
+/// 3. The switches and the owner's consent.
+/// 4. The outcome lands in the attempt's events through the task object's control path, only while the attempt still
+///    runs and without extending its lease, so an outpost can never keep a silent worker's attempt alive. Then the
+///    vault lets it stand, and the worker can read it.
+///
+/// A refusal at 3 or 4 takes the report back: the step reads refused, with that code, and what it read is dropped.
+/// Every answer after the vault's credential check writes `browser_step.reported`, by the outpost, with ids only.
+async function reportStep(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
+  const read = await outpostRequest(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields, credentialHash } = read;
+  const shape = reportShapeError(fields);
+  if (shape) return json({ error: shape }, 400);
+  const reported = await askVault(env, tenant, "/browser-steps/report", { stepId: fields.stepId,
+    outpostId: fields.outpostId, credentialHash, outcome: fields.outcome, code: fields.code, text: fields.text });
+  if (!reported) return json({ error: "vault_unavailable" }, 503);
+  if (reported.status === 401) return json({ error: "unauthorized" }, 401);
+  const outpostId = String(fields.outpostId);
+  const binding = isRecord(reported.body.binding) ? reported.body.binding as StepBinding : null;
+  const subject: AuditSubject = { ...binding, outpostId };
+  const record = (outcome: AuditOutcome, reason?: string) => appendAudit(env, tenant, {
+    actor: { kind: "outpost", id: outpostId }, action: "browser_step.reported", subject, outcome,
+    ...(reason !== undefined ? { reason } : {}) });
+  const step = isRecord(reported.body.step) ? reported.body.step as ReportedStep : null;
+  if (reported.status !== 200 || !binding || !step) {
+    const error = typeof reported.body.error === "string" ? reported.body.error : "vault_unavailable";
+    await record("refused", error);
+    return json({ error }, reported.status === 200 ? 503 : reported.status);
+  }
+  const takeBack = async (status: number, error: string, extra: Record<string, unknown> = {}) => {
+    await askVault(env, tenant, "/browser-steps/settle", { stepId: step.stepId, code: error });
+    await record("refused", error);
+    return json({ error, ...extra }, status);
+  };
+  const gated = await workGate(env, tenant, flags, false);
+  if (gated) return takeBack(gated.status, gated.error, gated.feature ? { feature: gated.feature } : {});
+  const landed = await landOutcome(env, tenant, binding, step);
+  if (landed !== "landed") return takeBack(landed === "attempt_ended" ? 409 : 503, landed);
+  const settled = await askVault(env, tenant, "/browser-steps/settle", { stepId: step.stepId });
+  if (!settled || settled.status !== 200) {
+    await record("refused", "vault_unavailable");
+    return json({ error: "vault_unavailable" }, 503);
+  }
+  await record(step.outcome, step.outcome === "failed" && step.code !== null ? step.code : undefined);
+  return json({ step: { stepId: step.stepId, state: step.outcome } });
+}
+
+/// Lands a reported step's outcome in the attempt's events, through the task object's control path, as a tool call
+/// in the agent event contract: `toolStarted` as it was queued, then `toolUpdated` with how it ended (a read's text, or
+/// a failure's code). Every reader of the timeline shows it with no new kind of event. Answers whether it landed, the
+/// attempt no longer runs, or the task could not be written.
+async function landOutcome(env: RedeemEnv, tenant: string, binding: StepBinding, step: ReportedStep):
+  Promise<"landed" | "attempt_ended" | "task_unavailable"> {
+  const events = [
+    { type: "toolStarted", id: step.stepId, call: { kind: "web", title: stepTitle(step), output: "",
+      status: "running", edits: [], startedAt: step.queuedAt } },
+    { type: "toolUpdated", id: step.stepId, update: { status: step.outcome === "done" ? "completed" : "failed",
+      output: step.text ?? step.code ?? "" } },
+  ];
+  try {
+    const response = await env.TASK.get(env.TASK.idFromName(binding.taskId)).fetch(new Request(
+      `https://task/attempts/${encodeURIComponent(binding.attemptId)}/outpost-events`, { method: "POST",
+        headers: { "content-type": "application/json", "x-tenant": tenant, "x-control": "1" },
+        body: JSON.stringify({ events }) }));
+    const answer = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    if (response.ok) return "landed";
+    const ended = response.status === 404 || (response.status === 409 &&
+      ["stale_attempt", "lease_expired", "task_settled"].includes(String(answer?.error)));
+    return ended ? "attempt_ended" : "task_unavailable";
+  } catch {
+    return "task_unavailable";
+  }
+}
+
+/// What the attempt's events call a step, in plain words, from what the worker asked for: never anything it read.
+function stepTitle(step: ReportedStep): string {
+  if (step.kind === "open") return `Open ${step.url ?? "a page"}`;
+  if (step.kind === "read") return step.selector !== null ? `Read ${step.selector}` : "Read the page";
+  return `Sign in to ${step.site ?? "a site"}`;
 }
 
 /// `POST /v1/outposts/redeem` with `{ tenant, outpostId, grantId }`: the outpost is about to type a sign-in for a

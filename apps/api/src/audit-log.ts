@@ -91,6 +91,11 @@ export const AUDIT_ACTIONS = [
   "outpost.registered",
   "outpost.removed",
   "outpost.credential_rotated",
+  // The step channel: a worker's browser step queued for an outpost, handed out to it, and how it went. Each names the
+  // step and what it is bound to by id, never its page, what it read, or anything typed.
+  "browser_step.queued",
+  "browser_step.fetched",
+  "browser_step.reported",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -132,6 +137,7 @@ export const AUDIT_SUBJECT_KEYS = [
   "helperId",
   "signInId",
   "outpostId",
+  "stepId",
   "grantId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;

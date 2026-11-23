@@ -18,6 +18,8 @@ const routes = [
   // is even looked at, and all of them share one bucket per address.
   ["/v1/outposts/heartbeat", "POST", "OUTPOST_LIMITER"],
   ["/v1/outposts/redeem", "POST", "OUTPOST_LIMITER"],
+  ["/v1/outposts/steps", "POST", "OUTPOST_LIMITER"],
+  ["/v1/outposts/steps/report", "POST", "OUTPOST_LIMITER"],
 ] as const;
 
 function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
