@@ -87,15 +87,15 @@ describe("terminal history", () => {
   });
 
   it("each save carries when history was last turned on, so the shell can refuse one from before a clear", async () => {
-    const { flushHistory, trackHistory, watchHistorySetting } = await import("./history");
+    const { flushHistory, historyReady, trackHistory, watchHistorySetting } = await import("./history");
     const sent: number[] = [];
     const h: HistoryHost = { ...host(null), historySave: async (_k, _t, since) => void sent.push(since) };
     watchHistorySetting(h);
     const t = new Terminal({ cols: 20, rows: 3, allowProposedApi: true });
     await write(t, "x");
     const tr = trackHistory(h, "s1", () => t);
-    // the serializer loads on first use
-    await new Promise((r) => setTimeout(r, 50));
+    // the serializer loads on first use: wait for it, not for a guessed delay
+    expect(await historyReady()).toBe(true);
     tr.touch();
     flushHistory();
     expect(sent).toHaveLength(1);
@@ -111,7 +111,7 @@ describe("terminal history", () => {
   });
 
   it("the 30-s tick saves each changed terminal in a task of its own, not all of them at once", async () => {
-    const { trackHistory, watchHistorySetting } = await import("./history");
+    const { historyReady, trackHistory, watchHistorySetting } = await import("./history");
     const saved: string[] = [];
     const h: HistoryHost = { ...host(null), historySave: async (k) => void saved.push(k) };
     watchHistorySetting(h);
@@ -120,7 +120,7 @@ describe("terminal history", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     try {
       const trs = ts.map((t, i) => trackHistory(h, `s${i}`, () => t));
-      await vi.dynamicImportSettled();
+      expect(await historyReady()).toBe(true);
       for (const tr of trs) tr.touch();
       // + 1: a timer set during a fake tick with no delay runs 1 ms later
       vi.advanceTimersByTime(HISTORY_EVERY_MS + 1);
@@ -142,7 +142,7 @@ describe("terminal history", () => {
 
 describe("a cleared screen", () => {
   it("is saved again on the next tick though nothing printed (Clear, Reset): a restart does not bring the cleared text back", async () => {
-    const { historyChanged, trackHistory, watchHistorySetting } = await import("./history");
+    const { historyChanged, historyReady, trackHistory, watchHistorySetting } = await import("./history");
     const saved: string[] = [];
     const h: HistoryHost = { ...host(null), historySave: async (k, text) => void saved.push(`${k}:${text.includes("secret") ? "secret" : "clean"}`) };
     watchHistorySetting(h);
@@ -151,7 +151,7 @@ describe("a cleared screen", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     try {
       const tr = trackHistory(h, "s7", () => t);
-      await vi.dynamicImportSettled();
+      expect(await historyReady()).toBe(true);
       tr.touch();
       vi.advanceTimersByTime(HISTORY_EVERY_MS + 1);
       expect(saved).toEqual(["s7:secret"]);
