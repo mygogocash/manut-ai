@@ -1475,16 +1475,18 @@ const OPS = {
     const named = history[b.name].some((m) => m.role === "assistant" && mediaLines(m.text).includes(path));
     const name = path.split("/").pop();
     const file = join(MEDIA_DIR, name);
-    let size;
+    // One read gives both the size and the bytes. A size check followed by a second read could describe one file
+    // and send another, if the file changed in between.
+    let data;
     try {
       if (!named || !path.startsWith("/w/media/")) throw new Error("not named");
-      size = statSync(file).size;
+      data = readFileSync(file);
     } catch {
       throw new OpError("not_found", "not a file this bot sent");
     }
-    const out = { path, name, mime: MEDIA_TYPES[name.split(".").pop()] ?? "application/octet-stream", size };
+    const out = { path, name, mime: MEDIA_TYPES[name.split(".").pop()] ?? "application/octet-stream", size: data.length };
     if (p.info === true) return out;
-    return { ...out, data_base64: readFileSync(file).toString("base64") };
+    return { ...out, data_base64: data.toString("base64") };
   },
   // Stages a file for the next chat.send, like Hermes' image.attach_bytes / pdf.attach / file.attach.
   // A name starting with "fail" is refused, so the e2e can check that nothing is sent after a failed attach.

