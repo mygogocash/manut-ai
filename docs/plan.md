@@ -302,3 +302,5 @@ template to a shop is not part of this task. Use exactly the content below; do n
 
 Done when: the three templates match the content above exactly, each `checkTemplate` problem is tested with a
 broken copy, and `templateById` of an unknown id is tested.
+
+Done on cloud/shop-templates, 23 Nov 2026: `packages/shop-templates` with the handmade, fashion and food templates, `templates`, `templateById` and `checkTemplate` (20 tests).
