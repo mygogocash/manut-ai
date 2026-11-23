@@ -96,6 +96,13 @@ export const MemoryIcon = () => (
   </Icon>
 );
 
+/// A page with its corner turned and a few lines: what the team wrote, for the owner to read.
+export const DraftIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h5l3 3v7.5a1 1 0 01-1 1h-7a1 1 0 01-1-1v-9.5a1 1 0 011-1zM9.5 2.5v3h3M6 8.5h4M6 11h3" />
+  </Icon>
+);
+
 /// A coin with a baht-like B: what the AI team spends on language models.
 export const SpendIcon = () => (
   <Icon>
