@@ -74,8 +74,9 @@ test.skip("U10: the Terminal toggle is a 24px icon button named Open in Terminal
 });
 
 test("U11: the collapsed strip names the newest ask's bot and its first words; expanding and ⌘J are unchanged", async ({ page }) => {
+  test.skip(true, "the Needs strip left the sidebar (NeedsStrip is no longer rendered): the Needs you page lists every ask instead");
   await open(page);
-  await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toContainText("updater");
+  // (a bot row's one-line preview, which this test used to read first, left with the sidebar's bot rows)
   const strip = page.getByTestId("needs-strip");
   await mock("mock.ask", { bot: "friren", kind: "approval" });
   await expect(page.getByTestId("needs-line")).toHaveText("1 needs you · Friren: Allow rm -rf build/?");
@@ -93,7 +94,7 @@ test("U11: the collapsed strip names the newest ask's bot and its first words; e
   await expect(page.getByTestId("needs-list")).toHaveCount(0);
   const key = (await page.evaluate(() => /Mac/.test(navigator.platform))) ? "Meta" : "Control";
   await page.keyboard.press(`${key}+j`);
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
 });
 
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)

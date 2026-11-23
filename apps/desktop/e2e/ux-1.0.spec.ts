@@ -3,6 +3,7 @@
 // no note about Slack threads it does not have, and Settings shows whole names (the in-use model, a profile id).
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
+import { openChat, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -27,7 +28,8 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 async function open(page: Page, lang?: string) {
   if (lang) await page.addInitScript((l) => localStorage.setItem("manut.lang", l), lang);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  // the app starts on Home (no snapshot here): the start is done, and a bot is opened from the Team page
+  await startDone(page);
 }
 
 test.beforeEach(async () => {
@@ -35,6 +37,7 @@ test.beforeEach(async () => {
 });
 
 test("a search with no bot shows its one line between the search and TERMINALS, not under TERMINALS", async ({ page }) => {
+  test.skip(true, "the sidebar's bot search and its BOTS region, where a search with no bot said so, left with the sidebar: the side menu has no bot list to search");
   await open(page);
   await page.getByTestId("bot-search").fill("zzzz");
   const empty = page.getByTestId("side-bots").locator(".bot-empty");
@@ -53,8 +56,7 @@ test("a search with no bot shows its one line between the search and TERMINALS, 
 
 test("Details on a bot with nothing elsewhere: no Slack-thread note, and its time word is the UI language's", async ({ page }) => {
   await open(page, "ko");
-  await page.getByTestId("bot-omh-tui").click();
-  await expect(page.getByTestId("bot-omh-tui")).toHaveAttribute("aria-current", "true");
+  await openChat(page, "omh-tui");
   await page.getByTestId("panel-button").click();
   // the panel opens on the tab used last (Plans on a fresh start): pick Details, once the tabs stopped sliding in
   await motionDone(page);
@@ -92,10 +94,12 @@ test("Details › Routines and the Schedule tab say cadence and last run in the 
   await expect(page.getByTestId("panel-schedule")).not.toContainText(/\b(daily|weekly)\b/);
 });
 
-test("Settings: the in-use model's name is whole, and a profile id chip stays on one line", async ({ page }) => {
+// The Providers page of Settings, with its model chips, left the fork: no provider-model chip exists in the app any more.
+test.skip("Settings: the in-use model's name is whole", async ({ page }) => {
+  test.skip(true, "the Providers page left the fork: no provider-model chip exists in the app and Settings has no providers entry, so the in-use model's name has no chip to be whole in");
   await open(page);
   // OMH TUI runs Sonnet 5.5: the longest of its provider's three names, and the one with the check
-  await page.getByTestId("bot-omh-tui").click();
+  await openChat(page, "omh-tui");
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("settings-nav-providers").click();
   const on = page.locator("[data-testid=provider-model].on");
@@ -106,6 +110,11 @@ test("Settings: the in-use model's name is whole, and a profile id chip stays on
   const tops = await page.locator("[data-testid=provider-model]").evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
   expect(tops).toBe(1);
 
+});
+
+test("Settings: a profile id chip stays on one line", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("nav-settings").click();
   await page.getByTestId("settings-nav-bots").click();
   const chip = page.getByTestId("bot-card-omh-tui").locator(".bc-id code");
   await expect(chip).toHaveText("omh-tui");

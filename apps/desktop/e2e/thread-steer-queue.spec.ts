@@ -2,7 +2,7 @@
 // with the ↵ mark, never "Not sent · a turn is running"), goes out after that turn with `chat.send {session, queued}`,
 // and Steer hands it to that thread's running turn (`chat.steer {session}`). Main-chat cases: steer-queue.spec.ts.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openChat, openThread } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -36,7 +36,8 @@ async function runningThread(page: Page): Promise<string> {
   const { threads } = await mock("mock.threads", { bot: "kami", threads: [{ title: "Steer neighbour", cwd: "/work/steer", ago: 1 }] });
   const id = threads[0] as string;
   await page.reload();
-  await page.getByTestId(`thread-row-${id}`).getByTestId("thread-open").click();
+  // a thread is opened from History, by its title (its row in the sidebar's tree left with the sidebar)
+  await openThread(page, "Steer neighbour");
   await say(page, "first running task");
   await expect(page.getByTestId("stop")).toBeVisible();
   return id;
@@ -120,8 +121,10 @@ test("removing a thread that holds messages never sends them; the main chat and 
   // held messages: Hermes refuses the steers, so each waits for its turn to end
   await mock("mock.steerMode", { bot: "kami", mode: "reject" });
   await page.reload();
+  // threads open from History by title (their rows in the sidebar's tree left with the sidebar)
+  const titleOf: Record<string, string> = { [a]: "Removed", [b]: "Kept" };
   const open = async (id: string) => {
-    await page.getByTestId(`thread-row-${id}`).getByTestId("thread-open").click();
+    await openThread(page, titleOf[id]);
     await expect(page.getByTestId("thread-chat")).toHaveAttribute("data-thread", id);
   };
   const heldRow = (text: string) => page.locator("[data-testid=bubble-user][data-held]", { hasText: text });
@@ -129,7 +132,7 @@ test("removing a thread that holds messages never sends them; the main chat and 
   await say(page, "B running");
   await expect(page.getByTestId("stop")).toBeVisible();
   await say(page, "B held");
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await say(page, "main running");
   await expect(page.getByTestId("stop")).toBeVisible();
   await say(page, "main held");
@@ -139,11 +142,12 @@ test("removing a thread that holds messages never sends them; the main chat and 
   await say(page, "do not send after archive");
   await expect(heldRow("do not send after archive")).toBeVisible();
 
-  const row = page.getByTestId(`thread-row-${a}`);
-  await row.hover();
-  await row.getByTestId("thread-x").click();
-  await page.getByTestId("thread-confirm-remove").click();
-  await expect(row).toHaveCount(0);
+  // removed by the store action the sidebar's row × called after its confirm (ThreadTree.tsx, no longer rendered)
+  await page.evaluate(async (id) => {
+    const m = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { removeThread(bot: string, thread: string): Promise<void> } } };
+    await m.getStore().actions.removeThread("kami", id);
+  }, a);
+  await expect.poll(async () => ((await mock("thread.list", { bot: "kami" })).threads as { thread: string }[]).map((t) => t.thread)).not.toContain(a);
   await page.waitForTimeout(750);
   // the other thread's and the main chat's turns end: theirs go out, the removed thread's never
   await mock("mock.emit", { events: [{ event: "turn.end", bot: "kami", session: b, outcome: "done" }] });

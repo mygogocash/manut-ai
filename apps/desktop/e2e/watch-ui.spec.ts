@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openCustomize } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.CW_SHOTS || "";
@@ -49,7 +49,8 @@ async function openAutomations(page: Page, opts: { lang?: string; theme?: string
   );
   await page.goto("/");
   await chatOpen(page);
-  await page.getByTestId("nav-automations").click();
+  // Automations is an entry of the Customize page now (the sidebar's foot button left with the sidebar)
+  await openCustomize(page, "automations");
   await expect(page.getByTestId("auto-list")).toBeVisible();
   await expect(page.getByTestId(`auto-row-${UNREAD}`)).toBeVisible();
 }
@@ -140,7 +141,7 @@ test("+ New watch sends one sentence to that bot's chat, opens it, and makes no 
   await expect(page.getByTestId("watch-form-sentence")).toHaveText(sentence);
   await page.getByTestId("watch-form-send").click();
 
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("bubble-user").last()).toContainText("Watch Discord #deploys");
   await expect.poll(() => submitted("friren")).toEqual([sentence]);
   expect(await submitted("kami")).toEqual([]);

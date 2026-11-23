@@ -10,6 +10,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+// Every test here is about the bots' thread tree: its rows under each bot, their states, their times, their row x and
+// their row's chat card. The tree left with the sidebar (ThreadTree.tsx and BotRow.tsx are no longer rendered), and the
+// side menu lists recent threads without a tree; threads are opened from History and the composer's ./thread.
+test.skip(true, "the bots' thread tree left with the sidebar (ThreadTree.tsx and BotRow.tsx are no longer rendered): rows under each bot, their states, times, row × and row cards have no place in the side menu");
 import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);

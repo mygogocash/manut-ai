@@ -2,7 +2,7 @@
 // "<bot> · <watch>", unread 1, one Dock badge call; a silent run leaves nothing; 40 answers that came in while
 // manut was closed -> one summary notification and unread 40. "Not useful" sends exactly one chat message.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -54,12 +54,12 @@ async function setup(page: Page, seen?: number) {
   }, seen ?? null);
   await page.goto("/");
   await chatOpen(page);
-  await expect(page.getByTestId("bot-friren")).toBeVisible();
 }
 
 const notes = (page: Page) => page.evaluate(() => (window as any).__notes.map((n: any) => ({ title: n.title, body: n.body })));
+// The unread count the app badge shows (the badge calls below) is checked; the count drawn on a bot's row left with the
+// sidebar, so no row is read for it.
 const badgeCalls = (page: Page) => page.evaluate(() => [...(window as any).__badgeCalls]);
-const unread = (page: Page, bot: string) => page.getByTestId(`bot-${bot}`).getByTestId("unread");
 
 test.beforeEach(async () => {
   await mock("mock.reset");
@@ -70,14 +70,13 @@ test("a hit on a bot that is not open: one notification, unread 1, one badge cal
   await expect.poll(() => badgeCalls(page)).toEqual([0]);
   await mock("mock.watchRun", { bot: "friren", name: "deploys", kind: "hit", text: "**Deploy failed** on main\nsecond line" });
   await expect.poll(() => notes(page)).toEqual([{ title: "Friren · deploys", body: "Deploy failed on main" }]);
-  await expect(unread(page, "friren")).toHaveText("1");
   await expect.poll(() => badgeCalls(page)).toEqual([0, 1]);
   await page.waitForTimeout(300);
   expect(await notes(page)).toHaveLength(1); // the delivered run's routine.ran adds no second note
 
   // the notification opens friren: the answer sits under one "Watch · deploys" line, no bubble from the person
   await page.evaluate(() => (window as any).__notes[0].n.onclick());
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("watch-line")).toHaveCount(1);
   await expect(page.getByTestId("watch-line")).toContainText(/Watch · deploys · \d\d:\d\d/);
   await expect(page.getByTestId("bubble-bot").filter({ hasText: "Deploy failed" })).toHaveCount(1);
@@ -102,10 +101,8 @@ test("a silent run: no notification, no unread, no badge call, no line", async (
   await mock("mock.watchRun", { bot: "friren", name: "deploys", kind: "silent" });
   await page.waitForTimeout(500);
   expect(await notes(page)).toEqual([]);
-  await expect(unread(page, "friren")).toHaveCount(0);
   expect(await badgeCalls(page)).toEqual([0]);
-  await page.getByTestId("bot-friren").click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await openChat(page, "friren");
   await expect(page.getByTestId("timeline")).toBeVisible();
   await expect(page.getByTestId("watch-line")).toHaveCount(0);
   await expect(page.getByTestId("routine-line")).toHaveCount(0);
@@ -114,7 +111,6 @@ test("a silent run: no notification, no unread, no badge call, no line", async (
 test("40 answers that came in while manut was closed: one summary notification, unread 40", async ({ page }) => {
   await mock("mock.watchQueued", { bot: "friren", name: "deploys", n: 40 });
   await setup(page, 1);
-  await expect(unread(page, "friren")).toHaveText("40");
   await expect.poll(() => notes(page)).toEqual([{ title: "Friren: 40 watch alerts", body: expect.stringContaining("match 40") }]);
   await expect.poll(() => badgeCalls(page)).toContain(40);
   await page.waitForTimeout(300);
@@ -126,5 +122,4 @@ test("a first start with no record of what was seen does not flood", async ({ pa
   await setup(page);
   await page.waitForTimeout(500);
   expect(await notes(page)).toEqual([]);
-  await expect(unread(page, "friren")).toHaveCount(0);
 });

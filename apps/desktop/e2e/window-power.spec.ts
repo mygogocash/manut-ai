@@ -78,7 +78,7 @@ test("System rows: defaults, persisted choices, the shell hears the window choic
   const close = page.getByTestId("window-close-seg");
   await expect(close.getByRole("radio", { name: "Keep running" })).toHaveAttribute("aria-checked", "true");
   // the hint names where manut goes on this platform (the browser's own platform here)
-  await expect(page.getByTestId("set-system")).toContainText(/manut stays in the (menu bar|notification area)/);
+  await expect(page.getByTestId("set-system")).toContainText(/Manut AI stays in the (menu bar|notification area)/);
   await expect(page.getByTestId("set-awake")).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("set-system")).toContainText("Closing the lid still sleeps it.");
   await expect.poll(() => page.evaluate(() => (window as any).__manutWindowPrefs?.[0])).toEqual({ hide: true, open: "Open Manut AI", quit: "Quit Manut AI" });
@@ -89,7 +89,7 @@ test("System rows: defaults, persisted choices, the shell hears the window choic
   await expect.poll(() => page.evaluate(() => (window as any).__manutWindowPrefs.at(-1).hide)).toBe(false);
 
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await startDone(page);
   await openGeneral(page);
   await expect(page.getByTestId("window-close-seg").getByRole("radio", { name: "Quit", exact: true })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("set-awake")).toHaveAttribute("aria-checked", "false");
@@ -98,7 +98,7 @@ test("System rows: defaults, persisted choices, the shell hears the window choic
 
   // the tray labels follow the language
   await page.getByTestId("language").getByRole("radio", { name: "한국어" }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__manutWindowPrefs.at(-1))).toEqual({ hide: false, open: "manut 열기", quit: "manut 종료" });
+  await expect.poll(() => page.evaluate(() => (window as any).__manutWindowPrefs.at(-1))).toEqual({ hide: false, open: "Manut AI 열기", quit: "Manut AI 종료" });
 });
 
 test("a bot turn holds the computer awake until it ends", async ({ page }) => {
@@ -170,7 +170,7 @@ test("the first hide of the window shows one 'still running' notification", asyn
   await page.evaluate(() => (window as any).__manutWindowHidden());
   const notes = await page.evaluate(() => (window as any).__notes as { title: string; body?: string }[]);
   expect(notes.length).toBe(1);
-  expect(notes[0].title).toBe("manut is still running");
+  expect(notes[0].title).toBe("Manut AI is still running");
   expect(notes[0].body).toMatch(/^Quit from the (menu bar|notification area) icon$/);
   // once per install: a reload does not say it again
   await page.reload();

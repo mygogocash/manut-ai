@@ -2,7 +2,7 @@
 // approval card, and the sidebar's Automations and Plugins rows opening their pages.
 import { expect, test, type Page } from "@playwright/test";
 import { usePlatform } from "./term-find-helpers";
-import { chatOpen } from "./start";
+import { chatOpen, openChat, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -97,7 +97,7 @@ test("Notify me can be turned off in Settings and stays off", async ({ page }) =
   await expect(seg.getByRole("radio", { name: "On" })).toHaveAttribute("aria-checked", "true");
   await seg.getByRole("radio", { name: "Off" }).click();
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await startDone(page);
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("notify-seg").getByRole("radio", { name: "Off" })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "Close settings" }).click();
@@ -116,12 +116,13 @@ test("shortcuts: Mod+2 opens the second bot, Mod+K searches, Mod+. toggles Detai
   const key = mac ? "Meta" : "Control";
 
   await page.keyboard.press(`${key}+2`);
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await page.keyboard.press(`${key}+1`);
   await chatOpen(page);
 
+  // Mod+K opens History with its search field focused (the menu's Search does the same)
   await page.keyboard.press(`${key}+k`);
-  await expect(page.getByRole("searchbox", { name: "Search bots and terminals" })).toBeFocused();
+  await expect(page.getByRole("searchbox", { name: "Search history" })).toBeFocused();
   await page.keyboard.press("Escape");
 
   const details = page.getByTestId("details");
@@ -144,11 +145,14 @@ test("Esc stops a running answer, but not while the search field has focus", asy
   await open(page);
   await send(page, "check the 502s");
   await expect(page.getByTestId("stop")).toBeVisible();
-  // Esc inside the search field only clears the search
-  await page.getByRole("searchbox", { name: "Search bots and terminals" }).focus();
+  // Esc inside the search field only clears the search: the menu's Search opens History with its field focused, and
+  // the answer goes on running there; back in the chat it is still running, with its stop button
+  await page.getByTestId("menu-search").click();
+  await page.getByRole("searchbox", { name: "Search history" }).focus();
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("stop")).toBeVisible();
   expect((await mock("mock.calls")).calls.filter((c: any) => c.op === "chat.interrupt")).toEqual([]);
+  await openChat(page, "kami");
+  await expect(page.getByTestId("stop")).toBeVisible();
   // anywhere else it stops the turn
   await page.getByTestId("timeline").click({ position: { x: 20, y: 20 } });
   await page.keyboard.press("Escape");
@@ -168,13 +172,15 @@ test("a risky command gets a warning line; the buttons stay the same", async ({ 
 
 test("Automations and Plugins are pages now, not Soon", async ({ page }) => {
   await open(page);
-  for (const [id, page_] of [["nav-automations", "automations"], ["nav-plugins", "plugins"]] as const) {
-    const b = page.getByTestId(id);
+  // the two entries are on the Customize page (the sidebar's foot buttons left with the sidebar); the page they open
+  // replaces that one, so the entry is not checked for aria-current after the click
+  for (const [id, page_] of [["automations", "automations"], ["plugins", "plugins"]] as const) {
+    await page.getByTestId("menu-customize").click();
+    const b = page.getByTestId(`nav-${id}`);
     await expect(b).toBeEnabled();
     await expect(b).not.toContainText("Soon");
     await b.click();
     await expect(page.getByTestId(page_)).toBeVisible();
-    await expect(b).toHaveAttribute("aria-current", "page");
   }
 });
 
