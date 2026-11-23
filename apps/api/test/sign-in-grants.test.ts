@@ -1,4 +1,5 @@
 import { adminFetch, tenantSession, trustedTaskPut } from "./authenticated-fixtures";
+import { sourceWorker } from "./source-worker";
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntry } from "../src/audit-log";
@@ -83,13 +84,13 @@ class StubOutpost {
   constructor(readonly tenant: string, readonly id: string, readonly credential: string) {}
 
   beat() {
-    return SELF.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: this.headers(this.credential),
+    return sourceWorker.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: this.headers(this.credential),
       body: JSON.stringify({ tenant: this.tenant, outpostId: this.id }) });
   }
 
   redeem(grantId: string, as: { tenant?: string; outpostId?: string; credential?: string | null } = {}) {
     const credential = as.credential === undefined ? this.credential : as.credential;
-    return SELF.fetch(`${API}/v1/outposts/redeem`, { method: "POST", headers: this.headers(credential),
+    return sourceWorker.fetch(`${API}/v1/outposts/redeem`, { method: "POST", headers: this.headers(credential),
       body: JSON.stringify({ tenant: as.tenant ?? this.tenant, outpostId: as.outpostId ?? this.id, grantId }) });
   }
 
@@ -330,6 +331,43 @@ describe("the sign-in step", () => {
     expect(await nam.signIn(signInId, mac.id)).toEqual({ ok: false, error: "sign_in_not_found" });
     expect(await nam.signIn("not-a-sign-in", mac.id)).toEqual({ ok: false, error: "sign_in_not_found" });
     expect(await nam.signInBroken(signInId)).toEqual({ ok: false, error: "sign_in_not_found" });
+  });
+
+  it("refuses a waiting grant once its outpost is removed, and issues none for it", async () => {
+    const s = await shop();
+    const signInId = await addSignIn(s.tenant);
+    const mac = await outpost(s.tenant);
+    const cloud = await outpost(s.tenant, { name: "Cloud outpost", kind: "cloud" });
+    const nam = await attempt(s, "nam");
+    const waiting = await grantOf(nam, signInId, mac.id);
+    const others = await grantOf(nam, signInId, cloud.id);
+
+    const removed = await adminFetch(`${API}/v1/admin/outposts/remove`, { method: "POST", headers: OPERATOR,
+      body: JSON.stringify({ tenant: s.tenant, outpostId: mac.id }) });
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ removed: true, outpostId: mac.id, stepsRefused: 0, grantsRefused: 1 });
+    // Used up in the same step as the removal, so nothing could ever redeem it.
+    const grant = await runInDurableObject(vault(s.tenant), (_instance, state) =>
+      state.storage.get<{ usedAt: string | null; openedAt: string | null }>(`signin-grant:${waiting}`));
+    expect(grant).toMatchObject({ usedAt: expect.any(String), openedAt: null });
+    await refusal(await mac.redeem(waiting), 401, "unauthorized");
+    expect(await nam.signIn(signInId, mac.id)).toEqual({ ok: false, error: "outpost_not_found" });
+
+    // Another outpost's grant is its own business.
+    expect((await cloud.redeem(others)).status).toBe(200);
+  });
+
+  it("keeps a waiting grant through a credential rotation, for the new credential only", async () => {
+    const s = await shop();
+    const signInId = await addSignIn(s.tenant);
+    const mac = await outpost(s.tenant);
+    const waiting = await grantOf(await attempt(s, "nam"), signInId, mac.id);
+    const rotated = await adminFetch(`${API}/v1/admin/outposts/credential`, { method: "POST", headers: OPERATOR,
+      body: JSON.stringify({ tenant: s.tenant, outpostId: mac.id }) });
+    expect(rotated.status).toBe(200);
+    const { credential } = (await rotated.json()) as { credential: string };
+    await refusal(await mac.redeem(waiting), 401, "unauthorized");
+    expect((await mac.redeem(waiting, { credential })).status).toBe(200);
   });
 
   it("reads the switches and the owner's consent at the grant and at the redeem", async () => {

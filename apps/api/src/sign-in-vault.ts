@@ -19,12 +19,26 @@
 /// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
+/// - `POST /outposts/remove` `{ outpostId }`: removes it, refusing every grant still waiting for it.
+/// - `POST /outposts/credential` `{ outpostId, credentialHash }`: a new credential's digest in place of the old one.
 /// - `POST /sign-in-grants` `{ signInId, outpostId, member, taskId, attemptId }`: a grant, for a member named on a
 ///   working sign-in, to an online outpost, for 60 seconds.
 /// - `POST /sign-in-grants/claim` `{ grantId, outpostId, credentialHash }`: the outpost's redeem, first half. Checks the
 ///   grant is its own, unused and on time, and uses it up whatever comes next; answers what it is bound to.
 /// - `POST /sign-in-grants/open` `{ grantId, outpostId, credentialHash }`: the second half, once the Worker has seen the
 ///   attempt still runs. Answers the username, the password and the origins, once per grant.
+///
+/// And the step channel, the browser steps a worker queues for an outpost (docs/browser-control.md):
+///
+/// - `POST /browser-steps` `{ kind, outpostId, url?, selector?, grantId?, member, taskId, attemptId }`: a step, for an
+///   online outpost, going only to the origins of a working sign-in the member is named on.
+/// - `GET /browser-steps/view?stepId=&taskId=&attemptId=`: a step as the worker that queued it sees it.
+/// - `POST /browser-steps/pending` `{ outpostId, credentialHash }`: the outpost's steps waiting to be handed out.
+/// - `POST /browser-steps/take` `{ outpostId, credentialHash, take, refuse }`: hands those the Worker let through out,
+///   once each, and refuses the rest.
+/// - `POST /browser-steps/report` `{ stepId, outpostId, credentialHash, outcome, code?, text? }`: the outpost's report,
+///   once, held until the Worker has landed it in the attempt's events.
+/// - `POST /browser-steps/settle` `{ stepId, code? }`: the Worker's word on a held report: landed, or refused.
 
 import { DEFAULT_ROSTER } from "@manut/member-grants";
 import { appendAudit, type AuditActor, type AuditSubject } from "./audit-log";
@@ -107,6 +121,9 @@ type GrantRecord = {
   usedAt: string | null;
   /// When the password was answered for it.
   openedAt: string | null;
+  /// The browser step that carries it to its outpost, once one does: a grant goes in one step only. Absent on grants
+  /// issued before steps existed, and on any no step carries.
+  stepId?: string;
 };
 
 /// What a grant is bound to, which the Worker needs to check the attempt and write the log. Never the password.
@@ -150,6 +167,8 @@ const keys = {
   outposts: "outpost:",
   grant: (id: string) => `signin-grant:${id}`,
   grants: "signin-grant:",
+  step: (id: string) => `browser-step:${id}`,
+  steps: "browser-step:",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -163,7 +182,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /// The paths this module answers inside the vault object.
 export function isSignInVaultPath(pathname: string): boolean {
   return pathname === "/sign-ins" || pathname.startsWith("/sign-ins/") || pathname === "/outposts" ||
-    pathname.startsWith("/outposts/") || pathname === "/sign-in-grants" || pathname.startsWith("/sign-in-grants/");
+    pathname.startsWith("/outposts/") || pathname === "/sign-in-grants" || pathname.startsWith("/sign-in-grants/") ||
+    pathname === "/browser-steps" || pathname.startsWith("/browser-steps/");
 }
 
 /// Whether two hex digests are the same, in time that does not depend on where they differ.
@@ -303,6 +323,7 @@ export async function signInVaultRoute(
     const nowMs = Date.now();
     return json({ outposts: (await outpostsOf(storage, tenant)).map((record) => outpostView(record, nowMs)) });
   }
+  if (route === "GET /browser-steps/view") return viewStep(storage, tenant, url);
   if (request.method !== "POST") return json({ error: "not_found" }, 404);
   if (request.headers.get("x-vault") !== "1") return json({ error: "forbidden" }, 403);
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
@@ -322,12 +343,26 @@ export async function signInVaultRoute(
       return registerOutpost(storage, tenant, body);
     case "POST /outposts/heartbeat":
       return outpostHeartbeat(storage, tenant, body);
+    case "POST /outposts/remove":
+      return removeOutpost(storage, tenant, body);
+    case "POST /outposts/credential":
+      return rotateCredential(storage, tenant, body);
     case "POST /sign-in-grants":
       return issueGrant(storage, tenant, body);
     case "POST /sign-in-grants/claim":
       return claimGrant(storage, tenant, body);
     case "POST /sign-in-grants/open":
       return openGrant(storage, vaultKeys, tenant, body);
+    case "POST /browser-steps":
+      return queueStep(storage, tenant, body);
+    case "POST /browser-steps/pending":
+      return pendingSteps(storage, tenant, body);
+    case "POST /browser-steps/take":
+      return takeSteps(storage, tenant, body);
+    case "POST /browser-steps/report":
+      return reportStep(storage, vaultKeys, tenant, body);
+    case "POST /browser-steps/settle":
+      return settleStep(storage, tenant, body);
     default:
       return json({ error: "not_found" }, 404);
   }
@@ -464,16 +499,19 @@ async function openGrant(storage: DurableObjectStorage, vaultKeys: SignInVaultKe
   return json({ signInId: signIn.id, site: signIn.site, origins: signIn.origins, username: signIn.username, password });
 }
 
-/// Part of the vault's tenant wipe (cred-object.ts): every sign-in, tombstones included, every outpost and every grant.
+/// Part of the vault's tenant wipe (cred-object.ts): every sign-in, tombstones included, every outpost, every grant and
+/// every browser step.
 export async function wipeSignInVault(storage: DurableObjectStorage):
-  Promise<{ signInsWiped: number; outpostsWiped: number; grantsWiped: number }> {
+  Promise<{ signInsWiped: number; outpostsWiped: number; grantsWiped: number; stepsWiped: number }> {
   const doomed = async (prefix: string) => [...(await storage.list({ prefix })).keys()];
   const signIns = await doomed(keys.signIns);
   const outposts = await doomed(keys.outposts);
   const grants = await doomed(keys.grants);
-  const all = [...signIns, ...outposts, ...grants];
+  const steps = await doomed(keys.steps);
+  const all = [...signIns, ...outposts, ...grants, ...steps];
   for (let i = 0; i < all.length; i += STORAGE_BATCH) await storage.delete(all.slice(i, i + STORAGE_BATCH));
-  return { signInsWiped: signIns.length, outpostsWiped: outposts.length, grantsWiped: grants.length };
+  return { signInsWiped: signIns.length, outpostsWiped: outposts.length, grantsWiped: grants.length,
+    stepsWiped: steps.length };
 }
 
 async function registerOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
@@ -490,6 +528,69 @@ async function registerOutpost(storage: DurableObjectStorage, tenant: string, bo
     lastHeartbeatAt: null, createdAt: new Date().toISOString() };
   await storage.put(keys.outpost(record.id), record);
   return json({ outpost: outpostView(record, Date.now()) });
+}
+
+/// The outpost of `tenant` an operator names, or null for a malformed id, one never made, one removed, or another
+/// tenant's.
+async function outpostOf(storage: DurableObjectStorage, tenant: string, id: unknown): Promise<OutpostRecord | null> {
+  if (typeof id !== "string" || !UUID.test(id)) return null;
+  const record = await storage.get<OutpostRecord>(keys.outpost(id));
+  return record && record.tenant === tenant ? record : null;
+}
+
+const OUTPOST_NOT_FOUND = { error: "outpost_not_found" };
+
+/// Writes every entry, at most 128 keys per call as Durable Object storage takes them.
+async function putAll(storage: DurableObjectStorage, entries: Record<string, unknown>): Promise<void> {
+  const all = Object.entries(entries);
+  for (let i = 0; i < all.length; i += STORAGE_BATCH) await storage.put(Object.fromEntries(all.slice(i, i + STORAGE_BATCH)));
+}
+
+/// Removal deletes the outpost, so its credential stops working at once: every outpost request is checked against the
+/// digest kept here, and there is none. In the same step, each grant still waiting for it (not used, not late) is used
+/// up, so nothing can ever redeem it, and each of its steps still waiting or running is refused (`outpost_removed`), so
+/// its worker hears so at once rather than when the step runs out of time. A step already reported is left to the
+/// Worker, which is landing it. Nothing else here awaits anything but this object's own storage, so no request comes
+/// between the reads and the writes. The audit log keeps the outpost's history.
+async function removeOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const nowMs = Date.now();
+  const at = new Date(nowMs).toISOString();
+  const grants: Record<string, GrantRecord> = {};
+  for (const [key, grant] of await storage.list<GrantRecord>({ prefix: keys.grants })) {
+    if (grant.tenant === tenant && grant.outpostId === outpost.id && grant.usedAt === null &&
+        nowMs < Date.parse(grant.expiresAt)) {
+      grants[key] = { ...grant, usedAt: at };
+    }
+  }
+  const steps: Record<string, StepRecord> = {};
+  for (const step of await stepsOf(storage, tenant)) {
+    if (step.outpostId === outpost.id && (step.state === "queued" || step.state === "taken") &&
+        nowMs < Date.parse(step.expiresAt)) {
+      steps[keys.step(step.id)] = refusedStep(step, "outpost_removed", at);
+    }
+  }
+  await putAll(storage, { ...grants, ...steps });
+  await storage.delete(keys.outpost(outpost.id));
+  return json({ removed: true, outpostId: outpost.id, stepsRefused: Object.keys(steps).length,
+    grantsRefused: Object.keys(grants).length });
+}
+
+/// A new credential's digest in place of the old one, so the old credential stops working at once. The outpost reads
+/// as asleep until the holder of the new one beats: no new grant goes to a machine that may not hold it. Grants already
+/// waiting for the outpost stay, for the new credential.
+async function rotateCredential(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  if (typeof body.credentialHash !== "string" || !DIGEST.test(body.credentialHash)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const rotated: OutpostRecord = { ...outpost, credentialHash: body.credentialHash, lastHeartbeatAt: null };
+  await storage.put(keys.outpost(outpost.id), rotated);
+  return json({ outpost: outpostView(rotated, Date.now()) });
 }
 
 /// A beat changes only the time of the last one: it is the outpost saying it is awake, not work.
@@ -558,6 +659,545 @@ async function removeSignIn(storage: DurableObjectStorage, tenant: string, body:
   return json({ removed: true, signInId: record.id });
 }
 
+// The step channel: what a worker asks an outpost's browser to do, and how it went (docs/browser-control.md).
+
+/// The steps an outpost's browser may run in this slice, each of them reading: going to a page, reading its text, and
+/// signing in so that it can read. A step that would submit anything (an order, a reply, a refund, a post) goes through
+/// member-grants' `decide` and an approval-core request naming the exact action first. That is the next slice; until it
+/// is built, any kind but these is refused (`step_kind_not_allowed`).
+export const STEP_KINDS = ["open", "read", "sign_in"] as const;
+export type StepKind = (typeof STEP_KINDS)[number];
+
+/// How an outpost may say a step failed: a fixed list, so a report can never carry free text, or anything a page or a
+/// sign-in held, into the task's events or the audit log. `origin_not_allowed`: a page was, or went, somewhere the
+/// step's origins do not include, and the outpost stopped there. `page_unavailable`: the page did not load.
+/// `selector_not_found`: nothing on the page matched the read's selector. `sign_in_refused`: the site refused the
+/// saved password, so the worker reports the sign-in broken (`signInBroken`). `grant_refused`: the redeem was refused,
+/// so there was nothing to type. `timed_out` and `browser_error`: anything else.
+export const STEP_FAILURES = ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused",
+  "grant_refused", "timed_out", "browser_error"] as const;
+
+/// A step lives two minutes from when it is queued, or until its grant ends if that is sooner. An outpost asks for its
+/// steps every few seconds and a page loads in seconds, so a step normally ends well inside a minute; two leave room for
+/// a slow site, and stay well inside the attempt's five-minute lease, so a worker waiting on its step keeps its attempt.
+/// A step for an outpost that stopped answering fails within two minutes rather than holding the worker up.
+export const STEP_TTL_MS = 120_000;
+/// The most a read brings back: 4 KB once written as JSON in UTF-8, some 4,000 letters of English or 1,300 of Thai. It
+/// goes into the task's events whole, as part of one agent event (which may take 8 KB), and it is what a worker's model
+/// will read, so a step reads the part of a page it needs (a selector) rather than all of it.
+export const MAX_READ_TEXT_BYTES = 4 * 1024;
+/// Steps one outpost holds at once, waiting, running or reported, so no worker can fill the shop's vault.
+const MAX_OPEN_STEPS = 20;
+/// Steps one fetch hands out, and so the attempts one fetch reads.
+const MAX_FETCH_STEPS = 5;
+const MAX_URL = 2048;
+const MAX_SELECTOR = 256;
+/// A refusal's code, as the audit log takes one.
+const CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/// `queued` until its outpost takes it, `taken` while it runs, `reported` once the outpost said how it went and until
+/// that has landed in the attempt's events; then `done` or `failed` as the outpost said, or `refused` when the control
+/// plane would not let it run or stand.
+type StepState = "queued" | "taken" | "reported" | "done" | "failed" | "refused";
+
+type StepRecord = {
+  id: string;
+  tenant: string;
+  kind: StepKind;
+  /// `open`: the page, written as the URL parser writes it.
+  url: string | null;
+  /// `read`: the part of the page to read; null reads the whole page.
+  selector: string | null;
+  /// `sign_in`: the grant it carries, and the grant's sign-in and its site.
+  grantId: string | null;
+  signInId: string | null;
+  site: string | null;
+  outpostId: string;
+  taskId: string;
+  attemptId: string;
+  /// The attempt's member, as the task object recorded it.
+  member: string;
+  queuedAt: string;
+  expiresAt: string;
+  takenAt: string | null;
+  reportedAt: string | null;
+  settledAt: string | null;
+  state: StepState;
+  /// What the outpost reported, held while `reported`.
+  outcome: "done" | "failed" | null;
+  /// Why it failed or was refused: one of STEP_FAILURES, `text_withheld`, or the control plane's refusal.
+  code: string | null;
+  /// What a `read` read, once it is done. Dropped when the step is refused.
+  text: string | null;
+};
+
+/// What a worker may ask for. The member, the task and the attempt are the control plane's to add, never the worker's.
+export type NewBrowserStep =
+  | { kind: "open"; outpostId: string; url: string }
+  | { kind: "read"; outpostId: string; selector?: string }
+  | { kind: "sign_in"; outpostId: string; grantId: string };
+
+/// A step as the worker that queued it sees it. `expired` is a step that did not end within its time. A step reported
+/// but not yet landed in the attempt's events still reads `taken`, so a worker never acts on an outcome its attempt's
+/// events do not hold.
+export type BrowserStepView = {
+  stepId: string;
+  kind: StepKind;
+  outpostId: string;
+  state: "queued" | "taken" | "done" | "failed" | "refused" | "expired";
+  queuedAt: string;
+  expiresAt: string;
+  url?: string;
+  selector?: string;
+  signInId?: string;
+  code?: string;
+  text?: string;
+};
+
+/// A step as its outpost is handed it: what to do, and the origins its browser may be on while doing it.
+export type OutpostStep = {
+  stepId: string;
+  kind: StepKind;
+  url?: string;
+  selector?: string;
+  grantId?: string;
+  origins: string[];
+  expiresAt: string;
+};
+
+/// The ids a step is bound to, for the Worker's audit entries: never its page, what it read, or anything typed.
+export type StepBinding = { stepId: string; taskId: string; attemptId: string; signInId?: string; grantId?: string };
+
+/// A reported step, as the Worker needs it to land its outcome in the attempt's events.
+export type ReportedStep = {
+  stepId: string;
+  kind: StepKind;
+  url: string | null;
+  selector: string | null;
+  site: string | null;
+  queuedAt: string;
+  outcome: "done" | "failed";
+  code: string | null;
+  text: string | null;
+};
+
+function isStepFailure(value: unknown): value is (typeof STEP_FAILURES)[number] {
+  return typeof value === "string" && (STEP_FAILURES as readonly string[]).includes(value);
+}
+
+/// Whether a read's text fits: at most 4 KB once written as JSON, so its event fits whatever the text holds.
+function readTextFits(text: string): boolean {
+  return new TextEncoder().encode(JSON.stringify(text)).byteLength <= MAX_READ_TEXT_BYTES;
+}
+
+/// What a report can be checked for before the vault reads its step: `invalid_report` for one no step could take,
+/// `text_too_long` for a read's text over 4 KB as JSON, or null. Its step's kind is checked in the vault.
+export function reportShapeError(fields: Record<string, unknown>): "invalid_report" | "text_too_long" | null {
+  const { outcome, code, text } = fields;
+  if (outcome === "done") {
+    if (code !== undefined) return "invalid_report";
+    if (text === undefined) return null;
+    if (typeof text !== "string") return "invalid_report";
+    return readTextFits(text) ? null : "text_too_long";
+  }
+  if (outcome === "failed") return text === undefined && isStepFailure(code) ? null : "invalid_report";
+  return "invalid_report";
+}
+
+/// A page to open, or null: an https URL with no account in it and no space, at most 2,048 characters as given and as
+/// the URL parser writes it.
+function urlOf(value: unknown): URL | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL || /[\s\u0000-\u001f\u007f]/.test(value)) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.hostname === "" ||
+      parsed.href.length > MAX_URL) {
+    return null;
+  }
+  return parsed;
+}
+
+/// The part of a page to read: a selector of 1 to 256 characters with no control character, null for the whole page,
+/// or undefined for anything else.
+function selectorOf(value: unknown): string | null | undefined {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.trim().length === 0 || [...value].length > MAX_SELECTOR || CONTROL.test(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+/// The origins `member` may browse now: those of every working sign-in of the shop that names them.
+async function workingOrigins(storage: DurableObjectStorage, tenant: string, member: string): Promise<string[]> {
+  const origins = new Set<string>();
+  for (const signIn of await liveSignIns(storage, tenant)) {
+    if (signIn.state === "working" && signIn.members.includes(member)) for (const origin of signIn.origins) origins.add(origin);
+  }
+  return [...origins];
+}
+
+async function stepsOf(storage: DurableObjectStorage, tenant: string): Promise<StepRecord[]> {
+  const records = [...(await storage.list<StepRecord>({ prefix: keys.steps })).values()]
+    .filter((record) => record.tenant === tenant);
+  return records.sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
+}
+
+/// A step of `tenant` by its id, or null for a malformed id, one never made, one pruned, or another tenant's.
+async function stepOf(storage: DurableObjectStorage, tenant: string, id: unknown): Promise<StepRecord | null> {
+  if (typeof id !== "string" || !UUID.test(id)) return null;
+  const record = await storage.get<StepRecord>(keys.step(id));
+  return record && record.tenant === tenant ? record : null;
+}
+
+/// The step refused with `code`, keeping nothing it read.
+function refusedStep(step: StepRecord, code: string, at: string): StepRecord {
+  return { ...step, state: "refused", outcome: null, code, text: null, settledAt: at };
+}
+
+function bindingOfStep(step: StepRecord): StepBinding {
+  return { stepId: step.id, taskId: step.taskId, attemptId: step.attemptId,
+    ...(step.signInId !== null ? { signInId: step.signInId } : {}),
+    ...(step.grantId !== null ? { grantId: step.grantId } : {}) };
+}
+
+function workerView(step: StepRecord, nowMs: number): BrowserStepView {
+  const running = step.state === "queued" || step.state === "taken" || step.state === "reported";
+  const state: BrowserStepView["state"] = !running ? step.state as BrowserStepView["state"]
+    : !(nowMs < Date.parse(step.expiresAt)) ? "expired" : step.state === "queued" ? "queued" : "taken";
+  const ended = state === "done" || state === "failed" || state === "refused";
+  return {
+    stepId: step.id,
+    kind: step.kind,
+    outpostId: step.outpostId,
+    state,
+    queuedAt: step.queuedAt,
+    expiresAt: step.expiresAt,
+    ...(step.url !== null ? { url: step.url } : {}),
+    ...(step.selector !== null ? { selector: step.selector } : {}),
+    ...(step.signInId !== null ? { signInId: step.signInId } : {}),
+    ...(ended && step.code !== null ? { code: step.code } : {}),
+    ...(ended && step.text !== null ? { text: step.text } : {}),
+  };
+}
+
+function handedStep(step: StepRecord, origins: string[]): OutpostStep {
+  return {
+    stepId: step.id,
+    kind: step.kind,
+    ...(step.url !== null ? { url: step.url } : {}),
+    ...(step.selector !== null ? { selector: step.selector } : {}),
+    ...(step.grantId !== null ? { grantId: step.grantId } : {}),
+    origins,
+    expiresAt: step.expiresAt,
+  };
+}
+
+/// The fields each kind takes besides the outpost, so nothing rides along that nothing reads.
+const STEP_FIELDS: Readonly<Record<StepKind, string>> = { open: "url", read: "selector", sign_in: "grantId" };
+
+/// A step for an outpost to run in the attempt's browser. The member, the task and the attempt come from the control
+/// plane, which read them from the task object; the kind, the outpost and what to do are what the worker asked for. In
+/// order: the kind (reading only), the outpost (the shop's, and online), then what the kind needs. An `open` goes to an
+/// https page on an origin of a working sign-in the member is named on; a `read` needs at least one such sign-in, since
+/// its outpost may only be on their origins; a `sign_in` carries an unused grant of this attempt, for this outpost, in
+/// no other step, and lives no longer than it.
+async function queueStep(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const { member, taskId, attemptId } = body;
+  if (typeof member !== "string" || member.length === 0 || member.length > MAX_MEMBER ||
+      typeof taskId !== "string" || !TASK_REF.test(taskId) || typeof attemptId !== "string" ||
+      !TASK_REF.test(attemptId)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const kind = STEP_KINDS.find((known) => known === body.kind);
+  if (!kind) return json({ error: "step_kind_not_allowed" }, 403);
+  if (Object.values(STEP_FIELDS).some((field) => field !== STEP_FIELDS[kind] && body[field] !== undefined)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const nowMs = Date.now();
+  // One that is asleep could not take it in time; better the worker hears so now.
+  if (outpostStatus(outpost.lastHeartbeatAt, nowMs) !== "online") return json({ error: "outpost_asleep" }, 409);
+  let expiresMs = nowMs + STEP_TTL_MS;
+  let url: string | null = null;
+  let selector: string | null = null;
+  let carried: { grant: GrantRecord; signIn: SignInRecord } | null = null;
+  if (kind === "open") {
+    const page = urlOf(body.url);
+    if (!page) return json({ error: "invalid_url" }, 400);
+    if (!(await workingOrigins(storage, tenant, member)).includes(page.origin)) {
+      return json({ error: "origin_not_allowed" }, 403);
+    }
+    url = page.href;
+  } else if (kind === "read") {
+    const part = selectorOf(body.selector);
+    if (part === undefined) return json({ error: "invalid_selector" }, 400);
+    selector = part;
+    if ((await workingOrigins(storage, tenant, member)).length === 0) return json({ error: "origin_not_allowed" }, 403);
+  } else {
+    const found = await grantToCarry(storage, tenant, body.grantId, { taskId, attemptId, member, outpostId: outpost.id },
+      nowMs);
+    if (found instanceof Response) return found;
+    carried = found;
+    expiresMs = Math.min(expiresMs, Date.parse(found.grant.expiresAt));
+  }
+  const open = (await stepsOf(storage, tenant)).filter((step) => step.outpostId === outpost.id &&
+    (step.state === "queued" || step.state === "taken" || step.state === "reported") &&
+    nowMs < Date.parse(step.expiresAt));
+  if (open.length >= MAX_OPEN_STEPS) return json({ error: "too_many_steps" }, 409);
+  await pruneSteps(storage, nowMs);
+  const step: StepRecord = { id: crypto.randomUUID(), tenant, kind, url, selector, grantId: carried?.grant.id ?? null,
+    signInId: carried?.signIn.id ?? null, site: carried?.signIn.site ?? null, outpostId: outpost.id, taskId, attemptId,
+    member, queuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(expiresMs).toISOString(), takenAt: null,
+    reportedAt: null, settledAt: null, state: "queued", outcome: null, code: null, text: null };
+  await storage.put({ [keys.step(step.id)]: step,
+    ...(carried ? { [keys.grant(carried.grant.id)]: { ...carried.grant, stepId: step.id } satisfies GrantRecord } : {}) });
+  return json({ step: workerView(step, nowMs) });
+}
+
+/// The grant a `sign_in` step would carry, with its sign-in, or the refusal. A grant of another attempt or another
+/// member reads as one that does not exist, so a worker learns nothing of grants that are not its own.
+async function grantToCarry(storage: DurableObjectStorage, tenant: string, grantId: unknown,
+  bound: { taskId: string; attemptId: string; member: string; outpostId: string }, nowMs: number):
+  Promise<{ grant: GrantRecord; signIn: SignInRecord } | Response> {
+  const grant = typeof grantId === "string" && UUID.test(grantId)
+    ? await storage.get<GrantRecord>(keys.grant(grantId)) : undefined;
+  if (!grant || grant.tenant !== tenant || grant.taskId !== bound.taskId || grant.attemptId !== bound.attemptId ||
+      grant.member !== bound.member) {
+    return json({ error: "grant_not_found" }, 404);
+  }
+  if (grant.outpostId !== bound.outpostId) return json({ error: "wrong_outpost" }, 403);
+  if (grant.usedAt !== null) return json({ error: "grant_used" }, 409);
+  if (!(nowMs < Date.parse(grant.expiresAt))) return json({ error: "grant_expired" }, 409);
+  if (grant.stepId !== undefined) return json({ error: "grant_queued" }, 409);
+  const signIn = await liveSignIn(storage, tenant, grant.signInId);
+  const refused = unusable(signIn, grant.member);
+  if (refused || !signIn) return json({ error: refused?.error ?? "sign_in_not_found" }, refused?.status ?? 404);
+  return { grant, signIn };
+}
+
+/// Deletes the steps that ran out of time ten minutes before, ended or not: long enough for a worker to read how its
+/// step went, and no longer, since what a read brought back is the shop's own data. Their history is in the audit log,
+/// and a landed outcome in the task's events.
+async function pruneSteps(storage: DurableObjectStorage, nowMs: number): Promise<void> {
+  const dead: string[] = [];
+  for (const [key, step] of await storage.list<StepRecord>({ prefix: keys.steps })) {
+    if (Date.parse(step.expiresAt) + GRANT_KEEP_MS < nowMs) dead.push(key);
+  }
+  for (let i = 0; i < dead.length; i += STORAGE_BATCH) await storage.delete(dead.slice(i, i + STORAGE_BATCH));
+}
+
+/// The outpost's steps waiting to be handed out, oldest first, five at most: their ids and the attempt each is for,
+/// which the Worker checks before any is handed out. Writes nothing.
+async function pendingSteps(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const outpost = await authenticated(storage, tenant, body.outpostId, body.credentialHash);
+  if (!outpost) return json(UNAUTHORIZED, 401);
+  const nowMs = Date.now();
+  const waiting = (await stepsOf(storage, tenant)).filter((step) => step.outpostId === outpost.id &&
+    step.state === "queued" && nowMs < Date.parse(step.expiresAt)).slice(0, MAX_FETCH_STEPS);
+  return json({ steps: waiting.map((step) => ({ stepId: step.id, taskId: step.taskId, attemptId: step.attemptId })) });
+}
+
+/// Up to five step ids, or null.
+function stepIdsOf(value: unknown): string[] | null {
+  return Array.isArray(value) && value.length <= MAX_FETCH_STEPS &&
+    value.every((id): id is string => typeof id === "string") ? value : null;
+}
+
+/// Up to five `{ stepId, code }`, or null.
+function stepRefusalsOf(value: unknown): { stepId: string; code: string }[] | null {
+  if (!Array.isArray(value) || value.length > MAX_FETCH_STEPS) return null;
+  const refusals: { stepId: string; code: string }[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.stepId !== "string" || typeof entry.code !== "string" ||
+        !CODE.test(entry.code)) {
+      return null;
+    }
+    refusals.push({ stepId: entry.stepId, code: entry.code });
+  }
+  return refusals;
+}
+
+/// What a step may still do as it is handed out: the origins its outpost may be on for it now, or why it may no longer
+/// run. They are read from the sign-ins again, since one may have been removed or broken since the step was queued;
+/// and a `sign_in` step's grant must still be unused and on time.
+async function allowedNow(storage: DurableObjectStorage, tenant: string, step: StepRecord, nowMs: number):
+  Promise<{ origins: string[] } | { code: string }> {
+  if (step.kind === "sign_in") {
+    const grant = step.grantId !== null ? await storage.get<GrantRecord>(keys.grant(step.grantId)) : undefined;
+    if (!grant || grant.tenant !== tenant) return { code: "grant_not_found" };
+    if (grant.usedAt !== null) return { code: "grant_used" };
+    if (!(nowMs < Date.parse(grant.expiresAt))) return { code: "grant_expired" };
+    const signIn = await liveSignIn(storage, tenant, grant.signInId);
+    const refused = unusable(signIn, step.member);
+    if (refused || !signIn) return { code: refused?.error ?? "sign_in_not_found" };
+    return { origins: signIn.origins };
+  }
+  const origins = await workingOrigins(storage, tenant, step.member);
+  if (origins.length === 0 || (step.url !== null && !origins.includes(new URL(step.url).origin))) {
+    return { code: "origin_not_allowed" };
+  }
+  return { origins };
+}
+
+/// Hands out the steps the Worker let through, once each, and refuses those it could not (the switches, consent, or
+/// an attempt that ended). Only steps still waiting for this outpost and on time are touched, so one that another fetch
+/// took, or that ran out of time meanwhile, is left as it is. A step handed out is read against the sign-ins again
+/// (`allowedNow`), and refused if it may no longer run. Nothing here awaits anything but this object's own storage, so
+/// no request comes between the reads and the one write.
+async function takeSteps(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const outpost = await authenticated(storage, tenant, body.outpostId, body.credentialHash);
+  if (!outpost) return json(UNAUTHORIZED, 401);
+  const take = stepIdsOf(body.take);
+  const refuse = stepRefusalsOf(body.refuse);
+  if (!take || !refuse) return json({ error: "invalid_request" }, 400);
+  const nowMs = Date.now();
+  const at = new Date(nowMs).toISOString();
+  const writes: Record<string, StepRecord> = {};
+  const taken: { step: OutpostStep; binding: StepBinding }[] = [];
+  const refused: { code: string; binding: StepBinding }[] = [];
+  const waiting = async (stepId: string) => {
+    const step = await stepOf(storage, tenant, stepId);
+    return step && step.outpostId === outpost.id && step.state === "queued" && nowMs < Date.parse(step.expiresAt) &&
+      writes[keys.step(step.id)] === undefined ? step : null;
+  };
+  const refuseStep = (step: StepRecord, code: string) => {
+    writes[keys.step(step.id)] = refusedStep(step, code, at);
+    refused.push({ code, binding: bindingOfStep(step) });
+  };
+  for (const { stepId, code } of refuse) {
+    const step = await waiting(stepId);
+    if (step) refuseStep(step, code);
+  }
+  for (const stepId of take) {
+    const step = await waiting(stepId);
+    if (!step) continue;
+    const allowed = await allowedNow(storage, tenant, step, nowMs);
+    if ("code" in allowed) {
+      refuseStep(step, allowed.code);
+      continue;
+    }
+    const handed: StepRecord = { ...step, state: "taken", takenAt: at };
+    writes[keys.step(step.id)] = handed;
+    taken.push({ step: handedStep(handed, allowed.origins), binding: bindingOfStep(step) });
+  }
+  await putAll(storage, writes);
+  return json({ taken, refused });
+}
+
+/// The step an authenticated outpost reports, if it may report it now, or the refusal. The binding goes with every
+/// refusal about a step that exists, for the Worker's audit entry; the Worker never passes it to the outpost.
+async function reportable(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>, nowMs: number):
+  Promise<StepRecord | Response> {
+  const outpost = await authenticated(storage, tenant, body.outpostId, body.credentialHash);
+  if (!outpost) return json(UNAUTHORIZED, 401);
+  const step = await stepOf(storage, tenant, body.stepId);
+  if (!step) return json({ error: "step_not_found" }, 404);
+  const binding = bindingOfStep(step);
+  if (step.outpostId !== outpost.id) return json({ error: "wrong_outpost", binding }, 403);
+  // Never handed out (waiting, or refused before it was): the outpost cannot have run it.
+  if (step.takenAt === null) return json({ error: "step_not_fetched", binding }, 409);
+  if (step.state !== "taken") return json({ error: "step_reported", binding }, 409);
+  if (!(nowMs < Date.parse(step.expiresAt))) return json({ error: "step_expired", binding }, 409);
+  return step;
+}
+
+/// What a report says happened, as its step's kind allows it, or null: `done` with the page's text for a read and with
+/// nothing for the other kinds, or `failed` with a code from STEP_FAILURES and no text.
+function outcomeOf(kind: StepKind, body: Record<string, unknown>):
+  { outcome: "done" | "failed"; code: string | null; text: string | null } | null {
+  if (body.outcome === "done" && body.code === undefined) {
+    if (kind !== "read") return body.text === undefined ? { outcome: "done", code: null, text: null } : null;
+    return typeof body.text === "string" && readTextFits(body.text) ? { outcome: "done", code: null, text: body.text }
+      : null;
+  }
+  if (body.outcome === "failed" && body.text === undefined && isStepFailure(body.code)) {
+    return { outcome: "failed", code: body.code, text: null };
+  }
+  return null;
+}
+
+/// Whether `text` holds the password of any of the shop's live sign-ins. Each is unsealed here, inside the vault, and
+/// compared here, so no password leaves for this check. A seal that cannot be opened counts as held: a read is withheld
+/// rather than let through unchecked.
+async function holdsPassword(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string, text: string):
+  Promise<boolean> {
+  const signIns = await liveSignIns(storage, tenant);
+  if (signIns.length === 0) return false;
+  const key = vaultKeys.CRED_KEY;
+  if (!key) return true;
+  for (const signIn of signIns) {
+    try {
+      if (text.includes(await openSecret(signIn.sealed, key, vaultKeys.CRED_KEY_PREVIOUS))) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// The outpost's report of how a step it took went: once, from that outpost, within the step's time. It is held as
+/// `reported` until the Worker has landed it in the attempt's events (`settleStep`), and from here a second report is
+/// refused, whatever comes next. A read whose text holds the password of one of the shop's sign-ins is held as failed,
+/// `text_withheld`, and the text is kept nowhere: whatever the page or the outpost did, no password reaches the task's
+/// events, the log or the worker.
+async function reportStep(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
+  body: Record<string, unknown>): Promise<Response> {
+  const step = await reportable(storage, tenant, body, Date.now());
+  if (step instanceof Response) return step;
+  const said = outcomeOf(step.kind, body);
+  if (!said) return json({ error: "invalid_report", binding: bindingOfStep(step) }, 400);
+  // Unsealing lets other requests in, so the step is read and checked again after it, before anything is written.
+  const withheld = said.text !== null && (await holdsPassword(storage, vaultKeys, tenant, said.text));
+  const nowMs = Date.now();
+  const again = await reportable(storage, tenant, body, nowMs);
+  if (again instanceof Response) return again;
+  const outcome = withheld ? "failed" : said.outcome;
+  const held: StepRecord = { ...again, state: "reported", reportedAt: new Date(nowMs).toISOString(), outcome,
+    ...(withheld ? { code: "text_withheld", text: null } : { code: said.code, text: said.text }) };
+  await storage.put(keys.step(held.id), held);
+  return json({ binding: bindingOfStep(held), step: { stepId: held.id, kind: held.kind, url: held.url,
+    selector: held.selector, site: held.site, queuedAt: held.queuedAt, outcome, code: held.code,
+    text: held.text } satisfies ReportedStep });
+}
+
+/// The Worker's word on a reported step: landed in the attempt's events, so it stands as the outpost said; or, with a
+/// `code` (the switches, consent, an attempt that ended, a task that could not be written), not allowed to stand, so it
+/// reads refused with that code and what it read is dropped.
+async function settleStep(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const step = await stepOf(storage, tenant, body.stepId);
+  if (!step) return json({ error: "step_not_found" }, 404);
+  if (step.state !== "reported" || step.outcome === null) return json({ error: "step_not_reported" }, 409);
+  if (body.code !== undefined && (typeof body.code !== "string" || !CODE.test(body.code))) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const at = new Date().toISOString();
+  const settled: StepRecord = typeof body.code === "string" ? refusedStep(step, body.code, at)
+    : { ...step, state: step.outcome, settledAt: at };
+  await storage.put(keys.step(step.id), settled);
+  return json({ step: { stepId: step.id, state: settled.state } });
+}
+
+/// `GET /browser-steps/view?stepId=&taskId=&attemptId=`: a step as the worker that queued it sees it. A step of another
+/// attempt reads as not found.
+async function viewStep(storage: DurableObjectStorage, tenant: string, url: URL): Promise<Response> {
+  const step = await stepOf(storage, tenant, url.searchParams.get("stepId"));
+  if (!step || step.taskId !== url.searchParams.get("taskId") || step.attemptId !== url.searchParams.get("attemptId")) {
+    return json({ error: "step_not_found" }, 404);
+  }
+  return json({ step: workerView(step, Date.now()) });
+}
+
 // The Worker's side: calling the shop's vault object, and reading what it answered.
 
 /// One call to the shop's vault object, with the tenant the Worker verified and, for a write, `x-vault`.
@@ -593,10 +1233,11 @@ function refusalOf(body: Record<string, unknown>): string {
 
 /// Ids a worker named, kept in an audit entry only when they could be the vault's (a UUID), so the log never refuses
 /// the entry for a malformed one.
-function namedIds(ids: { signInId?: unknown; outpostId?: unknown }): AuditSubject {
+function namedIds(ids: { signInId?: unknown; outpostId?: unknown; grantId?: unknown }): AuditSubject {
   return {
     ...(typeof ids.signInId === "string" && UUID.test(ids.signInId) ? { signInId: ids.signInId } : {}),
     ...(typeof ids.outpostId === "string" && UUID.test(ids.outpostId) ? { outpostId: ids.outpostId } : {}),
+    ...(typeof ids.grantId === "string" && UUID.test(ids.grantId) ? { grantId: ids.grantId } : {}),
   };
 }
 
@@ -628,6 +1269,56 @@ export async function issueSignInGrant(env: VaultEnv, attempt: AttemptRef, signI
   await appendAudit(env, tenant, { actor, action: "signin.requested", subject: { ...subject, grantId: grant.grantId },
     outcome: "ok" });
   return { ok: true, value: grant };
+}
+
+/// The worker's browser step (job-flow.ts, `browserStep`), once the port has read the switches and consent and the
+/// attempt's own heartbeat. Only the fields a step can have are passed on, with the attempt's own member, task and
+/// attempt. Writes `browser_step.queued`, queued or refused, under the attempt, with ids only: never the page, the
+/// selector, or anything else the worker wrote.
+export async function queueBrowserStep(env: VaultEnv, attempt: AttemptRef, step: unknown):
+  Promise<{ ok: true; value: BrowserStepView } | { ok: false; error: string }> {
+  const { tenant, taskId, attemptId, member } = attempt;
+  const asked = isRecord(step) ? step : {};
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, tenant, "POST", "/browser-steps", { kind: asked.kind,
+      outpostId: asked.outpostId, url: asked.url, selector: asked.selector, grantId: asked.grantId, member, taskId,
+      attemptId }));
+  } catch {
+    answer = null;
+  }
+  if (!answer) return { ok: false, error: "vault_unavailable" };
+  const actor: AuditActor = { kind: "worker", attemptId };
+  if (answer.status !== 200 || !isRecord(answer.body.step)) {
+    const error = refusalOf(answer.body);
+    await appendAudit(env, tenant, { actor, action: "browser_step.queued", subject: {
+      ...namedIds({ outpostId: asked.outpostId, grantId: asked.grantId }), taskId, attemptId }, outcome: "refused",
+    reason: error });
+    return { ok: false, error };
+  }
+  const queued = answer.body.step as BrowserStepView;
+  await appendAudit(env, tenant, { actor, action: "browser_step.queued", subject: { stepId: queued.stepId,
+    ...namedIds({ outpostId: queued.outpostId, signInId: queued.signInId,
+      grantId: queued.kind === "sign_in" ? asked.grantId : undefined }), taskId, attemptId }, outcome: "ok" });
+  return { ok: true, value: queued };
+}
+
+/// How one of the attempt's browser steps stands (job-flow.ts, `browserStepOutcome`), once the port has read the
+/// switches, consent and the attempt's own heartbeat. Another attempt's step reads as not found. A read changes
+/// nothing, so it is not written to the audit log.
+export async function readBrowserStep(env: VaultEnv, attempt: AttemptRef, stepId: unknown):
+  Promise<{ ok: true; value: BrowserStepView } | { ok: false; error: string }> {
+  if (typeof stepId !== "string" || !UUID.test(stepId)) return { ok: false, error: "step_not_found" };
+  const query = new URLSearchParams({ stepId, taskId: attempt.taskId, attemptId: attempt.attemptId });
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, attempt.tenant, "GET", `/browser-steps/view?${query.toString()}`));
+  } catch {
+    answer = null;
+  }
+  if (!answer) return { ok: false, error: "vault_unavailable" };
+  if (answer.status !== 200 || !isRecord(answer.body.step)) return { ok: false, error: refusalOf(answer.body) };
+  return { ok: true, value: answer.body.step as BrowserStepView };
 }
 
 /// The worker's report that the site refused a sign-in's password (job-flow.ts, `signInBroken`), once the port has read

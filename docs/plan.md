@@ -78,6 +78,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | done | 2 and 3. Routines running on schedule, and applying a shop template (runs wait for the owner's `officeRoutines` and `officeCloud` switches) | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
+| done | 8a. The outpost's step channel in the API: workers' browser steps (open, read, sign in) reach an outpost and land in the attempt's events; removing an outpost and replacing its credential; an ingress limit on the outpost routes | | Opus |
 | done | 4. Console: the People page | | Sonnet |
 | done | 7. Several shops in one view: the design and the API side (`docs/several-shops.md`); the desktop switcher is next | | Opus |
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |

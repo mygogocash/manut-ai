@@ -236,7 +236,8 @@ export type AuditEntry = {
   actor: AuditActor;
   action: string;
   /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
-  /// `previousConnectionId`, `confirmationId`, `factId`, `inviteId`, `helperId`, `signInId`, `outpostId`, `grantId`.
+  /// `previousConnectionId`, `confirmationId`, `factId`, `inviteId`, `helperId`, `signInId`, `outpostId`, `stepId`,
+  /// `grantId`.
   subject: Record<string, string>;
   outcome: string;
   reason?: string;

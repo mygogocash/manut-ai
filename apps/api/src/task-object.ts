@@ -532,6 +532,8 @@ export const NO_ATTEMPT = "none";
 /// value, which may not pass 2 MB; at this size a full log stays well inside it.
 const MAX_AGENT_EVENT_BYTES = 8 * 1024;
 const MAX_EVENTS_PER_REPORT = 100;
+/// The most the control plane appends for an outpost at once: a browser step's outcome is two events.
+const MAX_OUTPOST_EVENTS = 10;
 /// Why an attempt ended, as a code a person never writes free text into.
 const REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
@@ -871,11 +873,12 @@ export class TaskObject extends DurableObject {
     if (request.method === "POST" && url.pathname === "/attempts/sweep") {
       return this.sweepAttempts(request);
     }
-    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|draft|end)$/);
+    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|draft|end|outpost-events)$/);
     if (request.method === "POST" && attemptJob) {
       const attemptId = attemptJob[1];
       if (!attemptId) return Response.json({ error: "invalid_request" }, { status: 400 });
       if (attemptJob[2] === "events") return this.reportEvents(request, attemptId);
+      if (attemptJob[2] === "outpost-events") return this.outpostEvents(request, attemptId);
       if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
       if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
@@ -1021,6 +1024,40 @@ export class TaskObject extends DurableObject {
       const tip = this.appendEventsSync(kv, doc, events.map((event) => ({ kind: "agent" as const,
         via: `attempt:events:${attemptId}`, attemptId, event })));
       return { status: 200, body: { stored: events.length, leaseUntil, tip } };
+    }));
+  }
+
+  /// `POST /attempts/:id/outpost-events` with `{ events }` and `x-control`: what an outpost did for the attempt (a
+  /// browser step's outcome, browser-control.ts), as agent events the control plane appends to the task's log on the
+  /// outpost's behalf. Only while the attempt still runs: active, neither its lease nor its deadline passed, its task not
+  /// settled. It needs no fence, since an outpost never holds one, and unlike the worker's own report it never extends
+  /// the lease, so an outpost can never keep a silent worker's attempt alive.
+  private async outpostEvents(request: Request, attemptId: string): Promise<Response> {
+    if (request.headers.get("x-control") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const parsed = await readJsonBody<{ events?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { events } = parsed.value;
+    if (!Array.isArray(events) || events.length === 0 || events.length > MAX_OUTPOST_EVENTS ||
+        !events.every(isAgentEvent)) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowS = Date.now() / 1000;
+      const attempt = kv.get<AttemptJSON>(`attempt:${attemptId}`);
+      if (!attempt) return { status: 404, body: { error: "not_found" } };
+      if (attempt.status !== "active") return { status: 409, body: { error: "stale_attempt" } };
+      if (attempt.leaseUntil <= nowS || attempt.deadline <= nowS) return { status: 409, body: { error: "lease_expired" } };
+      if (isSettled(doc)) return { status: 409, body: { error: "task_settled" } };
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      kv.put("writeStamps", stamps);
+      const tip = this.appendEventsSync(kv, doc, events.map((event) => ({ kind: "agent" as const,
+        via: `attempt:outpost:${attemptId}`, attemptId, event })));
+      return { status: 200, body: { stored: events.length, tip } };
     }));
   }
 
