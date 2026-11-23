@@ -84,8 +84,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - Phase 3: answering approvals from the desktop through the approvals wire format, then the offline cache.
    - Phase 4: Nam, Pim and Ton as workers on the job flow with the stand-in model, drafts only, every send
      through an approval; FlowAccount and Google Sheets connectors behind interfaces, with no live calls.
-   - Phase 5: the routines page (on `@manut/routine-rules`), the owner's billing page with a PromptPay QR
-     (needs Manut AI's PromptPay id from the owner), two shop templates, the LINE client.
+   - Phase 5: the routines page (on `@manut/routine-rules`) and the shop templates. Parked by the owner for
+     later: payments (the owner's PromptPay billing page) and LINE (the LINE client, owner cards).
    - Phase 6: several shops in one view, and more roles.
    - Desktop: a home for the old member-row actions (new thread, pin, restart); richer Team, Needs you and
      History pages.
