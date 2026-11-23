@@ -36,6 +36,10 @@ export const DEFAULT_ROSTER: Roster = [
       { id: "read_orders", access: "read", needsConnection: true },
       { id: "order_status", access: "read", needsConnection: true },
       { id: "reply_customers", access: "write", kind: "reply", needsConnection: true },
+      // Orders are Nam's on the shop's sites ("Nam uses it for orders and chat"). Placing or changing one may spend,
+      // charge or refund the shop's money, so both ask as money, which only the owner decides.
+      { id: "place_orders", access: "write", kind: "money", needsConnection: true },
+      { id: "change_orders", access: "write", kind: "money", needsConnection: true },
     ],
   },
   {
