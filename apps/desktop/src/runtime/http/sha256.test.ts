@@ -17,7 +17,9 @@ describe("sha256Hex", () => {
 
   it("agrees with Node on every length around a block boundary, and on text that is not ASCII", () => {
     for (let n = 0; n <= 130; n += 1) expect(sha256Hex("x".repeat(n)), String(n)).toBe(node("x".repeat(n)));
-    for (const text of ["ร้านมะลิ", "가나다라", "日本語のテキスト", "👍🏽 emoji", "apple:001234.abcdef", JSON.stringify(["https://dev.manut.xyz", "apple:owner-1"])]) {
+    // the fourth text holds code points beyond the first 65,536, which UTF-8 writes in four bytes each
+    const fourBytes = `${String.fromCodePoint(0x1f44d, 0x1f3fd)} outside the basic plane`;
+    for (const text of ["ร้านมะลิ", "가나다라", "日本語のテキスト", fourBytes, "apple:001234.abcdef", JSON.stringify(["https://dev.manut.xyz", "apple:owner-1"])]) {
       expect(sha256Hex(text), text).toBe(node(text));
     }
   });
