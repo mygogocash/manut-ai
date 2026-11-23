@@ -80,7 +80,8 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | done | 4. Console: the People page | | Sonnet |
 | running | 7. Several shops in one view: the design and the API side (the desktop switcher after item 5) | | Opus |
-| done locally | The Playwright revival: pull request #15, merged when CI's Playwright job passes | | Haiku |
+| done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
+| 11 | Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Haiku |
 | running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
