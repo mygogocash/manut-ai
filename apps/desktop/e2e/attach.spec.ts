@@ -1,6 +1,7 @@
 // Files the person sends: the + at the composer's left edge (menu above the composer), drag-and-drop onto
 // the chat, paste, chips with limits, and sending as `chat.attach` for each file, then `chat.send`.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat } from "./start";
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -33,7 +34,8 @@ const sendOps = async () =>
 
 async function openFriren(page: Page) {
   await page.goto("/");
-  await page.getByTestId("bot-friren").click();
+  await chatOpen(page);
+  await openChat(page, "friren");
   await expect(page.getByTestId("header").getByText("Friren", { exact: true })).toBeVisible();
   await expect(page.getByTestId("composer")).toBeEnabled();
 }
@@ -83,7 +85,8 @@ test("the + sits at the composer's left edge, level with Send, always there", as
     const s = getComputedStyle(e);
     return { radius: s.borderRadius, border: s.borderTopStyle, bg: s.backgroundImage };
   });
-  expect(style).toEqual({ radius: "6px", border: "solid", bg: "none" }); // gray outline, never the brand gradient
+  // gray outline, never the brand gradient; the corner is --r, the design kit's 8px radius since the fork's restyle
+  expect(style).toEqual({ radius: "8px", border: "solid", bg: "none" });
 });
 
 test("the + menu has one file item and Plugins ›, the plugins open beside it; the picker adds chips; × removes one; a drop adds one", async ({ page }) => {

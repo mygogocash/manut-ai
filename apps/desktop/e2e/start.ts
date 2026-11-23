@@ -43,12 +43,26 @@ export async function openCode(page: Page): Promise<void> {
   await expect(page.getByTestId("page-code")).toBeVisible();
 }
 
+/** Automations or Plugins: entries of the Customize page now, where the sidebar's foot buttons went. They keep the
+ *  buttons' test ids (`nav-automations`, `nav-plugins`). */
+export async function openCustomize(page: Page, entry: "automations" | "plugins"): Promise<void> {
+  await page.getByTestId("menu-customize").click();
+  await page.getByTestId(`nav-${entry}`).click();
+}
+
 /** Open a page of Settings (`accounts`, `terminal`, `bot-kami`...): the menu's account row opens Settings, and
  *  Settings' own list picks the page. The old sidebar's "You" row opened Accounts in one press. */
 export async function openSettings(page: Page, id: string): Promise<void> {
   await page.getByTestId("nav-settings").click();
   await page.getByTestId(`settings-nav-${id}`).click();
   await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();
+}
+
+/** Open a thread from the History page, which lists every thread of the team: the thread trees under the bot rows
+ *  left with the sidebar. History's rows carry no thread id, so the thread is found by its title. */
+export async function openThread(page: Page, title: string | RegExp): Promise<void> {
+  await page.getByTestId("menu-history").click();
+  await page.getByTestId("history-row").filter({ hasText: title }).click();
 }
 
 /** Open an ask from the Needs you page, which replaced the sidebar's Needs strip: its row, like the strip's item,

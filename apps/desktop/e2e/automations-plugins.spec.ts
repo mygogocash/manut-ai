@@ -3,7 +3,7 @@
 // button; the "say it in words" box, Run now and Edit go to the bot's chat; the cards a bot's own changes leave in
 // its chat; the language picker (ko, ja) with no raw keys on either page.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+import { chatOpen, openChat, openCustomize } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -40,12 +40,12 @@ async function open(page: Page) {
 }
 async function openAutomations(page: Page) {
   await open(page);
-  await page.getByTestId("nav-automations").click();
+  await openCustomize(page, "automations");
   await expect(page.getByTestId("auto-list")).toBeVisible();
 }
 async function openPlugins(page: Page) {
   await open(page);
-  await page.getByTestId("nav-plugins").click();
+  await openCustomize(page, "plugins");
   await expect(page.getByTestId("plug-grid-installed")).toBeVisible();
 }
 
@@ -59,7 +59,10 @@ test("Automations lists every bot's jobs with status, filters by bot and counts 
   await openAutomations(page);
   const rows = page.getByTestId("auto-list").getByRole("listitem");
   await expect(rows).toHaveCount(6);
+  // the Customize page's Automations row counts them, as the sidebar's button did
+  await page.getByTestId("menu-customize").click();
   await expect(page.getByTestId("nav-automations")).toContainText("6");
+  await page.getByTestId("nav-automations").click();
   await expect(page.getByTestId("auto-summary")).toHaveText("1 failed · 1 paused");
   // one of each mark: done, failed, never ran, paused (its toggle off)
   await expect(page.getByTestId("auto-row-c93a7f1e0b55").locator("[data-status]")).toHaveAttribute("data-status", "failed");
@@ -101,7 +104,7 @@ test("a row opens its detail: when, what, where it delivers, last run, and the n
   await expect(d).toContainText('You can also change it by telling Kami in chat');
   // a job delivered to the bot's own chat says so
   await page.getByTestId("auto-row-a1f0c2d9e801").click();
-  await expect(d.getByTestId("auto-deliver")).toHaveText("Kami chat (manut)");
+  await expect(d.getByTestId("auto-deliver")).toHaveText("Kami chat (Manut AI)");
   // Run now is a quiet text action at the end of the row, not a filled button (khope: it looked like one you must
   // press): no fill, the quiet colour, after Delete
   const run = d.getByTestId("auto-run");
@@ -125,7 +128,7 @@ test("the toggle pauses and resumes through cron.manage with the job id; offline
   ]);
   await mock("mock.offline", { bot: "kami" });
   await tog.click();
-  await expect(page.getByTestId("page-error")).toHaveText("Kami is offline. Start its gateway, then try again.");
+  await expect(page.getByTestId("page-error")).toHaveText("Kami is offline. Try again when it is back.");
   await expect(tog).toHaveAttribute("aria-checked", "true");
 });
 
@@ -158,7 +161,7 @@ test("Run now is a chat message to the bot and opens its chat; Edit fills the bo
   expect(await submitted("friren")).toEqual([]);
   await page.getByTestId("auto-run").click();
   await page.getByTestId("auto-run-confirm").click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("bubble-user").last().locator(".b")).toHaveText('Run my automation "Weekly product-ab report" (id e5c2a9b81d40) now.');
   expect(await submitted("friren")).toEqual(['Run my automation "Weekly product-ab report" (id e5c2a9b81d40) now.']);
   expect((await calls("automations.")).filter((c) => c.op !== "automations.list")).toEqual([]);
@@ -173,7 +176,7 @@ test("the top box sends to the picked bot's chat; a suggestion only fills it", a
   await page.getByTestId("ask-bot").click();
   await page.getByTestId("ask-bot-default").click();
   await page.getByTestId("ask-send").click();
-  await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "default");
   await expect(page.getByTestId("bubble-user").last().locator(".b")).toHaveText("Tell me when CI fails on one of my PRs");
   expect(await submitted("default")).toEqual(["Tell me when CI fails on one of my PRs"]);
 });
@@ -192,7 +195,7 @@ test("New adds through cron.manage; Hermes' refusal shows as its own words", asy
   await expect(form).toHaveCount(0);
   await expect(page.getByTestId("auto-list").getByRole("listitem")).toHaveCount(7);
   await expect(page.getByTestId("auto-detail").getByRole("heading")).toHaveText("Standup notes");
-  await expect(page.getByTestId("auto-deliver")).toHaveText("Kami chat (manut)");
+  await expect(page.getByTestId("auto-deliver")).toHaveText("Kami chat (Manut AI)");
   const adds = (await calls("automations.add")).map((c) => c.params);
   expect(adds[1]).toEqual({ bot: "kami", name: "Standup notes", schedule: "0 9 * * 1-5", prompt: "Collect yesterday's merged PRs into standup notes.", deliver: "bot-chat:kami" });
 });
@@ -205,8 +208,10 @@ test("an automation the bot made in chat leaves a card there: run, open, undo", 
   await expect(card).toContainText("CI watch on my PRs");
   await expect(card).toContainText("New automation");
   await expect(card).toContainText("every 15 min");
-  await expect(card).toContainText("Kami chat (manut)");
+  await expect(card).toContainText("Kami chat (Manut AI)");
+  await page.getByTestId("menu-customize").click();
   await expect(page.getByTestId("nav-automations")).toContainText("7");
+  await openChat(page, "kami");
   // Run once is the quiet last action: a click asks first, Run sends the run message to the bot
   const run = card.getByTestId("card-run");
   const [runBox, undoBox] = await Promise.all([run.boundingBox(), card.getByTestId("card-undo").boundingBox()]);
@@ -219,7 +224,7 @@ test("an automation the bot made in chat leaves a card there: run, open, undo", 
 
   await card.getByTestId("card-open-auto").click();
   await expect(page.getByTestId("auto-detail").getByRole("heading")).toHaveText("CI watch on my PRs");
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await card.getByTestId("card-undo").click();
   await card.getByTestId("card-undo-confirm").click();
   await expect(card).toContainText("Removed");
@@ -357,6 +362,7 @@ test("the language picker switches at once (ko, ja); both pages translate and sh
 
   await seg.getByRole("radio", { name: "한국어" }).click();
   expect(await page.evaluate(() => localStorage.getItem("manut.lang"))).toBe("ko");
+  await page.getByTestId("menu-customize").click();
   await expect(page.getByTestId("nav-automations")).toContainText("자동화");
   await page.getByTestId("nav-automations").click();
   const auto = page.getByTestId("automations");
@@ -370,7 +376,7 @@ test("the language picker switches at once (ko, ja); both pages translate and sh
   await expect(page.getByTestId("auto-pause")).toHaveText("멈춤");
   await expect(page.getByTestId("auto-delete")).toHaveText("삭제");
   expect(await auto.innerText()).not.toMatch(RAW_KEY);
-  await page.getByTestId("nav-plugins").click();
+  await openCustomize(page, "plugins");
   const plug = page.getByTestId("plugins");
   await expect(page.getByTestId("plug-tab-installed")).toHaveText("설치됨4");
   await expect(page.getByTestId("plug-card-elevenlabs-music").getByTestId("needs-key")).toHaveText("켜려면 API 키가 필요해요");
@@ -378,33 +384,35 @@ test("the language picker switches at once (ko, ja); both pages translate and sh
 
   // the choice stays after a reload, and Japanese works the same way
   await page.reload();
+  await chatOpen(page);
+  await page.getByTestId("menu-customize").click();
   await expect(page.getByTestId("nav-plugins")).toContainText("플러그인");
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("language").getByRole("radio", { name: "日本語" }).click();
-  await page.getByTestId("nav-automations").click();
+  await openCustomize(page, "automations");
   await expect(page.getByTestId("automations").getByTestId("header")).toContainText("オートメーション");
   await page.getByTestId("auto-row-a1f0c2d9e801").click();
   await expect(page.getByTestId("auto-run")).toHaveText("今すぐ実行");
   expect(await page.getByTestId("automations").innerText()).not.toMatch(RAW_KEY);
-  await page.getByTestId("nav-plugins").click();
+  await openCustomize(page, "plugins");
   await expect(page.getByTestId("plug-tab-browse")).toContainText("探す");
   await page.getByTestId("plug-tab-browse").click();
   await expect(page.getByTestId("plug-install-babysit")).toHaveText("インストール");
   expect(await page.getByTestId("plugins").innerText()).not.toMatch(RAW_KEY);
-  await expect(page.getByTestId("sidebar")).toContainText("ボット");
+  // the side menu speaks it too: its Team row
+  await expect(page.getByTestId("menu-team")).toHaveText("チーム");
 
   // back to English for the other specs on this browser
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("language").getByRole("radio", { name: "English" }).click();
-  await expect(page.getByTestId("nav-settings")).toHaveText("Settings");
+  await expect(page.getByTestId("menu-team")).toHaveText("Team");
 });
 
 // ---- the back arrow ---------------------------------------------------------------------------------------------
 
-test("Automations, Plugins and Settings each have a back arrow top left that returns to the chat", async ({ page }) => {
+test("Automations, Plugins and Settings each have a back arrow top left that returns to where they were opened", async ({ page }) => {
   await open(page);
-  for (const [nav, view] of [["nav-automations", "automations"], ["nav-plugins", "plugins"], ["nav-settings", "settings"]]) {
-    await page.getByTestId(nav).click();
+  const leavesBy = async (view: string) => {
     await expect(page.getByTestId(view)).toBeVisible();
     const head = page.getByTestId("header");
     const back = head.getByTestId("page-back");
@@ -416,8 +424,19 @@ test("Automations, Plugins and Settings each have a back arrow top left that ret
     expect(b.x - (await head.boundingBox())!.x).toBeLessThan(20);
     await back.click();
     await expect(page.getByTestId(view)).toHaveCount(0);
-    await expect(page.getByTestId("composer")).toBeVisible();
+  };
+  // Automations and Plugins open from the Customize page and return to it (store.ts, backOf)
+  for (const [nav, view] of [["nav-automations", "automations"], ["nav-plugins", "plugins"]]) {
+    await page.getByTestId("menu-customize").click();
+    await page.getByTestId(nav).click();
+    await leavesBy(view);
+    await expect(page.getByTestId("page-customize")).toBeVisible();
   }
+  // Settings opens from the menu's account row over the chat, and returns to the chat
+  await openChat(page, "kami");
+  await page.getByTestId("nav-settings").click();
+  await leavesBy("settings");
+  await expect(page.getByTestId("composer")).toBeVisible();
   // Settings keeps its × too
   await page.getByTestId("nav-settings").click();
   await page.getByRole("button", { name: "Close settings" }).click();

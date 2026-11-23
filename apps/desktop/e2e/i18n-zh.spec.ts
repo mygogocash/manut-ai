@@ -2,7 +2,7 @@
 // Chinese with no English UI words left, nothing overflows sideways at the 900px minimum width, <html lang> says
 // zh-CN, a first run picks the system's language, and Enter that commits an IME composition never submits.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen, openCode } from "./start";
+import { chatOpen, homeOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -36,7 +36,7 @@ async function openZh(page: Page) {
 async function englishLeft(page: Page, root: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const KEEP =
-      /^(manut|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Graphite|Ocean|Forest|Sunset|Rose)$/;
+      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Graphite|Ocean|Forest|Sunset|Rose)$/;
     // commands (`hermes auth add …`, `npm i -g …`), paths, ids and model or provider names stay as written
     const isData = (s: string) =>
       /[@/\\:]|^\d|^[a-z0-9._-]+$|^v?\d+(\.\d+)+/.test(s) ||
@@ -108,7 +108,6 @@ for (const width of [1280, 900]) {
     await expect(page.getByTestId("model-search")).toHaveAttribute("placeholder", "搜索模型");
     expect(await englishLeft(page, "[data-testid=model-pop]")).toEqual([]);
     await page.keyboard.press("Escape");
-    await openCode(page);
     await page.getByTestId("session-new").click();
     await expect(page.getByTestId("session-menu")).toContainText("新建会话");
     expect(await englishLeft(page, "[data-testid=session-menu]")).toEqual([]);
@@ -120,7 +119,8 @@ for (const width of [1280, 900]) {
     await openZh(page);
     await page.getByTestId("nav-settings").click();
     await expect(page.locator(".head-title")).toHaveText("设置");
-    const pages = ["accounts", "bots", "bot-kami", "general", "providers", "computer"];
+    // every page but Providers, which the fork removed with Hermes' sign-in
+    const pages = ["accounts", "bots", "bot-kami", "general", "computer"];
     for (const id of pages) {
       await page.getByTestId(`settings-nav-${id}`).click();
       await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();
@@ -165,8 +165,8 @@ test("a first run takes the language from the system; an install that already ra
   const fresh = await browser.newContext({ locale: "zh-CN", colorScheme: "dark", storageState: { cookies: [], origins: [] } });
   const p1 = await fresh.newPage();
   await p1.goto("/");
-  // a fresh install lists the default bot alone
-  await expect(p1.getByTestId("bot-default")).toBeVisible();
+  // a fresh install opens on Home
+  await homeOpen(p1);
   expect(await p1.evaluate(() => document.documentElement.lang)).toBe("zh-CN");
   await expect(p1.getByTestId("nav-settings")).toContainText("设置");
   expect(await p1.evaluate(() => localStorage.getItem("manut.lang"))).toBe("zh");
@@ -181,7 +181,7 @@ test("a first run takes the language from the system; an install that already ra
   const old = await browser.newContext({ locale: "ja-JP", colorScheme: "dark" });
   const p2 = await old.newPage();
   await p2.goto("/");
-  await expect(p2.getByTestId("bot-kami")).toBeVisible();
+  await chatOpen(p2);
   await expect(p2.getByTestId("nav-settings")).toContainText("Settings");
   expect(await p2.evaluate(() => document.documentElement.lang)).toBe("en");
   await old.close();

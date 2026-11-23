@@ -2,7 +2,7 @@
 // Korean choices. They stay out of the repo (CLARIFY_SHOTS dir, else Playwright's ignored test-results).
 import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
-import { chatOpen } from "./start";
+import { chatOpen, openNeed } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.CLARIFY_SHOTS || "test-results";
@@ -32,7 +32,7 @@ async function setup(page: Page, rewrite: (msg: any) => void, kind: string, them
     m.getStore().actions.setTheme(th as "light" | "dark");
   }, theme);
   if (kind === "interview") {
-    // asked by the mock bridge on another bot, opened from the Needs-you strip
+    // asked by the mock bridge on another bot, opened from the Needs you page
     await page.evaluate(async (port) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=e2e`);
       await new Promise<void>((res) => (ws.onopen = () => res()));
@@ -42,8 +42,7 @@ async function setup(page: Page, rewrite: (msg: any) => void, kind: string, them
       });
       ws.close();
     }, MOCK);
-    await page.getByTestId("needs-strip").click();
-    await page.getByTestId("needs-item").first().click();
+    await openNeed(page);
     return;
   }
   const c = page.getByTestId("composer");

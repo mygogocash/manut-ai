@@ -13,7 +13,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
 import { mkdirSync } from "node:fs";
-import { chatOpen } from "./start";
+import { chatOpen, openChat, openThread } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || process.env.MANUT_SHOTS_DIR || "";
@@ -51,6 +51,8 @@ const SEED = [
   { title: "OG 대시보드 502 원인 찾기", ago: 60, cwd: "/home/you/code/og-gateway" },
 ];
 
+const historyRow = (page: Page, title: string) => page.getByTestId("history-row").filter({ hasText: title });
+
 /** Kami with five threads in the five states; the 502 thread runs a Codex part and a Hermes child. */
 async function seed(page: Page) {
   await mock("mock.manual", { bot: "kami" });
@@ -58,7 +60,9 @@ async function seed(page: Page) {
   await page.reload();
   await chatOpen(page);
   const [notes, nightly, slack, docs, og] = threads as string[];
-  await expect(page.getByTestId(`thread-row-${og}`)).toBeVisible();
+  // History lists the threads and their states, as the thread tree under the bot row did
+  await page.getByTestId("menu-history").click();
+  await expect(historyRow(page, "OG 대시보드 502 원인 찾기")).toBeVisible();
   const sub = (id: string, index: number, extra: Record<string, unknown>) => ({
     event: "subagent", bot: "kami", session: og, id, index, count: 2, delegation: "deleg_og", state: "running", ...extra,
   });
@@ -77,8 +81,8 @@ async function seed(page: Page) {
       { event: "turn.end", bot: "kami", session: nightly, outcome: "error", error: "gateway timeout" },
     ],
   });
-  await expect(page.getByTestId(`thread-row-${og}`)).toHaveAttribute("data-state", "running");
-  await expect(page.getByTestId(`thread-row-${docs}`)).toHaveAttribute("data-state", "needs_you");
+  await expect(historyRow(page, "OG 대시보드 502 원인 찾기")).toContainText("Working");
+  await expect(historyRow(page, "Docs dark mode 대비 점검")).toContainText("Needs you");
   return { notes, nightly, slack, docs, og };
 }
 
@@ -92,6 +96,7 @@ test.afterEach(async () => {
 test.describe("shots", () => {
   test.use({ deviceScaleFactor: 2 });
   test("integrate shots: sidebar dark/light, a thread with harness marks, the terminal", async ({ page }) => {
+    test.skip(true, "shots of the sidebar's thread tree, which left with the bot rows; History lists the threads now");
     test.skip(!SHOTS, "MANUT_SHOTS unset");
     mkdirSync(SHOTS, { recursive: true });
     await setup(page, "dark");
@@ -130,32 +135,12 @@ test.describe("shots", () => {
   });
 });
 
-test("a thread row carries the marks of who works in it; the thread chat shows the same subagent rows", async ({ page }) => {
+test("the thread chat shows the subagent rows of who works in it", async ({ page }) => {
   await setup(page);
-  const ids = await seed(page);
-  const stack = page.getByTestId(`thread-row-${ids.og}`).getByTestId("harness-stack");
-  await expect(stack).toBeVisible();
-  // Codex (its own mark) and a Hermes child out: the row shows ONE mark (the first), no "+N"; the tooltip names both
-  await expect(stack.locator("[data-harness]")).toHaveCount(1);
-  await expect(stack.locator("[data-harness]")).toHaveAttribute("data-harness", "codex");
-  await expect(stack.getByTestId("harness-more")).toHaveCount(0);
-  await expect(stack).toHaveAttribute("title", "Codex, Hermes");
-  // the title keeps >= 14 visible characters at the default sidebar width
-  const visible = await page.getByTestId(`thread-row-${ids.og}`).locator(".th-title").evaluate((el) => {
-    const c = document.createElement("canvas").getContext("2d")!;
-    c.font = getComputedStyle(el).font;
-    const s = el.textContent ?? "";
-    let n = 0;
-    while (n < s.length && c.measureText(s.slice(0, n + 1) + "…").width <= el.clientWidth) n++;
-    return n;
-  });
-  expect(visible).toBeGreaterThanOrEqual(14);
-  // the mark sits in the time's place while it shows; a row with nobody out keeps its time
-  await expect(page.getByTestId(`thread-row-${ids.og}`).locator(".th-time")).toBeHidden();
-  await expect(page.getByTestId(`thread-row-${ids.slack}`).locator(".th-time")).toBeVisible();
-  // a thread with nobody out has no stack (the slot stays empty)
-  await expect(page.getByTestId(`thread-row-${ids.slack}`).getByTestId("harness-stack")).toHaveCount(0);
-  await page.getByTestId(`thread-row-${ids.og}`).getByTestId("thread-open").click();
+  await seed(page);
+  // The thread rows that carried the same marks, their titles and times left with the sidebar's thread tree, and
+  // History's rows have no marks yet, so only the thread chat's part of this test is left.
+  await openThread(page, "OG 대시보드 502 원인 찾기");
   const chat = page.getByTestId("thread-chat");
   // the header reads "Kami / <title>" as one breadcrumb: no fixed-width gap after the bot's name
   const name = await page.getByTestId("thread-back").locator(".head-title").boundingBox();
@@ -163,18 +148,17 @@ test("a thread row carries the marks of who works in it; the thread chat shows t
   expect(sep!.x - (name!.x + name!.width)).toBeLessThanOrEqual(16);
   await expect(chat.locator('.sa-mark[data-harness="codex"]')).toHaveCount(1);
   await expect(chat.locator('.sa-mark[data-harness="hermes"]')).toHaveCount(1);
-  // the Codex child ends: the row's one mark is the Hermes child still out
-  await mock("mock.emit", { events: [{ event: "subagent", bot: "kami", session: ids.og, id: "sa-og-1", index: 0, count: 2, delegation: "deleg_og", state: "done", summary: "502 at 14:31" }] });
-  await expect(stack.locator("[data-harness]")).toHaveAttribute("data-harness", "hermes");
 });
 
 test("the terminal panel's next tab starts in the open thread's folder, home in the main chat", async ({ page }) => {
   await setup(page);
   const ids = await seed(page);
   const cwd = () => page.evaluate(async () => ((await import("/src/terminal/state.ts" as string)) as { getTermPanel?: () => { cwd: string | null } }).getTermPanel?.().cwd ?? null);
-  await page.getByTestId(`thread-row-${ids.og}`).getByTestId("thread-open").click();
+  await openThread(page, "OG 대시보드 502 원인 찾기");
+  await expect(page.getByTestId("thread-chat")).toHaveAttribute("data-thread", ids.og);
   await expect.poll(cwd).toBe("/home/you/code/og-gateway");
-  await page.getByTestId(`thread-row-${ids.notes}`).getByTestId("thread-open").click();
+  await openThread(page, "릴리스 노트 초안 정리");
+  await expect(page.getByTestId("thread-chat")).toHaveAttribute("data-thread", ids.notes);
   await expect.poll(cwd).toBe("/home/you/code/docs");
   await page.getByTestId("thread-back").click();
   await expect.poll(cwd).toBe(null);
@@ -185,9 +169,8 @@ test("a restored thread listed without a folder: opening it gives the row its fo
   await mock("mock.manual", { bot: "kami" });
   const { threads } = await mock("mock.threads", { bot: "kami", threads: [{ title: "restored", ago: 60, cwd: "/work/restored", listedCwd: "" }] });
   await page.reload();
-  const row = page.getByTestId(`thread-row-${threads[0]}`);
-  await expect(row).toBeVisible();
-  await row.getByTestId("thread-open").click();
+  await chatOpen(page);
+  await openThread(page, "restored");
   await expect(page.getByTestId("thread-chat")).toHaveAttribute("data-thread", threads[0]);
   // the row takes the folder once thread.open answers; the terminal's next tab follows it
   const termCwd = () => page.evaluate(async () => ((await import("/src/terminal/state.ts" as string)) as { getTermPanel(): { cwd: string | null } }).getTermPanel().cwd);
@@ -200,19 +183,20 @@ test("a restored thread listed without a folder: opening it gives the row its fo
 
 test("SESSIONS is back as TERMINALS only (2026-11-16): ⌘N opens its + menu with no chat choice; ⌘⇧] with no terminal opens nothing", async ({ page }) => {
   await setup(page);
-  await expect(page.getByTestId("side-bots")).toBeVisible();
-  await expect(page.getByTestId("side-sessions")).toBeVisible();
   const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
   await page.keyboard.press(`${mod}+Shift+BracketRight`);
   await page.waitForTimeout(200);
   await expect(page.getByTestId("session-view")).toHaveCount(0);
+  // ⌘N opens the Code page, where TERMINALS went, with its + menu open
   await page.keyboard.press(`${mod}+n`);
+  await expect(page.getByTestId("page-code").getByTestId("side-sessions")).toBeVisible();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await expect(page.getByTestId("session-agent-shell")).toBeVisible();
   await expect(page.getByTestId("session-menu").getByText(/^Chat$/)).toHaveCount(0);
 });
 
 test("thread rows: connector, spinner, pulse, idle dot, indent and size; bot row follows its newest thread", async ({ page }) => {
+  test.skip(true, "the thread tree's connector, spinner, pulse and dot, and the bot row's line, left with the sidebar; History shows a status word per thread");
   await setup(page);
   const ids = await seed(page);
   const look = await page.evaluate((ids) => {
@@ -315,8 +299,11 @@ test("split: link lines are a tight underlined list; Send there is primary; the 
   expect(b!.y - (a!.y + a!.height)).toBeLessThanOrEqual(2);
   const deco = await links.nth(0).locator(".th-link-t").evaluate((el) => getComputedStyle(el).textDecorationLine);
   expect(deco).toContain("underline");
-  const ids = await page.getByTestId("threads-kami").getByRole("treeitem").evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")!));
-  await expect.poll(async () => page.getByTestId("threads-kami").getByRole("treeitem").evaluateAll((els) => els.map((e) => e.getAttribute("data-state")))).toEqual(["done", "done"]);
+  const ids = await links.evaluateAll((els) => els.map((e) => e.getAttribute("data-thread")!));
+  // both threads did their task, as History says (the thread tree under the bot row did before)
+  await page.getByTestId("menu-history").click();
+  for (const title of ["A 스레드", "B 스레드"]) await expect(historyRow(page, title)).toContainText("Done");
+  await openChat(page, "kami");
   await mock("mock.answer", { bot: "kami", text: "그 스레드에서 이어가요.\n" + fence("manut-thread-route", { thread: ids[0] }) });
   await box.click();
   await box.fill("이어서 해줘");

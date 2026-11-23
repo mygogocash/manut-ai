@@ -3,6 +3,8 @@
 // Pinned bots move only among the pinned; dragging another bot above them stops below them (nothing gets pinned).
 import { expect, test, type Page } from "@playwright/test";
 
+test.skip(true, "the bot rows and their drag, ⌥↑/⌥↓ and pinned order left with the sidebar; Team lists the members and has no reorder yet");
+
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
 async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {

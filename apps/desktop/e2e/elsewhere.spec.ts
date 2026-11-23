@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -68,11 +68,11 @@ test("header chip counts the other places and toggles the panel", async ({ page 
   await expect.poll(async () => Math.round((await details.boundingBox())?.width ?? 0)).toBeLessThan(2);
 
   // a bot with no sessions elsewhere shows no chip
-  await page.getByTestId("bot-default").click();
+  await openChat(page, "default");
   await expect(page.getByTestId("header").getByText("Hermes", { exact: true })).toBeVisible();
   await expect(page.getByTestId("places")).toHaveCount(0);
   // Friren has one Telegram session
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   await expect(page.getByTestId("places")).toHaveText("1 other place");
 });
 
@@ -104,14 +104,14 @@ test("Details panel: identity, where the bot is, note, routines", async ({ page 
   await page.getByTestId("places").click();
   const panel = page.getByTestId("details-panel");
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText("Hermes profile · kami");
+  await expect(panel).toContainText("ID · kami");
   await expect(panel.locator(".details-sub.mono")).toHaveText("Opus 5.5");
   await expect(panel.getByTestId("where-sec")).toHaveText("Where Kami is4");
 
   const rows = panel.getByTestId("where-row");
   await expect(rows).toHaveCount(4);
   await expect(rows.nth(0)).toContainText("This chat");
-  await expect(rows.nth(0)).toContainText("manut");
+  await expect(rows.nth(0)).toContainText("Manut AI");
   await expect(rows.nth(1)).toContainText("gateway 502 on /v1/responses");
   await expect(rows.nth(1)).toContainText("Slack #og-dev");
   await expect(rows.nth(1)).toContainText(/working · \d+m/);
