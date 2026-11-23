@@ -187,8 +187,13 @@ type Payment = {
 };
 
 // The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
-// attention items and `pilot: { shop, messages, replies, payments }`. Saved whole.
-type ShopExport = { tenant: string; exportedAt: string; [part: string]: unknown };
+// attention items and `pilot: { shop, messages, replies, payments, displayNames }`, where `displayNames` is
+// the LINE display names cached for the shop's customers, `{ lineUserId, displayName }[]`. `deletedAt` is
+// there once the shop was deleted. Saved whole.
+// If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
+// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "schedules", "tombstone"),
+// never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
+type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
 
 type DeletedShop = {
   tasksWiped: number;
