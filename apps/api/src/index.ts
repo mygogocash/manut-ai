@@ -4,7 +4,7 @@ import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
-import { vaultAdminRoute } from "./browser-control";
+import { outpostRoute, vaultAdminRoute } from "./browser-control";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
@@ -207,10 +207,11 @@ const ADMIN_METHODS = new Set([
   // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
   // model through the gateway, never the route. The tenant travels in the body.
   "POST /v1/admin/workers/run",
-  // The vault's site sign-ins (browser-control.ts): list them without any secret, add one, replace a password, remove
-  // one. The tenant and the sign-in's id travel in the query or the body.
+  // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
+  // add one, replace a password, remove one; register an outpost, list them. The tenant and the ids travel in the
+  // query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
-  "POST /v1/admin/vault/sign-ins/remove",
+  "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -636,10 +637,12 @@ export default {
     const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
     if (workers) return workers;
 
-    // The vault's site sign-ins (browser-control.ts). The admin gate above already required both credentials and the
-    // exact method.
+    // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
+    // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
     const vault = await vaultAdminRoute(request, url, env, ctx);
     if (vault) return vault;
+    const outpost = await outpostRoute(request, url, env);
+    if (outpost) return outpost;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

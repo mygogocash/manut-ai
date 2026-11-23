@@ -58,11 +58,12 @@ export const AUDIT_ACTIONS = [
   "memory.confirmed",
   "memory.corrected",
   "memory.forgotten",
-  // Browser control (browser-control.ts): the vault's site sign-ins. Each names the sign-in by its id, never its
-  // account or password.
+  // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
+  // sign-in or the outpost by its id, never an account, a password or a credential.
   "signin.created",
   "signin.password_replaced",
   "signin.removed",
+  "outpost.registered",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -95,6 +96,7 @@ export const AUDIT_SUBJECT_KEYS = [
   "confirmationId",
   "factId",
   "signInId",
+  "outpostId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 

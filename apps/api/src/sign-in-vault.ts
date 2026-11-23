@@ -1,8 +1,9 @@
-/// The shop's site sign-ins, kept in its vault object (`CredObject`, `t:${tenant}`) beside its connections
-/// (docs/browser-control.md). This is the object's side; the routes are browser-control.ts's.
+/// The shop's site sign-ins and the outposts that type them, kept in its vault object (`CredObject`, `t:${tenant}`)
+/// beside its connections (docs/browser-control.md). This is the object's side; the routes are browser-control.ts's.
 ///
 /// A sign-in's password is sealed with the vault's own keys (cred-crypto.ts). No answer from here holds it: each
-/// answers the public view, which says only that a password is set.
+/// answers the public view, which says only that a password is set. An outpost's credential is never here at all: the
+/// Worker mints it, hands it out once, and gives this object only its SHA-256 digest.
 ///
 /// Paths, each with the Worker's `x-tenant` (a record of another tenant reads as not found), and writes also with
 /// `x-vault`, the same defence in depth as `x-pilot` and `x-audit`:
@@ -11,6 +12,9 @@
 /// - `POST /sign-ins` `{ site, origins, username, password, members }`: a new sign-in.
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
+/// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
+/// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
+/// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
 
 import { DEFAULT_ROSTER } from "@manut/member-grants";
 import { readJsonBody } from "./body";
@@ -56,6 +60,26 @@ export const SIGN_IN_MEMBERS: readonly string[] = DEFAULT_ROSTER
   .filter((member) => member.capabilities.some((capability) => capability.needsConnection))
   .map((member) => member.id);
 
+export const OUTPOST_KINDS = ["this_mac", "cloud"] as const;
+export type OutpostKind = (typeof OUTPOST_KINDS)[number];
+
+/// A machine the team's browser runs on: this Mac through the desktop app, or a cloud outpost.
+type OutpostRecord = {
+  id: string;
+  tenant: string;
+  name: string;
+  kind: OutpostKind;
+  /// The SHA-256 of its credential, in hex.
+  credentialHash: string;
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+};
+
+export type OutpostView = Omit<OutpostRecord, "tenant" | "credentialHash"> & { status: "online" | "asleep" };
+
+/// An outpost beats every 30 seconds while it is awake, so one silent for 90 has missed three beats and is asleep.
+export const ONLINE_WINDOW_MS = 90_000;
+
 const MAX_BODY_BYTES = 16 * 1024;
 /// Live sign-ins per shop, so one shop's vault cannot grow without bound.
 const MAX_SIGN_INS = 50;
@@ -64,14 +88,20 @@ const MAX_ORIGINS = 5;
 const MAX_ORIGIN_LENGTH = 256;
 const MAX_USERNAME = 256;
 const MAX_PASSWORD = 1024;
+/// Outposts per shop.
+const MAX_OUTPOSTS = 20;
+const MAX_NAME = 80;
 /// Characters that cannot be typed into a form field, and are never part of a name or an account.
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const DIGEST = /^[0-9a-f]{64}$/;
 const EMPTY_SEAL: SealedSecret = { keyTag: "", iv: "", data: "" };
 
 const keys = {
   signIn: (id: string) => `signin:${id}`,
   signIns: "signin:",
+  outpost: (id: string) => `outpost:${id}`,
+  outposts: "outpost:",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -84,8 +114,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /// The paths this module answers inside the vault object.
 export function isSignInVaultPath(pathname: string): boolean {
-  return pathname === "/sign-ins" || pathname.startsWith("/sign-ins/");
+  return pathname === "/sign-ins" || pathname.startsWith("/sign-ins/") || pathname === "/outposts" ||
+    pathname.startsWith("/outposts/");
 }
+
+/// Whether two hex digests are the same, in time that does not depend on where they differ.
+function sameDigest(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/// Online while its last beat is under 90 seconds old; asleep otherwise, and before its first beat.
+export function outpostStatus(lastHeartbeatAt: string | null, nowMs: number): "online" | "asleep" {
+  if (lastHeartbeatAt === null) return "asleep";
+  const at = Date.parse(lastHeartbeatAt);
+  return Number.isFinite(at) && nowMs - at < ONLINE_WINDOW_MS ? "online" : "asleep";
+}
+
+function outpostView(record: OutpostRecord, nowMs: number): OutpostView {
+  return { id: record.id, name: record.name, kind: record.kind, status: outpostStatus(record.lastHeartbeatAt, nowMs),
+    lastHeartbeatAt: record.lastHeartbeatAt, createdAt: record.createdAt };
+}
+
+async function outpostsOf(storage: DurableObjectStorage, tenant: string): Promise<OutpostRecord[]> {
+  const records = [...(await storage.list<OutpostRecord>({ prefix: keys.outposts })).values()]
+    .filter((record) => record.tenant === tenant);
+  return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+}
+
+/// The outpost that presented this credential digest, or null. An unknown outpost, another tenant's, and a digest
+/// that is not its own all read the same, so a caller learns nothing from which it was.
+async function authenticated(storage: DurableObjectStorage, tenant: string, outpostId: unknown,
+  credentialHash: unknown): Promise<OutpostRecord | null> {
+  if (typeof outpostId !== "string" || !UUID.test(outpostId) || typeof credentialHash !== "string" ||
+      !DIGEST.test(credentialHash)) {
+    return null;
+  }
+  const record = await storage.get<OutpostRecord>(keys.outpost(outpostId));
+  if (!record || record.tenant !== tenant) return null;
+  return sameDigest(record.credentialHash, credentialHash) ? record : null;
+}
+
+const UNAUTHORIZED = { error: "unauthorized" };
 
 /// A site's name as people write it, trimmed: one to 80 characters, Thai counted the same as English.
 function siteOf(value: unknown): string | null {
@@ -179,6 +251,10 @@ export async function signInVaultRoute(
   if (route === "GET /sign-ins") {
     return json({ signIns: (await liveSignIns(storage, tenant)).map(viewOf) });
   }
+  if (route === "GET /outposts") {
+    const nowMs = Date.now();
+    return json({ outposts: (await outpostsOf(storage, tenant)).map((record) => outpostView(record, nowMs)) });
+  }
   if (request.method !== "POST") return json({ error: "not_found" }, 404);
   if (request.headers.get("x-vault") !== "1") return json({ error: "forbidden" }, 403);
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
@@ -192,9 +268,40 @@ export async function signInVaultRoute(
       return replacePassword(storage, vaultKeys, tenant, body);
     case "POST /sign-ins/remove":
       return removeSignIn(storage, tenant, body);
+    case "POST /outposts":
+      return registerOutpost(storage, tenant, body);
+    case "POST /outposts/heartbeat":
+      return outpostHeartbeat(storage, tenant, body);
     default:
       return json({ error: "not_found" }, 404);
   }
+}
+
+async function registerOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (name.length === 0 || [...name].length > MAX_NAME || CONTROL.test(name)) return json({ error: "invalid_name" }, 400);
+  const kind = OUTPOST_KINDS.find((known) => known === body.kind);
+  if (!kind) return json({ error: "invalid_kind" }, 400);
+  if (typeof body.credentialHash !== "string" || !DIGEST.test(body.credentialHash)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  if ((await outpostsOf(storage, tenant)).length >= MAX_OUTPOSTS) return json({ error: "too_many_outposts" }, 409);
+  const record: OutpostRecord = { id: crypto.randomUUID(), tenant, name, kind, credentialHash: body.credentialHash,
+    lastHeartbeatAt: null, createdAt: new Date().toISOString() };
+  await storage.put(keys.outpost(record.id), record);
+  return json({ outpost: outpostView(record, Date.now()) });
+}
+
+/// A beat changes only the time of the last one: it is the outpost saying it is awake, not work.
+async function outpostHeartbeat(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const outpost = await authenticated(storage, tenant, body.outpostId, body.credentialHash);
+  if (!outpost) return json(UNAUTHORIZED, 401);
+  const nowMs = Date.now();
+  const beating: OutpostRecord = { ...outpost, lastHeartbeatAt: new Date(nowMs).toISOString() };
+  await storage.put(keys.outpost(outpost.id), beating);
+  return json({ outpost: outpostView(beating, nowMs) });
 }
 
 async function createSignIn(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
