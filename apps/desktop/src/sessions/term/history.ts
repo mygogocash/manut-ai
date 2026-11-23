@@ -47,6 +47,13 @@ const loadSer = () =>
     () => (serLoad = null),
   ));
 
+/** Resolves once the serializer has loaded: true, or false when it could not. A save before then is skipped and
+ *  the next tick picks it up, so the app never waits on this; tests do, instead of guessing how long the import
+ *  takes on a loaded machine. */
+export function historyReady(): Promise<boolean> {
+  return loadSer().then((S) => S != null);
+}
+
 /** `text` without the whitespace and colour escapes (`ESC [ digits ; m`) it ends with. Walked from the end: the
  *  regex /(?:\s|\x1b\[[0-9;]*m)+$/ it replaces backtracked from every whitespace run, quadratic in the run's length
  *  (79 ms on 2000 lines with one 200-space run each, as a full-width TUI footer prints). */
