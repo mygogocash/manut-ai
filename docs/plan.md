@@ -334,6 +334,8 @@ gateway, built from the shop's own data. It may use `@manut/shop-memory` (`works
 Done when: each member's request, only usable facts, the limit and what is dropped first, customer text never
 in the system prompt, Thai text, and an empty memory are tested.
 
+Done on pilot/week-1, 23 Nov 2026: `packages/agent-prompts` with `buildRequest`, `estimateTokens` and `describeSource` (14 tests), built in the lead session because the night build routine was no longer there.
+
 ### sheets-rows
 `packages/sheets-rows` (`@manut/sheets-rows`). The request that would append a month of Ton's books to a Google
 Sheet, built from `@manut/books` (`workspace:*`). Pure: no network call and no sign-in; sending it is a later
