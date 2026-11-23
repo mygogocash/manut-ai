@@ -29,7 +29,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 | Orca (agent protocol code, worktrees) | https://github.com/stablyai/orca |
 | Night build (cloud routine) | https://claude.ai/code/routines/trig_01W1xtTKRySeLkPiqorkJohN |
 
-## Done and pushed (all green: about 2,330 tests plus two local-Worker contracts)
+## Done and pushed (all green: about 2,390 tests plus two local-Worker contracts)
 
 - `apps/api`: GoSpark's Workers backend lifted whole, plus the LINE connector, the owner's signed approval link
   and payment records.
@@ -45,33 +45,34 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Packages: `approval-core`, `promptpay`, `agent-events`, `ui-kit`, and `format` (from the first night build, PR #2).
 - The night build works end to end: its first run opened PR #2, which was reviewed and merged into the working branch.
 
-## In progress
+## Landed since the first version of this note
 
-- **Owner-confirmed deletion of a live shop**, in a separate checkout. A shop with consent or LINE connected is
-  deleted only after its owner confirms through a signed link, run through `packages/approval-core`. It also
-  fixes the client's and the fake's drift from the API's deletion answers. Review it, merge it, then redeploy dev.
-- **Pull request #4** (GitHub Actions CI, CodeQL, Dependabot, Deploy dev, SECURITY.md). Merge it into the
-  working branch once its checks pass. The repository settings it changed are listed with undo commands in its
-  description.
+- Owner-confirmed deletion of a live shop (the owner's decision): signed deletion links, run through
+  `packages/approval-core`, a one-step owner page at `/delete/{token}`, and the console's waiting state.
+- GitHub: CI on every pull request and push, CodeQL, Dependabot, secret scanning and push protection, and a
+  `main` ruleset (pull request #4). All four code-scanning findings were fixed; two test-only findings were
+  dismissed as "used in tests". No alert is open.
+- Two real bugs behind flaky tests are fixed: pilot ids now keep their order within a millisecond, and the
+  desktop's argv cache ignores a parent pid that could not be read (the macOS Rust job caught it).
 
 ## Next steps, in order
 
-1. Merge the two items above, each after the full gate, and redeploy dev (commands below).
-2. Fix the flaky payments-ordering test: `sortableId` in `apps/api/src/pilot-store.ts` breaks
-   same-millisecond ties with a random suffix, so "newest first" can swap. Do this after the deletion work
-   lands, because it edits the same file.
-3. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
+1. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
    audit row. It waits for a test LINE Official Account. Turn on `officeInbound`, `officeCloud` and
    `officeExternalWrites` for dev only when that exists.
-4. Desktop, next slices:
+2. Desktop, next slices:
    - a Home page (`Main.dc.html`: the ask box with Chat, Team and Code modes);
    - a home for the old member-row actions (new thread, pin, restart);
    - richer Team, Needs you and History pages.
    Revive the Playwright suite: 140 of its 156 specs wait for the removed bot rows, so one shared fixture change
    (wait for `menu-new`) brings most back.
-5. Each morning: review the night build's `cloud/<task>` pull requests and merge the good ones into the
+3. Deletion follow-ups:
+   - The owner reviews the English copy of `/delete/{token}`.
+   - A shop whose wipe stopped after its registry row went leaves the console's list. Only the owner's page
+     then shows it as deleting.
+4. Each morning: review the night build's `cloud/<task>` pull requests and merge the good ones into the
    working branch, never into `main`. The queue still holds slip-rules, promptpay-read and approval-wire.
-6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
+5. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
 
 ## Needs the owner
 
@@ -92,7 +93,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Known flaky tests (they fail only under heavy load)
 
-- `apps/api` pilot.test.ts, "records payments and lists them newest first": a real ordering bug, step 2.
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/runs/boxView.test.ts`: can pass 30 seconds when the machine is saturated.
 
