@@ -92,8 +92,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - the desktop running submit steps, after 8b and browser control's slice 2; the cloud outpost after that.
-   - Before the next dev deploy: check that the new `OUTPOST_LIMITER` namespace ids in `apps/api/wrangler.jsonc`
-     (2026112329 to 2026112332) do not clash with another rate limiter in the Cloudflare account.
+   - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
+     with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
+     2026112333 up for the next limiter.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
