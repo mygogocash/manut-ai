@@ -1,0 +1,27 @@
+# The Ubuntu packages Tauri 2 needs to compile apps/desktop/src-tauri: WebKitGTK 4.1 and the libraries around it,
+# as listed on Tauri's prerequisites page (https://v2.tauri.app/start/prerequisites/). The Rust checks in CI use
+# it, and so does CodeQL's Rust analysis, because that runs the crates' build scripts, which look for these
+# libraries.
+name: Install Tauri's Linux libraries
+description: The apt packages Tauri 2 needs to build on Ubuntu.
+
+runs:
+  using: composite
+  steps:
+    # libdbus-1-dev is not on Tauri's list. tao links D-Bus through libdbus-sys, so it is named here instead of
+    # relying on the WebKitGTK packages to pull it in.
+    - name: apt-get install
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          build-essential \
+          curl \
+          wget \
+          file \
+          libxdo-dev \
+          libssl-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          libdbus-1-dev
