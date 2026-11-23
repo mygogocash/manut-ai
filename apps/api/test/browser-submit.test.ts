@@ -488,6 +488,22 @@ describe("queuing a write step", () => {
         actionId: approved }, outcome: "ok" });
   });
 
+  it("refuses a write past its time, whether or not a begin has already found that out", async () => {
+    const { s, signInId, mac } = await ready();
+    const nam = await attempt(s, "nam");
+    const requestId = await asked(nam, reply(signInId));
+    await ownerDecides(s, requestId);
+    await runInDurableObject(task(s.taskId), async (_instance, state) => {
+      const action = await state.storage.get<ActionProposalJSON>(`action:${requestId}`);
+      await state.storage.put(`action:${requestId}`, { ...action, expiresAt: new Date(Date.now() - 1).toISOString() });
+    });
+    expect(await nam.browserStep(submit(mac.id, requestId))).toEqual({ ok: false, error: "action_expired" });
+    // A begin that finds it past its time marks it expired, which reads the same.
+    await refusal(await begin(s, requestId, { attemptId: nam.job.attemptId }), 409, "action_expired");
+    expect((await stored(s, requestId)).action.state).toBe("expired");
+    expect(await nam.browserStep(submit(mac.id, requestId))).toEqual({ ok: false, error: "action_expired" });
+  });
+
   it("is never a read: a worker cannot write through the read steps or the broker's asks", async () => {
     const { s, signInId, mac } = await ready();
     const nam = await attempt(s, "nam");

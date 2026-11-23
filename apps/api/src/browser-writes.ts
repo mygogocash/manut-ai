@@ -381,11 +381,12 @@ export async function queueSubmitStep(env: SubmitEnv, attempt: AttemptRef, asked
   if (record.request.revision !== revision || record.decision.seenRevision !== revision) {
     return refuse("request_changed", write.signInId);
   }
-  if (action.state !== "approved") {
-    return refuse(action.state === "rejected" || action.state === "expired" ? "not_approved" : "already_begun",
-      write.signInId);
+  if (action.state === "proposed" || action.state === "rejected") return refuse("not_approved", write.signInId);
+  if (action.state !== "approved" && action.state !== "expired") return refuse("already_begun", write.signInId);
+  // Past its time is one answer, whether or not a begin has already marked the write expired.
+  if (action.state === "expired" || !(Date.now() < Date.parse(action.expiresAt))) {
+    return refuse("action_expired", write.signInId);
   }
-  if (!(Date.now() < Date.parse(action.expiresAt))) return refuse("action_expired", write.signInId);
   let answer: Awaited<ReturnType<typeof vaultAnswer>>;
   try {
     answer = await vaultAnswer(await vaultCall(env, tenant, "POST", "/browser-steps/submit", { outpostId: fields.outpostId,
