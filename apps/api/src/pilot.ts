@@ -32,7 +32,7 @@ import {
 } from "./connectors/line";
 import { readConnectionSecret } from "./cred-broker";
 import type { FeatureFlags } from "./index";
-import type { InboundMessage, Payment, PilotReplyRecord, PilotShopRecord } from "./pilot-store";
+import type { InboundMessage, Payment, PilotDeletionRecord, PilotReplyRecord, PilotShopRecord } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
@@ -158,7 +158,7 @@ export async function pilotRoute(
   if (line && request.method === "POST") return receiveLineWebhook(request, env, ctx, line[1] ?? "", flags);
   const approval = url.pathname.match(/^\/v1\/pilot\/approvals\/([^/]+)(?:\/(consent|decision))?$/);
   if (approval) return approvalRoute(request, env, ctx, approval[1] ?? "", approval[2], flags);
-  if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags);
+  if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags, ctx);
   return null;
 }
 
@@ -455,13 +455,13 @@ async function startSend(env: PilotEnv, ctx: ExecutionContext, claim: ApprovalCl
 // an exact ADMIN_METHODS entry, all checked before this runs)
 // ---------------------------------------------------------------------------
 
-async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: Flags): Promise<Response> {
+async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: Flags, ctx: ExecutionContext): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
   if (request.method === "GET") {
     if (route === "GET /v1/admin/pilot/shops") return listShops(env);
     const tenant = url.searchParams.get("tenant") ?? "";
     if (!isValidTenant(tenant)) return json({ error: "tenant_required" }, 400);
-    if (!(await readShop(env, tenant))) return json({ error: "shop_not_found" }, 404);
+    if (!(await readShop(env, tenant))) return noShop(env, tenant);
     if (route === "GET /v1/admin/pilot/messages") return listFrom(env, tenant, "/pilot/messages", "messages");
     if (route === "GET /v1/admin/pilot/payments") return listFrom(env, tenant, "/pilot/payments", "payments");
     if (route === "GET /v1/admin/pilot/actions") return listActions(env, tenant);
@@ -479,12 +479,51 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   // Every other write names an existing pilot shop.
   if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
   const shop = await readShop(env, body.tenant);
-  if (!shop) return json({ error: "shop_not_found" }, 404);
+  if (!shop) return noShop(env, body.tenant);
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
-  if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body);
+  if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body, ctx);
   return json({ error: "not_found" }, 404);
+}
+
+/// A tenant with no shop record: deleted, saying when and by whom, or never a shop at all.
+async function noShop(env: PilotEnv, tenant: string): Promise<Response> {
+  const deletion = await readDeletion(env, tenant);
+  if (deletion?.deletedAt) {
+    return json({ error: "tenant_deleted", deletedAt: deletion.deletedAt, deletedBy: deletion.deletedBy }, 404);
+  }
+  return json({ error: "shop_not_found" }, 404);
+}
+
+async function readDeletion(env: PilotEnv, tenant: string): Promise<PilotDeletionRecord | null> {
+  const response = await authCall(env, `/pilot-deletions?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return null;
+  return ((await response.json()) as { deletion: PilotDeletionRecord | null }).deletion;
+}
+
+function writeDeletion(env: PilotEnv, record: PilotDeletionRecord): Promise<Response> {
+  return authCall(env, "/pilot-deletions", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify(record),
+  });
+}
+
+/// The operator's Access identity. Access gives an email for a person and nothing for a service token.
+async function operatorIdentity(ctx: ExecutionContext): Promise<string | null> {
+  try {
+    const identity = (await ctx.access?.getIdentity()) as { email?: unknown } | undefined;
+    return typeof identity?.email === "string" ? identity.email : null;
+  } catch {
+    return null;
+  }
+}
+
+/// A typed name and a stored one are the same name when they differ only in outer spaces or in how an accented
+/// letter was composed (é typed as one character or as e and a combining accent).
+function sameName(typed: unknown, stored: string): boolean {
+  return typeof typed === "string" && typed.normalize("NFC").trim() === stored.normalize("NFC").trim();
 }
 
 /// Deletes everything stored for one pilot shop, at the shop's request,
@@ -497,9 +536,28 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
 /// naming what is left, and sending the same request again finishes it.
 /// Pilot shops belong to no company, so unlike the session route there are
 /// no company indexes to prune afterwards.
-async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
-  if (body.confirmName !== shop.name) return json({ error: "name_mismatch" }, 409);
-  return tenantDelete(env, shop.tenant);
+///
+/// The record of the deletion is written before anything is wiped, and a
+/// deletion that cannot be recorded does not start. It is completed with the
+/// time and the counts once the wipe finishes. If only that last write fails,
+/// the data is gone and the record still shows who asked and when.
+async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, ctx: ExecutionContext): Promise<Response> {
+  if (!sameName(body.confirmName, shop.name)) return json({ error: "name_mismatch" }, 409);
+  const record: PilotDeletionRecord = {
+    tenant: shop.tenant,
+    name: shop.name,
+    requestedAt: new Date().toISOString(),
+    deletedBy: await operatorIdentity(ctx),
+  };
+  if (!(await writeDeletion(env, record)).ok) return json({ error: "audit_unavailable" }, 503);
+  const wiped = await tenantDelete(env, shop.tenant);
+  if (!wiped.ok) return wiped;
+  const summary = (await wiped.json()) as Record<string, unknown>;
+  const counts = Object.fromEntries(Object.entries(summary).filter((entry): entry is [string, number] =>
+    typeof entry[1] === "number"));
+  const deletedAt = typeof summary.deletedAt === "string" ? summary.deletedAt : new Date().toISOString();
+  await writeDeletion(env, { ...record, deletedAt, counts }).catch(() => undefined);
+  return json(summary);
 }
 
 /// A pilot shop is a tenant of its own (`pilot:<uuid>`), so every existing
@@ -507,11 +565,15 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
 /// applies to it unchanged. No session can ever carry such a tenant: session
 /// tenants come from a verified provider subject.
 async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise<Response> {
-  if (!bounded(body.name, 200) || !bounded(body.ownerName, 200)) return json({ error: "invalid_request" }, 400);
+  // Names are stored as a person reads them, without outer spaces, so the name the console shows is the name an
+  // operator can type back to confirm a deletion.
+  const name = typeof body.name === "string" ? body.name.trim() : body.name;
+  const ownerName = typeof body.ownerName === "string" ? body.ownerName.trim() : body.ownerName;
+  if (!bounded(name, 200) || !bounded(ownerName, 200)) return json({ error: "invalid_request" }, 400);
   const tenant = `pilot:${crypto.randomUUID()}`;
   const created = await pilotWrite(env, tenant, "/pilot/shop", {
-    name: body.name,
-    ownerName: body.ownerName,
+    name,
+    ownerName,
     taskId: `pilot-task-${crypto.randomUUID()}`,
   });
   if (!created.ok) return json({ error: "shop_unavailable" }, 503);
@@ -521,7 +583,7 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise
     body: JSON.stringify({ tenant }),
   });
   if (!registered.ok) return json({ error: "shop_unavailable" }, 503);
-  return json({ tenant, name: body.name, ownerName: body.ownerName });
+  return json({ tenant, name, ownerName });
 }
 
 async function listShops(env: PilotEnv): Promise<Response> {

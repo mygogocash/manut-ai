@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  // The pages Worker (src/pages.ts): apps/web's build, the owner's approval
+  // page and the operator console. The API Worker (wrangler.jsonc) is the
+  // front door and hands it every path outside /v1/* and /relay/* over its
+  // WEB service binding, so this Worker needs no route of its own. It exists
+  // apart from the API because Cloudflare runs a Worker with static assets
+  // behind an internal router that does not pass ctx.access, and the API's
+  // admin gate needs it. Deploy it before the API Worker of the same
+  // environment: `wrangler deploy -c wrangler.web.jsonc --env dev`.
+  "name": "manut-web",
+  "main": "src/pages.ts",
+  "compatibility_date": "2026-09-16",
+  // The custom build runs before every `wrangler dev` and `wrangler deploy`,
+  // so a deploy never ships a missing or stale web app; `build:worker` builds
+  // it to call the API on its own origin. Wrangler runs the command in "cwd"
+  // taken from where it was started, not from this file, so run it from
+  // apps/api, as every package script does.
+  "build": {
+    "command": "node --run build:worker",
+    "cwd": "../web",
+    "watch_dir": "../web/src"
+  },
+  // Every request runs src/pages.ts first, which sets the pages' security
+  // headers in code; the assets binding answers a path that names no file
+  // with the app's one page, which picks the screen from the path.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "workers_dev": false,
+  "preview_urls": false,
+  "env": {
+    "dev": {"name": "manut-web-dev"},
+    "staging": {"name": "manut-web-staging"},
+    "prod": {"name": "manut-web-prod"}
+  }
+}

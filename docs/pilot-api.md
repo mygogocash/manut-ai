@@ -154,34 +154,50 @@ type DeletedShop = {
   operator prune. Shops, reply records and payments stay until the shop is deleted.
 - **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute).
 - **CORS.** The approval routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator routes do
-  not answer CORS and need none: the Worker serves the web app from its own origin (below).
-
-## One origin
-
-`apps/api`'s Worker also serves `apps/web` (`assets` and `build` in `apps/api/wrangler.jsonc`), so
-`WEB_ORIGIN` and `PUBLIC_API_ORIGIN` are both the Worker's own origin.
-
-- `/v1/*` and `/relay/*` always reach the Worker, even when a person opens one in a browser.
-- Every other path is the web app: a file when one matches, otherwise its one page, which picks the screen from
-  the path (`/approve/{token}`, `/ops`).
-- `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the
-  pages call the API that served them and a deploy never ships a missing or stale web app.
-- The pages' headers (`apps/web/public/_headers`): no framing (`X-Frame-Options: DENY`, `frame-ancestors
-  'none'`), `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `X-Robots-Tag: noindex,
-  nofollow`; approval pages also `Cache-Control: no-store`. They never apply to the API's answers.
-- Cloudflare Access: one application on the Worker's host, covering `/ops` and `/v1/admin/*` and nothing else;
-  `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*` and `/v1/pilot/*`, LINE's `/v1/inbound/*` and
-  `/v1/health` stay public.
-- `pnpm --filter @manut/api test` checks the routing, the headers and the admin gate on a local Worker
-  (`scripts/one-origin-contract.mjs`, `scripts/admin-access-contract.mjs`).
-- **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body.
+  not answer CORS and need none: the pages and the API share one origin (below).
+- **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body,
+  400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
   every reply, the sealed LINE secrets and the webhook route, messages, payments, consent and the shop's
-  registry row, and leaves a tombstone with the time. The owner's links answer `link_invalid` afterwards and
-  the webhook answers 404. It cannot be undone, so the operator sends the shop's exact name with its id. A
-  partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request again
-  finishes it.
+  registry row. The owner's links answer `link_invalid` afterwards and the webhook answers 404.
+  - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
+    only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
+  - A record of the deletion is written before the wipe starts and outlives the shop: who asked (the operator's
+    Access identity, or `null` for a service token), when, and what was removed. A deletion that cannot be
+    recorded does not start: 503 `audit_unavailable`.
+  - Afterwards every operator route naming the shop answers 404 `{ "error": "tenant_deleted", "deletedAt",
+    "deletedBy" }`.
+  - A partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request
+    again finishes it.
+
+## One origin
+
+The pages and the API share one origin, so the console needs no CORS and one Cloudflare Access application
+covers the console and the operator routes. They are two Workers, both deployed from `apps/api`:
+
+- **The API Worker** (`wrangler.jsonc`) is the front door. It answers `/v1/*` and `/relay/*` and hands every
+  other path to the pages Worker over its `WEB` service binding. It must never have static assets: Cloudflare
+  runs a Worker with assets behind an internal router that does not pass `ctx.access`, and the admin gate needs
+  it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
+- **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
+  matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`, `/ops`).
+  `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
+  call the API that served them and a deploy never ships a missing or stale web app.
+- **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
+  no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
+  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval pages also
+  `Cache-Control: no-store`. They never apply to the API's answers.
+- **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
+- **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
+  `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*` and `/v1/pilot/*`, LINE's `/v1/inbound/*` and
+  `/v1/health` stay public.
+- **Deploying:** the pages Worker of an environment first (`wrangler deploy -c wrangler.web.jsonc --env dev`),
+  then its API Worker (`wrangler deploy --env dev`). Only the API Worker gets the host's route.
+- **Locally:** `pnpm --filter @manut/api dev` runs both Workers on one origin.
+- **Checks:** `pnpm --filter @manut/api test` checks the hand-off and the headers in workerd
+  (`test/pages.test.ts`), then on local Workers the configuration of every environment, the pages, the front
+  door (`scripts/one-origin-contract.mjs`) and the admin gate (`scripts/admin-access-contract.mjs`).
 
 ## The send itself
 

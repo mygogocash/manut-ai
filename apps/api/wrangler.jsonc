@@ -29,30 +29,16 @@
   // unreachable while officeInbound is off, like the Linear one.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
-  // One origin for the pilot (docs/pilot-api.md): this Worker also serves
-  // apps/web, the owner's approval page and the operator console, so the
+  // One origin for the pilot (docs/pilot-api.md): this Worker is the front
+  // door. It answers /v1/* and /relay/* and hands every other path to the
+  // pages Worker (wrangler.web.jsonc) over the WEB service binding, so the
   // console needs no CORS and one Cloudflare Access application covers the
-  // console and the operator routes. The custom build runs before every
-  // `wrangler dev` and `wrangler deploy`, so a deploy never ships a missing or
-  // stale web app; `build:worker` builds it to call the API on its own origin.
-  // Every environment below inherits both blocks.
-  "build": {
-    "command": "node --run build:worker",
-    "cwd": "../web",
-    "watch_dir": "../web/src"
-  },
-  // API paths always reach this Worker first, even when a person opens one in
-  // a browser. Every other path is the web app: a file when one matches,
-  // otherwise its one page, which picks the screen from the path. The web
-  // app's security headers live in apps/web/public/_headers; Cloudflare
-  // applies them to the web app only, never to the API's answers. A new
-  // top-level API prefix must be added here, or browsers get the page for it
-  // (scripts/one-origin-contract.mjs checks each prefix).
-  "assets": {
-    "directory": "../web/dist",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/v1/*", "/relay/*"]
-  },
+  // console and the operator routes. This Worker must never get "assets":
+  // Cloudflare runs a Worker with static assets behind an internal router that
+  // does not pass ctx.access, and the admin gate needs it
+  // (scripts/one-origin-contract.mjs refuses this file if "assets" appears).
+  // Each environment names its own pages Worker; deploy that one first.
+  "services": [{"binding": "WEB", "service": "manut-web"}],
   "workers_dev": false,
   "preview_urls": false,
   // Metadata-only logs (task id, state, duration, status) — never bodies.
@@ -65,6 +51,7 @@
   "env": {
     "dev": {
       "name": "manut-api-dev",
+      "services": [{"binding": "WEB", "service": "manut-web-dev"}],
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -143,6 +130,7 @@
     },
     "staging": {
       "name": "manut-api-staging",
+      "services": [{"binding": "WEB", "service": "manut-web-staging"}],
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -221,6 +209,7 @@
     },
     "prod": {
       "name": "manut-api-prod",
+      "services": [{"binding": "WEB", "service": "manut-web-prod"}],
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},

@@ -12,7 +12,7 @@ spec is the Manut AI design canvas.
 | Path | What it is | Started from |
 | --- | --- | --- |
 | `apps/api` | Cloudflare Workers backend: tenants, members, tasks with exact-action approvals, a one-use dispatch broker, an encrypted credential vault, schedules, retention | GoSpark's `cloud/` at `a7537c80`, lifted whole |
-| `apps/web` | The owner's approval page (`/approve/:token`) and the operator console (`/ops`), served by `apps/api`'s Worker from the API's own origin | The design canvas's classes and states |
+| `apps/web` | The owner's approval page (`/approve/:token`) and the operator console (`/ops`), served from the API's own origin by a pages Worker behind the API Worker | The design canvas's classes and states |
 | `apps/desktop` | The desktop app (Tauri 2 + React 19): shell, chat, Needs you, terminal and coding-agent adapters, running on a demo runtime until the real one exists | A fork of Oh My Hermes (`apps/omher` at `77b8646`), Hermes bridge removed |
 | `packages/approval-core` | Settle-once approval rules shared by every client | GoSpark's decision binding and Orca's settle-once journal |
 | `packages/agent-events` | The one event contract every agent reports through, with tolerant decoders and a timeline reducer | GoSpark's provider events (`ProviderSession.swift`) and their tests |
@@ -27,22 +27,25 @@ pnpm install          # only esbuild and workerd may run install scripts (pnpm-w
 pnpm test             # every package's tests
 pnpm typecheck
 pnpm --filter @manut/web dev    # the web app against an in-memory fake of the API
-pnpm --filter @manut/api dev    # the Worker on localhost:8787: the API and the web app on one origin
+pnpm --filter @manut/api dev    # both Workers on localhost:8787: the API and the web app on one origin
 ```
 
 Set `VITE_API_ORIGIN` to point the web app at a running backend, or to `same-origin` for the API that served
 the page. The backend's tests run in real workerd (`pnpm --filter @manut/api test`), followed by two contracts
-on a local Worker: the admin gate, and the one-origin routing and headers (`docs/pilot-api.md`). Nothing here
+on local Workers: the admin gate, and the one-origin configuration, pages and front door (`docs/pilot-api.md`). Nothing here
 deploys anything.
 
 ## Deploying
 
-Nothing is deployed yet. Before the first deploy of `apps/api`: create the Wrangler secrets (`CLOUD_API_KEY`,
-`APPROVAL_LINK_SECRET`, and the vault key `CRED_KEY`); put `/ops` and `/v1/admin/*`, and nothing else, behind
-one Cloudflare Access application and set `ADMIN_ACCESS_AUD` to its audience; set `WEB_ORIGIN` and
-`PUBLIC_API_ORIGIN`, both the Worker's own origin because it serves the web app too; and turn on the feature
-flags the pilot needs. `wrangler deploy` builds the web app first. The worker names are `manut-api-*`, so a
-deploy from here can never replace one of GoSpark's services.
+Nothing is deployed yet. `apps/api` deploys two Workers per environment: the pages Worker
+(`wrangler deploy -c wrangler.web.jsonc --env dev`, which builds the web app first) and then the API Worker
+(`wrangler deploy --env dev`), the front door that hands every non-API path to the pages
+(`docs/pilot-api.md`, "One origin"). Before the first deploy: create the Wrangler secrets (`CLOUD_API_KEY`,
+`APPROVAL_LINK_SECRET`, and the vault key `CRED_KEY`); give the API Worker the host's route; put `/ops` and
+`/v1/admin/*`, and nothing else, behind one Cloudflare Access application and set `ADMIN_ACCESS_AUD` to its
+audience; set `WEB_ORIGIN` and `PUBLIC_API_ORIGIN`, both that host's origin; and turn on the feature flags the
+pilot needs. The worker names are `manut-api-*` and `manut-web-*`, so a deploy from here can never replace one
+of GoSpark's services.
 
 ## Credits
 

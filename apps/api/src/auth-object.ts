@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
-import { pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
+import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
 
 type AuthEnv = {
   APPLE_CLIENT_ID?: string;
@@ -126,6 +126,10 @@ export class AuthObject extends DurableObject {
     // The Manut AI pilot's shop registry (pilot-store.ts).
     if (url.pathname === "/pilot-shops") {
       return pilotRegistryRoute(this.ctx.storage, request);
+    }
+    // Pilot shop deletions, kept here so the record outlives the shop's own objects.
+    if (url.pathname === "/pilot-deletions") {
+      return pilotDeletionRoute(this.ctx.storage, request);
     }
     if (url.pathname === "/flags") {
       if (request.method === "GET") {

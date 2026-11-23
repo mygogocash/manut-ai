@@ -445,6 +445,40 @@ export async function pilotRegistryRoute(storage: DurableObjectStorage, request:
   return json({ registered: true });
 }
 
+/// One pilot shop's deletion, kept by AuthObject apart from the shop's own
+/// objects so it outlives them: whose request it was (the operator's Access
+/// identity, when Access gives one), when it was asked for, and once the wipe
+/// finished, when and what it removed. Operators share one bearer key, so the
+/// Access identity is the only name an operator can be known by.
+export type PilotDeletionRecord = {
+  tenant: string;
+  name: string;
+  requestedAt: string;
+  deletedBy: string | null;
+  deletedAt?: string;
+  counts?: Record<string, number>;
+};
+
+export function pilotDeletionKey(tenant: string): string {
+  return `pilot-deletion:${enc(tenant)}`;
+}
+
+/// `/pilot-deletions` on AuthObject: read one shop's record (`?tenant=`), or
+/// write it. Writing needs the Worker's `x-admin` header, like the registry.
+export async function pilotDeletionRoute(storage: DurableObjectStorage, request: Request): Promise<Response> {
+  if (request.method === "GET") {
+    const tenant = new URL(request.url).searchParams.get("tenant") ?? "";
+    return json({ deletion: (await storage.get<PilotDeletionRecord>(pilotDeletionKey(tenant))) ?? null });
+  }
+  if (request.method !== "POST") return json({ error: "not_found" }, 404);
+  if (request.headers.get("x-admin") !== "1") return json({ error: "forbidden" }, 403);
+  const parsed = await readJsonBody<PilotDeletionRecord>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!bounded(parsed.value?.tenant)) return json({ error: "invalid_request" }, 400);
+  await storage.put(pilotDeletionKey(parsed.value.tenant), parsed.value);
+  return json({ recorded: true });
+}
+
 /// The broker's view of a reply: which message, author and connection the
 /// owner's approval answers. Null when there is no record, which the broker
 /// treats as a reply nothing authorized.

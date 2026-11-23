@@ -69,6 +69,14 @@ export interface Env {
   /// which the page polls while a send settles.
   LINE_INBOUND_LIMITER?: RateLimit;
   PILOT_APPROVAL_LIMITER?: RateLimit;
+  /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
+  /// Unbound, those paths answer this Worker's own 404.
+  WEB?: Fetcher;
+}
+
+/// The paths this Worker answers itself. Everything else is a page of the web app.
+function isApiPath(pathname: string): boolean {
+  return pathname.startsWith("/v1/") || pathname.startsWith("/relay/");
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -473,6 +481,10 @@ async function taskWriteAssertions(
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    // One origin (docs/pilot-api.md): this Worker is the front door, and every path outside the API goes to the
+    // pages Worker. This Worker keeps no static assets of its own: Cloudflare runs a Worker with assets behind a
+    // router that does not pass ctx.access, and the admin gate below needs it (pages.ts).
+    if (!isApiPath(url.pathname)) return env.WEB ? env.WEB.fetch(request) : json({ error: "not_found" }, 404);
     const rateDenial = await ingressRateGate(request, url.pathname, env);
     if (rateDenial) return rateDenial;
     const adminDenial = adminGate(request, url.pathname, env, ctx);

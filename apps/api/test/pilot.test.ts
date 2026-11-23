@@ -715,21 +715,53 @@ describe("pilot data under retention, export and deletion", () => {
     expect(deleted.status).toBe(200);
     expect(deleted.body).toMatchObject({ tasksWiped: 1, connectionsWiped: 1, deletedAt: expect.any(String) });
 
-    // The owner's link, the shop's LINE webhook and every operator route now know nothing of the shop.
+    // The owner's link and the shop's LINE webhook now know nothing of the shop; every operator route answers that
+    // it was deleted, and when.
     expect(await view(token)).toMatchObject({ status: 404, body: { error: "link_invalid" } });
     expect((await deliver(shop.connectionId, { destination: BOT, events: [textEvent("after deletion")] })).status)
       .toBe(404);
+    const gone = { error: "tenant_deleted", deletedAt: deleted.body.deletedAt, deletedBy: null };
     for (const path of [`/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`,
       `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`]) {
-      expect((await admin("GET", path)).body).toEqual({ error: "shop_not_found" });
+      expect((await admin("GET", path)).body).toEqual(gone);
     }
     expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Baan Somtam" })).body)
-      .toEqual({ error: "shop_not_found" });
+      .toEqual(gone);
     const remaining = (await admin<{ shops: { tenant: string }[] }>("GET", "/v1/admin/pilot/shops")).body.shops
       .map((entry) => entry.tenant);
     expect(remaining).toContain(other.body.tenant);
     expect(remaining).not.toContain(shop.tenant);
     expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(other.body.tenant)}`)).status)
       .toBe(200);
+  });
+
+  it("matches the typed name however its outer spaces and accents were entered", async () => {
+    const created = await admin<{ tenant: string; name: string; ownerName: string }>("POST", "/v1/admin/pilot/shops",
+      { name: "  Café Lek  ", ownerName: " Khun Lek " });
+    expect(created.status).toBe(200);
+    expect(created.body).toMatchObject({ name: "Café Lek", ownerName: "Khun Lek" });
+    const listed = (await admin<{ shops: { tenant: string; name: string }[] }>("GET", "/v1/admin/pilot/shops")).body.shops
+      .find((entry) => entry.tenant === created.body.tenant);
+    expect(listed?.name).toBe("Café Lek");
+    // Another word is another name; a decomposed é and stray outer spaces are the same name.
+    expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: created.body.tenant, confirmName: "Cafe Lek" })).status)
+      .toBe(409);
+    expect((await admin("POST", "/v1/admin/pilot/deletions",
+      { tenant: created.body.tenant, confirmName: " Café Lek " })).status).toBe(200);
+  });
+
+  it("keeps a record of who deleted a shop and when, which outlives the shop", async () => {
+    const shop = await setupShop();
+    const context = createExecutionContext();
+    Object.defineProperty(context, "access", { value: { aud: bindings.ADMIN_ACCESS_AUD,
+      getIdentity: async () => ({ email: "ops@manut.test" }) }, configurable: true });
+    const response = await worker.fetch(new Request("https://api.manut.test/v1/admin/pilot/deletions", {
+      method: "POST", headers: OPERATOR, body: JSON.stringify({ tenant: shop.tenant, confirmName: "Baan Somtam" }),
+    }), bindings, context);
+    await waitOnExecutionContext(context);
+    expect(response.status).toBe(200);
+    const { deletedAt } = (await response.json()) as { deletedAt: string };
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)))
+      .toEqual({ status: 404, body: { error: "tenant_deleted", deletedAt, deletedBy: "ops@manut.test" } });
   });
 });
