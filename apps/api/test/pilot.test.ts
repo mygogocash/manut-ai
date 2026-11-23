@@ -2,11 +2,11 @@ import { adminFetch, trustedTaskPut } from "./authenticated-fixtures";
 import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
-import { mintApprovalToken } from "../src/approval-link";
+import { checkApprovalToken, checkDeletionToken, mintApprovalToken, mintDeletionToken } from "../src/approval-link";
 import { dispatchAction } from "../src/broker-actions";
-import type { ApprovalView } from "../src/pilot";
+import type { ApprovalView, DeletionView } from "../src/pilot";
 import type { ActionProposalJSON } from "../src/task-object";
-import { tenantDelete, tenantExport, tenantPrune } from "../src/tenant-data";
+import { authCall, tenantCall, tenantDelete, tenantExport, tenantPrune } from "../src/tenant-data";
 
 // Manut AI pilot (docs/pilot-api.md) through the real Worker and objects.
 //
@@ -37,12 +37,13 @@ function sourceIp(): string {
 }
 
 /// A public request, as the edge would deliver it: its own source address so
-/// unrelated requests never share a rate bucket.
-async function call(path: string, init: RequestInit = {}): Promise<Response> {
+/// unrelated requests never share a rate bucket. `target` swaps in an
+/// environment with one binding wrapped, for the tests that make a call fail.
+async function call(path: string, init: RequestInit = {}, target: Env = bindings): Promise<Response> {
   const request = new Request(`https://api.manut.test${path}`, init);
   request.headers.set("cf-connecting-ip", sourceIp());
   const context = createExecutionContext();
-  const response = await worker.fetch(request, bindings, context);
+  const response = await worker.fetch(request, target, context);
   await waitOnExecutionContext(context);
   return response;
 }
@@ -53,6 +54,19 @@ async function admin<T = Record<string, unknown>>(method: string, path: string, 
     headers: OPERATOR,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+  return { status: response.status, body: (await response.json()) as T };
+}
+
+/// An operator call through the admin gate, against `target` and with the Access identity `email` when given.
+async function adminWith<T = Record<string, unknown>>(target: Env, method: string, path: string, body?: unknown,
+  email?: string) {
+  const context = createExecutionContext();
+  Object.defineProperty(context, "access", { value: { aud: bindings.ADMIN_ACCESS_AUD,
+    getIdentity: async () => (email ? { email } : undefined) }, configurable: true });
+  const response = await worker.fetch(new Request(`https://api.manut.test${path}`, {
+    method, headers: OPERATOR, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }), target, context);
+  await waitOnExecutionContext(context);
   return { status: response.status, body: (await response.json()) as T };
 }
 
@@ -710,17 +724,21 @@ describe("pilot data under retention, export and deletion", () => {
     expect((await view(token)).status).toBe(200);
     expect(await messages(shop.tenant)).toHaveLength(1);
 
-    const deleted = await admin<{ tasksWiped: number; connectionsWiped: number; deletedAt: string }>(
-      "POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Baan Somtam" });
-    expect(deleted.status).toBe(200);
-    expect(deleted.body).toMatchObject({ tasksWiped: 1, connectionsWiped: 1, deletedAt: expect.any(String) });
+    // The shop is live, so the right name only asks its owner; the owner's yes deletes it.
+    const asked = await askToDelete(shop.tenant, "Baan Somtam");
+    expect(asked.status).toBe(202);
+    expect(await messages(shop.tenant)).toHaveLength(1);
+    const deleted = await decideDeletion(deletionTokenOf(asked.body.confirmUrl), true);
+    expect(deleted).toMatchObject({ status: 200, body: { state: "deleted" } });
+    const deletedAt = (await deletionRecord(shop.tenant)).deletion?.deletedAt;
+    expect(deletedAt).toEqual(expect.any(String));
 
     // The owner's link and the shop's LINE webhook now know nothing of the shop; every operator route answers that
     // it was deleted, and when.
     expect(await view(token)).toMatchObject({ status: 404, body: { error: "link_invalid" } });
     expect((await deliver(shop.connectionId, { destination: BOT, events: [textEvent("after deletion")] })).status)
       .toBe(404);
-    const gone = { error: "tenant_deleted", deletedAt: deleted.body.deletedAt, deletedBy: null };
+    const gone = { error: "tenant_deleted", deletedAt, deletedBy: null };
     for (const path of [`/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`,
       `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`]) {
       expect((await admin("GET", path)).body).toEqual(gone);
@@ -751,17 +769,463 @@ describe("pilot data under retention, export and deletion", () => {
   });
 
   it("keeps a record of who deleted a shop and when, which outlives the shop", async () => {
-    const shop = await setupShop();
-    const context = createExecutionContext();
-    Object.defineProperty(context, "access", { value: { aud: bindings.ADMIN_ACCESS_AUD,
-      getIdentity: async () => ({ email: "ops@manut.test" }) }, configurable: true });
-    const response = await worker.fetch(new Request("https://api.manut.test/v1/admin/pilot/deletions", {
-      method: "POST", headers: OPERATOR, body: JSON.stringify({ tenant: shop.tenant, confirmName: "Baan Somtam" }),
-    }), bindings, context);
-    await waitOnExecutionContext(context);
-    expect(response.status).toBe(200);
-    const { deletedAt } = (await response.json()) as { deletedAt: string };
+    // A shop that never went live: no LINE connection and no consent, so the operator's request deletes it.
+    const shop = await newShop("Baan Somtam");
+    const deleted = await adminWith<{ deletedAt: string }>(bindings, "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" }, "ops@manut.test");
+    expect(deleted.status).toBe(200);
     expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)))
-      .toEqual({ status: 404, body: { error: "tenant_deleted", deletedAt, deletedBy: "ops@manut.test" } });
+      .toEqual({ status: 404, body: { error: "tenant_deleted", deletedAt: deleted.body.deletedAt,
+        deletedBy: "ops@manut.test" } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deleting a live shop: the owner's confirmation through a signed link
+// ---------------------------------------------------------------------------
+
+type Asked = { status: "awaiting_owner"; confirmUrl: string; expiresAt: string };
+type Settled = { ok: boolean; refused?: string; decision?: { optionId: string; decidedBy: string; decidedAt: number } };
+type ConfirmationRecord = { status: "pending" | "decided" | "withdrawn";
+  request: { id: string; kind: string; revision: number; expiresAt: number; detail: unknown };
+  decision?: { optionId: string; decidedBy: string; role: string; decidedAt: number } };
+type DeletionRecord = { tenant: string; name: string; requestedAt: string; deletedBy: string | null;
+  confirmationId?: string; deletedAt?: string; counts?: Record<string, number> };
+
+const deletionTokenOf = (confirmUrl: string) => confirmUrl.slice(`${WEB}/delete/`.length);
+
+/// A shop as an operator first creates it: no LINE connection and no consent, so it has never gone live.
+async function newShop(name: string, ownerName = "Khun Dao"): Promise<{ tenant: string }> {
+  const created = await admin<{ tenant: string }>("POST", "/v1/admin/pilot/shops", { name, ownerName });
+  expect(created.status).toBe(200);
+  return created.body;
+}
+
+async function askToDelete(tenant: string, confirmName = "Baan Somtam") {
+  return admin<Asked & Record<string, unknown>>("POST", "/v1/admin/pilot/deletions", { tenant, confirmName });
+}
+
+async function deletionView(token: string, target: Env = bindings) {
+  const response = await call(`/v1/pilot/deletions/${token}`, {}, target);
+  return { status: response.status, body: (await response.json()) as DeletionView & { error?: string } };
+}
+
+async function decideDeletion(token: string, approve: boolean, target: Env = bindings) {
+  const response = await call(`/v1/pilot/deletions/${token}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ approve }),
+  }, target);
+  return { status: response.status, body: (await response.json()) as DeletionView & { error?: string; view?: DeletionView } };
+}
+
+/// The deletion record and the confirmation it points at, as AuthObject keeps them.
+async function deletionRecord(tenant: string) {
+  const response = await authCall(bindings, `/pilot-deletions?tenant=${encodeURIComponent(tenant)}`);
+  expect(response.status).toBe(200);
+  return (await response.json()) as { deletion: DeletionRecord | null; confirmation: ConfirmationRecord | null };
+}
+
+async function listedShop(tenant: string) {
+  const listed = await admin<{ shops: { tenant: string; deletion?: Record<string, unknown> }[] }>("GET",
+    "/v1/admin/pilot/shops");
+  expect(listed.status).toBe(200);
+  return listed.body.shops.find((entry) => entry.tenant === tenant);
+}
+
+/// The Worker's environment with the task wipe answering 500 the next `times` times, as when a TaskObject cannot be
+/// reached part way through a deletion. Every other call reaches the real objects.
+function failingTaskWipes(times: number): Env {
+  let left = times;
+  const tasks = bindings.TASK;
+  const TASK = {
+    idFromName: (name: string) => tasks.idFromName(name),
+    get: (id: DurableObjectId) => {
+      const stub = tasks.get(id);
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          if (request.method === "DELETE" && new URL(request.url).pathname === "/wipe" && left > 0) {
+            left--;
+            return Response.json({ error: "fixture_wipe_failed" }, { status: 500 });
+          }
+          return stub.fetch(request);
+        },
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+  return { ...bindings, TASK };
+}
+
+/// A live shop with something of everything: two messages, one proposed reply and one payment.
+async function liveShopWithData() {
+  const shop = await setupShop();
+  const message = await customerWrites(shop, "ขอยกเลิกบัญชีค่ะ");
+  await customerWrites(shop, "ลบข้อมูลด้วยนะคะ");
+  const reply = await propose(shop, message.id, "รับทราบค่ะ");
+  expect(reply.status).toBe(200);
+  expect((await admin("POST", "/v1/admin/pilot/payments",
+    { tenant: shop.tenant, orderRef: "ORD-11", amountSatang: 15000, promptPayId: "0812345678" })).status).toBe(200);
+  return { shop, reply: reply.body };
+}
+
+function base64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/// Signs `fields` the way approval-link.ts does, under the domain tag given, with the real link secret.
+async function signUnder(domain: string, fields: unknown[]): Promise<string> {
+  const utf8 = (text: string) => new TextEncoder().encode(text);
+  const payload = base64url(utf8(JSON.stringify(fields)));
+  const key = await crypto.subtle.importKey("raw", utf8(LINK_SECRET), { name: "HMAC", hash: "SHA-256" }, false,
+    ["sign"]);
+  return `${payload}.${base64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, utf8(domain + payload))))}`;
+}
+
+describe("deleting a live shop needs its owner's confirmation", () => {
+  it("deletes a shop that never went live at once, without asking its owner", async () => {
+    const shop = await newShop("Sabai Tea");
+    const deleted = await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Sabai Tea" });
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({ tasksWiped: 0, connectionsWiped: 0, schedulesWiped: 0, occurrencesWiped: 0,
+      sessionsWiped: 0, deletedAt: expect.any(String) });
+    expect((await deletionRecord(shop.tenant)).confirmation).toBeNull();
+  });
+
+  it("asks the owner of a shop with a LINE connection, deletes nothing, and answers the same link again", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    expect(asked.status).toBe(202);
+    expect(asked.body).toEqual({ status: "awaiting_owner", expiresAt: expect.any(String),
+      confirmUrl: expect.stringMatching(/^https:\/\/web\.manut\.test\/delete\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/) });
+    const lifetime = Date.parse(asked.body.expiresAt) - Date.now();
+    expect(lifetime).toBeGreaterThan(23.9 * 3600 * 1000);
+    expect(lifetime).toBeLessThanOrEqual(24 * 3600 * 1000);
+    expect(await messages(shop.tenant)).toHaveLength(2);
+
+    // Asking again answers the confirmation already open: the same link and the same expiry.
+    expect(await askToDelete(shop.tenant)).toEqual(asked);
+    // The console's list shows the shop waiting for its owner, with that link.
+    expect((await listedShop(shop.tenant))?.deletion).toEqual({ state: "awaiting_owner",
+      confirmUrl: asked.body.confirmUrl, expiresAt: asked.body.expiresAt });
+    // A near miss on the name still deletes nothing and asks nobody.
+    expect(await askToDelete(shop.tenant, "Baan Som")).toEqual({ status: 409, body: { error: "name_mismatch" } });
+  });
+
+  it("counts the owner's consent alone as live", async () => {
+    const shop = await newShop("Khao Man Gai Lek");
+    // Consent is only ever recorded through an approval link; written here directly, as that route writes it.
+    expect((await tenantCall(bindings, shop.tenant, "/consent", { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenant: shop.tenant, cloudWork: true }) })).status).toBe(200);
+    expect((await askToDelete(shop.tenant, "Khao Man Gai Lek")).status).toBe(202);
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).status).toBe(200);
+  });
+
+  it("records who asked before anything else happens, as a confirmation only the owner can decide", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await adminWith<Asked>(bindings, "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" }, "ops@manut.test");
+    expect(asked.status).toBe(202);
+    const { deletion, confirmation } = await deletionRecord(shop.tenant);
+    expect(deletion).toEqual({ tenant: shop.tenant, name: "Baan Somtam", requestedAt: expect.any(String),
+      deletedBy: "ops@manut.test", confirmationId: confirmation?.request.id });
+    // approval-core's record: one request of an owner-only kind, at its first revision, open for 24 hours.
+    expect(confirmation).toMatchObject({ status: "pending",
+      request: { kind: "command", revision: 1, expiresAt: Date.parse(asked.body.expiresAt) } });
+
+    const decided = await decideDeletion(deletionTokenOf(asked.body.confirmUrl), true);
+    expect(decided).toMatchObject({ status: 200, body: { state: "deleted" } });
+    const after = await deletionRecord(shop.tenant);
+    expect(after.confirmation).toMatchObject({ status: "decided",
+      decision: { optionId: "delete", role: "owner", decidedBy: "owner-link" } });
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).body)
+      .toEqual({ error: "tenant_deleted", deletedAt: after.deletion?.deletedAt, deletedBy: "ops@manut.test" });
+  });
+
+  it("shows the owner what goes, and the link is all it takes to read it", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const shown = await deletionView(deletionTokenOf(asked.body.confirmUrl));
+    expect(shown).toEqual({ status: 200, body: {
+      shopName: "Baan Somtam",
+      goes: { messages: 2, replies: 1, payments: 1, lineConnected: true },
+      state: "awaiting_owner",
+      expiresAt: asked.body.expiresAt,
+    } });
+  });
+
+  it("deletes everything once the owner approves, and every link and route says so afterwards", async () => {
+    const { shop, reply } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const token = deletionTokenOf(asked.body.confirmUrl);
+
+    const decided = await decideDeletion(token, true);
+    expect(decided.status).toBe(200);
+    expect(decided.body).toEqual({ shopName: "Baan Somtam",
+      goes: { messages: 2, replies: 1, payments: 1, lineConnected: true },
+      state: "deleted", expiresAt: asked.body.expiresAt, decidedAt: expect.any(String) });
+
+    const { deletion } = await deletionRecord(shop.tenant);
+    expect(deletion?.counts).toMatchObject({ tasksWiped: 1, connectionsWiped: 1 });
+    expect((await admin("GET", `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`)).body)
+      .toEqual({ error: "tenant_deleted", deletedAt: deletion?.deletedAt, deletedBy: null });
+    expect(await view(tokenOf(reply.approvalUrl))).toMatchObject({ status: 404, body: { error: "link_invalid" } });
+    expect((await deliver(shop.connectionId, { destination: BOT, events: [textEvent("after")] })).status).toBe(404);
+    expect(await listedShop(shop.tenant)).toBeUndefined();
+    const tenantObject = bindings.TENANT.get(bindings.TENANT.idFromName(`t:${shop.tenant}`));
+    await runInDurableObject(tenantObject, async (_instance, state) => {
+      expect([...(await state.storage.list({ prefix: "pilot-" })).keys()]).toEqual([]);
+    });
+    // The confirmation outlives the shop, so its link still says what happened, with what the shop held.
+    expect((await deletionView(token)).body).toEqual(decided.body);
+  });
+
+  it("deletes nothing when the owner keeps their data, and a new request asks again with a new link", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const token = deletionTokenOf(asked.body.confirmUrl);
+
+    const kept = await decideDeletion(token, false);
+    expect(kept).toMatchObject({ status: 200, body: { state: "declined", decidedAt: expect.any(String) } });
+    expect(await messages(shop.tenant)).toHaveLength(2);
+    expect((await listedShop(shop.tenant))?.deletion).toEqual({ state: "declined",
+      confirmUrl: asked.body.confirmUrl, expiresAt: asked.body.expiresAt, decidedAt: kept.body.decidedAt });
+
+    const again = await askToDelete(shop.tenant);
+    expect(again.status).toBe(202);
+    expect(again.body.confirmUrl).not.toBe(asked.body.confirmUrl);
+    // The old link still says no; the new one waits.
+    expect((await deletionView(token)).body.state).toBe("declined");
+    expect((await deletionView(deletionTokenOf(again.body.confirmUrl))).body.state).toBe("awaiting_owner");
+    expect((await listedShop(shop.tenant))?.deletion).toMatchObject({ state: "awaiting_owner",
+      confirmUrl: again.body.confirmUrl });
+  });
+
+  it("refuses a second decision with the settled view, and deletes nothing after a no", async () => {
+    const { shop } = await liveShopWithData();
+    const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+    expect((await decideDeletion(token, false)).status).toBe(200);
+    for (const approve of [true, false]) {
+      const again = await decideDeletion(token, approve);
+      expect(again.status).toBe(409);
+      expect(again.body.error).toBe("already_decided");
+      expect(again.body.view?.state).toBe("declined");
+    }
+    expect(await messages(shop.tenant)).toHaveLength(2);
+  });
+
+  it("settles once when two decisions arrive together", async () => {
+    for (const second of [true, false]) {
+      const { shop } = await liveShopWithData();
+      const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+      const answers = await Promise.all([decideDeletion(token, true), decideDeletion(token, second)]);
+      expect(answers.map((answer) => answer.status).sort()).toEqual([200, 409]);
+      const won = answers.find((answer) => answer.status === 200)!;
+      const lost = answers.find((answer) => answer.status === 409)!;
+      expect(lost.body.error).toBe("already_decided");
+      const { confirmation } = await deletionRecord(shop.tenant);
+      if (won.body.state === "deleted") {
+        expect(confirmation?.decision?.optionId).toBe("delete");
+        expect(["deleting", "deleted"]).toContain(lost.body.view?.state);
+        expect((await admin("GET", `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`)).body.error)
+          .toBe("tenant_deleted");
+      } else {
+        expect(won.body.state).toBe("declined");
+        expect(confirmation?.decision?.optionId).toBe("keep");
+        expect(lost.body.view?.state).toBe("declined");
+        expect(await messages(shop.tenant)).toHaveLength(2);
+      }
+    }
+  });
+
+  it("answers 410 for an expired link and 404 for a bad one, deciding nothing", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const genuine = deletionTokenOf(asked.body.confirmUrl);
+    const confirmationId = (await deletionRecord(shop.tenant)).confirmation!.request.id;
+    const claim = { tenant: shop.tenant, confirmationId };
+    const expired = await mintDeletionToken(LINK_SECRET, { ...claim, expiresAtMs: Date.now() - 1000 });
+    const forged = await mintDeletionToken("an-attacker-secret-of-reasonable-length",
+      { ...claim, expiresAtMs: Date.now() + 3600_000 });
+    const [payload, mac] = genuine.split(".") as [string, string];
+    const nowhere = await mintDeletionToken(LINK_SECRET,
+      { ...claim, confirmationId: crypto.randomUUID(), expiresAtMs: Date.now() + 3600_000 });
+    const tampered = `${nowhere.split(".")[0]}.${mac}`;
+
+    expect(await deletionView(expired)).toEqual({ status: 410, body: { error: "link_expired" } });
+    expect(await decideDeletion(expired, true)).toEqual({ status: 410, body: { error: "link_expired" } });
+    for (const bad of [forged, tampered, `${payload}.${"A".repeat(43)}`, "garbage", nowhere]) {
+      expect(await deletionView(bad)).toEqual({ status: 404, body: { error: "link_invalid" } });
+      expect(await decideDeletion(bad, true)).toEqual({ status: 404, body: { error: "link_invalid" } });
+    }
+    expect((await decideDeletion(genuine, "yes" as unknown as boolean)).status).toBe(400);
+    expect(await messages(shop.tenant)).toHaveLength(2);
+    expect((await deletionView(genuine)).body.state).toBe("awaiting_owner");
+  });
+
+  it("lets nobody decide a confirmation past its expiry, and the next request opens a new one", async () => {
+    const { shop } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const token = deletionTokenOf(asked.body.confirmUrl);
+    const { confirmation } = await deletionRecord(shop.tenant);
+    // Moves the stored confirmation's expiry into the past while the token still reads as current, as when the
+    // two clocks disagree by a moment at the 24-hour mark.
+    const auth = bindings.AUTH.get(bindings.AUTH.idFromName("auth"));
+    await runInDurableObject(auth, async (_instance, state) => {
+      const key = `pilot-deletion-confirmation:${encodeURIComponent(shop.tenant)}:${confirmation!.request.id}`;
+      const stored = await state.storage.get<ConfirmationRecord>(key);
+      expect(stored?.status).toBe("pending");
+      await state.storage.put(key, { ...stored, request: { ...stored!.request, expiresAt: Date.now() - 1000 } });
+    });
+
+    expect((await deletionView(token)).body.state).toBe("expired");
+    expect(await decideDeletion(token, true)).toEqual({ status: 410, body: { error: "link_expired" } });
+    expect(await messages(shop.tenant)).toHaveLength(2);
+    expect((await listedShop(shop.tenant))?.deletion).toMatchObject({ state: "expired" });
+
+    const again = await askToDelete(shop.tenant);
+    expect(again.status).toBe(202);
+    expect(again.body.confirmUrl).not.toBe(asked.body.confirmUrl);
+    // The new request withdrew the old one, so at most one confirmation per shop can ever be decided.
+    expect((await deletionView(token)).body.state).toBe("expired");
+    const next = await decideDeletion(deletionTokenOf(again.body.confirmUrl), true);
+    expect(next).toMatchObject({ status: 200, body: { state: "deleted" } });
+  });
+
+  it("keeps reply links and deletion links apart, in both directions", async () => {
+    const { shop, reply } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const deletionToken = deletionTokenOf(asked.body.confirmUrl);
+    const replyToken = tokenOf(reply.approvalUrl);
+
+    // A reply link can never delete.
+    expect(await deletionView(replyToken)).toEqual({ status: 404, body: { error: "link_invalid" } });
+    expect(await decideDeletion(replyToken, true)).toEqual({ status: 404, body: { error: "link_invalid" } });
+    // A deletion link can never approve a reply, nor record consent.
+    expect(await view(deletionToken)).toMatchObject({ status: 404, body: { error: "link_invalid" } });
+    expect((await linkPost(deletionToken, "consent", { cloudWork: true })).status).toBe(404);
+    expect((await linkPost(deletionToken, "decision", { approve: true })).status).toBe(404);
+    expect(await messages(shop.tenant)).toHaveLength(2);
+    expect((await view(replyToken)).body).toMatchObject({ state: "proposed", needsConsent: true });
+    expect((await deletionView(deletionToken)).body.state).toBe("awaiting_owner");
+    expect(pushes()).toHaveLength(0);
+
+    // The separation is in the MAC itself: a payload each check would accept, signed with the real secret under
+    // the other check's domain, is refused. The same signer under the right domain gives the genuine tokens.
+    const confirmationId = (await deletionRecord(shop.tenant)).confirmation!.request.id;
+    const deletionFields = [1, shop.tenant, confirmationId, Date.parse(asked.body.expiresAt)];
+    const replyFields = [1, shop.tenant, reply.taskId, reply.actionId, Date.parse(reply.expiresAt)];
+    expect(await signUnder("manut-ai/pilot-deletion/v1.", deletionFields)).toBe(deletionToken);
+    expect(await signUnder("manut-ai/pilot-approval/v1.", replyFields)).toBe(replyToken);
+    const deletionSignedAsReply = await signUnder("manut-ai/pilot-approval/v1.", deletionFields);
+    const replySignedAsDeletion = await signUnder("manut-ai/pilot-deletion/v1.", replyFields);
+    expect(await checkDeletionToken(LINK_SECRET, deletionSignedAsReply, Date.now())).toEqual(
+      { ok: false, error: "link_invalid" });
+    expect(await checkApprovalToken(LINK_SECRET, replySignedAsDeletion, Date.now())).toEqual(
+      { ok: false, error: "link_invalid" });
+    expect((await checkDeletionToken(LINK_SECRET, deletionToken, Date.now())).ok).toBe(true);
+    expect((await checkApprovalToken(LINK_SECRET, replyToken, Date.now())).ok).toBe(true);
+  });
+
+  it("finishes a wipe the owner approved when the operator asks again, without asking the owner again", async () => {
+    const { shop, reply } = await liveShopWithData();
+    const asked = await askToDelete(shop.tenant);
+    const token = deletionTokenOf(asked.body.confirmUrl);
+
+    // The task wipe fails while the owner's yes runs the deletion: the decision stands, the data is half gone.
+    const decided = await decideDeletion(token, true, failingTaskWipes(1));
+    expect(decided).toMatchObject({ status: 200, body: { state: "deleting", decidedAt: expect.any(String) } });
+    expect(await messages(shop.tenant)).toHaveLength(2);
+    expect((await deletionView(token)).body.state).toBe("deleting");
+    expect((await listedShop(shop.tenant))?.deletion).toMatchObject({ state: "deleting" });
+    const decidedAt = (await deletionRecord(shop.tenant)).confirmation?.decision?.decidedAt;
+
+    // The operator's same request runs the wipe again, still failing once, then finishing; never a new link.
+    const partial = await adminWith(failingTaskWipes(1), "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" });
+    expect(partial).toEqual({ status: 500, body: { error: "wipe_incomplete", tasksWiped: 0, failed: [reply.taskId] } });
+    const finished = await askToDelete(shop.tenant);
+    expect(finished.status).toBe(200);
+    expect(finished.body).toMatchObject({ tasksWiped: 1, connectionsWiped: 1, deletedAt: expect.any(String) });
+    expect(finished.body).not.toHaveProperty("confirmUrl");
+
+    expect((await deletionView(token)).body.state).toBe("deleted");
+    const { deletion, confirmation } = await deletionRecord(shop.tenant);
+    expect(deletion?.deletedAt).toBe(finished.body.deletedAt);
+    expect(confirmation?.decision?.decidedAt).toBe(decidedAt);
+    expect((await askToDelete(shop.tenant)).body).toMatchObject({ error: "tenant_deleted" });
+  });
+
+  it("answers CORS for the page's origin only, never caches, and counts against the approval routes' limit", async () => {
+    const { shop } = await liveShopWithData();
+    const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+    const preflight = await call(`/v1/pilot/deletions/${token}/decision`, {
+      method: "OPTIONS",
+      headers: { origin: WEB, "access-control-request-method": "POST", "access-control-request-headers": "content-type" },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(WEB);
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    const ours = await call(`/v1/pilot/deletions/${token}`, { headers: { origin: WEB } });
+    expect(ours.headers.get("access-control-allow-origin")).toBe(WEB);
+    expect(ours.headers.get("cache-control")).toBe("no-store");
+    const theirs = await call(`/v1/pilot/deletions/${token}`, { headers: { origin: "https://evil.example" } });
+    expect(theirs.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await call("/v1/pilot/deletions/garbage")).headers.get("cache-control")).toBe("no-store");
+
+    const keys: string[] = [];
+    const limited: Env = { ...bindings, PILOT_APPROVAL_LIMITER: { limit: async ({ key }: { key: string }) => {
+      keys.push(key);
+      return { success: false };
+    } } as RateLimit };
+    for (const path of [`/v1/pilot/deletions/${token}`, `/v1/pilot/deletions/${token}/decision`]) {
+      const response = await call(path, { method: path.endsWith("decision") ? "POST" : "GET" }, limited);
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({ error: "rate_limited" });
+    }
+    expect(keys).toHaveLength(2);
+    expect((await deletionView(token)).body.state).toBe("awaiting_owner");
+  });
+});
+
+describe("the deletion confirmation's store", () => {
+  async function decideAtStore(body: Record<string, unknown>, headers: Record<string, string> = { "x-admin": "1" }) {
+    const response = await authCall(bindings, "/pilot-deletions/decide", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as { result?: Settled; error?: string } };
+  }
+
+  it("lets only the owner decide, and only the Worker write", async () => {
+    const { shop } = await liveShopWithData();
+    await askToDelete(shop.tenant);
+    const id = (await deletionRecord(shop.tenant)).confirmation!.request.id;
+    const helper = await decideAtStore({ tenant: shop.tenant, id, approve: false, role: "helper", decidedBy: "staff" });
+    expect(helper.body.result).toEqual({ ok: false, refused: "not_permitted" });
+    expect((await decideAtStore({ tenant: shop.tenant, id, approve: true, role: "owner", decidedBy: "x" }, {})).status)
+      .toBe(403);
+    expect((await decideAtStore({ tenant: shop.tenant, id, approve: true, role: "boss", decidedBy: "x" })).status)
+      .toBe(400);
+    expect((await deletionRecord(shop.tenant)).confirmation?.status).toBe("pending");
+  });
+
+  it("settles a confirmation once however many decisions arrive together", async () => {
+    const { shop } = await liveShopWithData();
+    await askToDelete(shop.tenant);
+    const id = (await deletionRecord(shop.tenant)).confirmation!.request.id;
+    const answers = await Promise.all(Array.from({ length: 6 }, (_, index) =>
+      decideAtStore({ tenant: shop.tenant, id, approve: index % 2 === 0, role: "owner", decidedBy: `owner-${index}` })));
+    const settled = answers.filter((answer) => answer.body.result?.ok);
+    expect(settled).toHaveLength(1);
+    const first = settled[0]!.body.result!.decision!;
+    for (const answer of answers.filter((entry) => !entry.body.result?.ok)) {
+      expect(answer.body.result).toEqual({ ok: false, refused: "already_decided", decision: first });
+    }
+    expect((await deletionRecord(shop.tenant)).confirmation?.decision).toEqual(first);
   });
 });

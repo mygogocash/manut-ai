@@ -101,16 +101,19 @@ try {
   // 2. The pages Worker on its own.
   const pagesBase = await pages.url;
   let home = "";
-  for (const path of ["/approve/tok_123", "/ops", "/", "/no-such-page"]) {
+  for (const path of ["/approve/tok_123", "/delete/tok_123", "/ops", "/", "/no-such-page"]) {
     for (const headers of NAVIGATIONS) {
       const html = await assertPage(await pages.fetch(new URL(path, pagesBase), { headers }), `pages ${path}`);
       if (path === "/") home = html;
     }
     checked++;
   }
-  const approve = await pages.fetch(new URL("/approve/tok_123", pagesBase), { headers: NAVIGATIONS[0] });
-  assert.equal(approve.headers.get("cache-control"), "no-store", "an approval page is never stored");
-  await approve.arrayBuffer();
+  // The pages the owner's two kinds of link open each name one thing to decide, so neither is ever stored.
+  for (const path of ["/approve/tok_123", "/delete/tok_123"]) {
+    const linked = await pages.fetch(new URL(path, pagesBase), { headers: NAVIGATIONS[0] });
+    assert.equal(linked.headers.get("cache-control"), "no-store", `${path} is never stored`);
+    await linked.arrayBuffer();
+  }
   const script = /<script[^>]+src="(\/assets\/[^"]+\.js)"/.exec(home)?.[1];
   assert.ok(script, "index.html names its script");
   const js = await pages.fetch(new URL(script, pagesBase));

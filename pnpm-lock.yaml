@@ -176,6 +176,10 @@ importers:
   .: {}
 
   apps/api:
+    dependencies:
+      '@manut/approval-core':
+        specifier: workspace:*
+        version: link:../../packages/approval-core
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.6.0

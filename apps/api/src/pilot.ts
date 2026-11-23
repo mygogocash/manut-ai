@@ -1,5 +1,5 @@
 /// The Manut AI pilot's routes (docs/pilot-api.md): the LINE webhook, the
-/// owner's signed approval link, and the operator console under
+/// owner's signed approval and deletion links, and the operator console under
 /// `/v1/admin/pilot/*`. In the pilot people play the shop's AI team: an
 /// operator reads a customer's LINE message, drafts a reply, and the shop
 /// owner approves or declines that one exact reply through a link.
@@ -13,8 +13,22 @@
 /// Approving still needs the shop's cloud-work consent, which only the owner
 /// can record, through the link, and the same kill switches as the session
 /// routes.
+///
+/// Deleting a live shop's data is the same shape: the operator's request opens
+/// one owner confirmation in approval-core's store (pilot-store.ts), the
+/// owner's link names exactly that confirmation, and the wipe starts only once
+/// the owner's yes is settled there.
 
-import { APPROVAL_LINK_TTL_MS, checkApprovalToken, mintApprovalToken, type ApprovalClaim } from "./approval-link";
+import type { ApprovalRecord } from "@manut/approval-core";
+import {
+  APPROVAL_LINK_TTL_MS,
+  checkApprovalToken,
+  checkDeletionToken,
+  mintApprovalToken,
+  mintDeletionToken,
+  type ApprovalClaim,
+  type DeletionClaim,
+} from "./approval-link";
 import { readBodyBytes, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
 import { isValidTenant } from "./companies";
@@ -32,7 +46,21 @@ import {
 } from "./connectors/line";
 import { readConnectionSecret } from "./cred-broker";
 import type { FeatureFlags } from "./index";
-import type { InboundMessage, Payment, PilotDeletionRecord, PilotReplyRecord, PilotShopRecord } from "./pilot-store";
+import {
+  approvedDeletion,
+  confirmationOpen,
+  isDeletionDetail,
+  type DecidedConfirmation,
+  type DeletionDetail,
+  type DeletionGoes,
+  type InboundMessage,
+  type OpenedConfirmation,
+  type Payment,
+  type PilotDeletionRecord,
+  type PilotReplyRecord,
+  type PilotShopRecord,
+  type StoredDeletion,
+} from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
@@ -77,6 +105,35 @@ export type ApprovalView = {
   decidedAt?: string;
   expiresAt: string;
   needsConsent: boolean;
+};
+
+/// Where an owner confirmation of a shop's deletion stands:
+/// - `awaiting_owner`: open, and nothing is deleted;
+/// - `deleting`: the owner said yes and the wipe has not finished (running,
+///   or stopped part way until the operator's same request finishes it);
+/// - `deleted`: the wipe finished;
+/// - `declined`: the owner kept the data, and nothing was deleted;
+/// - `expired`: nobody answered in time, and nothing was deleted.
+export type DeletionLinkState = "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
+
+/// What the owner's deletion page shows. `goes` is counted afresh while the
+/// shop's data is there, and once it is gone, is what the shop held when the
+/// operator asked.
+export type DeletionView = {
+  shopName: string;
+  goes: DeletionGoes;
+  state: DeletionLinkState;
+  expiresAt: string;
+  decidedAt?: string;
+};
+
+/// A shop's latest deletion request as the console's shop list shows it. The
+/// link is re-minted on each read at the same expiry, like a reply's.
+export type ShopDeletion = {
+  state: DeletionLinkState;
+  confirmUrl: string;
+  expiresAt: string;
+  decidedAt?: string;
 };
 
 function json(data: unknown, status = 200): Response {
@@ -158,6 +215,8 @@ export async function pilotRoute(
   if (line && request.method === "POST") return receiveLineWebhook(request, env, ctx, line[1] ?? "", flags);
   const approval = url.pathname.match(/^\/v1\/pilot\/approvals\/([^/]+)(?:\/(consent|decision))?$/);
   if (approval) return approvalRoute(request, env, ctx, approval[1] ?? "", approval[2], flags);
+  const deletion = url.pathname.match(/^\/v1\/pilot\/deletions\/([^/]+)(?:\/(decision))?$/);
+  if (deletion) return deletionLinkRoute(request, env, deletion[1] ?? "", deletion[2]);
   if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags, ctx);
   return null;
 }
@@ -269,6 +328,14 @@ function linkResponse(response: Response, request: Request, env: PilotEnv): Resp
   return new Response(response.body, { status: response.status, headers });
 }
 
+function linkPreflight(request: Request, env: PilotEnv): Response {
+  const preflight = empty(204);
+  preflight.headers.set("access-control-allow-methods", "GET, POST");
+  preflight.headers.set("access-control-allow-headers", "content-type");
+  preflight.headers.set("access-control-max-age", "600");
+  return linkResponse(preflight, request, env);
+}
+
 async function approvalRoute(
   request: Request,
   env: PilotEnv,
@@ -277,13 +344,7 @@ async function approvalRoute(
   leaf: string | undefined,
   flags: Flags,
 ): Promise<Response> {
-  if (request.method === "OPTIONS") {
-    const preflight = empty(204);
-    preflight.headers.set("access-control-allow-methods", "GET, POST");
-    preflight.headers.set("access-control-allow-headers", "content-type");
-    preflight.headers.set("access-control-max-age", "600");
-    return linkResponse(preflight, request, env);
-  }
+  if (request.method === "OPTIONS") return linkPreflight(request, env);
   const answer = await (async (): Promise<Response> => {
     const checked = await checkApprovalToken(env.APPROVAL_LINK_SECRET, token, Date.now());
     if (!checked.ok) return json({ error: checked.error }, checked.error === "link_expired" ? 410 : 404);
@@ -451,6 +512,142 @@ async function startSend(env: PilotEnv, ctx: ExecutionContext, claim: ApprovalCl
 }
 
 // ---------------------------------------------------------------------------
+// Owner's deletion link
+// ---------------------------------------------------------------------------
+
+/// `/v1/pilot/deletions/{token}`: the owner reads and answers one confirmation
+/// of deleting their shop's data. The same rate limit, CORS and no-store as
+/// the approval link; the token is a deletion token, which no reply link can
+/// pass for (approval-link.ts).
+async function deletionLinkRoute(
+  request: Request,
+  env: PilotEnv,
+  token: string,
+  leaf: string | undefined,
+): Promise<Response> {
+  if (request.method === "OPTIONS") return linkPreflight(request, env);
+  const answer = await (async (): Promise<Response> => {
+    const checked = await checkDeletionToken(env.APPROVAL_LINK_SECRET, token, Date.now());
+    if (!checked.ok) return json({ error: checked.error }, checked.error === "link_expired" ? 410 : 404);
+    if (!leaf && request.method === "GET") {
+      const loaded = await loadDeletion(env, checked.claim);
+      return loaded ? json(await deletionView(env, loaded)) : json({ error: "link_invalid" }, 404);
+    }
+    if (leaf === "decision" && request.method === "POST") return decideDeletionByLink(request, env, checked.claim);
+    return json({ error: "not_found" }, 404);
+  })().catch(() => json({ error: "unavailable" }, 503));
+  return linkResponse(answer, request, env);
+}
+
+type LoadedDeletion = { deletion: PilotDeletionRecord | null; confirmation: ApprovalRecord; detail: DeletionDetail };
+
+/// The confirmation a deletion link names, with the shop's deletion record.
+/// Null when this backend holds no such confirmation for that shop.
+function asLoaded(stored: StoredDeletion, claim: DeletionClaim): LoadedDeletion | null {
+  const { deletion, confirmation } = stored;
+  if (!confirmation || confirmation.request.id !== claim.confirmationId) return null;
+  const detail = confirmation.request.detail;
+  if (!isDeletionDetail(detail) || detail.tenant !== claim.tenant) return null;
+  return { deletion, confirmation, detail };
+}
+
+async function loadDeletion(env: PilotEnv, claim: DeletionClaim): Promise<LoadedDeletion | null> {
+  const response = await authCall(env, `/pilot-deletions/confirmation?tenant=${encodeURIComponent(claim.tenant)}` +
+    `&id=${encodeURIComponent(claim.confirmationId)}`);
+  if (!response.ok) throw new Error(`deletion_read_${response.status}`);
+  return asLoaded((await response.json()) as StoredDeletion, claim);
+}
+
+/// When a deletion this confirmation started finished: the time on its record
+/// or, if the wipe finished but completing the record failed, the tenant's
+/// tombstone, which the wipe writes last. Null while anything is left.
+async function deletionFinishedAt(env: PilotEnv, tenant: string, deletion: PilotDeletionRecord | null): Promise<string | null> {
+  if (deletion?.deletedAt) return deletion.deletedAt;
+  const response = await tenantCall(env, tenant, `/tombstone?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) throw new Error(`tombstone_read_${response.status}`);
+  const { tombstone } = (await response.json()) as { tombstone: { deletedAt?: unknown } | null };
+  return typeof tombstone?.deletedAt === "string" ? tombstone.deletedAt : null;
+}
+
+async function deletionLinkState(env: PilotEnv, loaded: LoadedDeletion, nowMs: number): Promise<DeletionLinkState> {
+  const { confirmation, deletion, detail } = loaded;
+  if (confirmation.status === "decided") {
+    if (!approvedDeletion(confirmation)) return "declined";
+    return (await deletionFinishedAt(env, detail.tenant, deletion)) ? "deleted" : "deleting";
+  }
+  // A withdrawn confirmation is one that expired unanswered before a new request replaced it.
+  if (confirmation.status === "withdrawn") return "expired";
+  return confirmationOpen(confirmation, nowMs) ? "awaiting_owner" : "expired";
+}
+
+/// What a deletion would take from the shop now, or null once the shop is gone.
+async function liveGoes(env: PilotEnv, tenant: string): Promise<DeletionGoes | null> {
+  const response = await tenantCall(env, tenant, `/pilot/summary?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) throw new Error(`summary_read_${response.status}`);
+  const summary = (await response.json()) as { shop: PilotShopRecord | null; messages: number; replies: number;
+    payments: number };
+  if (!summary.shop) return null;
+  return {
+    messages: summary.messages,
+    replies: summary.replies,
+    payments: summary.payments,
+    lineConnected: Boolean(summary.shop.lineConnectionId),
+  };
+}
+
+async function deletionView(env: PilotEnv, loaded: LoadedDeletion): Promise<DeletionView> {
+  const { confirmation, detail } = loaded;
+  const state = await deletionLinkState(env, loaded, Date.now());
+  const goes = state === "deleted" ? detail.goes : ((await liveGoes(env, detail.tenant)) ?? detail.goes);
+  return {
+    shopName: detail.shopName,
+    goes,
+    state,
+    expiresAt: new Date(confirmation.request.expiresAt ?? 0).toISOString(),
+    ...(confirmation.status === "decided" ? { decidedAt: new Date(confirmation.decision.decidedAt).toISOString() } : {}),
+  };
+}
+
+/// `POST /v1/pilot/deletions/{token}/decision`. The owner's answer is settled
+/// in AuthObject by approval-core's rules before anything is deleted: whoever
+/// holds the link is the owner, as for replies, so the role is set here and
+/// never read from the request, and the kind is owner-only. Approving then runs
+/// the tenant deletion and completes the record; if the wipe stops part way
+/// the decision still stands, the page shows `deleting`, and the operator's
+/// same request finishes it without asking the owner again. Declining deletes
+/// nothing.
+async function decideDeletionByLink(request: Request, env: PilotEnv, claim: DeletionClaim): Promise<Response> {
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value) || typeof parsed.value.approve !== "boolean") return json({ error: "invalid_request" }, 400);
+  const approve = parsed.value.approve;
+  const response = await authCall(env, "/pilot-deletions/decide", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ tenant: claim.tenant, id: claim.confirmationId, approve, role: "owner",
+      decidedBy: "owner-link" }),
+  });
+  if (!response.ok) return json({ error: "decision_unavailable" }, 503);
+  const decided = (await response.json()) as DecidedConfirmation;
+  const loaded = asLoaded(decided, claim);
+  if (!loaded) return json({ error: "link_invalid" }, 404);
+  if (!decided.result.ok) {
+    if (decided.result.refused === "already_decided") {
+      return json({ error: "already_decided", view: await deletionView(env, loaded) }, 409);
+    }
+    if (decided.result.refused === "expired") return json({ error: "link_expired" }, 410);
+    // Not found, withdrawn, not permitted, or an option or revision the link never showed: nothing this link can
+    // decide.
+    return json({ error: "link_invalid" }, 404);
+  }
+  if (approve && loaded.deletion) {
+    const wiped = await wipeShop(env, loaded.deletion);
+    return json(await deletionView(env, { ...loaded, deletion: wiped.record }));
+  }
+  return json(await deletionView(env, loaded));
+}
+
+// ---------------------------------------------------------------------------
 // Operator console (behind adminGate: Access audience, operator bearer, and
 // an exact ADMIN_METHODS entry, all checked before this runs)
 // ---------------------------------------------------------------------------
@@ -487,19 +684,24 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   return json({ error: "not_found" }, 404);
 }
 
-/// A tenant with no shop record: deleted, saying when and by whom, or never a shop at all.
+/// A tenant with no shop record: deleted, saying when and by whom, or never a
+/// shop at all. A shop whose wipe finished but whose record could not be
+/// completed is known by the tombstone the wipe writes last.
 async function noShop(env: PilotEnv, tenant: string): Promise<Response> {
-  const deletion = await readDeletion(env, tenant);
-  if (deletion?.deletedAt) {
-    return json({ error: "tenant_deleted", deletedAt: deletion.deletedAt, deletedBy: deletion.deletedBy }, 404);
+  const deletion = (await readDeletionState(env, tenant))?.deletion ?? null;
+  const deletedAt = deletion ? await deletionFinishedAt(env, tenant, deletion).catch(() => null) : null;
+  if (deletion && deletedAt) {
+    return json({ error: "tenant_deleted", deletedAt, deletedBy: deletion.deletedBy }, 404);
   }
   return json({ error: "shop_not_found" }, 404);
 }
 
-async function readDeletion(env: PilotEnv, tenant: string): Promise<PilotDeletionRecord | null> {
+/// The shop's deletion record and its current owner confirmation, or null when
+/// they cannot be read.
+async function readDeletionState(env: PilotEnv, tenant: string): Promise<StoredDeletion | null> {
   const response = await authCall(env, `/pilot-deletions?tenant=${encodeURIComponent(tenant)}`);
   if (!response.ok) return null;
-  return ((await response.json()) as { deletion: PilotDeletionRecord | null }).deletion;
+  return (await response.json()) as StoredDeletion;
 }
 
 function writeDeletion(env: PilotEnv, record: PilotDeletionRecord): Promise<Response> {
@@ -537,12 +739,29 @@ function sameName(typed: unknown, stored: string): boolean {
 /// Pilot shops belong to no company, so unlike the session route there are
 /// no company indexes to prune afterwards.
 ///
+/// A live shop (`isLive`) also needs its owner's confirmation (the owner's
+/// decision of 23 Nov 2026): the request deletes nothing and answers 202 with
+/// the link to send the owner, the same link while that confirmation waits.
+/// The owner's yes runs the deletion. Once the owner has said yes, this same
+/// request finishes a wipe that stopped part way, without asking again. A shop
+/// that never went live is deleted at once, as before.
+///
 /// The record of the deletion is written before anything is wiped, and a
 /// deletion that cannot be recorded does not start. It is completed with the
 /// time and the counts once the wipe finishes. If only that last write fails,
 /// the data is gone and the record still shows who asked and when.
 async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, ctx: ExecutionContext): Promise<Response> {
   if (!sameName(body.confirmName, shop.name)) return json({ error: "name_mismatch" }, 409);
+  // Whether the owner has already said yes comes first, and is never guessed: without the record, nothing starts.
+  const current = await readDeletionState(env, shop.tenant);
+  if (!current) return json({ error: "audit_unavailable" }, 503);
+  if (current.deletion && approvedDeletion(current.confirmation) &&
+      current.deletion.confirmationId === current.confirmation?.request.id) {
+    return (await wipeShop(env, current.deletion)).response;
+  }
+  const live = await isLive(env, shop);
+  if (live === null) return json({ error: "consent_unavailable" }, 503);
+  if (live) return askOwner(env, shop, ctx);
   const record: PilotDeletionRecord = {
     tenant: shop.tenant,
     name: shop.name,
@@ -550,14 +769,69 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
     deletedBy: await operatorIdentity(ctx),
   };
   if (!(await writeDeletion(env, record)).ok) return json({ error: "audit_unavailable" }, 503);
-  const wiped = await tenantDelete(env, shop.tenant);
-  if (!wiped.ok) return wiped;
+  return (await wipeShop(env, record)).response;
+}
+
+/// A shop is live once its owner has given consent or a LINE connection
+/// exists: from then on it holds what its customers and its owner gave it, so
+/// deleting it needs the owner's own yes. Null when consent cannot be read,
+/// because a deletion never guesses that a shop is not live.
+async function isLive(env: PilotEnv, shop: PilotShopRecord): Promise<boolean | null> {
+  if (shop.lineConnectionId) return true;
+  const response = await tenantCall(env, shop.tenant, `/consent?tenant=${encodeURIComponent(shop.tenant)}`);
+  if (!response.ok) return null;
+  const record = (await response.json().catch(() => null)) as { cloudWork?: unknown } | null;
+  return typeof record?.cloudWork === "boolean" ? record.cloudWork : null;
+}
+
+/// Opens the owner's confirmation, or answers the one already open, with the
+/// link to send the owner. AuthObject records who asked in the same write that
+/// opens it, so no link is handed out for a request it could not record. If
+/// the owner said yes in the moment since this request read the record, it
+/// finishes their deletion instead.
+async function askOwner(env: PilotEnv, shop: PilotShopRecord, ctx: ExecutionContext): Promise<Response> {
+  const webOrigin = originOf(env.WEB_ORIGIN);
+  if (!webOrigin) return json({ error: "not_configured", setting: "WEB_ORIGIN" }, 503);
+  if (!env.APPROVAL_LINK_SECRET || env.APPROVAL_LINK_SECRET.length < 32) {
+    return json({ error: "not_configured", setting: "APPROVAL_LINK_SECRET" }, 503);
+  }
+  const goes = await liveGoes(env, shop.tenant).catch(() => null);
+  if (!goes) return json({ error: "shop_unavailable" }, 503);
+  const detail: DeletionDetail = { tenant: shop.tenant, shopName: shop.name, goes };
+  const response = await authCall(env, "/pilot-deletions/open", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin": "1" },
+    body: JSON.stringify({ tenant: shop.tenant, name: shop.name, deletedBy: await operatorIdentity(ctx), detail }),
+  });
+  if (!response.ok) return json({ error: "audit_unavailable" }, 503);
+  const opened = (await response.json()) as OpenedConfirmation;
+  if (opened.outcome === "approved") return (await wipeShop(env, opened.deletion)).response;
+  const expiresAtMs = opened.confirmation.request.expiresAt ?? 0;
+  const token = await mintDeletionToken(env.APPROVAL_LINK_SECRET, {
+    tenant: shop.tenant,
+    confirmationId: opened.confirmation.request.id,
+    expiresAtMs,
+  });
+  return json({
+    status: "awaiting_owner",
+    confirmUrl: `${webOrigin}/delete/${token}`,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  }, 202);
+}
+
+/// Runs the tenant deletion for a recorded request and completes its record
+/// with the time and counts. Answers the deletion's own response (the counts,
+/// or 500 wipe_incomplete) and the record as it now stands.
+async function wipeShop(env: PilotEnv, record: PilotDeletionRecord): Promise<{ response: Response; record: PilotDeletionRecord }> {
+  const wiped = await tenantDelete(env, record.tenant);
+  if (!wiped.ok) return { response: wiped, record };
   const summary = (await wiped.json()) as Record<string, unknown>;
   const counts = Object.fromEntries(Object.entries(summary).filter((entry): entry is [string, number] =>
     typeof entry[1] === "number"));
   const deletedAt = typeof summary.deletedAt === "string" ? summary.deletedAt : new Date().toISOString();
-  await writeDeletion(env, { ...record, deletedAt, counts }).catch(() => undefined);
-  return json(summary);
+  const completed: PilotDeletionRecord = { ...record, deletedAt, counts };
+  await writeDeletion(env, completed).catch(() => undefined);
+  return { response: json(summary), record: completed };
 }
 
 /// A pilot shop is a tenant of its own (`pilot:<uuid>`), so every existing
@@ -586,24 +860,59 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>): Promise
   return json({ tenant, name, ownerName });
 }
 
+/// Every pilot shop, with its latest deletion request when it has one, so the
+/// console shows a shop waiting for its owner after any reload. A deletion
+/// request that cannot be read fails the list rather than vanishing from it: a
+/// shop shown without one reads as nobody having asked.
 async function listShops(env: PilotEnv): Promise<Response> {
   const registry = await authCall(env, "/pilot-shops");
   if (!registry.ok) return json({ error: "shops_unavailable" }, 503);
   const { tenants } = (await registry.json()) as { tenants: string[] };
   const shops = await Promise.all(
     tenants.map(async (tenant) => {
-      const [shop, consent] = await Promise.all([readShop(env, tenant), shopConsent(env, tenant)]);
+      const [shop, consent, stored] = await Promise.all([
+        readShop(env, tenant),
+        shopConsent(env, tenant),
+        readDeletionState(env, tenant),
+      ]);
       if (!shop) return null;
+      if (!stored) throw new Error("deletion_unavailable");
+      const deletion = await shopDeletion(env, tenant, stored);
       return {
         tenant,
         name: shop.name,
         ownerName: shop.ownerName,
         ...(shop.lineConnectionId ? { lineConnectionId: shop.lineConnectionId } : {}),
         consent,
+        ...(deletion ? { deletion } : {}),
       };
     }),
-  );
+  ).catch(() => null);
+  if (!shops) return json({ error: "shops_unavailable" }, 503);
   return json({ shops: shops.filter((shop) => shop !== null) });
+}
+
+/// The shop's current owner confirmation as the console shows it, its link
+/// re-minted at the same expiry (minting is deterministic, so a read never
+/// extends it). Null when no deletion of this shop was ever put to its owner.
+async function shopDeletion(env: PilotEnv, tenant: string, stored: StoredDeletion): Promise<ShopDeletion | null> {
+  const { confirmation } = stored;
+  if (!confirmation) return null;
+  const loaded = asLoaded(stored, { tenant, confirmationId: confirmation.request.id, expiresAtMs: 0 });
+  if (!loaded) return null;
+  const expiresAtMs = confirmation.request.expiresAt ?? 0;
+  const webOrigin = originOf(env.WEB_ORIGIN);
+  const token = await mintDeletionToken(env.APPROVAL_LINK_SECRET, {
+    tenant,
+    confirmationId: confirmation.request.id,
+    expiresAtMs,
+  }).catch(() => null);
+  return {
+    state: await deletionLinkState(env, loaded, Date.now()),
+    confirmUrl: webOrigin && token ? `${webOrigin}/delete/${token}` : "",
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    ...(confirmation.status === "decided" ? { decidedAt: new Date(confirmation.decision.decidedAt).toISOString() } : {}),
+  };
 }
 
 async function listFrom(env: PilotEnv, tenant: string, path: string, field: string): Promise<Response> {

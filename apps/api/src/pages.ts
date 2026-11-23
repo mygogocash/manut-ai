@@ -23,8 +23,9 @@ const PAGE_HEADERS: Record<string, string> = {
   "x-robots-tag": "noindex, nofollow",
 };
 
-/// The page an approval link opens names exactly one action, so no browser or proxy keeps it.
-const NEVER_STORED = /^\/approve\//;
+/// The page an approval or deletion link opens names exactly one thing the owner may decide, so no browser or
+/// proxy keeps it.
+const NEVER_STORED = /^\/(approve|delete)\//;
 
 export function withPageHeaders(response: Response, pathname: string): Response {
   const answer = new Response(response.body, response);

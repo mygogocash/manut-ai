@@ -97,8 +97,11 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
   else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
-  // Any method: the link is a bearer capability, so every probe counts.
-  else if (pathname.startsWith("/v1/pilot/approvals/")) binding = env.PILOT_APPROVAL_LIMITER;
+  // Any method: the link is a bearer capability, so every probe counts. The
+  // owner's two kinds of link share one limit, so probing both doubles nothing.
+  else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {
+    binding = env.PILOT_APPROVAL_LIMITER;
+  }
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
