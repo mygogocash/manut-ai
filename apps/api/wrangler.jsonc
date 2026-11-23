@@ -27,6 +27,12 @@
   // tokens never appear here: operators enter them per shop, and they go
   // straight into the encrypted credential vault. The LINE webhook stays
   // unreachable while officeInbound is off, like the Linear one.
+  // The model gateway (docs/model-gateway.md): ANTHROPIC_API_KEY is a Wrangler
+  // secret the owner adds (`wrangler secret put ANTHROPIC_API_KEY`); until then
+  // every model call answers 503 not_configured and nothing is sent. Two
+  // optional vars, both the owner's decision: MODEL_SATANG_PER_USD (whole
+  // satang per US dollar, 3500 when unset) and MODEL_DEFAULT_CAP_SATANG (each
+  // shop's monthly cap in satang, 20000 when unset). None is set here yet.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front

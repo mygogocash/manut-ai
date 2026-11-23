@@ -720,7 +720,8 @@ function writeDeletion(env: PilotEnv, record: PilotDeletionRecord): Promise<Resp
 }
 
 /// The operator's Access identity. Access gives an email for a person and nothing for a service token.
-async function operatorIdentity(ctx: ExecutionContext): Promise<string | null> {
+/// The model gateway's cap route records it the same way (model-gateway.ts).
+export async function operatorIdentity(ctx: ExecutionContext): Promise<string | null> {
   try {
     const identity = (await ctx.access?.getIdentity()) as { email?: unknown } | undefined;
     return typeof identity?.email === "string" ? identity.email : null;

@@ -23,6 +23,8 @@ function defaults(): Record<string, () => Response> {
     "TENANT GET /tombstone": () => Response.json({ tombstone: null }),
     "TENANT GET /attention": () => Response.json({ items: [{ id: "item-1" }] }),
     "TENANT GET /pilot/export": () => Response.json({ shop: null, messages: [], replies: [], payments: [], displayNames: [] }),
+    "TENANT GET /model/export": () =>
+      Response.json({ capOverride: null, months: [{ month: "2026-11", spentMillisatang: 4_200 }], calls: [], holds: [] }),
     "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
@@ -152,6 +154,7 @@ describe("tenant export fan-out", () => {
       schedules?: unknown[];
       consent?: { cloudWork?: boolean };
       attention?: unknown[];
+      model?: { months?: unknown[] };
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
@@ -160,6 +163,8 @@ describe("tenant export fan-out", () => {
     expect(body.schedules).toHaveLength(1);
     expect(body.consent?.cloudWork).toBe(true);
     expect(body.attention).toHaveLength(1);
+    // The model gateway's meter: what each model call cost the shop.
+    expect(body.model?.months).toEqual([{ month: "2026-11", spentMillisatang: 4_200 }]);
   });
 
   for (const [route, part] of [
@@ -169,6 +174,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /tombstone", "tombstone"],
     ["TENANT GET /attention", "attention"],
     ["TENANT GET /pilot/export", "pilot"],
+    ["TENANT GET /model/export", "model"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {

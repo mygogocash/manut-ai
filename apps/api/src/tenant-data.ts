@@ -51,10 +51,10 @@ export async function tenantCall(
 }
 
 /// Assembles a tenant's task documents with their histories, connection
-/// metadata, schedules, consent, inbound attention items, pilot records and
-/// deletion tombstone. Each task answers with its document, event log, action
-/// proposals and attempts, so the export no longer leaves the history behind
-/// (the old "task record only" gap is closed below).
+/// metadata, schedules, consent, inbound attention items, pilot records, model
+/// meter and deletion tombstone. Each task answers with its document, event
+/// log, action proposals and attempts, so the export no longer leaves the
+/// history behind (the old "task record only" gap is closed below).
 ///
 /// For the parts it does assemble, a part that cannot be read answers 500
 /// export_incomplete naming it, instead of a 200 that quietly leaves those
@@ -92,6 +92,11 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
   const pilotResp = await tenantCall(env, tenant, `/pilot/export?${query}`);
   if (!pilotResp.ok) failed.push("pilot");
   const pilot: unknown = pilotResp.ok ? await pilotResp.json() : null;
+  // The model gateway's meter: the cap override, monthly totals, open
+  // reservations and one metadata record per model call (model-meter.ts).
+  const modelResp = await tenantCall(env, tenant, `/model/export?${query}`);
+  if (!modelResp.ok) failed.push("model");
+  const model: unknown = modelResp.ok ? await modelResp.json() : null;
   const schedResp = await scheduleStub(env, tenant).fetch(new Request("https://schedules/schedules", { headers }));
   if (!schedResp.ok) failed.push("schedules");
   const schedules = (schedResp.ok ? await schedResp.json() : {}) as { schedules?: unknown[] };
@@ -115,6 +120,7 @@ export async function tenantExport(env: TenantDataEnv, tenant: string): Promise<
     consent,
     attention: attention.items ?? [],
     pilot,
+    model,
     ...(tomb.tombstone ? { deletedAt: tomb.tombstone.deletedAt } : {}),
   });
 }
