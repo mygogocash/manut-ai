@@ -866,6 +866,7 @@ export const peopleWords = {
     `A request a helper cannot approve waits for ${owner}, and the helper can pass it on with a note.`,
   columns: { what: "What", owner: "Owner", helper: "Helper" },
   yes: "Yes",
+  no: "No",
   noAsks: (owner: string) => `No, asks ${owner}`,
   kindRow: {
     message: "Messages to customers",
@@ -893,7 +894,6 @@ export const peopleWords = {
   helperLabel: "Helper who covers",
   untilLabel: "Away until",
   untilHelp: "Cover lasts to the end of that day.",
-  dayPassed: "That day has already passed. Choose today or a later day.",
   setCover: "Set cover",
   settingCover: "Setting cover",
   endCover: "End cover",
@@ -907,6 +907,7 @@ export const peopleWords = {
   notesLabel: (shop: string) => `Notes passed on to ${shop}'s owner`,
   notePassedBy: (name: string) => `Passed on by ${name}`,
   noteWhen: (at: string) => `${formatDate(at)} at ${formatClock(at)}`,
+  noteRequest: (requestId: string) => `request ${requestId}`,
   noNotes: (owner: string) =>
     `No notes yet. When a helper cannot approve a request, they can pass it to ${owner} with a note, and it shows here.`,
 } as const;

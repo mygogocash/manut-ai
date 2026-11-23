@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useApiSetup } from "../api";
-import { AuditIcon, BrandMark, FlagIcon, MemoryIcon, SpendIcon, StoreIcon, useColorScheme } from "../ui/marks";
+import { AuditIcon, BrandMark, FlagIcon, MemoryIcon, PeopleIcon, SpendIcon, StoreIcon, useColorScheme } from "../ui/marks";
 import { AuditView } from "./AuditView";
 import { DeletionNotices } from "./DeletionNotices";
 import { GateView } from "./GateView";
@@ -9,24 +9,26 @@ import { MessagesTab } from "./MessagesTab";
 import { ModelSpendView } from "./ModelSpendView";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
+import { PeopleView } from "./PeopleView";
 import { ShopDataTab } from "./ShopDataTab";
 import { useLoad } from "./useLoad";
 import { deletionOf, useShopDeletion } from "./useShopDeletion";
-import { auditWords, errorText, gateWords, isAuthError, memoryWords, modelSpendWords, shopDataWords } from "./words";
+import { auditWords, errorText, gateWords, isAuthError, memoryWords, modelSpendWords, peopleWords, shopDataWords } from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
 /// the side menu, the chosen shop's messages, replies, payments and data in the main column. The Pilot gate,
 /// above the shops, puts every shop in the main column at once: where the pilot stands against its Phase 1 gate.
 /// The Audit page beside it reads one shop's audit log: who did what for it, and when. The Memory page reads what the
-/// team knows about one shop, and is where an operator relays the owner's say over it. The Model spend page reads one
-/// shop's model spend for a month against its monthly cap, and sets or clears the cap.
+/// team knows about one shop, and is where an operator relays the owner's say over it. The People page reads who can use
+/// Manut AI for one shop, and is where an operator invites, removes and sets cover on the owner's word. The Model spend
+/// page reads one shop's model spend for a month against its monthly cap, and sets or clears the cap.
 
 export const REFRESH_MS = 15000;
 
 type Tab = "messages" | "payments" | "data";
-/// What the main column shows: the chosen shop, the Pilot gate across all of them, or one shop's audit log, memory or
-/// model spend.
-type Page = "shop" | "gate" | "audit" | "memory" | "model";
+/// What the main column shows: the chosen shop, the Pilot gate across all of them, or one shop's audit log, memory, people
+/// or model spend.
+type Page = "shop" | "gate" | "audit" | "memory" | "people" | "model";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -135,6 +137,16 @@ export function OpsConsole() {
               type="button"
               className="nav"
               style={{ width: "100%" }}
+              aria-current={page === "people" ? "page" : undefined}
+              onClick={() => setPage("people")}
+            >
+              <PeopleIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{peopleWords.nav}</span>
+            </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
               aria-current={page === "model" ? "page" : undefined}
               onClick={() => setPage("model")}
             >
@@ -199,6 +211,8 @@ export function OpsConsole() {
           <AuditView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "memory" ? (
           <MemoryView shops={shopList} tenant={tenant} onForget={forget} />
+        ) : page === "people" ? (
+          <PeopleView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (

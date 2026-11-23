@@ -481,6 +481,7 @@ describe("the People page's words", () => {
         ["Commands the team asks to run", true, false],
       ]);
     expect(peopleWords.yes).toBe("Yes");
+    expect(peopleWords.no).toBe("No");
     expect(peopleWords.noAsks("Fon")).toBe("No, asks Fon");
     for (const kind of APPROVAL_KINDS) expect(peopleWords.kindTag[kind].length).toBeGreaterThan(0);
   });
@@ -558,6 +559,7 @@ describe("the People page's words", () => {
     expect(peopleWords.kindOf("public_post")).toBe("Public post");
     expect(peopleWords.kindOf("something_new")).toBe("something_new");
     expect(peopleWords.noteWhen("2026-11-23T00:00:00.000Z")).toBe("23 November at 07:00");
+    expect(peopleWords.noteRequest("req_refund")).toBe("request req_refund");
     expect(peopleWords.noNotes("Fon")).toBe(
       "No notes yet. When a helper cannot approve a request, they can pass it to Fon with a note, and it shows here.");
     expect(peopleWords.removedNote(["Mint"])).toBe(
