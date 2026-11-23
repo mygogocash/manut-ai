@@ -8,7 +8,10 @@ import {
   type DeletedShop,
   type DeletionView,
   type InboundMessage,
+  type ModelCap,
+  type ModelUsage,
   type NewLineConnection,
+  type NewModelCap,
   type NewPayment,
   type NewReply,
   type NewShop,
@@ -33,7 +36,7 @@ export type HttpApiOptions = {
 };
 
 type Request = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   path: string;
   query?: Record<string, string>;
   body?: unknown;
@@ -194,11 +197,30 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         },
         admin: true,
       }),
+
+    // The month goes in the query only when asked for: the API's own current Bangkok month decides otherwise.
+    getModelUsage: (tenant, month) =>
+      request<ModelUsage>({
+        method: "GET",
+        path: "/v1/admin/model/usage",
+        query: { tenant, ...(month !== undefined ? { month } : {}) },
+        admin: true,
+      }),
+    // Built field by field so `capSatang` is always in the body, null included: the API refuses a body without it,
+    // so clearing a cap is said and never implied by leaving it out.
+    setModelCap: (input: NewModelCap) =>
+      request<ModelCap>({
+        method: "PUT",
+        path: "/v1/admin/model/cap",
+        body: { tenant: input.tenant, capSatang: input.capSatang },
+        admin: true,
+      }),
   };
 }
 
 /// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
-/// wipe left, and when and by whom a deleted shop was deleted. Fields of the wrong type are dropped, not guessed.
+/// wipe left, when and by whom a deleted shop was deleted, and the setting a `not_configured` answer names. Fields of
+/// the wrong type are dropped, not guessed.
 async function errorOf(response: Response): Promise<ApiError> {
   let parsed: unknown;
   try {
@@ -217,6 +239,7 @@ async function errorOf(response: Response): Promise<ApiError> {
     ...(failed ? { failed } : {}),
     ...(typeof record.deletedAt === "string" ? { deletedAt: record.deletedAt } : {}),
     ...(typeof record.deletedBy === "string" || record.deletedBy === null ? { deletedBy: record.deletedBy } : {}),
+    ...(typeof record.setting === "string" && record.setting ? { setting: record.setting } : {}),
   });
 }
 

@@ -174,6 +174,80 @@ describe("the API client", () => {
     ]);
   });
 
+  it("reads a shop's model spend for a month and sets or clears its cap, as docs/model-gateway.md answers", async () => {
+    const usage = {
+      tenant: "pilot:1", month: "2026-11", capSatang: 20000, capSource: "default", capOverride: null,
+      spentSatang: 49, spentMillisatang: 48500, heldSatang: 0, heldMillisatang: 0, remainingSatang: 19951,
+      counts: { ok: 2, failed: 0, unreadable: 0, abandoned: 0, refused: 0 }, tokens: { input: 2000, output: 1000 },
+      calls: [{ id: "call-1", at: "2026-11-23T03:00:01.000Z", model: "claude-sonnet-5-5", inputTokens: 1000,
+        outputTokens: 500, millisatang: 24500, satang: 25, outcome: "ok" }],
+      holds: [],
+    };
+    const cap = { tenant: "pilot:1", capSatang: 15000, capSource: "override",
+      capOverride: { capSatang: 15000, setAt: "2026-11-23T03:00:00.000Z", setBy: "ops@manut.test" } };
+    const { api, calls } = harness("op-key-123", (url) => (url.includes("/model/cap") ? json(cap) : json(usage)));
+
+    expect(await api.getModelUsage("pilot:1")).toEqual(usage);
+    expect(await api.getModelUsage("pilot:1", "2026-10")).toEqual(usage);
+    expect(await api.setModelCap({ tenant: "pilot:1", capSatang: 15000 })).toEqual(cap);
+    await api.setModelCap({ tenant: "pilot:1", capSatang: null });
+    await api.setModelCap({ tenant: "pilot:1", capSatang: 0 });
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET https://api.example.test/v1/admin/model/usage?tenant=pilot%3A1",
+      "GET https://api.example.test/v1/admin/model/usage?tenant=pilot%3A1&month=2026-10",
+      "PUT https://api.example.test/v1/admin/model/cap",
+      "PUT https://api.example.test/v1/admin/model/cap",
+      "PUT https://api.example.test/v1/admin/model/cap",
+    ]);
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    // `capSatang` is always in the body: the API refuses a body without it, so a request that means to clear the
+    // cap says null and one that means zero says 0, and neither is ever left out.
+    expect(calls[2]?.raw).toBe('{"tenant":"pilot:1","capSatang":15000}');
+    expect(calls[3]?.raw).toBe('{"tenant":"pilot:1","capSatang":null}');
+    expect(calls[4]?.raw).toBe('{"tenant":"pilot:1","capSatang":0}');
+  });
+
+  it("keeps the setting a 503 not_configured names, and every other answer of the model routes", async () => {
+    const answers: Record<string, Response> = {
+      named: json({ error: "not_configured", setting: "MODEL_DEFAULT_CAP_SATANG" }, 503),
+      rate: json({ error: "not_configured", setting: "MODEL_SATANG_PER_USD" }, 503),
+      odd: json({ error: "not_configured", setting: 42 }, 503),
+      meter: json({ error: "meter_unavailable" }, 503),
+      tenant: json({ error: "tenant_required" }, 400),
+      month: json({ error: "invalid_request" }, 400),
+    };
+    const failing = (key: string) => {
+      const { api } = harness("op-key-123", () => answers[key]!.clone());
+      return api.getModelUsage("t1").catch((e: unknown) => e as ApiError);
+    };
+
+    const named = await failing("named");
+    expect(named).toBeInstanceOf(ApiError);
+    expect(named).toMatchObject({ status: 503, code: "not_configured", setting: "MODEL_DEFAULT_CAP_SATANG" });
+    expect(await failing("rate")).toMatchObject({ status: 503, code: "not_configured", setting: "MODEL_SATANG_PER_USD" });
+    // A setting that is not text is dropped, not guessed.
+    expect(((await failing("odd")) as ApiError).setting).toBeUndefined();
+    expect(await failing("meter")).toMatchObject({ status: 503, code: "meter_unavailable" });
+    expect(await failing("tenant")).toMatchObject({ status: 400, code: "tenant_required" });
+    expect(await failing("month")).toMatchObject({ status: 400, code: "invalid_request" });
+
+    // The cap route's refusals arrive the same way, naming the setting too.
+    const { api } = harness("op-key-123", () => answers.rate!.clone());
+    await expect(api.setModelCap({ tenant: "t1", capSatang: 100 })).rejects.toMatchObject({ status: 503,
+      code: "not_configured", setting: "MODEL_SATANG_PER_USD" });
+  });
+
+  it("refuses the model routes with no key and sends nothing", async () => {
+    const { api, fetch } = harness(null);
+    await expect(api.getModelUsage("t1")).rejects.toMatchObject({ code: "operator_key_missing" });
+    await expect(api.setModelCap({ tenant: "t1", capSatang: null })).rejects.toMatchObject({ code: "operator_key_missing" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("refuses an admin call with no key and sends nothing", async () => {
     const { api, fetch } = harness(null);
     await expect(api.listShops()).rejects.toMatchObject({ code: "operator_key_missing" });

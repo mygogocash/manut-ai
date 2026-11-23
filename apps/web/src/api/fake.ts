@@ -1,7 +1,9 @@
+import { formatIsoDate } from "../format";
 import {
   ApiError,
   isLiveShop,
   isSending,
+  MODEL_CAP_MAX_SATANG,
   REPLY_MAX_LENGTH,
   type ApprovalState,
   type ApprovalView,
@@ -14,6 +16,11 @@ import {
   type DeletionState,
   type DeletionView,
   type InboundMessage,
+  type ModelCall,
+  type ModelCap,
+  type ModelCapOverride,
+  type ModelHold,
+  type ModelUsage,
   type Payment,
   type PilotApi,
   type ReplyAction,
@@ -39,6 +46,11 @@ import { pilotGate } from "./gate";
 /// time and page with the API's cursor, exported with the shop and deleted with it. Practice actions are an
 /// operator's with no Access identity, as the API records a service token. Baan Mali's log starts with the history
 /// of its sample world.
+///
+/// Each shop's model spend (docs/model-gateway.md) is kept as the API's meter keeps it: one record per call, the
+/// reservations still open, and an operator's cap override. Months and totals are read from the records, so a total can
+/// never disagree with what it adds up. Baan Mali has ฿186 spent of an operator's ฿300 cap with one call in progress, and
+/// Sabai Tea the default cap and no calls. A cap set in practice is kept with the rest of the world.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -52,6 +64,13 @@ export type FakeApiOptions = {
   webOrigin?: string;
   /// Keeps the sample data across reloads and tabs, so an approval link opened in a new tab still works.
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined;
+  /// What the model gateway reads from the Worker's settings, so practice and tests can put a page in the states a
+  /// misread setting or an unreadable meter causes. A var left out takes the API's default.
+  modelGateway?: {
+    vars?: { MODEL_SATANG_PER_USD?: string; MODEL_DEFAULT_CAP_SATANG?: string };
+    /// The meter cannot be read or written, so both model routes answer 503 `meter_unavailable`.
+    meterUnavailable?: boolean;
+  };
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
@@ -97,8 +116,15 @@ type FakeConfirmation = {
 };
 /// An audit entry with the shop it belongs to, which the API keeps by the shop's own object instead.
 type FakeAuditEntry = AuditEntry & { tenant: string };
+/// The model gateway's meter for every shop: a cap override, one record per call, and the reservations still open. The
+/// API counts the calls it refused at the cap, but the fake makes no calls to refuse, so it keeps no count.
+type FakeModel = {
+  overrides: (ModelCapOverride & { tenant: string })[];
+  calls: (ModelCall & { tenant: string })[];
+  holds: (ModelHold & { tenant: string })[];
+};
 type FakeDb = {
-  version: 4;
+  version: 5;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -111,11 +137,12 @@ type FakeDb = {
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
   expiredTokens: string[];
   audit: FakeAuditEntry[];
+  model: FakeModel;
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
-/// (version 1), before trial starts and subscription payments were kept (version 2) or before the audit log
-/// (version 3) is replaced by a fresh one rather than read without them.
+/// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
+/// (version 3) or before the model meter (version 4) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -159,8 +186,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 4 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
-        Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit)
+      return parsed && parsed.version === 5 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+        Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) && Array.isArray(parsed.model?.calls) &&
+        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds)
         ? parsed
         : null;
     } catch {
@@ -277,6 +305,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.subscriptionPayments = db.subscriptionPayments.filter((p) => !mine(p));
     // The log goes with the shop; the deletion record below keeps who asked and when.
     db.audit = db.audit.filter((e) => !mine(e));
+    // The meter lives in the shop's own object in the API, so its cap, calls and open reservations go with the rest.
+    db.model.overrides = db.model.overrides.filter((o) => !mine(o));
+    db.model.calls = db.model.calls.filter((c) => !mine(c));
+    db.model.holds = db.model.holds.filter((h) => !mine(h));
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
   }
@@ -407,6 +439,72 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
 
   function newestFirst<T>(items: T[], at: (item: T) => string): T[] {
     return [...items].sort((a, b) => Date.parse(at(b)) - Date.parse(at(a)));
+  }
+
+  /// What both model routes check once their own request is sound, in the API's order: the Worker's settings, which
+  /// name the var they cannot read, then the meter itself. Answers the default cap the settings give.
+  function readyGateway(): number {
+    const vars = options.modelGateway?.vars ?? {};
+    if (wholeSetting(vars.MODEL_SATANG_PER_USD, 3500, 1, 1_000_000) === null) {
+      throw new ApiError(503, "not_configured", undefined, { setting: "MODEL_SATANG_PER_USD" });
+    }
+    const defaultCapSatang = wholeSetting(vars.MODEL_DEFAULT_CAP_SATANG, 20_000, 0, MODEL_CAP_MAX_SATANG);
+    if (defaultCapSatang === null) {
+      throw new ApiError(503, "not_configured", undefined, { setting: "MODEL_DEFAULT_CAP_SATANG" });
+    }
+    if (options.modelGateway?.meterUnavailable) throw new ApiError(503, "meter_unavailable");
+    return defaultCapSatang;
+  }
+
+  /// A shop's cap: its operator's override when there is one, else the default. An override of zero is a real cap.
+  function capOf(tenant: string, defaultCapSatang: number): ModelCap {
+    const override = db.model.overrides.find((o) => o.tenant === tenant);
+    return {
+      tenant,
+      capSatang: override ? override.capSatang : defaultCapSatang,
+      capSource: override ? "override" : "default",
+      capOverride: override ? { capSatang: override.capSatang, setAt: override.setAt, setBy: override.setBy } : null,
+    };
+  }
+
+  /// One month of one shop's meter, read as the API answers `GET /v1/admin/model/usage`: totals over every call of the
+  /// month, the newest 200 records, and spend and holds rounded up with what is left rounded down.
+  function usageOf(tenant: string, month: string, defaultCapSatang: number): ModelUsage {
+    const cap = capOf(tenant, defaultCapSatang);
+    const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+    const all = db.model.calls
+      .filter((call) => call.tenant === tenant && monthOf(Date.parse(call.at)) === month)
+      .sort((a, b) => (a.at === b.at ? (a.id < b.id ? 1 : -1) : a.at < b.at ? 1 : -1))
+      .map(({ tenant: _tenant, ...call }) => call);
+    const holds = db.model.holds
+      .filter((hold) => hold.tenant === tenant && monthOf(Date.parse(hold.at)) === month)
+      .map(({ tenant: _tenant, ...hold }) => hold);
+    const counts = { ok: 0, failed: 0, unreadable: 0, abandoned: 0, refused: 0 };
+    for (const call of all) {
+      if (call.outcome === "ok" || call.outcome === "failed" || call.outcome === "unreadable" ||
+          call.outcome === "abandoned") {
+        counts[call.outcome] += 1;
+      }
+    }
+    const spent = sum(all.map((call) => call.millisatang));
+    const held = sum(holds.map((hold) => hold.worstMillisatang));
+    const left = cap.capSatang * MILLISATANG_PER_SATANG - spent - held;
+    return {
+      tenant,
+      month,
+      capSatang: cap.capSatang,
+      capSource: cap.capSource,
+      capOverride: cap.capOverride,
+      spentSatang: ceilSatang(spent),
+      spentMillisatang: spent,
+      heldSatang: ceilSatang(held),
+      heldMillisatang: held,
+      remainingSatang: left > 0 ? floorSatang(left) : 0,
+      counts,
+      tokens: { input: sum(all.map((call) => call.inputTokens)), output: sum(all.map((call) => call.outputTokens)) },
+      calls: all.slice(0, MODEL_LISTED_CALLS),
+      holds,
+    };
   }
 
   return {
@@ -754,8 +852,80 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const last = entries[entries.length - 1];
         return { tenant, entries, next: older.length > limit && last ? last.id : null, missed: null };
       }),
+
+    // As the API: the tenant, then the month (the current Bangkok month unless one is named), then the settings and the
+    // meter. Any tenant reads, as in the API; a shop it never metered has an empty month on the default cap.
+    getModelUsage: (tenant, month) =>
+      run(() => {
+        admin();
+        if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+        if (month !== undefined && !MONTH.test(month)) throw new ApiError(400, "invalid_request");
+        const defaultCapSatang = readyGateway();
+        return usageOf(tenant, month ?? monthOf(now()), defaultCapSatang);
+      }),
+
+    // As the API: the tenant, then a cap that is present and null or whole satang within the limit, then the settings
+    // and the meter. The change and its audit entry are written together, and a refusal writes neither.
+    setModelCap: (input) =>
+      run(() => {
+        admin();
+        const { tenant, capSatang } = input;
+        if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+        if (!isCapValue(capSatang)) throw new ApiError(400, "invalid_request");
+        const defaultCapSatang = readyGateway();
+        db.model.overrides = db.model.overrides.filter((o) => o.tenant !== tenant);
+        if (capSatang === null) {
+          audit(tenant, PRACTICE_OPERATOR, "model.cap_cleared", {});
+        } else {
+          db.model.overrides.push({ tenant, capSatang, setAt: iso(now()), setBy: null });
+          audit(tenant, PRACTICE_OPERATOR, "model.cap_set", {}, "ok", { amountSatang: capSatang });
+        }
+        return capOf(tenant, defaultCapSatang);
+      }),
   };
 
+}
+
+const MILLISATANG_PER_SATANG = 1000;
+/// The newest records one month's answer lists, as the API lists them.
+const MODEL_LISTED_CALLS = 200;
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function validTenant(tenant: unknown): tenant is string {
+  return typeof tenant === "string" && tenant.length > 0 && tenant.length <= 256;
+}
+
+/// A cap the API takes: null, or whole satang from 0 to the limit. Anything else, a missing one included, is refused.
+function isCapValue(value: unknown): value is number | null {
+  return value === null ||
+    (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MODEL_CAP_MAX_SATANG);
+}
+
+/// A Worker var holding a whole number between `min` and `max`, as the API reads one (model-price.ts): unset means the
+/// documented default, and anything else that is not plainly such a number answers null.
+function wholeSetting(raw: string | undefined, fallback: number, min: number, max: number): number | null {
+  if (raw === undefined) return fallback;
+  if (!/^\d{1,10}$/.test(raw)) return null;
+  const value = Number(raw);
+  return value >= min && value <= max ? value : null;
+}
+
+/// Whole satang from millisatang, as the API rounds them: spend up and what is left down, with the remainder taken first
+/// so no float rounds anything.
+function ceilSatang(millisatang: number): number {
+  const remainder = millisatang % MILLISATANG_PER_SATANG;
+  const whole = (millisatang - remainder) / MILLISATANG_PER_SATANG;
+  return remainder === 0 ? whole : whole + 1;
+}
+
+function floorSatang(millisatang: number): number {
+  return (millisatang - (millisatang % MILLISATANG_PER_SATANG)) / MILLISATANG_PER_SATANG;
+}
+
+/// The calendar month in Bangkok at `ms`, as `YYYY-MM`: the shop's own day (format.ts) cut to its month. Months turn at
+/// midnight Bangkok time, as in the API.
+function monthOf(ms: number): string {
+  return formatIsoDate(new Date(ms).toISOString()).slice(0, 7);
 }
 
 /// Who the fake's log names. Practice actions come from the practice key, which has no Access identity: the API
@@ -769,10 +939,16 @@ const SYSTEM: AuditActor = { kind: "system" };
 const AUDIT_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
 
 function auditId(ms: number, seq: number): string {
+  return sortableId("aud", ms, seq);
+}
+
+/// A prefix, a base-36 millisecond clock, a sequence and a random tail, so ids sort by time. The meter's call ids
+/// (`call-…`) are made the same way.
+function sortableId(prefix: string, ms: number, seq: number): string {
   const tail = new Uint8Array(4);
   crypto.getRandomValues(tail);
   const hex = [...tail].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `aud-${ms.toString(36).padStart(9, "0")}-${(seq % 46656).toString(36).padStart(3, "0")}-${hex}`;
+  return `${prefix}-${ms.toString(36).padStart(9, "0")}-${(seq % 46656).toString(36).padStart(3, "0")}-${hex}`;
 }
 
 /// LINE's `x-line-signature`: base64 HMAC-SHA256 of the raw body under the channel secret.
@@ -928,7 +1104,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 4,
+    version: 5,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -977,6 +1153,57 @@ function seed(at: number): FakeDb {
     confirmations: demos.map((entry) => entry.confirmation),
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
     audit: sampleAudit(at, tenant, connectionId),
+    model: seedModel(at, tenant),
+  };
+}
+
+/// Baan Mali's model spend as the meter would have kept it: 50 calls spread across the Bangkok month `at` falls in, ฿186.00
+/// in all, against the ฿300 cap an operator set five days ago, and one more call still in progress. Each kind of call is
+/// priced at ฿35 a dollar by docs/model-gateway.md's table and rounded up once per call: a Sonnet 5.5 reply of 2,800
+/// tokens in and 560 out is 39,200 millisatang. Spreading the calls from the month's first moment to `at` keeps them in
+/// the current month whatever day the practice world is made.
+function seedModel(at: number, tenant: string): FakeModel {
+  const monthStart = Date.parse(`${monthOf(at)}-01T00:00:00+07:00`);
+  // Per kind: model, tokens in, tokens out, millisatang each, how many, and how it ended.
+  const kinds: [string, number, number, number, number, string][] = [
+    ["claude-opus-5-5", 52_000, 5_200, 1_092_000, 6, "ok"], // the week's plan
+    ["claude-opus-5-5", 31_000, 2_900, 637_000, 12, "ok"], // the research behind a reply
+    ["claude-opus-5-5", 18_000, 1_200, 336_000, 11, "ok"], // an order looked up
+    ["claude-sonnet-5-5", 2_800, 560, 39_200, 18, "ok"], // a reply drafted
+    ["claude-haiku-5-5", 1_400, 250, 928, 2, "ok"], // a message sorted
+    ["claude-haiku-5-5", 0, 0, 0, 1, "failed"], // the provider failed, so nothing was charged
+  ];
+  const rows = kinds.flatMap(([model, inputTokens, outputTokens, millisatang, count, outcome]) =>
+    Array.from({ length: count }, () => ({ model, inputTokens, outputTokens, millisatang, outcome })));
+  // A fixed shuffle mixes the kinds without a random number: 31 and 50 share no factor, so it visits every row once.
+  const calls = rows.map((_, i) => {
+    const row = rows[(i * 31) % rows.length]!;
+    const when = monthStart + Math.floor(((at - monthStart) * (i + 1)) / (rows.length + 1));
+    return {
+      tenant,
+      id: sortableId("call", when, i),
+      at: new Date(when).toISOString(),
+      model: row.model,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      millisatang: row.millisatang,
+      satang: ceilSatang(row.millisatang),
+      outcome: row.outcome,
+    };
+  });
+  // A Sonnet reply asked for a minute ago: its worst case is held, 3,400 tokens in and 1,000 out at the table's price.
+  const heldAt = at - MINUTE_MS;
+  return {
+    overrides: [{ tenant, capSatang: 30_000, setAt: new Date(at - 5 * DAY_MS).toISOString(), setBy: "ops@manut.test" }],
+    calls,
+    holds: [{
+      tenant,
+      callId: sortableId("call", heldAt, rows.length),
+      model: "claude-sonnet-5-5",
+      worstMillisatang: 58_800,
+      at: new Date(heldAt).toISOString(),
+      expiresAt: new Date(heldAt + 15 * MINUTE_MS).toISOString(),
+    }],
   };
 }
 
@@ -984,6 +1211,8 @@ function seed(at: number): FakeDb {
 /// times match the sample's own: the shop and its LINE account 13 days ago, then each payment, reply and decision.
 function sampleAudit(at: number, tenant: string, connectionId: string): FakeAuditEntry[] {
   const operator: AuditActor = { kind: "operator", email: null };
+  // The operator who set Baan Mali's cap was signed in through Access, so the log names them.
+  const named: AuditActor = { kind: "operator", email: "ops@manut.test" };
   const owner: AuditActor = { kind: "owner" };
   const system: AuditActor = { kind: "system" };
   const taskId = `task_${tenant}`;
@@ -1000,6 +1229,7 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
   return [
     entry(tenant, 13 * 24 * 60 + 30, operator, "shop.created", {}),
     entry(tenant, 13 * 24 * 60, operator, "line.connected", { connectionId }),
+    entry(tenant, 5 * 24 * 60, named, "model.cap_set", {}, "ok", 30000),
     entry("shop_sabaitea", 2 * 24 * 60, operator, "shop.created", {}),
     entry(tenant, 1500, operator, "payment.recorded", { paymentId: "pay_2288" }, "ok", 45000),
     entry(tenant, 1320, operator, "reply.proposed", reply("act_joy", "msg_joy")),

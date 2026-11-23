@@ -493,3 +493,224 @@ describe("the fake's audit log, kept as the API keeps it", () => {
     expect((await api.listAudit("shop_baanmali")).entries.length).toBeGreaterThan(0);
   });
 });
+
+describe("the fake's model spend, answered as docs/model-gateway.md says", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 on 23 November in Bangkok
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const NO_CALLS = { ok: 0, failed: 0, unreadable: 0, abandoned: 0, refused: 0 };
+
+  function memory() {
+    const saved = new Map<string, string>();
+    return {
+      saved,
+      storage: {
+        getItem: (key: string) => saved.get(key) ?? null,
+        setItem: (key: string, value: string) => void saved.set(key, value),
+        removeItem: (key: string) => void saved.delete(key),
+      },
+    };
+  }
+
+  it("gives Baan Mali a believable month: ฿186 spent of its ฿300 cap, with one call in progress", async () => {
+    const usage = await createFakeApi({ now: () => NOW }).getModelUsage(BAAN_MALI);
+    expect(usage).toMatchObject({
+      tenant: BAAN_MALI,
+      month: "2026-11",
+      capSatang: 30000,
+      capSource: "override",
+      capOverride: { capSatang: 30000, setBy: "ops@manut.test" },
+      spentSatang: 18600,
+      spentMillisatang: 18_599_456,
+      heldSatang: 59,
+      heldMillisatang: 58_800,
+      // 30,000 satang less what is spent and held, 11,341.744 satang, rounded down.
+      remainingSatang: 11341,
+      counts: { ok: 49, failed: 1, unreadable: 0, abandoned: 0, refused: 0 },
+      tokens: { input: 935_200, output: 89_780 },
+    });
+    expect(Date.parse(usage.capOverride!.setAt)).toBeLessThan(NOW);
+    expect(usage.holds).toEqual([{ callId: expect.stringMatching(/^call-/), model: "claude-sonnet-5-5",
+      worstMillisatang: 58_800, at: new Date(NOW - 60_000).toISOString(), expiresAt: new Date(NOW + 14 * 60_000).toISOString() }]);
+
+    // The month's records agree with its totals, newest first, each in this Bangkok month.
+    const calls = usage.calls!;
+    expect(calls).toHaveLength(50);
+    expect(new Set(calls.map((call) => call.id)).size).toBe(50);
+    expect(calls.reduce((sum, call) => sum + call.millisatang, 0)).toBe(18_599_456);
+    expect(calls.reduce((sum, call) => sum + call.inputTokens, 0)).toBe(935_200);
+    expect(calls.reduce((sum, call) => sum + call.outputTokens, 0)).toBe(89_780);
+    expect(calls.map((call) => call.at)).toEqual([...calls.map((call) => call.at)].sort().reverse());
+    expect(calls.every((call) => call.at >= "2026-10-31T17:00:00.000Z" && call.at <= new Date(NOW).toISOString())).toBe(true);
+    expect(new Set(calls.map((call) => call.model))).toEqual(
+      new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]));
+    // `satang` is `millisatang` rounded up, and the one failed call cost nothing.
+    for (const call of calls) {
+      expect(call.satang * 1000).toBeGreaterThanOrEqual(call.millisatang);
+      expect(call.satang * 1000 - call.millisatang).toBeLessThan(1000);
+    }
+    expect(calls.filter((call) => call.outcome === "failed")).toEqual([
+      expect.objectContaining({ millisatang: 0, satang: 0, inputTokens: 0, outputTokens: 0 })]);
+    expect(calls.filter((call) => call.outcome === "ok")).toHaveLength(49);
+  });
+
+  it("gives a shop with no calls the default cap and an empty month", async () => {
+    expect(await createFakeApi({ now: () => NOW }).getModelUsage(SABAI_TEA)).toEqual({
+      tenant: SABAI_TEA, month: "2026-11", capSatang: 20000, capSource: "default", capOverride: null,
+      spentSatang: 0, spentMillisatang: 0, heldSatang: 0, heldMillisatang: 0, remainingSatang: 20000,
+      counts: NO_CALLS, tokens: { input: 0, output: 0 }, calls: [], holds: [],
+    });
+  });
+
+  it("reads any Bangkok month, which turns at midnight there, and refuses what is not a month", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    // The cap is the shop's, not the month's: an earlier month has no calls but the same cap.
+    expect(await api.getModelUsage(BAAN_MALI, "2026-10")).toMatchObject({ month: "2026-10", capSatang: 30000,
+      capSource: "override", spentSatang: 0, remainingSatang: 30000, counts: NO_CALLS, calls: [], holds: [] });
+    expect((await api.getModelUsage(BAAN_MALI, "2026-11")).spentSatang).toBe(18600);
+
+    for (const [at, month] of [["2026-11-30T16:59:59Z", "2026-11"], ["2026-11-30T17:00:00Z", "2026-12"],
+      ["2026-12-31T17:00:00Z", "2027-01"]] as const) {
+      expect((await createFakeApi({ now: () => Date.parse(at) }).getModelUsage(SABAI_TEA)).month).toBe(month);
+    }
+    for (const bad of ["2026-13", "2026-00", "2026-1", "26-11", "november", "2026-11-01", " 2026-11", ""]) {
+      await expect(api.getModelUsage(BAAN_MALI, bad)).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    await expect(api.getModelUsage("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+  });
+
+  it("puts Baan Mali's sample month inside whichever Bangkok month the practice world is made in", async () => {
+    // Half an hour into December in Bangkok: the sample calls sit in December, not behind in November.
+    const api = createFakeApi({ now: () => Date.parse("2026-11-30T17:30:00Z") });
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ month: "2026-12", spentSatang: 18600,
+      counts: { ok: 49, failed: 1 } });
+  });
+
+  it("sets a shop's cap in whole satang, answers the cap as it now stands, and clears it with null", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 15000 })).toEqual({
+      tenant: SABAI_TEA, capSatang: 15000, capSource: "override",
+      // The practice key has no Access identity, so nobody is named, as the API records a service token.
+      capOverride: { capSatang: 15000, setAt: "2026-11-23T03:00:00.000Z", setBy: null },
+    });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 15000, capSource: "override",
+      capOverride: { capSatang: 15000, setBy: null }, remainingSatang: 15000 });
+
+    // A cap under what is already spent is allowed and leaves nothing; zero is a real cap that stops every call.
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 10000 });
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 10000, spentSatang: 18600, remainingSatang: 0 });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 0 })).toMatchObject({ capSatang: 0, capSource: "override" });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: 1_000_000_000 })).toMatchObject({ capSatang: 1_000_000_000 });
+
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toEqual({
+      tenant: SABAI_TEA, capSatang: 20000, capSource: "default", capOverride: null });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default", capOverride: null });
+    // Clearing a shop that has no override is the same answer, not an error.
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toMatchObject({ capSource: "default" });
+  });
+
+  it("refuses a cap that is not 0 to 1,000,000,000 whole satang, or null, or that is missing, and changes nothing", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    for (const capSatang of [-1, 1.5, 1_000_000_001, Number.NaN, Number.POSITIVE_INFINITY, "100", true, undefined]) {
+      await expect(api.setModelCap({ tenant: SABAI_TEA, capSatang } as never)).rejects.toMatchObject({ status: 400,
+        code: "invalid_request" });
+    }
+    // A body that forgot `capSatang` never clears a cap by accident.
+    await expect(api.setModelCap({ tenant: BAAN_MALI } as never)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(api.setModelCap({ tenant: "", capSatang: 100 })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    // The tenant is checked before the cap, as the API checks it.
+    await expect(api.setModelCap({ tenant: "", capSatang: -1 })).rejects.toMatchObject({ code: "tenant_required" });
+
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 30000, capOverride: { setBy: "ops@manut.test" } });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default" });
+    // Nothing was refused into the log either.
+    const log = (await api.listAudit(SABAI_TEA, { limit: 200 })).entries;
+    expect(log.some((entry) => entry.action.startsWith("model."))).toBe(false);
+  });
+
+  it("writes a cap's change to the shop's audit log, as the API does in the same write", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    await api.setModelCap({ tenant: SABAI_TEA, capSatang: 15000 });
+    await api.setModelCap({ tenant: SABAI_TEA, capSatang: null });
+    const log = (await api.listAudit(SABAI_TEA, { limit: 200 })).entries.reverse().map(({ id: _id, at: _at, ...said }) => said);
+    expect(log.slice(-2)).toEqual([
+      { actor: { kind: "operator", email: null }, action: "model.cap_set", subject: {}, outcome: "ok", amountSatang: 15000 },
+      { actor: { kind: "operator", email: null }, action: "model.cap_cleared", subject: {}, outcome: "ok" },
+    ]);
+    // Baan Mali's sample log already holds the entry for the cap its sample world was given.
+    const sample = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries.find((entry) => entry.action === "model.cap_set");
+    expect(sample).toMatchObject({ actor: { kind: "operator", email: "ops@manut.test" }, outcome: "ok", amountSatang: 30000 });
+  });
+
+  it("answers 503 not_configured, naming the setting, when a Worker var cannot be read as the API reads it", async () => {
+    const cases: [{ MODEL_SATANG_PER_USD?: string; MODEL_DEFAULT_CAP_SATANG?: string }, string][] = [
+      [{ MODEL_DEFAULT_CAP_SATANG: "3,390" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_DEFAULT_CAP_SATANG: "" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_DEFAULT_CAP_SATANG: "1000000001" }, "MODEL_DEFAULT_CAP_SATANG"],
+      [{ MODEL_SATANG_PER_USD: "33.90" }, "MODEL_SATANG_PER_USD"],
+      [{ MODEL_SATANG_PER_USD: "0" }, "MODEL_SATANG_PER_USD"],
+      [{ MODEL_SATANG_PER_USD: "1000001" }, "MODEL_SATANG_PER_USD"],
+      // When both are wrong the rate is named, because the API reads it first.
+      [{ MODEL_SATANG_PER_USD: "x", MODEL_DEFAULT_CAP_SATANG: "y" }, "MODEL_SATANG_PER_USD"],
+    ];
+    for (const [vars, setting] of cases) {
+      const api = createFakeApi({ now: () => NOW, modelGateway: { vars } });
+      await expect(api.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 503, code: "not_configured", setting });
+      await expect(api.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 503,
+        code: "not_configured", setting });
+    }
+    // The cap is checked before the settings are read, as in the API.
+    const broken = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_SATANG_PER_USD: "x" } } });
+    await expect(broken.setModelCap({ tenant: BAAN_MALI, capSatang: -1 })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("takes the default cap from MODEL_DEFAULT_CAP_SATANG, and answers 503 meter_unavailable when the meter is down", async () => {
+    const api = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_DEFAULT_CAP_SATANG: "25000",
+      MODEL_SATANG_PER_USD: "3390" } } });
+    expect(await api.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 25000, capSource: "default", remainingSatang: 25000 });
+    expect(await api.setModelCap({ tenant: SABAI_TEA, capSatang: null })).toMatchObject({ capSatang: 25000, capSource: "default" });
+    // Zero is a readable default: it stops every shop that has no override of its own.
+    const stopped = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_DEFAULT_CAP_SATANG: "0" } } });
+    expect(await stopped.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 0, remainingSatang: 0 });
+
+    const down = createFakeApi({ now: () => NOW, modelGateway: { meterUnavailable: true } });
+    await expect(down.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 503, code: "meter_unavailable" });
+    await expect(down.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 503,
+      code: "meter_unavailable" });
+    // Refusals that need no meter still come first.
+    await expect(down.getModelUsage("")).rejects.toMatchObject({ code: "tenant_required" });
+  });
+
+  it("refuses both routes without an operator key", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    await expect(api.getModelUsage(BAAN_MALI)).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(api.setModelCap({ tenant: BAAN_MALI, capSatang: 1000 })).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+
+  it("takes a shop's meter and its cap with it when the shop is deleted", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    // As the API's meter, wiped with the rest of the shop's object: an empty month on the default cap.
+    expect(await api.getModelUsage(BAAN_MALI)).toMatchObject({ capSatang: 20000, capSource: "default", capOverride: null,
+      spentSatang: 0, heldSatang: 0, counts: NO_CALLS, calls: [], holds: [] });
+  });
+
+  it("keeps a cap changed in practice across a reload, and starts again on reset", async () => {
+    const { storage } = memory();
+    await createFakeApi({ now: () => NOW, storage }).setModelCap({ tenant: SABAI_TEA, capSatang: 12345 });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    expect(await reloaded.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 12345, capSource: "override" });
+    reloaded.reset();
+    expect(await reloaded.getModelUsage(SABAI_TEA)).toMatchObject({ capSatang: 20000, capSource: "default" });
+  });
+
+  it("replaces a practice world saved before the model meter existed", async () => {
+    const { storage, saved } = memory();
+    saved.set("manut.pilot.fake.v1", JSON.stringify({ version: 4, seq: 100, shops: [], connections: [], messages: [],
+      actions: [], payments: [], subscriptionPayments: [], deletions: [], confirmations: [], expiredTokens: [], audit: [] }));
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.getModelUsage(BAAN_MALI)).spentSatang).toBe(18600);
+  });
+});
