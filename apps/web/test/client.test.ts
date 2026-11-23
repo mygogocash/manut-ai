@@ -62,6 +62,7 @@ async function everyAdminRoute(api: PilotApi) {
   await api.recordSubscriptionPayment({ tenant: "t1", amountSatang: 49900, slipRef: "KB-1", slipNote: "KBank 10:02" });
   await api.listSubscriptionPayments("t1");
   await api.getGate();
+  await api.listAudit("t1", { before: "aud-mi8x2k4c0-000-0a1b2c3d", limit: 20 });
 }
 
 describe("the API client", () => {
@@ -83,6 +84,7 @@ describe("the API client", () => {
       "POST https://api.example.test/v1/admin/pilot/subscription-payments",
       "GET https://api.example.test/v1/admin/pilot/subscription-payments?tenant=t1",
       "GET https://api.example.test/v1/admin/pilot/gate",
+      "GET https://api.example.test/v1/admin/audit?tenant=t1&before=aud-mi8x2k4c0-000-0a1b2c3d&limit=20",
     ]);
     for (const call of calls) {
       expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
@@ -150,6 +152,26 @@ describe("the API client", () => {
     expect(await api.listSubscriptionPayments("t1")).toEqual([payment]);
     await expect(api.recordSubscriptionPayment({ tenant: "t1", amountSatang: 49900, slipRef: "KB-1" })).rejects
       .toMatchObject({ status: 409, code: "slip_already_recorded" });
+  });
+
+  it("reads a shop's audit log a page at a time, asking only for what it was given", async () => {
+    const page = {
+      tenant: "pilot:1",
+      entries: [{ id: "aud-mi8x2k4c0-000-0a1b2c3d", at: "2026-11-23T03:00:00.000Z",
+        actor: { kind: "operator", email: "ops@manut.test" }, action: "shop.created", subject: {}, outcome: "ok" }],
+      next: null,
+      missed: { count: 1, lastAt: "2026-11-23T03:05:00.000Z", lastAction: "dispatch.settled" },
+    };
+    const { api, calls } = harness("op-key-123", (url) =>
+      url.includes("before=bad") ? json({ error: "invalid_request" }, 400) : json(page));
+
+    expect(await api.listAudit("pilot:1")).toEqual(page);
+    await expect(api.listAudit("pilot:1", { before: "bad" })).rejects.toMatchObject({ status: 400,
+      code: "invalid_request" });
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.test/v1/admin/audit?tenant=pilot%3A1",
+      "https://api.example.test/v1/admin/audit?tenant=pilot%3A1&before=bad",
+    ]);
   });
 
   it("refuses an admin call with no key and sends nothing", async () => {

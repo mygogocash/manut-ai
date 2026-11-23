@@ -188,6 +188,42 @@ export type DeletedShop = {
 /// Asking again while that confirmation waits answers the same link.
 export type AwaitingOwner = { status: "awaiting_owner"; confirmUrl: string; expiresAt: string };
 
+/// Who an audit entry says acted: an operator by their Cloudflare Access identity (null for a service token, and in
+/// practice mode), the shop's owner (through a link, or with the id of their signed-in device), a helper, a worker by
+/// its attempt, or Manut AI's own system.
+export type AuditActor =
+  | { kind: "operator"; email: string | null }
+  | { kind: "owner"; id?: string }
+  | { kind: "helper"; id: string }
+  | { kind: "worker"; attemptId: string }
+  | { kind: "system" };
+
+/// One entry of a shop's audit log (docs/pilot-api.md, "Audit log"): who did what and when, metadata only. `action`
+/// and `outcome` are the contract's codes; a code this console does not know yet is shown as it is rather than
+/// dropped, so they are kept as strings.
+export type AuditEntry = {
+  id: string;
+  at: string;
+  actor: AuditActor;
+  action: string;
+  /// Only ids: `taskId`, `actionId`, `messageId`, `attemptId`, `requestId`, `paymentId`, `connectionId`,
+  /// `previousConnectionId`, `confirmationId`.
+  subject: Record<string, string>;
+  outcome: string;
+  reason?: string;
+  amountSatang?: number;
+};
+
+/// How many entries the log could not write for the shop, and the last one's time and action.
+export type AuditMissed = { count: number; lastAt: string; lastAction: string };
+
+/// One page of a shop's log, newest first. `next` is the cursor for the page before it, null on the oldest page.
+export type AuditPage = { tenant: string; entries: AuditEntry[]; next: string | null; missed: AuditMissed | null };
+
+/// Which page to read: the entries before the cursor `before` (an entry's id), at most `limit` of them (1 to 200; the
+/// API reads 50 when the console does not say).
+export type AuditQuery = { before?: string; limit?: number };
+
 /// The reply text the broker accepts: 1 to 5,000 characters.
 export const REPLY_MAX_LENGTH = 5000;
 
@@ -241,6 +277,10 @@ export interface PilotApi {
   listSubscriptionPayments(tenant: string): Promise<SubscriptionPayment[]>;
   /// The Phase 1 gate: every shop's trial, payment and activity, and the cohort against the gate's two lines.
   getGate(): Promise<PilotGate>;
+
+  /// `GET /v1/admin/audit`: one page of a shop's audit log, newest first. Rejects with 400 `invalid_request` for a
+  /// cursor that is not an entry's id or a size out of range.
+  listAudit(tenant: string, query?: AuditQuery): Promise<AuditPage>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.

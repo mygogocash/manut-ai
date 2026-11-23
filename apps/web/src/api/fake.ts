@@ -5,6 +5,8 @@ import {
   REPLY_MAX_LENGTH,
   type ApprovalState,
   type ApprovalView,
+  type AuditActor,
+  type AuditEntry,
   type AwaitingOwner,
   type DeletedShop,
   type DeletionGoes,
@@ -32,6 +34,11 @@ import { pilotGate } from "./gate";
 /// open the owner's page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined,
 /// demo-old and demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
 /// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
+///
+/// Each shop's audit log is kept as the API keeps it: the same actions and outcomes, metadata only, ids that sort by
+/// time and page with the API's cursor, exported with the shop and deleted with it. Practice actions are an
+/// operator's with no Access identity, as the API records a service token. Baan Mali's log starts with the history
+/// of its sample world.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -88,8 +95,10 @@ type FakeConfirmation = {
   approved?: boolean;
   decidedAt?: string;
 };
+/// An audit entry with the shop it belongs to, which the API keeps by the shop's own object instead.
+type FakeAuditEntry = AuditEntry & { tenant: string };
 type FakeDb = {
-  version: 3;
+  version: 4;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -101,11 +110,12 @@ type FakeDb = {
   confirmations: FakeConfirmation[];
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
   expiredTokens: string[];
+  audit: FakeAuditEntry[];
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
-/// (version 1) or before trial starts and subscription payments were kept (version 2) is replaced by a fresh one
-/// rather than read without them.
+/// (version 1), before trial starts and subscription payments were kept (version 2) or before the audit log
+/// (version 3) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -149,8 +159,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 3 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
-        Array.isArray(parsed.subscriptionPayments)
+      return parsed && parsed.version === 4 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+        Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit)
         ? parsed
         : null;
     } catch {
@@ -188,6 +198,20 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   function nextId(prefix: string): string {
     db.seq += 1;
     return `${prefix}_${db.seq}`;
+  }
+
+  /// Appends to the shop's audit log, now, as the API would: ids only, and a code for what happened.
+  function audit(
+    tenant: string,
+    actor: AuditActor,
+    action: string,
+    subject: Record<string, string>,
+    outcome = "ok",
+    extra: { amountSatang?: number } = {},
+  ): void {
+    db.seq += 1;
+    const at = now();
+    db.audit.push({ tenant, id: auditId(at, db.seq), at: iso(at), actor, action, subject, outcome, ...extra });
   }
 
   /// The API's answers for a shop that is not there: `tenant_deleted`, saying when and by whom, once it has been
@@ -251,6 +275,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.actions = db.actions.filter((a) => !mine(a));
     db.payments = db.payments.filter((p) => !mine(p));
     db.subscriptionPayments = db.subscriptionPayments.filter((p) => !mine(p));
+    // The log goes with the shop; the deletion record below keeps who asked and when.
+    db.audit = db.audit.filter((e) => !mine(e));
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
   }
@@ -282,6 +308,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     };
     db.confirmations.push(confirmation);
     writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(at), deletedBy: null, confirmationId: confirmation.id });
+    audit(shop.tenant, PRACTICE_OPERATOR, "deletion.requested", { confirmationId: confirmation.id }, "awaiting_owner");
     return awaiting(confirmation);
   }
 
@@ -334,6 +361,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     if (now() - Date.parse(action.decidedAt) < settleMs) return;
     action.state = action.outcome;
     if (action.outcome !== "failed") action.dispatchedAt = iso(now());
+    audit(action.tenant, SYSTEM, "dispatch.settled", { taskId: action.taskId, actionId: action.actionId },
+      action.outcome);
   }
 
   function byToken(token: string): FakeAction {
@@ -366,6 +395,14 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
 
   function linkOf(action: FakeAction): string {
     return `${webOrigin.replace(/\/+$/, "")}/approve/${encodeURIComponent(action.token)}`;
+  }
+
+  /// The shop's log, newest first, as the API answers it.
+  function auditOf(tenant: string): AuditEntry[] {
+    return db.audit
+      .filter((entry) => entry.tenant === tenant)
+      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .map(({ tenant: _tenant, ...entry }) => entry);
   }
 
   function newestFirst<T>(items: T[], at: (item: T) => string): T[] {
@@ -421,6 +458,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       run(() => {
         const action = byToken(token);
         shopOf(action.tenant).consent = true;
+        audit(action.tenant, OWNER, "consent.given", {});
         return viewOf(action);
       }),
 
@@ -432,6 +470,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         if (approve && !shop.consent) throw new ApiError(403, "consent_required");
         action.decidedAt = iso(now());
         action.state = approve ? "dispatching" : "rejected";
+        const about = { taskId: action.taskId, actionId: action.actionId };
+        audit(action.tenant, OWNER, "reply.decided", about, approve ? "approved" : "declined");
+        if (approve) audit(action.tenant, SYSTEM, "dispatch.started", about);
         return viewOf(action);
       }),
 
@@ -443,6 +484,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         if (!name || !ownerName) throw new ApiError(400, "invalid_body");
         const shop: FakeShop = { tenant: nextId("shop"), name, ownerName, consent: false };
         db.shops.push(shop);
+        audit(shop.tenant, PRACTICE_OPERATOR, "shop.created", {});
         return { tenant: shop.tenant, name: shop.name, ownerName: shop.ownerName };
       }),
 
@@ -473,7 +515,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         });
         // The first connection starts the shop's trial; a later one never moves it.
         if (!shop.trialStartedAt && !shop.lineConnectionId) shop.trialStartedAt = iso(now());
+        const previous = shop.lineConnectionId;
         shop.lineConnectionId = connectionId;
+        audit(shop.tenant, PRACTICE_OPERATOR, "line.connected",
+          { connectionId, ...(previous && previous !== connectionId ? { previousConnectionId: previous } : {}) });
         return { connectionId, webhookUrl: `${FAKE_API_ORIGIN}/v1/inbound/line/${connectionId}` };
       }),
 
@@ -509,6 +554,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         };
         db.actions.push(action);
         message.replyActionId = action.actionId;
+        audit(input.tenant, PRACTICE_OPERATOR, "reply.proposed",
+          { taskId: action.taskId, actionId: action.actionId, messageId: message.id });
         return {
           taskId: action.taskId,
           actionId: action.actionId,
@@ -559,6 +606,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const note = input.slipNote?.trim();
         if (note) payment.slipNote = note;
         db.payments.push(payment);
+        audit(input.tenant, PRACTICE_OPERATOR, "payment.recorded", { paymentId: payment.id }, "ok",
+          { amountSatang: payment.amountSatang });
         return payment;
       }),
 
@@ -593,6 +642,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             payments: db.payments.filter((p) => p.tenant === tenant),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === tenant),
           },
+          // As the backend's export: every entry, oldest first, and what the log could not write.
+          audit: { entries: auditOf(tenant).reverse(), missed: null },
         };
       }),
 
@@ -607,6 +658,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const current = currentConfirmation(record);
         if (record && current?.status === "decided" && current.approved) return wipe(record);
         if (isLiveShop(shop)) return askOwner(shop, record);
+        // Recorded and then wiped with the rest of the shop, as the API does.
+        audit(shop.tenant, PRACTICE_OPERATOR, "deletion.requested", {});
         return wipe(writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(now()), deletedBy: null }));
       }),
 
@@ -622,8 +675,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         confirmation.status = "decided";
         confirmation.approved = approve;
         confirmation.decidedAt = iso(now());
-        const record = recordOf(confirmation.tenant);
-        if (approve && record?.confirmationId === confirmation.id) wipe(record);
+        audit(confirmation.tenant, OWNER, "deletion.decided", { confirmationId: confirmation.id },
+          approve ? "approved" : "declined");
+        const deletion = recordOf(confirmation.tenant);
+        if (approve && deletion?.confirmationId === confirmation.id) wipe(deletion);
         return deletionViewOf(confirmation);
       }),
 
@@ -652,6 +707,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const note = input.slipNote?.trim();
         if (note) payment.slipNote = note;
         db.subscriptionPayments.push(payment);
+        audit(input.tenant, PRACTICE_OPERATOR, "subscription_payment.recorded", { paymentId: payment.id }, "ok",
+          { amountSatang: payment.amountSatang });
         return payment;
       }),
 
@@ -681,7 +738,41 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           now(),
         );
       }),
+
+    // As the API: any tenant (one with no log, or a deleted shop, reads as an empty page), newest first, the page
+    // before an entry's id, 50 at a time unless asked for 1 to 200.
+    listAudit: (tenant, query = {}) =>
+      run(() => {
+        admin();
+        if (!tenant) throw new ApiError(400, "tenant_required");
+        const limit = query.limit ?? 50;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new ApiError(400, "invalid_request");
+        const before = query.before;
+        if (before !== undefined && !AUDIT_ID.test(before)) throw new ApiError(400, "invalid_request");
+        const older = auditOf(tenant).filter((entry) => before === undefined || entry.id < before);
+        const entries = older.slice(0, limit);
+        const last = entries[entries.length - 1];
+        return { tenant, entries, next: older.length > limit && last ? last.id : null, missed: null };
+      }),
   };
+
+}
+
+/// Who the fake's log names. Practice actions come from the practice key, which has no Access identity: the API
+/// records such an operator as `email: null`, as it records a service token.
+const PRACTICE_OPERATOR: AuditActor = { kind: "operator", email: null };
+const OWNER: AuditActor = { kind: "owner" };
+const SYSTEM: AuditActor = { kind: "system" };
+
+/// The API's entry ids: a base-36 millisecond clock, a sequence and a random tail, so ids sort by time and page with
+/// the same cursor the API takes.
+const AUDIT_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
+
+function auditId(ms: number, seq: number): string {
+  const tail = new Uint8Array(4);
+  crypto.getRandomValues(tail);
+  const hex = [...tail].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `aud-${ms.toString(36).padStart(9, "0")}-${(seq % 46656).toString(36).padStart(3, "0")}-${hex}`;
 }
 
 /// LINE's `x-line-signature`: base64 HMAC-SHA256 of the raw body under the channel secret.
@@ -837,7 +928,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 3,
+    version: 4,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -885,5 +976,42 @@ function seed(at: number): FakeDb {
     deletions: demos.map((entry) => entry.record),
     confirmations: demos.map((entry) => entry.confirmation),
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
+    audit: sampleAudit(at, tenant, connectionId),
   };
+}
+
+/// Baan Mali's audit log as its sample world would have written it, oldest first, and Sabai Tea's one entry. The
+/// times match the sample's own: the shop and its LINE account 13 days ago, then each payment, reply and decision.
+function sampleAudit(at: number, tenant: string, connectionId: string): FakeAuditEntry[] {
+  const operator: AuditActor = { kind: "operator", email: null };
+  const owner: AuditActor = { kind: "owner" };
+  const system: AuditActor = { kind: "system" };
+  const taskId = `task_${tenant}`;
+  let seq = 0;
+  const entry = (shop: string, minutesAgo: number, actor: AuditActor, action: string, subject: Record<string, string>,
+    outcome = "ok", amountSatang?: number): FakeAuditEntry => {
+    const ms = at - minutesAgo * MINUTE_MS;
+    seq += 1;
+    return { tenant: shop, id: auditId(ms, seq), at: new Date(ms).toISOString(), actor, action, subject, outcome,
+      ...(amountSatang !== undefined ? { amountSatang } : {}) };
+  };
+  const reply = (actionId: string, messageId: string) => ({ taskId, actionId, messageId });
+  const decided = (actionId: string) => ({ taskId, actionId });
+  return [
+    entry(tenant, 13 * 24 * 60 + 30, operator, "shop.created", {}),
+    entry(tenant, 13 * 24 * 60, operator, "line.connected", { connectionId }),
+    entry("shop_sabaitea", 2 * 24 * 60, operator, "shop.created", {}),
+    entry(tenant, 1500, operator, "payment.recorded", { paymentId: "pay_2288" }, "ok", 45000),
+    entry(tenant, 1320, operator, "reply.proposed", reply("act_joy", "msg_joy")),
+    entry(tenant, 410, operator, "reply.proposed", reply("act_fah", "msg_fah")),
+    entry(tenant, 395, owner, "reply.decided", decided("act_fah"), "declined"),
+    entry(tenant, 290, operator, "reply.proposed", reply("act_mai", "msg_mai")),
+    entry(tenant, 282, owner, "reply.decided", decided("act_mai"), "approved"),
+    entry(tenant, 282, system, "dispatch.started", decided("act_mai")),
+    entry(tenant, 282, system, "dispatch.settled", decided("act_mai"), "confirmed"),
+    entry(tenant, 120, operator, "payment.recorded", { paymentId: "pay_2301" }, "ok", 129000),
+    entry(tenant, 70, operator, "reply.proposed", reply("act_tracking", "msg_tracking")),
+    entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
+    entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
+  ];
 }

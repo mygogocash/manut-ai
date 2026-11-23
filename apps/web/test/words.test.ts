@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type DeletedShop, type PilotGate, type Shop } from "../src/api";
-import { deletedText, deleteRefusalText, deleteWhatText, gateWords, subscriptionErrorText, unfinishedText } from "../src/ops/words";
+import { ApiError, type AuditEntry, type DeletedShop, type PilotGate, type Shop } from "../src/api";
+import {
+  auditActorText,
+  auditOutcomeTag,
+  auditReasonText,
+  auditSentence,
+  auditSubjectText,
+  auditWords,
+  deletedText,
+  deleteRefusalText,
+  deleteWhatText,
+  gateWords,
+  subscriptionErrorText,
+  unfinishedText,
+} from "../src/ops/words";
 
 const RESULT: DeletedShop = {
   tasksWiped: 1,
@@ -112,5 +125,76 @@ describe("the Pilot gate's words", () => {
       "This slip is already recorded for Baan Mali. Nothing was recorded again.");
     expect(subscriptionErrorText(new ApiError(400, "invalid_request"), "Baan Mali")).toBe(
       "The API did not accept this (invalid_request).");
+  });
+});
+
+describe("the audit log's words", () => {
+  const op = { kind: "operator" as const, email: "ops@manut.test" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-23T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok",
+    ...overrides });
+
+  it("names who did it the way an operator knows them", () => {
+    expect(auditActorText(op, "Fon")).toBe("ops@manut.test");
+    expect(auditActorText({ kind: "operator", email: null }, "Fon")).toBe("An operator (no Access identity)");
+    expect(auditActorText({ kind: "owner" }, "Fon")).toBe("Fon");
+    expect(auditActorText({ kind: "owner", id: "owner-phone-1" }, "Fon")).toBe("Fon (owner-phone-1)");
+    expect(auditActorText({ kind: "helper", id: "staff-2" }, "Fon")).toBe("Helper staff-2");
+    expect(auditActorText({ kind: "worker", attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" }, "Fon"))
+      .toBe("Worker attempt 6f9d1f0e");
+    expect(auditActorText({ kind: "system" }, "Fon")).toBe("Manut AI");
+  });
+
+  it("says what happened in one sentence, with the money it was about", () => {
+    expect(auditSentence(entry({ actor: op, action: "payment.recorded", amountSatang: 129000 }), "Fon"))
+      .toBe("ops@manut.test recorded an order payment of ฿1,290.");
+    expect(auditSentence(entry({ actor: op, action: "subscription_payment.recorded", amountSatang: 49900 }), "Fon"))
+      .toBe("ops@manut.test recorded a subscription payment of ฿499.");
+    expect(auditSentence(entry({ actor: op, action: "model.cap_set", amountSatang: 15050 }), "Fon"))
+      .toBe("ops@manut.test set the monthly model cap to ฿150.50.");
+    expect(auditSentence(entry({ actor: op, action: "line.connected", subject: { connectionId: "c1" } }), "Fon"))
+      .toBe("ops@manut.test connected the shop's LINE account.");
+    expect(auditSentence(entry({ actor: op, action: "line.connected",
+      subject: { connectionId: "c2", previousConnectionId: "c1" } }), "Fon"))
+      .toBe("ops@manut.test connected a new LINE account in place of the old one.");
+    expect(auditSentence(entry({ actor: { kind: "owner" }, action: "reply.decided", outcome: "approved" }), "Fon"))
+      .toBe("Fon decided a reply.");
+    expect(auditSentence(entry({ action: "dispatch.settled", outcome: "confirmed" }), "Fon"))
+      .toBe("Manut AI finished sending an approved action.");
+    expect(auditSentence(entry({ actor: { kind: "worker", attemptId: "6f9d1f0e-9a7e" }, action: "approval.requested" }),
+      "Fon")).toBe("Worker attempt 6f9d1f0e asked for approval of an action.");
+    expect(auditSentence(entry({ action: "something.new" }), "Fon")).toBe("Manut AI did something.new.");
+  });
+
+  it("tags each outcome, and explains a refusal or an attempt's end in plain words", () => {
+    expect(auditOutcomeTag("ok", "Fon")).toBeNull();
+    expect(auditOutcomeTag("approved", "Fon")).toEqual({ label: "Approved", className: "tag ok" });
+    expect(auditOutcomeTag("declined", "Fon")).toEqual({ label: "Declined", className: "tag" });
+    expect(auditOutcomeTag("awaiting_owner", "Fon")).toEqual({ label: "Waiting for Fon", className: "tag warn" });
+    expect(auditOutcomeTag("confirmed", "Fon")).toEqual({ label: "Sent", className: "tag ok" });
+    expect(auditOutcomeTag("failed", "Fon")).toEqual({ label: "Failed", className: "tag err" });
+    expect(auditOutcomeTag("unknown", "Fon")).toEqual({ label: "Not sure it was sent", className: "tag warn" });
+    expect(auditOutcomeTag("refused", "Fon")).toEqual({ label: "Refused", className: "tag warn" });
+    expect(auditOutcomeTag("superseded", "Fon")).toEqual({ label: "No longer open", className: "tag" });
+    expect(auditOutcomeTag("brand_new", "Fon")).toEqual({ label: "brand_new", className: "tag" });
+    expect(auditReasonText("budget")).toBe("The shop's model budget ran out.");
+    expect(auditReasonText("silent")).toBe("The worker stopped reporting.");
+    expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
+    expect(auditReasonText("not_permitted")).toBe("That role may not decide it.");
+    expect(auditReasonText("gave_up")).toBe("Reason: gave_up.");
+  });
+
+  it("lists the ids an entry is about, each once, in a fixed order", () => {
+    expect(auditSubjectText({ requestId: "r1", actionId: "r1", taskId: "t1", attemptId: "a1" }))
+      .toBe("task t1 · attempt a1 · action r1");
+    expect(auditSubjectText({ actionId: "act_1", messageId: "msg_1", taskId: "t1" })).toBe("task t1 · action act_1 · message msg_1");
+    expect(auditSubjectText({})).toBe("");
+  });
+
+  it("warns that a log with misses is not complete", () => {
+    expect(auditWords.missed({ count: 1, lastAt: "2026-11-23T03:05:00.000Z", lastAction: "dispatch.settled" }, SAME_DAY))
+      .toBe("1 entry could not be written, so this log is not complete. The last was at 10:05 (dispatch.settled).");
+    expect(auditWords.missed({ count: 3, lastAt: "2026-11-23T03:05:00.000Z", lastAction: "reply.decided" }, NEXT_DAY))
+      .toBe("3 entries could not be written, so this log is not complete. The last was at 23 November 10:05 (reply.decided).");
   });
 });

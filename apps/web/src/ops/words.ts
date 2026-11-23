@@ -1,6 +1,9 @@
 import {
   ApiError,
   type ApprovalState,
+  type AuditActor,
+  type AuditEntry,
+  type AuditMissed,
   type DeletedShop,
   type DeletionRequest,
   type GateStatus,
@@ -291,6 +294,156 @@ export const gateWords = {
   listItem: (amountSatang: number, slipRef: string) => `${formatBaht(amountSatang)}, slip ${slipRef}`,
   listWhen: (iso: string, now: number = Date.now()) => `Recorded ${formatStamp(iso, now)}.`,
 } as const;
+
+/// The Audit page: one shop's audit log (docs/pilot-api.md, "Audit log"), newest first. Each entry reads as one
+/// sentence, who and then what, with its outcome as a tag; under it, when, and the ids it is about for looking the
+/// records up. A code this console does not know yet is shown as it is, never dropped.
+export const auditWords = {
+  nav: "Audit",
+  title: "Audit",
+  intro:
+    "Who did what for this shop, and when, newest first. The log keeps who and what only: never a customer's words, a reply's text or a key.",
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading the audit log",
+  empty: "Nothing recorded for this shop yet.",
+  noShops: "No shops yet.",
+  older: "Show older entries",
+  loadingOlder: "Loading older entries",
+  listLabel: (shop: string) => `${shop}'s audit log`,
+  unavailable: "The API could not read the audit log. Try again.",
+  /// The API counts every entry it could not write, so a gap is never read as nothing having happened.
+  missed: (missed: AuditMissed, now: number = Date.now()) =>
+    `${missed.count} ${missed.count === 1 ? "entry" : "entries"} could not be written, so this log is not complete. The last was at ${formatStamp(missed.lastAt, now)} (${missed.lastAction}).`,
+} as const;
+
+/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name.
+export function auditActorText(actor: AuditActor, ownerName: string): string {
+  switch (actor.kind) {
+    case "operator":
+      return actor.email ?? "An operator (no Access identity)";
+    case "owner":
+      return actor.id ? `${ownerName} (${actor.id})` : ownerName;
+    case "helper":
+      return `Helper ${actor.id}`;
+    case "worker":
+      return `Worker attempt ${actor.attemptId.slice(0, 8)}`;
+    case "system":
+      return "Manut AI";
+    default:
+      return "Someone";
+  }
+}
+
+const amountOf = (entry: AuditEntry) => (entry.amountSatang === undefined ? "" : ` of ${formatBaht(entry.amountSatang)}`);
+
+/// What each action did, said after who did it.
+const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry) => string>> = {
+  "shop.created": () => "created the shop",
+  "line.connected": (entry) =>
+    entry.subject.previousConnectionId ? "connected a new LINE account in place of the old one" : "connected the shop's LINE account",
+  "reply.proposed": () => "proposed a reply",
+  "payment.recorded": (entry) => `recorded an order payment${amountOf(entry)}`,
+  "subscription_payment.recorded": (entry) => `recorded a subscription payment${amountOf(entry)}`,
+  "model.cap_set": (entry) =>
+    `set the monthly model cap${entry.amountSatang === undefined ? "" : ` to ${formatBaht(entry.amountSatang)}`}`,
+  "model.cap_cleared": () => "cleared the model cap, so the default applies again",
+  "deletion.requested": () => "asked to delete the shop's data",
+  "reply.decided": () => "decided a reply",
+  "deletion.decided": () => "answered the request to delete the shop's data",
+  "consent.given": () => "allowed Manut AI to send for the shop",
+  "consent.withdrawn": () => "withdrew permission to send for the shop",
+  "dispatch.started": () => "started sending an approved action",
+  "dispatch.settled": () => "finished sending an approved action",
+  "attempt.started": () => "started a worker attempt",
+  "attempt.ended": (entry) => (entry.actor.kind === "worker" ? "finished its attempt" : "ended a worker attempt"),
+  "approval.requested": () => "asked for approval of an action",
+  "approval.decided": () => "decided an approval request",
+  "approval.superseded": () => "closed an approval request",
+};
+
+/// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290."
+export function auditSentence(entry: AuditEntry, ownerName: string): string {
+  const said = Object.hasOwn(AUDIT_ACTIONS, entry.action) ? AUDIT_ACTIONS[entry.action]!(entry) : `did ${entry.action}`;
+  return `${auditActorText(entry.actor, ownerName)} ${said}.`;
+}
+
+/// The outcome as a tag, or nothing for an action simply done as asked.
+export function auditOutcomeTag(outcome: string, ownerName: string): { label: string; className: string } | null {
+  switch (outcome) {
+    case "ok":
+      return null;
+    case "approved":
+      return { label: "Approved", className: "tag ok" };
+    case "declined":
+      return { label: "Declined", className: "tag" };
+    case "refused":
+      return { label: "Refused", className: "tag warn" };
+    case "awaiting_owner":
+      return { label: `Waiting for ${ownerName}`, className: "tag warn" };
+    case "confirmed":
+      return { label: "Sent", className: "tag ok" };
+    case "failed":
+      return { label: "Failed", className: "tag err" };
+    case "unknown":
+      return { label: "Not sure it was sent", className: "tag warn" };
+    case "done":
+      return { label: "Done", className: "tag ok" };
+    case "cancelled":
+      return { label: "Cancelled", className: "tag" };
+    case "superseded":
+      return { label: "No longer open", className: "tag" };
+    default:
+      return { label: outcome, className: "tag" };
+  }
+}
+
+/// Why, for an attempt that ended or a decision that was refused.
+const AUDIT_REASONS: Readonly<Record<string, string>> = {
+  budget: "The shop's model budget ran out.",
+  silent: "The worker stopped reporting.",
+  deadline: "The attempt ran out of time.",
+  attempt_ended: "Its attempt had already ended.",
+  turn_ended: "Its turn had already ended.",
+  withdrawn: "It had been taken back.",
+  already_decided: "It was already decided.",
+  not_permitted: "That role may not decide it.",
+  expired: "It had expired.",
+  changed: "It had changed since it was shown.",
+  not_offered: "That choice was not offered.",
+  not_found: "There was no such request.",
+};
+
+export function auditReasonText(reason: string): string {
+  return Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+}
+
+/// The ids an entry is about, in one order whatever order they came in. A worker's request shares its action's id,
+/// so the id is listed once, as the action.
+const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
+  ["taskId", "task"],
+  ["attemptId", "attempt"],
+  ["requestId", "request"],
+  ["actionId", "action"],
+  ["messageId", "message"],
+  ["paymentId", "payment"],
+  ["connectionId", "LINE connection"],
+  ["previousConnectionId", "replacing"],
+  ["confirmationId", "confirmation"],
+];
+
+export function auditSubjectText(subject: Record<string, string>): string {
+  const known = new Set(SUBJECT_LABELS.map(([key]) => key));
+  const parts = SUBJECT_LABELS.flatMap(([key, label]) => {
+    const id = subject[key];
+    if (!id || (key === "requestId" && subject.actionId === id)) return [];
+    return [`${label} ${id}`];
+  });
+  for (const [key, id] of Object.entries(subject)) if (!known.has(key) && id) parts.push(`${key} ${id}`);
+  return parts.join(" · ");
+}
 
 /// What the API said to recording a subscription payment that recorded nothing.
 export function subscriptionErrorText(error: unknown, shop: string): string {
