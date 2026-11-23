@@ -8,7 +8,8 @@
 ///   own event log; calls a model only through the gateway, metered against the shop's cap; stops before an external
 ///   write to ask for the exact action; reads how its request settled; asks for a one-time grant for an outpost to
 ///   type a site sign-in, or reports one broken, and queues browser steps for an outpost and reads how they went
-///   (sign-in-vault.ts); and finishes. The port holds the environment and
+///   (sign-in-vault.ts); asks to submit a write through a browser, and queues it once approved (browser-writes.ts); and
+///   finishes. The port holds the environment and
 ///   the worker holds only the port, so a worker never holds a credential: the port has no method that returns one.
 /// - `decideRequest` is a person's decision on a worker's request, through approval-core in the task object, and on
 ///   approval the broker's one dispatch with the vault's credentials (`dispatchApproved`).
@@ -23,6 +24,14 @@ import type { ApprovalKind, ApprovalRecord, ApprovalRequest, DecideResult, Role,
 import { APPROVAL_LINK_TTL_MS } from "./approval-link";
 import { appendAudit, type AuditActor, type AuditOutcome } from "./audit-log";
 import { beginDispatchAction, finishDispatchAction, type FetchImpl } from "./broker-actions";
+import {
+  auditAsk,
+  BROWSER_SUBMIT,
+  prepareSubmit,
+  queueSubmitStep,
+  submitText,
+  type SubmitWrite,
+} from "./browser-writes";
 import { callModel, type ModelGatewayEnv } from "./model-gateway";
 import type { UsageState } from "./model-meter";
 import { bangkokMonth, effectiveCap, floorSatang, gatewaySettings, MILLISATANG_PER_SATANG } from "./model-price";
@@ -90,6 +99,15 @@ export type ProposedAction = { operationType: string; targetResourceId: string; 
 
 export type AskAnswer = { requestId: string; kind: ApprovalKind; revision: number; expiresAt: string };
 
+/// What asking to submit through a browser came to (browser-writes.ts): a request raised for the owner, naming the exact
+/// write; or, while the site is in practice mode, a draft of the write and no request.
+export type SubmitAsked =
+  | ({ outcome: "asked" } & AskAnswer)
+  | { outcome: "draft_only"; kind: ApprovalKind; draft: DraftJSON };
+
+/// A write that is another member's job is refused naming whose it is, so the worker can pass it on.
+export type NotMyJob = { ok: false; error: "not_my_job"; member: string };
+
 /// What a worker wrote for the owner to read, as it hands it to `draft`. The task object keeps it with the attempt
 /// that wrote it and the time (task-object.ts, `DraftJSON`).
 export type NewDraft = Omit<DraftJSON, "attemptId" | "at">;
@@ -127,6 +145,10 @@ export interface WorkerPort {
   /// How one of this attempt's browser steps stands; once it is done, what a read read. An outcome is here once it is
   /// in the attempt's events.
   browserStepOutcome(stepId: string): Promise<PortAnswer<BrowserStepView>>;
+  /// Asks to submit a write through a browser (browser-writes.ts): member-grants' `decide` first, then one approval-core
+  /// request naming the site, the page and every value, of the kind the action has in the control plane's table. Once
+  /// the request is approved, `browserStep` with `kind: "submit"` and the request queues the write for an outpost.
+  askSubmit(write: SubmitWrite): Promise<PortAnswer<SubmitAsked> | NotMyJob>;
 }
 
 /// The provider each operation a worker may ask for writes to. The connection that carries it is the shop's live
@@ -334,8 +356,9 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
   };
   /// Where a browser control step happens (a grant, a broken sign-in, a browser step), after the switches, consent and
   /// the heartbeat: the member comes from the task object's record of the attempt, never from the worker's word.
-  const browserControlAt = async (): Promise<PortAnswer<AttemptRef>> => {
-    const refused = await gate();
+  /// `writes` adds the external-writes switch, for asking to submit and for queuing a write step.
+  const browserControlAt = async (writes = false): Promise<PortAnswer<AttemptRef>> => {
+    const refused = await gate(writes);
     if (refused) return refused;
     const live = await beat();
     if (!live.ok) return live;
@@ -473,14 +496,64 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
 
     /// The vault queues the step (sign-in-vault.ts) for the outpost named, bound to this attempt and its member. Only
     /// that outpost is handed it, once; what it did comes back into this attempt's events through the control plane.
+    /// A write step (`kind: "submit"`) needs the external-writes switch as well, and is queued from the approved request
+    /// it names (browser-writes.ts); any other kind reads, and is queued as the worker asked.
     async browserStep(step) {
-      const at = await browserControlAt();
-      return at.ok ? queueBrowserStep(env, at.value, step) : at;
+      const writes = (step as { kind?: unknown } | null)?.kind === "submit";
+      const at = await browserControlAt(writes);
+      if (!at.ok) return at;
+      return writes ? queueSubmitStep(env, at.value, step) : queueBrowserStep(env, at.value, step);
     },
 
     async browserStepOutcome(stepId) {
       const at = await browserControlAt();
       return at.ok ? readBrowserStep(env, at.value, stepId) : at;
+    },
+
+    /// After the switches (with `officeExternalWrites`), consent and the heartbeat, which gives the member from the task
+    /// object's record: the write's shape, member-grants' `decide` and the sign-in's own rules (browser-writes.ts,
+    /// `prepareSubmit`). In practice mode the write is kept as the attempt's draft, for the owner to read, and no
+    /// request is raised. Otherwise the task object stores the exact write and opens its request in one step. Every
+    /// answer from here is written to the audit log, with ids only.
+    async askSubmit(write) {
+      const at = await browserControlAt(true);
+      if (!at.ok) return at;
+      const prepared = await prepareSubmit(env, at.value, write, Date.now());
+      if (!prepared.ok) {
+        await auditAsk(env, at.value, write, { refused: prepared.error });
+        return prepared.error === "not_my_job" && prepared.member !== undefined
+          ? { ok: false, error: "not_my_job", member: prepared.member } : { ok: false, error: prepared.error };
+      }
+      if (prepared.answer === "draft_only") {
+        const drafted = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/draft`, { method: "POST", body: {
+          fence: job.fence,
+          draft: { member: at.value.member, job: prepared.write.action, text: submitText(prepared.write, prepared.site),
+            about: { signInId: prepared.write.signInId }, send: { answer: "draft_only", kind: prepared.kind } },
+        } });
+        if (!drafted.ok) {
+          const refusal = await portRefusal(drafted);
+          await auditAsk(env, at.value, write, { refused: refusal.error });
+          return refusal;
+        }
+        await auditAsk(env, at.value, write, { skipped: "draft_only" });
+        return { ok: true, value: { outcome: "draft_only", kind: prepared.kind,
+          draft: (await drafted.json()) as DraftJSON } };
+      }
+      const response = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/ask-submit`, { method: "POST", body: {
+        fence: job.fence,
+        write: prepared.write,
+        site: prepared.site,
+        expiresAt: new Date(Date.now() + APPROVAL_LINK_TTL_MS).toISOString(),
+      } });
+      if (!response.ok) {
+        const refusal = await portRefusal(response);
+        await auditAsk(env, at.value, write, { refused: refusal.error });
+        return refusal;
+      }
+      const { request } = (await response.json()) as { request: ApprovalRequest };
+      await auditAsk(env, at.value, write, { requestId: request.id });
+      return { ok: true, value: { outcome: "asked", requestId: request.id, kind: request.kind,
+        revision: request.revision, expiresAt: new Date(request.expiresAt ?? 0).toISOString() } };
     },
   };
 }
@@ -579,6 +652,8 @@ export async function dispatchApproved(
   const current = await readAction(env, tenant, taskId, actionId);
   if (!current) return "unknown";
   if (current.state !== "approved") return current.state;
+  // A browser write is begun only as its step is handed to an outpost (browser-writes.ts); approved, it waits for that.
+  if (current.operationType === BROWSER_SUBMIT) return current.state;
   if (await workGate(env, tenant, options.flags, true)) return current.state;
   const dispatch = { tenant, grantRevision: current.grantRevision,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) };

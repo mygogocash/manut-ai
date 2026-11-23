@@ -15,6 +15,7 @@
 import { appendAudit, type AuditAction, type AuditOutcome, type AuditSubject } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
+import { handOutSubmit, settleSubmitReport, submitTitle } from "./browser-writes";
 import { isValidTenant } from "./companies";
 import { workGate, type JobFlags } from "./job-flow";
 import { operatorIdentity } from "./pilot";
@@ -124,6 +125,9 @@ function stepsAnswer(steps: OutpostStep[]): Response {
 ///    ended is refused (`attempt_ended`); one whose task cannot be read is left waiting for the next ask.
 /// 4. The vault hands the rest out, once each, with the origins its browser may be on for each, read from the
 ///    sign-ins again; one that may no longer run is refused there.
+/// 5. A write step (`submit`) needs `officeExternalWrites` as well at step 2, and once the vault has taken it, the task
+///    object's one-use begin gate moves its approved write to dispatching before it leaves (browser-writes.ts,
+///    `handOutSubmit`): only then does the outpost get it, with the approved write's values.
 ///
 /// Each step handed out or refused writes `browser_step.fetched`, by the outpost, with ids only.
 async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
@@ -135,7 +139,7 @@ async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Pr
   if (!pending) return json({ error: "vault_unavailable" }, 503);
   if (pending.status === 401) return json({ error: "unauthorized" }, 401);
   if (pending.status !== 200 || !Array.isArray(pending.body.steps)) return json({ error: "vault_unavailable" }, 503);
-  const waiting = pending.body.steps as { stepId: string; taskId: string; attemptId: string }[];
+  const waiting = pending.body.steps as { stepId: string; kind?: string; taskId: string; attemptId: string }[];
   if (waiting.length === 0) return stepsAnswer([]);
 
   const gated = await workGate(env, tenant, flags, false);
@@ -144,8 +148,14 @@ async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Pr
   if (gated) {
     for (const step of waiting) refuse.push({ stepId: step.stepId, code: gated.error });
   } else {
+    // A write needs the external-writes switch too: without it a write step is refused for good, and reads still go.
+    const writesGated = waiting.some((step) => step.kind === "submit") ? await workGate(env, tenant, flags, true) : null;
     const runs = new Map<string, boolean | undefined>();
     for (const step of waiting) {
+      if (step.kind === "submit" && writesGated) {
+        refuse.push({ stepId: step.stepId, code: writesGated.error });
+        continue;
+      }
       const attempt = `${step.taskId} ${step.attemptId}`;
       if (!runs.has(attempt)) runs.set(attempt, await attemptRuns(env, tenant, step.taskId, step.attemptId));
       const running = runs.get(attempt);
@@ -162,17 +172,24 @@ async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Pr
   // Past the vault's check the outpost is known, so its id is one the vault minted.
   const outpostId = String(fields.outpostId);
   const actor = { kind: "outpost", id: outpostId } as const;
-  const taken = handed.body.taken as { step: OutpostStep; binding: StepBinding }[];
-  for (const { binding } of taken) {
-    await appendAudit(env, tenant, { actor, action: "browser_step.fetched", subject: { ...binding, outpostId },
+  const taken = handed.body.taken as { step: OutpostStep; binding: StepBinding; revision?: number }[];
+  const out: OutpostStep[] = [];
+  for (const entry of taken) {
+    if (entry.step.kind === "submit") {
+      const begun = await handOutSubmit(env, tenant, outpostId, entry);
+      if (begun) out.push(begun);
+      continue;
+    }
+    await appendAudit(env, tenant, { actor, action: "browser_step.fetched", subject: { ...entry.binding, outpostId },
       outcome: "ok" });
+    out.push(entry.step);
   }
   for (const { code, binding } of handed.body.refused as { code: string; binding: StepBinding }[]) {
     await appendAudit(env, tenant, { actor, action: "browser_step.fetched", subject: { ...binding, outpostId },
       outcome: "refused", reason: code });
   }
   if (gated) return json({ error: gated.error, ...(gated.feature ? { feature: gated.feature } : {}) }, gated.status);
-  return stepsAnswer(taken.map((entry) => entry.step));
+  return stepsAnswer(out);
 }
 
 /// `POST /v1/outposts/steps/report` with `{ tenant, outpostId, stepId, outcome, code?, text? }`: how a step the outpost
@@ -190,6 +207,8 @@ async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Pr
 ///    vault lets it stand, and the worker can read it.
 ///
 /// A refusal at 3 or 4 takes the report back: the step reads refused, with that code, and what it read is dropped.
+/// A write step's report settles its write first, once the vault holds it (browser-writes.ts, `settleSubmitReport`):
+/// what was done on the site stands, whatever can still land in the attempt.
 /// Every answer after the vault's credential check writes `browser_step.reported`, by the outpost, with ids only.
 async function takeReport(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
   const read = await outpostRequest(request);
@@ -213,6 +232,7 @@ async function takeReport(request: Request, env: RedeemEnv, flags: JobFlags): Pr
     await record("refused", error);
     return json({ error }, reported.status === 200 ? 503 : reported.status);
   }
+  if (step.kind === "submit") await settleSubmitReport(env, tenant, binding, step, outpostId);
   const takeBack = async (status: number, error: string, extra: Record<string, unknown> = {}) => {
     await askVault(env, tenant, "/browser-steps/settle", { stepId: step.stepId, code: error });
     await record("refused", error);
@@ -262,6 +282,7 @@ async function landOutcome(env: RedeemEnv, tenant: string, binding: StepBinding,
 function stepTitle(step: ReportedStep): string {
   if (step.kind === "open") return `Open ${step.url ?? "a page"}`;
   if (step.kind === "read") return step.selector !== null ? `Read ${step.selector}` : "Read the page";
+  if (step.kind === "submit") return submitTitle(step.action, step.site);
   return `Sign in to ${step.site ?? "a site"}`;
 }
 
