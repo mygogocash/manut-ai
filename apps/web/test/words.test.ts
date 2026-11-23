@@ -663,7 +663,7 @@ describe("the audit log's words for the owner's people and for browser control",
   it("reads the names off the people list: helpers, removed helpers and invites, skipping any it has no name for", () => {
     const people: People = {
       tenant: "t1",
-      owner: { name: "Fon" },
+      owner: { name: "Fon", account: null },
       helpers: [{ id: "helper-1", name: "Mint", identity: { kind: "email", address: "mint@baanmali.example" },
         joinedAt: "2026-11-13T03:05:00.000Z", devices: 1 }],
       invites: [{ id: "inv-1", name: "Beam", identity: { kind: "line", id: "beam.baanmali" }, status: "pending",
@@ -740,6 +740,48 @@ describe("the audit log's words for the owner's people and for browser control",
     // The reasons that already had words keep them.
     expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
     expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
+  });
+});
+
+// The owner's linked account and the shop sessions (docs/several-shops.md): the operator links and unlinks an account, and a
+// device opens and ends its own session. Each reads as one sentence by who did it, by ids only, never by its raw action name.
+describe("the audit log's words for the owner's linked account", () => {
+  const op = { kind: "operator" as const, email: "ops@manut.test" };
+  const owner = { kind: "owner" as const, id: "owner-1" };
+  const helper = { kind: "helper" as const, id: "helper-1" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>, names: Record<string, string> = {}) =>
+    auditSentence(entry(overrides), "Fon", names);
+
+  it("says what linking, unlinking, opening and ending a session did, with the owner's name where it helps", () => {
+    expect(said({ actor: op, action: "owner.linked", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("ops@manut.test linked Fon's account to the shop.");
+    expect(said({ actor: op, action: "owner.unlinked", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("ops@manut.test unlinked Fon's account from the shop.");
+    expect(said({ actor: owner, action: "owner.session_opened", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("Fon (owner-1) signed in to the shop on a device.");
+    expect(said({ actor: owner, action: "owner.session_ended", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("Fon (owner-1) signed out of the shop on a device.");
+    expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }))
+      .toBe("Helper helper-1 signed out on a device.");
+    expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }, { "helper-1": "Mint" }))
+      .toBe("Mint signed out on a device.");
+  });
+
+  it("has words for each of them: none is shown by its raw name or as an action it does not know", () => {
+    for (const [action, actor] of [["owner.linked", op], ["owner.unlinked", op], ["owner.session_opened", owner],
+      ["owner.session_ended", owner], ["helper.session_ended", helper]] as const) {
+      const sentence = said({ actor, action });
+      expect(sentence, action).not.toContain(action);
+      expect(sentence, action).not.toMatch(/\bdid\b/);
+      expect(sentence.endsWith("."), action).toBe(true);
+    }
+  });
+
+  it("labels the link's id an entry is about", () => {
+    expect(auditSubjectText({ ownerAccountId: "owner-1" })).toBe("owner account owner-1");
+    expect(auditSubjectText({ helperId: "helper-1", ownerAccountId: "owner-1" })).toBe("helper helper-1 · owner account owner-1");
   });
 });
 

@@ -20,12 +20,14 @@ import {
   type Identity,
   type InboundMessage,
   type InviteView,
+  type LinkedOwner,
   type Payment,
   type People,
   type PilotApi,
   type ReplyAction,
   type Shop,
   type SubscriptionPayment,
+  type UnlinkedOwner,
   type WorkerDraft,
   type WorkerJobEntry,
 } from "./types";
@@ -79,6 +81,14 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// refusal answers the API's status and code, a change is recorded in the shop's audit log by ids only, and the people are
 /// exported with the shop and deleted with it. Baan Mali starts with Mint, who helps and covers while Fon is away, Beam
 /// invited and not yet joined, and a note Mint passed on; Sabai Tea has only its owner.
+///
+/// The owner's linked account (docs/several-shops.md) is kept as the API keeps it: an operator links the account a one-use code
+/// names, a shop has one at a time, and unlinking signs it out of the shop on every device. The codes are the ones an owner's
+/// app might have shown (`PRACTICE_OWNER_CODES`): each works once, for the account that asked for it, and goes the first time it
+/// is tried, whatever the answer. A waiting code does not run out by the clock, because practice has no owner's app to ask for a
+/// new one; the one that ran out is the sample of that answer. A change is recorded by the link's id, never the account, and
+/// the link is exported with the shop and deleted with it. Baan Mali starts linked to Fon's account on two devices; Sabai Tea
+/// has no account linked.
 ///
 /// Each shop's model spend (docs/model-gateway.md) is kept as the API's meter keeps it: one record per call, the
 /// reservations still open, and an operator's cap override. Months and totals are read from the records, so a total can
@@ -154,11 +164,24 @@ type FakeConfirmation = {
 type FakeAuditEntry = AuditEntry & { tenant: string };
 /// One shop's people as the API keeps them, without the sessions' hashes the fake has no use for: the rules' whole state,
 /// and the name the owner gave each invite and helper (kept after a helper is removed, so the log can still name them).
-type FakePeople = { state: PeopleState; names: Record<string, string> };
+type FakePeople = {
+  state: PeopleState;
+  names: Record<string, string>;
+  /// The account the operator linked as the owner's, and how many of its sessions run now (the fake never lets one run out,
+  /// as for a helper's devices). Absent until one is linked, and again once it is unlinked.
+  ownerAccount?: FakeOwnerAccount;
+  ownerDevices?: number;
+};
+/// The account linked as a shop's owner, as the API's people record keeps it: the link's id, which the log names; the verified
+/// provider subject the account signs in as, which only the shop's own export carries out; and when it was linked.
+type FakeOwnerAccount = { id: string; subject: string; linkedAt: number };
+/// A code an owner's app showed, waiting for an operator: the account that asked for it, the code in its one form (the API
+/// keeps only its SHA-256), and whether it had run out.
+type FakeOwnerCode = { code: string; subject: string; ranOut?: boolean };
 /// A job with the shop it belongs to, which the API finds through the shop's own task index.
 type FakeWorkerJob = WorkerJobEntry & { tenant: string };
 type FakeDb = {
-  version: 8;
+  version: 9;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -175,6 +198,8 @@ type FakeDb = {
   memory: Record<string, MemoryState>;
   /// The owner's people, per shop. A shop with no entry has only its owner.
   people: Record<string, FakePeople>;
+  /// The codes owners' apps showed that nobody has tried yet. A code leaves the list the first time it is tried.
+  ownerCodes: FakeOwnerCode[];
   model: FakeModel;
   /// Every shop's worker jobs, oldest first, the order the API's task index keeps them in.
   workers: FakeWorkerJob[];
@@ -183,13 +208,27 @@ type FakeDb = {
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
-/// (version 6) or before the owner's people (version 7) is replaced by a fresh one rather than read without them.
+/// (version 6), before the owner's people (version 7) or before the owner's linked account and its codes (version 8) is
+/// replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 
 export const PRACTICE_CHANNEL_SECRET = "practice-channel-secret";
+
+/// The link codes the practice world holds, as an owner's app shows them (`XXXX-XXXX`). Each works once, and a code goes the first
+/// time it is tried, whatever the answer. The sample world's accounts are Fon's, whom Baan Mali already has, Dao's and a guest's.
+export const PRACTICE_OWNER_CODES = {
+  /// Dao's account: it links Sabai Tea, or any shop that has no account linked.
+  dao: "7K0M-4X1R",
+  /// Fon's account, the one Baan Mali already has: the link it has, and nothing written.
+  fon: "2WNZ-5H8T",
+  /// An account that is neither: it links a shop that has none, and is refused with 409 on one that has.
+  guest: "5CPV-8EJ3",
+  /// A code past its 15 minutes: 410.
+  ranOut: "9BDF-3G6S",
+} as const;
 
 export const DEMO_TOKENS = {
   waiting: "demo",
@@ -227,11 +266,11 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 8 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+      return parsed && parsed.version === 9 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
         Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers) &&
-        typeof parsed.people === "object" && parsed.people !== null
+        typeof parsed.people === "object" && parsed.people !== null && Array.isArray(parsed.ownerCodes)
         ? parsed
         : null;
     } catch {
@@ -531,6 +570,13 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return shop;
   }
 
+  /// What the API's export carries of a shop's people: the rules' state, the names and the linked account with the subject it
+  /// signs in as, or null.
+  function exportedPeople(tenant: string) {
+    const { state, names, ownerAccount } = peopleOf(tenant);
+    return { state, names, ownerAccount: ownerAccount ?? null };
+  }
+
   /// The id of an invite or a helper in a body: text of 1 to 256 characters, which is what the shop's record keeps.
   function peopleId(id: unknown): string {
     if (typeof id !== "string" || id.length < 1 || id.length > 256) throw new ApiError(400, "invalid_request");
@@ -563,11 +609,17 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
 
   /// What the API's people list answers for the shop.
   function peopleList(shop: FakeShop): People {
-    const { state, names } = peopleOf(shop.tenant);
+    const { state, names, ownerAccount, ownerDevices } = peopleOf(shop.tenant);
     const nowMs = now();
     return {
       tenant: shop.tenant,
-      owner: { name: shop.ownerName },
+      // The account is shown by its link's id, never by the subject it signs in as; `devices` is its sessions open now.
+      owner: {
+        name: shop.ownerName,
+        account: ownerAccount
+          ? { id: ownerAccount.id, linkedAt: iso(ownerAccount.linkedAt), devices: ownerDevices ?? 0 }
+          : null,
+      },
       // `devices` is the sessions open now: the fake never lets one run out, so it is every session of the helper's.
       helpers: state.helpers.map((helper) => ({ id: helper.id, name: names[helper.id] ?? "", identity: helper.identity,
         joinedAt: iso(helper.joinedAt), devices: helper.sessions.length })),
@@ -860,8 +912,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           audit: { entries: auditOf(tenant).reverse(), missed: null },
           // What the team knows: every fact, waiting ones included, and only how many it was told to forget.
           memory: shopMemory.exportFacts(memoryOf(tenant)),
-          // Who the people are and what they passed on, as the API's export carries them (it never carries a session's hash).
-          people: peopleOf(tenant),
+          // Who the people are, what they passed on and the owner's linked account, as the API's export carries them (it never
+          // carries a session's hash, nor a count of sessions).
+          people: exportedPeople(tenant),
         };
       }),
 
@@ -1037,7 +1090,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         db.seq += 1;
         const made = peopleRules.invite(record.state, `inv-${db.seq}`, identity, now());
         if (!made.ok) throw new ApiError(made.refused === "bad_identity" || made.refused === "bad_id" ? 400 : 409, made.refused);
-        db.people[shop.tenant] = { state: made.state, names: { ...record.names, [made.invite.id]: name } };
+        db.people[shop.tenant] = { ...record, state: made.state, names: { ...record.names, [made.invite.id]: name } };
         audit(shop.tenant, PRACTICE_OPERATOR, "invite.created", { inviteId: made.invite.id });
         return { invite: inviteView(made.invite, name, now()), inviteUrl: inviteLink(made.invite) };
       }),
@@ -1098,6 +1151,47 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         db.people[shop.tenant] = { ...record, state: peopleRules.clearAway(record.state) };
         audit(shop.tenant, PRACTICE_OPERATOR, "away.cleared", { helperId: covering });
         return { away: null };
+      }),
+
+    // As the API's operator routes: the key, then the body's own checks (the shop before the code, so a shop that is not there
+    // leaves a code unused), then the code's use, then the link. A code goes the first time it is tried, whatever the answer:
+    // the refusal of a second account (409) and a code that ran out (410) use it up as well. Linking the account that is
+    // already linked changes and records nothing. A change is recorded by the link's id, never the account.
+    linkOwner: (input) =>
+      run((): LinkedOwner => {
+        admin();
+        if (!validTenant(input.tenant)) throw new ApiError(400, "tenant_required");
+        if (typeof input.code !== "string") throw new ApiError(400, "invalid_request");
+        const shop = peopleShop(input.tenant);
+        const typed = typedCode(input.code);
+        const found = typed === null ? undefined : db.ownerCodes.find((one) => one.code === typed);
+        if (!found) throw new ApiError(404, "unknown_code");
+        db.ownerCodes = db.ownerCodes.filter((one) => one !== found);
+        if (found.ranOut) throw new ApiError(410, "code_expired");
+        const record = peopleOf(shop.tenant);
+        const current = record.ownerAccount;
+        if (current) {
+          if (current.subject !== found.subject) throw new ApiError(409, "already_linked");
+          return { tenant: shop.tenant, ownerAccount: { id: current.id, linkedAt: iso(current.linkedAt) } };
+        }
+        db.seq += 1;
+        const ownerAccount: FakeOwnerAccount = { id: `owner-${db.seq}`, subject: found.subject, linkedAt: now() };
+        // No app has opened the shop yet, so no device has it.
+        db.people[shop.tenant] = { ...record, ownerAccount, ownerDevices: 0 };
+        audit(shop.tenant, PRACTICE_OPERATOR, "owner.linked", { ownerAccountId: ownerAccount.id });
+        return { tenant: shop.tenant, ownerAccount: { id: ownerAccount.id, linkedAt: iso(ownerAccount.linkedAt) } };
+      }),
+
+    // Every session of the account ends in the same step, and the answer says how many.
+    unlinkOwner: (input) =>
+      run((): UnlinkedOwner => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const { ownerAccount, ownerDevices, ...rest } = peopleOf(shop.tenant);
+        if (!ownerAccount) throw new ApiError(404, "not_linked");
+        db.people[shop.tenant] = rest;
+        audit(shop.tenant, PRACTICE_OPERATOR, "owner.unlinked", { ownerAccountId: ownerAccount.id });
+        return { tenant: shop.tenant, unlinked: ownerAccount.id, sessionsEnded: ownerDevices ?? 0 };
       }),
 
     // As the API: the tenant, then the month (the current Bangkok month unless one is named), then the settings and the
@@ -1169,6 +1263,14 @@ const MEMORY_STATUS: Record<Refusal, number> = {
   forgotten: 409,
   full: 409,
 };
+
+/// A link code as an operator typed it, in the one form it is kept in: capitals, with no spaces or dashes, and with the letters
+/// people mistake for digits read as those digits, as Crockford's base 32 reads them. Null when it cannot be a code at all,
+/// as the API's reading of it.
+function typedCode(value: string): string | null {
+  const code = value.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  return /^[0-9A-HJKMNP-TV-Z]{8}$/.test(code) ? code : null;
+}
 
 /// The id the API gives a shop's owner in the rules' state: in the pilot the owner has no account.
 const OWNER_ID = "owner";
@@ -1380,7 +1482,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 8,
+    version: 9,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -1431,6 +1533,7 @@ function seed(at: number): FakeDb {
     audit: sampleAudit(at, tenant, connectionId),
     memory: { [tenant]: sampleMemory(at) },
     people: { [tenant]: samplePeople(at, tenant) },
+    ownerCodes: sampleOwnerCodes(),
     model: seedModel(at, tenant),
     workers: sampleWorkers(at, tenant),
   };
@@ -1504,6 +1607,7 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
       ...(amountSatang !== undefined ? { amountSatang } : {}) };
   };
   const helper: AuditActor = { kind: "helper", id: "helper-mint" };
+  const fon: AuditActor = { kind: "owner", id: SAMPLE_OWNER_ACCOUNT };
   const reply = (actionId: string, messageId: string) => ({ taskId, actionId, messageId });
   const decided = (actionId: string) => ({ taskId, actionId });
   return [
@@ -1536,6 +1640,11 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     entry(tenant, 24 * 60, operator, "away.set", { helperId: "helper-mint" }),
     entry(tenant, 180, helper, "request.passed_on", { requestId: "req_refund", taskId }),
     entry(tenant, 120, operator, "invite.created", { inviteId: "inv-beam" }),
+    // What the owner's account of `samplePeople` did, by the link's id only: the operator linked it eleven days ago, and the
+    // owner's app opened the shop on two devices.
+    entry(tenant, 11 * 24 * 60, operator, "owner.linked", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
+    entry(tenant, 11 * 24 * 60 - 4, fon, "owner.session_opened", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
+    entry(tenant, 3 * 24 * 60, fon, "owner.session_opened", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
     entry(tenant, 70, operator, "reply.proposed", reply("act_tracking", "msg_tracking")),
     entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
     entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
@@ -1570,7 +1679,27 @@ function samplePeople(at: number, tenant: string): FakePeople {
   if (!invitedBeam.ok) throw refused("invite for Beam", invitedBeam.refused);
   state = invitedBeam.state;
 
-  return { state, names: { "inv-mint": "Mint", "helper-mint": "Mint", "inv-beam": "Beam" } };
+  // Fon's account was linked eleven days ago, and her app has the shop open on two devices.
+  return {
+    state,
+    names: { "inv-mint": "Mint", "helper-mint": "Mint", "inv-beam": "Beam" },
+    ownerAccount: { id: SAMPLE_OWNER_ACCOUNT, subject: "apple:practice-fon", linkedAt: at - 11 * DAY_MS },
+    ownerDevices: 2,
+  };
+}
+
+/// The id of the link `samplePeople` makes for Fon's account, which `sampleAudit` names.
+const SAMPLE_OWNER_ACCOUNT = "owner-fon";
+
+/// The codes `PRACTICE_OWNER_CODES` names, each for the account that asked for it, as the API keeps a code: in its one form.
+function sampleOwnerCodes(): FakeOwnerCode[] {
+  const bare = (code: string) => code.replace("-", "");
+  return [
+    { code: bare(PRACTICE_OWNER_CODES.dao), subject: "apple:practice-dao" },
+    { code: bare(PRACTICE_OWNER_CODES.fon), subject: "apple:practice-fon" },
+    { code: bare(PRACTICE_OWNER_CODES.guest), subject: "apple:practice-guest" },
+    { code: bare(PRACTICE_OWNER_CODES.ranOut), subject: "apple:practice-dao", ranOut: true },
+  ];
 }
 
 /// What Nam, Pim and Ton did for Baan Mali, oldest first, as the API's task index would list it: one job for each way a job

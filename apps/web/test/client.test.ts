@@ -570,3 +570,74 @@ describe("the API client, for the owner's helpers", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+// The owner's linked account (docs/pilot-api.md, "Several shops", "Operator routes"): link the account a code names, and
+// unlink it, both under the admin gate. Each sends the tenant and exactly what its route takes, and answers what the API
+// answers.
+describe("the API client, for the owner's linked account", () => {
+  const linked = { tenant: "pilot:1", ownerAccount: { id: "owner-1", linkedAt: "2026-11-24T03:00:00.000Z" } };
+  const unlinked = { tenant: "pilot:1", unlinked: "owner-1", sessionsEnded: 2 };
+  const answering = (url: string) => json(new URL(url).pathname.endsWith("/unlink") ? unlinked : linked);
+
+  it("sends the operator key to the contract's two paths, with the tenant and exactly what each route takes", async () => {
+    const { api, calls } = harness("op-key-123", answering);
+    await api.linkOwner({ tenant: "pilot:1", code: " k7m4-x9rq " });
+    await api.unlinkOwner({ tenant: "pilot:1" });
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "POST https://api.example.test/v1/admin/shops/owner",
+      "POST https://api.example.test/v1/admin/shops/owner/unlink",
+    ]);
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    // The code goes as it was given: the API reads any case, and the dash and spaces are its to ignore.
+    expect(calls[0]?.body).toEqual({ tenant: "pilot:1", code: " k7m4-x9rq " });
+    expect(calls[1]?.body).toEqual({ tenant: "pilot:1" });
+  });
+
+  it("never sends a field its route does not take, an account, a subject or a role above all", async () => {
+    const { api, calls } = harness("op-key-123", answering);
+    const extra = { subject: "apple:someone", role: "owner", ownerAccountId: "owner-chosen" };
+    await api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ", ...extra } as never);
+    await api.unlinkOwner({ tenant: "t1", ...extra } as never);
+    expect(calls.map((c) => c.raw)).toEqual(['{"tenant":"t1","code":"K7M4-X9RQ"}', '{"tenant":"t1"}']);
+  });
+
+  it("answers what the API answers: the link, and the sessions its end took with it", async () => {
+    const { api } = harness("op-key-123", answering);
+    expect(await api.linkOwner({ tenant: "pilot:1", code: "K7M4-X9RQ" })).toEqual(linked);
+    expect(await api.unlinkOwner({ tenant: "pilot:1" })).toEqual(unlinked);
+  });
+
+  it("turns every refusal of the two routes into an ApiError with the API's status and code", async () => {
+    const calls: [(api: PilotApi) => Promise<unknown>, number, string][] = [
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 400, "tenant_required"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 400, "invalid_request"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 404, "shop_not_found"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 404, "unknown_code"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 410, "code_expired"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 409, "already_linked"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 503, "index_unavailable"],
+      [(api) => api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" }), 503, "shops_unavailable"],
+      [(api) => api.unlinkOwner({ tenant: "t1" }), 404, "not_linked"],
+      [(api) => api.unlinkOwner({ tenant: "t1" }), 404, "shop_not_found"],
+      [(api) => api.unlinkOwner({ tenant: "t1" }), 400, "invalid_request"],
+      [(api) => api.unlinkOwner({ tenant: "t1" }), 503, "shops_unavailable"],
+    ];
+    for (const [call, status, code] of calls) {
+      const { api } = harness("op-key-123", () => json({ error: code }, status));
+      const failed = await call(api).catch((e: unknown) => e);
+      expect(failed).toBeInstanceOf(ApiError);
+      expect(failed).toMatchObject({ status, code });
+    }
+  });
+
+  it("refuses both routes with no key and sends nothing", async () => {
+    const { api, fetch } = harness(null);
+    await expect(api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" })).rejects.toMatchObject({ code: "operator_key_missing" });
+    await expect(api.unlinkOwner({ tenant: "t1" })).rejects.toMatchObject({ code: "operator_key_missing" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

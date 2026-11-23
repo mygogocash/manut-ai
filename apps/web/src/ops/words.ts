@@ -434,6 +434,14 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
     return name ? `ended ${name}'s cover` : "ended the cover";
   },
   "request.passed_on": (_entry, { ownerName }) => `passed a request on to ${ownerName}`,
+  // The owner's linked account and the shop sessions (docs/several-shops.md). The log holds the link's id only, never the
+  // account itself, so the words say whose account by the shop's owner. A device signing in or out is the account's or the
+  // helper's own doing, so it is said of them.
+  "owner.linked": (_entry, { ownerName }) => `linked ${ownerName}'s account to the shop`,
+  "owner.unlinked": (_entry, { ownerName }) => `unlinked ${ownerName}'s account from the shop`,
+  "owner.session_opened": () => "signed in to the shop on a device",
+  "owner.session_ended": () => "signed out of the shop on a device",
+  "helper.session_ended": () => "signed out on a device",
   // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
   // ids only, never a username or a password.
   "signin.created": () => "added a site sign-in to the vault",
@@ -550,6 +558,7 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["questionId", "question"],
   ["inviteId", "invite"],
   ["helperId", "helper"],
+  ["ownerAccountId", "owner account"],
   ["signInId", "sign-in"],
   ["outpostId", "outpost"],
   ["grantId", "grant"],

@@ -43,7 +43,8 @@ const rowWith = (text: string, list = PEOPLE) => {
 };
 
 function emptyPeople(overrides: Partial<People> = {}): People {
-  return { tenant: "t1", owner: { name: "Fon" }, helpers: [], invites: [], away: null, passedOn: [], removed: [], ...overrides };
+  return { tenant: "t1", owner: { name: "Fon", account: null }, helpers: [], invites: [], away: null, passedOn: [], removed: [],
+    ...overrides };
 }
 
 const MINT = { id: "helper-mint", name: "Mint", identity: { kind: "email", address: "mint@baanmali.example" } as const,
