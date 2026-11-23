@@ -61,7 +61,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a read-only connected runtime (Settings › Developer) and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
-| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, the console). PromptPay billing: owner, parked for later (23 Nov); the payload writer and reader and the slip rules exist as packages. The rules for routines (`@manut/routine-rules`) and three shop templates (`@manut/shop-templates`) are built as packages; the routines page and applying a template are not yet |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines running and applying a template are being built; the outpost's browser is next. Parked by the owner: PromptPay billing and the LINE client |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial: more roles built (the owner's helpers, deciding from a session by role); three shop kinds as templates; the desktop fork's terminals and coding sessions; several shops in one view and computer control are in the December plan; phone apps wait for the desktop |
 
 ## December engineering (the owner's go, 23 Nov 2026)
@@ -76,9 +76,9 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | running | 1. Console: the workers' drafts and a shops overview | | Sonnet |
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
-| running | Browser control, first slice: vault sign-ins and outposts | | Opus |
+| done | Browser control, first slice: vault sign-ins and outposts | | Opus |
+| running | 4. Console: the People page | | Sonnet |
 | running | The Playwright revival | | Haiku |
-| 4 | Console: the People page | the helpers' API | Sonnet |
 | 5 | The desktop answering approvals through the session decide route (tested with test sign-in) | the helpers' API | Opus |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
 | 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
