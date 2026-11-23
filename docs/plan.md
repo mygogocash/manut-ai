@@ -271,6 +271,8 @@ owner is away, and removal. It may use `@manut/approval-core` (`workspace:*`) fo
 Done when: each invite answer, passing on and its refusals, cover never moving money or posts, cover ending on
 its date, and removal are tested.
 
+Done on cloud/people-rules, 23 Nov 2026: `packages/people-rules` with invites, `acceptInvite`, `passOn`, away cover, `deciders`/`canDecide` and `removeHelper` (24 tests).
+
 ### shop-templates
 `packages/shop-templates` (`@manut/shop-templates`). The starting setups for three kinds of online seller: the
 roadmap's first kind plus its "two more shop templates". Data and checks only, in English for now; applying a
