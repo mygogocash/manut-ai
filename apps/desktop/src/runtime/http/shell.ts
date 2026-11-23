@@ -77,7 +77,7 @@ export function shellFetch(): FetchLike {
   };
 }
 
-/** The session's keychain item through the shell's `session_read`, `session_write` and `session_clear`. */
+/** The session's keychain item through the shell's `api_session_read`, `api_session_write` and `api_session_clear`. */
 export function shellVault(): SessionVault {
   const call = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
     if (!inShell()) throw new VaultUnavailable("no desktop shell");
@@ -90,8 +90,8 @@ export function shellVault(): SessionVault {
     }
   };
   return {
-    read: () => call<string | null>("session_read"),
-    write: (value) => call<void>("session_write", { value }),
-    clear: () => call<void>("session_clear"),
+    read: () => call<string | null>("api_session_read"),
+    write: (value) => call<void>("api_session_write", { value }),
+    clear: () => call<void>("api_session_clear"),
   };
 }

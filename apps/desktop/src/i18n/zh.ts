@@ -1848,7 +1848,7 @@ export const zh: Record<Key, string> = {
   "dev.originBad.has_credentials": "不要包含用户名和密码。",
   "dev.save": "保存",
   "dev.restart": "重启以应用",
-  "dev.restartHint": "应用在启动时选择运行时。",
+  "dev.restartHint": "应用在启动时选择运行时。重启会停止应用中正在运行的终端和编程会话。",
   "dev.signInTitle": "登录",
   "dev.signInHint": "API 使用 Apple 登录。在应用能自己向 Apple 请求之前，请粘贴身份 token 和生成它时使用的 nonce。",
   "dev.token": "身份 token",

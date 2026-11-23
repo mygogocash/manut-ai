@@ -451,6 +451,22 @@
   font-size: 11.5px;
   color: var(--quiet);
 }
+/* Settings › Developer's fields (DeveloperPage.tsx): the API origin, an identity token and its nonce. */
+.dev-in {
+  height: 28px;
+  width: 260px;
+  max-width: 100%;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--raise);
+  color: var(--ink);
+  font-size: 12px;
+}
+.dev-in:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
 .bots-q {
   height: 28px;
   width: 200px;

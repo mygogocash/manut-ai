@@ -147,6 +147,20 @@ describe("signing in", () => {
     expect(kept(vault)).toMatchObject({ accessToken: "access-2", tenant: "apple:owner-2" });
   });
 
+  it("ends another API's session left in the keychain on its own API before signing in here, and sends it nowhere else", async () => {
+    const other = "https://staging.manut.xyz";
+    const { session, api, vault } = setup(stored(clock().now(), { origin: other, accessToken: "access-other" }));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(1) });
+    await session.load();
+    expect(session.state).toEqual({ kind: "signed_out" });
+    expect((await session.signIn(IDENTITY, NONCE)).kind).toBe("signed_in");
+    expect(api.calls.map((r) => [r.method, r.url, r.bearer])).toEqual([
+      ["DELETE", `${other}/v1/auth/session`, "access-other"],
+      ["POST", `${ORIGIN}/v1/auth/exchange`, null],
+    ]);
+    expect(kept(vault)).toMatchObject({ origin: ORIGIN, accessToken: "access-1" });
+  });
+
   it("ends a new session it cannot keep, so no live token is left behind", async () => {
     const { session, api, vault } = setup();
     api.on("POST", "/v1/auth/exchange", { status: 200, json: tokens(1) }).on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } });

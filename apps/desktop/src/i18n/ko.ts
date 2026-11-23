@@ -1848,7 +1848,7 @@ export const ko: Record<Key, string> = {
   "dev.originBad.has_credentials": "사용자 이름과 비밀번호는 빼 주세요.",
   "dev.save": "저장",
   "dev.restart": "다시 시작해서 적용",
-  "dev.restartHint": "앱은 시작할 때 런타임을 정해요.",
+  "dev.restartHint": "앱은 시작할 때 런타임을 정해요. 다시 시작하면 앱에서 실행 중인 터미널과 코딩 세션이 멈춰요.",
   "dev.signInTitle": "로그인",
   "dev.signInHint": "API는 Apple로 로그인해요. 앱이 직접 Apple에 물어볼 수 있을 때까지는 ID 토큰과 그 토큰을 만들 때 쓴 nonce를 붙여 넣으세요.",
   "dev.token": "ID 토큰",

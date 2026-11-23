@@ -66,9 +66,9 @@ describe("shellVault", () => {
   it("reads, writes and clears the one session item through the shell", async () => {
     let kept: string | null = null;
     const calls = shell((cmd, args) => {
-      if (cmd === "session_write") kept = String(args?.value);
-      if (cmd === "session_clear") kept = null;
-      return cmd === "session_read" ? kept : null;
+      if (cmd === "api_session_write") kept = String(args?.value);
+      if (cmd === "api_session_clear") kept = null;
+      return cmd === "api_session_read" ? kept : null;
     });
     const vault = shellVault();
     expect(await vault.read()).toBeNull();
@@ -76,7 +76,7 @@ describe("shellVault", () => {
     expect(await vault.read()).toBe('{"v":1}');
     await vault.clear();
     expect(await vault.read()).toBeNull();
-    expect(calls.map(([cmd]) => cmd)).toEqual(["session_read", "session_write", "session_read", "session_clear", "session_read"]);
+    expect(calls.map(([cmd]) => cmd)).toEqual(["api_session_read", "api_session_write", "api_session_read", "api_session_clear", "api_session_read"]);
   });
 
   it("says when this computer's shell has no keychain, apart from a keychain that refused", async () => {

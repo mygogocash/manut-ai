@@ -1848,7 +1848,7 @@ export const ja: Record<Key, string> = {
   "dev.originBad.has_credentials": "ユーザー名とパスワードは含めないでください。",
   "dev.save": "保存",
   "dev.restart": "再起動して適用",
-  "dev.restartHint": "アプリは起動時にランタイムを選びます。",
+  "dev.restartHint": "アプリは起動時にランタイムを選びます。再起動すると、アプリで動いているターミナルとコーディングセッションは停止します。",
   "dev.signInTitle": "サインイン",
   "dev.signInHint": "API は Apple でサインインします。アプリが自分で Apple に問い合わせられるようになるまでは、ID トークンと、その作成に使った nonce を貼り付けてください。",
   "dev.token": "ID トークン",

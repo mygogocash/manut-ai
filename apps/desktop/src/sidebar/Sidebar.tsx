@@ -21,6 +21,7 @@ import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentThreads, rowPage, type MenuRow } from "./menu";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
+import { ModeLine } from "./ModeLine";
 import { UpdateButton } from "./UpdateButton";
 import { Usage } from "./Usage";
 
@@ -159,6 +160,8 @@ export function Sidebar() {
           {can("accounts") && <AccountsWatcher />}
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}
           <UpdateButton />
+          {/* Practice mode, or the API host it is connected to: never a guess about which data this is. */}
+          <ModeLine onOpen={() => s.openSettings("developer")} />
         </>
       }
     />

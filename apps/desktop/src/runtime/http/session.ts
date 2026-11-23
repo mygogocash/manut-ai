@@ -120,6 +120,9 @@ export class ApiSession {
   private readonly now: () => number;
   private readonly newDeviceId: () => string;
   private record: StoredSession | null = null;
+  /** Another origin's session found in the keychain item, which holds one session at a time. It is never sent here;
+   *  a sign-in here ends it on its own API first, so overwriting the item never leaves it live there. */
+  private foreign: StoredSession | null = null;
   private loading: Promise<void> | null = null;
   private refreshing: Promise<Refreshed> | null = null;
   private signingIn: Promise<SignInState> | null = null;
@@ -138,13 +141,13 @@ export class ApiSession {
     return () => this.listeners.delete(fn);
   }
 
-  /** Reads the keychain once. A session for another origin reads as signed out and is never sent here. */
+  /** Reads the keychain once. A session for another origin reads as signed out here and is never sent here. */
   load(): Promise<void> {
     return (this.loading ??= this.readVault());
   }
 
-  /** Exchanges an identity token and its raw nonce for a session and keeps it in the keychain. A session already
-   *  here is ended first, so a second sign-in never leaves the first one live on the API. */
+  /** Exchanges an identity token and its raw nonce for a session and keeps it in the keychain. The session the
+   *  keychain held before (this origin's or another's) is ended first, so a sign-in never leaves one live on an API. */
   async signIn(identityToken: string, nonce: string): Promise<SignInState> {
     await this.load();
     if (this.state.kind === "no_keychain") return this.state;
@@ -154,6 +157,7 @@ export class ApiSession {
     if (!token || !raw || token.length > MAX_IDENTITY || raw.length > MAX_NONCE) return this.set({ kind: "signed_out", failure: "invalid_identity" });
     this.signingIn = (async () => {
       if (this.record) await this.signOut();
+      else if (this.foreign) await this.endForeign(this.foreign);
       return this.exchange(token, raw);
     })().finally(() => {
       this.signingIn = null;
@@ -230,7 +234,10 @@ export class ApiSession {
     if (rec && rec.origin === this.origin) {
       this.record = rec;
       this.set({ kind: "signed_in", tenant: rec.tenant, signedInAt: rec.signedInAt });
-    } else this.set({ kind: "signed_out" });
+    } else {
+      this.foreign = rec;
+      this.set({ kind: "signed_out" });
+    }
   }
 
   private async exchange(identityToken: string, nonce: string): Promise<SignInState> {
@@ -262,6 +269,12 @@ export class ApiSession {
     }
     this.record = rec;
     return this.set({ kind: "signed_in", tenant: rec.tenant, signedInAt: rec.signedInAt });
+  }
+
+  /** Ends another origin's session on that origin's own API (best effort: the item is overwritten either way). */
+  private async endForeign(rec: StoredSession): Promise<void> {
+    this.foreign = null;
+    await this.send("DELETE", "/v1/auth/session", rec.accessToken, undefined, rec.origin);
   }
 
   /** Refreshes unless the token a request used was already replaced (another request's refresh got there first). */
@@ -314,12 +327,12 @@ export class ApiSession {
     this.set({ kind: "signed_out", ended: "expired" });
   }
 
-  private async send(method: "GET" | "POST" | "DELETE", path: string, bearer: string | null, body?: unknown): Promise<Raw> {
+  private async send(method: "GET" | "POST" | "DELETE", path: string, bearer: string | null, body?: unknown, origin = this.origin): Promise<Raw> {
     const headers: Record<string, string> = { accept: "application/json" };
     if (bearer) headers.authorization = `Bearer ${bearer}`;
     if (body !== undefined) headers["content-type"] = "application/json";
     try {
-      const res = await this.fetch(`${this.origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const res = await this.fetch(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return { kind: "answer", status: res.status, text: await res.text() };
     } catch (e) {
       return { kind: e instanceof LinkDown && e.kind === "offline" ? "offline" : "unavailable" };

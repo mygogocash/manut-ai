@@ -1860,7 +1860,7 @@ export const en = {
   "dev.originBad.has_credentials": "Leave out the user name and password.",
   "dev.save": "Save",
   "dev.restart": "Restart to apply",
-  "dev.restartHint": "The app picks its runtime when it starts.",
+  "dev.restartHint": "The app picks its runtime when it starts. Restarting stops the terminals and coding sessions it runs.",
   "dev.signInTitle": "Sign-in",
   "dev.signInHint": "The API signs in with Apple. Until the app can ask Apple itself, paste an identity token and the nonce it was made with.",
   "dev.token": "Identity token",

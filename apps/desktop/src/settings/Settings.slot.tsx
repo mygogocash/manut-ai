@@ -1,5 +1,5 @@
 // Settings view (main column while `ui.view === "settings"`). Left list: You (Accounts, when the runtime keeps them),
-// Bots (one page per bot: Profile, Model, Work) and App (General, Terminal, Agents, Computer). Pages are `bot:<name>`
+// Bots (one page per bot: Profile, Model, Work) and App (General, Terminal, Agents, Computer, Developer). Pages are `bot:<name>`
 // and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
 // Oh My Hermes also had Providers (`hermes auth`) and Remote machines (Hermes over SSH) here; both needed its bridge.
 import { useEffect, useState } from "react";
@@ -24,6 +24,7 @@ import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides
 import { AgentsPage } from "./agents/AgentsPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
 import { ShopSettings } from "../onboarding/ShopSettings";
+import { DeveloperPage } from "./DeveloperPage";
 
 export const slot = "settings";
 
@@ -32,6 +33,8 @@ const APP_PAGES: { id: string; label: Key }[] = [
   { id: "terminal", label: "set.terminal" },
   { id: "agents", label: "set.agents" },
   { id: "computer", label: "set.computer" },
+  // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
+  { id: "developer", label: "set.developer" },
 ];
 
 const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offline", starting: "bot.starting" };
@@ -93,6 +96,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <AgentsPage />
         ) : current === "computer" ? (
           <ComputerPage />
+        ) : current === "developer" ? (
+          <DeveloperPage />
         ) : (
           <GeneralPage />
         )}
