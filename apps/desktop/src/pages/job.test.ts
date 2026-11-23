@@ -20,6 +20,7 @@ const job: Job = {
   stage: "checked",
   at: at(22, 9, 20),
   goal: "Reply to customers whose parcels are late.",
+  again: "parcels are late",
   steps: [
     { stage: "proposed", at: at(22, 9, 10) },
     { stage: "approved", at: at(22, 9, 14) },

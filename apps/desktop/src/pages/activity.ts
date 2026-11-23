@@ -65,7 +65,7 @@ const midnight = (ms: number) => {
 };
 
 /** A `YYYY-MM-DD` as its day's midnight on this computer, or null when it is not a day on the calendar. */
-function parseDay(v: string): number | null {
+export function parseDay(v: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
   if (!m) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]) - 1, Number(m[3])];
@@ -164,6 +164,9 @@ export type ExportAction =
   | { type: "kind"; kind: ActivityKind }
   | { type: "text" }
   | { type: "note"; note: "not_yet" };
+
+/** Saving was asked for and the app cannot do it yet. */
+export const SAVE_NOT_YET: ExportAction = { type: "note", note: "not_yet" };
 
 /** Any change to what the file holds takes a refusal's note away, since the note was about the file as it was. */
 export function exportReduce(x: ExportState, a: ExportAction): ExportState {

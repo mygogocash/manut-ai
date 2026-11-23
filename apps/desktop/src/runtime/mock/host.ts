@@ -161,6 +161,7 @@ export class MockHost {
         stage: last.stage,
         at: last.at,
         goal: j.goal,
+        again: j.again,
         steps,
         summary: j.summary,
         recipients: j.recipients.map((r) => ({ ...r })),

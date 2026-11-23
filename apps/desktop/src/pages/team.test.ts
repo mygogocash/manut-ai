@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { asksOf, memberStatus } from "./team";
 import type { Ask, Chat } from "../state/store";
 
-const bot = (over: { status?: "online" | "offline"; running?: boolean } = {}) => ({ status: over.status ?? "online", running: over.running ?? false });
+const bot = (over: { status?: "online" | "offline"; running?: boolean; paused?: boolean } = {}) => ({
+  status: over.status ?? "online",
+  running: over.running ?? false,
+  ...(over.paused ? { paused: true } : {}),
+});
 const chat = (over: { turn?: boolean; outcome?: "done" | "interrupted" | "ended" | "error" } = {}) =>
   ({
     turn: over.turn ? { id: "t" } : null,
@@ -14,6 +18,13 @@ describe("a member's status", () => {
   it("is Needs you while an ask of theirs waits, whatever else holds", () => {
     expect(memberStatus(bot({ running: true }), chat({ turn: true }), 1)).toBe("needs");
     expect(memberStatus(bot({ status: "offline" }), undefined, 2)).toBe("needs");
+  });
+
+  it("is Paused while Pause everyone holds them, whatever else holds, even an ask that waits for the owner", () => {
+    expect(memberStatus(bot({ paused: true }), undefined, 0)).toBe("paused");
+    expect(memberStatus(bot({ paused: true, running: true }), chat({ turn: true }), 0)).toBe("paused");
+    expect(memberStatus(bot({ paused: true }), chat({ outcome: "error" }), 2)).toBe("paused");
+    expect(memberStatus(bot({ paused: false }), undefined, 0)).toBe("idle");
   });
 
   it("is Not connected when the runtime cannot reach them", () => {

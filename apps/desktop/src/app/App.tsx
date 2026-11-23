@@ -23,6 +23,8 @@ import { CodePage } from "../pages/CodePage";
 import { ArtifactsPage } from "../pages/ArtifactsPage";
 import { CustomizePage } from "../pages/CustomizePage";
 import { HistoryPage } from "../pages/HistoryPage";
+import { JobPage } from "../pages/JobPage";
+import { ActivityPage } from "../pages/ActivityPage";
 import { Onboarding } from "../onboarding/Onboarding";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { useLookAttributes, useThemeAttribute } from "./theme";
@@ -106,6 +108,10 @@ export function App() {
           <PluginsPage />
         ) : s.ui.view === "tasks" ? (
           <TasksPage />
+        ) : s.ui.view === "job" ? (
+          <JobPage />
+        ) : s.ui.view === "activity" ? (
+          <ActivityPage />
         ) : s.ui.view === "session" ? (
           <Suspense fallback={null}>
             <SessionView />

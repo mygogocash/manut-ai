@@ -60,6 +60,9 @@ export interface TraceStep {
 export interface Job extends JobRow {
   /** what the owner asked for, in the owner's words */
   goal: string;
+  /** the rule the owner could keep from this job, as the end of "Do this whenever …" ("parcels are late"); null when
+   *  the job is not one a rule could repeat */
+  again: string | null;
   steps: JobStep[];
   /** what happened, in one or two sentences */
   summary: string;

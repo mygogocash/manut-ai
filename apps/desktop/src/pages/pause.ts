@@ -3,7 +3,8 @@
 // "Team: pause everyone" (PauseAll.dc.html). Pausing is the runtime's to do; nothing here stops anyone.
 import { dayLabel, hhmm, sameDay } from "../app/time";
 import { listText, t } from "../i18n";
-import type { PausedJob } from "../runtime/mission";
+import type { PausedJob, TeamState } from "../runtime/mission";
+import { unavailable } from "./load";
 
 /** What the page itself holds: the question is open, everyone has just come back, a request is on its way, and why the last
  *  one did not go. Whether the team is paused is the runtime's to say (`team.state`), not the page's. */
@@ -63,4 +64,15 @@ export function pausedJobLine(j: PausedJob, nameOf: (bot: string) => string): st
 export function sinceText(sinceSec: number, nowMs: number): string {
   const time = hhmm(new Date(sinceSec * 1000));
   return sameDay(sinceSec, nowMs / 1000) ? time : `${dayLabel(sinceSec, nowMs)} ${time}`;
+}
+
+/** Asks the runtime to pause or resume, and says how the page moves on: the runtime's new state and the flow's next move,
+ *  or, when the runtime says no (the connected one: "not yet"), its own words and no new state. */
+export async function pauseStep(call: () => Promise<TeamState>, resuming: boolean): Promise<{ state: TeamState | null; action: PauseAction }> {
+  try {
+    return { state: await call(), action: { type: "done", paused: !resuming } };
+  } catch (e) {
+    const why = unavailable(e);
+    return { state: null, action: { type: "failed", message: why.kind === "unavailable" ? why.message : "" } };
+  }
 }

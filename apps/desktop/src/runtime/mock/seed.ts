@@ -107,6 +107,8 @@ export interface JobSeed {
   id: string;
   title: string;
   goal: string;
+  /** the rule the owner could keep from this job ("parcels are late"), or null */
+  again: string | null;
   bot: string;
   steps: readonly (readonly [JobStage, number])[];
   summary: string;
@@ -132,6 +134,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "late-parcels",
     title: "Replies about late parcels",
     goal: "Reply to customers whose parcels are late.",
+    again: "parcels are late",
     bot: "nam",
     steps: [
       ["proposed", 50 * MIN],
@@ -161,6 +164,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "weekend-replies",
     title: "Replies about weekend orders",
     goal: "Answer the customers who asked about weekend orders.",
+    again: "a customer asks about weekend orders",
     bot: "nam",
     steps: [
       ["proposed", 12 * MIN],
@@ -185,6 +189,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "teaser-draft",
     title: "Captions for the pre-order page",
     goal: "Write short captions for the pre-order page.",
+    again: null,
     bot: "pim",
     steps: [["working", 20 * MIN]],
     summary: "Pim is writing captions for the pre-order page. Nothing goes live until you say so.",
@@ -197,6 +202,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "daily-summary",
     title: "Daily sales summary",
     goal: "Send me yesterday's sales every morning.",
+    again: null,
     bot: "ton",
     steps: [
       ["proposed", 3 * HOUR + 10 * MIN],
@@ -216,6 +222,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "teaser-post",
     title: "12.12 teaser post",
     goal: "Post a teaser for the 12.12 sale on Instagram.",
+    again: null,
     bot: "pim",
     steps: [["proposed", 18 * HOUR]],
     summary: "Pim wrote a teaser post for Instagram. It waits for your approval, and nothing is posted before then.",
@@ -228,6 +235,7 @@ export const JOB_SEED: readonly JobSeed[] = [
     id: "order-status",
     title: "Order-status replies to 5 customers",
     goal: "Answer questions about where an order is.",
+    again: "a customer asks where an order is",
     bot: "nam",
     steps: [["sent", 20 * HOUR]],
     summary: "Nam answered 5 customers who asked where their orders were. Order-status questions only: everything else waited for you.",
