@@ -91,7 +91,7 @@ export interface WorkerPort {
 
 /// The provider each operation a worker may ask for writes to. The connection that carries it is the shop's live
 /// connection to that provider whose grant covers the target. The task object sets the approval kind of each
-/// operation (`JOB_REQUEST_KINDS` in task-object.ts), and LINE replies stay on the pilot's own flow.
+/// operation (`REQUEST_KINDS` in task-object.ts), and LINE replies stay on the pilot's own flow.
 const PROVIDER_OF: Readonly<Record<string, string>> = { "linear.issue.create": "linear" };
 
 /// The task object's answers that mean the attempt no longer runs.

@@ -7,11 +7,14 @@ import {
   type ApprovalKind,
   type ApprovalOption,
   type ApprovalRecord,
+  type DecideResult,
+  type Decision,
+  type NewApprovalRequest,
   type Role,
 } from "@manut/approval-core";
 import { readJsonBody } from "./body";
 import { isValidCompanyId } from "./companies";
-import { isValidLinePushProposal, LINE_PUSH_OPERATION } from "./connectors/line";
+import { isValidLinePushProposal, LINE_PUSH_OPERATION, lineReplyText } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
 
 export type TaskCriterionJSON = {
@@ -277,10 +280,13 @@ export type ActionProposalJSON = {
     | "unknown";
   approval?: { by: string; at: string };
   dispatch?: { at: string; providerOperationId?: string; receipt?: unknown };
-  /// Set on an action a worker asked for (job-flow.ts): the id of the
-  /// approval-core request that alone decides it, which is the action's own
-  /// id. The older decision route refuses such an action, so the request's
-  /// rules (who may decide, once, while its attempt runs) have no way round.
+  /// Set on an action an approval-core request alone decides: one a worker
+  /// asked for (job-flow.ts), and every reply. It is the id of that request,
+  /// which is the action's own id. The older decision route refuses a
+  /// worker's action, and decides a reply only through its request, so the
+  /// request's rules (who may decide, once, while its attempt runs, before it
+  /// expires) have no way round. A reply stored before replies carried
+  /// requests has none until its first decision stores one.
   requestId?: string;
 };
 
@@ -448,20 +454,68 @@ function newProposal(
 // The worker adapter contract (job-flow.ts, docs/phase-0-spikes.md section 3)
 // ---------------------------------------------------------------------------
 
-/// What every request a worker opens offers. One approves the exact action and one declines it; approval-core keeps
-/// what the chosen option does apart from its label, so the decision says whether the action was approved without
-/// anyone reading a label.
+/// What every request a worker or a reply opens offers. One approves the exact action and one declines it;
+/// approval-core keeps what the chosen option does apart from its label, so the decision says whether the action was
+/// approved without anyone reading a label.
 export const JOB_REQUEST_OPTIONS: readonly ApprovalOption[] = [
   { id: "approve", label: "Approve", effect: "approve" },
   { id: "decline", label: "Decline", effect: "decline" },
 ];
 
-/// The approval kind of each operation a worker may ask for, set here from the operation and never taken from the
-/// worker, so a worker cannot ask for a write to the shop's systems as if it were a reply a helper may decide. An
-/// issue in the shop's own tracker changes the shop's records: approval-core's owner-only `command`. A LINE reply
-/// is not here: it needs the reply record binding it to the message it answers, which only the pilot's reply flow
-/// writes, so a worker's LINE reply would always fail at dispatch.
-const JOB_REQUEST_KINDS: Readonly<Record<string, ApprovalKind>> = { "linear.issue.create": "command" };
+/// The approval kind of each operation an approval-core request decides, set here from the operation and never taken
+/// from whoever proposes it, so nobody can ask for a write to the shop's systems as if it were a reply a helper may
+/// decide. A LINE reply answers a customer who wrote first, privately: approval-core's `reply`. An issue in the shop's
+/// own tracker changes the shop's records: the owner-only `command`.
+const REQUEST_KINDS: Readonly<Record<string, ApprovalKind>> = {
+  [LINE_PUSH_OPERATION]: "reply",
+  "linear.issue.create": "command",
+};
+
+/// The operations a worker may ask for (job-flow.ts). A LINE reply is not one: it needs the reply record binding it
+/// to the message it answers, which only the pilot's reply flow writes, so a worker's LINE reply would always fail at
+/// dispatch.
+const WORKER_OPERATIONS: ReadonlySet<string> = new Set(["linear.issue.create"]);
+
+/// Whether an action is a reply, which only its approval-core request decides, whichever route proposed it.
+function isReply(action: Pick<ActionProposalJSON, "operationType">): boolean {
+  return REQUEST_KINDS[action.operationType] === "reply";
+}
+
+/// Replies are never revised: a changed reply is a new proposal with a link of its own. So the one revision anyone
+/// deciding a reply can have seen is the first, and every decision on one names it. Were a revision ever added, the
+/// older decisions would be refused as changed, never applied to something nobody saw.
+export const REPLY_REVISION = 1;
+
+/// What a reply's approval-core request asks: approve or decline that exact reply, its draft and the one customer it
+/// goes to, until the reply's own expiry, which is its link's. It is built from the stored reply alone, so a reply
+/// stored before replies carried requests reads as the very request it would have opened (`decidingRecordSync`).
+function replyRequest(action: ActionProposalJSON): NewApprovalRequest {
+  return {
+    id: action.id,
+    kind: "reply",
+    options: JOB_REQUEST_OPTIONS,
+    expiresAt: Date.parse(action.expiresAt),
+    detail: {
+      actionId: action.id,
+      operationType: action.operationType,
+      targetResourceId: action.targetResourceId,
+      recipient: action.recipients?.[0] ?? null,
+      text: lineReplyText(action.payload),
+      payloadHash: action.payloadHash,
+    },
+  };
+}
+
+/// A reply's request as approval-core opens it: at revision 1, asked when the reply was proposed.
+function openReply(existing: ApprovalRecord | undefined, action: ActionProposalJSON) {
+  return openTransition(existing, replyRequest(action), Date.parse(action.proposedAt));
+}
+
+/// What settling a decision through a request came to: approval-core's result with the record and the action as they
+/// now stand, or a refusal from before approval-core was asked.
+type Settled =
+  | { asked: true; result: DecideResult; record: ApprovalRecord; action: ActionProposalJSON }
+  | { asked: false; status: 404 | 409; error: "not_found" | "action_not_open" };
 
 /// What the control plane reports to approval-core as the running attempt when no attempt holds the task.
 /// approval-core reads a missing attempt as unknown and lets a stamped request through, but here it is known that
@@ -901,7 +955,9 @@ export class TaskObject extends DurableObject {
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
     const checked = await proposalFields(parsed.value.action);
     if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });
-    const kind = JOB_REQUEST_KINDS[checked.fields.operationType];
+    const kind = WORKER_OPERATIONS.has(checked.fields.operationType)
+      ? REQUEST_KINDS[checked.fields.operationType]
+      : undefined;
     if (!kind) return Response.json({ error: "unsupported_operation" }, { status: 400 });
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
     const id = crypto.randomUUID();
@@ -944,15 +1000,55 @@ export class TaskObject extends DurableObject {
     }));
   }
 
-  /// `GET /requests/:id`: a request a worker opened, its action, and where it stands for whoever shows it, at its
-  /// current revision and against the attempt holding the task now.
+  /// The approval-core record that decides `action`: its stored request, or, for a reply stored before replies carried
+  /// requests and still waiting, the request it would have opened when it was proposed (`replyRequest`). Reading that
+  /// one writes nothing; the first decision that settles it stores it (`settleSync`). So every decision on an old reply
+  /// still goes through approval-core, and no task object has to be swept to give old replies their requests. An old
+  /// reply decided before then has no record: its decision stands as it was made, and nothing can settle it again.
+  private decidingRecordSync(kv: SyncKvStorage, action: ActionProposalJSON): ApprovalRecord | undefined {
+    const stored = kv.get<ApprovalRecord>(`request:${action.id}`);
+    if (stored !== undefined) return stored;
+    if (action.requestId !== undefined || !isReply(action) || action.state !== "proposed") return undefined;
+    return openReply(undefined, action).next;
+  }
+
+  /// Settles `decision` on the request that decides `action`, through approval-core's transition, in the caller's
+  /// transaction: who decided first, who may decide its kind (`mayDecide`), whether its attempt still holds the task
+  /// (`bindingHolds`), its expiry and revision, and the option. The action moves with the request: an approval to
+  /// approved, the only state the broker's begin gate dispatches from, and a decline to rejected. This is the only way
+  /// an action a request decides leaves `proposed` on a decision. A refusal writes nothing.
+  private settleSync(kv: SyncKvStorage, doc: TaskDocJSON, action: ActionProposalJSON, decision: Decision,
+    now: number): Settled {
+    const record = this.decidingRecordSync(kv, action);
+    if (record === undefined) return { asked: false, status: 404, error: "not_found" };
+    const { result, next } = decideTransition(record, decision,
+      { running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
+    if (!result.ok || next?.status !== "decided") return { asked: true, result, record, action };
+    // A pending request's action is always proposed: nothing else decides it. If that ever stops holding, nothing is
+    // written rather than settling a request whose action cannot follow.
+    if (action.state !== "proposed") return { asked: false, status: 409, error: "action_not_open" };
+    const approved = next.request.options.find((option) => option.id === next.decision.optionId)?.effect === "approve";
+    // An old reply carries its request's id from its first decision on, as every reply proposed since does.
+    const bound: ActionProposalJSON = { ...action, requestId: action.id };
+    const decided: ActionProposalJSON = approved
+      ? { ...bound, state: "approved", approval: { by: decision.decidedBy, at: new Date(now).toISOString() } }
+      : { ...bound, state: "rejected" };
+    kv.put(`request:${action.id}`, next);
+    kv.put(`action:${action.id}`, decided);
+    this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:decision:${action.id}` }]);
+    return { asked: true, result, record: next, action: decided };
+  }
+
+  /// `GET /requests/:id`: a request, its action, and where it stands for whoever shows it, at its current revision and
+  /// against the attempt holding the task now.
   private async readRequest(request: Request, requestId: string): Promise<Response> {
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
     return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
       const kv = this.ctx.storage.kv;
-      const record = kv.get<ApprovalRecord>(`request:${requestId}`);
       const action = kv.get<ActionProposalJSON>(`action:${requestId}`);
-      if (!record || !action || this.foreignAction(action, request)) return { status: 404, body: { error: "not_found" } };
+      if (!action || this.foreignAction(action, request)) return { status: 404, body: { error: "not_found" } };
+      const record = this.decidingRecordSync(kv, action);
+      if (!record) return { status: 404, body: { error: "not_found" } };
       const now = Date.now();
       const standing = requestStanding(record, { seenRevision: record.request.revision,
         running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
@@ -961,11 +1057,9 @@ export class TaskObject extends DurableObject {
   }
 
   /// `POST /requests/:id/decision` with approval-core's `{ optionId, seenRevision, decidedBy, role }`, the role set
-  /// by the control plane from who is deciding, never by a client. approval-core's transition settles the request
-  /// once, in its order: who decided first, who may decide its kind (`mayDecide`), whether its attempt still holds
-  /// the task (`bindingHolds`), its expiry and revision, and the option. In the same transaction an approval moves
-  /// the action to approved, the only state the broker's begin gate dispatches from, and a decline rejects it.
-  /// Every refusal answers 200 with approval-core's result and writes nothing.
+  /// by the control plane from who is deciding, never by a client: the job flow's person deciding a worker's request,
+  /// or the owner's link deciding a reply (pilot.ts). approval-core settles the request once and the action moves with
+  /// it (`settleSync`). Every refusal answers 200 with approval-core's result and writes nothing.
   private async decideRequest(request: Request, requestId: string): Promise<Response> {
     const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
@@ -979,26 +1073,14 @@ export class TaskObject extends DurableObject {
     return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
       const kv = this.ctx.storage.kv;
       const doc = kv.get<TaskDocJSON>("task");
-      const record = kv.get<ApprovalRecord>(`request:${requestId}`);
       const action = kv.get<ActionProposalJSON>(`action:${requestId}`);
-      if (!doc || !record || !action || this.foreignAction(action, request)) {
+      if (!doc || !action || this.foreignAction(action, request)) {
         return { status: 404, body: { error: "not_found" } };
       }
-      const now = Date.now();
-      const { result, next } = decideTransition(record, { requestId, optionId, seenRevision, decidedBy, role },
-        { running: { attemptId: this.runningAttemptSync(kv, now / 1000) }, now });
-      if (!result.ok || next?.status !== "decided") return { status: 200, body: { result, record, action } };
-      // A pending request's action is always proposed: nothing else decides it. If that ever stops holding, nothing
-      // is written rather than settling a request whose action cannot follow.
-      if (action.state !== "proposed") return { status: 409, body: { error: "action_not_open" } };
-      const approved = next.request.options.find((option) => option.id === next.decision.optionId)?.effect === "approve";
-      const decided: ActionProposalJSON = approved
-        ? { ...action, state: "approved", approval: { by: decidedBy, at: new Date(now).toISOString() } }
-        : { ...action, state: "rejected" };
-      kv.put(`request:${requestId}`, next);
-      kv.put(`action:${requestId}`, decided);
-      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:decision:${requestId}` }]);
-      return { status: 200, body: { result, record: next, action: decided } };
+      const settled = this.settleSync(kv, doc, action, { requestId, optionId, seenRevision, decidedBy, role },
+        Date.now());
+      if (!settled.asked) return { status: settled.status, body: { error: settled.error } };
+      return { status: 200, body: { result: settled.result, record: settled.record, action: settled.action } };
     }));
   }
 
@@ -1522,6 +1604,7 @@ export class TaskObject extends DurableObject {
       checked.fields,
       new Date().toISOString(),
     );
+    if (isReply(proposal)) return this.storeReply(request, proposal);
     await this.ctx.storage.put(`action:${proposal.id}`, proposal);
     await this.appendEvent(doc, {
       kind: "updated",
@@ -1530,6 +1613,24 @@ export class TaskObject extends DurableObject {
       via: `action:propose:${proposal.id}`,
     });
     return Response.json(proposal);
+  }
+
+  /// Stores a reply with its approval-core request (`replyRequest`), opened in the same storage transaction, so no
+  /// reply ever waits without the request that alone decides it, whichever route proposed it: the pilot's reply flow
+  /// or a session's propose route.
+  private storeReply(request: Request, proposal: ActionProposalJSON): Response {
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+      const reply: ActionProposalJSON = { ...proposal, requestId: proposal.id };
+      const opened = openReply(kv.get<ApprovalRecord>(`request:${reply.id}`), reply);
+      if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };
+      kv.put(`action:${reply.id}`, reply);
+      kv.put(`request:${reply.id}`, opened.next);
+      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:propose:${reply.id}` }]);
+      return { status: 200, body: reply };
+    }));
   }
 
   private async readAction(request: Request, id: string): Promise<Response> {
@@ -1562,8 +1663,12 @@ export class TaskObject extends DurableObject {
     // An action a worker asked for is decided only through its approval-core
     // request (`/requests/:id/decision`), which checks who may decide and that
     // the attempt that asked still runs. This route checks neither, so it
-    // refuses before touching the action, expiry included.
-    if (action.requestId !== undefined) {
+    // refuses before touching the action, expiry included. A reply is decided
+    // through its request here too (`decideReplyByAction`): approval-core lets
+    // any role decide a reply, and a reply is never asked in an attempt, so
+    // nothing approval-core checks depends on what this route does not know.
+    const reply = isReply(action);
+    if (action.requestId !== undefined && !reply) {
       return Response.json({ error: "decide_by_request" }, { status: 409 });
     }
     if (action.state !== "proposed") {
@@ -1586,6 +1691,7 @@ export class TaskObject extends DurableObject {
     // the client body: a self-attested "by" would let any device approve as
     // anyone. The operator path (empty header) keeps the supplied value.
     const approver = request.headers.get("x-tenant") || body.by;
+    if (reply) return this.decideReplyByAction(request, id, body.approve, approver);
     const decided: ActionProposalJSON = body.approve
       ? { ...action, state: "approved", approval: { by: approver, at: new Date().toISOString() } }
       : { ...action, state: "rejected" };
@@ -1597,6 +1703,39 @@ export class TaskObject extends DurableObject {
       via: `action:decision:${id}`,
     });
     return Response.json(decided);
+  }
+
+  /// This route's `{ approve, by }` on a reply, settled through the reply's approval-core request (`settleSync`), so
+  /// this route never moves a reply's action on its own. It carries no role, so it claims no more than it knows: a
+  /// call stamped with the reply's own tenant is the shop deciding, which is its owner; any other caller is at most a
+  /// helper, whom approval-core lets decide a reply and nothing owner-only. The answers stay this route's own.
+  private decideReplyByAction(request: Request, id: string, approve: boolean, approver: string): Response {
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = kv.get<TaskDocJSON>("task");
+      const action = kv.get<ActionProposalJSON>(`action:${id}`);
+      if (!doc || !action || this.foreignAction(action, request)) return { status: 404, body: { error: "not_found" } };
+      const tenant = request.headers.get("x-tenant") ?? "";
+      const role: Role = tenant !== "" && tenant === action.tenant ? "owner" : "helper";
+      const settled = this.settleSync(kv, doc, action, { requestId: id, optionId: approve ? "approve" : "decline",
+        seenRevision: REPLY_REVISION, decidedBy: approver, role }, Date.now());
+      // No request decides the reply any more (its record is gone), or its action moved on without one: nothing this
+      // route may settle.
+      if (!settled.asked) {
+        return settled.status === 404 ? { status: 404, body: { error: "not_found" } }
+          : { status: 409, body: { error: "already_decided" } };
+      }
+      const { result } = settled;
+      if (result.ok) return { status: 200, body: settled.action };
+      if (result.refused === "already_decided") return { status: 409, body: { error: "already_decided" } };
+      if (result.refused === "expired") {
+        // As this route has always marked a proposal it found past its expiry. The request needs no write: its
+        // expiry is the reply's, so approval-core already reads it as expired.
+        kv.put(`action:${id}`, { ...action, state: "expired" } satisfies ActionProposalJSON);
+        return { status: 409, body: { error: "action_expired" } };
+      }
+      return { status: 409, body: { error: result.refused === "superseded" ? result.reason : result.refused } };
+    }));
   }
 
   /// Atomically moves an approved proposal to dispatching and hands the

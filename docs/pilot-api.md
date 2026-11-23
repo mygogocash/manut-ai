@@ -35,6 +35,16 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - Approving an external write still needs the shop's consent (`cloudWork`), recorded from the owner through
   the link (`/consent` below), never by an operator.
 - A decision settles once. The task object already refuses a second decision; the link routes keep that.
+- A reply is decided through `packages/approval-core`, as a worker's request and a deletion's confirmation are. Each
+  proposed reply is stored with one approval-core request of kind `reply`, opened in the same task object storage
+  transaction, which names the exact reply: its action id, the operation, the bot it is sent from, the one customer it
+  goes to (`recipient`), the draft (`text`) and the hash the send is checked against. The owner's link decides that
+  request as the owner (role `owner`, `decidedBy: "owner-link"`), at its one revision (a reply is never revised; a
+  changed reply is a new one with a new link), and only before its expiry, which is the reply's and the link's. The
+  request and the reply's action change in one transaction, so of any number of decisions exactly one settles, and no
+  route moves a reply's action without its request: the task object's older decision route decides a reply through
+  its request too. A reply stored before replies had requests is read as the request it would have opened and stores
+  it with its first decision. None of the answers below changed.
 - Customer message text is stored for the pilot (the operator must read it to draft a reply) and falls under
   the backend's existing retention and tenant export/delete.
 
@@ -406,7 +416,8 @@ What is written, and by whom:
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
-section 3); a pilot shop has none until a worker runs for it.
+section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
+entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
   and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
@@ -464,6 +475,8 @@ A reply is one action proposal on the shop's task with `operationType: "line.mes
   `targetResourceId`: the bot user id (the connection's only granted resource).
 - `recipients`: `[lineUserId]` of the customer who wrote the message being answered.
 - `payload`: `{ "text": string }`, 1 to 5,000 characters.
+
+Proposing it opens its approval-core request ("Security rules", above), whichever route proposes it.
 
 The broker pushes it with the LINE Messaging API, sending the action id as the retry key so a retry can never
 send twice, and settles `confirmed`, `failed` or `unknown` as it does for every provider.
