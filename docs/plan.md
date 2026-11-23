@@ -34,6 +34,35 @@ Week 2, brought forward:
 - [x] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta
 - [ ] Dry run with two test shops: dev is deployed at https://dev.manut.xyz; waits for a test LINE Official Account
 
+## Roadmap phases and coverage
+
+The roadmap (`~/Developer/gospark-main/manut-ai-artifacts/pages/roadmap.html`, as of 22 November 2026) has
+seven phases. Each ends at a gate that real results decide: paying shops, a full day on the desktop app, and
+so on. Only the owner can pass a gate. Covering a phase here means building and testing its engineering
+deliverables, and saying what its gate still needs. The owner approves anything that cannot be undone, every
+phase goes through the one approval object and audit log, and cost per shop is measured from Phase 2 on.
+
+Status: **built** (tested and merged), **partial**, **not yet**, or **owner** (needs an account, money or a
+decision only the owner can give).
+
+| Phase | Deliverable | Status |
+| --- | --- | --- |
+| 0 Spikes | Drive the DeepSeek Harness; pause and resume approvals with LangGraph.js; draft the worker adapter contract | not yet (the event contract exists in `packages/agent-events`) |
+| 1 Pilot | Buddy on LINE run by operators; simple web approval view; tenant and owner records; simplest approval object | built |
+| 1 Pilot | Approval cards and a morning brief sent to owners on LINE | not yet; sending to real owners needs the owner's go and Manut's own LINE Official Account |
+| 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | not yet |
+| 1 Pilot | Audit log an operator can read | partial (task history and deletion records) |
+| 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` used by deletion only) |
+| 2 Control plane | The model gateway with spending caps, and cost per shop | not yet |
+| 2 Control plane | Memory; the job queue; the audit log | partial (tasks and schedules lifted) |
+| 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | not yet (can be a test) |
+| 3 Desktop MVP | Mission Control and the session view | partial (Home, side menu and pages; sessions from the fork) |
+| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | not yet |
+| 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet (models cost money: the owner) |
+| 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the rest need the owner's applications, `docs/connectors.md`) |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, PromptPay payloads, the console) |
+| 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions) |
+
 ## Queue for cloud routines
 
 Take the first task below that has no `cloud/<task-id>` branch on the remote yet. One task per run. Every task
