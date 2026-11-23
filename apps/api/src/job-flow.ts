@@ -6,7 +6,8 @@
 ///   claim), the goal (the task's objective), what is left of the shop's model cap, and a deadline.
 /// - `workerPort` is everything the worker may do, bound to that one attempt. It reports agent events into the task's
 ///   own event log; calls a model only through the gateway, metered against the shop's cap; stops before an external
-///   write to ask for the exact action; reads how its request settled; and finishes. The port holds the environment and
+///   write to ask for the exact action; reads how its request settled; asks for a one-time grant for an outpost to
+///   type a site sign-in, or reports one broken (sign-in-vault.ts); and finishes. The port holds the environment and
 ///   the worker holds only the port, so a worker never holds a credential: the port has no method that returns one.
 /// - `decideRequest` is a person's decision on a worker's request, through approval-core in the task object, and on
 ///   approval the broker's one dispatch with the vault's credentials (`dispatchApproved`).

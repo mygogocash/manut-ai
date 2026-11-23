@@ -175,7 +175,7 @@ function sameDigest(a: string, b: string): boolean {
 }
 
 /// Online while its last beat is under 90 seconds old; asleep otherwise, and before its first beat.
-export function outpostStatus(lastHeartbeatAt: string | null, nowMs: number): "online" | "asleep" {
+function outpostStatus(lastHeartbeatAt: string | null, nowMs: number): "online" | "asleep" {
   if (lastHeartbeatAt === null) return "asleep";
   const at = Date.parse(lastHeartbeatAt);
   return Number.isFinite(at) && nowMs - at < ONLINE_WINDOW_MS ? "online" : "asleep";
@@ -253,7 +253,7 @@ function membersOf(value: unknown): string[] | null {
   return new Set(value).size === value.length ? [...value] : null;
 }
 
-export function viewOf(record: SignInRecord): SignInView {
+function viewOf(record: SignInRecord): SignInView {
   return {
     id: record.id,
     site: record.site,
