@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayOffset, formatBaht, formatClock, formatStamp, langOf, parseBahtToSatang } from "../src/format";
+import { dayOffset, formatBaht, formatClock, formatIsoDate, formatStamp, langOf, parseBahtToSatang } from "../src/format";
 
 describe("money and time", () => {
   it("writes baht with the sign first and satang only when there are some", () => {
@@ -29,6 +29,13 @@ describe("money and time", () => {
     expect(dayOffset("2026-11-23T17:00:00Z", now)).toBe(1);
     expect(formatStamp("2026-11-23T02:12:00Z", now)).toBe("09:12");
     expect(formatStamp("2026-11-24T03:00:00Z", now)).toBe("24 November 10:00");
+  });
+
+  it("writes the shop's calendar day as an ISO 8601 date", () => {
+    expect(formatIsoDate("2026-11-23T03:00:00Z")).toBe("2026-11-23");
+    expect(formatIsoDate("2026-11-23T16:59:00Z")).toBe("2026-11-23");
+    expect(formatIsoDate("2026-11-23T17:00:00Z")).toBe("2026-11-24");
+    expect(formatIsoDate("2026-01-04T20:00:00Z")).toBe("2026-01-05");
   });
 
   it("marks Thai text so it is read as Thai", () => {

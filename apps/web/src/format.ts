@@ -58,6 +58,14 @@ export function formatDate(iso: string, locale = "en-GB"): string {
   return format.format(new Date(iso));
 }
 
+/// 2026-11-24: the shop's calendar day as an ISO 8601 date, for file names. Built from the parts, so it
+/// never depends on how a locale happens to order or punctuate a date.
+export function formatIsoDate(iso: string): string {
+  const parts = dayKeyFormat.formatToParts(new Date(iso));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 /// Whole days from `now` to `iso` on the shop's calendar: 0 today, 1 tomorrow, -1 yesterday.
 export function dayOffset(iso: string, now: number): number {
   const key = (ms: number) => Date.parse(`${dayKeyFormat.format(new Date(ms))}T00:00:00Z`);
