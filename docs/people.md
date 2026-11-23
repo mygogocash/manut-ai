@@ -129,10 +129,10 @@ wherever the shop's approvals are listed and in the operator's people list. A re
 ## The audit log
 
 Every change writes one entry, metadata only: the actor (the operator's Access identity, or the helper's id), a fixed
-action (`invite.created`, `invite.revoked`, `helper.joined`, `helper.session_opened`, `helper.removed`, `away.set`,
-`away.cleared`, `request.passed_on`) and ids (`inviteId`, `helperId`, `requestId`, `taskId`). Never a name, a note or
-an identity's value. A decision from a session is the job flow's `approval.decided` entry, naming the owner or the
-helper.
+action (`invite.created`, `invite.revoked`, `helper.joined`, `helper.session_opened`, `helper.session_ended` when a
+device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_on`) and ids (`inviteId`, `helperId`,
+`requestId`, `taskId`). Never a name, a note or an identity's value. A decision from a session is the job flow's
+`approval.decided` entry, naming the owner or the helper.
 
 ## Not built yet
 

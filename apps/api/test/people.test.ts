@@ -1,5 +1,6 @@
 import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256Hex } from "../src/auth";
 import worker from "../src/index";
 import type { PeopleRecord } from "../src/people-store";
 import { mintApprovalToken, mintDeletionToken, mintInviteToken } from "../src/approval-link";
@@ -430,6 +431,24 @@ describe("the shop's record", () => {
         body: JSON.stringify({ tenant: shop.tenant, tokenHash }) }));
       expect(await checked.json()).toEqual({ ok: false, error: "unauthorized" });
     }
+  });
+
+  it("ends a session only by its own hash, never by a name every object inherits, and only at the Worker's asking", async () => {
+    const shop = await setupShop();
+    const helper = await joinHelper(shop, "Mint");
+    const end = (path: string, tokenHash: string, headers: Record<string, string> = { "x-people": "1" }) =>
+      tenantStub(bindings, shop.tenant).fetch(new Request(`https://tenant${path}`, { method: "POST",
+        headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ tenant: shop.tenant, tokenHash }) }));
+    for (const path of ["/people/end-helper-session", "/people/end-owner-session"]) {
+      for (const tokenHash of ["__proto__", "constructor", "toString", "hasOwnProperty", "0".repeat(64)]) {
+        expect(await (await end(path, tokenHash)).json()).toEqual({ ok: false, error: "unauthorized" });
+      }
+      // Without the Worker's header nothing is ended, not even a session the record holds.
+      const held = await sha256Hex(helper.headers.authorization.slice("Bearer ".length));
+      expect((await end(path, held, {})).status).toBe(403);
+    }
+    // The helper's own session was never ended by any of it.
+    expect((await asSession(helper.headers, "GET", "/v1/approvals?state=open")).status).toBe(200);
   });
 
   it("keeps an invited email without outer spaces, and still matches it without case", async () => {

@@ -61,7 +61,9 @@ one shop:
 The shop keeps only the token's SHA-256. A shop session lasts 30 days with no refresh, as a helper session does; the
 app opens the shop again with the signed-in session after that. Unlinking the owner's account ends every owner session
 of that shop in the same write. Removing a helper ends that helper's sessions of that shop. Nothing done to one shop
-ends a session of another.
+ends a session of another. When the person signs out of a device, the app ends its own session of each shop with
+`POST /v1/shops/session/end`: exactly that session, in one write, and no other of theirs. The route takes the shop
+session itself as its bearer, so the shop and the role come from the session and nothing else.
 
 With a shop session, every read and every decision works as it did, scoped to the session's shop: `GET /v1/approvals`
 lists that shop's requests, the decision route finds requests only in that shop's index, and approval-core decides
@@ -112,8 +114,9 @@ failed write left out. The operator sees the link on the shop's People answer (`
   of the card's shop, never the shop the switcher shows.
 - **Each shop's data kept apart offline.** The offline cache keys every record by the shop's id, and each shop
   session's token is stored under its shop. Switching shops never shows one shop's cached data under another's name.
-  Signing out clears every shop's cache and session. A shop that leaves the list (unlinked, removed, deleted) has its
-  cache and session dropped at the next refresh, and an answer of 401 `unlinked` or `removed` drops them at once.
+  Signing out ends every shop session with `POST /v1/shops/session/end` and clears every shop's cache and session. A
+  shop that leaves the list (unlinked, removed, deleted) has its cache and session dropped at the next refresh, and an
+  answer of 401 `unlinked` or `removed` drops them at once.
 
 ## The slices that follow
 
@@ -126,8 +129,9 @@ failed write left out. The operator sees the link on the shop's People answer (`
 4. **Owner sessions on more routes**, each its own decision: the shop's consent, export and memory. Today an owner
    session reaches the approval routes and the team's routines. Whether the owner manages helpers from their own
    session belongs here too (`docs/people.md`, "Not built yet").
-5. **Ending shop sessions from the app:** a route for the app to end its own shop sessions when the person signs out.
-   Today they run to their 30 days unless the owner's account is unlinked or the helper removed.
+5. **Done here (API):** ending a shop session from the app, `POST /v1/shops/session/end` (24 Nov 2026). It ends the one
+   session it is called with, an owner's or a helper's, and the desktop calls it on sign-out once its switcher is built. A
+   sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
 6. **Co-owners:** more than one linked owner account per shop, if the owner wants it.
 7. **LINE Login as an identity**, parked with the rest of LINE.
 

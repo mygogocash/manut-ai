@@ -5,6 +5,8 @@
 ///   their role at each (`GET /v1/shops`); a shop session for one of them (`POST /v1/shops/session`), which is how they
 ///   act for a shop; and a one-use code for the operator to link their account to a shop as its owner
 ///   (`POST /v1/shops/owner-code`).
+/// - The one route a shop session itself calls: the app ends its own shop session when the person signs out
+///   (`POST /v1/shops/session/end`).
 /// - The operator's routes, under the admin gate as exact `ADMIN_METHODS` entries: link the account a code names to a
 ///   shop as its owner, and unlink it. The shop's audit log records both under the operator's Access identity.
 ///
@@ -20,6 +22,7 @@ import { readBodyBytes, readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import {
   bearer,
+  callerOf,
   hasExactly,
   openHelperSession,
   openOwnerSession,
@@ -76,6 +79,8 @@ export async function shopsRoute(request: Request, url: URL, env: PeopleEnv, ctx
     case "/v1/shops/session":
     case "/v1/shops/owner-code":
       return personRoute(request, url.pathname, env);
+    case "/v1/shops/session/end":
+      return endSessionRoute(request, env);
     case "/v1/admin/shops/owner":
     case "/v1/admin/shops/owner/unlink":
       return operatorRoute(request, url, env, ctx);
@@ -206,6 +211,47 @@ async function exactBody(request: Request, keys: readonly string[]): Promise<Rec
   const body = parsed.value;
   if (!isRecord(body) || !hasExactly(body, keys)) return json({ error: "invalid_request" }, 400);
   return body;
+}
+
+// ---------------------------------------------------------------------------
+// A shop session's own route
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/shops/session/end` with exactly `{}` and the shop session itself as the bearer: the app ends its own session
+/// of one shop when the person signs out of this device. Exactly that session ends, an owner's (`mos1.`) or a helper's
+/// (`mhs1.`), in one write to the shop's people record with its audit entry; the person's other devices, their other
+/// shops and their own sign-in are untouched, and the same token answers 401 everywhere from then on. It answers
+/// `{ ended: { shop, role } }`.
+///
+/// Who is asking is checked first, with the same check every shop-session route makes (`callerOf`), so a token is ended here
+/// exactly while it still works there, and one that does not answers as it does there: 401 `unauthorized`, `removed` or
+/// `unlinked`. Then the credential's kind, then the method, then the body.
+async function endSessionRoute(request: Request, env: PeopleEnv): Promise<Response> {
+  const caller = await callerOf(request, env);
+  if (caller instanceof Response) return caller;
+  // The shop's own session and a person's sign-in are the lifted auth's sessions, not shop sessions. They are real
+  // credentials, so this is 403 and not 401: an app that sent the wrong one must not read its sign-in as ended. Signing out
+  // of one of them is the lifted auth's own route, and nothing here ends it.
+  if (caller.role === "owner" && caller.accountId === undefined) return json({ error: "not_a_shop_session" }, 403);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  // The session names the shop, the role and the account. Nothing in the body may, so a body with any field is refused.
+  const body = await exactBody(request, []);
+  if (body instanceof Response) return body;
+  try {
+    const response = await peopleCall(env, caller.shop,
+      caller.role === "owner" ? "/people/end-owner-session" : "/people/end-helper-session",
+      { tokenHash: await sha256Hex(bearer(request)) });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return json({ error: "people_unavailable" }, 503);
+    }
+    // The record checks the session again where it ends it, so another device sending the same token a moment before
+    // wins and this one hears 401: the session is gone either way, which is what was asked.
+    const { ok } = (await response.json()) as { ok: boolean };
+    return ok ? json({ ended: { shop: caller.shop, role: caller.role } }) : json({ error: "unauthorized" }, 401);
+  } catch {
+    return json({ error: "people_unavailable" }, 503);
+  }
 }
 
 // ---------------------------------------------------------------------------
