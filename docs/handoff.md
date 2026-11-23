@@ -71,28 +71,20 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four helpers are running (23 Nov, evening), each on its own branch from `pilot/week-1`; review each, merge it
-   after the full root gate, add its decisions to `docs/decisions.md` and mark the tracker:
-   - the desktop's Customize page, memory and routines from the canvas's Brain board
-     (`feat/desktop-customize-brain-2`, Sonnet);
-   - the Playwright revival (`test/desktop-e2e-revival-2`, Haiku), whose new draft pull request replaces #5:
-     merge it when CI's Playwright job passes;
-   - the owner's helpers and deciding approvals from a session by role (`feat/people-helpers`, Opus);
-   - browser control: vault sign-ins the AI never sees, and outposts (`feat/browser-control-vault`, Opus).
-   Three earlier runs stopped at a usage limit and were replaced by these; if one of the old branches
-   (`feat/desktop-customize-brain`, `test/fix-desktop-e2e-navigation`, `feat/shop-helpers-api`) moves again, an
-   old run came back on its own: stop it and keep the new branch.
-2. The night build (Fronk's routine) takes `notify-rules` tonight; review its draft pull request and merge it into
-   `pilot/week-1`, never into `main`. Its queue is then empty: add pure packages to `docs/plan.md` as the phases
-   need them.
-3. Next, from the tracker:
-   - Phase 5: applying a shop template when a shop is created (`@manut/shop-templates`), the desktop's routines
-     running on the schedule object, and the outpost's browser in the desktop shell after the vault slice.
-   - Phase 6: several shops in one view (design it on the helpers' identity model first).
-   - Phase 3: the desktop answering approvals through `/v1/approvals` and the session decide route, once real
-     sign-in exists.
-   - Phase 4: a console view of the workers' drafts and handovers; a `handoff` kind in `@manut/agent-events`.
-   - Desktop: a home for the old member-row actions (new thread, pin, restart).
+1. Three December helpers are running (24 Nov, restarted on their own after the 1am usage-limit reset), each on
+   its own branch from `pilot/week-1`; review each, merge it after the full root gate, add its decisions to
+   `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   - item 5, the desktop answering approvals (`feat/desktop-answers-approvals`, Opus);
+   - item 7, several shops in one view, the design and the API side (`feat/several-shops`, Opus);
+   - item 9, desktop leftovers and three app bugs the Playwright revival found (`feat/desktop-leftovers`, Sonnet).
+   Items 2 and 3 (routines running, applying a shop template) and the Playwright revival (#15) are merged.
+2. The night build (Fronk's routine) built `notify-rules` (draft pull request #16 into `pilot/week-1`). Its queue
+   is then empty: add pure packages to `docs/plan.md` as the phases need them.
+3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
+   - item 6, macOS notifications on `@manut/notify-rules` (Sonnet);
+   - item 8, the outpost's browser on this Mac, the first step of computer control (Opus);
+   - item 11, the Playwright follow-up: the 31 failing specs and sharding the CI job (Haiku);
+   - the desktop's switcher for several shops, after items 5 and 7.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
@@ -133,6 +125,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   unencrypted in an owner-only file for up to 7 days; say if that is acceptable, or if 7 days is wrong.
 - **Workers:** whether drafts should age out after 7 days like the messages they quote; whether the owner can end
   practice mode early and whether 3 days is right.
+- **Routines' switches:** `officeRoutines` and `officeCloud` are off in every environment, so each routine run is
+  written down as `skipped` (`routines_off`) until someone turns them on with `PUT /v1/admin/flags`. Real drafts
+  also need the model key; stock routines need a stock feed; "Send the books" only drafts until FlowAccount is
+  connected. The console's new words (New shop, First week) need Thai copy.
 - **Night replies:** the canvas's routine "Every night after 21:00: Answer order-status questions" reads as Nam
   replying alone; the rules (and CLAUDE.md) make every reply to a customer ask first, so the desktop shows
   "Asks first" on it. Say if night replies about order status may go without asking.
