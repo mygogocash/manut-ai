@@ -53,6 +53,7 @@ import { parseCommands, type AgentCommand } from "../chat/parts/commands";
 import { t as tr } from "../i18n";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
+import { watchOpenFolder } from "./revealOpen";
 import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
 
@@ -2567,6 +2568,8 @@ export function getSessions(): SessionsStore {
     // e2e (mock host only): drive a terminal's foreground CLI the way the shell's event will
     if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) (window as unknown as { __manutSessions?: SessionsStore }).__manutSessions = s;
     setSessionKeyLookup((id) => s.chatKey(id));
+    // the folder of the session in view opens in the Code page's list, wherever the person is (revealOpen.ts)
+    watchOpenFolder(getStore(), s);
     s.setNotify((ev) => notifySessionEvent(ev, getStore().getState()));
     s.setNotifyState((id, n) => notifySessionNote(id, n, getStore().getState()));
   }
