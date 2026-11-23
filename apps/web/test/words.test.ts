@@ -69,5 +69,16 @@ describe("the words for deleting a shop", () => {
     expect(deleteRefusalText(new ApiError(400, "invalid_request"))).toBe(
       "Nothing was deleted. The API did not accept this (invalid_request).",
     );
+    expect(deleteRefusalText(new ApiError(503, "audit_unavailable"))).toBe(
+      "Nothing was deleted. The API could not record the deletion, so it did not start. It is safe to try again.",
+    );
+  });
+
+  it("says why a run of an unfinished deletion did not start", () => {
+    expect(
+      unfinishedText({ name: "Baan Mali", partial: true, tries: 2, error: new ApiError(503, "audit_unavailable") }),
+    ).toBe(
+      "Deleting Baan Mali still did not finish after 2 tries. Part of its data is deleted and the rest is still stored. The API could not record the deletion, so it did not start. It is safe to try again. Run it again to finish the job.",
+    );
   });
 });

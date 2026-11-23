@@ -269,6 +269,41 @@ describe("deleting a shop", () => {
     expect(document.activeElement).toBe(within(panel).getByRole("button", { name: "Delete this shop" }));
   });
 
+  it("says nothing was deleted when the API could not record the deletion, and keeps the form for another try", async () => {
+    const api = fakeApi();
+    const remove = vi.spyOn(api, "deleteShop").mockRejectedValueOnce(new ApiError(503, "audit_unavailable"));
+    const panel = await openShopData(api);
+    const form = openDeletion(panel);
+
+    typeNameAndDelete(form);
+
+    expect((await within(form).findByRole("alert")).textContent).toBe(
+      "Nothing was deleted. The API could not record the deletion, so it did not start. It is safe to try again.",
+    );
+    // A refusal is not an unfinished deletion: nothing is shown above the tabs, and the shop stays.
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Baan Mali" })).toBeTruthy();
+
+    fireEvent.click(within(form).getByRole("button", { name: "Delete for good" }));
+
+    expect((await screen.findByRole("status")).textContent).toMatch(DELETED_BAAN_MALI);
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
+  it("says the shop is already deleted when the API answers tenant_deleted", async () => {
+    const api = fakeApi();
+    vi.spyOn(api, "deleteShop").mockRejectedValueOnce(new ApiError(404, "tenant_deleted"));
+    const panel = await openShopData(api);
+
+    typeNameAndDelete(openDeletion(panel));
+
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "Baan Mali is already deleted. Nothing of it was left to delete.",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Baan Mali" })).toBeNull();
+  });
+
   it("shows any other refusal in the form, where nothing was deleted", async () => {
     const api = fakeApi();
     vi.spyOn(api, "deleteShop").mockRejectedValueOnce(new ApiError(403, "forbidden"));

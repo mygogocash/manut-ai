@@ -23,15 +23,17 @@ export type ShopDeletion = {
   dismissFinished(): void;
 };
 
-/// The 404 codes that mean the shop no longer exists: `shop_not_found` from apps/api, and `unknown_tenant`
-/// from the practice-mode fake.
-const GONE_CODES = new Set(["shop_not_found", "unknown_tenant"]);
+/// The 404 codes that mean the shop has been deleted: `tenant_deleted` from apps/api, which answers it on every
+/// operator route once a deletion has run, and `unknown_tenant` from the practice-mode fake. The API's
+/// `shop_not_found` is not one of them: it means the tenant was never a pilot shop.
+const GONE_CODES = new Set(["tenant_deleted", "unknown_tenant"]);
 
 /// What a deletion that did not answer with its result means for the shop's data.
-/// - `gone`: the shop no longer exists, which is what was asked for.
+/// - `gone`: the shop has been deleted, which is what was asked for.
 /// - `partial`: the API stopped part way (wipe_incomplete). Some data is deleted and some is still stored.
-/// - `refused`: nothing was deleted, because the API turned it down with a 4xx, or because the client never
-///   sent it for want of an operator key.
+/// - `refused`: nothing was deleted. The API turned it down with a 4xx; or it could not record the deletion
+///   (audit_unavailable), which it writes before the wipe and without which it does not start; or the client
+///   never sent it for want of an operator key.
 /// - `unclear`: anything else. With no answer, a server error, or a success whose body could not be read,
 ///   nobody can say how much was deleted.
 export type DeleteErrorKind = "gone" | "partial" | "refused" | "unclear";
@@ -40,8 +42,17 @@ export function classifyDeleteError(error: unknown): DeleteErrorKind {
   if (!(error instanceof ApiError)) return "unclear";
   if (error.status === 404 && GONE_CODES.has(error.code)) return "gone";
   if (isWipeIncomplete(error)) return "partial";
-  if ((error.status >= 400 && error.status < 500) || error.code === "operator_key_missing") return "refused";
+  if (error.status >= 400 && error.status < 500) return "refused";
+  if (error.code === "audit_unavailable" || error.code === "operator_key_missing") return "refused";
   return "unclear";
+}
+
+/// Whether the typed name confirms deleting the shop: the same letters, capitals and spaces, so a name that is
+/// nearly right, the sign of a different shop, never confirms. How an accented letter was composed is the one
+/// difference ignored, because no one can see it and the API ignores it too. Nothing is trimmed: the operator
+/// types every space shown.
+export function confirmsShopName(typed: string, name: string): boolean {
+  return typed.normalize("NFC") === name.normalize("NFC");
 }
 
 export function useShopDeletion(

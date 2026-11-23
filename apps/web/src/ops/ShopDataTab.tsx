@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi, type Shop } from "../api";
 import { downloadText, exportFileName } from "./download";
+import { confirmsShopName } from "./useShopDeletion";
 import { deleteAfterText, deleteRefusalText, deleteWhatText, errorText, shopDataWords as W } from "./words";
 
 /// The selected shop's data, exported or deleted at the shop's request. Laid out like "Privacy and data" on
@@ -128,9 +129,8 @@ function DeleteShopForm({
 }) {
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<unknown>(null);
-  // Exactly the shop's name: no trimming and no case folding. A name that is nearly right is the sign of a
-  // different shop, and the API compares the same way.
-  const matches = typed === shop.name;
+  // What was typed is sent as it is: the API decides, and this only keeps the button shut until it can agree.
+  const matches = confirmsShopName(typed, shop.name);
 
   async function submit(event: FormEvent) {
     event.preventDefault();

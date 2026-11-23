@@ -124,14 +124,14 @@ export function unfinishedText(deletion: { name: string; partial: boolean; tries
   if (partial) {
     const head =
       tries > 1 ? `Deleting ${name} still did not finish after ${tries} tries.` : `Deleting ${name} did not finish.`;
-    const latest = isWipeIncomplete(error) ? "" : ` ${errorText(error)}`;
+    const latest = isWipeIncomplete(error) ? "" : ` ${deleteAnswerText(error)}`;
     return `${head} Part of its data is deleted and the rest is still stored.${latest} Run it again to finish the job.`;
   }
   const head =
     tries > 1
       ? `After ${tries} tries, it is still not clear whether ${name} was deleted.`
       : `It is not clear whether ${name} was deleted.`;
-  return `${head} ${errorText(error)} Running it again is safe, and finishes the job if anything is left.`;
+  return `${head} ${deleteAnswerText(error)} Running it again is safe, and finishes the job if anything is left.`;
 }
 
 /// An answer that deleted nothing. A name mismatch can only mean the server's name differs from the one on
@@ -140,7 +140,16 @@ export function deleteRefusalText(error: unknown): string {
   if (error instanceof ApiError && error.code === "name_mismatch") {
     return "Nothing was deleted. The name did not match the shop's name exactly. Check the name and type it again.";
   }
-  return `Nothing was deleted. ${errorText(error)}`;
+  return `Nothing was deleted. ${deleteAnswerText(error)}`;
+}
+
+/// The console's usual words for an answer, with the one only a deletion gets: the API records every deletion
+/// before it starts the wipe, and starts none it cannot record.
+function deleteAnswerText(error: unknown): string {
+  if (error instanceof ApiError && error.code === "audit_unavailable") {
+    return "The API could not record the deletion, so it did not start. It is safe to try again.";
+  }
+  return errorText(error);
 }
 
 export function isWipeIncomplete(error: unknown): boolean {
