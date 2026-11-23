@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type AuditEntry, type DeletedShop, type PilotGate, type Shop } from "../src/api";
+import {
+  ApiError,
+  type AuditEntry,
+  type DeletedShop,
+  type ModelCap,
+  type ModelCounts,
+  type ModelUsage,
+  type PilotGate,
+  type Shop,
+} from "../src/api";
 import {
   auditActorText,
   auditOutcomeTag,
@@ -7,10 +16,19 @@ import {
   auditSentence,
   auditSubjectText,
   auditWords,
+  callOutcomeTag,
   deletedText,
   deleteRefusalText,
   deleteWhatText,
+  errorText,
   gateWords,
+  modelErrorText,
+  modelSpendWords,
+  moneyText,
+  monthName,
+  monthsBack,
+  percentUsed,
+  spendLevel,
   subscriptionErrorText,
   unfinishedText,
 } from "../src/ops/words";
@@ -196,5 +214,167 @@ describe("the audit log's words", () => {
       .toBe("1 entry could not be written, so this log is not complete. The last was at 10:05 (dispatch.settled).");
     expect(auditWords.missed({ count: 3, lastAt: "2026-11-23T03:05:00.000Z", lastAction: "reply.decided" }, NEXT_DAY))
       .toBe("3 entries could not be written, so this log is not complete. The last was at 23 November 10:05 (reply.decided).");
+  });
+});
+
+describe("the model spend page's words", () => {
+  const NONE: ModelCounts = { ok: 0, failed: 0, unreadable: 0, abandoned: 0, refused: 0 };
+  /// Baan Mali's month as the sample world has it, ฿186.59 of its ฿300 cap spent and held, with any figure replaced.
+  function usage(overrides: Partial<ModelUsage> = {}): ModelUsage {
+    return {
+      tenant: "t1", month: "2026-11", capSatang: 30000, capSource: "override",
+      capOverride: { capSatang: 30000, setAt: "2026-11-18T03:00:00.000Z", setBy: "ops@manut.test" },
+      spentSatang: 18600, spentMillisatang: 18_599_456, heldSatang: 59, heldMillisatang: 58_800, remainingSatang: 11341,
+      counts: { ok: 49, failed: 1, unreadable: 0, abandoned: 0, refused: 0 }, tokens: { input: 935_200, output: 89_780 },
+      calls: [], holds: [], ...overrides,
+    };
+  }
+  const empty = (overrides: Partial<ModelUsage> = {}) => usage({ spentSatang: 0, spentMillisatang: 0, heldSatang: 0,
+    heldMillisatang: 0, remainingSatang: 30000, counts: NONE, tokens: { input: 0, output: 0 }, ...overrides });
+
+  it("writes money with formatMoney: whole baht plain, satang to two places, thousands grouped", () => {
+    expect(moneyText(18600)).toBe("฿186");
+    expect(moneyText(11341)).toBe("฿113.41");
+    expect(moneyText(59)).toBe("฿0.59");
+    expect(moneyText(5)).toBe("฿0.05");
+    expect(moneyText(0)).toBe("฿0");
+    expect(moneyText(129000)).toBe("฿1,290");
+    expect(moneyText(1_000_000_000)).toBe("฿10,000,000");
+  });
+
+  it("shows a marker, never a wrong amount or a crash, for a figure the API should never send", () => {
+    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, undefined, "18600"]) {
+      expect(moneyText(bad as number)).toBe("unknown");
+    }
+  });
+
+  it("puts a month at one of four levels, warning past half of the cap and at it", () => {
+    expect(spendLevel(usage())).toBe("half");
+    // Exactly half of the cap is not over half; one satang more is.
+    expect(spendLevel(usage({ spentSatang: 14000, heldSatang: 1000, remainingSatang: 15000 }))).toBe("ok");
+    expect(spendLevel(usage({ spentSatang: 14000, heldSatang: 1001, remainingSatang: 14999 }))).toBe("half");
+    expect(spendLevel(usage({ spentSatang: 29000, heldSatang: 0, remainingSatang: 1000 }))).toBe("half");
+    // Nothing left is the cap, however it came about: spend, calls in progress, a cap lowered under the spend, or a
+    // zero cap that stops every call before anything is spent.
+    expect(spendLevel(usage({ spentSatang: 30000, heldSatang: 0, remainingSatang: 0 }))).toBe("cap");
+    expect(spendLevel(usage({ spentSatang: 100, heldSatang: 29900, remainingSatang: 0 }))).toBe("cap");
+    expect(spendLevel(usage({ capSatang: 10000, remainingSatang: 0 }))).toBe("cap");
+    expect(spendLevel(empty({ capSatang: 0, remainingSatang: 0 }))).toBe("cap");
+    // A month with nothing spent, held, called or refused is empty; one failed call, which costs nothing, is not.
+    expect(spendLevel(empty())).toBe("empty");
+    expect(spendLevel(empty({ counts: { ...NONE, failed: 1 } }))).toBe("ok");
+    expect(spendLevel(empty({ heldSatang: 59, heldMillisatang: 58_800, remainingSatang: 29941 }))).toBe("ok");
+  });
+
+  it("reads how much of the cap spend and holds take, in whole percent rounded down and never past 100", () => {
+    expect(percentUsed(usage())).toBe(62);
+    expect(percentUsed(empty())).toBe(0);
+    expect(percentUsed(usage({ spentSatang: 29999, heldSatang: 0 }))).toBe(99);
+    expect(percentUsed(usage({ spentSatang: 30000, heldSatang: 0 }))).toBe(100);
+    expect(percentUsed(usage({ capSatang: 10000 }))).toBe(100);
+    expect(percentUsed(empty({ capSatang: 0 }))).toBe(100);
+  });
+
+  it("names a month, and counts back through the months before it across a year's end", () => {
+    expect(monthName("2026-11")).toBe("November 2026");
+    expect(monthName("2027-01")).toBe("January 2027");
+    expect(monthName("bogus")).toBe("bogus");
+    expect(monthsBack("2026-11", 3)).toEqual(["2026-10", "2026-09", "2026-08"]);
+    expect(monthsBack("2026-02", 3)).toEqual(["2026-01", "2025-12", "2025-11"]);
+    expect(monthsBack("2026-11", 11).at(-1)).toBe("2025-12");
+    expect(monthsBack("2026-11", 0)).toEqual([]);
+    expect(monthsBack("bogus", 3)).toEqual([]);
+  });
+
+  it("says where a month stands, and what the cap means for the next call this month or in another", () => {
+    expect(modelSpendWords.level.empty).toEqual({ label: "No spend yet", className: "tag" });
+    expect(modelSpendWords.level.ok).toEqual({ label: "Under half of the cap", className: "tag ok" });
+    expect(modelSpendWords.level.half).toEqual({ label: "Over half of the cap", className: "tag warn" });
+    expect(modelSpendWords.level.cap).toEqual({ label: "At the cap", className: "tag err" });
+    expect(modelSpendWords.usedText(62)).toBe("62% of the cap is used");
+    expect(modelSpendWords.emptyText("2026-11", true)).toBe("No model calls yet this month.");
+    expect(modelSpendWords.emptyText("2026-10", false)).toBe("No model calls in October 2026.");
+    expect(modelSpendWords.atCapText(true, 30000)).toBe("New calls are refused until the cap is raised or the month turns.");
+    expect(modelSpendWords.atCapText(false, 30000)).toBe("That month's spend and holds reached the cap.");
+    expect(modelSpendWords.atCapText(true, 0)).toBe("The cap is ฿0, so every call is refused.");
+  });
+
+  it("says whether the cap is the default or an operator's, and who set it and when", () => {
+    expect(modelSpendWords.capSource(usage(), SAME_DAY)).toBe("Set by ops@manut.test on 18 November at 10:00.");
+    const today = { capSatang: 30000, setAt: "2026-11-23T03:00:00.000Z", setBy: null };
+    expect(modelSpendWords.capSource(usage({ capOverride: today }), SAME_DAY))
+      .toBe("Set by an operator (no Access identity) at 10:00.");
+    expect(modelSpendWords.capSource(usage({ capOverride: { ...today, setAt: "when?" } }), SAME_DAY))
+      .toBe("Set by an operator (no Access identity).");
+    expect(modelSpendWords.capSource(usage({ capSource: "default", capOverride: null, capSatang: 20000 }), SAME_DAY))
+      .toBe("The default. No operator has set one for this shop.");
+  });
+
+  it("counts the calls made and refused, and says what became of the ones that did not finish", () => {
+    expect(modelSpendWords.callsText({ ok: 49, failed: 1, unreadable: 0, abandoned: 0, refused: 0 }))
+      .toBe("50 calls made, 0 refused at the cap.");
+    expect(modelSpendWords.callsText({ ...NONE, ok: 1, refused: 3 })).toBe("1 call made, 3 refused at the cap.");
+    expect(modelSpendWords.callsText({ ...NONE, ok: 1203, failed: 1 })).toBe("1,204 calls made, 0 refused at the cap.");
+    expect(modelSpendWords.callsText(NONE)).toBe("0 calls made, 0 refused at the cap.");
+    expect(modelSpendWords.outcomesText({ ...NONE, ok: 49, refused: 2 })).toBe("");
+    expect(modelSpendWords.outcomesText({ ...NONE, ok: 49, failed: 1 })).toBe("Of these, 1 failed (not charged).");
+    expect(modelSpendWords.outcomesText({ ok: 40, failed: 1, unreadable: 2, abandoned: 1, refused: 0 })).toBe(
+      "Of these, 1 failed (not charged), 2 answered without a usable token count (charged at the worst case) and 1 never finished (charged at the worst case).");
+  });
+
+  it("says how much is held and for how many calls, and how many tokens went in and out", () => {
+    expect(modelSpendWords.heldHelp(0)).toBe("No calls in progress.");
+    expect(modelSpendWords.heldHelp(1)).toBe("1 call in progress, counted at its worst case.");
+    expect(modelSpendWords.heldHelp(3)).toBe("3 calls in progress, counted at their worst case.");
+    expect(modelSpendWords.heldHelp(null)).toBe("Calls in progress, counted at their worst case.");
+    expect(modelSpendWords.spentHelp({ input: 935_200, output: 89_780 })).toBe("935,200 tokens in, 89,780 out.");
+  });
+
+  it("writes a call's tokens, tags how it ended, and says when the list is only the newest of the month's calls", () => {
+    expect(modelSpendWords.tokensText(2800, 560)).toBe("2,800 in, 560 out");
+    expect(modelSpendWords.tokensText(1_234_567, 0)).toBe("1,234,567 in, 0 out");
+    expect(callOutcomeTag("ok")).toEqual({ label: "Done", className: "tag ok" });
+    expect(callOutcomeTag("failed")).toEqual({ label: "Failed, not charged", className: "tag" });
+    expect(callOutcomeTag("unreadable")).toEqual({ label: "Worst case charged", className: "tag warn" });
+    expect(callOutcomeTag("abandoned")).toEqual({ label: "Never finished, worst case charged", className: "tag warn" });
+    // A code this console does not know yet is shown as it is, never dropped.
+    expect(callOutcomeTag("brand_new")).toEqual({ label: "brand_new", className: "tag" });
+    // Refused calls have no record, so only the calls made are counted against the list.
+    expect(modelSpendWords.newestNote(200, { ok: 340, failed: 2, unreadable: 0, abandoned: 0, refused: 5 }))
+      .toBe("Showing the newest 200 of 342 calls.");
+    expect(modelSpendWords.newestNote(50, { ...NONE, ok: 49, failed: 1 })).toBeNull();
+  });
+
+  it("names the setting a not-configured answer points at, and says whether a cap may have been written", () => {
+    expect(modelErrorText(new ApiError(503, "not_configured", undefined, { setting: "MODEL_DEFAULT_CAP_SATANG" }), "read"))
+      .toBe("The model gateway is not set up: the API setting MODEL_DEFAULT_CAP_SATANG is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.");
+    expect(modelErrorText(new ApiError(503, "not_configured"), "write")).toBe(
+      "The model gateway is not set up: one of the API's model settings is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.");
+    expect(modelErrorText(new ApiError(503, "meter_unavailable"), "read"))
+      .toBe("The API could not read this shop's model meter, so no spend is shown. Try again.");
+    expect(modelErrorText(new ApiError(503, "meter_unavailable"), "write"))
+      .toBe("The API could not confirm the cap, so it may not have changed. Check the cap shown, then try again.");
+    // Everything else is the console's usual words.
+    for (const error of [new ApiError(400, "invalid_request"), new ApiError(403, "forbidden"), new ApiError(0, "network"),
+      new Error("odd")]) {
+      expect(modelErrorText(error, "write")).toBe(errorText(error));
+    }
+    expect(modelErrorText(new ApiError(400, "invalid_request"), "write")).toBe("The API did not accept this (invalid_request).");
+  });
+
+  it("confirms a cap from the API's own answer, naming who set it and what clearing did", () => {
+    const set: ModelCap = { tenant: "t1", capSatang: 25050, capSource: "override",
+      capOverride: { capSatang: 25050, setAt: "2026-11-23T03:00:00.000Z", setBy: "ops@manut.test" } };
+    expect(modelSpendWords.capAnswer("Baan Mali", set, SAME_DAY)).toBe(
+      "The cap for Baan Mali is now ฿250.50, set by ops@manut.test at 10:00. It applies from the next call; calls already in progress keep the budget they hold.");
+    expect(modelSpendWords.capAnswer("Baan Mali", { ...set, capOverride: { ...set.capOverride!, setBy: null } }, SAME_DAY))
+      .toContain("set by an operator (no Access identity) at 10:00.");
+    expect(modelSpendWords.capAnswer("Baan Mali", { tenant: "t1", capSatang: 20000, capSource: "default", capOverride: null },
+      SAME_DAY)).toBe("The cap for Baan Mali is now ฿200, the default. The override is cleared.");
+  });
+
+  it("holds the form's refusals, which name the limit from the API's own", () => {
+    expect(modelSpendWords.badCap).toBe("Write the cap in baht, like 300 or 300.50. It must be more than ฿0.");
+    expect(modelSpendWords.tooBigCap).toBe("The cap can be at most ฿10,000,000.");
   });
 });
