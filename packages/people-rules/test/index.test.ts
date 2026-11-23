@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { APPROVAL_KINDS, type ApprovalKind } from "@manut/approval-core";
 import {
-  INVITE_LIFETIME_MS, acceptInvite, addSession, canDecide, clearAway, coverAt, deciders, emptyPeople, invite, passOn,
-  removeHelper, revokeInvite, sameIdentity, setAway, type Identity, type PeopleState,
+  INVITE_LIFETIME_MS, acceptInvite, addSession, canDecide, clearAway, coverAt, deciders, emptyPeople, endSession, invite,
+  passOn, removeHelper, revokeInvite, sameIdentity, setAway, type Identity, type PeopleState,
 } from "../src/index";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -213,6 +213,41 @@ describe("removal", () => {
   });
   it("refuses a session for someone who is not a helper", () => {
     expect(addSession(team(), "nobody", "s")).toEqual({ ok: false, refused: "not_a_helper" });
+  });
+});
+
+describe("signing out of one device", () => {
+  it("takes only that session off the helper's open ones, so a later removal ends just the rest", () => {
+    const two = addSession(team(), "h-pim", "s-pim-2");
+    if (!two.ok) throw new Error("expected ok");
+    const r = endSession(two.state, "h-pim", "s-pim-1");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.helpers.find((h) => h.id === "h-pim")?.sessions).toEqual(["s-pim-2"]);
+    // Another helper's sessions, and everything else in the state, are as they were.
+    expect(r.state.helpers.find((h) => h.id === "h-nam")?.sessions).toEqual(["s-nam-1"]);
+    expect({ ...r.state, helpers: two.state.helpers }).toEqual(two.state);
+    const removed = removeHelper(r.state, "h-pim");
+    expect(removed.ok && removed.endSessions).toEqual(["s-pim-2"]);
+  });
+  it("refuses someone who is not a helper, and a session that helper does not have, and changes nothing", () => {
+    const before = team();
+    expect(endSession(before, "nobody", "s-pim-1")).toEqual({ ok: false, refused: "not_a_helper" });
+    // A session id is the helper's own: another helper's does not end through them.
+    expect(endSession(before, "h-pim", "s-nam-1")).toEqual({ ok: false, refused: "unknown_session" });
+    expect(before).toEqual(team());
+    // Ending the same session twice finds nothing the second time.
+    const once = endSession(before, "h-pim", "s-pim-1");
+    if (!once.ok) throw new Error("expected ok");
+    expect(endSession(once.state, "h-pim", "s-pim-1")).toEqual({ ok: false, refused: "unknown_session" });
+  });
+  it("leaves the helper a helper, with their cover and their notes, when their last session ends", () => {
+    const away = setAway(team(), "h-pim", 10 * DAY, 0);
+    if (!away.ok) throw new Error("expected ok");
+    const r = endSession(away.state, "h-pim", "s-pim-1");
+    expect(r.ok && r.state.helpers.map((h) => h.id)).toEqual(["h-nam", "h-pim"]);
+    expect(r.ok && r.state.away?.helperId).toBe("h-pim");
+    expect(r.ok && r.state.helpers.find((h) => h.id === "h-pim")?.sessions).toEqual([]);
   });
 });
 

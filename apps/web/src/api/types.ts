@@ -310,11 +310,17 @@ export type AwayView = { helperId: string; name: string; until: string; inForce:
 /// a kind this console does not know yet is shown as it is, so it is kept a string.
 export type PassedOnItem = { requestId: string; kind: string; by: string; name: string; note: string; at: string };
 
-/// `GET /v1/admin/people`: the owner, the helpers, every invite, the cover, the notes helpers passed on, and the helpers
-/// who were removed, so what they did in the activity log still has their name.
+/// The account linked as a shop's owner (docs/several-shops.md), as the people list shows it: the link's id, which the audit
+/// log and the owner's decisions name; when the operator linked it; and how many devices have it signed in, one owner session
+/// for each. Never the account's own identity.
+export type OwnerAccountView = { id: string; linkedAt: string; devices: number };
+
+/// `GET /v1/admin/people`: the owner with the account linked as theirs (`null` until the operator links one), the helpers,
+/// every invite, the cover, the notes helpers passed on, and the helpers who were removed, so what they did in the activity
+/// log still has their name.
 export type People = {
   tenant: string;
-  owner: { name: string };
+  owner: { name: string; account: OwnerAccountView | null };
   helpers: PeopleHelper[];
   invites: InviteView[];
   away: AwayView | null;
@@ -335,6 +341,16 @@ export type CreatedInvite = { invite: InviteView; inviteUrl: string };
 /// What a removal did: the helper's sessions it ended, their pending invites it revoked (by id), and whether they were the
 /// one covering.
 export type HelperRemoval = { removed: string; sessionsEnded: number; invitesRevoked: string[]; coverEnded: boolean };
+
+/// The code the owner's app shows (`XXXX-XXXX`), as the operator typed it, and the shop it links the owner's account to. The
+/// API reads any case, with or without the dash or spaces, and O, I and L as 0, 1 and 1.
+export type NewOwnerLink = { tenant: string; code: string };
+
+/// What linking answered: the link, which the people list then shows. The account itself is never named.
+export type LinkedOwner = { tenant: string; ownerAccount: { id: string; linkedAt: string } };
+
+/// What unlinking did: the link that ended, and how many of the account's sessions ended with it.
+export type UnlinkedOwner = { tenant: string; unlinked: string; sessionsEnded: number };
 
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
@@ -542,6 +558,16 @@ export interface PilotApi {
   setAway(input: NewAway): Promise<{ away: AwayView }>;
   /// The owner is back. Clearing when nobody covers changes nothing.
   clearAway(input: { tenant: string }): Promise<{ away: null }>;
+  /// `POST /v1/admin/shops/owner`: links the account a code names as the shop's owner, after the operator has checked that
+  /// the code came from the owner (docs/several-shops.md). A code is used up the first time it is tried, whatever the
+  /// answer. Rejects with 400 `tenant_required` or `invalid_request`, 404 `shop_not_found` or `unknown_code`, 409
+  /// `already_linked` (unlink the first account), 410 `code_expired`, and 503 `shops_unavailable`, or `index_unavailable`:
+  /// the link was made but the owner's list could not be written, and linking the same account again with a new code puts
+  /// the shop there.
+  linkOwner(input: NewOwnerLink): Promise<LinkedOwner>;
+  /// `POST /v1/admin/shops/owner/unlink`: the account is signed out of the shop on every device in the same step. Rejects
+  /// with 400 `tenant_required` or `invalid_request`, 404 `shop_not_found` or `not_linked`, and 503 `shops_unavailable`.
+  unlinkOwner(input: { tenant: string }): Promise<UnlinkedOwner>;
 
   /// `GET /v1/admin/model/usage`: a shop's model spend, cap and calls for one Bangkok month (`YYYY-MM`), the current
   /// one when none is given. Rejects with 400 `tenant_required`, 400 `invalid_request` for a month that is not one, 503

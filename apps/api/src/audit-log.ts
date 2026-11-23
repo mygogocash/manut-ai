@@ -81,10 +81,13 @@ export const AUDIT_ACTIONS = [
   "away.cleared",
   "request.passed_on",
   // Several shops (shops.ts, people-store.ts): the operator links or unlinks the account the shop's owner signs in with,
-  // and that account opens the shop. Each names the link by its id, never the account itself or the code.
+  // and that account opens the shop. Each names the link by its id, never the account itself or the code. A device's
+  // sign-out ends its own shop session, an owner's or a helper's, and names the account or the helper by its id too.
   "owner.linked",
   "owner.unlinked",
   "owner.session_opened",
+  "owner.session_ended",
+  "helper.session_ended",
   // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
   // sign-in or the outpost by its id, never an account, a password or a credential.
   "signin.created",

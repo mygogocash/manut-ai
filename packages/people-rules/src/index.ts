@@ -142,6 +142,23 @@ export function addSession(state: PeopleState, helperId: string, sessionId: stri
   };
 }
 
+export type EndSessionResult =
+  | { readonly ok: true; readonly state: PeopleState }
+  | { readonly ok: false; readonly refused: "not_a_helper" | "unknown_session" };
+
+/// A helper signs out of one device: that session, and only that one, leaves the sessions they have open. The list stays
+/// the truth about what is open, so a later removal returns, and the caller ends, just the sessions still running. The
+/// helper stays a helper, with their cover and their notes: signing out of a device is not leaving the shop.
+export function endSession(state: PeopleState, helperId: string, sessionId: string): EndSessionResult {
+  const helper = state.helpers.find((h) => h.id === helperId);
+  if (!helper) return { ok: false, refused: "not_a_helper" };
+  if (!helper.sessions.includes(sessionId)) return { ok: false, refused: "unknown_session" };
+  return {
+    ok: true,
+    state: { ...state, helpers: state.helpers.map((h) => (h.id === helperId ? { ...h, sessions: h.sessions.filter((id) => id !== sessionId) } : h)) },
+  };
+}
+
 // ---------------------------------------------------------------- passing on
 
 /// What the caller knows about a request: its kind, and who decided it if anyone has.

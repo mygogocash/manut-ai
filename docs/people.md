@@ -40,8 +40,9 @@ record, apply one rule, write the record and its audit entry, with no `await` be
 decided one after the other. A refusal writes nothing.
 
 People exist for pilot shops today: the operator routes need the shop's record, which gives the shop's name for the
-invite and its answers. In the pilot the owner has no account, so the operator console invites, removes and sets cover
-on the owner's word, as it already does for memory.
+invite and its answers. In the pilot the owner cannot yet manage helpers from their own session (an account the operator
+links reaches only the approval routes and the team's routines, `docs/several-shops.md`), so the operator console invites,
+removes and sets cover on the owner's word, as it already does for memory.
 
 ## Who is deciding: the role comes from the session
 
@@ -129,10 +130,10 @@ wherever the shop's approvals are listed and in the operator's people list. A re
 ## The audit log
 
 Every change writes one entry, metadata only: the actor (the operator's Access identity, or the helper's id), a fixed
-action (`invite.created`, `invite.revoked`, `helper.joined`, `helper.session_opened`, `helper.removed`, `away.set`,
-`away.cleared`, `request.passed_on`) and ids (`inviteId`, `helperId`, `requestId`, `taskId`). Never a name, a note or
-an identity's value. A decision from a session is the job flow's `approval.decided` entry, naming the owner or the
-helper.
+action (`invite.created`, `invite.revoked`, `helper.joined`, `helper.session_opened`, `helper.session_ended` when a
+device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_on`) and ids (`inviteId`, `helperId`,
+`requestId`, `taskId`). Never a name, a note or an identity's value. A decision from a session is the job flow's
+`approval.decided` entry, naming the owner or the helper.
 
 ## Not built yet
 

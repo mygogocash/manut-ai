@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isAwaitingOwner, type AwaitingOwner, type DeletedShop } from "../src/api";
-import { createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET } from "../src/api/fake";
+import {
+  createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET, PRACTICE_OWNER_CODES,
+} from "../src/api/fake";
 
 function tokenOf(url: string): string {
   return decodeURIComponent(url.split("/approve/")[1] ?? "");
@@ -922,7 +924,7 @@ describe("the fake's people, kept as the API keeps them", () => {
     const api = fresh();
     expect(await api.getPeople(BAAN_MALI)).toEqual({
       tenant: BAAN_MALI,
-      owner: { name: "Fon" },
+      owner: { name: "Fon", account: { id: "owner-fon", linkedAt: "2026-11-12T03:00:00.000Z", devices: 2 } },
       helpers: [{ id: "helper-mint", name: "Mint", identity: mint, joinedAt: "2026-11-13T03:05:00.000Z", devices: 2 }],
       invites: [
         { id: "inv-mint", name: "Mint", identity: mint, status: "used", createdAt: "2026-11-13T03:00:00.000Z",
@@ -936,8 +938,8 @@ describe("the fake's people, kept as the API keeps them", () => {
         note: "The customer sent a photo of the broken jar. It looks right to me.", at: "2026-11-23T00:00:00.000Z" }],
       removed: [],
     });
-    expect(await api.getPeople(SABAI_TEA)).toEqual({ tenant: SABAI_TEA, owner: { name: "Dao" }, helpers: [], invites: [],
-      away: null, passedOn: [], removed: [] });
+    expect(await api.getPeople(SABAI_TEA)).toEqual({ tenant: SABAI_TEA, owner: { name: "Dao", account: null }, helpers: [],
+      invites: [], away: null, passedOn: [], removed: [] });
   });
 
   it("answers as the API does for no tenant, a tenant that is not a shop, and a shop that was deleted", async () => {
@@ -1121,7 +1123,7 @@ describe("the fake's people, kept as the API keeps them", () => {
     const exported = await api.exportShop(BAAN_MALI);
     expect(exported.people).toMatchObject({ names: { "helper-mint": "Mint", "inv-beam": "Beam" },
       state: { shop: BAAN_MALI, ownerId: "owner", helpers: [expect.objectContaining({ id: "helper-mint" })] } });
-    expect((await api.exportShop(SABAI_TEA)).people).toEqual({ names: {},
+    expect((await api.exportShop(SABAI_TEA)).people).toEqual({ names: {}, ownerAccount: null,
       state: { shop: SABAI_TEA, ownerId: "owner", helpers: [], invites: [], away: null, passedOn: [], removed: [] } });
     const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
     await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
@@ -1283,5 +1285,179 @@ describe("the fake's worker jobs, read as GET /v1/admin/workers/drafts reads the
       expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
       expect((await api.listWorkerJobs(BAAN_MALI)).jobs).toHaveLength(7);
     }
+  });
+});
+
+// The owner's linked account, kept as the API keeps it (docs/several-shops.md; docs/pilot-api.md, "Several shops"): the same
+// statuses and codes for both routes, a change recorded in the shop's audit log by the link's id only, and the link
+// exported with the shop and deleted with it. The practice world holds the codes an owner's app might have shown.
+describe("the fake's owner link, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z");
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const fresh = (now = () => NOW) => createFakeApi({ now });
+  const operator = { kind: "operator", email: null };
+  const { dao, fon, guest, ranOut } = PRACTICE_OWNER_CODES;
+
+  /// The owner entries of a shop's log, oldest first, as what they say: no id and no time.
+  async function linkTrail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().filter((entry) => entry.action.startsWith("owner."))
+      .map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  /// A browser's storage for the saved world, with the saved text where a test can reach it.
+  function kept() {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    return { saved, storage };
+  }
+
+  it("starts Baan Mali linked to Fon's account on two devices, and Sabai Tea with no account, by ids only in the log", async () => {
+    const api = fresh();
+    expect((await api.getPeople(BAAN_MALI)).owner).toEqual({ name: "Fon",
+      account: { id: "owner-fon", linkedAt: "2026-11-12T03:00:00.000Z", devices: 2 } });
+    expect((await api.getPeople(SABAI_TEA)).owner).toEqual({ name: "Dao", account: null });
+    const fonDid = { kind: "owner", id: "owner-fon" };
+    expect(await linkTrail(api, BAAN_MALI)).toEqual([
+      { actor: operator, action: "owner.linked", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
+      { actor: fonDid, action: "owner.session_opened", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
+      { actor: fonDid, action: "owner.session_opened", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
+    ]);
+    // The newest entry is still the newest reply of the sample world, and the log never names the account itself.
+    expect((await api.listAudit(BAAN_MALI)).entries[0]).toMatchObject({ action: "reply.proposed" });
+    expect(JSON.stringify(await api.listAudit(BAAN_MALI, { limit: 200 }))).not.toContain("apple:");
+  });
+
+  it("links the account a code names, typed in any case with or without the dash, once, and logs only the link's id", async () => {
+    const api = fresh();
+    const made = await api.linkOwner({ tenant: SABAI_TEA, code: `  ${dao.toLowerCase().replace("-", "")} ` });
+    expect(made).toEqual({ tenant: SABAI_TEA, ownerAccount: { id: expect.stringMatching(/^owner-/),
+      linkedAt: "2026-11-23T03:00:00.000Z" } });
+    // No app has opened the shop yet, so no device has it.
+    expect((await api.getPeople(SABAI_TEA)).owner).toEqual({ name: "Dao",
+      account: { id: made.ownerAccount.id, linkedAt: "2026-11-23T03:00:00.000Z", devices: 0 } });
+    expect(await linkTrail(api, SABAI_TEA)).toEqual([
+      { actor: operator, action: "owner.linked", subject: { ownerAccountId: made.ownerAccount.id }, outcome: "ok" }]);
+    await expect(api.linkOwner({ tenant: SABAI_TEA, code: dao })).rejects.toMatchObject({ status: 404, code: "unknown_code" });
+    expect(JSON.stringify(await api.listAudit(SABAI_TEA))).not.toContain("apple:");
+  });
+
+  it("reads O, I and L as 0, 1 and 1 and ignores spaces, as the API does", async () => {
+    for (const typed of ["7KOM-4XIR", "7kom4xlr", " 7K0M 4X1R ", "7K0M-4X1R"]) {
+      const made = await fresh().linkOwner({ tenant: SABAI_TEA, code: typed });
+      expect(made.ownerAccount.id).toMatch(/^owner-/);
+    }
+  });
+
+  it("answers as the API does for text that is no code, a code nobody made, a code that ran out and a shop that is not there", async () => {
+    const api = fresh();
+    for (const code of ["", "not a code", "7K0M-4X1", "7K0M-4X1RZ", "ZZZZ-ZZZZ", "7KUM-4X1R"]) {
+      await expect(api.linkOwner({ tenant: SABAI_TEA, code })).rejects.toMatchObject({ status: 404, code: "unknown_code" });
+    }
+    await expect(api.linkOwner({ tenant: SABAI_TEA, code: ranOut })).rejects.toMatchObject({ status: 410, code: "code_expired" });
+    // A code goes the first time it is tried, whatever the answer, so a late one cannot be tried again either.
+    await expect(api.linkOwner({ tenant: SABAI_TEA, code: ranOut })).rejects.toMatchObject({ status: 404, code: "unknown_code" });
+    await expect(api.linkOwner({ tenant: SABAI_TEA, code: 12345678 as never })).rejects
+      .toMatchObject({ status: 400, code: "invalid_request" });
+    await expect(api.linkOwner({ tenant: "", code: dao })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    // The shop is checked before a code is used, so a shop that is not there leaves the code for the one that is.
+    await expect(api.linkOwner({ tenant: "shop_nobody", code: dao })).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    expect((await api.linkOwner({ tenant: SABAI_TEA, code: dao })).ownerAccount.id).toMatch(/^owner-/);
+    // None of the refusals was recorded.
+    expect(await linkTrail(api, SABAI_TEA)).toHaveLength(1);
+  });
+
+  it("keeps one account per shop: another's code is used up and refused, and the same account's changes and records nothing", async () => {
+    const api = fresh();
+    // Fon's account is already Baan Mali's: her new code answers the link it has, and writes nothing.
+    expect(await api.linkOwner({ tenant: BAAN_MALI, code: fon })).toEqual({ tenant: BAAN_MALI,
+      ownerAccount: { id: "owner-fon", linkedAt: "2026-11-12T03:00:00.000Z" } });
+    expect((await linkTrail(api, BAAN_MALI)).filter((entry) => entry.action === "owner.linked")).toHaveLength(1);
+    expect((await api.getPeople(BAAN_MALI)).owner.account?.devices).toBe(2);
+    // Another account's code is refused, and used up all the same.
+    await expect(api.linkOwner({ tenant: BAAN_MALI, code: guest })).rejects.toMatchObject({ status: 409, code: "already_linked" });
+    await expect(api.linkOwner({ tenant: SABAI_TEA, code: guest })).rejects.toMatchObject({ status: 404, code: "unknown_code" });
+    expect((await api.getPeople(BAAN_MALI)).owner.account?.id).toBe("owner-fon");
+    expect((await linkTrail(api, BAAN_MALI)).filter((entry) => entry.action === "owner.linked")).toHaveLength(1);
+  });
+
+  it("unlinks the account, ending its sessions in the same step, and logs only the link's id", async () => {
+    const api = fresh();
+    expect(await api.unlinkOwner({ tenant: BAAN_MALI })).toEqual({ tenant: BAAN_MALI, unlinked: "owner-fon", sessionsEnded: 2 });
+    expect((await api.getPeople(BAAN_MALI)).owner).toEqual({ name: "Fon", account: null });
+    expect((await linkTrail(api, BAAN_MALI)).filter((entry) => entry.action === "owner.unlinked")).toEqual([
+      { actor: operator, action: "owner.unlinked", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" }]);
+    // Unlinking again, or a shop never linked, finds nothing; the shop checks come first, as they do in the API.
+    await expect(api.unlinkOwner({ tenant: BAAN_MALI })).rejects.toMatchObject({ status: 404, code: "not_linked" });
+    await expect(api.unlinkOwner({ tenant: SABAI_TEA })).rejects.toMatchObject({ status: 404, code: "not_linked" });
+    await expect(api.unlinkOwner({ tenant: "shop_nobody" })).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.unlinkOwner({ tenant: "" })).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    // Linking again makes a new link, with no device on it yet; the old one's sessions stay ended.
+    const again = await api.linkOwner({ tenant: BAAN_MALI, code: fon });
+    expect(again.ownerAccount.id).not.toBe("owner-fon");
+    expect((await api.getPeople(BAAN_MALI)).owner.account).toEqual({ id: again.ownerAccount.id,
+      linkedAt: "2026-11-23T03:00:00.000Z", devices: 0 });
+  });
+
+  it("keeps the link when the people around it change: an invite, a removal, a cover", async () => {
+    const api = fresh();
+    const linked = (await api.linkOwner({ tenant: SABAI_TEA, code: dao })).ownerAccount;
+    await api.createInvite({ tenant: SABAI_TEA, name: "Kai", identity: { kind: "email", address: "kai@sabai.example" } });
+    expect((await api.getPeople(SABAI_TEA)).owner.account).toMatchObject({ id: linked.id, devices: 0 });
+    await api.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" });
+    await api.clearAway({ tenant: BAAN_MALI });
+    await api.revokeInvite({ tenant: BAAN_MALI, inviteId: "inv-beam" });
+    expect((await api.getPeople(BAAN_MALI)).owner.account).toEqual({ id: "owner-fon", linkedAt: "2026-11-12T03:00:00.000Z", devices: 2 });
+  });
+
+  it("exports the link with the shop, with the account's subject as the API's export carries it, and deletes it with the shop", async () => {
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test" });
+    expect((await api.exportShop(BAAN_MALI)).people).toMatchObject({ ownerAccount: { id: "owner-fon",
+      subject: expect.stringMatching(/^apple:/), linkedAt: Date.parse("2026-11-12T03:00:00.000Z") } });
+    expect((await api.exportShop(SABAI_TEA)).people).toMatchObject({ ownerAccount: null });
+    // A count of devices is not part of the export, as the API never carries a session in it.
+    expect(JSON.stringify((await api.exportShop(BAAN_MALI)).people)).not.toContain("devices");
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    await expect(api.getPeople(BAAN_MALI)).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.unlinkOwner({ tenant: BAAN_MALI })).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+  });
+
+  it("keeps a link made in practice across a reload, and starts again on reset", async () => {
+    const { storage } = kept();
+    await createFakeApi({ now: () => NOW, storage }).linkOwner({ tenant: SABAI_TEA, code: dao });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    expect((await reloaded.getPeople(SABAI_TEA)).owner.account).toMatchObject({ devices: 0 });
+    // The code that made it is used up for good, not given back by a reload.
+    await expect(reloaded.linkOwner({ tenant: BAAN_MALI, code: dao })).rejects.toMatchObject({ status: 404, code: "unknown_code" });
+    reloaded.reset();
+    expect((await reloaded.getPeople(SABAI_TEA)).owner.account).toBeNull();
+    expect((await reloaded.linkOwner({ tenant: SABAI_TEA, code: dao })).ownerAccount.id).toMatch(/^owner-/);
+  });
+
+  it("replaces a practice world saved before the owner link, whether it is a version behind or only lacks the codes", async () => {
+    for (const change of [{ version: 8 }, { ownerCodes: undefined }]) {
+      const { saved, storage } = kept();
+      const first = createFakeApi({ now: () => NOW, storage });
+      await first.unlinkOwner({ tenant: BAAN_MALI });
+      const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+      saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, ...change }));
+      const api = createFakeApi({ now: () => NOW, storage });
+      // The world was read as a fresh one: Fon's account is linked again.
+      expect((await api.getPeople(BAAN_MALI)).owner.account?.id).toBe("owner-fon");
+    }
+  });
+
+  it("refuses both routes without an operator key", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    for (const call of [
+      () => api.linkOwner({ tenant: SABAI_TEA, code: dao }),
+      () => api.unlinkOwner({ tenant: BAAN_MALI }),
+    ]) await expect(call()).rejects.toMatchObject({ status: 403, code: "forbidden" });
   });
 });

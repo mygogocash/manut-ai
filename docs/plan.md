@@ -81,6 +81,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 8a. The outpost's step channel in the API: workers' browser steps (open, read, sign in) reach an outpost and land in the attempt's events; removing an outpost and replacing its credential; an ingress limit on the outpost routes | | Opus |
 | done | 4. Console: the People page | | Sonnet |
 | done | 7. Several shops in one view: the design and the API side (`docs/several-shops.md`); the desktop switcher is next | | Opus |
+| done | Several shops: the console's owner link, and ending a shop session (`docs/several-shops.md`, slices 3 and 5) | | Sonnet |
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
 | running | 11. Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Sonnet |
 | done | 9. Desktop leftovers (the Team page's member menu and lines, Needs you, History's chips) and three app bugs the revival found (the undo toast, the folder reveal, the usage caret) | | Sonnet |

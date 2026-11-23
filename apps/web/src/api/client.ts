@@ -14,6 +14,7 @@ import {
   type Identity,
   type InboundMessage,
   type InviteView,
+  type LinkedOwner,
   type Memory,
   type ModelCap,
   type ModelUsage,
@@ -37,6 +38,7 @@ import {
   type ShopTemplate,
   type NewAnswer,
   type SubscriptionPayment,
+  type UnlinkedOwner,
   type WorkerJobsPage,
 } from "./types";
 
@@ -263,6 +265,18 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       }),
     clearAway: (input) =>
       request<{ away: null }>({ method: "POST", path: "/v1/admin/people/away/clear", body: { tenant: input.tenant }, admin: true }),
+
+    // The owner's linked account (docs/several-shops.md): built field by field, like the people changes, so the code is all that
+    // names an account and nothing a caller adds ever travels.
+    linkOwner: (input) =>
+      request<LinkedOwner>({
+        method: "POST",
+        path: "/v1/admin/shops/owner",
+        body: { tenant: input.tenant, code: input.code },
+        admin: true,
+      }),
+    unlinkOwner: (input) =>
+      request<UnlinkedOwner>({ method: "POST", path: "/v1/admin/shops/owner/unlink", body: { tenant: input.tenant }, admin: true }),
 
     // The month goes in the query only when asked for: the API's own current Bangkok month decides otherwise.
     getModelUsage: (tenant, month) =>

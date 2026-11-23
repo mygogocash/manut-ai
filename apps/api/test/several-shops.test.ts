@@ -2,7 +2,9 @@ import { createExecutionContext, runInDurableObject, waitOnExecutionContext } fr
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../src/auth";
 import worker from "../src/index";
-import { tenantDelete } from "../src/tenant-data";
+import type { PeopleRecord } from "../src/people-store";
+import { tenantDelete, tenantStub } from "../src/tenant-data";
+import { tenantSession } from "./authenticated-fixtures";
 import {
   accept,
   admin,
@@ -322,6 +324,188 @@ describe("removing them as a helper", () => {
     expect((await asSession(asOwnerOfMali, "GET", "/v1/approvals?state=open")).status).toBe(200);
     expect((await myShops(fon)).body.shops.map((shop) => shop.id)).toEqual([mali.tenant, khaoHom.tenant]);
     expect(await openShop(fon, paNoi.tenant)).toEqual({ status: 404, body: { error: "not_found" } });
+  });
+});
+
+describe("signing out of a shop session", () => {
+  type Ended = { ended?: { shop: string; role: Role }; error?: string; unlinkedAt?: string; removedAt?: string };
+  /// The app ends its own shop session: the session is the credential, and the body is `{}`.
+  const endSession = (headers: Headers, body: unknown = {}) =>
+    asSession<Ended>(headers, "POST", "/v1/shops/session/end", body);
+  const worksOnApprovals = async (headers: Headers) => (await asSession(headers, "GET", "/v1/approvals?state=open")).status;
+  /// How many devices the shop's people list counts as signed in: the owner's account and each helper.
+  async function devices(shop: Shop) {
+    const listed = await admin<{ owner: { account: { devices: number } | null }; helpers: { id: string; devices: number }[] }>(
+      "GET", `/v1/admin/people?tenant=${encodeURIComponent(shop.tenant)}`);
+    expect(listed.status).toBe(200);
+    return { owner: listed.body.owner.account?.devices ?? null,
+      helpers: Object.fromEntries(listed.body.helpers.map((helper) => [helper.id, helper.devices])) };
+  }
+  const sessionEnds = async (shop: Shop, action: "owner.session_ended" | "helper.session_ended") =>
+    (await auditEntries(shop.tenant)).filter((entry) => entry.action === action);
+
+  it("ends exactly that owner session: it answers 401 everywhere after, and no other session of hers is touched", async () => {
+    const { fon, mali, khaoHom, paNoi, maliAccount, joinedSession } = await fonsShops();
+    const phone = await shopSession(fon, mali, "owner");
+    const laptop = await shopSession(fon, mali, "owner");
+    const asOwnerOfKhaoHom = await shopSession(fon, khaoHom, "owner");
+    const asHelperAtPaNoi = await shopSession(fon, paNoi, "helper");
+    expect((await devices(mali)).owner).toBe(2);
+
+    expect(await endSession(phone)).toEqual({ status: 200, body: { ended: { shop: mali.tenant, role: "owner" } } });
+
+    // The same token answers 401 everywhere, as any ended session does: the approvals, the team's routines and this route.
+    for (const [method, path, body] of [["GET", "/v1/approvals?state=open"], ["POST", "/v1/approvals/anything/decision", DECLINE],
+      ["GET", "/v1/routines"], ["POST", "/v1/team/pause", {}], ["POST", "/v1/shops/session/end", {}]] as const) {
+      expect(await asSession(phone, method, path, body)).toEqual({ status: 401, body: { error: "unauthorized" } });
+    }
+    // Her other device of the same shop, her other shops, her helper session and her own sign-in carry on.
+    for (const headers of [laptop, asOwnerOfKhaoHom, asHelperAtPaNoi, joinedSession]) expect(await worksOnApprovals(headers)).toBe(200);
+    expect((await myShops(fon)).body.shops.map((shop) => [shop.id, shop.role])).toEqual([[mali.tenant, "owner"],
+      [khaoHom.tenant, "owner"], [paNoi.tenant, "helper"]]);
+    expect((await devices(mali)).owner).toBe(1);
+    // Signing out is not unlinking: she opens the shop again with her sign-in, and the new session works.
+    expect(await worksOnApprovals(await shopSession(fon, mali, "owner"))).toBe(200);
+    // The log says the account ended a session, by ids only: never the token, the account's subject, her email or a name.
+    const ended = await sessionEnds(mali, "owner.session_ended");
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ actor: { kind: "owner", id: maliAccount }, subject: { ownerAccountId: maliAccount },
+      outcome: "ok" });
+    expect(Object.keys(ended[0]!).sort()).toEqual(["action", "actor", "at", "id", "outcome", "subject"]);
+    const secret = phone.authorization.split(".")[2]!;
+    for (const kept of [secret, phone.authorization, fon.tenant, "Fon"]) expect(JSON.stringify(ended)).not.toContain(kept);
+    expect(await sessionEnds(khaoHom, "owner.session_ended")).toHaveLength(0);
+  });
+
+  it("ends exactly that helper session, answers it 401 unauthorized and not removed, and removal then ends only the rest", async () => {
+    const { fon, paNoi, helperId, joinedSession } = await fonsShops();
+    const laptop = await shopSession(fon, paNoi, "helper");
+    expect((await devices(paNoi)).helpers).toEqual({ [helperId]: 2 });
+
+    expect(await endSession(laptop)).toEqual({ status: 200, body: { ended: { shop: paNoi.tenant, role: "helper" } } });
+
+    // She signed out; nobody removed her, so the token is unknown, not "removed".
+    for (const [method, path, body] of [["GET", "/v1/approvals?state=open"], ["POST", "/v1/approvals/anything/decision", DECLINE],
+      ["GET", "/v1/routines"], ["POST", "/v1/shops/session/end", {}]] as const) {
+      expect(await asSession(laptop, method, path, body)).toEqual({ status: 401, body: { error: "unauthorized" } });
+    }
+    expect(await worksOnApprovals(joinedSession)).toBe(200);
+    expect((await devices(paNoi)).helpers).toEqual({ [helperId]: 1 });
+    const ended = await sessionEnds(paNoi, "helper.session_ended");
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ actor: { kind: "helper", id: helperId }, subject: { helperId }, outcome: "ok" });
+    expect(Object.keys(ended[0]!).sort()).toEqual(["action", "actor", "at", "id", "outcome", "subject"]);
+    for (const kept of [laptop.authorization.split(".")[2]!, fon.tenant, "Fon"]) expect(JSON.stringify(ended)).not.toContain(kept);
+
+    // She is still a helper and opens the shop again; removing her later ends only the one session that was still open.
+    expect(await worksOnApprovals(await shopSession(fon, paNoi, "helper"))).toBe(200);
+    expect(await admin("POST", "/v1/admin/people/remove", { tenant: paNoi.tenant, helperId })).toMatchObject({ status: 200,
+      body: { removed: helperId, sessionsEnded: 2 } });
+    expect(await asSession(joinedSession, "GET", "/v1/approvals?state=open")).toMatchObject({ status: 401,
+      body: { error: "removed" } });
+    expect(await asSession(laptop, "GET", "/v1/approvals?state=open")).toEqual({ status: 401, body: { error: "unauthorized" } });
+  });
+
+  it("refuses what is not a shop session, each with its own status, and ends nothing", async () => {
+    const { fon, mali, khaoHom } = await fonsShops();
+    const asOwnerOfMali = await shopSession(fon, mali, "owner");
+    // A person's sign-in and the shop's own pilot session are real credentials of another kind: they are told so, and
+    // neither is ended.
+    const shopsOwn = await tenantSession(mali.tenant);
+    for (const headers of [fon.headers, shopsOwn]) {
+      expect(await endSession(headers)).toEqual({ status: 403, body: { error: "not_a_shop_session" } });
+    }
+    expect((await myShops(fon)).status).toBe(200);
+    expect(await worksOnApprovals(shopsOwn)).toBe(200);
+    // The operator key is no session at all, and nor is no credential, a token nobody holds, or one moved to another shop.
+    const [prefix, , secret] = asOwnerOfMali.authorization.slice("Bearer ".length).split(".");
+    const toShop = (tenant: string) => `${prefix}.${btoa(tenant).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}.${secret}`;
+    for (const headers of [{ authorization: "Bearer test-key" }, {}, { authorization: "Bearer nonsense" },
+      { authorization: `Bearer ${toShop(khaoHom.tenant)}` }, { authorization: `Bearer ${prefix}.bm9wZQ.${"0".repeat(64)}` }]) {
+      expect(await endSession(headers)).toEqual({ status: 401, body: { error: "unauthorized" } });
+    }
+    // Who is asking is checked before the method and the body, so none of these learns anything about the route.
+    expect(await asSession({}, "GET", "/v1/shops/session/end")).toEqual({ status: 401, body: { error: "unauthorized" } });
+    expect(await endSession({ authorization: "Bearer test-key" }, { shop: mali.tenant })).toEqual({ status: 401,
+      body: { error: "unauthorized" } });
+    // The shop session is still open, and nothing was written.
+    expect(await worksOnApprovals(asOwnerOfMali)).toBe(200);
+    expect((await devices(mali)).owner).toBe(1);
+    expect(await sessionEnds(mali, "owner.session_ended")).toHaveLength(0);
+  });
+
+  it("takes exactly {} from a live session: another method or body is refused, and ends nothing", async () => {
+    const { fon, mali } = await fonsShops();
+    const phone = await shopSession(fon, mali, "owner");
+    for (const method of ["GET", "PUT", "DELETE"]) {
+      expect(await asSession(phone, method, "/v1/shops/session/end")).toEqual({ status: 405, body: { error: "method_not_allowed" } });
+    }
+    // A shop, a role or an account in the body is refused, never read: the session names all three.
+    for (const body of [{ shop: mali.tenant }, { role: "owner" }, { tenant: mali.tenant }, { ownerAccountId: "owner-chosen" }, [], "end",
+      null, 7]) {
+      expect(await endSession(phone, body)).toEqual({ status: 400, body: { error: "invalid_request" } });
+    }
+    for (const raw of ["{not json", ""]) {
+      const response = await call("/v1/shops/session/end", { method: "POST", headers: { ...phone, "content-type": "application/json" },
+        ...(raw === "" ? {} : { body: raw }) });
+      expect({ status: response.status, body: await response.json() }).toEqual({ status: 400, body: { error: "invalid_json" } });
+    }
+    expect(await worksOnApprovals(phone)).toBe(200);
+    expect(await sessionEnds(mali, "owner.session_ended")).toHaveLength(0);
+    expect(await endSession(phone)).toMatchObject({ status: 200 });
+  });
+
+  it("answers a session that unlinking or removal ended as every route does, and records nothing", async () => {
+    const { fon, mali, paNoi, helperId } = await fonsShops();
+    const asOwnerOfMali = await shopSession(fon, mali, "owner");
+    const asHelperAtPaNoi = await shopSession(fon, paNoi, "helper");
+    expect((await unlinkOwner(mali)).status).toBe(200);
+    expect((await admin("POST", "/v1/admin/people/remove", { tenant: paNoi.tenant, helperId })).status).toBe(200);
+    expect(await endSession(asOwnerOfMali)).toMatchObject({ status: 401, body: { error: "unlinked", unlinkedAt: expect.any(String) } });
+    expect(await endSession(asHelperAtPaNoi)).toMatchObject({ status: 401, body: { error: "removed", removedAt: expect.any(String) } });
+    expect(await sessionEnds(mali, "owner.session_ended")).toHaveLength(0);
+    expect(await sessionEnds(paNoi, "helper.session_ended")).toHaveLength(0);
+  });
+
+  it("answers a session past its 30 days 401 and records nothing", async () => {
+    const { fon, mali } = await fonsShops();
+    const phone = await shopSession(fon, mali, "owner");
+    const hash = await sha256Hex(phone.authorization.slice("Bearer ".length));
+    await runInDurableObject(tenantStub(bindings, mali.tenant), async (_instance, state) => {
+      const key = `people:${encodeURIComponent(mali.tenant)}`;
+      const record = (await state.storage.get<PeopleRecord>(key))!;
+      const session = record.ownerSessions![hash]!;
+      await state.storage.put(key, { ...record, ownerSessions: { ...record.ownerSessions, [hash]: { ...session,
+        expiresAt: Date.now() - 1000 } } });
+    });
+    expect(await endSession(phone)).toEqual({ status: 401, body: { error: "unauthorized" } });
+    expect(await sessionEnds(mali, "owner.session_ended")).toHaveLength(0);
+  });
+
+  it("ends a session once however many devices send it at once: one answer 200, the rest 401, one entry in the log", async () => {
+    const { fon, mali } = await fonsShops();
+    const phone = await shopSession(fon, mali, "owner");
+    const answers = await Promise.all([endSession(phone), endSession(phone), endSession(phone)]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 401, 401]);
+    expect(await sessionEnds(mali, "owner.session_ended")).toHaveLength(1);
+  });
+
+  it("answers 503 and ends nothing when the shop's record cannot be read or written", async () => {
+    const { fon, mali, paNoi } = await fonsShops();
+    const phone = await shopSession(fon, mali, "owner");
+    const laptop = await shopSession(fon, paNoi, "helper");
+    const post = (path: string) => (request: Request) => request.method === "POST" && new URL(request.url).pathname === path;
+    const cases = [
+      [phone, post("/people/end-owner-session")], [phone, post("/people/owner-session-check")],
+      [laptop, post("/people/end-helper-session")], [laptop, post("/people/session-check")],
+    ] as const;
+    for (const [headers, fails] of cases) {
+      expect(await callWith(failingWhere("TENANT", fails), "/v1/shops/session/end", { method: "POST", headers, body: {} }))
+        .toEqual({ status: 503, body: { error: "people_unavailable" } });
+    }
+    for (const headers of [phone, laptop]) expect(await worksOnApprovals(headers)).toBe(200);
+    expect(await endSession(phone)).toMatchObject({ status: 200 });
+    expect(await endSession(laptop)).toMatchObject({ status: 200 });
   });
 });
 

@@ -434,6 +434,14 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
     return name ? `ended ${name}'s cover` : "ended the cover";
   },
   "request.passed_on": (_entry, { ownerName }) => `passed a request on to ${ownerName}`,
+  // The owner's linked account and the shop sessions (docs/several-shops.md). The log holds the link's id only, never the
+  // account itself, so the words say whose account by the shop's owner. A device signing in or out is the account's or the
+  // helper's own doing, so it is said of them.
+  "owner.linked": (_entry, { ownerName }) => `linked ${ownerName}'s account to the shop`,
+  "owner.unlinked": (_entry, { ownerName }) => `unlinked ${ownerName}'s account from the shop`,
+  "owner.session_opened": () => "signed in to the shop on a device",
+  "owner.session_ended": () => "signed out of the shop on a device",
+  "helper.session_ended": () => "signed out on a device",
   // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
   // ids only, never a username or a password.
   "signin.created": () => "added a site sign-in to the vault",
@@ -576,6 +584,7 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["questionId", "question"],
   ["inviteId", "invite"],
   ["helperId", "helper"],
+  ["ownerAccountId", "owner account"],
   ["signInId", "sign-in"],
   ["outpostId", "outpost"],
   ["stepId", "browser step"],
@@ -905,15 +914,15 @@ const KIND_TAGS = {
 } as const satisfies Record<ApprovalKind, string>;
 
 /// The People page: who can use Manut AI for one shop, laid out from the design canvas's "Settings: people" and "States:
-/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts for the owner,
-/// who has no account in the pilot, so the words name the owner and say what a helper may and may not approve. What each
-/// role may approve is read from approval-core's `mayDecide`, and only named here. Sentences that hold a name or a date
-/// are functions.
+/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts for the owner, who
+/// cannot yet change the list from the app (and may have no account linked at all), so the words name the owner and say what a
+/// helper may and may not approve. What each role may approve is read from approval-core's `mayDecide`, and only named here.
+/// Sentences that hold a name or a date are functions.
 export const peopleWords = {
   nav: "People",
   title: "People",
   intro: (owner: string) =>
-    `Who can use Manut AI for this shop. ${owner} has no account here in the pilot, so invite, cancel, remove and set cover only when ${owner} asks you to.`,
+    `Who can use Manut AI for this shop. ${owner} cannot change this list from the app yet, so invite, cancel, remove and set cover only when ${owner} asks you to.`,
   shopLabel: "Shop",
   refresh: "Refresh",
   tryAgain: "Try again",
@@ -951,6 +960,30 @@ export const peopleWords = {
   /// What a copy button says it copies, after "Copy link": a waiting invite's, or the one just made.
   copyInviteOf: (name: string) => `for ${name}'s invite`,
   copyNewInvite: "for the new invite",
+
+  // The owner's account (docs/several-shops.md): linked by a one-use code the owner reads out from their app. The operator checks
+  // the code came from the owner; the API only knows it names an account that was signed in a moment ago.
+  ownerLinked: (linkedAt: string) => `Linked to the owner's account on ${formatDate(linkedAt)}`,
+  ownerNotLinked: "Not linked to an account yet",
+  linkTitle: "Link the owner's account",
+  codeLabel: "Link code",
+  codeHelp:
+    "8 letters and numbers, as the owner's app shows them: like K7M4-X9RQ. Capitals or small letters, with or without the dash.",
+  /// How an operator confirms a code is not settled by the owner yet (docs/decisions.md): until it is, the page says where a code
+  /// may be taken from.
+  codeTake: "Take the code only from the owner, on a call or in the shop's own chat.",
+  link: "Link",
+  linking: "Linking",
+  linked: (owner: string, shop: string) => `Linked. ${shop} now shows in ${owner}'s app.`,
+  unlink: "Unlink",
+  unlinkTitle: (owner: string) => `Unlink ${owner}'s account?`,
+  unlinkEffect: (owner: string) => `${owner}'s app will be signed out of this shop on every device.`,
+  unlinkNote: (owner: string) => `${owner} can link the account again later with a new code.`,
+  unlinkYes: (owner: string) => `Unlink ${owner}'s account`,
+  unlinkNo: "Keep the link",
+  unlinking: "Unlinking",
+  /// What the API's own answer says it did: how many sessions of the account ended with the link.
+  unlinked: (sessionsEnded: number) => `Unlinked. ${countOf(sessionsEnded, "session", "sessions")} ended.`,
 
   // Removing a helper asks once more, in the board's own words
   removeTitle: (name: string) => `Remove ${name}?`,
@@ -1076,6 +1109,40 @@ export function peopleErrorText(error: unknown): string {
         return peopleWords.saveUnavailable;
       case "not_configured":
         return peopleWords.notConfigured(error.setting);
+    }
+  }
+  return errorText(error);
+}
+
+/// What the API said to linking or unlinking the owner's account that did not do it, in the page's words, and the console's usual
+/// words for the rest. The same code can mean another thing on the other route (`invalid_request` is a bad code only when linking),
+/// so the route says which words apply. A refusal that means the list moved on is followed by the page reading the list again.
+export function ownerAccountErrorText(error: unknown, action: "link" | "unlink"): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    if (action === "link") {
+      switch (error.code) {
+        case "unknown_code":
+          return "That code is not known or has run out. Ask the owner for a new one.";
+        case "code_expired":
+          return "That code has run out. A code works for 15 minutes. Ask the owner for a new one.";
+        case "already_linked":
+          return "This shop is already linked to an account. Unlink it first.";
+        case "invalid_request":
+          return "Write the code the owner's app shows: 8 letters and numbers, like K7M4-X9RQ.";
+        // The link was made, but the account's list of shops could not be written, so the shop is not on the owner's list yet.
+        case "index_unavailable":
+          return "The account is linked, but the owner's app cannot list the shop yet. Ask the owner for a new code and link again to put it there.";
+        // The code was used up first, so it may or may not have linked: the operator reads the list to see.
+        case "shops_unavailable":
+          return "The API could not link the account just now. Press Refresh to see whether it did, then try again with a new code from the owner.";
+      }
+    } else {
+      switch (error.code) {
+        case "not_linked":
+          return "This shop has no linked account now. The list was refreshed.";
+        case "shops_unavailable":
+          return peopleWords.saveUnavailable;
+      }
     }
   }
   return errorText(error);

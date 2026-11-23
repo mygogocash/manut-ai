@@ -445,6 +445,8 @@ What is written, and by whom:
 | `invite.created`, `invite.revoked` | operator | `inviteId` | `ok` |
 | `helper.joined` | helper | `inviteId`, `helperId` | `ok` |
 | `helper.session_opened` | helper | `helperId` | `ok` |
+| `helper.session_ended` | helper, ending their own shop session (`POST /v1/shops/session/end`) | `helperId` | `ok` |
+| `owner.session_ended` | the owner's linked account, by its id, ending its own shop session | `ownerAccountId` | `ok` |
 | `helper.removed` | operator | `helperId` | `ok` |
 | `away.set`, `away.cleared` | operator | `helperId` (who covers, or covered) | `ok` |
 | `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
@@ -463,7 +465,7 @@ section 3); a pilot shop has none until a worker runs for it. A reply decided th
 `reply.*` entries and writes no `approval.*` one; a reply decided from a session ("Deciding from a session", below)
 writes `approval.decided`, naming the shop's own session, the owner's linked account or the helper. The people entries
 name invites, helpers and requests by id only: never a name, a note, or an identity's value. The several-shops entries
-(`owner.linked`, `owner.unlinked`, `owner.session_opened`) name the owner's linked account by its id
+(`owner.linked`, `owner.unlinked`, `owner.session_opened`, `owner.session_ended`) name the owner's linked account by its id
 (`ownerAccountId`), never the account itself or a code.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
@@ -1297,7 +1299,8 @@ type HelperSession = {
 A helper session is accepted by `GET /v1/approvals`, `POST /v1/approvals/{requestId}/decision` and
 `POST /v1/approvals/{requestId}/pass-on`, for its own shop only. Every other session route answers it 401: a helper
 never acts as the shop. The team's routines (`/v1/routines`, `/v1/team/*`, "Routines", below) answer it 403
-`owner_only` instead, so a helper's app does not read its session as ended. The shop keeps only its SHA-256.
+`owner_only` instead, so a helper's app does not read its session as ended. The shop keeps only its SHA-256. The helper's
+app ends its own session with `POST /v1/shops/session/end` ("Several shops", below); removal ends every one at once.
 
 **`POST /v1/approvals/{requestId}/pass-on`** with `{ note }` and a helper session: the helper hands the owner a request
 they may not decide, with a note of 1 to 500 characters (trimmed). It decides nothing: the request keeps waiting for
@@ -1556,12 +1559,51 @@ changes name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` a
 answers the shop's own session. Every other session route answers it 401, so it never acts as the shop: not the tasks,
 consent, export, deletion, connections or schedules. The shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then
 on each answers 401 `unlinked` with `unlinkedAt`. Opening one writes `owner.session_opened` to the shop's audit log,
-naming the account by its id.
+naming the account by its id; the app ends its own with `POST /v1/shops/session/end` ("Ending a shop session", below),
+which writes `owner.session_ended`.
 
 **`POST /v1/shops/owner-code`** with no body, or `{}`: a code the owner sends their operator so the operator can link this
 account to their shop ("Operator routes", below). 200 `{ code, expiresAt }`: `code` is eight characters of Crockford's
 base 32, shown as `XXXX-XXXX`. It names only the account that asked for it, works once, for 15 minutes, and asking again
 replaces it. Only its SHA-256 is kept. A body with any field, an account above all, answers 400 `invalid_request`.
+
+### Ending a shop session
+
+**`POST /v1/shops/session/end`** with exactly `{}` and the shop session itself as the bearer (`mos1.` for an owner,
+`mhs1.` for a helper): the app ends its own session of one shop when the person signs out of that device. It ends exactly
+that session, in one write to the shop's people record with its audit entry. The person's other devices at the shop, their
+other shops and their own sign-in are untouched, and they can open the shop again with the sign-in. The same token answers
+401 `unauthorized` on every route from then on, as any session the shop's record no longer holds does. The shop keeps no
+mark of it: nothing removed the helper or unlinked the account, so the token reads as unknown, never as `removed` or
+`unlinked`.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ ended: { shop, role } }` | The session worked and is ended; `role` is `"owner"` or `"helper"` |
+| 401 | `{ error: "unauthorized" }` | No credential, the operator key, a token no shop holds, a session already ended by signing out, or one past its 30 days. Two devices sending one token at once: one gets 200, the other this |
+| 401 | `{ error: "removed", removedAt }` or `{ error: "unlinked", unlinkedAt }` | A session that removal or unlinking ended, answered as every shop-session route answers it. Nothing is written |
+| 403 | `{ error: "not_a_shop_session" }` | The credential is a person's sign-in or the shop's own pilot session (the lifted auth's). Nothing is ended. It is 403 and not 401 so an app that sent the wrong one does not read its sign-in as ended |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST` |
+| 400 | `{ error: "invalid_request" }` | A body that is not exactly `{}`: any field (a shop, a role or an account above all), an array, or a value that is not an object |
+| 400 | `{ error: "invalid_json" }` | A body that is not JSON, or none |
+| 503 | `{ error: "people_unavailable" }` | The shop's record could not be read or written. Nothing is known to have ended: the session still works |
+
+- **Order.** Who is asking comes first, as on every session route, so a caller with no session learns nothing about the route,
+  not even its method: the session (401), then its kind (403), then the method (405), then the body (400). The session is
+  checked with the same check every shop-session route makes (`callerOf`), so a token ends here exactly while it still
+  works there. The shop's record checks it again where it ends it, so a second device sending the same token is never
+  recorded twice.
+- **What is ended.** An owner session leaves `ownerSessions` and a helper session leaves `sessions`, and its id leaves the
+  helper's open sessions in the rules' state (`endSession` in `@manut/people-rules`), so a later removal reports and ends
+  only the sessions still open. The helper stays a helper, with their cover and their notes, and the owner's account stays
+  linked. `GET /v1/admin/people` counts one device fewer (`devices`).
+- **The log.** `owner.session_ended` (the actor is the account, by its id; the subject is `ownerAccountId`) or
+  `helper.session_ended` (the actor is the helper, by their id; the subject is `helperId`), outcome `ok`. Ids only: never the
+  token, the account's subject, an email or a name. Nothing is written for a refusal.
+- **What the app does.** On sign-out it calls this once for each shop session it holds, then drops them and their cached
+  data. A call that cannot be made leaves that session running to its 30 days (there is no refresh), or until the account is
+  unlinked or the helper removed; the person's sign-in is ended by the lifted auth's own `DELETE /v1/auth/session`, which
+  this route does not call.
 
 ### Operator routes
 

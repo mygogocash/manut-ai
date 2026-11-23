@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { ApiProvider, createApi, type ApiSetup } from "./api";
-import { DEMO_DELETION_TOKENS, DEMO_TOKENS } from "./api/fake";
+import { DEMO_DELETION_TOKENS, DEMO_TOKENS, PRACTICE_OWNER_CODES } from "./api/fake";
 import { ApprovePage } from "./approve/ApprovePage";
 import { DeletePage } from "./delete/DeletePage";
 import { OpsConsole } from "./ops/OpsConsole";
@@ -42,8 +42,16 @@ const DEMO_LINKS: { href: string; label: string }[] = [
   { href: `/delete/${DEMO_DELETION_TOKENS.expiredLink}`, label: "Delete a shop's data: link expired" },
 ];
 
+/// The codes an owner's app might show, for linking an owner's account on a shop's People page in practice mode: what each one does.
+const DEMO_CODES: { code: string; what: string }[] = [
+  { code: PRACTICE_OWNER_CODES.dao, what: "Dao's account. It links Sabai Tea." },
+  { code: PRACTICE_OWNER_CODES.fon, what: "Fon's account, which Baan Mali already has. Nothing changes." },
+  { code: PRACTICE_OWNER_CODES.guest, what: "another account. It links a shop with no account, and is refused for one that has one." },
+  { code: PRACTICE_OWNER_CODES.ranOut, what: "a code that has run out." },
+];
+
 /// What anyone who lands outside a link sees. In practice mode it also lists a link for every state of the
-/// owner's page, and the console.
+/// owner's page, the console, and the codes that link an owner's account.
 function Home({ setup, notFound }: { setup: ApiSetup; notFound: boolean }) {
   const scheme = useColorScheme();
   return (
@@ -72,6 +80,19 @@ function Home({ setup, notFound }: { setup: ApiSetup; notFound: boolean }) {
                   <Link className="lk" href={demo.href}>
                     {demo.label}
                   </Link>
+                </li>
+              ))}
+            </ul>
+            <h3 className="h2">Owner link codes</h3>
+            <p className="hint" style={{ margin: 0 }}>
+              On a shop's People page in the console, type one of these to link an owner's account. Each code works once, and is
+              used up the first time it is tried.
+            </p>
+            <ul aria-label="Link codes for a shop's People page"
+              style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
+              {DEMO_CODES.map((demo) => (
+                <li key={demo.code}>
+                  <code>{demo.code}</code>: {demo.what}
                 </li>
               ))}
             </ul>

@@ -151,6 +151,34 @@ function ownerDevicesOf(record: PeopleRecord, nowMs: number): number {
   return Object.values(record.ownerSessions ?? {}).filter((session) => ownerSessionLive(record, session, nowMs)).length;
 }
 
+/// What a session that is not one this record holds, or no longer works, is answered. Both kinds of check answer it.
+const UNAUTHORIZED = { ok: false, error: "unauthorized" } as const;
+
+/// The session a request names, with the hash it is kept under. Only a SHA-256 the record holds as its own key names a
+/// session: never a name every object inherits.
+function heldSession<T>(sessions: Record<string, T>, tokenHash: unknown): { hash: string; session: T } | null {
+  if (typeof tokenHash !== "string" || !SHA256_HEX.test(tokenHash) || !Object.hasOwn(sessions, tokenHash)) return null;
+  const session = sessions[tokenHash];
+  return session ? { hash: tokenHash, session } : null;
+}
+
+/// Whether a helper session still works at `nowMs`, and whose it is, or why not: removal ended it, or it is unknown, ran
+/// out, or is no longer one of the helper's open sessions. One answer for the check a route makes and for ending the
+/// session, so the two can never disagree about which tokens still work.
+function checkHelperSession(record: PeopleRecord, session: HelperSession, nowMs: number): SessionCheck {
+  if (session.endedAt !== undefined) return { ok: false, error: "removed", removedAt: session.endedAt };
+  const helper = record.state.helpers.find((one) => one.id === session.helperId);
+  if (session.expiresAt <= nowMs || !helper?.sessions.includes(session.sessionId)) return UNAUTHORIZED;
+  return { ok: true, helperId: helper.id, sessionId: session.sessionId, name: record.names[helper.id] ?? "" };
+}
+
+/// The same for an owner session: unlinking ended it, or it is unknown, ran out, or is of an account no longer linked.
+function checkOwnerSession(record: PeopleRecord, session: OwnerSession, nowMs: number): OwnerSessionCheck {
+  if (session.endedAt !== undefined) return { ok: false, error: "unlinked", unlinkedAt: session.endedAt };
+  if (!ownerSessionLive(record, session, nowMs)) return UNAUTHORIZED;
+  return { ok: true, accountId: session.accountId, sessionId: session.sessionId };
+}
+
 /// `/people` and `/people/*` on a TenantObject. Reads need only the tenant; writes need the Worker's `x-people` header.
 export async function peopleTenantRoute(storage: DurableObjectStorage, request: Request, url: URL): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
@@ -309,20 +337,27 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 
   /// `{ tokenHash }`: whether a helper session still works, and whose it is. Reads only.
   "POST /people/session-check": (record, body, nowMs) => {
-    // Only a SHA-256 the record holds as its own key names a session: never a name every object inherits.
-    const hash = typeof body.tokenHash === "string" && SHA256_HEX.test(body.tokenHash) ? body.tokenHash : null;
-    const session = hash !== null && Object.hasOwn(record.sessions, hash) ? record.sessions[hash] : undefined;
-    const unauthorized: SessionCheck = { ok: false, error: "unauthorized" };
-    if (!session) return { answer: { status: 200, body: unauthorized } };
-    if (session.endedAt !== undefined) {
-      return { answer: { status: 200, body: { ok: false, error: "removed", removedAt: session.endedAt } satisfies SessionCheck } };
-    }
-    const helper = record.state.helpers.find((one) => one.id === session.helperId);
-    if (session.expiresAt <= nowMs || !helper?.sessions.includes(session.sessionId)) {
-      return { answer: { status: 200, body: unauthorized } };
-    }
-    return { answer: { status: 200, body: { ok: true, helperId: helper.id, sessionId: session.sessionId,
-      name: record.names[helper.id] ?? "" } satisfies SessionCheck } };
+    const held = heldSession(record.sessions, body.tokenHash);
+    return { answer: { status: 200, body: held ? checkHelperSession(record, held.session, nowMs) : UNAUTHORIZED } };
+  },
+
+  /// `{ tokenHash }`: a device signs the helper out: that one session ends, and no other. It leaves the record altogether,
+  /// and its id leaves the helper's open sessions (`rules.endSession`), in one write with its audit entry. It is not kept
+  /// as ended, as removal keeps a session, because nothing removed the helper: the token is simply unknown from now on.
+  /// A session that no longer works is answered as a check answers it, and nothing is written.
+  "POST /people/end-helper-session": (record, body, nowMs) => {
+    const held = heldSession(record.sessions, body.tokenHash);
+    if (!held) return { answer: { status: 200, body: UNAUTHORIZED } };
+    const checked = checkHelperSession(record, held.session, nowMs);
+    if (!checked.ok) return { answer: { status: 200, body: checked } };
+    const ended = rules.endSession(record.state, checked.helperId, checked.sessionId);
+    if (!ended.ok) return { answer: { status: 200, body: UNAUTHORIZED } };
+    const { [held.hash]: _signedOut, ...sessions } = record.sessions;
+    return {
+      answer: { status: 200, body: checked },
+      next: { ...record, state: ended.state, sessions },
+      audit: entry({ kind: "helper", id: checked.helperId }, SYSTEM, "helper.session_ended", { helperId: checked.helperId }),
+    };
   },
 
   /// `{ helperId, request: { id, kind, decided }, taskId, note }`: a helper hands the owner a request with a note
@@ -444,19 +479,27 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 
   /// `{ tokenHash }`: whether an owner session still works, and whose it is. Reads only.
   "POST /people/owner-session-check": (record, body, nowMs) => {
-    // Only a SHA-256 the record holds as its own key names a session: never a name every object inherits.
-    const hash = typeof body.tokenHash === "string" && SHA256_HEX.test(body.tokenHash) ? body.tokenHash : null;
+    const held = heldSession(record.ownerSessions ?? {}, body.tokenHash);
+    return { answer: { status: 200, body: held ? checkOwnerSession(record, held.session, nowMs) : UNAUTHORIZED } };
+  },
+
+  /// `{ tokenHash }`: a device signs the owner's account out of this shop: that one session ends, and no other, in one
+  /// write with its audit entry. It leaves the record altogether, because nothing unlinked the account: the token is
+  /// simply unknown from now on, and does not say "unlinked". A session that no longer works is answered as a check
+  /// answers it, and nothing is written.
+  "POST /people/end-owner-session": (record, body, nowMs) => {
     const sessions = record.ownerSessions ?? {};
-    const session = hash !== null && Object.hasOwn(sessions, hash) ? sessions[hash] : undefined;
-    const unauthorized: OwnerSessionCheck = { ok: false, error: "unauthorized" };
-    if (!session) return { answer: { status: 200, body: unauthorized } };
-    if (session.endedAt !== undefined) {
-      const unlinked: OwnerSessionCheck = { ok: false, error: "unlinked", unlinkedAt: session.endedAt };
-      return { answer: { status: 200, body: unlinked } };
-    }
-    if (!ownerSessionLive(record, session, nowMs)) return { answer: { status: 200, body: unauthorized } };
-    const live: OwnerSessionCheck = { ok: true, accountId: session.accountId, sessionId: session.sessionId };
-    return { answer: { status: 200, body: live } };
+    const held = heldSession(sessions, body.tokenHash);
+    if (!held) return { answer: { status: 200, body: UNAUTHORIZED } };
+    const checked = checkOwnerSession(record, held.session, nowMs);
+    if (!checked.ok) return { answer: { status: 200, body: checked } };
+    const { [held.hash]: _signedOut, ...ownerSessions } = sessions;
+    return {
+      answer: { status: 200, body: checked },
+      next: { ...record, ownerSessions },
+      audit: entry({ kind: "owner", id: checked.accountId }, SYSTEM, "owner.session_ended",
+        { ownerAccountId: checked.accountId }),
+    };
   },
 };
 
