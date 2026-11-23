@@ -1,6 +1,6 @@
 // Settings › Developer: which runtime this computer runs, and signing in to the API when it is Connected.
 //
-// - Runtime: Practice (the in-process demo team, the default) or Connected (the read-only runtime over apps/api at one
+// - Runtime: Practice (the in-process demo team, the default) or Connected (the runtime over apps/api at one
 //   origin). The choice is saved on this computer (runtime/setting.ts) and applies at the next start, which the page
 //   offers when the saved choice is not the one running.
 // - Sign-in: the lifted backend signs in with Apple only. Until the app can ask Apple itself (docs/runtime-adapter.md),

@@ -86,7 +86,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     const denied = item.resolved === "deny";
     return <Line icon={denied ? "✕" : "✓"} text={t(ALLOW_LABEL[item.resolved])} detail={item.command || item.title} testid="card-line" />;
   }
-  if (item.expired && !busy) return <Line icon="–" text={t(EXPIRED_LABEL[item.expired])} detail={item.command || item.title} testid="card-line" />;
+  // the runtime's own words for why it stopped waiting ("Already decided by Mint at 19:42"), when it gave them
+  if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={item.command || item.title} testid="card-line" />;
   if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={item.command || item.title} testid="card-line" />;
 
   const pick = async (choice: ApprovalChoice) => {

@@ -234,6 +234,8 @@ export type ApprovalItem = {
   outdated?: boolean;
   resolved?: ApprovalChoice;
   expired?: AskExpiry;
+  /** Why it stopped waiting, in words, when the runtime said more than the reason ("Already decided by Mint at 19:42"). */
+  expiredNote?: string;
 };
 export type ClarifyItem = {
   kind: "clarify";
@@ -1253,7 +1255,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
         withItems(
           c,
           c.items.map((i) => {
-            if (i.kind === "approval" && i.request_id === ev.request_id && !i.resolved) return { ...i, expired: ev.reason };
+            if (i.kind === "approval" && i.request_id === ev.request_id && !i.resolved) return { ...i, expired: ev.reason, ...(ev.note ? { expiredNote: ev.note } : {}) };
             if (i.kind === "clarify" && i.request_id === ev.request_id && i.answer === undefined) return { ...i, expired: ev.reason };
             return i;
           }),

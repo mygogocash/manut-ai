@@ -2,7 +2,7 @@
 //
 // The rule is deliberately small: a configured WebSocket URL (the page's `__MANUT_BRIDGE_URL__` stand-in, or the
 // `VITE_MANUT_BRIDGE` build variable) selects the WebSocket adapter; otherwise this computer's choice in Settings ›
-// Developer does (setting.ts): Connected selects the read-only runtime over apps/api at its origin (`./http`), and
+// Developer does (setting.ts): Connected selects the runtime over apps/api at its origin (`./http`), and
 // Practice, the default, the in-process runtime. Nothing is configured in a normal build and Practice is the default,
 // so the desktop app starts with no other process and no network. The packaged app's content security policy also
 // allows no socket, so a WebSocket runtime there needs that policy widened on purpose (src-tauri/tauri.conf.json);

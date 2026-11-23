@@ -1,10 +1,11 @@
 // The connected runtime under the app's own store, end to end over a fake API: what waits for the owner reaches Needs
-// you, the shop's tasks are Buddy's threads, its schedules are on the Automations page, and pressing Approve is
-// refused as "not yet" without settling anything, so the ask stays open and the API is sent nothing. When the API
-// cannot be reached the store opens on the last good read the app kept, and replaces it when the API answers again.
+// you, the shop's tasks are Buddy's threads, its schedules are on the Automations page, and pressing Approve answers
+// through the shop's decide route (every way that can go is in answering.test.ts). When the API cannot be reached the
+// store opens on the last good read the app kept, where an ask cannot be answered, and replaces it when the API answers
+// again.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settleApproval } from "../../chat/cards/respond";
-import { setLang, t } from "../../i18n";
+import { setLang } from "../../i18n";
 import { createStore, selectAsks } from "../../state/store";
 import { ShopCache } from "./cache";
 import { HttpHost } from "./host";
@@ -45,14 +46,18 @@ describe("the app's store on the connected runtime", () => {
     expect(state.automations?.map((a) => [a.id, a.name, a.paused])).toEqual([["sched-1", "Morning brief", false]]);
   });
 
-  it("refuses Approve as not yet, leaves the ask open, and sends the API nothing", async () => {
+  it("answers Approve through the shop's decide route, and the ask leaves Needs you once the API took it", async () => {
     const { api, store } = connectedStore();
     await store.actions.init();
     await vi.advanceTimersByTimeAsync(0);
     const [ask] = selectAsks(store.getState());
-    expect(await settleApproval(store, "buddy", ask.item, "once")).toBe(t("rt.notYet"));
-    expect(selectAsks(store.getState())).toHaveLength(1);
-    expect(api.calls.every((c) => c.method === "GET")).toBe(true);
+    api.on("POST", "/v1/approvals/action-1/decision", () => {
+      serveShop(api, { tasks: [taskJson({ actions: [actionJson({ state: "confirmed" })] })] });
+      return { status: 200, json: { result: { ok: true }, action: "confirmed" } };
+    });
+    expect(await settleApproval(store, "buddy", ask.item, "once")).toBeNull();
+    expect(api.to("POST", "/v1/approvals/action-1/decision").map((c) => c.body)).toEqual([{ optionId: "approve", seenRevision: 1 }]);
+    expect(selectAsks(store.getState())).toEqual([]);
   });
 });
 

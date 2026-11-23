@@ -1886,7 +1886,7 @@ export const en = {
   // the account row at the bottom of the menu: the person and the shop, as the canvas writes them ("Fon, Baan Mali")
   "acct.personShop": "{person}, {shop}",
   // the connected runtime (src/runtime/http): its refusals, and a shop's task told as Buddy's notes
-  "rt.notYet": "Not yet: Connected mode only reads for now. Answering and changing things come in a later version.",
+  "rt.notYet": "Not yet: Connected mode reads and answers approvals for now. Changing things comes in a later version.",
   "rt.offline": "Offline: the Manut AI API cannot be reached.",
   "rt.unavailable": "The Manut AI API is not answering right now.",
   "rt.signedOut": "Signed out. Sign in under Settings › Developer.",
@@ -1953,7 +1953,7 @@ export const en = {
   // Settings › Developer: Practice or Connected, the API origin, and signing in to it
   "set.developer": "Developer",
   "dev.runtime": "Runtime",
-  "dev.runtimeHint": "Practice runs a demo team inside the app and never shows real shop data. Connected reads one shop's work from the Manut AI API and changes nothing.",
+  "dev.runtimeHint": "Practice runs a demo team inside the app and never shows real shop data. Connected reads one shop's work from the Manut AI API and answers what waits for you there; it changes nothing else.",
   "dev.practice": "Practice",
   "dev.connected": "Connected",
   "dev.origin": "API origin",

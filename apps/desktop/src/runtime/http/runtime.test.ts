@@ -1,5 +1,6 @@
 // The connected runtime end to end over a fake API: what it reads, what it shows through the app's protocol, how it
-// stays current, and how it reports being signed out, offline or facing an API that does not answer. It writes nothing.
+// stays current, and how it reports being signed out, offline or facing an API that does not answer. The one write it
+// makes, answering an ask, is in answering.test.ts; every other write answers "not yet".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError, BridgeEvent } from "../../lib/protocol";
@@ -263,12 +264,12 @@ describe("reading", () => {
 });
 
 describe("writing", () => {
-  it("answers every write with a clear not yet, and sends nothing to the API", async () => {
+  it("answers every write but an answer to an ask with a clear not yet, and sends nothing to the API", async () => {
     const { api, rt } = setup();
     serveShop(api);
     await rt.connect();
     const req = rt.request.bind(rt) as unknown as (op: string, p: unknown) => Promise<unknown>;
-    for (const op of WRITE_OPS)
+    for (const op of WRITE_OPS.filter((op) => op !== "approval.respond"))
       expect(await refusal(req(op, { bot: "buddy", request_id: "action-1@1", choice: "once", text: "hi", job: "sched-1" })), op).toEqual({
         code: "not_yet",
         message: t("rt.notYet"),

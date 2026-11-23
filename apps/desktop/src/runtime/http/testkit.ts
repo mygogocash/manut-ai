@@ -12,7 +12,8 @@ import { readShop } from "./shop";
 
 export const ORIGIN = "https://dev.manut.xyz";
 
-/** Every op the connected runtime refuses because it only reads: each answers `not_yet` while connected and `offline` while only a kept read is shown. */
+/** Every op that writes. Each answers `offline` while only a kept read is shown (an ask: "Connect to answer this"); while
+ *  connected, `approval.respond` answers through the decide route and every other one answers `not_yet`. */
 export const WRITE_OPS = [
   "chat.send",
   "chat.steer",

@@ -1,6 +1,8 @@
-// What an approval card shows for an ask of the connected runtime this build cannot answer (a kind, an answer or a state
-// it does not know): it is shown whole with no answer offered and says to update the app, whether or not the API can be
-// reached. This is what the person sees; the runtime's own refusal comes with answering.
+// What an approval card shows for the connected runtime's answers: an ask this build cannot answer (a kind, an answer or
+// a state it does not know) is shown whole with no answer offered and says to update the app, whether or not the API can
+// be reached; and a card that stopped waiting closes in the runtime's own words when it gave them ("Already decided by
+// Mint at 19:42"), else in the card's usual word for why. The runtime refuses an answer on its own too
+// (runtime/http/answering.test.ts); this is what the person sees.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../../i18n";
@@ -74,5 +76,31 @@ describe("an ask this build cannot answer", () => {
     expect(html).not.toContain("card-outdated");
     expect(html).toContain('data-choice="deny"');
     expect(html).toContain('data-choice="once"');
+  });
+});
+
+describe("a card that stopped waiting", () => {
+  it("closes in the runtime's words when it gave them", () => {
+    setLang("en");
+    connected("open");
+    const html = renderToString(<Cards bot="buddy" item={ask({ expired: "resolved", expiredNote: "Already decided by Mint at 19:42" })} />);
+    expect(html).toContain('data-testid="card-line"');
+    expect(html).toContain("Already decided by Mint at 19:42");
+    expect(html).not.toContain("Answered elsewhere");
+    expect(html).toContain("Send on LINE: “Your order ships tomorrow morning.”");
+  });
+
+  it("closes in the card's usual word without them", () => {
+    setLang("en");
+    connected("open");
+    expect(renderToString(<Cards bot="buddy" item={ask({ expired: "resolved" })} />)).toContain("Answered elsewhere");
+  });
+
+  it("keeps the person's own answer over any words: an answered card says what they chose", () => {
+    setLang("en");
+    connected("open");
+    const html = renderToString(<Cards bot="buddy" item={ask({ resolved: "once", expired: "resolved", expiredNote: "Already decided by you at 19:42" })} />);
+    expect(html).toContain("Allowed once");
+    expect(html).not.toContain("Already decided");
   });
 });
