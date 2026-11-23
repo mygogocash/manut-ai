@@ -1,0 +1,213 @@
+/* App frame: sidebar | main | details (0px closed, 300px open). */
+.window {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-columns: var(--side-w) minmax(0, 1fr) 0px;
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--bg);
+  transition: grid-template-columns 0.25s ease;
+  overflow: hidden;
+  /* clip, not just hide: the closed panel's 1px border (and, under 1100px, the panel parked off to the right) made
+     .window 1px wider than the screen, and a scroll into view could shift the whole app 1px left */
+  overflow: clip;
+}
+.window.panel-open {
+  grid-template-columns: var(--side-w) minmax(0, 1fr) var(--panel-w);
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+.details {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--side);
+  border-left: 1px solid var(--line-soft);
+}
+.window:not(.panel-open) .details {
+  border-left-color: transparent;
+}
+/* the panel's left edge is a drag handle (PanelResizer): a 6px strip, a line when it is in use */
+.details {
+  position: relative;
+}
+.panel-resizer {
+  /* inside the panel's edge: .details clips what sticks out */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after,
+.panel-resizer.on::after {
+  width: 3px;
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.panel-resizer:focus-visible {
+  outline: none;
+}
+/* while dragging the columns follow the pointer at once, and the drag selects no text */
+.window.panel-dragging {
+  transition: none;
+  user-select: none;
+  cursor: col-resize;
+}
+/* Maximised in place (⌘⇧G, the tab row's button): PanelResizer sets --panel-w to everything right of the sidebar,
+   so the chat column folds to 0 inside the same grid. The chat stays mounted, hidden and inert, and is hidden only
+   once the panel has covered it. No handle while maximised. */
+.window.panel-maxing {
+  transition: grid-template-columns 0.18s ease-out;
+}
+.window.panel-max .main {
+  visibility: hidden;
+  transition: visibility 0s linear 0.18s;
+}
+.window.panel-max .panel-resizer {
+  display: none;
+}
+.window.panel-max .details {
+  border-left-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .window.panel-maxing,
+  .window.panel-maxing .details,
+  .window.panel-max .main {
+    transition: none;
+  }
+}
+/* A narrow window keeps the chat its width: the panel slides over it instead of pushing it to ~350px. */
+@media (max-width: 1099px) {
+  .window.panel-open {
+    grid-template-columns: var(--side-w) minmax(0, 1fr) 0px;
+  }
+  .details {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--panel-w);
+    z-index: 20;
+    box-shadow: var(--pop-shadow);
+    transition: transform 0.25s ease;
+  }
+  .window:not(.panel-open) .details {
+    transform: translateX(100%);
+    box-shadow: none;
+  }
+}
+.details-in {
+  width: var(--panel-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.details-h {
+  height: 52px; /* the chat header's height: the two dividers meet in one line */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+  flex: none;
+}
+.details-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px 16px;
+}
+.details-id b {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+}
+.details-id > div {
+  min-width: 0;
+  flex: 1;
+}
+.details-edit {
+  flex: none;
+  align-self: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--raise);
+}
+.details-edit:hover {
+  color: var(--ink);
+  background: var(--raise2);
+}
+.details-id span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.details-id span.mono {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+/* header (shared by chat and settings) */
+.head {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 0 16px;
+  flex: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+.head-title {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+}
+/* a page's back arrow sits on the header's left padding, so the title keeps its place beside it */
+.head > .head-back {
+  margin-left: -6px;
+  margin-right: -4px;
+}
+.head-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.plain-note {
+  padding: 18px 28px;
+  font-size: 12px;
+  color: var(--quiet);
+}

@@ -28,7 +28,8 @@ Week 1, the pilot slice:
 
 Week 2, brought forward:
 
-- [ ] `apps/desktop`: fork of Oh My Hermes with the Hermes bridge removed (in progress on the Mac)
+- [x] `apps/desktop`: fork of Oh My Hermes with the Hermes bridge removed (1,358 unit tests, `cargo check` passes)
+- [ ] `apps/desktop`, next pass: the canvas side menu and screens, a real runtime adapter against `apps/api`, approvals through `packages/approval-core`, and a triage of the 156 Playwright specs (some still expect removed screens)
 - [x] `packages/agent-events`: the agent event contract ported from GoSpark (213 tests)
 - [x] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta
 - [ ] Dry run with two test shops (needs a dev deploy and the owner's Cloudflare token)

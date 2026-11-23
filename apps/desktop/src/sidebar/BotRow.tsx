@@ -1,0 +1,362 @@
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import type { Bot } from "../lib/protocol";
+import { askText, liveLabel, type Ask, type Chat } from "../state/store";
+import { Avatar, LiveRing, Ticker, TypingDots } from "../ui";
+import { AskLine } from "./Needs";
+import { busyFor, shortTime } from "../app/time";
+import { useNow } from "../elsewhere/useNow";
+import { fileName, splitMedia } from "../chat/parts/mediaLines";
+import { listText, t } from "../i18n";
+import { WORKING } from "../state/store";
+import { useRestart } from "./restart";
+import { RestartLine } from "./RestartLine";
+import { useMates } from "./restart";
+import type { RowDrag } from "./useRowDrag";
+import { NewThreadIcon } from "../threads/NewThreadIcon";
+import { termLinkText } from "../sessions/termShare";
+
+/** The newest thing said in a bot's threads: when, and the line. The bot row shows it when it is newer than the main
+ *  chat's own last line. A thread with nothing said yet gives nothing: its title is listed right under the bot, so
+ *  the bot row keeps its main chat's line (tidy, 2026-11-16). */
+export function threadsLatest(rows: { thread: string; title: string; preview?: string; last?: number; started_at: number }[], chatOf: (thread: string) => Chat | undefined): { text: string; ts: number } | null {
+  let best: { text: string; ts: number } | null = null;
+  for (const r of rows) {
+    const items = chatOf(r.thread)?.items ?? [];
+    let said: { text: string; ts: number } | null = null;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === "assistant" || it.kind === "user") {
+        said = { text: plain(it.text), ts: it.ts };
+        break;
+      }
+    }
+    if (!said?.text) continue;
+    const ts = Math.max(r.last ?? 0, said.ts);
+    if (!ts || (best && best.ts >= ts)) continue;
+    best = { text: said.text, ts };
+  }
+  return best;
+}
+
+/** The live step the activity line shows ("Reading gateway.log", "Running pnpm test"); "Thinking…" until there
+ *  is one ("Working…" is only the placeholder of a turn found running on open). */
+const liveText = (status: string | undefined) => (status && status !== WORKING ? status : t("row.thinking"));
+
+/** One-line preview: the live step while running, else the last assistant text. */
+export function preview(bot: Bot, chat: Chat | undefined): { text: string; live: boolean; ts: number | null } {
+  if (bot.status === "offline") return { text: t("row.offline"), live: false, ts: null };
+  if (chat?.turn) return { text: liveText(chat.turn.status), live: true, ts: chat.turn.startedAt / 1000 };
+  const items = chat?.items ?? [];
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "assistant") return { text: plain(it.text), live: false, ts: it.ts };
+  }
+  const last = items[items.length - 1];
+  if (bot.running) return { text: liveText(""), live: true, ts: null };
+  return { text: bot.description || "", live: false, ts: last ? last.ts : null };
+}
+
+/** The live step as the activity line shows it: the command or path of the latest tool in a code span. */
+function LiveStep({ chat, text }: { chat: Chat | undefined; text: string }) {
+  const l = chat?.turn ? liveLabel(chat.turn) : null;
+  return (
+    <Ticker text={text}>
+      {l?.code ? (
+        <>
+          {l.verb} <code>{l.code}</code>
+        </>
+      ) : (
+        text
+      )}
+    </Ticker>
+  );
+}
+
+/** Markdown-ish text to one plain line; a file the bot sent shows as its name, and an manut terminal link as that
+ *  terminal's title (as its chip reads), never the raw `manut://terminal/…` address. */
+export const plain = (raw: string) => {
+  const { text, paths } = splitMedia(raw);
+  return text ? flat(termLinkText(text)) : paths.map(fileName).join(", ");
+};
+const flat = (t: string) =>
+  t
+    .replace(/```[\s\S]*?```/g, " ")
+    // list markers at a line's start ("- Fix PR", "* a", "+ b", "1. c", "- [ ] task"): the preview read "…work: - Fi…"
+    .replace(/^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, "")
+    .replace(/[`*_>#]/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const MENU_W = 188;
+const MENU_H = 236;
+
+export interface RowMenu {
+  /** "New thread · <name>": a new, empty thread under this bot, opened with the composer focused. */
+  onNewThread?: () => void;
+  pinned: boolean;
+  onPin: () => void;
+  onEdit: () => void;
+  /** Restart that bot (Start when it is offline); restart.ts holds what follows. Absent when the runtime cannot
+   *  restart the process behind a bot: the menu then has no such item. */
+  onRestart?: () => void;
+  /** The bot is offline: the row reads "Start". */
+  offline?: boolean;
+  /** Take the bot out of the sidebar list (the profile stays; it is offered under + again). Absent for the last
+   *  listed bot: the item shows disabled, with a tooltip saying why. */
+  onRemove?: () => void;
+}
+
+/** Right-click or ⋯ menu of a bot row: New thread · <name> first, in a group of its own (its icon, a divider under
+ *  it: it is work with the bot, not managing the bot; owner, 2026-11-18), then Pin to top, Edit bot, Restart (Start
+ *  when offline), Remove from list. Nothing that would create, stop or delete a Hermes profile, and no "restart all". */
+function Menu({ menu, onClose, name, bot, at }: { menu: RowMenu; onClose: () => void; name: string; bot: string; at: { x: number; y: number } }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Restart restarts the gateway process that serves this bot: say who else goes down with it, before the press
+  const mates = useMates(bot);
+  useEffect(() => {
+    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+  const run = (fn: () => void) => () => {
+    onClose();
+    fn();
+  };
+  // each item says what it is, so one that is absent (New thread, Restart) never shifts another's look or test id
+  type Item = { kind: "new" | "pin" | "edit" | "restart" | "remove"; label: string; fn: (() => void) | undefined };
+  const items: Item[] = [
+    ...(menu.onNewThread ? [{ kind: "new", label: t("thread.new", { name }), fn: menu.onNewThread } satisfies Item] : []),
+    { kind: "pin", label: menu.pinned ? t("row.unpin") : t("row.pin"), fn: menu.onPin },
+    { kind: "edit", label: t("row.edit"), fn: menu.onEdit },
+    ...(menu.onRestart ? [{ kind: "restart", label: menu.offline ? t("row.start") : t("row.restart"), fn: menu.onRestart } satisfies Item] : []),
+    { kind: "remove", label: t("row.remove"), fn: menu.onRemove },
+  ];
+  return (
+    <div
+      ref={ref}
+      className="row-menu"
+      style={{ left: at.x, top: at.y }}
+      role="menu"
+      aria-label={t("row.actions", { name })}
+      data-testid="row-menu"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+          return;
+        }
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        e.preventDefault();
+        const btns = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not([aria-disabled])") ?? [])];
+        const at = btns.indexOf(document.activeElement as HTMLButtonElement);
+        btns[(at + (e.key === "ArrowDown" ? 1 : btns.length - 1)) % btns.length]?.focus();
+      }}
+    >
+      {items.map(({ kind, label, fn }) =>
+        kind === "new" && fn ? (
+          <div key={label} role="none" className="row-mg">
+            <button type="button" role="menuitem" className="row-mi row-mi-new" onClick={run(fn)} data-testid="row-new-thread">
+              <NewThreadIcon size={14} />
+              <span className="row-mi-l">{label}</span>
+            </button>
+            <div role="separator" className="row-sep" data-testid="row-menu-sep" />
+          </div>
+        ) : kind === "restart" && mates.length && fn ? (
+          <button key={label} type="button" role="menuitem" className="row-mi two" onClick={run(fn)} data-testid="row-restart">
+            {label}
+            <span className="row-mi-sub" data-testid="row-restart-with">
+              {t("row.restartWith", { list: listText(mates.map((m) => m.display_name)) })}
+            </span>
+          </button>
+        ) : (
+          <button
+            key={label}
+            type="button"
+            role="menuitem"
+            className="row-mi"
+            onClick={fn ? run(fn) : undefined}
+            aria-disabled={!fn || undefined}
+            title={!fn && kind === "remove" ? t("row.removeLast") : undefined}
+            data-testid={kind === "restart" ? "row-restart" : kind === "remove" ? "row-remove" : undefined}
+          >
+            {label}
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+export function BotRow({
+  bot,
+  chat,
+  unread,
+  active,
+  asks = [],
+  pinned = false,
+  menu,
+  onSelect,
+  drag,
+  children,
+  groupId,
+  latest,
+}: {
+  bot: Bot;
+  chat: Chat | undefined;
+  unread: number;
+  active: boolean;
+  /** Approvals and questions of this bot still waiting on the person. */
+  asks?: Ask[];
+  pinned?: boolean;
+  menu?: RowMenu;
+  onSelect: () => void;
+  /** Hold-and-drag reordering (useRowDrag); absent while the list is filtered. */
+  drag?: RowDrag | null;
+  /** The bot's threads, nested under the row (a `role=group` inside this treeitem). */
+  children?: ReactNode;
+  /** The id of that group, when there is one (aria-owns / aria-expanded). */
+  groupId?: string;
+  /** The newest activity in the bot's threads (threadsLatest): the row's time and line when newer than its chat's. */
+  latest?: { text: string; ts: number } | null;
+}) {
+  // The menu is fixed to the window (the bot list scrolls and would clip it): opened at the pointer on a
+  // right-click, under the ⋯ button otherwise, kept inside the sidebar's width and the window's height.
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const open = at !== null;
+  const wrap = useRef<HTMLDivElement>(null);
+  const place = (x: number, y: number) => {
+    const side = wrap.current?.closest(".side")?.getBoundingClientRect();
+    const right = (side?.right ?? window.innerWidth) - 6;
+    setAt({ x: Math.max(6, Math.min(x, right - MENU_W)), y: Math.min(y, window.innerHeight - MENU_H - 6) });
+  };
+  const own = preview(bot, chat);
+  const p = latest && !own.live && bot.status !== "offline" && latest.ts > (own.ts ?? 0) ? { text: latest.text, live: false, ts: latest.ts } : own;
+  const rs = useRestart(bot.name);
+  const restarting = rs.step === "restarting";
+  const running = bot.running || !!chat?.turn;
+  const needs = asks.length;
+  const text = needs ? askText(asks[asks.length - 1].item) : p.text;
+  const live = p.live && !needs;
+  // the time slot: how long a busy bot has been at it ("12s", "1m"), "waiting" while an ask is open, else the time
+  const busySince = running && !needs ? chat?.turn?.startedAt ?? null : null;
+  const now = useNow(busySince !== null, 1_000);
+  const onContext = (e: MouseEvent) => {
+    if (!menu) return;
+    e.preventDefault();
+    place(e.clientX, e.clientY);
+  };
+  return (
+    <div
+      ref={wrap}
+      className={`bot-w${menu?.onNewThread ? " can-new" : ""}${open ? " menu-open" : ""}${drag?.lifted ? " lifted" : ""}${drag?.active ? " sliding" : ""}`}
+      style={drag?.dy ? { transform: `translateY(${drag.dy}px)` } : undefined}
+      onContextMenu={onContext}
+      onPointerDown={drag?.onPointerDown}
+      onKeyDown={drag?.onKeyDown}
+      data-testid={`bot-row-${bot.name}`}
+      role="treeitem"
+      aria-level={1}
+      aria-selected={active}
+      aria-expanded={groupId ? true : undefined}
+      aria-label={bot.display_name}
+    >
+      <button
+        type="button"
+        className={`bot${active ? " active" : ""}${unread && !needs ? " unread" : ""}${needs ? " needs" : ""}`}
+        onClick={onSelect}
+        aria-current={active ? "true" : undefined}
+        data-testid={`bot-${bot.name}`}
+      >
+        {/* answering: a thin rotating ring around the face; an open ask stops it (the amber dot takes over) */}
+        <LiveRing on={(running && !needs) || restarting} size={34} gap={3.5} label={restarting ? t("rs.restarting") : t("row.answering")} seed={bot.name}>
+          <Avatar bot={bot.name} size={34} />
+        </LiveRing>
+        <span className="bot-m">
+          <span className="bot-r1">
+            <span className={bot.host ? "bot-n has-ssh" : "bot-n"}>
+              {bot.host ? <span className="bot-nt">{bot.display_name}</span> : bot.display_name}
+              {pinned && <span className="bot-pin" data-testid="pinned" aria-label={t("row.pinned")} title={t("row.pinned")} />}
+            </span>
+            {restarting ? (
+              <span className="bot-t busy" data-testid="bot-time" data-restarting="true">
+                {bot.status === "offline" ? t("rs.starting") : t("rs.restarting")}
+              </span>
+            ) : needs > 0 ? (
+              <span className="bot-t wait" data-testid="bot-time">
+                {t("row.waiting")}
+              </span>
+            ) : busySince !== null ? (
+              <span className="bot-t busy" data-testid="bot-time">
+                {busyFor(now - busySince)}
+              </span>
+            ) : (
+              p.ts !== null && (
+                <span className="bot-t" data-testid="bot-time">
+                  {shortTime(p.ts)}
+                </span>
+              )
+            )}
+          </span>
+          <span className="bot-r2">
+            <span className={`bot-p${live ? " live" : ""}${needs ? " ask" : ""}`} data-testid="bot-sub">
+              {needs ? <AskLine text={text} /> : live ? <LiveStep chat={chat} text={text} /> : text}
+            </span>
+            {live && <TypingDots size={3} testId="bot-typing" />}
+            {needs > 0 ? (
+              // a plain amber dot, no number: a count here would read as unread (the strip carries the count)
+              <span className="needs-dot" data-testid="needs" role="status" aria-label={t("row.needsAnswer")} title={t("row.needsAnswer")} />
+            ) : (
+              unread > 0 && (
+                <span className="badge" data-testid="unread">
+                  {unread}
+                </span>
+              )
+            )}
+          </span>
+        </span>
+      </button>
+      {menu?.onNewThread && (
+        // a new thread one press away on hover, beside ⋯ (the same action as the menu's first line)
+        <button
+          type="button"
+          className="bot-new"
+          aria-label={t("thread.new", { name: bot.display_name })}
+          title={t("thread.new", { name: bot.display_name })}
+          data-testid={`bot-new-${bot.name}`}
+          onClick={menu.onNewThread}
+        >
+          <NewThreadIcon size={14} />
+        </button>
+      )}
+      {menu && (
+        <button
+          type="button"
+          className="bot-more"
+          aria-label={t("row.more", { name: bot.display_name })}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          data-testid={`bot-more-${bot.name}`}
+          onClick={(e) => {
+            if (open) return setAt(null);
+            const r = e.currentTarget.getBoundingClientRect();
+            const row = wrap.current?.getBoundingClientRect();
+            place(r.right - MENU_W, (row?.bottom ?? r.bottom) + 2);
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+      )}
+      {menu && at && <Menu menu={menu} at={at} name={bot.display_name} bot={bot.name} onClose={() => setAt(null)} />}
+      <RestartLine bot={bot} testId={`restart-line-${bot.name}`} pop />
+      {children}
+    </div>
+  );
+}

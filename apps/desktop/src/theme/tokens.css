@@ -1,0 +1,266 @@
+/* Manut AI's design tokens for the desktop app.
+
+   Two layers. The first is the design system itself: the values of packages/ui-kit/tokens.json (version 0.2), under
+   the same names packages/ui-kit/app.css gives them (`--aui-*`, `--main`, `--soft`, `--hov`…), for dark and light.
+   src/theme/tokens.test.ts reads tokens.json and fails when a value here drifts from it, so change the tokens there
+   first. The second layer is the names the screens were written against in Oh My Hermes (`--bg`, `--raise`,
+   `--line`, `--muted`…), each pointed at a design token. That makes this a restyle at the token level only: no
+   screen's CSS changed, and a screen rebuilt on the kit's own classes can use the first layer directly.
+
+   Dark is the default (:root); light lives under [data-theme="light"]. The app resolves the "system" preference to
+   dark or light in JS and writes the result to <html data-theme>. (The kit's canvas switches with `data-t="dark"`;
+   the mechanism differs, the values are the same.) */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- layer 1: the design tokens (dark) ---------------------------------------------------- */
+  --aui-font: "Geist", "IBM Plex Sans Thai", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --aui-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-read: "Source Serif 4", "Noto Serif Thai", Georgia, serif;
+
+  --rad-sm: 6px;
+  --rad: 8px;
+  --rad-lg: 12px;
+  --rad-xl: 16px;
+  --rad-pill: 999px;
+
+  --main: #171716;
+  --side: #111110;
+  --aui-surface: #1f1f1d;
+  --aui-overlay: #262624;
+  --soft: #252523;
+  --aui-subtle: #222220;
+  --hov: #2b2b28;
+  --aui-border: #30302d;
+  --aui-border-strong: #75746e;
+  --aui-ink: #f3f2ee;
+  --aui-muted: #a3a29c;
+  --aui-placeholder: #8f8e88;
+  --aui-primary: #f3f2ee;
+  --aui-on-primary: #111110;
+  --aui-focus: #8cc4ff;
+  --aui-info: #8cc4ff;
+  --bluebg: #13283f;
+  --aui-success: #5fd68a;
+  --okbg: #12301e;
+  --aui-danger: #ff8a8e;
+  --errbg: #3a1719;
+  --aui-warning: #e0b43a;
+  --warnbg: #3a3318;
+  --aui-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -14px rgba(0, 0, 0, 0.7);
+
+  /* the same in both themes */
+  --aui-blue: #4da3ff;
+  --aui-green: #22b455;
+  --aui-amber: #e0b43a;
+  --aui-red: #e5484d;
+  --face-ink: #1f2022;
+
+  /* ---- layer 2: the names the screens use --------------------------------------------------- */
+
+  /* brand: the wordmark is plain ink and the mark is its own file; no gradient */
+  --l1: var(--aui-primary);
+  --l2: var(--aui-primary);
+  --l3: var(--aui-primary);
+  --g-logo: linear-gradient(var(--aui-primary), var(--aui-primary));
+  --g-word: linear-gradient(var(--aui-ink), var(--aui-ink));
+
+  /* accent: the colour set the person picks (Settings > Appearance). It paints only the accent points: send button,
+     unread badge, live dots, skill chip, spinner, your bubble. Manut AI's own set is the primary button colour, a
+     near-black or near-white, so the three stops are one colour; the other sets below keep their gradients. */
+  --a1: var(--l1);
+  --a2: var(--l2);
+  --a3: var(--l3);
+  --g-accent: linear-gradient(120deg, var(--a1), var(--a2) 55%, var(--a3));
+  --on-accent: var(--aui-on-primary);
+  /* Buddy blue is for working dots, never for text */
+  --spin: var(--aui-blue);
+
+  /* surfaces */
+  --page: var(--main);
+  --bg: var(--main);
+  --raise: var(--aui-surface);
+  --raise2: var(--hov);
+  --line: var(--aui-border);
+  --line-soft: var(--aui-subtle);
+  --line-strong: var(--aui-border-strong);
+  --hover: var(--hov);
+  --active-row: var(--hov);
+  --search-bg: var(--aui-surface);
+  --grp-bg: var(--aui-surface);
+  --pop: var(--aui-overlay);
+  --seg-on: var(--aui-surface);
+  --knob: #ffffff;
+  --toggle-off: var(--hov);
+  --toggle-off-line: var(--aui-border-strong);
+
+  /* text */
+  --ink: var(--aui-ink);
+  --body: var(--aui-ink);
+  --muted: var(--aui-muted);
+  --quiet: var(--aui-placeholder);
+  --ok: var(--aui-success);
+  --danger: var(--aui-danger);
+  --accent: var(--aui-info);
+  --link: var(--aui-info);
+  --focus: var(--aui-focus);
+
+  /* bubbles: filled on both sides, no border; the owner's message is the quiet fill */
+  --bub-bot: var(--aui-subtle);
+  --bub-me: var(--soft);
+  --user: var(--soft);
+
+  /* elsewhere source squares: other apps' own colours, not ours */
+  --src-discord: #5865f2;
+  --src-slack: #e8a33c;
+  --src-telegram: #2aabee;
+  --src-cron: var(--quiet);
+
+  /* text size (Settings > Appearance): messages and the composer only */
+  --fs-msg: 13px;
+  --lh-msg: 1.55;
+
+  /* shape + type */
+  --r: var(--rad);
+  --r-sm: var(--rad-sm);
+  --r-lg: var(--rad-lg);
+  --r-bubble: var(--rad-xl);
+  --side-x: 8px;
+  --side-w: 248px;
+  --panel-w: 300px;
+  --thread-w: 920px;
+  /* The interface stack of the tokens, with the CJK families the Korean, Japanese and Chinese translations need put
+     before the last generic name: Simplified Chinese (PingFang SC on macOS, Microsoft YaHei on Windows, Noto on
+     Linux), Japanese and Korean. `<html lang>` (zh-CN / ja / ko) picks the right glyphs for the shared Han
+     characters. Geist and IBM Plex Sans Thai are bundled (fonts.css). */
+  --font: "Geist", "IBM Plex Sans Thai", -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo",
+    "Noto Sans CJK JP", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --mono: var(--aui-font-mono);
+
+  /* one shadow, for menus, dialogs and the ask box; the hairline ring keeps a popover's edge on a same-colour ground */
+  --shadow: var(--aui-shadow-card), 0 0 0 1px var(--aui-border);
+  --pop-shadow: var(--aui-shadow-card), 0 0 0 1px var(--aui-border);
+  --scrollbar: var(--aui-border);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* ---- layer 1: the design tokens (light) --------------------------------------------------- */
+  --main: #fbfaf7;
+  --side: #f3f2ee;
+  --aui-surface: #ffffff;
+  --aui-overlay: #ffffff;
+  --soft: #f4f3ef;
+  --aui-subtle: #f1f0eb;
+  --hov: #eceae4;
+  --aui-border: #e7e5df;
+  --aui-border-strong: #8a8881;
+  --aui-ink: #111110;
+  --aui-muted: #6a6964;
+  --aui-placeholder: #737269;
+  --aui-primary: #1a1a19;
+  --aui-on-primary: #ffffff;
+  --aui-focus: #2f7fe0;
+  --aui-info: #1764c0;
+  --bluebg: #e8f2fe;
+  --aui-success: #177a3b;
+  --okbg: #e4f5ea;
+  --aui-danger: #c62f35;
+  --errbg: #fbe9ea;
+  --aui-warning: #7d5e0e;
+  --warnbg: #f6efd3;
+  --aui-shadow-card: 0 1px 2px rgba(17, 17, 16, 0.05), 0 10px 28px -14px rgba(17, 17, 16, 0.16);
+
+  /* ---- layer 2: what differs from dark beyond the tokens themselves ------------------------- */
+  --src-slack: #d08a1e;
+  /* Buddy blue is too light for a thin spinner on white: the info blue carries it */
+  --spin: var(--aui-info);
+}
+
+/* ---- colour sets ------------------------------------------------------------------------------
+   Each sets the accent gradient, the link colour and your bubble's tint, for dark and light.
+   "manut" is the default above (the primary button colour). Selection states stay gray in every set. */
+
+/* "manut" restated so a swatch inside another set still shows the default colours */
+[data-palette="manut"] {
+  --a1: var(--l1);
+  --a2: var(--l2);
+  --a3: var(--l3);
+}
+[data-palette="graphite"] {
+  --a1: #6a707c;
+  --a2: #565c67;
+  --a3: #454a54;
+  --on-accent: #fff;
+  --spin: #a3a8b1;
+  --link: #c9cdd4;
+  --bub-me: #34363b;
+}
+[data-palette="ocean"] {
+  --a1: #2457c9;
+  --a2: #2f6fe4;
+  --a3: #3a7fe0;
+  --on-accent: #fff;
+  --spin: #5ea2f5;
+  --link: #8cbcff;
+  --bub-me: #1f3150;
+}
+[data-palette="forest"] {
+  --a1: #157a51;
+  --a2: #1d9160;
+  --a3: #3c9d58;
+  --on-accent: #fff;
+  --spin: #4cc08a;
+  --link: #86d9ab;
+  --bub-me: #1d3a2c;
+}
+[data-palette="sunset"] {
+  --a1: #d2461f;
+  --a2: #df6430;
+  --a3: #e5873a;
+  --on-accent: #fff;
+  --spin: #f2884b;
+  --link: #ffb48c;
+  --bub-me: #45291d;
+}
+[data-palette="rose"] {
+  --a1: #c42f66;
+  --a2: #d6477c;
+  --a3: #de6390;
+  --on-accent: #fff;
+  --spin: #ec6a9a;
+  --link: #ffa3c2;
+  --bub-me: #45202f;
+}
+
+[data-theme="light"][data-palette="graphite"] {
+  --link: #3f4550;
+  --bub-me: #e4e5e8;
+}
+[data-theme="light"][data-palette="ocean"] {
+  --link: #1d5fd1;
+  --bub-me: #d8e7fa;
+}
+[data-theme="light"][data-palette="forest"] {
+  --link: #16794d;
+  --bub-me: #d9eedf;
+}
+[data-theme="light"][data-palette="sunset"] {
+  --link: #b5521f;
+  --bub-me: #fae4d4;
+}
+[data-theme="light"][data-palette="rose"] {
+  --link: #b8285f;
+  --bub-me: #f8dce6;
+}
+
+[data-text="medium"] {
+  --fs-msg: 14px;
+}
+[data-text="large"] {
+  --fs-msg: 15px;
+  --lh-msg: 1.6;
+}

@@ -1,0 +1,3194 @@
+//! Agent sessions: manut starts one agent program from a FIXED list (the built-ins `claude`, `codex`, `omo`, `dsh`,
+//! `omh`, `pi`, `omp`, `grok`, `opencode`, and the generic ACP agents of [`crate::acp_agents::ACP_LIST`]) in a pseudo-terminal (its own terminal UI) or, for a chat, through [`crate::agent_chat`], in a folder the person picked, and stops it when the session is closed or
+//! the app quits.
+//!
+//! The UI only ever names an agent id. The program, its path and its arguments are decided here: an id that
+//! is not in [`AGENTS`] is refused, and there is no way to pass a command line or extra arguments from the
+//! UI beyond a conversation id to continue ([`resume_args`]). Agent discovery looks on `PATH` plus the usual install folders, because an app started from the Dock
+//! or the Start menu gets a much shorter `PATH` than a terminal does.
+
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::Serialize;
+
+use crate::acp_agents::{self, AcpEntry};
+use crate::platform::Os;
+
+/// One agent program manut may start.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Agent {
+    /// What the UI sends (`session_start(agent: "claude", …)`).
+    pub id: &'static str,
+    /// The program looked up on `PATH` and in the install folders.
+    pub program: &'static str,
+    pub label: &'static str,
+    /// How a new session opens: a chat driven through the agent's structured mode, the manut chat on
+    /// Hermes (omh, through the bridge), or the agent's own terminal UI.
+    pub mode: Mode,
+}
+
+/// How a session of an agent opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    /// The agent's structured mode (see [`chat_args`]), shown as an manut chat.
+    Chat,
+    /// oh-my-hermes: a Hermes chat through the bridge, no new program.
+    Hermes,
+    /// The agent's own terminal UI in a pseudo-terminal.
+    Terminal,
+}
+
+/// The built-in agents. With [`crate::acp_agents::ACP_LIST`] this is the whole allow-list ([`agent`]); adding a
+/// program to either is a boundary change (Oh My Hermes' docs/OMHER-BOUNDARY.md rule 11). Claude Code, Codex and OmO are the main
+/// agents (their own adapters); the UI names that tier (`main` in src/sessions/agents.ts).
+pub const AGENTS: [Agent; 9] = [
+    Agent { id: "claude", program: "claude", label: "Claude Code", mode: Mode::Chat },
+    Agent { id: "codex", program: "codex", label: "Codex", mode: Mode::Chat },
+    // OmO (`omo-ai`, oh-my-openagent on the senpi engine) speaks pi's RPC: `omo --mode rpc`, checked against omo
+    // 5.0.0-beta.65 (get_state, prompt, agent_end; `--session <id>` continues a conversation).
+    Agent { id: "omo", program: "omo", label: "OmO", mode: Mode::Chat },
+    // DSH is DeepSeek Harness (deepseek-ai/deepseek-harness), found only where the harness installs its CLI
+    // ([`dsh_harness`]), never another `dsh` on PATH. It ships no terminal profile, so its chat runs one
+    // `dsh --profile headless --json` per message ([`dsh_turn_args`], crate::dsh_chat), continued by `--session-id`.
+    Agent { id: "dsh", program: "dsh", label: "DSH", mode: Mode::Chat },
+    Agent { id: "omh", program: "omh", label: "oh-my-hermes", mode: Mode::Hermes },
+    Agent { id: "pi", program: "pi", label: "pi", mode: Mode::Chat },
+    Agent { id: "omp", program: "omp", label: "oh-my-pi", mode: Mode::Chat },
+    // Grok's headless stream is read-only (approvals need ACP, `grok agent stdio`), and grok is not on this
+    // machine to verify against, so it keeps the terminal view.
+    Agent { id: "grok", program: "grok", label: "Grok", mode: Mode::Terminal },
+    // OpenCode (`opencode-ai`) speaks the Agent Client Protocol (`opencode acp`, crate::acp_chat), checked against 1.19.5.
+    Agent { id: "opencode", program: "opencode", label: "OpenCode", mode: Mode::Chat },
+];
+
+/// Claude Code's structured mode: one long-lived `-p` process reading and writing stream-json, with tool
+/// approvals sent to us over the same stream (`--permission-prompt-tool stdio`) instead of a TUI prompt, and each
+/// message the person sent echoed back when Claude Code takes it (`--replay-user-messages`), so a message sent
+/// while a turn runs shows as waiting until then.
+pub const CLAUDE_CHAT_ARGS: [&str; 10] = [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-prompt-tool",
+    "stdio",
+    "--replay-user-messages",
+];
+
+/// The fixed arguments that start agent `id` in its structured mode, or `None` when it has none here. These
+/// are the only arguments manut ever adds besides a conversation id ([`resume_args`]). A generic ACP agent's are
+/// its row in [`crate::acp_agents::ACP_LIST`] (`acp` or `--acp`).
+pub fn chat_args(id: &str) -> Option<&'static [&'static str]> {
+    if let Some(e) = acp_agents::entry(id) {
+        return Some(e.args);
+    }
+    match agent(id)?.mode {
+        Mode::Chat => Some(match id {
+            "claude" => &CLAUDE_CHAT_ARGS[..],
+            "codex" => &["app-server"][..],
+            "pi" | "omp" | "omo" => &["--mode", "rpc"][..],
+            "opencode" => &["acp"][..],
+            _ => return None,
+        }),
+        _ => None,
+    }
+}
+
+/// The argument that continues a conversation: `--resume <id>` for Claude Code (so its terminal view and its
+/// chat continue one conversation), `--session <id>` for OmO (the session id it reported), `--session-id <id>`
+/// for DSH (the `session-<uuid>` DeepSeek Harness reported). The id must be a UUID (DSH: `session-` and a UUID);
+/// every other agent and any other text is refused.
+pub fn resume_args(id: &str, session: &str) -> Result<Vec<OsString>, String> {
+    let flag = match id {
+        "claude" => "--resume",
+        "omo" => "--session",
+        "dsh" => "--session-id",
+        _ => return Err(format!("{id} sessions cannot be resumed")),
+    };
+    let ok = if id == "dsh" { session.strip_prefix("session-").is_some_and(is_uuid) } else { is_uuid(session) };
+    if !ok {
+        return Err("not a conversation id".into());
+    }
+    Ok(vec![flag.into(), session.into()])
+}
+
+/// The overlay DSH's chat passes with `--patch`: DeepSeek Harness's shipped headless profile turns off its own
+/// saved-credentials store, and these three rows (upstream dsh-headless README, "Credentials") turn it back on
+/// for that one run, so the harness uses the keys and sign-in saved in its own app. manut writes this fixed text
+/// to [`dsh_patch_path`] and never reads a key; the person's `~/.dsh` is not changed.
+pub const DSH_HEADLESS_PATCH: &str = "# manut: DeepSeek Harness's headless runs use the harness's own saved credentials\n\
+- id: credentials\n  disabled: false\n- id: authorization\n  disabled: false\n- id: deepseek-account\n  disabled: false\n";
+
+/// `<home>/.manut/dsh/headless.patch.yml`, the one file manut writes for DSH.
+pub fn dsh_patch_path(home: &Path) -> PathBuf {
+    home.join(".manut").join("dsh").join("headless.patch.yml")
+}
+
+/// The arguments of one DSH chat turn, all fixed apart from the overlay path and a checked session id:
+/// `--profile headless --patch <overlay> --json [--session-id session-<uuid>] -` (the message goes on stdin).
+pub fn dsh_turn_args(patch: &Path, session: Option<&str>) -> Result<Vec<OsString>, String> {
+    let mut a: Vec<OsString> = vec!["--profile".into(), "headless".into(), "--patch".into(), patch.as_os_str().to_owned(), "--json".into()];
+    if let Some(s) = session {
+        a.extend(resume_args("dsh", s)?);
+    }
+    a.push("-".into());
+    Ok(a)
+}
+
+/// The arguments a TERMINALS session of agent `id` starts with, besides none: `--session-id <uuid>` for a new Claude
+/// Code conversation whose id manut made (`new_session`), so the same conversation can be continued after manut
+/// restarts; `--resume <uuid>` (Claude Code) or `resume <uuid>` (Codex, a thread id it wrote) to continue one; and
+/// the chat-era `--session <uuid>` for OmO ([`resume_args`]). Never both; every id must be a UUID; any other agent
+/// or shape is refused.
+pub fn terminal_args(id: &str, new_session: Option<&str>, resume: Option<&str>) -> Result<Vec<OsString>, String> {
+    match (new_session, resume) {
+        (None, None) => Ok(Vec::new()),
+        (Some(_), Some(_)) => Err("a new conversation or one to continue, not both".into()),
+        (Some(s), None) => {
+            if id != "claude" {
+                return Err(format!("{id} sessions are not given a conversation id"));
+            }
+            if !is_uuid(s) {
+                return Err("not a conversation id".into());
+            }
+            Ok(vec!["--session-id".into(), s.into()])
+        }
+        (None, Some(r)) if id == "codex" => {
+            if !is_uuid(r) {
+                return Err("not a conversation id".into());
+            }
+            Ok(vec!["resume".into(), r.into()])
+        }
+        (None, Some(r)) => resume_args(id, r),
+    }
+}
+
+/// The one variable a TERMINALS session gets besides the terminal's own and the account's: an oh-my-hermes (`omh`)
+/// terminal is told its manut row's link id as `MANUT_TERMINAL_LINK=<link id>`, so the OMH TUI it runs can name this
+/// terminal and reopen the session it dropped here after manut restarts. No other agent gets it, and an id that is
+/// not 10 lowercase base32 characters is refused.
+pub fn terminal_env(id: &str, link: Option<&str>) -> Result<Vec<(String, String)>, String> {
+    let Some(link) = link else { return Ok(Vec::new()) };
+    if id != "omh" {
+        return Err(format!("{id} sessions are not given a terminal link"));
+    }
+    if !crate::term_link::is_link_id(link) {
+        return Err("not a terminal link id".into());
+    }
+    Ok(vec![("MANUT_TERMINAL_LINK".into(), link.into())])
+}
+
+/// `8-4-4-4-12` hex digits, nothing else.
+pub fn is_uuid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// The allow-list entry for `id` (a built-in, else a generic ACP agent's row), or `None` for anything else (paths,
+/// command lines, other programs, an agent manut no longer offers).
+pub fn agent(id: &str) -> Option<&'static Agent> {
+    AGENTS.iter().find(|a| a.id == id).or_else(|| acp_agents::entry(id).map(|e| &e.agent))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Discovery (pure: env, file check and OS are passed in, so both layouts are tested on any host)
+// ---------------------------------------------------------------------------------------------
+
+/// CLI folders that macOS desktop apps carry inside their bundle, relative to an Applications folder.
+/// The ChatGPT app (and the Codex app) ship a signed-in Codex CLI there: `bin/codex` is a `/bin/sh`
+/// wrapper that execs the sibling `CodexCLI.app/Contents/MacOS/codex`.
+const APP_BUNDLE_CLI_DIRS: [&str; 2] =
+    ["ChatGPT.app/Contents/Resources/codex-cli/bin", "Codex.app/Contents/Resources/codex-cli/bin"];
+
+/// [`APP_BUNDLE_CLI_DIRS`] under `/Applications`, then under `~/Applications`. Both `search_dirs` (here and
+/// in `accounts`) append these after every other folder, so a real install on PATH or in an install folder
+/// wins. The folders only exist on macOS.
+pub(crate) fn app_bundle_cli_dirs(home: Option<&str>) -> Vec<PathBuf> {
+    let mut roots = vec![PathBuf::from("/Applications")];
+    roots.extend(home.filter(|h| !h.trim().is_empty()).map(|h| Path::new(h).join("Applications")));
+    roots.iter().flat_map(|r| APP_BUNDLE_CLI_DIRS.iter().map(move |d| r.join(d))).collect()
+}
+
+/// Folders to look in, in order: every `PATH` entry, then the usual per-user install folders
+/// (`~/.local/bin` for Claude Code's installer, Homebrew, npm/pnpm/bun/cargo/volta globals, and on
+/// Windows `%APPDATA%\npm`), then on macOS the CLI folders inside app bundles. Duplicates are dropped.
+pub fn search_dirs<E: Fn(&str) -> Option<String>>(env: &E, os: Os) -> Vec<PathBuf> {
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(path) = set("PATH") {
+        let sep = if os == Os::Windows { ';' } else { ':' };
+        dirs.extend(path.split(sep).filter(|d| !d.trim().is_empty()).map(PathBuf::from));
+    }
+    let join = |base: &str, parts: &[&str]| parts.iter().fold(PathBuf::from(base), |p, c| p.join(c));
+    match os {
+        Os::Unix => {
+            if let Some(home) = set("HOME") {
+                for parts in [
+                    &[".local", "bin"][..],
+                    &[".bun", "bin"],
+                    &[".cargo", "bin"],
+                    &[".npm-global", "bin"],
+                    &[".volta", "bin"],
+                    &["Library", "pnpm"],
+                    &[".local", "share", "pnpm"],
+                    // the official installers' own folders, which only a shell's rc file puts on PATH: Grok
+                    // (x.ai/cli/install.sh, `~/.grok/bin`) and pi's managed install (pi.dev/install.sh, `~/.pi/agent/bin`)
+                    &[".grok", "bin"],
+                    &[".pi", "agent", "bin"],
+                ] {
+                    dirs.push(join(&home, parts));
+                }
+            }
+            if let Some(pnpm) = set("PNPM_HOME") {
+                dirs.push(PathBuf::from(pnpm));
+            }
+            dirs.push(PathBuf::from("/opt/homebrew/bin"));
+            dirs.push(PathBuf::from("/usr/local/bin"));
+            dirs.extend(app_bundle_cli_dirs(set("HOME").as_deref()));
+        }
+        Os::Windows => {
+            if let Some(appdata) = set("APPDATA") {
+                dirs.push(join(&appdata, &["npm"]));
+            }
+            if let Some(profile) = set("USERPROFILE") {
+                for parts in [&[".local", "bin"][..], &[".bun", "bin"], &[".cargo", "bin"], &[".volta", "bin"], &[".grok", "bin"], &[".pi", "agent", "bin"]] {
+                    dirs.push(join(&profile, parts));
+                }
+            }
+            if let Some(local) = set("LOCALAPPDATA") {
+                dirs.push(join(&local, &["pnpm"]));
+            }
+            if let Some(pnpm) = set("PNPM_HOME") {
+                dirs.push(PathBuf::from(pnpm));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| seen.insert(d.clone()));
+    dirs
+}
+
+/// File names that start `program`: the bare name on macOS/Linux; `.exe`, then the npm `.cmd` / `.bat`
+/// shims on Windows (never `.ps1`, never the extension-less npm shell script).
+pub fn file_names(program: &str, os: Os) -> Vec<String> {
+    match os {
+        Os::Unix => vec![program.to_string()],
+        Os::Windows => ["exe", "cmd", "bat"].iter().map(|e| format!("{program}.{e}")).collect(),
+    }
+}
+
+/// The first `dir/name` that `is_program` accepts.
+pub fn resolve<X: Fn(&Path) -> bool>(program: &str, dirs: &[PathBuf], is_program: X, os: Os) -> Option<PathBuf> {
+    let names = file_names(program, os);
+    dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| is_program(p))
+}
+
+/// Where DeepSeek Harness puts its CLI, in order: inside the macOS app (`/Applications`, then `~/Applications`),
+/// inside the Windows app (its per-user NSIS install, `%LOCALAPPDATA%\\Programs\\DeepSeek Harness`). Linux has no
+/// fixed place: the npm package `@deepseek-ai/dsh` on PATH ([`is_dsh_harness`]) is how it is found there.
+pub fn dsh_app_clis<E: Fn(&str) -> Option<String>>(env: &E, os: Os) -> Vec<PathBuf> {
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    let cli = |root: PathBuf, name: &str| ["Resources", "runtime", "cli", "bin", name].iter().fold(root, |p, c| p.join(c));
+    match os {
+        Os::Unix => {
+            let mut roots = vec![PathBuf::from("/Applications")];
+            roots.extend(set("HOME").map(|h| Path::new(&h).join("Applications")));
+            roots.into_iter().map(|r| cli(r.join("DeepSeek Harness.app").join("Contents"), "dsh")).collect()
+        }
+        Os::Windows => set("LOCALAPPDATA")
+            .map(|l| {
+                let app = Path::new(&l).join("Programs").join("DeepSeek Harness");
+                ["resources", "runtime", "cli", "bin", "dsh.cmd"].iter().fold(app, |p, c| p.join(c))
+            })
+            .into_iter()
+            .collect(),
+    }
+}
+
+/// Whether a `dsh` found on PATH is DeepSeek Harness: its real path (links followed) is inside the harness app
+/// (`DeepSeek Harness.app`, or `DeepSeek Harness/resources/runtime/cli` on Windows, which is what the app's
+/// "Manage dsh Command" installs) or inside the npm package `@deepseek-ai/dsh`; an npm `.cmd` shim counts when
+/// that package sits next to it (`node_modules/@deepseek-ai/dsh`). Any other `dsh` (deepseek-bot's launcher in
+/// `~/.local/bin` is one) is not.
+pub fn is_dsh_harness<X: Fn(&Path) -> bool>(found: &Path, real: &Path, exists: X) -> bool {
+    let parts: Vec<String> = real.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    let has = |i: usize, s: &str| parts.get(i).is_some_and(|p| p.eq_ignore_ascii_case(s));
+    let inside_app = parts.iter().any(|p| p == "DeepSeek Harness.app")
+        || (0..parts.len()).any(|i| has(i, "DeepSeek Harness") && has(i + 1, "resources") && has(i + 2, "runtime") && has(i + 3, "cli"));
+    let npm = parts.windows(2).any(|w| w[0] == "@deepseek-ai" && w[1] == "dsh");
+    let shim = found.parent().is_some_and(|d| exists(&d.join("node_modules").join("@deepseek-ai").join("dsh").join("package.json")));
+    inside_app || npm || shim
+}
+
+/// The DeepSeek Harness CLI on this machine: the app's own CLI first, then a `dsh` in `dirs` that
+/// [`is_dsh_harness`] accepts. `real` resolves links. Never the first `dsh` on PATH just because it is first.
+pub fn dsh_harness<E, X, R>(env: &E, dirs: &[PathBuf], is_program: X, real: R, os: Os) -> Option<PathBuf>
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+    R: Fn(&Path) -> PathBuf,
+{
+    if let Some(p) = dsh_app_clis(env, os).into_iter().find(|p| is_program(p)) {
+        return Some(p);
+    }
+    let names = file_names("dsh", os);
+    dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| is_program(p) && is_dsh_harness(p, &real(p), |q| is_program(q) || q.is_file()))
+}
+
+/// Where an agent's official installs put its program, so a same-named other program earlier on PATH (Homebrew's
+/// `grok` regex tool, a `pi` or `codex` of some other project) is not started as the agent. A found program
+/// matches when its real path (links followed) holds one of these. DSH has its own check ([`is_dsh_harness`]);
+/// oh-my-hermes has no row and is found as before.
+pub struct Layout {
+    pub id: &'static str,
+    /// npm (or bun) packages: `node_modules/<package>` in the real path, or on Windows an npm `.cmd` shim with
+    /// `node_modules/<package>/package.json` beside it.
+    pub packages: &'static [&'static str],
+    /// Folder names that follow each other anywhere in the real path (an app bundle, a Homebrew keg, an
+    /// installer's own folder).
+    pub inside: &'static [&'static [&'static str]],
+    /// Folders a standalone installer copies the program itself into, under the home folder (`~`) or
+    /// `%LOCALAPPDATA%`: the real path's folder must be one of them.
+    pub folders: &'static [(&'static str, &'static [&'static str])],
+    /// The install line manut shows for it (the same text as `INSTALL` in src/sessions/agents.ts).
+    pub install: &'static str,
+}
+
+pub const LAYOUTS: [Layout; 6] = [
+    Layout {
+        id: "claude",
+        packages: &["@anthropic-ai/claude-code"],
+        // the native installer (`~/.local/bin/claude` -> `~/.local/share/claude/versions/<v>`), Homebrew's cask
+        inside: &[&[".local", "share", "claude", "versions"], &["Caskroom", "claude-code"]],
+        // Windows: the native installer's own `claude.exe`
+        folders: &[("~", &[".local", "bin"])],
+        install: "npm i -g @anthropic-ai/claude-code",
+    },
+    Layout {
+        id: "codex",
+        packages: &["@openai/codex"],
+        // the CLI inside the ChatGPT or Codex app (APP_BUNDLE_CLI_DIRS), Homebrew's cask
+        inside: &[&["ChatGPT.app", "Contents", "Resources", "codex-cli"], &["Codex.app", "Contents", "Resources", "codex-cli"], &["Caskroom", "codex"]],
+        folders: &[],
+        install: "npm i -g @openai/codex",
+    },
+    Layout {
+        id: "omo",
+        packages: &["omo-ai"],
+        inside: &[],
+        // get.omo.dev/install.sh and install.ps1 copy the binary into ~/.local/bin
+        folders: &[("~", &[".local", "bin"])],
+        install: "npm i -g omo-ai",
+    },
+    Layout {
+        id: "pi",
+        packages: &["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"],
+        // pi.dev/install.sh's managed install (its launcher `~/.pi/agent/bin/pi`, which a link in ~/.local/bin
+        // or Homebrew's bin may lead to), Homebrew's formula
+        inside: &[&[".pi", "agent", "bin"], &["Cellar", "pi-coding-agent"]],
+        folders: &[],
+        install: "npm i -g --ignore-scripts @earendil-works/pi-coding-agent",
+    },
+    Layout {
+        id: "omp",
+        packages: &["@oh-my-pi/pi-coding-agent"],
+        // Homebrew's tap (can1357/tap/omp)
+        inside: &[&["Cellar", "omp"]],
+        // omp.sh/install's binary (~/.local/bin/omp; %LOCALAPPDATA%\\omp\\omp.exe on Windows)
+        folders: &[("~", &[".local", "bin"]), ("LOCALAPPDATA", &["omp"])],
+        install: "curl -fsSL https://omp.sh/install | sh",
+    },
+    Layout {
+        id: "grok",
+        packages: &["@xai-official/grok"],
+        // x.ai/cli/install.sh: `~/.grok/bin/grok` -> `grok-<version>` (or into ~/.grok/downloads)
+        inside: &[&[".grok", "bin"], &[".grok", "downloads"]],
+        folders: &[],
+        install: "curl -fsSL https://x.ai/cli/install.sh | bash",
+    },
+];
+
+/// The [`LAYOUTS`] row of agent `id`.
+pub fn layout(id: &str) -> Option<&'static Layout> {
+    LAYOUTS.iter().find(|l| l.id == id)
+}
+
+/// A path's folder names, split on both separators so a Windows path reads the same on any host.
+pub(crate) fn parts_of(p: &Path) -> Vec<String> {
+    // (the `?` of a Windows `\\?\` canonical path is no folder)
+    p.to_string_lossy().split(['/', '\\']).filter(|c| !c.is_empty() && *c != "?").map(str::to_string).collect()
+}
+
+pub(crate) fn holds(parts: &[String], seq: &[&str]) -> bool {
+    !seq.is_empty() && parts.windows(seq.len()).any(|w| w.iter().zip(seq).all(|(a, b)| a.eq_ignore_ascii_case(b)))
+}
+
+/// Whether program `found` (real path `real`, links followed) sits where an official install of agent `id` puts it
+/// ([`LAYOUTS`]). `exists` checks a file (the npm package beside a Windows shim). An agent without a row: false.
+pub fn in_install_layout<E, X>(id: &str, found: &Path, real: &Path, env: &E, exists: X) -> bool
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+{
+    let Some(l) = layout(id) else { return false };
+    let parts = parts_of(real);
+    let package = |pkg: &str| {
+        let seq: Vec<&str> = std::iter::once("node_modules").chain(pkg.split('/')).collect();
+        holds(&parts, &seq) || found.parent().is_some_and(|d| exists(&pkg.split('/').fold(d.join("node_modules"), |p, c| p.join(c)).join("package.json")))
+    };
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    let folder = |(base, rel): &(&str, &[&str])| {
+        let root = if *base == "~" { set("HOME").or_else(|| set("USERPROFILE")) } else { set(base) };
+        let Some(root) = root else { return false };
+        let want: Vec<String> = parts_of(Path::new(&root)).into_iter().chain(rel.iter().map(|s| s.to_string())).collect();
+        // the real path's folder (by both separators: `Path::parent` would not split a Windows path elsewhere)
+        let have = &parts[..parts.len().saturating_sub(1)];
+        have.len() == want.len() && have.iter().zip(&want).all(|(a, b)| a.eq_ignore_ascii_case(b))
+    };
+    l.packages.iter().any(|p| package(p)) || l.inside.iter().any(|seq| holds(&parts, seq)) || l.folders.iter().any(folder)
+}
+
+/// Program `program` of agent `id` in `dirs`: the first candidate that [`in_install_layout`] accepts, else (no row, or
+/// no candidate in a known layout) the first candidate, as [`resolve`] finds it. A real install in a layout this
+/// table does not know is therefore still found, never "Not installed".
+pub fn find_in_layouts<E, X, R>(id: &str, program: &str, dirs: &[PathBuf], env: &E, is_program: X, real: R, os: Os) -> Option<PathBuf>
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+    R: Fn(&Path) -> PathBuf,
+{
+    let names = file_names(program, os);
+    let found: Vec<PathBuf> = dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).filter(|p| is_program(p)).collect();
+    found.iter().find(|p| in_install_layout(id, p, &real(p), env, |q| is_program(q) || q.is_file())).or(found.first()).cloned()
+}
+
+fn real_path(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Where allow-listed agent `a` is on this machine: [`find_in_layouts`] over `dirs`, except DSH ([`dsh_harness`]).
+fn find_agent(a: &Agent, dirs: &[PathBuf]) -> Option<PathBuf> {
+    if a.id == "dsh" {
+        return dsh_harness(&host_env, dirs, is_program_file, real_path, Os::current());
+    }
+    find_in_layouts(a.id, a.program, dirs, &host_env, is_program_file, real_path, Os::current())
+}
+
+/// The program manut would start for agent `id` when it lies in none of that agent's install layouts ([`LAYOUTS`]),
+/// so it may be another program with the same name; `None` when it is in one, or the agent has no row.
+pub fn unrecognized_program(id: &str) -> Option<PathBuf> {
+    let a = agent(id)?;
+    layout(id)?;
+    let path = find_agent(a, &host_dirs())?;
+    (!in_install_layout(id, &path, &real_path(&path), &host_env, |q| is_program_file(q) || q.is_file())).then_some(path)
+}
+
+/// argv for a resolved program. A Windows `.cmd`/`.bat` shim runs through `cmd.exe /c`, because
+/// CreateProcess does not start batch files on its own. No other argument is ever added.
+pub fn argv_for(path: &Path, os: Os) -> Result<Vec<OsString>, String> {
+    let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
+    if os == Os::Windows && matches!(ext.as_deref(), Some("cmd") | Some("bat")) {
+        Ok(vec!["cmd.exe".into(), "/c".into(), cmd_path_arg(&path.to_string_lossy())?.into()])
+    } else {
+        Ok(vec![path.as_os_str().to_owned()])
+    }
+}
+
+/// The shim path as `cmd.exe /c` must see it. cmd parses that line itself, so `&`, `|`, `<`, `>`, `^`,
+/// `(`, `)` and `@` in a folder name would split or change the command. Without whitespace, the path
+/// reaches cmd unquoted (portable-pty quotes only on whitespace), so each of those gets a `^` escape.
+/// With whitespace it arrives in quotes, and cmd keeps quotes only when no such character is inside, so
+/// that case is refused, as is `%` (variable expansion, which no escape stops on a `/c` line).
+pub fn cmd_path_arg(path: &str) -> Result<String, String> {
+    const META: &[char] = &['&', '|', '<', '>', '^', '(', ')', '@'];
+    let refuse = || Err(format!("cannot start {path} through cmd.exe: its folder name has characters cmd treats as commands"));
+    if path.contains('%') || path.contains('"') {
+        return refuse();
+    }
+    if path.chars().any(char::is_whitespace) {
+        return if path.contains(META) { refuse() } else { Ok(path.to_string()) };
+    }
+    let mut out = String::with_capacity(path.len() + 4);
+    for c in path.chars() {
+        if META.contains(&c) {
+            out.push('^');
+        }
+        out.push(c);
+    }
+    Ok(out)
+}
+
+fn host_env(k: &str) -> Option<String> {
+    std::env::var(k).ok()
+}
+
+#[cfg(unix)]
+pub(crate) fn is_program_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn is_program_file(p: &Path) -> bool {
+    p.is_file()
+}
+
+/// `search_dirs` on this machine plus the newest nvm Node (`~/.nvm/versions/node/<v>/bin`), which npm
+/// globals such as Codex live in when Node came from nvm. The nvm folders go before the app-bundle tail, so
+/// an npm install still wins over the ChatGPT app's copy.
+pub(crate) fn host_dirs() -> Vec<PathBuf> {
+    let os = Os::current();
+    let mut dirs = search_dirs(&host_env, os);
+    if os == Os::Unix {
+        if let Some(home) = host_env("HOME") {
+            let nvm = Path::new(&home).join(".nvm").join("versions").join("node");
+            if let Ok(rd) = std::fs::read_dir(&nvm) {
+                let mut vs: Vec<PathBuf> = rd.flatten().map(|e| e.path().join("bin")).filter(|p| p.is_dir()).collect();
+                vs.sort();
+                vs.reverse();
+                let bundles = app_bundle_cli_dirs(Some(&home));
+                let at = dirs.len() - dirs.iter().rev().take_while(|d| bundles.contains(d)).count();
+                dirs.splice(at..at, vs);
+            }
+        }
+    }
+    dirs
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AgentInfo {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub mode: Mode,
+    /// Where the program was found, or `None` when it is not installed.
+    pub path: Option<String>,
+    /// `hermes`: the oh-my-hermes row of a person who has Hermes but not `omh`. Its session is the same Hermes chat
+    /// in the folder (through the bridge, no program), `path` is where Hermes was found, and it has no terminal view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<&'static str>,
+    /// A generic ACP agent's row ([`crate::acp_agents::ACP_LIST`]): the UI's only copy of its arguments, sign-in and
+    /// install lines, mark and whether it continues a conversation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acp: Option<&'static AcpEntry>,
+}
+
+/// What the oh-my-hermes row says the person has. Its session never runs `omh`: it is a Hermes chat in the folder
+/// through the bridge, so Hermes alone is enough to open one. `omh` found: the row as always ("oh-my-hermes", its
+/// path; the terminal view starts `omh`). Only Hermes (`hermes`, its Python): the row reads "Hermes" and is `via`
+/// Hermes. Neither: not installed.
+pub fn hermes_row(omh: Option<PathBuf>, hermes: Option<PathBuf>) -> AgentInfo {
+    let a = agent("omh").expect("omh is on the allow-list");
+    let info = |label, path: Option<PathBuf>, via| AgentInfo { id: a.id, label, mode: a.mode, path: path.map(|p| p.to_string_lossy().into_owned()), via, acp: None };
+    match (omh, hermes) {
+        (Some(p), _) => info(a.label, Some(p), None),
+        (None, Some(h)) => info(HERMES_LABEL, Some(h), Some("hermes")),
+        (None, None) => info(a.label, None, None),
+    }
+}
+
+/// The oh-my-hermes row's name when only Hermes is there.
+pub const HERMES_LABEL: &str = "Hermes";
+
+/// Every allow-listed agent with where it was found on this machine: the built-ins, then the generic ACP agents,
+/// each with its list row.
+pub fn agents_on_this_machine() -> Vec<AgentInfo> {
+    let dirs = host_dirs();
+    let rows = AGENTS.iter().map(|a| (a, None)).chain(acp_agents::ACP_LIST.iter().map(|e| (&e.agent, Some(e))));
+    rows.map(|(a, acp)| {
+        let found = find_agent(a, &dirs);
+        if a.id == "omh" {
+            // Manut AI starts no Hermes bridge, so nothing looks for Hermes' own Python any more: the row is
+            // installed only when the `omh` program itself is found.
+            return hermes_row(found, None);
+        }
+        AgentInfo { id: a.id, label: a.label, mode: a.mode, path: found.map(|p| p.to_string_lossy().into_owned()), via: None, acp }
+    })
+    .collect()
+}
+
+/// What manut runs for agent `id`: the allow-list entry resolved on this machine, as argv, plus the
+/// `PATH` the child gets (the program's own folder and the install folders first, so `#!/usr/bin/env node`
+/// shims find Node even when the app was started from the Dock).
+pub fn launch_for(id: &str) -> Result<(Vec<OsString>, OsString), String> {
+    let a = agent(id).ok_or_else(|| format!("unknown agent \"{id}\""))?;
+    let dirs = host_dirs();
+    let path = find_agent(a, &dirs).ok_or_else(|| match a.id {
+        "dsh" => "DeepSeek Harness is not installed (no DeepSeek Harness `dsh` found)".to_string(),
+        _ => format!("{} is not installed (no `{}` found)", a.label, a.program),
+    })?;
+    let mut child_dirs: Vec<PathBuf> = path.parent().map(|p| vec![p.to_path_buf()]).unwrap_or_default();
+    child_dirs.extend(dirs);
+    let joined = std::env::join_paths(child_dirs.iter().filter(|d| d.is_dir())).map_err(|e| e.to_string())?;
+    Ok((argv_for(&path, Os::current())?, joined))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The bottom terminal panel: the person's own login shell, nothing else
+// ---------------------------------------------------------------------------------------------
+
+/// The shells tried, in order, when `$SHELL` is not a usable login shell (macOS, Linux).
+pub const SHELL_FALLBACKS: [&str; 2] = ["/bin/zsh", "/bin/bash"];
+
+/// Windows PowerShell's fixed place under `%SystemRoot%`.
+const POWERSHELL_UNDER_ROOT: &str = r"System32\WindowsPowerShell\v1.0\powershell.exe";
+
+/// Does `/etc/shells` (its text) list `shell`? One absolute path per line; `#` starts a comment.
+pub fn listed_in_etc_shells(etc_shells: &str, shell: &str) -> bool {
+    etc_shells.lines().map(|l| l.split('#').next().unwrap_or("").trim()).any(|l| !l.is_empty() && l == shell)
+}
+
+/// The one program the terminal panel runs, as argv, decided here and never by the page:
+/// - macOS / Linux: `[$SHELL, "-l"]` when `$SHELL` is an absolute path to an executable file that `/etc/shells`
+///   lists; else `/bin/zsh -l`, else `/bin/bash -l`.
+/// - Windows: `powershell.exe -NoLogo` (Windows PowerShell at its fixed place under `%SystemRoot%`); when it is
+///   missing, `%COMSPEC%` (an absolute path to an existing file) with no arguments.
+///
+/// Pure: the environment, `/etc/shells`' text, the file check and the OS are passed in.
+pub fn shell_argv<E, X>(env: &E, etc_shells: &str, is_program: X, os: Os) -> Result<Vec<OsString>, String>
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+{
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    match os {
+        Os::Unix => {
+            if let Some(sh) = set("SHELL") {
+                let p = Path::new(&sh);
+                // absolute by Unix rules (a leading `/`), whatever OS the check runs on: `Path::is_absolute` on
+                // Windows wants a drive letter
+                if sh.starts_with('/') && listed_in_etc_shells(etc_shells, &sh) && is_program(p) {
+                    return Ok(vec![OsString::from(sh), OsString::from("-l")]);
+                }
+            }
+            SHELL_FALLBACKS
+                .iter()
+                .find(|s| is_program(Path::new(s)))
+                .map(|s| vec![OsString::from(*s), OsString::from("-l")])
+                .ok_or_else(|| "no login shell found (no usable $SHELL, /bin/zsh or /bin/bash)".to_string())
+        }
+        Os::Windows => {
+            let root = set("SystemRoot").or_else(|| set("windir")).unwrap_or_else(|| r"C:\Windows".to_string());
+            let ps = PathBuf::from(format!(r"{}\{POWERSHELL_UNDER_ROOT}", root.trim_end_matches('\\')));
+            if is_program(&ps) {
+                return Ok(vec![ps.into_os_string(), OsString::from("-NoLogo")]);
+            }
+            match set("COMSPEC") {
+                Some(c) if is_windows_absolute(&c) && is_program(Path::new(&c)) => Ok(vec![OsString::from(c)]),
+                _ => Err("no shell found (no Windows PowerShell and no %COMSPEC%)".to_string()),
+            }
+        }
+    }
+}
+
+/// One shell a new Shell terminal may run: a stable id (the only thing the page sends back), the name shown, the
+/// program's absolute path, and whether it is the one [`shell_argv`] picks. Its arguments are fixed here and never
+/// leave Rust.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShellEntry {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+    pub default: bool,
+    #[serde(skip)]
+    pub args: Vec<&'static str>,
+}
+
+impl ShellEntry {
+    fn argv(&self) -> Vec<OsString> {
+        std::iter::once(OsString::from(&self.path)).chain(self.args.iter().map(OsString::from)).collect()
+    }
+}
+
+/// The shells a Shell terminal may run on this machine, the default ([`shell_argv`]) first. Fixed candidates only,
+/// each listed when its file is there:
+/// - Windows: Windows PowerShell (`powershell`, `-NoLogo`), PowerShell 7 (`pwsh`, `%ProgramFiles%\PowerShell\7`,
+///   `-NoLogo`), Command Prompt (`cmd`, `%COMSPEC%`), Git Bash (`gitbash`, `%ProgramFiles%\Git\bin\bash.exe --login -i`),
+///   WSL (`wsl`, `%SystemRoot%\System32\wsl.exe`).
+/// - macOS / Linux: the login shell, then every absolute path `/etc/shells` lists that is an executable file
+///   (`unix:<path>`, each with `-l`).
+///
+/// Pure: the environment, `/etc/shells`' text, the file check and the OS are passed in.
+pub fn shells_available<E, X>(env: &E, etc_shells: &str, is_program: X, os: Os) -> Vec<ShellEntry>
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+{
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    let entry = |id: String, label: String, path: String, args: Vec<&'static str>| ShellEntry { id, label, path, default: false, args };
+    let mut list: Vec<ShellEntry> = Vec::new();
+    match os {
+        Os::Unix => {
+            let lines = etc_shells.lines().map(|l| l.split('#').next().unwrap_or("").trim()).filter(|l| l.starts_with('/'));
+            let login = shell_argv(env, etc_shells, &is_program, os).ok().and_then(|a| a.first().map(|p| p.to_string_lossy().into_owned()));
+            for p in login.into_iter().chain(lines.map(str::to_string)) {
+                if list.iter().any(|e| e.path == p) || !is_program(Path::new(&p)) {
+                    continue;
+                }
+                let label = p.rsplit('/').next().unwrap_or(&p).to_string();
+                list.push(entry(format!("unix:{p}"), label, p, vec!["-l"]));
+            }
+        }
+        Os::Windows => {
+            let root = set("SystemRoot").or_else(|| set("windir")).unwrap_or_else(|| r"C:\Windows".to_string());
+            let root = root.trim_end_matches('\\').to_string();
+            let pf = set("ProgramFiles").unwrap_or_else(|| r"C:\Program Files".to_string());
+            let pf = pf.trim_end_matches('\\').to_string();
+            let comspec = set("COMSPEC").filter(|c| is_windows_absolute(c));
+            let candidates: [(&str, &str, Option<String>, Vec<&'static str>); 5] = [
+                ("powershell", "Windows PowerShell", Some(format!(r"{root}\{POWERSHELL_UNDER_ROOT}")), vec!["-NoLogo"]),
+                ("pwsh", "PowerShell 7", Some(format!(r"{pf}\PowerShell\7\pwsh.exe")), vec!["-NoLogo"]),
+                ("cmd", "Command Prompt", comspec, vec![]),
+                ("gitbash", "Git Bash", Some(format!(r"{pf}\Git\bin\bash.exe")), vec!["--login", "-i"]),
+                ("wsl", "WSL", Some(format!(r"{root}\System32\wsl.exe")), vec![]),
+            ];
+            for (id, label, path, args) in candidates {
+                if let Some(p) = path.filter(|p| is_program(Path::new(p))) {
+                    list.push(entry(id.to_string(), label.to_string(), p, args));
+                }
+            }
+        }
+    }
+    // the default shell first, marked
+    if let Ok(def) = shell_argv(env, etc_shells, &is_program, os) {
+        if let Some(i) = list.iter().position(|e| e.argv() == def) {
+            let mut d = list.remove(i);
+            d.default = true;
+            list.insert(0, d);
+        }
+    }
+    list
+}
+
+/// What a Shell terminal runs for `id` (the page's choice, an id from [`shells_available`]): that entry's argv,
+/// looked up again here. No id: the default shell ([`shell_argv`]). An id that is not on this machine's list (a
+/// shell uninstalled since, or anything else) also gets the default, with the id's name back for the row's note.
+pub fn shell_argv_for<E, X>(id: Option<&str>, env: &E, etc_shells: &str, is_program: X, os: Os) -> Result<(Vec<OsString>, Option<String>), String>
+where
+    E: Fn(&str) -> Option<String>,
+    X: Fn(&Path) -> bool,
+{
+    let id = id.map(str::trim).filter(|i| !i.is_empty());
+    if let Some(id) = id {
+        if let Some(e) = shells_available(env, etc_shells, &is_program, os).into_iter().find(|e| e.id == id) {
+            return Ok((e.argv(), None));
+        }
+    }
+    let missing = id.map(shell_name_of_id);
+    Ok((shell_argv(env, etc_shells, &is_program, os)?, missing))
+}
+
+/// The name a shell id reads as when its shell is gone: the Windows names, a Unix path's file name, else the id
+/// itself (cut to 60 characters).
+fn shell_name_of_id(id: &str) -> String {
+    match id {
+        "powershell" => "Windows PowerShell".to_string(),
+        "pwsh" => "PowerShell 7".to_string(),
+        "cmd" => "Command Prompt".to_string(),
+        "gitbash" => "Git Bash".to_string(),
+        "wsl" => "WSL".to_string(),
+        _ => {
+            let name = id.strip_prefix("unix:").map(|p| p.rsplit('/').next().unwrap_or(p)).unwrap_or(id);
+            name.chars().filter(|c| !c.is_control()).take(60).collect()
+        }
+    }
+}
+
+/// `C:\…` or `\\server\…`: an absolute Windows path, whatever OS the check runs on.
+fn is_windows_absolute(p: &str) -> bool {
+    let b = p.as_bytes();
+    (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')) || p.starts_with(r"\\")
+}
+
+/// Where a terminal-panel shell starts: `wanted` when it is an absolute path to an existing folder, else `home`.
+pub fn shell_cwd(wanted: Option<&str>, home: &Path) -> PathBuf {
+    match wanted.map(Path::new) {
+        Some(p) if p.is_absolute() && p.is_dir() => p.to_path_buf(),
+        _ => home.to_path_buf(),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Live sessions
+// ---------------------------------------------------------------------------------------------
+
+/// What a session sends back: terminal bytes, then once, the exit (code; `None` when a signal ended it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Output {
+    Data(Vec<u8>),
+    Exit(Option<u32>),
+}
+
+type Sink = Arc<Mutex<Box<dyn FnMut(Output) + Send>>>;
+
+struct Live {
+    master: Box<dyn MasterPty + Send>,
+    /// Input for the session's writer thread. The PTY takes only about 1 KB before a write blocks, so the
+    /// write happens there, never under the sessions lock.
+    input: SyncSender<Vec<u8>>,
+    /// Set by the writer thread when it ends.
+    writer_done: Arc<AtomicBool>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+    pid: Option<u32>,
+    exited: Arc<AtomicBool>,
+    /// Its output on the way to the page.
+    out: Arc<Out>,
+    /// The account home variable it was started with (`account_env`): its Codex home, for
+    /// [`Sessions::codex_conversation`].
+    account_env: Vec<(String, String)>,
+}
+
+impl Live {
+    /// The process [`crate::fg::Probe`] reads: the terminal's foreground process group leader (unix: the program a
+    /// shell runs now, else the shell), or on Windows the session's program (its tree is searched).
+    fn foreground(&self) -> Option<u32> {
+        #[cfg(unix)]
+        return self.master.process_group_leader().map(|p| p as u32);
+        #[cfg(not(unix))]
+        return self.pid;
+    }
+}
+
+/// Pending writes per session (keystrokes or whole pastes). A program that stops reading fills it, and
+/// further writes fail at once instead of piling up.
+pub(crate) const INPUT_QUEUE: usize = 256;
+
+/// Reads from the PTY are merged into one message of up to this many bytes...
+pub(crate) const COALESCE_BYTES: usize = 64 * 1024;
+/// ...collected for at most this long after the first byte arrives (keeps typing echo prompt).
+pub(crate) const COALESCE_WINDOW: Duration = Duration::from_millis(4);
+
+/// Output the page was handed and has not yet said it drew ([`Sessions::ack`]). At [`FLOW_HIGH`] the session's
+/// reader stops reading the PTY, so the kernel holds the program back as a real terminal does, and at
+/// [`FLOW_LOW`] it reads again. What a session can have undrawn is at most `FLOW_HIGH` plus two messages and one
+/// read (the message that crossed the mark, the one being built, the read under way).
+///
+/// The pair is the smallest in `bench/pty/sweep.json` that feeds a fast page within 0.2% of what no limit does.
+/// Measured under `yes` into a page model that draws 100 MB/s in slices of 12 ms and acknowledges once per slice,
+/// as xterm does: 75.5 MB/s here against 75.7 with no limit, 72.9 at 2 MiB / 512 KiB, 71.3 at 1 MiB / 256 KiB,
+/// 38.5 at 256 KiB / 64 KiB. One slice of that page is 1.2 MB, which is the likely reason: a high mark that holds less
+/// than a slice, or a low mark more than a slice under the high one, leaves the page waiting for the reader.
+/// What the size costs is what a page still has to draw after Ctrl+C: 1.0 to 1.7 MB here (six runs) against
+/// 0.4 MB at 1 MiB / 256 KiB and 6.5 MB at 8 MiB / 2 MiB (220 MB with no limit). How long that takes is the
+/// page's speed (`bench/pty/README.md`).
+pub(crate) const FLOW_HIGH: u64 = 2 * 1024 * 1024;
+pub(crate) const FLOW_LOW: u64 = 1024 * 1024;
+
+/// Every running session of this app. Dropped sessions are stopped; [`Sessions::close_all`] runs on exit.
+pub struct Sessions {
+    live: Mutex<HashMap<u32, Live>>,
+    next: AtomicU32,
+    /// (high, low) of each new session's output credit
+    marks: (u64, u64),
+    /// The one foreground watcher's inbox ([`Sessions::watch_foreground`]).
+    fg: Mutex<FgInbox>,
+    #[cfg(test)]
+    fg_stats: FgStats,
+}
+
+impl Default for Sessions {
+    fn default() -> Sessions {
+        Sessions {
+            live: Mutex::default(),
+            next: AtomicU32::new(0),
+            marks: (FLOW_HIGH, FLOW_LOW),
+            fg: Mutex::default(),
+            #[cfg(test)]
+            fg_stats: FgStats::default(),
+        }
+    }
+}
+
+/// Spawn a thread named `name` (they show by name in a profiler and in `ps -M`). Fails only as `thread::spawn` does.
+fn named<F: FnOnce() + Send + 'static>(name: String, f: F) -> thread::JoinHandle<()> {
+    thread::Builder::new().name(name).spawn(f).expect("failed to spawn thread")
+}
+
+/// Sessions handed to [`Sessions::watch_foreground`] that its thread has not taken yet, and whether that thread runs.
+#[derive(Default)]
+struct FgInbox {
+    pending: Vec<FgWatch>,
+    running: bool,
+}
+
+/// One watched session, owned by the foreground watcher thread.
+struct FgWatch {
+    id: u32,
+    /// probed on the next tick of this length after its terminal had I/O...
+    every: Duration,
+    /// ...and at least this often without
+    idle: Duration,
+    on_change: Box<dyn FnMut(Option<&'static str>) + Send>,
+    probe: crate::fg::Probe,
+    last: Option<&'static str>,
+    /// [`Out::io`] at the last probe, and when that was (`None`: not probed yet)
+    io: u64,
+    probed: Option<Instant>,
+}
+
+/// What the watcher did, for the tests.
+#[cfg(test)]
+#[derive(Default)]
+struct FgStats {
+    threads: AtomicU32,
+    watched: AtomicU32,
+    wakes: AtomicU64,
+    probes: AtomicU64,
+}
+
+fn clamp_size(cols: u16, rows: u16) -> PtySize {
+    PtySize { cols: cols.clamp(2, 1000), rows: rows.clamp(2, 500), pixel_width: 0, pixel_height: 0 }
+}
+
+impl Sessions {
+    pub fn new() -> Arc<Sessions> {
+        Arc::new(Sessions::default())
+    }
+
+    /// Sessions whose readers hold off at `high` and read again at `low` (the bench's sweep).
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_marks(high: u64, low: u64) -> Arc<Sessions> {
+        Arc::new(Sessions { marks: (high, low), ..Sessions::default() })
+    }
+
+    /// Start `argv` in a new pseudo-terminal in `cwd`. Crate-internal: the app reaches it only through
+    /// [`Sessions::start_agent`], so argv always comes from the allow-list (tests use it directly).
+    pub(crate) fn spawn<F>(
+        &self,
+        argv: Vec<OsString>,
+        cwd: &Path,
+        path_env: Option<OsString>,
+        account_env: &[(String, String)],
+        cols: u16,
+        rows: u16,
+        sink: F,
+    ) -> Result<u32, String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
+        self.spawn_cmd(command_for(argv, cwd, path_env, account_env), cwd, account_env, cols, rows, sink)
+    }
+
+    /// [`Sessions::spawn`] with the command already built (gh's sign-in: [`gh_login_command`]).
+    fn spawn_cmd<F>(&self, cmd: CommandBuilder, cwd: &Path, account_env: &[(String, String)], cols: u16, rows: u16, sink: F) -> Result<u32, String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
+        if !cwd.is_absolute() || !cwd.is_dir() {
+            return Err(format!("not a folder: {}", cwd.display()));
+        }
+        let pair = native_pty_system().openpty(clamp_size(cols, rows)).map_err(|e| e.to_string())?;
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+        drop(pair.slave); // only the child holds the terminal side, so its exit ends our reads
+        let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+        let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+        let killer = child.clone_killer();
+        let pid = child.process_id();
+        let exited = Arc::new(AtomicBool::new(false));
+        let sink: Sink = Arc::new(Mutex::new(Box::new(sink)));
+
+        let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let out = Out::new(self.marks);
+        spawn_reader(id, reader, sink.clone(), out.clone());
+        let (input, queued) = mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE);
+        let writer_done = Arc::new(AtomicBool::new(false));
+        {
+            let (done, out) = (writer_done.clone(), out.clone());
+            named(format!("manut-pty-{id}-writer"), move || {
+                for chunk in queued {
+                    if writer.write_all(&chunk).and_then(|_| writer.flush()).is_err() {
+                        break;
+                    }
+                    out.io.fetch_add(1, Ordering::Relaxed);
+                }
+                drop(writer);
+                done.store(true, Ordering::SeqCst);
+            });
+        }
+        {
+            let (exited, out) = (exited.clone(), out.clone());
+            named(format!("manut-pty-{id}-wait"), move || {
+                let code = match child.wait() {
+                    Ok(st) if st.signal().is_none() => Some(st.exit_code()),
+                    _ => None,
+                };
+                exited.store(true, Ordering::SeqCst);
+                // what the program printed last is handed on before its exit is, whatever the page has drawn
+                out.flow.drain(Duration::from_millis(120));
+                if let Ok(mut f) = sink.lock() {
+                    f(Output::Exit(code));
+                }
+            });
+        }
+        self.live.lock().unwrap().insert(id, Live { master: pair.master, input, writer_done, killer, pid, exited, out, account_env: account_env.to_vec() });
+        Ok(id)
+    }
+
+    /// Start allow-listed agent `agent` in `cwd`. Anything not in [`AGENTS`] is refused before a process
+    /// exists. `account_env` is `accounts::session_env` for that agent: the chosen account's home variable,
+    /// or nothing. `new_session` (Claude Code) names the new conversation, `resume` (Claude Code, Codex) continues
+    /// one in the agent's own terminal UI ([`terminal_args`]); `link` (oh-my-hermes only) is the row's link id,
+    /// passed as `MANUT_TERMINAL_LINK` ([`terminal_env`]).
+    pub fn start_agent<F>(
+        &self,
+        agent_id: &str,
+        cwd: &Path,
+        new_session: Option<&str>,
+        resume: Option<&str>,
+        link: Option<&str>,
+        account_env: &[(String, String)],
+        cols: u16,
+        rows: u16,
+        sink: F,
+    ) -> Result<u32, String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
+        // DeepSeek Harness ships no terminal profile: DSH runs only as a chat
+        if agent_id == "dsh" {
+            return Err("DeepSeek Harness has no terminal view here".into());
+        }
+        let extra = terminal_args(agent_id, new_session, resume)?;
+        let mut env = account_env.to_vec();
+        env.extend(terminal_env(agent_id, link)?);
+        let (mut argv, path_env) = launch_for(agent_id)?;
+        argv.extend(extra);
+        // Claude Code's status line runs manut's relay, which records the usage it reports and runs the person's own
+        // status line unchanged (`claude_usage.rs`; Claude Code with the person's own status line, on macOS and Linux
+        // outside an AppImage)
+        argv.extend(crate::claude_usage::terminal_args(agent_id, cwd, account_env, &crate::claude_usage::RelayHost::current()));
+        self.spawn(argv, cwd, Some(path_env), &env, cols, rows, sink)
+    }
+
+    /// The conversation the Codex in the foreground of session `id` holds open ([`crate::fg::codex_conversation`]), in
+    /// the Codex home the session started with (its account's, else the CLI's own: rule 30's
+    /// [`crate::past_chats::cli_home`]); `None` while it holds none, or once the session ended. Only the id comes back.
+    pub fn codex_conversation(&self, id: u32, user_home: &Path) -> Option<String> {
+        let (fg, env) = {
+            let g = self.live.lock().unwrap();
+            let l = g.get(&id).filter(|l| !l.exited.load(Ordering::SeqCst))?;
+            (l.foreground()?, l.account_env.clone())
+        };
+        let root = crate::past_chats::cli_home(user_home, "codex", &env, &|k| std::env::var(k).ok())?;
+        crate::fg::codex_conversation(fg, &root)
+    }
+
+    /// Start the terminal panel's shell ([`shell_argv`]: the person's login shell, never a program the page names)
+    /// in `cwd` when that is an existing folder, else in `home` ([`shell_cwd`]). Nothing is typed into it, and it
+    /// gets no account variable. The session is an ordinary PTY session: write, ack, resize and close as any other.
+    /// Returns the session id and the folder it started in (the tab names it).
+    /// `shell`: an id from [`shells_available`] (none: the default); one that is not on the list starts the default
+    /// and its name comes back third, for the row's note.
+    pub fn start_shell<F>(&self, cwd: Option<&str>, shell: Option<&str>, home: &Path, cols: u16, rows: u16, sink: F) -> Result<(u32, PathBuf, Option<String>), String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
+        let etc_shells = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+        let (argv, missing) = shell_argv_for(shell, &host_env, &etc_shells, is_program_file, Os::current())?;
+        let at = shell_cwd(cwd, home);
+        Ok((self.spawn(argv, &at, None, &[], cols, rows, sink)?, at, missing))
+    }
+
+    /// Settings › Accounts › GitHub "Sign in to another account": gh's own sign-in (`gh auth login`, or with
+    /// `--hostname <host>`: gh_me::login_argv) in a pseudo-terminal in `home`, shown in the terminal panel. The program
+    /// is the `gh` found on this computer, the arguments are those fixed words with at most a checked host, and
+    /// nothing is typed into it: the person answers gh's own questions, and gh stores the login itself.
+    pub fn start_gh_login<F>(&self, gh: &Path, args: Vec<String>, home: &Path, cols: u16, rows: u16, sink: F) -> Result<u32, String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
+        self.spawn_cmd(gh_login_command(gh, args, home), home, &[], cols, rows, sink)
+    }
+
+    /// The shells a Shell terminal may run here ([`shells_available`] on this machine).
+    pub fn shells(&self) -> Vec<ShellEntry> {
+        let etc_shells = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+        shells_available(&host_env, &etc_shells, is_program_file, Os::current())
+    }
+
+    /// Queue `data` for session `id`'s writer thread. Never blocks: a program that is not reading its
+    /// input makes this fail once the queue is full.
+    pub fn write(&self, id: u32, data: &[u8]) -> Result<(), String> {
+        let input = self.live.lock().unwrap().get(&id).ok_or("no such session")?.input.clone();
+        match input.try_send(data.to_vec()) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err("the program is not reading its input".into()),
+            Err(TrySendError::Disconnected(_)) => Err("the session's input is closed".into()),
+        }
+    }
+
+    /// The page has drawn `bytes` more of session `id`'s output: credit for its reader ([`FLOW_HIGH`]). A session
+    /// that is gone takes none.
+    pub fn ack(&self, id: u32, bytes: u64) {
+        if let Some(s) = self.live.lock().unwrap().get(&id) {
+            s.out.flow.ack(bytes);
+        }
+    }
+
+    pub fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
+        let g = self.live.lock().unwrap();
+        let s = g.get(&id).ok_or("no such session")?;
+        s.master.resize(clamp_size(cols, rows)).map_err(|e| e.to_string())
+    }
+
+    /// Stop the session's program (hang-up, then a hard kill after a grace period) and forget it.
+    pub fn close(&self, id: u32) {
+        let live = self.live.lock().unwrap().remove(&id);
+        if let Some(s) = live {
+            named(format!("manut-pty-{id}-close"), move || stop(s, Duration::from_millis(1500)));
+        }
+    }
+
+    /// Stop every session now (the app is quitting).
+    pub fn close_all(&self) {
+        let all: Vec<(u32, Live)> = self.live.lock().unwrap().drain().collect();
+        let handles: Vec<_> = all.into_iter().map(|(id, s)| named(format!("manut-pty-{id}-close"), move || stop(s, Duration::from_millis(400)))).collect();
+        for h in handles {
+            let _ = h.join();
+        }
+    }
+
+    /// Watch which agent CLI runs in session `id`'s foreground ([`crate::fg`]): `on_change` gets the agent id (or
+    /// `None`: a shell, any other program) only when it differs from the last one it got; it starts from `None`. The
+    /// watch ends when the session ends or is closed, handing on `None` then if an agent was shown.
+    ///
+    /// One thread (`manut-fg`) watches every session; it starts with the first watch and ends when none is left. It
+    /// wakes every `every` and looks at a session's foreground process only when its terminal had output or input since
+    /// the last look, else every [`FG_IDLE_TICKS`] wakes: starting a CLI is typing its name and it prints as it starts,
+    /// so the mark still shows within about `every`, while idle terminals cost no process reads. Whether a session
+    /// ended is checked on every wake. Each wake takes the sessions lock once, to read the terminals' foreground
+    /// process groups (unix) or the programs' pids (Windows); processes are read outside it.
+    pub fn watch_foreground<F>(self: &Arc<Self>, id: u32, every: Duration, on_change: F)
+    where
+        F: FnMut(Option<&'static str>) + Send + 'static,
+    {
+        let w = FgWatch { id, every, idle: every * FG_IDLE_TICKS, on_change: Box::new(on_change), probe: crate::fg::Probe::default(), last: None, io: 0, probed: None };
+        let mut inbox = self.fg.lock().unwrap();
+        inbox.pending.push(w);
+        if !inbox.running {
+            inbox.running = true;
+            let sessions = Arc::downgrade(self);
+            named("manut-fg".into(), move || fg_watcher(sessions));
+        }
+    }
+
+    #[cfg(test)]
+    pub fn count(&self) -> usize {
+        self.live.lock().unwrap().len()
+    }
+
+    /// Bytes session `id`'s page was handed and has not acknowledged.
+    #[cfg(all(test, unix))]
+    pub(crate) fn unacked(&self, id: u32) -> Option<u64> {
+        self.live.lock().unwrap().get(&id).map(|s| s.out.flow.state.lock().unwrap().unacked)
+    }
+}
+
+/// A session with no terminal I/O since its foreground was last read is read again after this many watcher wakes.
+pub(crate) const FG_IDLE_TICKS: u32 = 5;
+
+/// The `manut-fg` thread ([`Sessions::watch_foreground`]).
+fn fg_watcher(sessions: std::sync::Weak<Sessions>) {
+    #[cfg(test)]
+    if let Some(s) = sessions.upgrade() {
+        s.fg_stats.threads.fetch_add(1, Ordering::SeqCst);
+    }
+    let mut watches: Vec<FgWatch> = Vec::new();
+    // (the session ended or is gone, else its foreground pid and its I/O count), per watch, read under the lock
+    let mut seen: Vec<Option<(Option<u32>, u64)>> = Vec::new();
+    loop {
+        let Some(s) = sessions.upgrade() else { break };
+        {
+            let mut inbox = s.fg.lock().unwrap();
+            watches.append(&mut inbox.pending);
+            if watches.is_empty() {
+                inbox.running = false;
+                break;
+            }
+        }
+        #[cfg(test)]
+        s.fg_stats.watched.store(watches.len() as u32, Ordering::SeqCst);
+        drop(s);
+        let tick = watches.iter().map(|w| w.every).min().unwrap_or(Duration::from_secs(1));
+        thread::sleep(tick);
+        let Some(s) = sessions.upgrade() else { break };
+        #[cfg(test)]
+        s.fg_stats.wakes.fetch_add(1, Ordering::SeqCst);
+        seen.clear();
+        {
+            let g = s.live.lock().unwrap();
+            seen.extend(watches.iter().map(|w| match g.get(&w.id) {
+                Some(l) if !l.exited.load(Ordering::SeqCst) => Some((l.foreground(), l.out.io.load(Ordering::Relaxed))),
+                _ => None,
+            }));
+        }
+        let now = Instant::now();
+        let mut i = 0;
+        for at in seen.iter() {
+            let Some((pid, io)) = *at else {
+                let mut gone = watches.remove(i);
+                if gone.last.is_some() {
+                    (gone.on_change)(None);
+                }
+                continue;
+            };
+            let w = &mut watches[i];
+            i += 1;
+            // a little slack: a wake that comes a hair early still counts as the idle look
+            let due = match w.probed {
+                None => true,
+                Some(t) => io != w.io || now.duration_since(t) + w.every / 2 >= w.idle,
+            };
+            if !due {
+                continue;
+            }
+            w.io = io;
+            w.probed = Some(now);
+            #[cfg(test)]
+            s.fg_stats.probes.fetch_add(1, Ordering::SeqCst);
+            let agent = pid.and_then(|p| w.probe.agent(p));
+            if agent != w.last {
+                w.last = agent;
+                (w.on_change)(agent);
+            }
+        }
+        drop(s);
+    }
+    // the app is gone: every watch ends
+    for mut w in watches {
+        if w.last.is_some() {
+            (w.on_change)(None);
+        }
+    }
+    #[cfg(test)]
+    if let Some(s) = sessions.upgrade() {
+        s.fg_stats.watched.store(0, Ordering::SeqCst);
+        s.fg_stats.threads.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The command a session runs: `argv` in `cwd`, with the terminal variables, the child `PATH`, and the chosen
+/// account's home variable (`account_env`, empty for the CLI's own login). Nothing else is added.
+fn command_for(argv: Vec<OsString>, cwd: &Path, path_env: Option<OsString>, account_env: &[(String, String)]) -> CommandBuilder {
+    let mut cmd = CommandBuilder::from_argv(argv);
+    cmd.cwd(cwd);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "manut");
+    if let Some(p) = path_env {
+        cmd.env("PATH", p);
+    }
+    #[cfg(unix)]
+    if std::env::var_os("LANG").is_none() {
+        // A Dock-started app has no locale; the agents' TUIs need UTF-8.
+        cmd.env("LANG", "en_US.UTF-8");
+    }
+    for (k, v) in account_env {
+        cmd.env(k, v);
+    }
+    crate::appimage::host_env(&mut cmd);
+    cmd
+}
+
+/// gh's sign-in as a terminal command: the `gh` found here, the fixed words, the home folder, and the terminal
+/// variables every session gets, with any `GH_TOKEN` / `GITHUB_TOKEN` / enterprise token manut inherited taken out
+/// (gh refuses to sign in while one is set: "The value of the GH_TOKEN environment variable is being used"), and
+/// gh's debug and pager variables with them.
+pub fn gh_login_command(gh: &Path, args: Vec<String>, home: &Path) -> CommandBuilder {
+    let mut argv: Vec<OsString> = vec![gh.as_os_str().to_os_string()];
+    argv.extend(args.into_iter().map(OsString::from));
+    let mut cmd = command_for(argv, home, None, &[]);
+    scrub_gh_env(&mut cmd);
+    cmd
+}
+
+/// Take what gh_me.rs's children never get (`gh_me::SCRUB`: inherited tokens, gh's debug output and pager) out of a
+/// terminal command's environment.
+pub fn scrub_gh_env(cmd: &mut CommandBuilder) {
+    for k in crate::gh_me::SCRUB {
+        cmd.env_remove(k);
+    }
+}
+
+/// Bytes every session's reader has taken from its PTY, for the bench (`pty_bench.rs`): read minus what the page
+/// has drawn is what waits somewhere on the way.
+#[cfg(all(test, unix))]
+pub(crate) static PTY_READ_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// One thread reads the PTY (macOS hands out at most 1 KB per read) into the session's [`Pipe`]; another takes one
+/// message per [`COALESCE_WINDOW`] / [`COALESCE_BYTES`] out of it and hands it to the sink, so a big dump is a few
+/// dozen Channel sends instead of one per KB. The reader holds off while the page is behind ([`Flow`]).
+fn spawn_reader(id: u32, mut reader: Box<dyn Read + Send>, sink: Sink, out: Arc<Out>) {
+    {
+        let out = out.clone();
+        named(format!("manut-pty-{id}-reader"), move || {
+            let mut buf = [0u8; 16 * 1024];
+            // Once the session is closed, what is left is read and dropped instead of handed on: closing a
+            // pseudo-terminal can wait until its output has been read (ConPTY, documented for ClosePseudoConsole).
+            let mut forward = true;
+            loop {
+                forward = forward && out.flow.may_read();
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        #[cfg(all(test, unix))]
+                        PTY_READ_BYTES.fetch_add(n as u64, Ordering::SeqCst);
+                        out.io.fetch_add(1, Ordering::Relaxed);
+                        forward = forward && out.pipe.push(&buf[..n]);
+                    }
+                }
+            }
+            out.pipe.end();
+        });
+    }
+    named(format!("manut-pty-{id}-coalesce"), move || {
+        while let Some(b) = out.pipe.take(COALESCE_WINDOW) {
+            // counted before the sink has it: the acknowledgement may come back while the sink still runs
+            out.flow.sent(b.len());
+            if let Ok(mut f) = sink.lock() {
+                f(Output::Data(b));
+            }
+        }
+        out.flow.finished();
+    });
+}
+
+/// One session's output on its way to the page: what was read and not yet handed on ([`Pipe`]), and how much the
+/// page still has to draw ([`Flow`]).
+struct Out {
+    pipe: Pipe,
+    flow: Flow,
+    /// Bumped by every PTY read and every write: the foreground watcher looks again soon after a change.
+    io: AtomicU64,
+}
+
+impl Out {
+    fn new(marks: (u64, u64)) -> Arc<Out> {
+        Arc::new(Out { pipe: Pipe::new(COALESCE_BYTES), flow: Flow::new(marks), io: AtomicU64::new(0) })
+    }
+
+    /// The session is closed: nothing more is handed on, and nothing holds the reader back.
+    fn close(&self) {
+        self.pipe.close();
+        self.flow.close();
+    }
+}
+
+/// Bytes on their way from the thread that reads the PTY to the thread that hands messages to the sink. At most
+/// `cap` of them wait here: a reader that is ahead waits for room, so nothing piles up between the two, and a read
+/// costs no allocation (its bytes are copied once, into the message being built).
+pub(crate) struct Pipe {
+    cap: usize,
+    state: Mutex<PipeState>,
+    /// a first byte came, the pipe filled up, or nothing more will come
+    filled: Condvar,
+    /// a message was taken: there is room again
+    room: Condvar,
+}
+
+#[derive(Default)]
+struct PipeState {
+    buf: Vec<u8>,
+    /// the reading side is done: what is here is the last of it
+    ended: bool,
+    /// the session is closed: nothing more is taken
+    closed: bool,
+}
+
+impl Pipe {
+    pub(crate) fn new(cap: usize) -> Pipe {
+        Pipe { cap, state: Mutex::default(), filled: Condvar::new(), room: Condvar::new() }
+    }
+
+    /// Add `data`, in order, waiting while the pipe is full. False once the pipe is closed (the bytes are dropped).
+    pub(crate) fn push(&self, mut data: &[u8]) -> bool {
+        let mut s = self.state.lock().unwrap();
+        while !data.is_empty() {
+            while s.buf.len() >= self.cap && !s.closed {
+                s = self.room.wait(s).unwrap();
+            }
+            if s.closed {
+                return false;
+            }
+            let first = s.buf.is_empty();
+            let n = data.len().min(self.cap - s.buf.len());
+            s.buf.extend_from_slice(&data[..n]);
+            data = &data[n..];
+            if first || s.buf.len() >= self.cap {
+                self.filled.notify_one();
+            }
+        }
+        true
+    }
+
+    /// The reading side is done.
+    pub(crate) fn end(&self) {
+        self.state.lock().unwrap().ended = true;
+        self.filled.notify_one();
+    }
+
+    pub(crate) fn close(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.closed = true;
+        s.buf = Vec::new();
+        self.filled.notify_all();
+        self.room.notify_all();
+    }
+
+    /// The next message: waits for a first byte, then up to `window` while more arrive, and takes everything that
+    /// is here (never more than `cap`). `None` when the reading side is done and nothing is left, or once closed.
+    pub(crate) fn take(&self, window: Duration) -> Option<Vec<u8>> {
+        let mut s = self.state.lock().unwrap();
+        while s.buf.is_empty() && !s.ended && !s.closed {
+            s = self.filled.wait(s).unwrap();
+        }
+        let deadline = Instant::now() + window;
+        while s.buf.len() < self.cap && !s.ended && !s.closed {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            s = self.filled.wait_timeout(s, left).unwrap().0;
+        }
+        if s.closed || s.buf.is_empty() {
+            return None;
+        }
+        // a flood's next message gets its full room at once; a keystroke's stays small
+        let next = Vec::with_capacity(s.buf.len());
+        let message = std::mem::replace(&mut s.buf, next);
+        self.room.notify_one();
+        Some(message)
+    }
+}
+
+/// A session's credit with the page: bytes handed to the sink minus bytes the page acknowledged.
+struct Flow {
+    high: u64,
+    low: u64,
+    state: Mutex<FlowState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct FlowState {
+    unacked: u64,
+    /// set at `high`, cleared at `low`: the reader holds off while it is set
+    paused: bool,
+    /// the program has just ended: its last output is read whatever the page has drawn
+    draining: bool,
+    /// the session is closed
+    closed: bool,
+    /// the end of the program's output was read and all of it handed on
+    done: bool,
+}
+
+impl Flow {
+    fn new((high, low): (u64, u64)) -> Flow {
+        Flow { high, low, state: Mutex::default(), changed: Condvar::new() }
+    }
+
+    /// `n` more bytes are on their way to the page.
+    fn sent(&self, n: usize) {
+        let mut s = self.state.lock().unwrap();
+        s.unacked += n as u64;
+        if s.unacked >= self.high {
+            s.paused = true;
+        }
+    }
+
+    /// The page drew `n` bytes.
+    fn ack(&self, n: u64) {
+        let mut s = self.state.lock().unwrap();
+        s.unacked = s.unacked.saturating_sub(n);
+        if s.paused && s.unacked <= self.low {
+            s.paused = false;
+            self.changed.notify_all();
+        }
+    }
+
+    /// The reader asks before every read, and waits here while the page is behind. False once the session is
+    /// closed: the reader then reads on to the end without handing anything on.
+    fn may_read(&self) -> bool {
+        let mut s = self.state.lock().unwrap();
+        while s.paused && !s.draining && !s.closed {
+            s = self.changed.wait(s).unwrap();
+        }
+        !s.closed
+    }
+
+    fn close(&self) {
+        self.state.lock().unwrap().closed = true;
+        self.changed.notify_all();
+    }
+
+    /// The end of the output was read and all of it handed to the sink.
+    fn finished(&self) {
+        self.state.lock().unwrap().done = true;
+        self.changed.notify_all();
+    }
+
+    /// The program has ended: until all its output is handed on, and for `limit` at most (something it started
+    /// may still hold the terminal), the reader is not held back.
+    fn drain(&self, limit: Duration) {
+        let mut s = self.state.lock().unwrap();
+        s.draining = true;
+        self.changed.notify_all();
+        let deadline = Instant::now() + limit;
+        while !s.done {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            s = self.changed.wait_timeout(s, left).unwrap().0;
+        }
+        s.draining = false;
+    }
+}
+
+/// A chat session's stdout (crate::agent_chat, on pipes) is merged with this; a terminal session's PTY goes through
+/// [`Pipe`] instead.
+///
+/// Wait for a chunk, then keep taking chunks until `max` bytes or `window` after that first chunk, and
+/// emit them as one buffer. Returns when the sender is gone and everything was emitted.
+pub(crate) fn coalesce(rx: Receiver<Vec<u8>>, max: usize, window: Duration, mut emit: impl FnMut(Vec<u8>)) {
+    while let Ok(mut buf) = rx.recv() {
+        let deadline = Instant::now() + window;
+        let mut open = true;
+        while buf.len() < max {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(more) => buf.extend_from_slice(&more),
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    open = false;
+                    break;
+                }
+            }
+        }
+        emit(buf);
+        if !open {
+            return;
+        }
+    }
+}
+
+/// Hang up the program's process group, wait up to `grace`, then kill it hard. Dropping the master side
+/// closes the terminal, which hangs up anything still attached to it. A writer thread stuck on a full PTY
+/// is waited for only briefly: it ends once the terminal is gone, and nothing here waits on it for long.
+fn stop(mut s: Live, grace: Duration) {
+    s.out.close();
+    // A program that already ended is not signalled: its pid may belong to someone else by now.
+    if !s.exited.load(Ordering::SeqCst) {
+        signal_group(s.pid, false);
+        let _ = s.killer.kill();
+    }
+    let Live { master, input, writer_done, exited, pid, .. } = s;
+    drop(input); // the writer thread ends after the write it is in, if any
+    let wait = |flag: &AtomicBool, limit: Duration| {
+        let deadline = Instant::now() + limit;
+        while !flag.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        flag.load(Ordering::SeqCst)
+    };
+    if !wait(&exited, grace) {
+        signal_group(pid, true);
+    }
+    drop(master);
+    wait(&writer_done, Duration::from_millis(200));
+}
+
+/// SIGHUP (or SIGKILL when `hard`) to the session's process group. The child is a session leader (the
+/// PTY made it one), so its group id is its pid and helpers it started go too. Windows: the ConPTY close
+/// and `TerminateProcess` from the killer end it.
+#[cfg(unix)]
+pub(crate) fn signal_group(pid: Option<u32>, hard: bool) {
+    if let Some(pid) = pid.filter(|p| *p > 1) {
+        let sig = if hard { libc::SIGKILL } else { libc::SIGHUP };
+        unsafe {
+            libc::kill(-(pid as i32), sig);
+            if hard {
+                libc::kill(pid as i32, sig);
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn signal_group(_pid: Option<u32>, _hard: bool) {}
+
+/// Every process a chat's program started, so closing the chat (or the start deadline) stops all of them, not only
+/// the program itself. Unix: the program leads its own process group (`process_group(0)` in the chat's command), so
+/// the group is killed. Windows has no process groups, and an npm agent runs as `cmd.exe /c <shim>.cmd`, which starts
+/// `node.exe`: killing `cmd.exe` leaves node running. There the program goes into a Job Object that kills every
+/// process in it when [`ProcessTree::kill`] ends it or the last handle closes (also when manut itself ends);
+/// processes it starts later join the job on their own.
+pub(crate) struct ProcessTree {
+    #[cfg(unix)]
+    pid: u32,
+    #[cfg(windows)]
+    job: job::Handle,
+}
+
+#[cfg(windows)]
+unsafe impl Send for ProcessTree {}
+#[cfg(windows)]
+unsafe impl Sync for ProcessTree {}
+
+impl ProcessTree {
+    /// The tree of `child`, or `None` when the system refuses one (the caller then kills `child` alone).
+    #[cfg(unix)]
+    pub(crate) fn adopt(child: &std::process::Child) -> Option<ProcessTree> {
+        Some(ProcessTree { pid: child.id() }).filter(|t| t.pid > 1)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn adopt(child: &std::process::Child) -> Option<ProcessTree> {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            let h = job::CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let tree = ProcessTree { job: h };
+            let mut info: job::ExtendedLimits = std::mem::zeroed();
+            info.basic.limit_flags = job::KILL_ON_JOB_CLOSE;
+            let size = std::mem::size_of::<job::ExtendedLimits>() as u32;
+            if job::SetInformationJobObject(h, job::EXTENDED_LIMIT_INFORMATION, &mut info as *mut _ as *mut _, size) == 0 {
+                return None;
+            }
+            if job::AssignProcessToJobObject(h, child.as_raw_handle() as job::Handle) == 0 {
+                return None;
+            }
+            Some(tree)
+        }
+    }
+
+    /// End every process in the tree now. Unix: SIGKILL to the group only, so it is safe after the program itself has
+    /// ended and been reaped (the group id stays taken while any member lives; an empty group is ESRCH).
+    pub(crate) fn kill(&self) {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(self.pid as i32), libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        unsafe {
+            job::TerminateJobObject(self.job, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        // kill-on-close: whatever is still in the job ends here
+        unsafe {
+            job::CloseHandle(self.job);
+        }
+    }
+}
+
+/// The kernel32 calls and structures [`ProcessTree`] uses (winnt.h layout, 64-bit).
+#[cfg(windows)]
+mod job {
+    use std::ffi::c_void;
+
+    pub type Handle = *mut c_void;
+    pub const EXTENDED_LIMIT_INFORMATION: i32 = 9; // JobObjectExtendedLimitInformation
+    pub const KILL_ON_JOB_CLOSE: u32 = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+
+    #[repr(C)]
+    pub struct BasicLimits {
+        pub per_process_user_time_limit: i64,
+        pub per_job_user_time_limit: i64,
+        pub limit_flags: u32,
+        pub minimum_working_set_size: usize,
+        pub maximum_working_set_size: usize,
+        pub active_process_limit: u32,
+        pub affinity: usize,
+        pub priority_class: u32,
+        pub scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    pub struct ExtendedLimits {
+        pub basic: BasicLimits,
+        pub io: [u64; 6],
+        pub process_memory_limit: usize,
+        pub job_memory_limit: usize,
+        pub peak_process_memory_used: usize,
+        pub peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
+        pub fn SetInformationJobObject(job: Handle, class: i32, info: *mut c_void, length: u32) -> i32;
+        pub fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+        pub fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
+        pub fn CloseHandle(handle: Handle) -> i32;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        move |k| m.get(k).cloned()
+    }
+
+    fn fs_of(files: &[&Path]) -> impl Fn(&Path) -> bool {
+        let set: HashSet<PathBuf> = files.iter().map(|p| p.to_path_buf()).collect();
+        move |p| set.contains(p)
+    }
+
+    /// A person with Hermes and no `omh` gets a usable "Hermes" row; with both, the row is as it always was; with
+    /// neither, it is not installed. The row never names a program to start: `launch_for("omh")` still needs `omh`.
+    #[test]
+    fn the_hermes_row_without_omh_with_both_and_with_neither() {
+        let omh = PathBuf::from("/Users/k/.local/bin/omh");
+        let py = PathBuf::from("/Users/k/.hermes/hermes-agent/venv/bin/python");
+        let only = hermes_row(None, Some(py.clone()));
+        assert_eq!((only.id, only.label, only.mode, only.via), ("omh", "Hermes", Mode::Hermes, Some("hermes")));
+        assert_eq!(only.path.as_deref(), Some(py.to_str().unwrap()));
+        let both = hermes_row(Some(omh.clone()), Some(py));
+        assert_eq!((both.label, both.via, both.path.as_deref()), ("oh-my-hermes", None, Some(omh.to_str().unwrap())));
+        let neither = hermes_row(None, None);
+        assert_eq!((neither.label, neither.via, neither.path), ("oh-my-hermes", None, None));
+        // the shell's JSON: `via` only on the Hermes row
+        assert_eq!(serde_json::to_value(&only).unwrap()["via"], "hermes");
+        assert!(serde_json::to_value(&both).unwrap().get("via").is_none());
+        // `omh` on a dir list is found as before; nothing named `hermes` is ever looked up as a session program
+        let dirs = [PathBuf::from("/Users/k/.local/bin")];
+        assert_eq!(find_in_layouts("omh", "omh", &dirs, &env_of(&[]), fs_of(&[&omh]), |p: &Path| p.to_path_buf(), Os::Unix), Some(omh));
+        assert!(AGENTS.iter().all(|a| a.program != "hermes"));
+    }
+
+    #[test]
+    fn allow_list_is_the_nine_built_ins_and_the_acp_list() {
+        let ids: Vec<&str> = AGENTS.iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["claude", "codex", "omo", "dsh", "omh", "pi", "omp", "grok", "opencode"]);
+        let generic: Vec<&str> = crate::acp_agents::ACP_LIST.iter().map(|e| e.agent.id).collect();
+        assert_eq!(generic, ["gemini", "qwen", "kimi", "copilot", "cline"]);
+        for a in AGENTS.iter().chain(crate::acp_agents::ACP_LIST.iter().map(|e| &e.agent)) {
+            assert_eq!(a.id, a.program, "the id is the program name; nothing else is ever run");
+            assert_eq!(agent(a.id), Some(a), "{}", a.id);
+        }
+        // Kilo Code is no longer offered
+        assert!(agent("kilo").is_none() && chat_args("kilo").is_none());
+    }
+
+    #[test]
+    fn modes_and_the_fixed_chat_arguments() {
+        let modes: Vec<(&str, Mode)> = AGENTS.iter().map(|a| (a.id, a.mode)).collect();
+        assert_eq!(
+            modes,
+            [
+                ("claude", Mode::Chat),
+                ("codex", Mode::Chat),
+                ("omo", Mode::Chat),
+                ("dsh", Mode::Chat),
+                ("omh", Mode::Hermes),
+                ("pi", Mode::Chat),
+                ("omp", Mode::Chat),
+                ("grok", Mode::Terminal),
+                ("opencode", Mode::Chat)
+            ]
+        );
+        assert_eq!(
+            chat_args("claude").unwrap(),
+            ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--replay-user-messages"]
+        );
+        assert_eq!(chat_args("codex").unwrap(), ["app-server"]);
+        assert_eq!(chat_args("pi").unwrap(), ["--mode", "rpc"]);
+        assert_eq!(chat_args("omp").unwrap(), ["--mode", "rpc"]);
+        assert_eq!(chat_args("omo").unwrap(), ["--mode", "rpc"]);
+        assert_eq!(chat_args("opencode").unwrap(), ["acp"]);
+        // the generic ACP agents: the list drives both the allow-list row and the one argument that starts its ACP
+        // server, as 0.2.8 had them (Gemini's `--experimental-acp` is deprecated)
+        for (id, arg) in [("gemini", "--acp"), ("qwen", "--acp"), ("kimi", "acp"), ("copilot", "--acp"), ("cline", "--acp")] {
+            let e = crate::acp_agents::entry(id).unwrap();
+            assert_eq!(chat_args(id).unwrap(), [arg], "{id}");
+            assert_eq!(chat_args(id).unwrap(), e.args, "{id}");
+            assert_eq!(agent(id).map(|a| (a.label, a.mode)), Some((e.agent.label, Mode::Chat)), "{id}");
+        }
+        // DSH's chat takes its arguments per message (dsh_turn_args), not here; Kilo Code is gone
+        for none in ["omh", "grok", "dsh", "sh", "", "claude -p", "kilo"] {
+            assert!(chat_args(none).is_none(), "{none}");
+        }
+        let p = Path::new("/h/.manut/dsh/headless.patch.yml");
+        assert_eq!(dsh_turn_args(p, None).unwrap(), ["--profile", "headless", "--patch", "/h/.manut/dsh/headless.patch.yml", "--json", "-"].map(OsString::from));
+        let sid = "session-8c11e2bc-9f55-4bcb-a597-19ea472184e8";
+        assert_eq!(
+            dsh_turn_args(p, Some(sid)).unwrap(),
+            ["--profile", "headless", "--patch", "/h/.manut/dsh/headless.patch.yml", "--json", "--session-id", sid, "-"].map(OsString::from)
+        );
+        for bad in ["", "8c11e2bc-9f55-4bcb-a597-19ea472184e8", "session-x", "session-8c11e2bc-9f55-4bcb-a597-19ea472184e8 --approval-policy", "--from-default-profile"] {
+            assert!(dsh_turn_args(p, Some(bad)).is_err(), "{bad:?}");
+        }
+        // no turn argument widens permissions, names another profile or touches the harness's own setup
+        for a in dsh_turn_args(p, Some(sid)).unwrap() {
+            let a = a.to_string_lossy();
+            assert!(!a.contains("permission") && !a.contains("approval") && !a.contains("plugin") && !a.contains("default-profile"), "{a}");
+        }
+        // no allow-listed argument can run a shell, skip permissions or load extra config
+        for a in AGENTS.iter().chain(crate::acp_agents::ACP_LIST.iter().map(|e| &e.agent)).filter_map(|a| chat_args(a.id)).flatten() {
+            assert!(!a.contains("dangerously") && !a.contains("bypass") && !a.contains("config") && !a.contains("mcp"), "{a}");
+        }
+    }
+
+    #[test]
+    fn resume_takes_only_a_claude_uuid() {
+        let id = "eee5079a-c52e-4526-b633-f3d8cb7d6394";
+        assert_eq!(resume_args("claude", id).unwrap(), [OsString::from("--resume"), OsString::from(id)]);
+        for bad in ["", "x", "--dangerously-skip-permissions", "eee5079a-c52e-4526-b633-f3d8cb7d639", "eee5079a-c52e-4526-b633-f3d8cb7d6394 --x", "../eee5079a-c52e-4526-b633-f3d8cb7d6394", "eee5079a_c52e_4526_b633_f3d8cb7d6394"] {
+            assert!(resume_args("claude", bad).is_err(), "{bad:?}");
+        }
+        assert!(resume_args("codex", id).is_err());
+        // OmO continues with --session, only with a UUID
+        assert_eq!(resume_args("omo", id).unwrap(), [OsString::from("--session"), OsString::from(id)]);
+        // DSH continues DeepSeek Harness's own `session-<uuid>` with --session-id; a bare UUID (a 0.2.4 deepseek-bot
+        // conversation id) is refused
+        let sid = format!("session-{id}");
+        assert_eq!(resume_args("dsh", &sid).unwrap(), [OsString::from("--session-id"), OsString::from(&sid)]);
+        assert!(resume_args("dsh", id).is_err());
+        for agent in ["omo", "dsh"] {
+            for bad in ["", "default", "--yolo", "eee5079a-c52e-4526-b633-f3d8cb7d6394 --x", "../x"] {
+                assert!(resume_args(agent, bad).is_err(), "{agent} {bad:?}");
+            }
+        }
+        // OpenCode continues over its protocol (session/resume), never by an argument
+        for agent in ["pi", "omp", "grok", "omh", "opencode", "kilo", "gemini", "qwen", "kimi", "copilot", "cline"] {
+            assert!(resume_args(agent, id).is_err(), "{agent}");
+        }
+        let s = Sessions::default();
+        assert!(s.start_agent("claude", &std::env::temp_dir(), None, Some("--yolo"), None, &[], 80, 24, |_| {}).is_err());
+        assert_eq!(s.count(), 0);
+    }
+
+    /// The DeepSeek Harness CLI is found where the harness installs it, never as "the first `dsh` on PATH":
+    /// deepseek-bot's launcher in ~/.local/bin, first on PATH, is skipped.
+    #[test]
+    fn dsh_is_deepseek_harness_not_the_first_dsh_on_path() {
+        let env = env_of(&[("PATH", "/Users/k/.local/bin:/usr/bin"), ("HOME", "/Users/k")]);
+        let dirs = search_dirs(&env, Os::Unix);
+        let bot = PathBuf::from("/Users/k/.local/bin/dsh");
+        let app = PathBuf::from("/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh");
+        let user_app = PathBuf::from("/Users/k/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh");
+        let same = |p: &Path| p.to_path_buf();
+        // the plain lookup would start deepseek-bot
+        assert_eq!(resolve("dsh", &dirs, fs_of(&[&bot, &app]), Os::Unix), Some(bot.clone()));
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &app]), same, Os::Unix), Some(app.clone()));
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &user_app]), same, Os::Unix), Some(user_app));
+        // deepseek-bot alone: DSH is not installed
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot]), same, Os::Unix), None);
+        // the app's "Manage dsh Command" link in /usr/local/bin and the npm package count, by where they lead
+        let link = PathBuf::from("/usr/local/bin/dsh");
+        let to_app = |p: &Path| if p == link { app.clone() } else { p.to_path_buf() };
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &link]), to_app, Os::Unix), Some(link.clone()));
+        let npm = PathBuf::from("/opt/homebrew/bin/dsh");
+        let to_npm = |p: &Path| if p == npm { PathBuf::from("/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/lib/bin.js") } else { p.to_path_buf() };
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &npm]), to_npm, Os::Unix), Some(npm));
+        // a `dsh` that leads anywhere else is not the harness
+        let other = |p: &Path| if p == link { PathBuf::from("/Users/k/Desktop/deepseek-bot/dist/tui/main.js") } else { p.to_path_buf() };
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &link]), other, Os::Unix), None);
+        // Linux: npm only (no app folder)
+        let lin = env_of(&[("PATH", "/home/k/.local/bin:/home/k/.npm-global/bin"), ("HOME", "/home/k")]);
+        let ldirs = search_dirs(&lin, Os::Unix);
+        let lnpm = PathBuf::from("/home/k/.npm-global/bin/dsh");
+        let lbot = PathBuf::from("/home/k/.local/bin/dsh");
+        let to_lnpm = |p: &Path| if p == lnpm { PathBuf::from("/home/k/.npm-global/lib/node_modules/@deepseek-ai/dsh/lib/bin.js") } else { p.to_path_buf() };
+        assert_eq!(dsh_harness(&lin, &ldirs, fs_of(&[&lbot, &lnpm]), to_lnpm, Os::Unix), Some(lnpm));
+    }
+
+    #[test]
+    fn dsh_on_windows_is_the_app_cli_or_the_npm_shim() {
+        let env = env_of(&[("PATH", r"C:\Users\k\.local\bin;C:\Users\k\AppData\Roaming\npm"), ("LOCALAPPDATA", r"C:\Users\k\AppData\Local"), ("APPDATA", r"C:\Users\k\AppData\Roaming"), ("USERPROFILE", r"C:\Users\k")]);
+        let dirs = search_dirs(&env, Os::Windows);
+        let app = dsh_app_clis(&env, Os::Windows);
+        assert_eq!(app, [Path::new(r"C:\Users\k\AppData\Local").join("Programs").join("DeepSeek Harness").join("resources").join("runtime").join("cli").join("bin").join("dsh.cmd")]);
+        let same = |p: &Path| p.to_path_buf();
+        let bot = Path::new(r"C:\Users\k\.local\bin").join("dsh.cmd");
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &app[0]]), same, Os::Windows), Some(app[0].clone()));
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot]), same, Os::Windows), None);
+        // the npm shim counts when @deepseek-ai/dsh sits next to it
+        let npm_dir = Path::new(r"C:\Users\k\AppData\Roaming\npm");
+        let shim = npm_dir.join("dsh.cmd");
+        let pkg = npm_dir.join("node_modules").join("@deepseek-ai").join("dsh").join("package.json");
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &shim, &pkg]), same, Os::Windows), Some(shim.clone()));
+        assert_eq!(dsh_harness(&env, &dirs, fs_of(&[&bot, &shim]), same, Os::Windows), None);
+        // and DeepSeek Harness never opens in a terminal session
+        let s = Sessions::default();
+        assert!(s.start_agent("dsh", &std::env::temp_dir(), None, None, None, &[], 80, 24, |_| {}).is_err());
+        assert_eq!(s.count(), 0);
+    }
+
+    #[test]
+    fn refuses_anything_not_on_the_allow_list() {
+        assert!(agent("claude").is_some());
+        for bad in ["", "sh", "bash", "/bin/sh", "claude --dangerously-skip-permissions", "claude;rm -rf ~", "CLAUDE", " claude", "../claude", "codex.cmd", "kilo", "gemini --acp"] {
+            assert!(agent(bad).is_none(), "{bad:?} must be refused");
+            assert!(launch_for(bad).is_err(), "{bad:?} must not launch");
+        }
+    }
+
+    /// A New session may open any agent as its terminal (the person picks Chat or Terminal), so `start_agent` takes
+    #[test]
+    fn terminal_args_take_only_a_new_claude_id_or_a_claude_or_codex_one_to_continue() {
+        let id = "0e2c5a8e-6c1b-4f7e-9a3d-2b1c4d5e6f70";
+        let x = "01a1d060-4ab7-72b2-b02b-1dbee1d5f52c";
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(terminal_args("claude", None, None).unwrap(), Vec::<OsString>::new());
+        assert_eq!(terminal_args("claude", Some(id), None).unwrap(), os(&["--session-id", id]));
+        assert_eq!(terminal_args("claude", None, Some(id)).unwrap(), os(&["--resume", id]));
+        assert_eq!(terminal_args("codex", None, Some(x)).unwrap(), os(&["resume", x]));
+        // never both, and a new id only for Claude Code
+        assert!(terminal_args("claude", Some(id), Some(id)).is_err());
+        for agent in ["codex", "grok", "pi", "omp", "omh", "opencode", "shell", "gemini"] {
+            assert!(terminal_args(agent, Some(id), None).is_err(), "{agent}");
+        }
+        for agent in ["grok", "pi", "omp", "omh", "opencode", "shell", "gemini"] {
+            assert!(terminal_args(agent, None, Some(id)).is_err(), "{agent}");
+        }
+        for bad in ["", "--yolo", "x", "0e2c5a8e-6c1b-4f7e-9a3d-2b1c4d5e6f7", "0e2c5a8e-6c1b-4f7e-9a3d-2b1c4d5e6f70 --yolo", "../0e2c5a8e-6c1b-4f7e-9a3d-2b1c4d5e6f70", "0e2c5a8e6c1b4f7e9a3d2b1c4d5e6f70"] {
+            assert!(terminal_args("claude", Some(bad), None).is_err(), "{bad:?}");
+            assert!(terminal_args("claude", None, Some(bad)).is_err(), "{bad:?}");
+            assert!(terminal_args("codex", None, Some(bad)).is_err(), "{bad:?}");
+        }
+        let s = Sessions::default();
+        assert!(s.start_agent("claude", &std::env::temp_dir(), Some("--dangerously-skip-permissions"), None, None, &[], 80, 24, |_| {}).is_err());
+        assert!(s.start_agent("codex", &std::env::temp_dir(), None, Some("--yolo"), None, &[], 80, 24, |_| {}).is_err());
+        assert_eq!(s.count(), 0);
+    }
+
+    /// An oh-my-hermes terminal gets its row's link id as `MANUT_TERMINAL_LINK` (OMH reopens the session it dropped in
+    /// this terminal); no other agent gets it, and a link that is not 10 lowercase base32 characters is refused.
+    #[test]
+    fn terminal_env_gives_only_omh_its_checked_link_id() {
+        assert_eq!(terminal_env("omh", None).unwrap(), Vec::<(String, String)>::new());
+        assert_eq!(terminal_env("claude", None).unwrap(), Vec::<(String, String)>::new());
+        assert_eq!(terminal_env("omh", Some("abcdefgh23")).unwrap(), vec![("MANUT_TERMINAL_LINK".to_string(), "abcdefgh23".to_string())]);
+        for agent in ["claude", "codex", "omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "shell"] {
+            assert!(terminal_env(agent, Some("abcdefgh23")).is_err(), "{agent}");
+        }
+        for bad in ["", "abcdefgh2", "abcdefgh234", "ABCDEFGH23", "abcdefgh18", "abcdefgh2 ", "abc/efgh23", "abcdefgh2\n", "abcdéfgh23"] {
+            assert!(terminal_env("omh", Some(bad)).is_err(), "{bad:?}");
+        }
+        // refused before a program is looked up or a process exists
+        let s = Sessions::default();
+        let tmp = std::env::temp_dir();
+        assert_eq!(s.start_agent("claude", &tmp, None, None, Some("abcdefgh23"), &[], 80, 24, |_| {}).unwrap_err(), "claude sessions are not given a terminal link");
+        assert_eq!(s.start_agent("omh", &tmp, None, None, Some("NOT-A-LINK"), &[], 80, 24, |_| {}).unwrap_err(), "not a terminal link id");
+        assert_eq!(s.count(), 0);
+    }
+
+    /// The link variable is added beside the account's and the terminal's own, and nothing else changes.
+    #[test]
+    fn the_link_is_the_one_variable_an_omh_terminal_adds() {
+        let cwd = std::env::temp_dir();
+        let argv = || vec![OsString::from("/x/omh")];
+        let extra = |cmd: &CommandBuilder| -> Vec<(String, String)> {
+            cmd.iter_extra_env_as_str().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let base = extra(&command_for(argv(), &cwd, None, &[]));
+        let cmd = command_for(argv(), &cwd, None, &terminal_env("omh", Some("q2w3e4r5t6")).unwrap());
+        let mut added: Vec<_> = extra(&cmd).into_iter().filter(|p| !base.contains(p)).collect();
+        added.sort();
+        assert_eq!(added, vec![("MANUT_TERMINAL_LINK".to_string(), "q2w3e4r5t6".to_string())]);
+        assert_eq!(cmd.get_argv(), &argv(), "the link changes no argument");
+    }
+
+    /// every allow-listed id except `dsh` (DeepSeek Harness ships no terminal profile). The folder is relative, so
+    /// `spawn` refuses it after the program is resolved and no process ever starts, installed or not.
+    #[test]
+    fn start_agent_accepts_every_allow_listed_agent_for_a_terminal_except_dsh() {
+        let s = Sessions::default();
+        for a in AGENTS.iter().chain(crate::acp_agents::ACP_LIST.iter().map(|e| &e.agent)) {
+            let err = s.start_agent(a.id, Path::new("relative/dir"), None, None, None, &[], 80, 24, |_| {}).unwrap_err();
+            if a.id == "dsh" {
+                assert!(err.contains("no terminal view"), "{err}");
+            } else {
+                assert!(!err.contains("unknown agent") && !err.contains("no terminal view"), "{}: {err}", a.id);
+                assert!(err.contains("not installed") || err.contains("not a folder"), "{}: {err}", a.id);
+            }
+        }
+        assert_eq!(s.count(), 0);
+    }
+
+    #[test]
+    fn start_agent_refuses_an_unknown_id_before_any_process() {
+        let s = Sessions::default();
+        let tmp = std::env::temp_dir();
+        for bad in ["/bin/sh", "kilo"] {
+            let err = s.start_agent(bad, &tmp, None, None, None, &[], 80, 24, |_| {}).unwrap_err();
+            assert_eq!(err, format!("unknown agent \"{bad}\""));
+        }
+        assert_eq!(s.count(), 0);
+    }
+
+    #[test]
+    fn unix_dirs_are_path_then_install_folders_without_duplicates() {
+        let env = env_of(&[("PATH", "/usr/bin:/bin:/opt/homebrew/bin"), ("HOME", "/Users/k")]);
+        let dirs = search_dirs(&env, Os::Unix);
+        assert_eq!(dirs[0], PathBuf::from("/usr/bin"));
+        assert!(dirs.contains(&PathBuf::from("/Users/k/.local/bin")));
+        assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+        assert_eq!(dirs.iter().filter(|d| **d == PathBuf::from("/opt/homebrew/bin")).count(), 1);
+        // the folders Grok's and pi's official installers use, which only a shell rc file puts on PATH
+        assert!(dirs.contains(&PathBuf::from("/Users/k/.grok/bin")));
+        assert!(dirs.contains(&PathBuf::from("/Users/k/.pi/agent/bin")));
+        let grok = PathBuf::from("/Users/k/.grok/bin/grok");
+        let pi = PathBuf::from("/Users/k/.pi/agent/bin/pi");
+        let short = env_of(&[("PATH", "/usr/bin:/bin"), ("HOME", "/Users/k")]);
+        let sdirs = search_dirs(&short, Os::Unix);
+        assert_eq!(resolve("grok", &sdirs, fs_of(&[&grok]), Os::Unix), Some(grok));
+        assert_eq!(resolve("pi", &sdirs, fs_of(&[&pi]), Os::Unix), Some(pi));
+        let win = env_of(&[("USERPROFILE", r"C:\Users\k")]);
+        let wdirs = search_dirs(&win, Os::Windows);
+        assert!(wdirs.contains(&Path::new(r"C:\Users\k").join(".grok").join("bin")));
+        assert!(wdirs.contains(&Path::new(r"C:\Users\k").join(".pi").join("agent").join("bin")));
+    }
+
+    /// H1: a same-named other program earlier on PATH (the QA report's shadow stubs; Homebrew's `grok` regex tool)
+    /// is passed over for the agent's own install; with no install in a known layout, the first one is still found.
+    #[test]
+    fn agents_are_found_in_their_install_layout_not_as_the_first_same_name_on_path() {
+        let env = env_of(&[("PATH", "/Users/k/shadow:/opt/homebrew/bin:/usr/bin"), ("HOME", "/Users/k")]);
+        let dirs = search_dirs(&env, Os::Unix);
+        // (agent, its real install as found on PATH or in an install folder, where that leads)
+        let real_installs: [(&str, &str, &str); 12] = [
+            ("claude", "/Users/k/.local/bin/claude", "/Users/k/.local/share/claude/versions/2.1.322"),
+            ("claude", "/opt/homebrew/bin/claude", "/opt/homebrew/Caskroom/claude-code/2.1.311/claude"),
+            ("codex", "/Users/k/.local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
+            ("codex", "/opt/homebrew/bin/codex", "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js"),
+            ("omo", "/Users/k/.local/bin/omo", "/Users/k/.local/bin/omo"),
+            ("omo", "/opt/homebrew/bin/omo", "/opt/homebrew/lib/node_modules/omo-ai/bin/omo.js"),
+            ("pi", "/opt/homebrew/bin/pi", "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
+            ("pi", "/Users/k/.local/bin/pi", "/Users/k/.pi/agent/bin/pi"),
+            ("omp", "/Users/k/.bun/bin/omp", "/Users/k/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"),
+            ("omp", "/Users/k/.local/bin/omp", "/Users/k/.local/bin/omp"),
+            ("grok", "/Users/k/.grok/bin/grok", "/Users/k/.grok/bin/grok-1.0.77"),
+            ("grok", "/usr/local/bin/grok", "/Users/k/.grok/downloads/grok-1.0.77"),
+        ];
+        for (id, found, leads_to) in real_installs {
+            let shadow = PathBuf::from(format!("/Users/k/shadow/{id}"));
+            let found = PathBuf::from(found);
+            let real = |p: &Path| if p == found { PathBuf::from(leads_to) } else { p.to_path_buf() };
+            // the plain lookup starts the shadow, the layout check the agent
+            assert_eq!(resolve(id, &dirs, fs_of(&[&shadow, &found]), Os::Unix), Some(shadow.clone()), "{id}");
+            assert_eq!(find_in_layouts(id, id, &dirs, &env, fs_of(&[&shadow, &found]), real, Os::Unix), Some(found.clone()), "{id} {leads_to}");
+            assert!(in_install_layout(id, &found, Path::new(leads_to), &env, |_| false), "{id} {leads_to}");
+            assert!(!in_install_layout(id, &shadow, &shadow, &env, |_| false), "{id}");
+            // only the shadow: still found (a real install in a layout the table does not know never reads "Not installed")
+            assert_eq!(find_in_layouts(id, id, &dirs, &env, fs_of(&[&shadow]), real, Os::Unix), Some(shadow.clone()), "{id}");
+        }
+        // Homebrew's `grok` (jordansissel/grok, a regex tool) is not Grok
+        let brew = PathBuf::from("/opt/homebrew/bin/grok");
+        assert!(!in_install_layout("grok", &brew, Path::new("/opt/homebrew/Cellar/grok/0.9.2/bin/grok"), &env, |_| false));
+        // another agent's package is not this one: oh-my-pi's npm package is not pi
+        assert!(!in_install_layout("pi", &brew, Path::new("/x/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"), &env, |_| false));
+        // a standalone installer's folder counts only for the program itself, not for anything below it
+        assert!(!in_install_layout("omo", &brew, Path::new("/Users/k/.local/bin/x/omo"), &env, |_| false));
+        // oh-my-hermes has no row: found as before
+        let omh = PathBuf::from("/Users/k/shadow/omh");
+        assert_eq!(find_in_layouts("omh", "omh", &dirs, &env, fs_of(&[&omh]), |p: &Path| p.to_path_buf(), Os::Unix), Some(omh));
+    }
+
+    #[test]
+    fn windows_agents_are_found_in_their_install_layout() {
+        let env = env_of(&[
+            ("PATH", r"C:\tools;C:\Users\k\AppData\Roaming\npm"),
+            ("APPDATA", r"C:\Users\k\AppData\Roaming"),
+            ("USERPROFILE", r"C:\Users\k"),
+            ("LOCALAPPDATA", r"C:\Users\k\AppData\Local"),
+        ]);
+        let same = |p: &Path| p.to_path_buf();
+        let npm = Path::new(r"C:\Users\k\AppData\Roaming\npm");
+        // an npm shim counts when its package sits beside it
+        let shim = npm.join("codex.cmd");
+        let pkg = npm.join("node_modules").join("@openai").join("codex").join("package.json");
+        assert!(in_install_layout("codex", &shim, &shim, &env, fs_of(&[&pkg])));
+        assert!(!in_install_layout("codex", &shim, &shim, &env, fs_of(&[])));
+        // the official installers' own folders
+        for (id, path) in [
+            ("grok", r"C:\Users\k\.grok\bin\grok.exe"),
+            ("pi", r"C:\Users\k\.pi\agent\bin\pi.cmd"),
+            ("omp", r"C:\Users\k\AppData\Local\omp\omp.exe"),
+            ("omo", r"C:\Users\k\.local\bin\omo.exe"),
+            ("claude", r"C:\Users\k\.local\bin\claude.exe"),
+        ] {
+            assert!(in_install_layout(id, Path::new(path), Path::new(path), &env, fs_of(&[])), "{path}");
+        }
+        let dirs = search_dirs(&env, Os::Windows);
+        let shadow = Path::new(r"C:\tools").join("grok.exe");
+        let grok = Path::new(r"C:\Users\k").join(".grok").join("bin").join("grok.exe");
+        assert_eq!(find_in_layouts("grok", "grok", &dirs, &env, fs_of(&[&shadow, &grok]), same, Os::Windows), Some(grok));
+    }
+
+    /// The install line manut names when a program does not look like the agent is the one the menu shows.
+    #[test]
+    fn layout_install_lines_are_the_menus() {
+        let ts = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/sessions/agents.ts")).unwrap();
+        for l in &LAYOUTS {
+            assert!(ts.contains(&format!("  {}: \"{}\",", l.id, l.install)), "{} {}", l.id, l.install);
+            assert!(agent(l.id).is_some_and(|a| a.mode == Mode::Chat || a.mode == Mode::Terminal), "{}", l.id);
+        }
+        assert!(layout("dsh").is_none() && layout("omh").is_none());
+    }
+
+    #[test]
+    fn unix_dirs_end_with_the_cli_folders_inside_app_bundles() {
+        let env = env_of(&[("PATH", "/usr/bin:/Applications/Codex.app/Contents/Resources/codex-cli/bin"), ("HOME", "/Users/k")]);
+        let dirs = search_dirs(&env, Os::Unix);
+        assert_eq!(dirs[..2], [PathBuf::from("/usr/bin"), PathBuf::from("/Applications/Codex.app/Contents/Resources/codex-cli/bin")]);
+        // the PATH copy is kept where PATH put it, not repeated in the tail
+        assert_eq!(
+            dirs[dirs.len() - 3..],
+            [
+                PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin"),
+                PathBuf::from("/Users/k/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin"),
+                PathBuf::from("/Users/k/Applications/Codex.app/Contents/Resources/codex-cli/bin"),
+            ]
+        );
+        let unique: HashSet<&PathBuf> = dirs.iter().collect();
+        assert_eq!(unique.len(), dirs.len());
+        // a real install wins over the ChatGPT app's copy; the copy is found when it is the only one
+        let bundled = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex");
+        let npm = PathBuf::from("/opt/homebrew/bin/codex");
+        assert_eq!(resolve("codex", &dirs, &fs_of(&[&bundled, &npm]), Os::Unix), Some(npm));
+        assert_eq!(resolve("codex", &dirs, &fs_of(&[&bundled]), Os::Unix), Some(bundled));
+        let home_only = env_of(&[("HOME", "/Users/k"), ("USERPROFILE", "C:/Users/k")]);
+        assert!(!search_dirs(&home_only, Os::Windows).iter().any(|d| d.to_string_lossy().contains(".app")));
+    }
+
+    #[test]
+    fn finds_claude_in_local_bin_when_the_app_path_is_short() {
+        // A Dock-started app sees PATH=/usr/bin:/bin; Claude Code's installer puts it in ~/.local/bin.
+        let env = env_of(&[("PATH", "/usr/bin:/bin"), ("HOME", "/Users/k")]);
+        let dirs = search_dirs(&env, Os::Unix);
+        let claude = PathBuf::from("/Users/k/.local/bin/claude");
+        let codex = PathBuf::from("/opt/homebrew/bin/codex");
+        let fs = fs_of(&[&claude, &codex]);
+        assert_eq!(resolve("claude", &dirs, &fs, Os::Unix), Some(claude.clone()));
+        assert_eq!(resolve("codex", &dirs, &fs, Os::Unix), Some(codex));
+        assert_eq!(resolve("pi", &dirs, &fs, Os::Unix), None);
+        assert_eq!(argv_for(&claude, Os::Unix).unwrap(), vec![OsString::from(claude.as_os_str())]);
+    }
+
+    #[test]
+    fn windows_finds_npm_shims_and_runs_them_through_cmd() {
+        let env = env_of(&[
+            ("PATH", "C:/Windows/System32;C:/Program Files/nodejs"),
+            ("APPDATA", "C:/Users/k/AppData/Roaming"),
+            ("USERPROFILE", "C:/Users/k"),
+        ]);
+        let dirs = search_dirs(&env, Os::Windows);
+        assert!(dirs.contains(&PathBuf::from("C:/Users/k/AppData/Roaming").join("npm")));
+        let shim = PathBuf::from("C:/Users/k/AppData/Roaming").join("npm").join("codex.cmd");
+        let script = PathBuf::from("C:/Users/k/AppData/Roaming").join("npm").join("codex");
+        let exe = PathBuf::from("C:/Users/k").join(".local").join("bin").join("claude.exe");
+        let fs = fs_of(&[&shim, &script, &exe]);
+        // never the extension-less shell script npm also writes
+        assert_eq!(resolve("codex", &dirs, &fs, Os::Windows), Some(shim.clone()));
+        assert_eq!(resolve("claude", &dirs, &fs, Os::Windows), Some(exe.clone()));
+        assert_eq!(argv_for(&shim, Os::Windows).unwrap(), vec![OsString::from("cmd.exe"), OsString::from("/c"), shim.into_os_string()]);
+        assert_eq!(argv_for(&exe, Os::Windows).unwrap(), vec![exe.into_os_string()]);
+        assert_eq!(file_names("omp", Os::Windows), ["omp.exe", "omp.cmd", "omp.bat"]);
+    }
+
+    #[test]
+    fn windows_shim_paths_are_escaped_for_cmd() {
+        // no whitespace: reaches cmd unquoted, so cmd's operators get a ^
+        assert_eq!(cmd_path_arg(r"C:\Users\A&B\npm\codex.cmd").unwrap(), r"C:\Users\A^&B\npm\codex.cmd");
+        assert_eq!(cmd_path_arg(r"C:\x^y\a|b\(1)\<c>@\codex.cmd").unwrap(), r"C:\x^^y\a^|b\^(1^)\^<c^>^@\codex.cmd");
+        assert_eq!(cmd_path_arg(r"C:\Users\k\AppData\Roaming\npm\codex.cmd").unwrap(), r"C:\Users\k\AppData\Roaming\npm\codex.cmd");
+        // whitespace only: quoted by the PTY layer, and cmd keeps those quotes
+        assert_eq!(cmd_path_arg(r"C:\Users\Kim Lee\npm\codex.cmd").unwrap(), r"C:\Users\Kim Lee\npm\codex.cmd");
+        // whitespace plus an operator, or %: cmd would split it, so refuse
+        for bad in [r"C:\Users\A & B\npm\codex.cmd", r"C:\Program Files (x86)\npm\codex.cmd", r"C:\%PATH%\codex.cmd", r"C:\a\b%c\codex.cmd"] {
+            assert!(cmd_path_arg(bad).is_err(), "{bad}");
+        }
+        let shim = PathBuf::from(r"C:\Users\A&B\npm\codex.cmd");
+        assert_eq!(argv_for(&shim, Os::Windows).unwrap()[2], OsString::from(r"C:\Users\A^&B\npm\codex.cmd"));
+        assert!(argv_for(Path::new(r"C:\A & B\codex.bat"), Os::Windows).is_err());
+        // an .exe never goes through cmd, so its path is left alone
+        let exe = PathBuf::from(r"C:\A & B\claude.exe");
+        assert_eq!(argv_for(&exe, Os::Windows).unwrap(), vec![exe.into_os_string()]);
+    }
+
+    #[test]
+    fn coalesce_merges_reads_up_to_the_size_cap() {
+        let (tx, rx) = mpsc::channel();
+        for _ in 0..200 {
+            tx.send(vec![b'a'; 1024]).unwrap();
+        }
+        drop(tx);
+        let mut out = Vec::new();
+        coalesce(rx, 64 * 1024, Duration::from_secs(5), |b| out.push(b.len()));
+        assert_eq!(out.iter().sum::<usize>(), 200 * 1024);
+        assert_eq!(out, [64 * 1024, 64 * 1024, 64 * 1024, 8 * 1024]);
+    }
+
+    #[test]
+    fn coalesce_sends_a_lone_keystroke_after_the_window() {
+        let (tx, rx) = mpsc::channel();
+        let (got_tx, got) = mpsc::channel();
+        let t = thread::spawn(move || coalesce(rx, 64 * 1024, Duration::from_millis(4), |b| got_tx.send((b, Instant::now())).unwrap()));
+        let sent = Instant::now();
+        tx.send(b"k".to_vec()).unwrap();
+        let (b, at) = got.recv_timeout(Duration::from_secs(2)).expect("a lone chunk must not wait for more");
+        assert_eq!(b, b"k");
+        assert!(at - sent < Duration::from_millis(100), "{:?}", at - sent);
+        drop(tx);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn the_pipe_merges_reads_up_to_the_size_cap() {
+        let pipe = Arc::new(Pipe::new(64 * 1024));
+        let p = pipe.clone();
+        let t = thread::spawn(move || {
+            for _ in 0..200 {
+                assert!(p.push(&[b'a'; 1024]));
+            }
+            p.end();
+        });
+        let mut out = Vec::new();
+        while let Some(b) = pipe.take(Duration::from_secs(5)) {
+            out.push(b.len());
+        }
+        t.join().unwrap();
+        assert_eq!(out.iter().sum::<usize>(), 200 * 1024);
+        assert_eq!(out, [64 * 1024, 64 * 1024, 64 * 1024, 8 * 1024]);
+    }
+
+    #[test]
+    fn the_pipe_hands_on_a_lone_keystroke_after_the_window() {
+        let pipe = Arc::new(Pipe::new(COALESCE_BYTES));
+        let (got_tx, got) = mpsc::channel();
+        let p = pipe.clone();
+        let t = thread::spawn(move || {
+            while let Some(b) = p.take(COALESCE_WINDOW) {
+                got_tx.send((b, Instant::now())).unwrap();
+            }
+        });
+        let sent = Instant::now();
+        assert!(pipe.push(b"k"));
+        let (b, at) = got.recv_timeout(Duration::from_secs(2)).expect("a lone chunk must not wait for more");
+        assert_eq!(b, b"k");
+        assert!(at - sent < Duration::from_millis(100), "{:?}", at - sent);
+        pipe.end();
+        t.join().unwrap();
+    }
+
+    /// 50 MB of a counter (every 8 bytes are their own position) through the bounded pipe, pushed in reads of
+    /// every size up to 16 KB while the taking side now and then falls behind: every byte arrives once and in
+    /// order, and never more than the cap waits.
+    #[test]
+    fn the_pipe_never_drops_or_reorders_bytes() {
+        use std::hash::Hasher;
+        const TOTAL: usize = 50 * 1024 * 1024;
+        const CAP: usize = 64 * 1024;
+        let pipe = Arc::new(Pipe::new(CAP));
+        let p = pipe.clone();
+        let producer = thread::spawn(move || {
+            let mut sent = std::collections::hash_map::DefaultHasher::new();
+            let mut buf = vec![0u8; 16 * 1024];
+            let (mut at, mut k) = (0usize, 0usize);
+            while at < TOTAL {
+                let n = (1 + (k * 7919) % buf.len()).min(TOTAL - at);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = (((at + i) / 8) as u64).to_le_bytes()[(at + i) % 8];
+                }
+                sent.write(&buf[..n]);
+                assert!(p.push(&buf[..n]));
+                at += n;
+                k += 1;
+            }
+            p.end();
+            sent.finish()
+        });
+        let mut got = std::collections::hash_map::DefaultHasher::new();
+        let (mut total, mut messages, mut full) = (0usize, 0usize, 0usize);
+        while let Some(b) = pipe.take(Duration::from_micros(200)) {
+            assert!(!b.is_empty() && b.len() <= CAP, "{}", b.len());
+            got.write(&b);
+            total += b.len();
+            messages += 1;
+            full += (b.len() == CAP) as usize;
+            if messages % 64 == 0 {
+                thread::sleep(Duration::from_millis(1)); // the producer runs into the cap and waits
+            }
+        }
+        assert_eq!(total, TOTAL);
+        assert_eq!(got.finish(), producer.join().unwrap(), "bytes were dropped, repeated or reordered");
+        assert!(full > 0, "the pipe never filled, so its limit was not exercised");
+    }
+
+    #[test]
+    fn empty_env_still_has_system_folders() {
+        let dirs = search_dirs(&env_of(&[]), Os::Unix);
+        assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(search_dirs(&env_of(&[]), Os::Windows).is_empty());
+    }
+
+    #[cfg(unix)]
+    fn collect(s: &Sessions, argv: &[&str], cols: u16, rows: u16) -> (u32, Arc<Mutex<Vec<u8>>>, Arc<Mutex<Option<Option<u32>>>>) {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let exit = Arc::new(Mutex::new(None));
+        let (o, x) = (out.clone(), exit.clone());
+        let id = s
+            .spawn(argv.iter().map(OsString::from).collect(), &std::env::temp_dir().canonicalize().unwrap(), None, &[], cols, rows, move |ev| match ev {
+                Output::Data(b) => o.lock().unwrap().extend(b),
+                Output::Exit(c) => *x.lock().unwrap() = Some(c),
+            })
+            .unwrap();
+        (id, out, exit)
+    }
+
+    #[cfg(unix)]
+    fn wait_for(cond: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_runs_in_the_folder_with_the_size_and_reports_exit() {
+        let s = Sessions::default();
+        let (_id, out, exit) = collect(&s, &["/bin/sh", "-c", "pwd; stty size; exit 3"], 91, 27);
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "no exit");
+        let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+        assert!(text.contains("27 91"), "{text:?}");
+        assert!(text.contains(&std::env::temp_dir().canonicalize().unwrap().to_string_lossy().to_string()), "{text:?}");
+        assert_eq!(*exit.lock().unwrap(), Some(Some(3)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pty_runs_the_chatgpt_apps_codex_wrapper() {
+        // the layout and wrapper the ChatGPT app ships: bin/codex is a sh script that resolves its own folder
+        // and execs ../CodexCLI.app/Contents/MacOS/codex with the arguments
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!("manut-bundle-{}", std::process::id()));
+        let bin = root.join("ChatGPT.app/Contents/Resources/codex-cli/bin");
+        let real = root.join("ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        let wrapper = "#!/bin/sh\nset -eu\nentry=\"$0\"\nwhile [ -L \"$entry\" ]; do\n  parent=$(CDPATH= cd -P -- \"$(dirname -- \"$entry\")\" && pwd)\n  entry=$(readlink \"$entry\")\n  case \"$entry\" in /*) ;; *) entry=\"$parent/$entry\" ;; esac\ndone\nbin_dir=$(CDPATH= cd -P -- \"$(dirname -- \"$entry\")\" && pwd)\nexec \"$bin_dir/../CodexCLI.app/Contents/MacOS/codex\" \"$@\"\n";
+        for (p, body) in [(bin.join("codex"), wrapper), (real.join("codex"), "#!/bin/sh\necho \"bundled codex $*\"\n")] {
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = resolve("codex", &[bin.clone()], is_program_file, Os::Unix).expect("wrapper found");
+        let argv = argv_for(&path, Os::Unix).unwrap();
+        assert_eq!(argv, vec![OsString::from(bin.join("codex"))]);
+        let s = Sessions::default();
+        let (out, exit) = (Arc::new(Mutex::new(Vec::new())), Arc::new(Mutex::new(None)));
+        let (o, x) = (out.clone(), exit.clone());
+        let mut argv = argv;
+        argv.push("--version".into());
+        s.spawn(argv, &root, Some(OsString::from("/usr/bin:/bin")), &[], 80, 24, move |ev| match ev {
+            Output::Data(b) => o.lock().unwrap().extend(b),
+            Output::Exit(c) => *x.lock().unwrap() = Some(c),
+        })
+        .unwrap();
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "no exit");
+        let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+        assert!(text.contains("bundled codex --version"), "{text:?}");
+        assert_eq!(*exit.lock().unwrap(), Some(Some(0)));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn typing_reaches_the_program_and_close_stops_it() {
+        let s = Sessions::default();
+        let (id, out, exit) = collect(&s, &["/bin/cat"], 80, 24);
+        s.write(id, b"ping\r").unwrap();
+        assert!(wait_for(|| String::from_utf8_lossy(&out.lock().unwrap()).matches("ping").count() >= 2), "cat did not echo");
+        s.resize(id, 100, 30).unwrap();
+        s.close(id);
+        assert_eq!(s.count(), 0);
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "close did not stop cat");
+        assert!(s.write(id, b"x").is_err());
+    }
+
+    /// A folder with a fake `claude` (`#!/bin/sh` running `body`) for a session's PATH.
+    #[cfg(unix)]
+    fn fake_claude(tag: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("manut-fg-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("claude");
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    /// What a foreground watch handed on, in order.
+    #[cfg(unix)]
+    type FgSeen = Arc<Mutex<Vec<Option<&'static str>>>>;
+
+    /// Start `sh -c <script>` with `dir` first on PATH and record what the foreground watch hands on.
+    #[cfg(unix)]
+    fn watch(s: &Arc<Sessions>, dir: Option<&Path>, script: &str) -> (u32, FgSeen, Arc<AtomicBool>) {
+        let path = dir.map(|d| OsString::from(format!("{}:/usr/bin:/bin", d.display())));
+        let exited = Arc::new(AtomicBool::new(false));
+        let x = exited.clone();
+        let argv = vec!["/bin/sh".into(), "-c".into(), script.into()];
+        let id = s
+            .spawn(argv, &std::env::temp_dir().canonicalize().unwrap(), path, &[], 80, 24, move |ev| {
+                if let Output::Exit(_) = ev {
+                    x.store(true, Ordering::SeqCst);
+                }
+            })
+            .unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let o = seen.clone();
+        s.watch_foreground(id, Duration::from_millis(50), move |a| o.lock().unwrap().push(a));
+        (id, seen, exited)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_program_in_the_foreground_is_no_agent() {
+        let s = Sessions::new();
+        let (id, seen, _) = watch(&s, None, "exec sleep 3");
+        thread::sleep(Duration::from_millis(800));
+        s.close(id);
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(*seen.lock().unwrap(), Vec::<Option<&str>>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_on_path_in_the_foreground_is_claude() {
+        // the script stays the foreground process (it waits for its own `sleep`): /bin/sh running …/claude
+        let dir = fake_claude("on", "sleep 3");
+        let s = Sessions::new();
+        let (id, seen, _) = watch(&s, Some(&dir), "exec claude");
+        assert!(wait_for(|| seen.lock().unwrap().contains(&Some("claude"))), "{:?}", seen.lock().unwrap());
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(*seen.lock().unwrap(), vec![Some("claude")], "sent once, not once a tick");
+        // closing the session hands on null
+        s.close(id);
+        assert!(wait_for(|| seen.lock().unwrap().len() == 2), "{:?}", seen.lock().unwrap());
+        assert_eq!(*seen.lock().unwrap(), vec![Some("claude"), None]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watch_sends_each_change_once() {
+        // shell (none) -> claude -> claude execs sleep (none) -> the program ends
+        let dir = fake_claude("seq", "sleep 1; exec sleep 1");
+        let s = Sessions::new();
+        let (_id, seen, exited) = watch(&s, Some(&dir), "sleep 0.5; exec claude");
+        assert!(wait_for(|| exited.load(Ordering::SeqCst)), "the program did not end");
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(*seen.lock().unwrap(), vec![Some("claude"), None]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Every watched session shares the one `manut-fg` thread.
+    #[cfg(unix)]
+    #[test]
+    fn sessions_share_one_foreground_watcher() {
+        let s = Sessions::new();
+        let ids: Vec<u32> = (0..6).map(|_| watch(&s, None, "exec sleep 5").0).collect();
+        assert!(wait_for(|| s.fg_stats.watched.load(Ordering::SeqCst) == 6), "watched {}", s.fg_stats.watched.load(Ordering::SeqCst));
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(s.fg_stats.threads.load(Ordering::SeqCst), 1);
+        s.close_all();
+        assert!(wait_for(|| s.fg_stats.threads.load(Ordering::SeqCst) == 0));
+        assert_eq!(ids.len(), 6);
+    }
+
+    /// A terminal with no I/O is looked at once per FG_IDLE_TICKS wakes' worth of time; output brings it back to every
+    /// wake. Counted against the wakes and the time that really passed, so a loaded machine's late wakes do not fail it.
+    #[cfg(unix)]
+    #[test]
+    fn an_idle_session_is_probed_less_often_until_it_has_output() {
+        let s = Sessions::new();
+        let (id, _, _) = watch(&s, None, "stty -echo; read x; while :; do echo .; sleep 0.01; done");
+        let probes = || s.fg_stats.probes.load(Ordering::SeqCst);
+        let wakes = || s.fg_stats.wakes.load(Ordering::SeqCst);
+        assert!(wait_for(|| probes() >= 1));
+        thread::sleep(Duration::from_millis(300));
+        // the shell prints nothing: one look per 250 ms (5 wakes of 50 ms) at most, however late the wakes come
+        let (p0, w0, t0) = (probes(), wakes(), Instant::now());
+        thread::sleep(Duration::from_millis(2000));
+        let (idle, idle_wakes) = (probes() - p0, wakes() - w0);
+        let most = (t0.elapsed().as_millis() / 200) as u64 + 1;
+        assert!(idle >= 1 && idle <= most, "{idle} looks in {:?} idle ({idle_wakes} wakes)", t0.elapsed());
+        // late wakes on a loaded machine each cover more time, so each is more often due: fewer looks than wakes,
+        // not a fixed ratio (CI saw 7 looks in 13 wakes over 2 s, inside the time bound above)
+        assert!(idle < idle_wakes, "{idle} looks for {idle_wakes} wakes while idle");
+        // it prints every 10 ms: a look on (almost) every wake
+        s.write(id, b"go\r").unwrap();
+        thread::sleep(Duration::from_millis(300));
+        let (p1, w1) = (probes(), wakes());
+        thread::sleep(Duration::from_millis(2000));
+        let (busy, busy_wakes) = (probes() - p1, wakes() - w1);
+        assert!(busy_wakes >= 5 && busy * 10 >= busy_wakes * 7, "{busy} looks for {busy_wakes} wakes with output");
+        s.close(id);
+    }
+
+    /// The watcher ends with the last watched session and starts again with the next one.
+    #[cfg(unix)]
+    #[test]
+    fn the_watcher_ends_with_the_last_session() {
+        let s = Sessions::new();
+        let (a, _, _) = watch(&s, None, "exec sleep 5");
+        let (b, _, _) = watch(&s, None, "exec sleep 5");
+        assert!(wait_for(|| s.fg_stats.watched.load(Ordering::SeqCst) == 2));
+        s.close(a);
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(s.fg_stats.threads.load(Ordering::SeqCst), 1, "one session is still watched");
+        s.close(b);
+        assert!(wait_for(|| s.fg_stats.threads.load(Ordering::SeqCst) == 0), "the watcher outlived its sessions");
+        let (c, _, _) = watch(&s, None, "exec sleep 5");
+        assert!(wait_for(|| s.fg_stats.threads.load(Ordering::SeqCst) == 1 && s.fg_stats.watched.load(Ordering::SeqCst) == 1));
+        s.close(c);
+        assert!(wait_for(|| s.fg_stats.threads.load(Ordering::SeqCst) == 0));
+    }
+
+    /// This process's thread count (`ps -M`, macOS) or `/proc/self/task` (Linux).
+    #[cfg(unix)]
+    fn thread_count() -> usize {
+        if let Ok(rd) = std::fs::read_dir("/proc/self/task") {
+            return rd.count();
+        }
+        let out = std::process::Command::new("ps").args(["-M", "-p", &std::process::id().to_string()]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().count().saturating_sub(1)
+    }
+
+    /// The numbers for the handoff: 20 idle login shells watched at the app's 1 s for 10 s; the threads they add and
+    /// the foreground looks they cost (`FG_BENCH_SECS`, default 10). `cargo test --lib fg_bench_20_idle_shells -- --ignored --nocapture --test-threads=1`
+    #[cfg(unix)]
+    #[test]
+    #[ignore]
+    fn fg_bench_20_idle_shells() {
+        let s = Sessions::new();
+        let before = thread_count();
+        let argv = || vec![OsString::from("/bin/sh")];
+        let ids: Vec<u32> = (0..20)
+            .map(|_| {
+                let id = s.spawn(argv(), &std::env::temp_dir().canonicalize().unwrap(), None, &[], 80, 24, |_| {}).unwrap();
+                s.watch_foreground(id, Duration::from_secs(1), |_| {});
+                id
+            })
+            .collect();
+        thread::sleep(Duration::from_secs(2)); // the prompts are printed and looked at once
+        let threads = thread_count() - before;
+        let (p0, w0) = (s.fg_stats.probes.load(Ordering::SeqCst), s.fg_stats.wakes.load(Ordering::SeqCst));
+        let secs: u64 = std::env::var("FG_BENCH_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+        thread::sleep(Duration::from_secs(secs));
+        let looks = s.fg_stats.probes.load(Ordering::SeqCst) - p0;
+        let wakes = s.fg_stats.wakes.load(Ordering::SeqCst) - w0;
+        println!("FG_BENCH sessions={} threads_added={threads} secs={secs} watcher_wakes={wakes} probes={looks}", ids.len());
+        s.close_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn close_all_kills_a_program_that_ignores_hangup() {
+        let s = Sessions::default();
+        let (_id, out, exit) = collect(&s, &["/bin/sh", "-c", "trap '' HUP; echo ready; while :; do sleep 1; done"], 80, 24);
+        assert!(wait_for(|| String::from_utf8_lossy(&out.lock().unwrap()).contains("ready")));
+        s.close_all();
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "SIGHUP-ignoring program survived close_all");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_big_write_to_a_program_that_never_reads_blocks_nothing() {
+        let s = Sessions::default();
+        let (id, out, exit) = collect(&s, &["/bin/sh", "-c", "stty raw -echo; echo ready; sleep 60"], 80, 24);
+        let (other, other_out, _) = collect(&s, &["/bin/cat"], 80, 24);
+        assert!(wait_for(|| String::from_utf8_lossy(&out.lock().unwrap()).contains("ready")));
+        // 1 MB in 64 KB pastes: the PTY takes about 1 KB, the rest must not hold anything up
+        let started = Instant::now();
+        for _ in 0..16 {
+            s.write(id, &vec![b'x'; 64 * 1024]).unwrap();
+        }
+        assert!(started.elapsed() < Duration::from_millis(500), "write blocked: {:?}", started.elapsed());
+        // other sessions keep working while that one is stuck
+        s.write(other, b"pong\r").unwrap();
+        s.resize(other, 100, 30).unwrap();
+        assert!(wait_for(|| String::from_utf8_lossy(&other_out.lock().unwrap()).contains("pong")), "other session stalled");
+        let t = Instant::now();
+        s.close_all();
+        assert!(t.elapsed() < Duration::from_secs(2), "close_all took {:?}", t.elapsed());
+        assert_eq!(s.count(), 0);
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "the stuck program survived close_all");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_large_dump_arrives_in_few_messages() {
+        let s = Sessions::default();
+        let events = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let exit = Arc::new(Mutex::new(None));
+        let (e, x) = (events.clone(), exit.clone());
+        s.spawn(
+            ["/bin/sh", "-c", "head -c 524288 /dev/zero | tr '\\0' a"].iter().map(OsString::from).collect(),
+            &std::env::temp_dir().canonicalize().unwrap(),
+            None,
+            &[],
+            80,
+            24,
+            move |ev| match ev {
+                Output::Data(b) => e.lock().unwrap().push(b.len()),
+                Output::Exit(c) => *x.lock().unwrap() = Some(c),
+            },
+        )
+        .unwrap();
+        assert!(wait_for(|| exit.lock().unwrap().is_some()));
+        let ev = events.lock().unwrap();
+        let total: usize = ev.iter().sum();
+        assert!(total >= 524288, "{total}");
+        // 1 KB per read would be over 500 messages
+        assert!(ev.len() < 64, "{} messages for {total} bytes", ev.len());
+    }
+
+    /// What the sink of a flow test was handed. It acknowledges nothing by itself.
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct Seen {
+        bytes: std::sync::atomic::AtomicU64,
+        exit: AtomicBool,
+    }
+
+    #[cfg(unix)]
+    fn flood(s: &Sessions, argv: &[&str]) -> (u32, Arc<Seen>) {
+        let seen = Arc::new(Seen::default());
+        let w = seen.clone();
+        let id = s
+            .spawn(argv.iter().map(OsString::from).collect(), &std::env::temp_dir().canonicalize().unwrap(), None, &[], 80, 24, move |ev| match ev {
+                Output::Data(b) => {
+                    w.bytes.fetch_add(b.len() as u64, Ordering::SeqCst);
+                }
+                Output::Exit(_) => w.exit.store(true, Ordering::SeqCst),
+            })
+            .unwrap();
+        (id, seen)
+    }
+
+    /// Wait until the sink has been handed at least `least` bytes and then nothing more for 300 ms; the count then.
+    #[cfg(unix)]
+    fn held_at(seen: &Seen, least: u64) -> u64 {
+        assert!(wait_for(|| seen.bytes.load(Ordering::SeqCst) >= least), "only {} of {least} bytes came", seen.bytes.load(Ordering::SeqCst));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let before = seen.bytes.load(Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(300));
+            if seen.bytes.load(Ordering::SeqCst) == before {
+                return before;
+            }
+            assert!(Instant::now() < deadline, "the output never stopped");
+        }
+    }
+
+    /// What can still reach the page once the high mark is crossed: the message that crossed it, the one being
+    /// built, and the read under way.
+    #[cfg(unix)]
+    const OVER_HIGH: u64 = 2 * COALESCE_BYTES as u64 + 16 * 1024;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_pauses_above_the_high_mark_and_resumes_below_the_low_mark() {
+        let s = Sessions::default();
+        let (id, seen) = flood(&s, &["/usr/bin/yes"]);
+        // nothing is acknowledged: the page is handed the high mark and what was already on its way, no more
+        let first = held_at(&seen, FLOW_HIGH);
+        assert!(first < FLOW_HIGH + OVER_HIGH, "{first}");
+        assert_eq!(s.unacked(id), Some(first));
+        assert!(!seen.exit.load(Ordering::SeqCst), "the program is held back, not ended");
+        // one byte above the low mark: still held
+        s.ack(id, first - FLOW_LOW - 1);
+        assert_eq!(s.unacked(id), Some(FLOW_LOW + 1));
+        assert_eq!(held_at(&seen, first), first);
+        // at the low mark it reads again, up to the high mark
+        s.ack(id, 1);
+        assert!(wait_for(|| seen.bytes.load(Ordering::SeqCst) > first), "did not read again at the low mark");
+        let second = held_at(&seen, first + FLOW_HIGH - FLOW_LOW);
+        let unacked = s.unacked(id).unwrap();
+        assert_eq!(unacked, FLOW_LOW + (second - first));
+        assert!((FLOW_HIGH..FLOW_HIGH + OVER_HIGH).contains(&unacked), "{unacked}");
+        assert!(!seen.exit.load(Ordering::SeqCst));
+        s.close_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn close_stops_a_program_whose_page_never_acknowledged() {
+        let s = Sessions::default();
+        // held at the high mark, the program blocked in its write
+        let (id, seen) = flood(&s, &["/usr/bin/yes"]);
+        held_at(&seen, FLOW_HIGH);
+        let t = Instant::now();
+        s.close(id);
+        assert!(wait_for(|| seen.exit.load(Ordering::SeqCst)), "close did not stop it");
+        // inside close's grace (1.5 s): the hang-up reached it, no hard kill was needed
+        assert!(t.elapsed() < Duration::from_millis(1500), "the hang-up took {:?}", t.elapsed());
+        // one that ignores the hang-up goes when the grace is over, no later
+        let (id, seen) = flood(&s, &["/bin/sh", "-c", "trap '' HUP; exec /usr/bin/yes"]);
+        held_at(&seen, FLOW_HIGH);
+        let t = Instant::now();
+        s.close(id);
+        assert!(wait_for(|| seen.exit.load(Ordering::SeqCst)), "close did not stop the one that ignores the hang-up");
+        assert!(t.elapsed() < Duration::from_millis(1500 + 1500), "{:?}", t.elapsed());
+        assert_eq!(s.count(), 0);
+    }
+
+    /// The app quits, or the page was loaded again (`session_close_all`), while a session waits for a page that
+    /// never acknowledged: it stops at once, and the session the page starts next has its own full credit.
+    #[cfg(unix)]
+    #[test]
+    fn close_all_stops_a_program_whose_page_never_acknowledged_and_the_next_session_starts_clean() {
+        let s = Sessions::default();
+        let (old, seen) = flood(&s, &["/usr/bin/yes"]);
+        held_at(&seen, FLOW_HIGH);
+        let t = Instant::now();
+        s.close_all();
+        assert!(t.elapsed() < Duration::from_secs(2), "close_all took {:?}", t.elapsed());
+        assert_eq!(s.count(), 0);
+        assert!(wait_for(|| seen.exit.load(Ordering::SeqCst)), "the held program survived close_all");
+        let (id, out, exit) = collect(&s, &["/bin/sh", "-c", "echo fresh"], 80, 24);
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "no exit");
+        assert!(String::from_utf8_lossy(&out.lock().unwrap()).contains("fresh"));
+        // an acknowledgement still on its way for the session that is gone changes nothing
+        s.ack(old, u64::MAX);
+        assert_eq!(s.unacked(old), None);
+        assert_eq!(s.unacked(id), Some(out.lock().unwrap().len() as u64));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lone_keystroke_still_echoes_within_the_window() {
+        let s = Sessions::default();
+        let (tx, rx) = mpsc::channel();
+        let id = s
+            .spawn(
+                ["/bin/sh", "-c", "stty raw -echo; echo ready; exec /bin/cat"].iter().map(OsString::from).collect(),
+                &std::env::temp_dir().canonicalize().unwrap(),
+                None,
+                &[],
+                80,
+                24,
+                move |ev| {
+                    if let Output::Data(b) = ev {
+                        let _ = tx.send((b, Instant::now()));
+                    }
+                },
+            )
+            .unwrap();
+        let mut text = Vec::new();
+        while !text.windows(5).any(|w| w == b"ready") {
+            text.extend(rx.recv_timeout(Duration::from_secs(10)).expect("the program did not start").0);
+        }
+        thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+        let mut fastest = Duration::MAX;
+        for key in *b"abcde" {
+            let sent = Instant::now();
+            s.write(id, &[key]).unwrap();
+            let (b, at) = rx.recv_timeout(Duration::from_secs(2)).expect("no echo");
+            assert_eq!(b, [key], "a keystroke's echo is its own message");
+            fastest = fastest.min(at - sent);
+            thread::sleep(Duration::from_millis(40));
+        }
+        // nothing but the window (4 ms) holds an echo back; the rest of this bound is the machine's own scheduling
+        assert!(fastest < Duration::from_millis(100), "{fastest:?}");
+        s.close_all();
+    }
+
+    /// Six high marks of output through a real session whose page acknowledges only when the output has stopped:
+    /// the reader pauses and reads again several times, and every byte still arrives once and in order.
+    #[cfg(unix)]
+    #[test]
+    fn output_arrives_whole_and_in_order_across_pauses() {
+        use std::fmt::Write as _;
+        // a counter in decimal with no newline in it (the terminal would add a byte to each)
+        let total = 6 * FLOW_HIGH as usize;
+        let mut want = String::with_capacity(total + 16);
+        let mut n = 0u64;
+        while want.len() < total {
+            write!(want, "{n:08} ").unwrap();
+            n += 1;
+        }
+        let file = std::env::temp_dir().canonicalize().unwrap().join(format!("manut-flow-{}.txt", std::process::id()));
+        std::fs::write(&file, &want).unwrap();
+        let s = Sessions::default();
+        let (id, out, exit) = collect(&s, &["/bin/cat", file.to_str().unwrap()], 80, 24);
+        let mut pauses = 0;
+        let mut last = (0usize, Instant::now());
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while out.lock().unwrap().len() < want.len() {
+            assert!(Instant::now() < deadline, "stuck with {} of {} bytes", out.lock().unwrap().len(), want.len());
+            thread::sleep(Duration::from_millis(5));
+            let len = out.lock().unwrap().len();
+            if len != last.0 {
+                last = (len, Instant::now());
+            } else if last.1.elapsed() > Duration::from_millis(100) {
+                // nothing for 100 ms: the reader is held (or the machine was busy); the page draws all it has
+                let owed = s.unacked(id).unwrap();
+                pauses += (owed >= FLOW_HIGH) as usize;
+                s.ack(id, owed);
+                last.1 = Instant::now();
+            }
+        }
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "no exit");
+        let _ = std::fs::remove_file(&file);
+        let got = out.lock().unwrap();
+        assert_eq!(got.len(), want.len());
+        assert!(*got == want.as_bytes(), "bytes were dropped, repeated or reordered");
+        assert!(pauses >= 3, "only {pauses} pauses: the credit was not exercised");
+    }
+
+    /// The page sends one size once a drag has settled (sessions.ts); whatever sizes came before it, the program
+    /// has the last one.
+    #[cfg(unix)]
+    #[test]
+    fn a_burst_of_resizes_leaves_the_program_with_the_last_size() {
+        let s = Sessions::default();
+        let (id, out, exit) = collect(&s, &["/bin/sh", "-c", "echo ready; read x; stty size"], 80, 24);
+        assert!(wait_for(|| String::from_utf8_lossy(&out.lock().unwrap()).contains("ready")));
+        for (cols, rows) in [(100, 30), (61, 17), (132, 43), (90, 20), (117, 38)] {
+            s.resize(id, cols, rows).unwrap();
+        }
+        s.write(id, b"\r").unwrap();
+        assert!(wait_for(|| exit.lock().unwrap().is_some()), "no exit");
+        let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+        assert!(text.contains("38 117"), "{text:?}");
+    }
+
+    #[test]
+    fn refuses_a_cwd_that_is_not_a_folder() {
+        let s = Sessions::default();
+        assert!(s.spawn(vec!["x".into()], Path::new("relative/dir"), None, &[], 80, 24, |_| {}).is_err());
+        assert!(s.spawn(vec!["x".into()], &std::env::temp_dir().join("manut-no-such-dir-x9"), None, &[], 80, 24, |_| {}).is_err());
+    }
+
+    /// A temp home whose `active.json` picks `active` for claude, with that account's folder made.
+    fn home_with_claude(name: &str, active: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("manut-sess-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let root = home.join(".manut").join("accounts");
+        std::fs::create_dir_all(root.join("claude").join("work")).unwrap();
+        std::fs::write(root.join("active.json"), format!(r#"{{"claude":"{active}"}}"#)).unwrap();
+        home
+    }
+
+    #[test]
+    fn a_claude_session_carries_the_stacked_account_home_and_this_computer_carries_none() {
+        let cwd = std::env::temp_dir();
+        let argv = || vec![OsString::from("/x/claude")];
+        let extra = |cmd: &CommandBuilder| -> Vec<(String, String)> {
+            cmd.iter_extra_env_as_str().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        };
+        let base = extra(&command_for(argv(), &cwd, None, &[]));
+
+        let home = home_with_claude("stacked", "work");
+        let env = crate::accounts::session_env(&home, "claude");
+        let cmd = command_for(argv(), &cwd, None, &env);
+        let work = home.join(".manut").join("accounts").join("claude").join("work");
+        assert_eq!(cmd.get_env("CLAUDE_CONFIG_DIR"), Some(work.as_os_str()));
+        assert_eq!(cmd.get_argv(), &argv(), "the account changes no argument");
+        // the chosen account's home is the only thing added
+        let mut added: Vec<_> = extra(&cmd).into_iter().filter(|p| !base.contains(p)).collect();
+        added.sort();
+        assert_eq!(added, vec![("CLAUDE_CONFIG_DIR".to_string(), work.to_string_lossy().into_owned())]);
+
+        let mine = home_with_claude("this-computer", "default");
+        let cmd = command_for(argv(), &cwd, None, &crate::accounts::session_env(&mine, "claude"));
+        assert_eq!(extra(&cmd), base);
+        assert!(!extra(&cmd).iter().any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
+        let _ = (std::fs::remove_dir_all(home), std::fs::remove_dir_all(mine));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_account_home_reaches_the_program() {
+        let home = home_with_claude("pty", "work");
+        let s = Sessions::default();
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let exit = Arc::new(Mutex::new(None));
+        let (o, x) = (out.clone(), exit.clone());
+        let argv = ["/bin/sh", "-c", "echo \"cfg=${CLAUDE_CONFIG_DIR-unset}\""].iter().map(OsString::from).collect();
+        s.spawn(argv, &std::env::temp_dir().canonicalize().unwrap(), None, &crate::accounts::session_env(&home, "claude"), 80, 24, move |ev| match ev {
+            Output::Data(b) => o.lock().unwrap().extend(b),
+            Output::Exit(c) => *x.lock().unwrap() = Some(c),
+        })
+        .unwrap();
+        assert!(wait_for(|| exit.lock().unwrap().is_some()));
+        let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+        let work = home.join(".manut").join("accounts").join("claude").join("work");
+        assert!(text.contains(&format!("cfg={}", work.display())), "{text:?}");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// The real check on a developer machine: `claude --version` / `codex --version` through the same
+    /// discovery and PTY path a session uses. Ignored by default (needs the programs installed):
+    /// `cargo test real_agents_print_their_version -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_agents_print_their_version() {
+        let s = Sessions::default();
+        let mut ran = 0;
+        for info in agents_on_this_machine() {
+            println!("{:<7} {}", info.id, info.path.as_deref().unwrap_or("not installed"));
+            if !matches!(info.id, "claude" | "codex") || info.path.is_none() {
+                continue;
+            }
+            let (mut argv, path_env) = launch_for(info.id).unwrap();
+            argv.push("--version".into()); // test only: sessions never take arguments
+            let out = Arc::new(Mutex::new(Vec::new()));
+            let exit = Arc::new(Mutex::new(None));
+            let (o, x) = (out.clone(), exit.clone());
+            let home = PathBuf::from(host_env("HOME").or_else(|| host_env("USERPROFILE")).unwrap());
+            s.spawn(argv, &home, Some(path_env), &[], 80, 24, move |ev| match ev {
+                Output::Data(b) => o.lock().unwrap().extend(b),
+                Output::Exit(c) => *x.lock().unwrap() = Some(c),
+            })
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while exit.lock().unwrap().is_none() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(50));
+            }
+            let text = String::from_utf8_lossy(&out.lock().unwrap()).to_string();
+            println!("{} --version via PTY -> exit {:?}, output {:?}", info.id, *exit.lock().unwrap(), text.trim());
+            assert_eq!(*exit.lock().unwrap(), Some(Some(0)));
+            assert!(text.chars().any(|c| c.is_ascii_digit()), "{text:?}");
+            ran += 1;
+        }
+        assert!(ran > 0, "neither claude nor codex is installed");
+    }
+
+    // ---- the terminal panel's shell -------------------------------------------------------------
+
+    const ETC_SHELLS: &str = "# List of acceptable shells\n/bin/bash\n/bin/csh\n/bin/zsh   # the default\n/opt/homebrew/bin/fish\n";
+
+    #[test]
+    fn shell_argv_is_the_login_shell_from_shell_when_etc_shells_lists_it() {
+        let all = fs_of(&[Path::new("/opt/homebrew/bin/fish"), Path::new("/bin/zsh"), Path::new("/bin/bash")]);
+        let argv = shell_argv(&env_of(&[("SHELL", "/opt/homebrew/bin/fish")]), ETC_SHELLS, &all, Os::Unix).unwrap();
+        assert_eq!(argv, vec![OsString::from("/opt/homebrew/bin/fish"), OsString::from("-l")]);
+        let argv = shell_argv(&env_of(&[("SHELL", "/bin/bash")]), ETC_SHELLS, &all, Os::Unix).unwrap();
+        assert_eq!(argv, vec![OsString::from("/bin/bash"), OsString::from("-l")]);
+    }
+
+    #[test]
+    fn shell_argv_falls_back_to_zsh_then_bash_when_shell_is_not_usable() {
+        let zsh_bash = fs_of(&[Path::new("/bin/zsh"), Path::new("/bin/bash"), Path::new("/tmp/evil"), Path::new("/usr/local/bin/nu")]);
+        let zsh = vec![OsString::from("/bin/zsh"), OsString::from("-l")];
+        // not listed in /etc/shells, relative, a command line, empty, unset, listed but missing
+        for bad in [Some("/tmp/evil"), Some("zsh"), Some("bin/zsh"), Some("/bin/zsh -c id"), Some("/bin/zsh;id"), Some(""), None, Some("/usr/local/bin/nu")] {
+            let env = env_of(&bad.map(|v| vec![("SHELL", v)]).unwrap_or_default());
+            assert_eq!(shell_argv(&env, ETC_SHELLS, &zsh_bash, Os::Unix).unwrap(), zsh, "{bad:?}");
+        }
+        // listed in /etc/shells but not an executable file here
+        assert_eq!(shell_argv(&env_of(&[("SHELL", "/bin/csh")]), ETC_SHELLS, &zsh_bash, Os::Unix).unwrap(), zsh);
+        // no zsh: bash; neither: an error, no program
+        let bash_only = fs_of(&[Path::new("/bin/bash")]);
+        assert_eq!(shell_argv(&env_of(&[]), ETC_SHELLS, &bash_only, Os::Unix).unwrap(), vec![OsString::from("/bin/bash"), OsString::from("-l")]);
+        assert!(shell_argv(&env_of(&[]), ETC_SHELLS, fs_of(&[]), Os::Unix).is_err());
+        // an /etc/shells that cannot be read lists nothing
+        assert_eq!(shell_argv(&env_of(&[("SHELL", "/bin/bash")]), "", &zsh_bash, Os::Unix).unwrap(), zsh);
+    }
+
+    #[test]
+    fn etc_shells_matches_whole_lines_only() {
+        assert!(listed_in_etc_shells(ETC_SHELLS, "/bin/zsh"));
+        assert!(listed_in_etc_shells(ETC_SHELLS, "/opt/homebrew/bin/fish"));
+        for no in ["", "/bin", "/bin/zs", "# List of acceptable shells", "the default", "/bin/zsh   # the default"] {
+            assert!(!listed_in_etc_shells(ETC_SHELLS, no), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn shell_argv_on_windows_is_powershell_nologo_else_comspec() {
+        let ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+        let env = env_of(&[("SystemRoot", r"C:\Windows"), ("COMSPEC", r"C:\Windows\system32\cmd.exe"), ("SHELL", "/bin/zsh")]);
+        let argv = shell_argv(&env, "", fs_of(&[Path::new(ps), Path::new(r"C:\Windows\system32\cmd.exe")]), Os::Windows).unwrap();
+        assert_eq!(argv, vec![OsString::from(ps), OsString::from("-NoLogo")]);
+        // no PowerShell: %COMSPEC% alone, no arguments
+        let argv = shell_argv(&env, "", fs_of(&[Path::new(r"C:\Windows\system32\cmd.exe")]), Os::Windows).unwrap();
+        assert_eq!(argv, vec![OsString::from(r"C:\Windows\system32\cmd.exe")]);
+        // %COMSPEC% must be an absolute path to an existing file
+        for bad in ["cmd.exe", r"cmd.exe /c calc", r"C:\nope\cmd.exe"] {
+            let env = env_of(&[("SystemRoot", r"C:\Windows"), ("COMSPEC", bad)]);
+            assert!(shell_argv(&env, "", fs_of(&[Path::new("cmd.exe")]), Os::Windows).is_err(), "{bad}");
+        }
+    }
+
+    const WIN_PS: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+    const WIN_PWSH: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
+    const WIN_CMD: &str = r"C:\Windows\system32\cmd.exe";
+    const WIN_GITBASH: &str = r"C:\Program Files\Git\bin\bash.exe";
+    const WIN_WSL: &str = r"C:\Windows\System32\wsl.exe";
+
+    fn win_env() -> impl Fn(&str) -> Option<String> {
+        env_of(&[("SystemRoot", r"C:\Windows"), ("ProgramFiles", r"C:\Program Files"), ("COMSPEC", WIN_CMD), ("SHELL", "/bin/zsh")])
+    }
+
+    fn ids(list: &[ShellEntry]) -> Vec<&str> {
+        list.iter().map(|e| e.id.as_str()).collect()
+    }
+
+    #[test]
+    fn windows_shells_are_the_fixed_candidates_whose_files_exist_in_order() {
+        let every = [WIN_PS, WIN_PWSH, WIN_CMD, WIN_GITBASH, WIN_WSL].map(Path::new);
+        let list = shells_available(&win_env(), "", fs_of(&every), Os::Windows);
+        assert_eq!(ids(&list), ["powershell", "pwsh", "cmd", "gitbash", "wsl"]);
+        assert_eq!(list.iter().map(|e| e.label.as_str()).collect::<Vec<_>>(), ["Windows PowerShell", "PowerShell 7", "Command Prompt", "Git Bash", "WSL"]);
+        assert_eq!(list.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), [WIN_PS, WIN_PWSH, WIN_CMD, WIN_GITBASH, WIN_WSL]);
+        assert_eq!(list.iter().map(|e| e.default).collect::<Vec<_>>(), [true, false, false, false, false]);
+        // the argv each id maps to at spawn
+        let fs = fs_of(&every);
+        let argv = |id: &str| shell_argv_for(Some(id), &win_env(), "", &fs, Os::Windows).unwrap();
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(argv("powershell"), (os(&[WIN_PS, "-NoLogo"]), None));
+        assert_eq!(argv("pwsh"), (os(&[WIN_PWSH, "-NoLogo"]), None));
+        assert_eq!(argv("cmd"), (os(&[WIN_CMD]), None));
+        assert_eq!(argv("gitbash"), (os(&[WIN_GITBASH, "--login", "-i"]), None));
+        assert_eq!(argv("wsl"), (os(&[WIN_WSL]), None));
+        // only the files that exist; without Windows PowerShell the default is %COMSPEC%, listed first
+        let list = shells_available(&win_env(), "", fs_of(&[Path::new(WIN_GITBASH), Path::new(WIN_CMD)]), Os::Windows);
+        assert_eq!(ids(&list), ["cmd", "gitbash"]);
+        assert!(list[0].default && !list[1].default);
+        // a relative %COMSPEC% is never listed
+        let env = env_of(&[("SystemRoot", r"C:\Windows"), ("COMSPEC", "cmd.exe")]);
+        assert_eq!(ids(&shells_available(&env, "", fs_of(&[Path::new("cmd.exe"), Path::new(WIN_WSL)]), Os::Windows)), ["wsl"]);
+        // the arguments never go to the page
+        let json = serde_json::to_value(&shells_available(&win_env(), "", fs_of(&every), Os::Windows)[3]).unwrap();
+        assert_eq!(json, serde_json::json!({"id": "gitbash", "label": "Git Bash", "path": WIN_GITBASH, "default": false}));
+    }
+
+    #[test]
+    fn unix_shells_are_the_login_shell_then_etc_shells_that_exist() {
+        let etc = "# List of acceptable shells\n\n/bin/bash\n/bin/csh # gone here\n/bin/zsh   # the default\nnot/absolute\n/opt/homebrew/bin/fish\n/bin/zsh\n";
+        let fs = fs_of(&[Path::new("/bin/bash"), Path::new("/bin/zsh"), Path::new("/opt/homebrew/bin/fish"), Path::new("not/absolute")]);
+        let list = shells_available(&env_of(&[("SHELL", "/bin/zsh")]), etc, &fs, Os::Unix);
+        assert_eq!(ids(&list), ["unix:/bin/zsh", "unix:/bin/bash", "unix:/opt/homebrew/bin/fish"]);
+        assert_eq!(list.iter().map(|e| e.label.as_str()).collect::<Vec<_>>(), ["zsh", "bash", "fish"]);
+        assert!(list[0].default && list[1..].iter().all(|e| !e.default));
+        assert_eq!(
+            shell_argv_for(Some("unix:/opt/homebrew/bin/fish"), &env_of(&[("SHELL", "/bin/zsh")]), etc, &fs, Os::Unix).unwrap(),
+            (vec![OsString::from("/opt/homebrew/bin/fish"), OsString::from("-l")], None)
+        );
+        // $SHELL not usable: the fallback (/bin/zsh) is the default, still first
+        let list = shells_available(&env_of(&[("SHELL", "/usr/local/bin/nope")]), "/bin/bash\n/bin/zsh\n", &fs, Os::Unix);
+        assert_eq!(ids(&list), ["unix:/bin/zsh", "unix:/bin/bash"]);
+        // no /etc/shells: the login shell alone
+        assert_eq!(ids(&shells_available(&env_of(&[]), "", &fs, Os::Unix)), ["unix:/bin/zsh"]);
+    }
+
+    #[test]
+    fn an_unknown_or_missing_shell_id_opens_the_default_and_says_which() {
+        let fs = fs_of(&[Path::new("/bin/zsh"), Path::new("/bin/bash")]);
+        let env = env_of(&[("SHELL", "/bin/zsh")]);
+        let zsh = vec![OsString::from("/bin/zsh"), OsString::from("-l")];
+        assert_eq!(shell_argv_for(None, &env, ETC_SHELLS, &fs, Os::Unix).unwrap(), (zsh.clone(), None));
+        assert_eq!(shell_argv_for(Some(" "), &env, ETC_SHELLS, &fs, Os::Unix).unwrap(), (zsh.clone(), None));
+        // fish is listed in /etc/shells but not installed here
+        assert_eq!(shell_argv_for(Some("unix:/opt/homebrew/bin/fish"), &env, ETC_SHELLS, &fs, Os::Unix).unwrap(), (zsh.clone(), Some("fish".into())));
+        // a command line, a path that is not on the list, a Windows id on Unix: never run, the default instead
+        for bad in ["/bin/zsh -c 'rm -rf ~'", "unix:/tmp/evil", "unix:/bin/zsh -c x", "pwsh", "/bin/bash"] {
+            let (argv, missing) = shell_argv_for(Some(bad), &env, ETC_SHELLS, &fs, Os::Unix).unwrap();
+            assert_eq!(argv, zsh, "{bad}");
+            assert!(missing.is_some(), "{bad}");
+        }
+        // Windows: Git Bash uninstalled since the row was made
+        let fs = fs_of(&[Path::new(WIN_PS), Path::new(WIN_CMD)]);
+        assert_eq!(
+            shell_argv_for(Some("gitbash"), &win_env(), "", &fs, Os::Windows).unwrap(),
+            (vec![OsString::from(WIN_PS), OsString::from("-NoLogo")], Some("Git Bash".into()))
+        );
+    }
+
+    #[test]
+    fn shell_cwd_is_the_folder_when_it_exists_else_home() {
+        let home = std::env::temp_dir().join(format!("manut-shell-home-{}", std::process::id()));
+        let dir = home.join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = home.join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(shell_cwd(Some(dir.to_str().unwrap()), &home), dir);
+        for bad in [None, Some(""), Some("relative/dir"), Some(file.to_str().unwrap()), Some("/manut-no-such-dir-x9/deeper")] {
+            assert_eq!(shell_cwd(bad, &home), home, "{bad:?}");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_shell_is_not_an_agent_id_and_no_other_program_is_launchable() {
+        // the panel's shell has its own start (`start_shell`) and is not on the agent allow-list
+        let s = Sessions::default();
+        for bad in ["shell", "zsh", "/bin/zsh", "bash -l", "powershell.exe", "cmd"] {
+            assert!(agent(bad).is_none(), "{bad}");
+            assert!(launch_for(bad).is_err(), "{bad}");
+            assert!(s.start_agent(bad, &std::env::temp_dir(), None, None, None, &[], 80, 24, |_| {}).unwrap_err().contains("unknown agent"));
+        }
+        assert_eq!(s.count(), 0);
+    }
+
+    /// The real start: a login shell in the folder (else home), echoing what is typed, stopped by close.
+    #[cfg(unix)]
+    #[test]
+    fn start_shell_runs_a_login_shell_in_the_folder_or_home() {
+        let base = std::env::temp_dir().join(format!("manut-shell-run-{}", std::process::id()));
+        let (home, dir) = (base.join("home"), base.join("work"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        for (wanted, expect) in [(dir.to_str().unwrap().to_string(), &dir), (base.join("gone").to_str().unwrap().to_string(), &home)] {
+            let s = Sessions::default();
+            let out = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let o = out.clone();
+            let (id, at, missing) = s
+                .start_shell(Some(&wanted), None, &home, 120, 24, move |ev| {
+                    if let Output::Data(b) = ev {
+                        o.lock().unwrap().extend(b);
+                    }
+                })
+                .unwrap();
+            assert_eq!(&at, expect);
+            assert_eq!(missing, None);
+            assert_eq!(s.count(), 1);
+            s.write(id, b"echo \"at:$(pwd -P)\"\r").unwrap();
+            let want = format!("at:{}", std::fs::canonicalize(expect).unwrap().display());
+            assert!(wait_for(|| String::from_utf8_lossy(&out.lock().unwrap()).contains(&want)), "{want}: {:?}", String::from_utf8_lossy(&out.lock().unwrap()));
+            s.close(id);
+            assert_eq!(s.count(), 0);
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

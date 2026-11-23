@@ -1,0 +1,1514 @@
+/* Sidebar: one icon column and one text column starting at --side-x. */
+.side {
+  background: var(--side);
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 8px;
+  min-height: 0;
+  min-width: 0;
+}
+.side-top {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 2px;
+  flex: none;
+  -webkit-app-region: drag;
+}
+.side-top button {
+  -webkit-app-region: no-drag;
+}
+.side-add {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* the "!" (oh-my-hermes is not installed): the + button's size and quiet colour, no fill at rest; open, the gray
+   pressed look the SESSIONS + has while its menu is open */
+.omh-note {
+  position: relative;
+}
+.omh-note-b[aria-expanded="true"] {
+  background: var(--raise2);
+  color: var(--ink);
+}
+/* right under the top row, as wide as the sidebar's rows plus the live ring a row draws past its edge (OmhNotice
+   measures both), so nothing of a row shows beside it. Its own height (it has a border, so it may end partway down a
+   row), the text scrolling inside when the window is short. The same 12px all round and 10px between its parts. */
+.omh-note .ui-pop.omh-pop {
+  top: var(--omh-pop-t, calc(100% + 6px));
+  left: var(--omh-pop-l, auto);
+  right: auto;
+  padding: 12px;
+  border-radius: var(--r);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.omh-pop-in {
+  display: flex;
+  flex-direction: column;
+}
+.omh-pop-c {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+.omh-pop-t {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ink);
+}
+.omh-pop-p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--body);
+}
+/* the output takes the popover's whole inner width, so a line wraps only when it is longer than that */
+.omh-pop .gate-log {
+  flex: none;
+  width: 100%;
+  margin: 0;
+}
+.omh-pop-err {
+  margin: 0;
+  font: 12px/18px var(--mono);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+/* the actions wrap under each other when the popover is too narrow for both (Install again + Don't show again) */
+.omh-pop-a {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+/* the app's quiet outlined action (transparent at rest, a thin border, 12px), never the brightest thing here */
+.omh-pop-go {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--quiet) 90%, var(--pop));
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+.omh-pop-go:hover:not(:disabled) {
+  background: var(--raise);
+}
+/* running: the same outlined box in the same place, only lower contrast */
+.omh-pop-go:disabled {
+  color: var(--muted);
+  border-color: color-mix(in srgb, var(--quiet) 55%, var(--pop));
+  cursor: default;
+}
+.omh-pop-hide {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.omh-pop-hide:hover:not(:disabled) {
+  color: var(--ink);
+}
+.side-add .ui-ib:disabled {
+  opacity: 0.5;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 var(--side-x);
+  flex: none;
+}
+.brand img {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+/* The wordmark carries the OMH wordmark gradient (brand point, like the logo). */
+.brand b {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  background: var(--g-word);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.search {
+  height: 30px;
+  border-radius: var(--r);
+  background: var(--search-bg);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--side-x);
+  color: var(--quiet);
+  margin: 0 0 14px;
+  flex: none;
+  cursor: text;
+}
+.side-sh {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 var(--side-x) 6px;
+  flex: none;
+}
+.search svg {
+  width: 18px;
+  flex: none;
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.search input::placeholder {
+  color: var(--quiet);
+}
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+/* the app's text-field focus: a 1px edge in --muted (the model picker's search has the same) */
+.search:focus-within {
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+
+.bot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.bot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px var(--side-x);
+  transition: background 0.12s;
+  border-radius: var(--r);
+  text-align: left;
+  width: 100%;
+  position: relative;
+  flex: none;
+}
+.bot:hover {
+  background: var(--hover);
+}
+.bot.active {
+  background: var(--active-row);
+}
+.bot-m {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.bot-r1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+.bot-n {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bot-nt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.bot-t {
+  color: var(--quiet);
+  font-size: 11px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+/* a busy row's time slot is its elapsed time; an open ask's is "waiting" in amber */
+.bot-t.busy {
+  color: var(--muted);
+}
+.bot-t.wait {
+  color: var(--needs-text);
+}
+.bot-r2 {
+  display: flex;
+  align-items: center;
+}
+.bot-p {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bot.unread .bot-p {
+  color: var(--body);
+}
+.bot-p.live {
+  color: var(--muted);
+}
+/* the live step slides up in place, one line high */
+.bot-p.live .ui-tick,
+.bot-p.live .ui-tick-t {
+  height: 17px;
+  line-height: 17px;
+}
+/* the typing dots end the preview text (not the row): the live preview only takes the width it needs */
+.bot-p.live {
+  flex: 0 1 auto;
+}
+.bot-r2 .ui-typing {
+  margin-left: 7px;
+  /* sit on the x-height middle of the 12px preview, not the line box middle */
+  transform: translateY(1.5px);
+}
+/* --muted at near full strength: at 3px a dimmed dot disappears */
+.bot-r2 .ui-typing i {
+  --dot-rest: 0.85;
+  background: var(--muted);
+}
+/* the live step's command or path in mono, as the activity line shows it */
+.bot-p.live code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--body);
+}
+.badge {
+  margin-left: 6px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--g-accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  flex: none;
+}
+.bot-empty {
+  padding: 8px var(--side-x);
+  font-size: 12px;
+  color: var(--quiet);
+}
+
+.side-foot {
+  margin-top: auto;
+  display: grid;
+  gap: 1px;
+  padding-top: 6px;
+  flex: none;
+}
+/* spacing (2026-11-16): Automations, Plugins and Settings are one row of icon buttons (their names in the tooltip
+   and for a screen reader), the usage marks at its right end; the user row under it. The footer was 172px tall. */
+/* little disk space left (src/sidebar/DiskChip.tsx): one compact quiet chip above the footer row; red when critical */
+.disk-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  margin: 0 var(--side-x) 6px;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--raise2);
+  color: var(--body);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.disk-chip svg {
+  flex: none;
+  color: var(--danger);
+}
+.disk-chip.critical {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--ink);
+}
+.disk-chip:hover {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.disk-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.foot-row {
+  position: relative; /* the usage card spans this row */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 calc(var(--side-x) - 6px);
+}
+.nav.nav-i {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  flex: none;
+}
+.nav.nav-i svg {
+  width: 18px;
+  height: 16px;
+}
+.nav.nav-i:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: -2px;
+}
+/* the Automations count: a small number on the icon's corner, cut out of the sidebar's colour (no filled chip) */
+.nav.nav-i .nav-count {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  margin: 0;
+  min-width: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  font-size: 9.5px;
+  line-height: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--muted);
+  background: var(--side);
+}
+.nav.nav-i.on .nav-count,
+.nav.nav-i:hover .nav-count {
+  background: transparent;
+}
+.foot-row .usage {
+  position: static;
+  margin: 0 0 0 auto;
+  padding: 0;
+  gap: 4px;
+}
+.foot-row .usage-card {
+  left: 0;
+  right: 0;
+}
+/* visually hidden, read out */
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px var(--side-x);
+  border-radius: var(--r);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+  width: 100%;
+}
+.nav svg {
+  width: 18px;
+  height: 14px;
+  color: var(--quiet);
+  flex: none;
+}
+.nav:not(:disabled):hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.nav:disabled {
+  cursor: default;
+  color: var(--quiet);
+}
+.nav-soon {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--quiet);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.nav.on {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.nav-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+.me {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px var(--side-x);
+  margin-top: 2px;
+  border-radius: var(--r);
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+}
+/* The user row holds two controls side by side: the Accounts button (avatar and name) and the update pill. */
+.me-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.me-btn:focus-visible {
+  outline: 2px solid var(--focus, var(--line));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.me:hover {
+  background: var(--hover);
+}
+.me.on {
+  background: var(--raise2);
+}
+/* Update: a quiet pill at the right end of the user row, shown only when a newer release exists. */
+.upd {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--on-accent);
+  background: var(--g-accent);
+}
+button.upd:hover {
+  filter: brightness(1.08);
+}
+.upd-busy {
+  color: var(--muted);
+  background: var(--raise2);
+  font-variant-numeric: tabular-nums;
+}
+.upd:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
+/* The update confirm: a small calm card over a dimmed app, the popovers' look (8px radius, --pop, one line). */
+.upd-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 3, 6, 0.7);
+  animation: upd-fade 0.12s ease both;
+}
+[data-theme="light"] .upd-veil {
+  background: rgba(20, 16, 22, 0.32);
+}
+.upd-dlg {
+  width: min(380px, calc(100vw - 48px));
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--pop);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--pop-shadow);
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  animation: pop 0.16s ease both;
+}
+.upd-dlg-t {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.upd-dlg-b p {
+  margin: 0 0 6px;
+}
+.upd-dlg-b p + p {
+  color: var(--muted);
+}
+.upd-dlg-f {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.upd-dlg-btn {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--body);
+  background: var(--seg-on);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+[data-theme="light"] .upd-dlg-btn {
+  background: var(--raise2);
+}
+.upd-dlg-btn:hover {
+  color: var(--ink);
+}
+/* the one primary action: the neutral ink fill, never the accent */
+.upd-dlg-btn.primary {
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: none;
+}
+.upd-dlg-btn.primary:hover {
+  background: var(--body);
+  color: var(--bg);
+}
+.upd-dlg-btn:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
+@keyframes upd-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upd-veil,
+  .upd-dlg {
+    animation: none;
+  }
+}
+.upd-err {
+  flex-basis: 100%;
+  padding-left: 30px;
+  font-size: 11px;
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.me-i {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--raise2);
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  color: var(--muted);
+  flex: none;
+}
+
+/* usage meters: one agent mark per CLI with a ring (only when the source gives a %) */
+.side {
+  --usage-amber: #e3a54a;
+  --usage-red: #f08a8a;
+}
+[data-theme="light"] .side {
+  --usage-amber: #c4801c;
+  --usage-red: #d64545;
+}
+/* the marks sit on the nav icons' column: each 26px mark is centred where the 18px nav icons and the 20px
+   user initial are (--side-x + 9..10px) */
+.usage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px calc(var(--side-x) - 4px);
+  margin-top: 4px;
+}
+/* round, so the gray hover disc and the usage ring are one shape */
+.usage-m {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.usage-m:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* the mark whose card is open: the gray selection, like an open nav row */
+.usage-m.on {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.usage-m > * {
+  grid-area: 1 / 1;
+}
+.usage-ring {
+  pointer-events: none;
+}
+.usage-track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.usage-fill {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.usage-fill.lv-gray {
+  stroke: var(--muted);
+}
+.usage-fill.lv-amber {
+  stroke: var(--usage-amber);
+}
+.usage-fill.lv-red {
+  stroke: var(--usage-red);
+}
+/* a mark only for a state worth a glance (limited, near, stale); a CLI with nothing to report shows just its mark.
+   A short bar under the mark, never a dot: in the sidebar a red dot means a failed turn and nothing else */
+.usage-dot {
+  position: absolute;
+  left: calc(50% - 5px);
+  bottom: 0;
+  width: 10px;
+  height: 3px;
+  border-radius: 1.5px;
+  box-shadow: 0 0 0 1.5px var(--side);
+  background: var(--quiet);
+}
+.usage-dot.st-near {
+  background: var(--usage-amber);
+}
+.usage-dot.st-limited {
+  background: var(--usage-red);
+}
+/* the card: from the first mark's edge to the same inset on the right, so it covers the nav rows it sits on whole
+   (a narrower card left their "Soon" tags peeking out beside it); a caret points at its mark (--caret, the mark's
+   centre) */
+.usage-card {
+  left: calc(var(--side-x) - 4px);
+  right: calc(var(--side-x) - 4px);
+  width: auto;
+  padding: 10px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  color: var(--body);
+  overflow: visible;
+  /* the shadow goes up, away from the marks: the popovers' usual drop shadow dimmed the open mark under it */
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+[data-theme="light"] .usage-card {
+  box-shadow: 0 -6px 20px rgba(40, 20, 40, 0.12);
+}
+.usage-card::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: calc(var(--caret, 20px) - 5px);
+  width: 9px;
+  height: 9px;
+  background: var(--pop);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.uc-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.uc-head b {
+  font-weight: 600;
+}
+.uc-plan {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.uc-w {
+  margin-top: 8px;
+}
+.uc-r1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: 8px;
+}
+.uc-label {
+  color: var(--body);
+}
+.uc-pct {
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.uc-bar {
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.uc-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--muted);
+}
+.uc-bar > i.lv-amber {
+  background: var(--usage-amber);
+}
+.uc-bar > i.lv-red {
+  background: var(--usage-red);
+}
+.uc-note {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.uc-state {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.uc-state.st-limited {
+  color: var(--usage-red);
+}
+/* Claude with several logins: one line each, the login on the left, what its own record says on the right */
+.uc-accts {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.uc-ah {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.uc-a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11.5px;
+}
+.uc-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--body);
+}
+.uc-a .uc-state {
+  flex: none;
+  font-size: 11px;
+}
+
+/* ---- Needs you: approvals and questions waiting on the person ------------------------------------
+   Amber, so it never reads as an unread count (the accent badge). Selected rows stay gray. A subagent row in the
+   chat that waits on the person (.sa-row) says "waiting" in the same amber, and so does its card's head when every
+   row still out waits (.sa-head). */
+.side,
+.sa-row,
+.sa-head {
+  --needs: #e9a23b;
+  --needs-ink: #1b1204;
+  --needs-soft: rgba(233, 162, 59, 0.12);
+  --needs-text: #e9a23b;
+}
+[data-theme="light"] .side,
+[data-theme="light"] .sa-row,
+[data-theme="light"] .sa-head {
+  --needs: #e39a2a;
+  --needs-ink: #1b1204;
+  --needs-soft: rgba(227, 154, 42, 0.14);
+  /* amber text on the light sidebar: a deeper shade, so 11px stays readable */
+  --needs-text: #a8640a;
+}
+/* per row: a plain dot, never a number (a number reads as unread; the strip above carries the count) */
+.needs-dot {
+  align-self: flex-start;
+  margin-top: 4.5px;
+  margin-left: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--needs);
+  box-shadow: 0 0 0 3px var(--needs-soft);
+  flex: none;
+}
+/* the ask gets two lines in the row, so it is not cut mid-word after a few characters */
+.bot-p.ask {
+  color: var(--body);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+/* The strip expands in place: the list opens inside the same box and pushes BOTS down, so it never covers
+   (or clips) the bot rows and the open bot stays in view. */
+.needs-w {
+  position: relative;
+  flex: none;
+  margin: -6px 0 10px;
+  border-radius: var(--r);
+}
+.needs-w.open {
+  background: var(--raise);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+[data-theme="light"] .needs-w.open {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 2px rgba(40, 20, 40, 0.06);
+}
+.needs-strip {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--side-x);
+  border-radius: var(--r);
+  background: var(--needs-soft);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.needs-strip:hover {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.needs-w.open .needs-strip {
+  background: none;
+  box-shadow: none;
+}
+.needs-ic {
+  width: 8px;
+  height: 8px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: var(--needs);
+  flex: none;
+}
+.needs-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* who asked last and the ask's first words: the count stays the strong part */
+.needs-who {
+  font-weight: 400;
+  color: var(--body);
+}
+/* " · " and the word after it: one box, so a cut line never ends on a lone separator */
+.needs-sep {
+  display: inline-block;
+}
+.needs-k {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.needs-chev {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition: transform 0.12s;
+}
+.needs-w.open .needs-chev {
+  transform: rotate(180deg);
+}
+/* a command in the row preview is one unit: it never breaks across lines (`git status --short` split at `--`
+   read as a different command); the line around it wraps and clamps as a whole, and a command longer than the
+   row ellipsizes itself */
+.bot-p code {
+  white-space: nowrap;
+}
+.bot-p.ask code {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.bot-p.ask code,
+.needs-q code {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 2px;
+  margin-right: 1px;
+  border-radius: 3px;
+  background: var(--raise2);
+  color: var(--ink);
+}
+.needs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 4px 4px;
+  border-top: 1px solid var(--line);
+  max-height: 232px;
+  overflow-y: auto;
+}
+.needs-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  width: 100%;
+}
+.needs-item .ui-av {
+  margin-top: 1px;
+}
+.needs-item:hover,
+.needs-item:focus-visible,
+.needs-more:hover,
+.needs-more:focus-visible {
+  background: var(--raise2);
+}
+/* past three asks: one plain row that says how many more, on the asks' text column */
+.needs-more {
+  width: 100%;
+  padding: 4px 4px 4px 32px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+  text-align: left;
+}
+.needs-m {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.needs-r1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.needs-b {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* what kind of ask: a small neutral tag (amber stays on the dots) */
+.needs-tag {
+  flex: none;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.needs-q {
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--body);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.needs-age {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ---- row menu (right-click / ⋯) ------------------------------------------------------------------ */
+.bot-w {
+  position: relative;
+  flex: none;
+}
+
+/* ---- hold to drag (useRowDrag) ---------------------------------------------------------------------- */
+/* while a row is held the others slide out of its way; the held row follows the pointer with no easing */
+.bot-w.sliding {
+  transition: transform 0.16s ease;
+}
+.bot-w.lifted {
+  z-index: 2;
+  transition: none;
+}
+.bot-w.lifted .bot {
+  /* not --raise2: that is the selected row's fill in the dark theme, so a held row must read apart from it */
+  background: var(--bg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 6px 18px rgb(0 0 0 / 0.28);
+}
+body.row-dragging .bot-w .bot-more {
+  opacity: 0;
+  pointer-events: none;
+}
+/* hover swaps the time for ⋯; while dragging there is no ⋯, so the time stays */
+body.row-dragging .bot-w:hover .bot-r1 .bot-t {
+  visibility: visible;
+}
+body.row-dragging,
+body.row-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-w.sliding {
+    transition: none;
+  }
+}
+.bot-more {
+  position: absolute;
+  right: 4px;
+  top: 6px;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--raise2);
+  opacity: 0;
+}
+.bot-w:hover .bot-more,
+.bot-more:focus-visible,
+.bot-w.menu-open .bot-more {
+  opacity: 1;
+}
+.bot-w.menu-open .bot:not(.active) {
+  background: var(--hover);
+}
+.bot-more:hover {
+  color: var(--ink);
+  background: var(--line-strong);
+}
+.bot-w:hover .bot-r1 .bot-t,
+.bot-w.menu-open .bot-r1 .bot-t {
+  visibility: hidden;
+}
+/* "+" for a new thread, left of ⋯ on hover (bots that can have one); the name gives way so neither covers it */
+.bot-new {
+  position: absolute;
+  right: 30px;
+  top: 6px;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--raise2);
+  opacity: 0;
+}
+.bot-w:hover .bot-new,
+.bot-new:focus-visible,
+.bot-w.menu-open .bot-new {
+  opacity: 1;
+}
+.bot-new:hover {
+  color: var(--ink);
+  background: var(--line-strong);
+}
+.bot-new .nt-ic {
+  display: block;
+}
+.bot-w.can-new:hover .bot-r1,
+.bot-w.can-new.menu-open .bot-r1,
+.bot-w.can-new:focus-within .bot-r1 {
+  padding-right: 26px;
+}
+body.row-dragging .bot-w .bot-new {
+  opacity: 0;
+  pointer-events: none;
+}
+.row-menu {
+  position: fixed;
+  z-index: 40;
+  width: 168px;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+  box-shadow: var(--pop-shadow);
+  animation: pop 0.14s ease both;
+  display: flex;
+  flex-direction: column;
+}
+.row-mi {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--body);
+  text-align: left;
+}
+.row-mi:hover,
+.row-mi:focus-visible {
+  background: var(--raise2);
+  color: var(--ink);
+  outline: 0;
+}
+/* New thread: its own group above the bot's management items, with its icon and a divider under it */
+.row-mg {
+  display: flex;
+  flex-direction: column;
+}
+.row-mi.row-mi-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.row-mi-new .nt-ic {
+  flex: none;
+  color: var(--muted);
+}
+.row-mi-new:hover .nt-ic,
+.row-mi-new:focus-visible .nt-ic {
+  color: var(--ink);
+}
+.row-mi-l {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--line-strong);
+}
+/* Remove from list on the last listed bot: shown, not pressable; its tooltip says why */
+.row-mi[aria-disabled="true"] {
+  color: var(--quiet);
+  background: none;
+  cursor: default;
+}
+/* Restart on a bot that shares its gateway: the second, dim line names who restarts with it */
+.row-mi.two {
+  height: auto;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 16px;
+}
+.row-mi-sub {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--muted);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bot-pin {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 0 2px 6px;
+  border-radius: 50%;
+  background: var(--quiet);
+  vertical-align: middle;
+}
+
+/* ---- restart one bot (restart.ts): 12px lines, Cancel first and quiet, the press that goes ahead outlined ----- */
+.rs-line {
+  margin: 0 8px 6px 52px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--body);
+}
+.rs-t,
+.rs-why {
+  margin: 0;
+}
+.rs-why {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+.rs-work {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* one line per unit, never broken mid-word: an ellipsis when it does not fit (the full line is its title) */
+.rs-work li {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.rs-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rs-for {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.rs-acts {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.rs-act {
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: var(--r-sm);
+  background: none;
+  border: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line-strong);
+  cursor: pointer;
+}
+.rs-act:hover {
+  text-decoration-color: currentColor;
+}
+/* the press that goes ahead: the app's quiet outlined button, never filled or coloured */
+.rs-act.go {
+  text-decoration: none;
+  border: 1px solid var(--line-strong);
+  padding: 0 7px;
+  margin: 0;
+  line-height: 18px;
+}
+.rs-act.go:hover {
+  background: var(--raise2);
+}
+/* under a bot row: the menu's own surface, at the row's width, so it belongs to that bot */
+.rs-line.rs-pop {
+  margin: 2px 6px 6px;
+  padding: 8px 10px;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--pop-shadow);
+  animation: pop 0.14s ease both;
+}
+.rs-act:focus-visible {
+  outline: 1px solid var(--line-strong);
+  outline-offset: 1px;
+}
+.rs-wait {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rs-note .rs-line,
+.pl-load .rs-line {
+  margin: 6px 0 0;
+  text-align: left;
+}
+.pl-load {
+  font-size: 12px;
+  color: var(--body);
+}
+
+
+/* ---- The dock: the bots scrolled out of view above BOTS, as Arc-favourites tiles above the account row (Dock.tsx);
+   only while BOTS is scrolled, fading and sliding in and out ---------------------------------------------------- */
+.dock {
+  flex: none;
+  animation: dk-in 150ms ease-out;
+  display: grid;
+  /* the tiles fill each row (Arc): Dock.tsx sets the column count so no tile is left alone on a row (4 = 2x2) */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: 44px;
+  gap: 6px;
+  padding: 8px 0 2px;
+  margin-top: 6px;
+  border-top: 1px solid var(--line-soft);
+  position: relative;
+}
+.dk-t {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--raise2);
+  border: 1px solid transparent;
+  transition: background 0.12s;
+  touch-action: none;
+}
+.dk-t:hover {
+  background: var(--hover);
+}
+.dk-t.on {
+  border-color: var(--muted);
+}
+.dk-t:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 1px;
+}
+.dk-t.lifted {
+  opacity: 0.55;
+}
+.dk-t.drop {
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+.dk-f {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+[data-theme="light"] .dk-t {
+  background: var(--raise2);
+  border-color: var(--line);
+}
+.dk-f img {
+  border-radius: 6px;
+}
+/* running: a thin turning ring centred on the tile (not on the face, whose box can sit off the tile's middle), well
+   inside the tile's edges; a bot's in the bots' ring colour, a terminal's in the running-terminal colour */
+.dk-t.ring::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 16px);
+  left: calc(50% - 16px);
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  /* a faint whole circle with the turning arc on it: still (reduced motion, a still shot) it reads as one ring round
+     the face, not a mark off to one side */
+  border: 1.5px solid color-mix(in srgb, var(--dk-run, var(--spin)) 22%, transparent);
+  border-top-color: var(--dk-run, var(--spin));
+  border-right-color: var(--dk-run, var(--spin));
+  animation: dk-turn 1.1s linear infinite;
+  pointer-events: none;
+}
+.dk-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--raise2);
+}
+.dk-dot.needs {
+  background: #f28c28;
+}
+.dk-dot.failed {
+  background: #e5484d;
+}
+.dock.out {
+  animation: dk-out 150ms ease-in forwards;
+}
+@keyframes dk-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes dk-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes dk-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dk-t.ring::after,
+  .dock,
+  .dock.out {
+    animation: none;
+  }
+}
+/* a sidebar too narrow for three tiles hides the dock (a short window keeps one row: Dock.tsx) */
+.side {
+  container: side / inline-size;
+}
+@container side (max-width: 150px) {
+  .dock {
+    display: none;
+  }
+}

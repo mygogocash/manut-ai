@@ -13,7 +13,7 @@ spec is the Manut AI design canvas.
 | --- | --- | --- |
 | `apps/api` | Cloudflare Workers backend: tenants, members, tasks with exact-action approvals, a one-use dispatch broker, an encrypted credential vault, schedules, retention | GoSpark's `cloud/` at `a7537c80`, lifted whole |
 | `apps/web` | The owner's approval page (`/approve/:token`) and the operator console (`/ops`) | The design canvas's classes and states |
-| `apps/desktop` | The desktop app, from week 2 | A fork of Oh My Hermes (`apps/omher`) |
+| `apps/desktop` | The desktop app (Tauri 2 + React 19): shell, chat, Needs you, terminal and coding-agent adapters, running on a demo runtime until the real one exists | A fork of Oh My Hermes (`apps/omher` at `77b8646`), Hermes bridge removed |
 | `packages/approval-core` | Settle-once approval rules shared by every client | GoSpark's decision binding and Orca's settle-once journal |
 | `packages/agent-events` | The one event contract every agent reports through, with tolerant decoders and a timeline reducer | GoSpark's provider events (`ProviderSession.swift`) and their tests |
 | `packages/promptpay` | PromptPay QR payloads for manual payments | dtinth/promptpay-qr's format and test vectors |
@@ -42,4 +42,4 @@ Nothing is deployed yet. Before the first deploy of `apps/api`: create the Wrang
 ## Credits
 
 Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gospark`, our own); Oh My Hermes
-(MIT) and Orca (MIT) as their code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors.
+(MIT, `apps/desktop`, see its `NOTICE.md` and `THIRD_PARTY_NOTICES.md`); Orca (MIT) as its code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors.

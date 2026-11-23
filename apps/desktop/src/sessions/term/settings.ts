@@ -1,0 +1,237 @@
+// What a person can change about SESSIONS terminals, kept on this computer (localStorage). One record for every
+// terminal: the look reads it when a terminal is made and again when it changes; the engine reads `gpu`,
+// `scrollback` and `images`. Anything stored that is missing, of the wrong type or out of range falls back to the default.
+
+export type TermGpu = "auto" | "on" | "off";
+export type TermCursor = "block" | "bar" | "underline";
+/** How far text colours are lifted from the background: `high` is 4.5:1 everywhere, `auto` is 4.5:1 on a light
+ *  background and 3:1 on a dark one, `theme` leaves the theme's colours as they are. Dim (SGR 2) text is not held
+ *  to it: xterm halves the target for a dim cell and draws it at half strength. */
+export type TermContrast = "auto" | "high" | "theme";
+
+export const TERM_CURSORS: readonly TermCursor[] = ["block", "bar", "underline"];
+export const TERM_CONTRASTS: readonly TermContrast[] = ["auto", "high", "theme"];
+export const TERM_GPUS: readonly TermGpu[] = ["auto", "on", "off"];
+/** The scrollback sizes Settings offers. */
+export const TERM_SCROLLBACKS: readonly number[] = [5000, 10000, 25000, 50000];
+export const TERM_FONT_SIZE = { min: 9, max: 24 } as const;
+export const TERM_LINE_HEIGHT = { min: 1, max: 2 } as const;
+export const TERM_PADDING = { min: 0, max: 24 } as const;
+/** How bright a split pane without the keyboard stays (Otty's unfocused-split-opacity, Orca's inactivePaneOpacity). */
+export const TERM_DIM = { min: 0.5, max: 1 } as const;
+/** The undo window after closing a TERMINALS row, in seconds (0: Off, the row's program ends at once). */
+export const TERM_UNDO_CLOSE: readonly number[] = [0, 5, 10];
+
+export interface TermSettings {
+  /** Theme ids from the catalog, one per app theme. */
+  themeDark: string;
+  themeLight: string;
+  /** "" = the bundled JetBrains Mono (Otty's terminal font), then the app's monospace stack (`--mono`). */
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  cursorStyle: TermCursor;
+  cursorBlink: boolean;
+  /** Rows kept above the screen. A terminal takes it when it is made. */
+  scrollback: number;
+  contrast: TermContrast;
+  /** Space around the terminal, in px, measured on its left side (the other sides keep their proportion). */
+  padding: number;
+  /** macOS: Option sends Meta (Alt) to the program instead of typing a character. */
+  optionIsMeta: boolean;
+  /** The GPU renderer: `on` tries it and falls back by itself, `off` never does. `auto` uses it wherever the
+   *  hardware allows it (WebGL2, not a software rasterizer: engine-policy.ts), so a CLI's block art and frames draw
+   *  without seams. */
+  gpu: TermGpu;
+  /** Releasing the mouse on a selection copies it. Off: nothing is copied until the person copies. */
+  copyOnSelect: boolean;
+  /** A right click pastes the clipboard (Ctrl+right-click keeps the menu). Off: right click is the program's or the menu's. */
+  rightClickPaste: boolean;
+  /** The Kitty keyboard protocol: a program that asks for it (`CSI > flags u`) gets keys as CSI-u codes, so it can tell
+   *  Shift+Enter from Enter. A program that does not ask gets the bytes it always got. Off: no program can turn it on. */
+  kittyKeys: boolean;
+  /** Pictures a program prints (sixel, iTerm2's OSC 1337, Kitty graphics) are drawn in the terminal. Off: they are
+   *  dropped, as before. */
+  images: boolean;
+  /** A program may put text on the clipboard (OSC 52: a tmux or Neovim yank, a copy over SSH). Copy only: no program
+   *  ever reads the clipboard. On by default, as in Ghostty, kitty and Windows Terminal. */
+  osc52: boolean;
+  /** A paste with more than one line asks first, unless the program turned on bracketed paste (it then takes the
+   *  text as one paste and runs none of it by itself). On by default, as in Otty. */
+  confirmPaste: boolean;
+  /** What each terminal showed comes back, dimmed, after manut restarts (kept in `~/.manut/term-history`). Off removes
+   *  every kept file at once. */
+  keepHistory: boolean;
+  /** How bright a split pane without the keyboard stays, TERMINALS and the bottom panel alike (1: not dimmed). */
+  dimUnfocused: number;
+  /** Seconds a closed TERMINALS row's program keeps running so the close can be undone (closeGrace.ts); 0 = Off. */
+  undoClose: number;
+  /** The shell a new TERMINALS Shell row runs: an id from the shell's `shells_available` list. "" = the login shell
+   *  (Windows PowerShell on Windows), as before. An id no longer on the list opens the default. */
+  defaultShell: string;
+  /** The person's own theme (Settings › Terminal › Import from…: a copy of another terminal app's profile), picked
+   *  as `custom` in `themeDark` / `themeLight`. null: none. */
+  custom: TermCustomTheme | null;
+}
+
+/** Colour slots a custom theme keeps: the sixteen ANSI ones and the four of the screen. */
+export const TERM_CUSTOM_KEYS = [
+  "foreground",
+  "background",
+  "cursor",
+  "cursorAccent",
+  "selectionBackground",
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+export type TermCustomKey = (typeof TERM_CUSTOM_KEYS)[number];
+export interface TermCustomTheme {
+  name: string;
+  colors: Partial<Record<TermCustomKey, string>>;
+}
+
+export const TERM_KEY = "manut.term";
+
+export const TERM_DEFAULTS: TermSettings = {
+  themeDark: "manut-dark",
+  themeLight: "manut-light",
+  fontFamily: "",
+  fontSize: 13,
+  lineHeight: 1.2,
+  cursorStyle: "block",
+  cursorBlink: true,
+  scrollback: 5000,
+  contrast: "high",
+  padding: 16,
+  optionIsMeta: true,
+  gpu: "auto",
+  copyOnSelect: false,
+  rightClickPaste: false,
+  kittyKeys: true,
+  images: true,
+  confirmPaste: true,
+  osc52: true,
+  keepHistory: true,
+  dimUnfocused: 0.72,
+  undoClose: 10,
+  defaultShell: "",
+  custom: null,
+};
+
+/** A shell id as `shells_available` makes them: a Windows name or `unix:<absolute path>`; anything else is "". */
+export const cleanShellId = (v: unknown): string =>
+  typeof v === "string" && v.length <= 600 && /^(?:powershell|pwsh|cmd|gitbash|wsl|unix:\/[^\0-\x1f\x7f]*)$/.test(v) ? v : "";
+
+const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+const str = (v: unknown, d: string, max = 200) => (typeof v === "string" && v.length <= max ? v : d);
+/** A font list as a person types it, kept to what a font name is made of (letters, digits, spaces, commas, quotes,
+ *  dots, hyphens): the value ends up in a stylesheet, so nothing that could end a rule is kept. */
+export const cleanTermFont = (v: string): string => v.replace(/[^\p{L}\p{N} ,'"._-]/gu, "").slice(0, 200);
+const one = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
+const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+
+/** A stored custom theme, each colour a `#rrggbb`; anything else is dropped (no name or no colour: none). */
+export function parseCustomTheme(v: unknown): TermCustomTheme | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const name = typeof o.name === "string" ? o.name.replace(/\p{Cc}/gu, "").trim().slice(0, 80) : "";
+  const raw = (o.colors && typeof o.colors === "object" ? o.colors : {}) as Record<string, unknown>;
+  const colors: TermCustomTheme["colors"] = {};
+  for (const k of TERM_CUSTOM_KEYS) {
+    const c = raw[k];
+    if (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)) colors[k] = c.toLowerCase();
+  }
+  return name && Object.keys(colors).length ? { name, colors } : null;
+}
+
+/** Stored text or object -> settings, every field checked. */
+export function parseTermSettings(raw: unknown): TermSettings {
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      v = null;
+    }
+  }
+  const o = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
+  const d = TERM_DEFAULTS;
+  return {
+    themeDark: str(o.themeDark, d.themeDark) || d.themeDark,
+    themeLight: str(o.themeLight, d.themeLight) || d.themeLight,
+    fontFamily: cleanTermFont(str(o.fontFamily, d.fontFamily)),
+    fontSize: num(o.fontSize, TERM_FONT_SIZE.min, TERM_FONT_SIZE.max, d.fontSize),
+    lineHeight: num(o.lineHeight, TERM_LINE_HEIGHT.min, TERM_LINE_HEIGHT.max, d.lineHeight),
+    cursorStyle: one(o.cursorStyle, TERM_CURSORS, d.cursorStyle),
+    cursorBlink: bool(o.cursorBlink, d.cursorBlink),
+    scrollback: Math.round(num(o.scrollback, 1000, 50000, d.scrollback)),
+    contrast: one(o.contrast, TERM_CONTRASTS, d.contrast),
+    padding: Math.round(num(o.padding, TERM_PADDING.min, TERM_PADDING.max, d.padding)),
+    optionIsMeta: bool(o.optionIsMeta, d.optionIsMeta),
+    gpu: one(o.gpu, TERM_GPUS, d.gpu),
+    copyOnSelect: bool(o.copyOnSelect, d.copyOnSelect),
+    rightClickPaste: bool(o.rightClickPaste, d.rightClickPaste),
+    kittyKeys: bool(o.kittyKeys, d.kittyKeys),
+    images: bool(o.images, d.images),
+    confirmPaste: bool(o.confirmPaste, d.confirmPaste),
+    osc52: bool(o.osc52, d.osc52),
+    keepHistory: bool(o.keepHistory, d.keepHistory),
+    dimUnfocused: Math.round(num(o.dimUnfocused, TERM_DIM.min, TERM_DIM.max, d.dimUnfocused) * 100) / 100,
+    undoClose: TERM_UNDO_CLOSE.includes(o.undoClose as number) ? (o.undoClose as number) : d.undoClose,
+    defaultShell: cleanShellId(o.defaultShell),
+    custom: parseCustomTheme(o.custom),
+  };
+}
+
+let current: TermSettings | null = null;
+const listeners = new Set<(s: TermSettings) => void>();
+
+export function readTermSettings(): TermSettings {
+  if (current) return current;
+  let raw: string | null = null;
+  try {
+    raw = typeof localStorage !== "undefined" ? localStorage.getItem(TERM_KEY) : null;
+  } catch {
+    /* no storage */
+  }
+  return (current = parseTermSettings(raw));
+}
+
+/** Change some settings: checked, saved, and handed to every open terminal. */
+export function writeTermSettings(patch: Partial<TermSettings>): TermSettings {
+  const next = parseTermSettings({ ...readTermSettings(), ...patch });
+  current = next;
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(TERM_KEY, JSON.stringify(next));
+  } catch {
+    /* no storage */
+  }
+  for (const fn of listeners) fn(next);
+  return next;
+}
+
+export function onTermSettings(fn: (s: TermSettings) => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+/** Tests: forget what was read. */
+export function resetTermSettings(): void {
+  current = null;
+}

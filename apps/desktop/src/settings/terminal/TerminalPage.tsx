@@ -1,0 +1,342 @@
+// Settings > Terminal: how the SESSIONS terminals look. A theme for each app theme (dark, light) picked from the
+// catalog with a live preview, then text, cursor and the rest. Every change is saved on this computer and reaches
+// the open terminals at once (term/settings.ts hands it to them).
+import { useEffect, useState, useSyncExternalStore } from "react";
+import "./terminal.css";
+import { useStore } from "../../state/store";
+import { useResolvedTheme } from "../../app/theme";
+import { Seg } from "../../chat/model/Seg";
+import { CheckIcon } from "../../chat/model/CheckIcon";
+import { locale, t, type Key } from "../../i18n";
+import { rendererInUse } from "../../sessions/term/engine";
+import {
+  cleanTermFont,
+  onTermSettings,
+  readTermSettings,
+  TERM_CONTRASTS,
+  TERM_CURSORS,
+  TERM_DIM,
+  TERM_FONT_SIZE,
+  TERM_GPUS,
+  TERM_LINE_HEIGHT,
+  TERM_PADDING,
+  TERM_SCROLLBACKS,
+  TERM_UNDO_CLOSE,
+  writeTermSettings,
+  type TermContrast,
+  type TermCursor,
+  type TermGpu,
+  type TermSettings,
+} from "../../sessions/term/settings";
+import { useShells } from "../../sessions/newMenu";
+import { ANSI_NORMAL, CUSTOM_THEME_ID, customTermTheme, TERM_THEMES, termThemePick, type TermTheme } from "../../sessions/term/themes";
+import { TermPreview } from "./TermPreview";
+import { TermImport, type ImportCandidate } from "./TermImport";
+
+type Mode = "dark" | "light";
+
+const SLOT: Record<Mode, Key> = { dark: "term.forDark", light: "term.forLight" };
+const KIND: Record<Mode, Key> = { dark: "look.dark", light: "look.light" };
+const CURSOR: Record<TermCursor, Key> = { block: "term.block", bar: "term.bar", underline: "term.underline" };
+const CONTRAST: Record<TermContrast, Key> = { auto: "term.auto", high: "term.contrastHigh", theme: "term.contrastTheme" };
+const CONTRAST_HINT: Record<TermContrast, Key> = { auto: "term.contrastAutoHint", high: "term.contrastHighHint", theme: "term.contrastThemeHint" };
+const GPU: Record<TermGpu, Key> = { auto: "term.auto", on: "set.on", off: "set.off" };
+const IN_USE: Record<"gpu" | "standard", Key> = { gpu: "term.usingGpu", standard: "term.usingStandard" };
+const ON_OFF = (): { value: string; label: string }[] => [
+  { value: "on", label: t("set.on") },
+  { value: "off", label: t("set.off") },
+];
+
+const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+/** "tokyonight" finds "Tokyo Night": letters and digits only, lower case. */
+const compact = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+const round = (n: number) => Math.round(n * 100) / 100;
+
+export function useTermSettings(): TermSettings {
+  return useSyncExternalStore(onTermSettings, readTermSettings, readTermSettings);
+}
+
+function Row({ title, hints, children, testId }: { title: string; hints?: (string | null)[]; children: React.ReactNode; testId?: string }) {
+  return (
+    <div className="st-row" data-testid={testId}>
+      <div className="st-k">
+        <b>{title}</b>
+        {hints?.map((h) => h && <span key={h}>{h}</span>)}
+      </div>
+      <div className="st-v">{children}</div>
+    </div>
+  );
+}
+
+/** A number with a step either side. Typing a value in range applies it as it is typed; anything else waits and
+ *  goes back to the value in force when the field is left. */
+function Stepper({ value, min, max, step, label, onChange, testId }: { value: number; min: number; max: number; step: number; label: string; onChange: (n: number) => void; testId: string }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const inRange = (raw: string) => {
+    const n = Number(raw);
+    return raw.trim() !== "" && Number.isFinite(n) && n >= min && n <= max ? round(n) : null;
+  };
+  const bump = (by: number) => onChange(Math.min(max, Math.max(min, round(value + by))));
+  return (
+    <div className="tm-step" role="group" aria-label={label} data-testid={testId}>
+      <button type="button" aria-label={t("term.dec", { what: label })} disabled={value <= min} onClick={() => bump(-step)}>
+        −
+      </button>
+      <input
+        inputMode="decimal"
+        aria-label={label}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const n = inRange(e.target.value);
+          if (n !== null && n !== value) onChange(n);
+        }}
+        onBlur={() => setText(String(value))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+      />
+      <button type="button" aria-label={t("term.inc", { what: label })} disabled={value >= max} onClick={() => bump(step)}>
+        +
+      </button>
+    </div>
+  );
+}
+
+function ThemeRow({ theme, on, onPick }: { theme: TermTheme; on: boolean; onPick: () => void }) {
+  const c = theme.theme;
+  return (
+    <button type="button" role="radio" aria-checked={on} className={`tm-row${on ? " on" : ""}`} onClick={onPick} title={theme.name} data-testid={`term-theme-${theme.id}`}>
+      <span className="tm-sw" aria-hidden="true" style={{ background: c.background, color: c.foreground }}>
+        {ANSI_NORMAL.map((k) => (
+          <i key={k} style={{ background: c[k] }} />
+        ))}
+      </span>
+      <span className="tm-name">{theme.name}</span>
+      {on && <CheckIcon />}
+    </button>
+  );
+}
+
+export function TerminalPage() {
+  const s = useStore();
+  const term = useTermSettings();
+  const appMode = useResolvedTheme(s.ui.theme);
+  // the pick being made: for the app theme in force until the person looks at the other one
+  const [slot, setSlot] = useState<Mode>(appMode);
+  useEffect(() => setSlot(appMode), [appMode]);
+  const [q, setQ] = useState("");
+  const [font, setFont] = useState(term.fontFamily);
+  useEffect(() => setFont(term.fontFamily), [term.fontFamily]);
+  // a profile being looked at in Import from…: the preview shows it until Use or Cancel
+  const [candidate, setCandidate] = useState<ImportCandidate>(null);
+  const mine = term.custom ? customTermTheme(term.custom) : null;
+  const [importAt, setImportAt] = useState<HTMLDivElement | null>(null);
+
+  const picked = termThemePick(slot, term);
+  const needle = compact(q);
+  const shown = needle ? TERM_THEMES.filter((th) => compact(th.name).includes(needle)) : TERM_THEMES;
+  // the kind that suits the app theme being picked for comes first
+  const kinds: Mode[] = slot === "light" ? ["light", "dark"] : ["dark", "light"];
+  const pick = (id: string) => writeTermSettings(slot === "light" ? { themeLight: id } : { themeDark: id });
+  const set = (patch: Partial<TermSettings>) => void writeTermSettings(patch);
+  // Default shell: this computer's shells; the default one is stored as "" (the login shell, as before)
+  const shells = useShells();
+  const shellDefault = shells?.find((s) => s.default) ?? shells?.[0];
+  const shellValue = shells?.some((s) => s.id === term.defaultShell) ? term.defaultShell : (shellDefault?.id ?? "");
+  const using = rendererInUse();
+  const rows = (n: number) => n.toLocaleString(locale());
+
+  return (
+    <div className="st-page st-wide tm" data-testid="term-settings">
+      <div className="st-gh st-gh0">{t("term.theme")}</div>
+      <TermPreview theme={candidate?.theme ?? picked} settings={candidate?.settings ?? term} />
+      <div className="tm-bar">
+        <div className="tm-slot">
+          <Seg
+            small
+            label={t("term.themeFor")}
+            value={slot}
+            options={(["dark", "light"] as Mode[]).map((m) => ({ value: m, label: t(SLOT[m]) }))}
+            onChange={(v) => setSlot(v as Mode)}
+            testId="term-slot"
+          />
+        </div>
+        <div className="tm-bar-r">
+          <input type="search" className="bots-q tm-q" placeholder={t("term.find")} aria-label={t("term.find")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="term-search" />
+          {isMac() && <TermImport settings={term} slot={slot} onCandidate={setCandidate} panelAt={importAt} />}
+        </div>
+      </div>
+      <div ref={setImportAt} />
+      <div className="tm-list" role="radiogroup" aria-label={t(SLOT[slot])} data-testid="term-themes">
+        {mine && (!needle || compact(mine.name).includes(needle)) && (
+          <div data-testid="term-themes-custom">
+            <div className="tm-gh">{t("term.yours")}</div>
+            <div className="tm-grid">
+              <ThemeRow theme={mine} on={picked.id === CUSTOM_THEME_ID} onPick={() => pick(CUSTOM_THEME_ID)} />
+            </div>
+          </div>
+        )}
+        {kinds.map((kind) => {
+          const list = shown.filter((th) => th.kind === kind);
+          if (!list.length) return null;
+          return (
+            <div key={kind} data-testid={`term-themes-${kind}`}>
+              <div className="tm-gh">{t(KIND[kind])}</div>
+              <div className="tm-grid">
+                {list.map((th) => (
+                  <ThemeRow key={th.id} theme={th} on={th.id === picked.id} onPick={() => pick(th.id)} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {shown.length === 0 && !(mine && compact(mine.name).includes(needle)) && (
+          <div className="tm-none" data-testid="term-themes-none">
+            {t("term.noMatch", { q: q.trim() })}
+          </div>
+        )}
+      </div>
+
+      <div className="st-gh">{t("term.text")}</div>
+      <div className="st-grp">
+        <Row title={t("term.font")} hints={[t("term.fontHint")]}>
+          <input
+            type="text"
+            className="tm-font"
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            placeholder={t("term.fontDefault")}
+            aria-label={t("term.font")}
+            value={font}
+            onChange={(e) => {
+              const v = cleanTermFont(e.target.value);
+              setFont(v);
+              set({ fontFamily: v });
+            }}
+            data-testid="term-font"
+          />
+        </Row>
+        <Row title={t("term.fontSize")}>
+          <Stepper value={term.fontSize} min={TERM_FONT_SIZE.min} max={TERM_FONT_SIZE.max} step={0.5} label={t("term.fontSize")} onChange={(n) => set({ fontSize: n })} testId="term-font-size" />
+        </Row>
+        <Row title={t("term.lineHeight")}>
+          <Stepper value={term.lineHeight} min={TERM_LINE_HEIGHT.min} max={TERM_LINE_HEIGHT.max} step={0.1} label={t("term.lineHeight")} onChange={(n) => set({ lineHeight: n })} testId="term-line-height" />
+        </Row>
+        <Row title={t("term.contrast")} hints={[t(CONTRAST_HINT[term.contrast])]} testId="term-contrast-row">
+          <Seg
+            small
+            label={t("term.contrast")}
+            value={term.contrast}
+            options={TERM_CONTRASTS.map((c) => ({ value: c, label: t(CONTRAST[c]) }))}
+            onChange={(v) => set({ contrast: v as TermContrast })}
+            testId="term-contrast"
+          />
+        </Row>
+        <Row title={t("term.padding")} hints={[t("term.paddingHint")]}>
+          <Stepper value={term.padding} min={TERM_PADDING.min} max={TERM_PADDING.max} step={2} label={t("term.padding")} onChange={(n) => set({ padding: Math.round(n) })} testId="term-padding" />
+        </Row>
+        <Row title={t("term.dim")} hints={[t("term.dimHint")]} testId="term-dim-row">
+          <Stepper value={term.dimUnfocused} min={TERM_DIM.min} max={TERM_DIM.max} step={0.04} label={t("term.dim")} onChange={(n) => set({ dimUnfocused: n })} testId="term-dim" />
+        </Row>
+      </div>
+
+      <div className="st-gh">{t("term.cursor")}</div>
+      <div className="st-grp">
+        <Row title={t("term.cursorStyle")}>
+          <Seg
+            small
+            label={t("term.cursorStyle")}
+            value={term.cursorStyle}
+            options={TERM_CURSORS.map((c) => ({ value: c, label: t(CURSOR[c]) }))}
+            onChange={(v) => set({ cursorStyle: v as TermCursor })}
+            testId="term-cursor"
+          />
+        </Row>
+        <Row title={t("term.blink")}>
+          <Seg small label={t("term.blink")} value={term.cursorBlink ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ cursorBlink: v === "on" })} testId="term-blink" />
+        </Row>
+      </div>
+
+      <div className="st-gh">{t("term.more")}</div>
+      <div className="st-grp">
+        {shells && shells.length > 0 && (
+          <Row title={t("term.defaultShell")} hints={[t("term.defaultShellHint")]} testId="term-default-shell-row">
+            <select
+              className="tm-font tm-shell"
+              aria-label={t("term.defaultShell")}
+              value={shellValue}
+              onChange={(e) => set({ defaultShell: e.target.value === shellDefault?.id ? "" : e.target.value })}
+              data-testid="term-default-shell"
+            >
+              {shells.map((s) => (
+                <option key={s.id} value={s.id} title={s.path}>
+                  {s.default ? t("term.shellDefaultOf", { shell: s.label }) : s.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+        )}
+        <Row title={t("term.scrollback")} hints={[t("term.scrollbackHint")]} testId="term-scrollback-row">
+          <Seg
+            small
+            label={t("term.scrollback")}
+            value={String(term.scrollback)}
+            options={TERM_SCROLLBACKS.map((n) => ({ value: String(n), label: rows(n) }))}
+            onChange={(v) => set({ scrollback: Number(v) })}
+            testId="term-scrollback"
+          />
+        </Row>
+        {isMac() && (
+          <Row title={t("term.optionMeta")} hints={[t("term.optionMetaHint")]} testId="term-option-meta-row">
+            <Seg small label={t("term.optionMeta")} value={term.optionIsMeta ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ optionIsMeta: v === "on" })} testId="term-option-meta" />
+          </Row>
+        )}
+        <Row title={t("term.gpu")} hints={[t("term.gpuHint"), using ? t(IN_USE[using]) : null]} testId="term-gpu-row">
+          <Seg small label={t("term.gpu")} value={term.gpu} options={TERM_GPUS.map((g) => ({ value: g, label: t(GPU[g]) }))} onChange={(v) => set({ gpu: v as TermGpu })} testId="term-gpu" />
+        </Row>
+        <Row title={t("term.kittyKeys")} hints={[t("term.kittyKeysHint")]} testId="term-kitty-row">
+          <Seg small label={t("term.kittyKeys")} value={term.kittyKeys ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ kittyKeys: v === "on" })} testId="term-kitty" />
+        </Row>
+        <Row title={t("term.images")} hints={[t("term.imagesHint")]} testId="term-images-row">
+          <Seg small label={t("term.images")} value={term.images ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ images: v === "on" })} testId="term-images" />
+        </Row>
+      </div>
+
+      <div className="st-gh">{t("term.clipboard")}</div>
+      <div className="st-grp">
+        <Row title={t("term.copyOnSelect")} hints={[t("term.copyOnSelectHint")]} testId="term-copy-select-row">
+          <Seg small label={t("term.copyOnSelect")} value={term.copyOnSelect ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ copyOnSelect: v === "on" })} testId="term-copy-select" />
+        </Row>
+        <Row title={t("term.rightClickPaste")} hints={[t("term.rightClickPasteHint")]} testId="term-right-paste-row">
+          <Seg small label={t("term.rightClickPaste")} value={term.rightClickPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ rightClickPaste: v === "on" })} testId="term-right-paste" />
+        </Row>
+        <Row title={t("term.confirmPaste")} hints={[t("term.confirmPasteHint")]} testId="term-confirm-paste-row">
+          <Seg small label={t("term.confirmPaste")} value={term.confirmPaste ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ confirmPaste: v === "on" })} testId="term-confirm-paste" />
+        </Row>
+        <Row title={t("term.osc52")} hints={[t("term.osc52Hint")]} testId="term-osc52-row">
+          <Seg small label={t("term.osc52")} value={term.osc52 ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ osc52: v === "on" })} testId="term-osc52" />
+        </Row>
+      </div>
+
+      <div className="st-gh">{t("term.history")}</div>
+      <div className="st-grp">
+        <Row title={t("term.keepHistory")} hints={[t("term.keepHistoryHint")]} testId="term-keep-history-row">
+          <Seg small label={t("term.keepHistory")} value={term.keepHistory ? "on" : "off"} options={ON_OFF()} onChange={(v) => set({ keepHistory: v === "on" })} testId="term-keep-history" />
+        </Row>
+        <Row title={t("term.undoClose")} hints={[t("term.undoCloseHint")]} testId="term-undo-close-row">
+          <Seg
+            small
+            label={t("term.undoClose")}
+            value={String(term.undoClose)}
+            options={TERM_UNDO_CLOSE.map((n) => ({ value: String(n), label: n ? t("term.undoCloseSec", { n }) : t("set.off") }))}
+            onChange={(v) => set({ undoClose: Number(v) })}
+            testId="term-undo-close"
+          />
+        </Row>
+      </div>
+    </div>
+  );
+}

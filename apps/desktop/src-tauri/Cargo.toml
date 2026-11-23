@@ -1,0 +1,40 @@
+[package]
+name = "manut"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "manut_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+portable-pty = "0.9"
+tauri-plugin-dialog = "2"
+tauri-plugin-process = "2"
+# manut://terminal/<id> links: the OS hands them to manut (term_link.rs takes only that shape)
+tauri-plugin-deep-link = "2"
+# Settings › Terminal › Import from…: iTerm2 / Apple Terminal prefs (term_import.rs); already in the tree via tauri
+plist = "1"
+# Tasks › 나: a non-active GitHub account's token is wiped from memory when its one `gh` call ends (gh_me.rs); already in
+# the tree via tauri
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Windows and Linux: a link opened while manut runs starts a second manut; this hands its link to the first one.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+# Linux: the opener plugin's own launcher list, run with the AppImage environment taken out (src/appimage.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+open = "5"

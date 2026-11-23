@@ -1,5 +1,96 @@
 # apps/desktop
 
-The desktop app starts in week 2 as a fork of Oh My Hermes (`apps/omher`, Tauri 2 + React 19),
-with the Hermes bridge removed and the canvas tokens from `@manut/ui-kit` applied.
-See the implementation plan, "First two weeks".
+Manut AI's desktop app: Tauri 2 with a React 19 front end. It is a fork of **omher**, the desktop app of
+[Oh My Hermes](https://github.com/rlaope/oh-my-hermes) (`apps/omher` at commit `77b8646`, version 1.1.3, MIT).
+`NOTICE.md` carries their licence and says what the fork changed; `THIRD_PARTY_NOTICES.md` carries the notices of the
+fonts and terminal themes the app ships.
+
+This is the first pass of the fork: the app copied in, renamed, cut loose from Hermes, and restyled with the design
+tokens. The screens are still omher's (a list of bots, a chat, terminals, tasks). Turning them into Manut AI's
+screens is the next pass.
+
+## Run it
+
+```bash
+pnpm --filter @manut/desktop dev         # the front end in a browser, http://localhost:5207
+pnpm --filter @manut/desktop typecheck
+pnpm --filter @manut/desktop test        # vitest
+pnpm --filter @manut/desktop tauri dev   # the desktop app (needs Rust; compiles src-tauri)
+```
+
+The app starts with no other process. In a browser the terminals and coding agents are stand-ins
+(`src/sessions/host.ts`, `src/terminal/host.ts`); in the desktop app they are real.
+
+## The runtime seam
+
+The screens speak one protocol, `src/lib/protocol.ts` (requests by op name, events by name), and reach whatever
+answers it through `src/runtime`:
+
+| File | What it is |
+| --- | --- |
+| `src/runtime/adapter.ts` | `RuntimeAdapter`: `connect`, `close`, `request(op, params)`, `on`, `onAny`, `onStatus`, plus `kind` and `capabilities` |
+| `src/runtime/index.ts` | `createRuntime()` picks the adapter; `can(feature)` asks what the runtime has |
+| `src/runtime/mock/` | The in-process runtime: Buddy and a small team, scripted turns, approvals that settle once. The default |
+| `src/lib/bridge.ts` | The WebSocket adapter (omher's original transport). Used only when `VITE_MANUT_BRIDGE` or the page's `__MANUT_BRIDGE_URL__` names a URL, which is how the Playwright suite reaches `e2e/mock-bridge.mjs` |
+
+In the demo runtime, type anything for a sample answer, or `/approve`, `/clarify`, `/interview`, `/delegate`.
+
+A real backend arrives as one more adapter that implements `RuntimeAdapter` and is returned by `createRuntime()`.
+Feature groups a runtime lacks are declared in its `RuntimeCapabilities` (`elsewhere`, `automations`, `plugins`,
+`restart`, `accounts`); the app hides those screens instead of showing ones that cannot work. The in-process
+runtime has none of them. **A release build would also run on the demo runtime today**, because no real one exists
+yet: do not ship this build to an owner.
+
+## What was removed from omher, and why
+
+- **The Hermes bridge.** `bridge/` (Python) was not copied; `src-tauri/src/bridge.rs` and its commands are gone.
+  The shell starts no process of its own at launch.
+- **Hermes install and sign-in.** The first-run gate (`BridgeGate`), the "add oh-my-hermes" offer, Settings ›
+  Providers (`hermes auth add`) and the chat's connect block, with `setup.rs` and `hermes_auth.rs`.
+- **Hermes on another computer.** The SSH peers (`peers.rs`, Settings › Remote machines, the Connect over SSH card).
+- **Hermes profiles.** The sidebar's + menu, which listed profiles to add. Every team member the runtime reports
+  is listed from the first run.
+- **The oh-my-hermes session row** is not offered (its chat was a Hermes chat through the bridge), and Tasks no
+  longer offers Linear (it was reached through a bot's Hermes).
+- **Hidden behind capabilities**, not deleted: Automations, Plugins, Accounts and usage, Restart, and the "other
+  places" chip. Their code and dictionary strings are still there.
+- **Other companies' logos.** `src/assets/agents/` was not copied; agents draw the first letter of their name.
+  Model, link and source marks drawn from inline path data (`src/ui/modelMarks.ts`, `brandIcons.tsx`,
+  `SourceIcon.tsx`, `src/tasks/marks.tsx`) are still in the code.
+- **In-app updates.** The update endpoint and signing key were omher's. They are removed from
+  `tauri.conf.json`, the updater plugin is not registered, and `UPDATER_ENABLED` in `src/sidebar/updater.ts` is
+  false. Turning it on needs our own key and endpoint (the steps are in that file).
+- **Their packaging.** The site preview (`preview/`), benchmarks (`bench/`), the AppImage smoke test and CI runner
+  scripts, the product screenshots, and their app icon and logo. The icon and `src/assets/manut-mark.svg` here are
+  placeholders (an "M" in the brand mark's token colours); regenerate the icons with `pnpm tauri icon <png>`.
+
+Kept whole: the terminal (`src-tauri/src/sessions.rs`, `src/sessions/term/`), the coding-agent adapters
+(`agent_chat.rs`, `acp_chat.rs`, `acp_agents.rs`, `dsh_chat.rs`), tasks through `gh` and `glab`, the tray,
+notifications, and the four languages (English, Korean, Japanese, Chinese). Thai is not added yet.
+
+## Names
+
+The product is "Manut AI". Identifiers that were `omher` are now `manut`: the crate, `~/.manut/` on disk, the
+`manut://` link scheme, `manut.*` keys in local storage, `MANUT_*` variables. The bundle identifier is
+`xyz.manut.desktop`. Comments that cite "BOUNDARY rule N" mean Oh My Hermes' `docs/OMHER-BOUNDARY.md`, which was
+not copied.
+
+## Tokens
+
+`src/theme/tokens.css` has two layers: the values of `packages/ui-kit/tokens.json` under the kit's own names, and
+the names omher's screens use, each pointed at a design token. `src/theme/tokens.test.ts` fails when the first
+layer drifts from `tokens.json`. Geist, Geist Mono and IBM Plex Sans Thai are bundled (`src/theme/fonts.css`,
+`src/assets/fonts/`), because the app allows no remote font.
+
+## Safety settings
+
+`src-tauri/tauri.conf.json` has a content security policy for the packaged app (scripts and styles from the app
+only, no remote origin, no socket) and a looser one for `tauri dev` (Vite on `localhost:5207`). macOS signing is
+ad hoc (`"-"`); there is no signing identity, notarisation or release workflow here.
+
+## Not done in this pass
+
+- The Playwright suite (`e2e/`, 156 specs) was copied and renamed but **not run**. Specs of removed screens were
+  deleted; others still expect the + menu, the oh-my-hermes row or omher's wording.
+- Rust tests were not run, only `cargo check`.
+- Dictionary strings of the hidden and removed screens were left in the four language files.

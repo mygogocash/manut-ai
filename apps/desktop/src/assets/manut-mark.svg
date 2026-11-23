@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Manut AI">
+  <!-- Placeholder brand mark: the initial on the mark ground and figure colours of the design tokens
+       (markGround #E3E1DB, markFigure #1F2022). Replace with the real mark when the brand is final. -->
+  <rect width="100" height="100" rx="22" fill="#E3E1DB"/>
+  <path d="M29 71V30l21 29 21-29v41" fill="none" stroke="#1F2022" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

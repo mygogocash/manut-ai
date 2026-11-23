@@ -280,6 +280,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@manut/promptpay':
+        specifier: workspace:*
+        version: link:../../packages/promptpay
       '@manut/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
@@ -317,6 +320,15 @@ importers:
       vite:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))
+
+  packages/agent-events:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2))

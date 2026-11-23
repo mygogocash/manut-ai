@@ -1,0 +1,39 @@
+// Header chip: "3 other places" with the app mark of each place the bot is in (Slack, Discord, …);
+// toggles the Details panel.
+import type { SlotProps } from "../features";
+import { useStore } from "../state/store";
+import { SourceIcon } from "../ui";
+import { sourceName } from "./format";
+import "./elsewhere.css";
+import { t } from "../i18n";
+import { can } from "../runtime";
+
+export const slot = "headerPlaces";
+
+export default function Places({ bot }: SlotProps["headerPlaces"]) {
+  const s = useStore();
+  const away = s.elsewhere[bot.name] ?? [];
+  // a runtime with no sessions in other apps has no chip, whatever an old list in the store says
+  if (!can("elsewhere") || away.length === 0) return null;
+  const open = s.ui.panelOpen;
+  const sources = [...new Set(away.map((a) => a.source))];
+  return (
+    <button
+      type="button"
+      className={`ew-places${open ? " on" : ""}`}
+      onClick={() => s.togglePanel()}
+      aria-expanded={open}
+      title={t("pl.where", { bot: bot.display_name })}
+      data-testid="places"
+    >
+      <span className="ew-pd" title={sources.map(sourceName).join(", ")}>
+        {sources.map((src) => (
+          <SourceIcon key={src} source={src} size={12} />
+        ))}
+      </span>
+      <span data-testid="places-label">
+        {away.length === 1 ? t("pl.one") : t("pl.many", { n: away.length })}
+      </span>
+    </button>
+  );
+}

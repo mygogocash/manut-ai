@@ -1,0 +1,2012 @@
+/* SESSIONS: sidebar section, + menu, terminal view. */
+
+/* BOTS and SESSIONS each take the room their rows need and share what is left; when both are long, each gives
+   way in proportion and scrolls on its own. Neither is squeezed under its header and a row or two: twelve bots
+   beside an empty SESSIONS no longer stop at five with a blank half under them. */
+/* Both regions grow from zero, so when both overflow they share the column evenly (twelve bots with threads no
+   longer leave TERMINALS one row); each stops at its content's height, so a short one gives the rest away. */
+.side-sec {
+  flex: 1 1 0;
+  min-height: 96px;
+  max-height: max-content;
+  display: flex;
+  flex-direction: column;
+}
+/* A search that leaves BOTS with only its "No bot named …" line: that line's height, SESSIONS right under it. */
+/* a row's menu or confirm opened inside a clipped list is never cut by that clip */
+.side-sec > .bot-list:has(.row-menu, .th-confirm, [role="menu"], [role="dialog"]) {
+  clip-path: none !important;
+}
+/* a row scrolled into view stops above the chevron's band, where it would be hidden */
+.side-sec .bot-w > .bot,
+.side-sec .th-row,
+.side-sec .tg-h,
+.side-sec .ss-row {
+  scroll-margin-bottom: 14px;
+}
+/* auto split (autoSplit.ts): the height is set from the rows; nothing grows or shrinks it */
+.side-sec[data-auto] {
+  flex: none;
+  box-sizing: border-box;
+  min-height: 0;
+  max-height: none;
+}
+.side-sec.side-sec-fit {
+  /* auto basis: with the base rule's 0 basis the section came out 0px tall and its "No bot named …" line was drawn
+     under TERMINALS, so a search that found no bot showed nothing at all */
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.side-sec + .side-sec {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+/* BOTS | TERMINALS: the line between them is a handle (SideSplit.tsx): an 11px grab band, its 1px line in the middle,
+   drawn stronger while hovered, focused or dragged */
+.side-split {
+  position: relative;
+  flex: none;
+  height: 11px;
+  margin: 1px 0 0;
+  cursor: row-resize;
+  outline: 0;
+  touch-action: none;
+}
+.side-split::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 1px;
+  background: var(--line-soft);
+  transition: background 0.12s, height 0.12s, top 0.12s;
+}
+.side-split:hover::before,
+.side-split:focus-visible::before,
+.side-resizing .side-split::before {
+  top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong, var(--muted));
+}
+.side-split + .side-sec {
+  padding-top: 4px;
+}
+body.side-resizing,
+body.side-resizing * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+.side-sec > .bot-list,
+.side-sec > .ss-list {
+  flex: 1 1 auto;
+}
+/* more rows past the bottom edge (edgeFade.ts): at the list's top it hides the row its end would cut, whole (a clip,
+   so nothing moves), and a small chevron sits in the band that leaves free (CUE_PX); scrolled, the cut row shows
+   under a soft fade to the sidebar's colour with the chevron on it, so no empty band stands above the chevron */
+.side-sec {
+  position: relative;
+}
+.side-sec:has(> [data-more="below"])::after,
+.side-sec:has(> [data-more="both"])::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23908a94' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>") center bottom 2px / 10px 10px no-repeat;
+  pointer-events: none;
+  z-index: 1;
+}
+.side-sec:has(> [data-more="both"])::after {
+  height: 28px;
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23908a94' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>") center bottom 2px / 10px 10px no-repeat,
+    linear-gradient(to bottom, transparent, var(--side));
+}
+.side-sh-row {
+  position: relative; /* the + menu spans the section's width under this row */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 3px; /* the + sits on the "Add a bot" + column above */
+  height: 24px;
+  padding-bottom: 4px;
+}
+.ss-add {
+  display: flex;
+}
+.ss-plus {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.ss-plus:hover,
+.ss-plus[aria-expanded="true"] {
+  background: var(--raise2);
+  color: var(--ink);
+}
+/* the header's + menu opens on the row's own bottom edge, 2px above the "New session" button under it, so the
+   button's top edge and corners never show above the menu as a second edge */
+.side-sh-row .ss-pop.ui-pop-bottom {
+  top: 100%;
+}
+/* opened above its row when there is more room there: it ends 2px over the + (which stands 2px above its row) */
+.side-sh-row .ss-pop.ui-pop-top {
+  bottom: calc(100% + 4px);
+}
+/* ...and keeps a few px of air under the sidebar row above it (MENU_AIR in SessionsSection.tsx): a band of the
+   sidebar's colour over the strip between, so the empty top of the next row (rows stand 2px apart) never shows.
+   fitMenu makes it taller (--ss-air) when a list that fits whole would otherwise end part-way down a row */
+.side-sh-row .ss-pop.ui-pop-top::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 1px);
+  height: var(--ss-air, 6px);
+  background: var(--side);
+}
+/* the list scrolls inside the menu when the window is too short for every agent (fitMenu sets its max height) */
+.ss-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* more agents below the cut: the last rows fade out, so the list reads as one that scrolls; gone at the end */
+.ss-scroll.more {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+/* A folded list can end on More agents: keep that entry at full contrast. A persistent thin scrollbar, rather
+   than a fade over its text, says there are more rows below. The expanded list keeps the edge fade. */
+.ss-scroll.more:has(.ss-more[aria-expanded="false"]) {
+  mask-image: none;
+  -webkit-mask-image: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+/* the first frame, before the menu knows where it fits, is not shown */
+.ss-pop-measuring {
+  visibility: hidden;
+}
+.ss-pop {
+  left: calc(-1 * var(--side-x) + 8px);
+  right: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.ss-h {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 4px 6px 4px;
+}
+.ss-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px;
+}
+.ss-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.ss-item:hover:not(:disabled) {
+  background: var(--raise2);
+}
+.ss-item:disabled {
+  color: var(--muted);
+}
+/* a missing agent in the + menu: dimmed, still focusable so its install line (the tooltip) can be read */
+.ss-item.off {
+  color: var(--muted);
+  cursor: default;
+}
+.ss-item.off .ss-ic {
+  opacity: 0.45;
+}
+.ss-item.off:hover {
+  background: none;
+}
+.ss-item:focus-visible {
+  outline: none;
+  background: var(--raise2);
+}
+.ss-item:disabled .ss-ic {
+  /* the official mark stays as is; "Not installed" in the text says why the row is off */
+  opacity: 1;
+}
+.ss-ic {
+  width: 18px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.ss-n {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* an agent row: the menu is at most the sidebar less 8px a side, too narrow for "Claude Code as work@…" and the
+   command on one line, so the account gets its own muted line under the agent; each ellipsizes only if it must
+   (the row's title has both) */
+.ss-n-as {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+.ss-l,
+.ss-as {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-item:has(.ss-as) {
+  height: 40px;
+}
+.ss-as {
+  /* which account the session will use: muted, read-only */
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--muted);
+}
+.ss-cmd {
+  font-size: 10.5px;
+  color: var(--muted);
+  background: none;
+  padding: 0;
+}
+/* the + menu's one quiet line for a person with Hermes but not oh-my-hermes: a plain muted row, no border or fill */
+.ss-add-omh {
+  margin-top: 2px;
+}
+.ss-add-omh-b {
+  color: var(--muted);
+}
+.ss-add-omh-b:hover,
+.ss-add-omh-b:focus-visible {
+  color: var(--ink);
+}
+.ss-missing {
+  font-size: 10.5px;
+  color: var(--muted);
+  flex: none;
+}
+.ss-path {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  max-width: 96px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: none;
+}
+/* "More agents": a plain row like the agents, its chevron in the mark's place and the count at its end */
+.ss-more {
+  color: var(--muted);
+}
+.ss-more:hover,
+.ss-more:focus-visible {
+  color: var(--ink);
+}
+.ss-more-ic {
+  font-size: 13px;
+  line-height: 1;
+}
+/* a missing agent's row: its name with "Not installed" (or "Copied") at the line's end, and under them the install
+   line, the text that is copied, small and quiet. The line is never cut: it takes as many lines as it needs, and
+   the row grows with it. A word of it (a package name, a flag) stays on one line unless it is longer than the row */
+.ss-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.ss-head .ss-l {
+  flex: 1;
+  min-width: 0;
+}
+.ss-item:has(.ss-install) {
+  height: auto;
+  min-height: 40px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.ss-item:has(.ss-install) > .ss-ic {
+  /* beside the name, not the middle of a row of several lines */
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.ss-as.ss-install {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+}
+.ss-tok {
+  display: inline-block;
+  max-width: 100%;
+}
+.ss-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 6px 0 4px;
+}
+/* the + menu's "Continue a conversation" rows end with a quiet chevron; the list they open starts with ‹ back */
+.ss-chev {
+  color: var(--muted);
+  font-size: 13px;
+  flex: none;
+}
+.ss-past-back {
+  color: var(--body);
+  font-weight: 500;
+}
+.ss-past-back > .ss-ic:first-child {
+  width: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+/* a past conversation: its title over its folder and age, each one line */
+.ss-past {
+  max-height: 260px;
+}
+.ss-past-row {
+  height: 40px;
+}
+/* step 2 of the menu: ← and the agent picked, over its folder choices */
+.ss-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 2px;
+  margin-bottom: 2px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.ss-back {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  flex: none;
+}
+.ss-back svg {
+  transform: scaleX(-1);
+}
+.ss-back:hover {
+  background: var(--raise2);
+  color: var(--ink);
+}
+
+/* agent marks */
+.ag-mark {
+  flex: none;
+  display: block;
+}
+.ag-codex {
+  color: var(--ink);
+}
+.ag-img {
+  border-radius: 4px;
+}
+.ag-pi {
+  color: var(--ink);
+  padding: 1px;
+}
+
+/* rows */
+/* empty section: one "New session" row in the nav rows' look (Automations, Settings): the + in their icon column,
+   the label at their text column. No border, no fill at rest, nothing centred. */
+.ss-none {
+  flex: none;
+  padding-top: 2px; /* the header's + menu (top: 100%) then covers the row's top edge */
+}
+.ss-start-w {
+  position: relative; /* the + menu opens right under the row, at the section's width */
+}
+.ss-start {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--side-x);
+  border-radius: var(--r);
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: left;
+  transition: background 0.12s;
+}
+/* the + in the nav icons' 18px column, so "New session" starts where "Settings" does */
+.ss-start > svg {
+  flex: none;
+  width: 18px;
+  height: 16px;
+  color: var(--quiet);
+}
+.ss-start:hover,
+.ss-start[aria-expanded="true"] {
+  color: var(--ink);
+}
+.ss-start:hover > svg,
+.ss-start[aria-expanded="true"] > svg {
+  color: var(--ink);
+}
+.ss-start:hover {
+  background: var(--hover);
+}
+.ss-start[aria-expanded="true"] {
+  background: var(--raise2);
+}
+.ss-row.bot {
+  padding: 0;
+  gap: 0;
+}
+.ss-open {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 7px var(--side-x);
+  text-align: left;
+}
+.ss-av,
+.ss-head-mark {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+/* SESSIONS owns its live dot: the bot row's dot styles may change (the answer ring replaced them). A terminal row
+   says "running" only with it, so it is solid and inside the tile's corner: a pulse fading to 30% or a dot astride
+   the tile's edge read as nothing. */
+.ss-row .live-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--spin);
+}
+.ss-x {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  display: none;
+  place-items: center;
+  color: var(--quiet);
+  background: var(--active-row);
+}
+.ss-row:hover .ss-x,
+.ss-x:focus-visible {
+  display: grid;
+}
+.ss-x:hover {
+  color: var(--ink);
+  background: var(--seg-on);
+}
+.ss-row:hover .bot-t {
+  visibility: hidden;
+}
+.ss-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 8px var(--side-x);
+  border-radius: var(--r);
+  background: var(--active-row);
+  flex: none;
+}
+/* the question gets its own line, so a long agent name is never cut off */
+.ss-q {
+  flex: 1 0 100%;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ss-btn {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  background: var(--raise2);
+  color: var(--ink);
+  font-size: 11.5px;
+  flex: none;
+}
+.ss-btn:hover {
+  background: var(--seg-on);
+}
+
+/* main column */
+.ss-head-mark {
+  width: 26px;
+  height: 26px;
+}
+/* the session's name: it can be a long sentence, so it gives way to the path and the controls */
+.head .head-title[data-testid="session-title"] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* the path gives way first, then the name (to its ellipsis); the controls on the right stay whole */
+  min-width: 0;
+  flex: 0 10000 auto;
+  max-width: 46%;
+}
+.ss-head-path {
+  flex: 0 1000000000 auto;
+  font-size: 11.5px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ss-head-st {
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--quiet);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ss-head-st.running,
+.ss-head-st.starting {
+  color: var(--muted);
+}
+/* the same live dot as the sidebar rows */
+.ss-head-st.running::before,
+.ss-head-st.starting::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--spin);
+  animation: pulse 1.4s infinite;
+}
+.ss-head-st.failed {
+  color: var(--danger);
+}
+/* a terminal session's running dot is the colour of its row's spinner */
+.ss-head-st.term.running::before,
+.ss-head-st.term.starting::before {
+  background: var(--term-run);
+}
+/* The space around a terminal and its colour come from Settings > Terminal (term/look.ts sets both on this box):
+   --term-pad is the left side, and the top, right and bottom keep the proportions of the 14 6 8 16 it always had;
+   --term-bg is the picked theme's background, so the space is the terminal's colour and not the page's. */
+.term-wrap {
+  --term-pad: 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: calc(var(--term-pad) * 0.875) calc(var(--term-pad) * 0.375) calc(var(--term-pad) * 0.5) var(--term-pad);
+  background: var(--term-bg, var(--bg));
+}
+.term-box {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.term-host {
+  position: absolute;
+  inset: 0;
+}
+.term-host .xterm {
+  height: 100%;
+}
+.term-host .xterm:not(.allow-transparency) .xterm-viewport {
+  /* xterm.css paints it #000 with `.xterm:not(.allow-transparency) .xterm-viewport`, as specific as a plain
+     `.term-host .xterm .xterm-viewport` and loaded later, so the :not() is repeated here: else the few pixels under the
+     last row, where the rows do not fill the box, show as a black bar. The theme background (on the scrollable
+     element) shows through instead */
+  background-color: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+/* TERMINALS splits (SplitView): up to four sessions right of or under each other, split by a 1px line like a terminal's
+   own splits (no title bar per pane); a pane's zoom and x float in its top right corner while the pointer is over it.
+   The pane with the keyboard shows by its cursor; the others are dimmed to the Settings › Terminal value (--pane-dim,
+   Otty's unfocused-split-opacity). No frame or shade around a pane: the 1px line is the only edge */
+.ss-split {
+  --pane-dim: 0.72;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.ss-split-node {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.ss-split-node.col {
+  flex-direction: column;
+}
+.ss-split-part {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.ss-split-side {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ss-split-side > .term-wrap,
+.ss-split-side > .ss-idle {
+  transition: opacity 0.12s ease;
+}
+.ss-split-side.dim > .term-wrap,
+.ss-split-side.dim > .ss-idle,
+.ss-split-side.dim > .ss-ended {
+  opacity: var(--pane-dim);
+}
+.ss-split-zoomed {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--line-soft);
+  pointer-events: none;
+  z-index: 2;
+}
+.ss-split-tools {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--term-bg, var(--bg)) 86%, transparent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ss-split-side:hover > .ss-split-tools,
+.ss-split-tools:focus-within {
+  opacity: 1;
+}
+/* a pane's grip (Otty's): a short pill at its top centre, faint on the focused pane, shown under the pointer; drag it
+   to another pane's side to move the pane (splitDrag.ts), click it for the pane's menu */
+.ss-split-grip {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  z-index: 3;
+  width: 44px;
+  height: 14px;
+  margin-left: -22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ss-split-grip > span {
+  width: 28px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--quiet);
+}
+.ss-split-side.focused > .ss-split-grip {
+  opacity: 0.35;
+}
+.ss-split-side:hover > .ss-split-grip,
+.ss-split-grip:focus-visible,
+.ss-split-grip.on {
+  opacity: 1;
+}
+.ss-split-grip:hover > span,
+.ss-split-grip.on > span {
+  background: var(--ink);
+}
+.ss-split-grip:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 1px;
+}
+.ss-pane-menu {
+  width: 260px;
+}
+.ss-pane-mi {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ss-pane-mi-l {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-pane-mi-k {
+  flex: none;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--quiet);
+}
+/* a drag onto the open terminal (splitDrag.ts): the half of the pane the drop would fill */
+.split-drop {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  transition: left 0.08s ease, top 0.08s ease, width 0.08s ease, height 0.08s ease;
+}
+/* where a TERMINALS row dragged in the sidebar would go: a line between rows */
+.row-drop {
+  position: fixed;
+  z-index: 60;
+  height: 2px;
+  pointer-events: none;
+  border-radius: 1px;
+  background: var(--accent);
+}
+body.split-dragging,
+body.split-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+/* the terminal under a drag takes no pointer events (a program's mouse reporting would see the drag) */
+body.split-dragging .xterm {
+  pointer-events: none;
+}
+.ss-split-x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  color: var(--quiet);
+}
+.ss-split-x svg {
+  width: 9px;
+  height: 9px;
+}
+.ss-split-x:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.ss-split-divider {
+  flex: none;
+  width: 1px;
+  position: relative;
+  background: var(--line-soft);
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
+}
+.ss-split-divider.col {
+  width: auto;
+  height: 1px;
+  cursor: row-resize;
+}
+.ss-split-divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+.ss-split-divider.col::after {
+  inset: -3px 0;
+}
+.ss-split-divider:hover,
+.ss-split-divider:focus-visible,
+.ss-split-divider.on {
+  background: var(--line-strong);
+  outline: none;
+}
+/* Plans: the open split drawn small (SessionPlans SplitMap), boxes in the layout's proportions */
+.ss-map {
+  position: relative;
+  height: 112px;
+  margin: 2px 0 14px;
+}
+.ss-map-box {
+  position: absolute;
+  padding: 2px;
+  display: flex;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.ss-map-in {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ss-map-box:hover .ss-map-in {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.ss-map-box:focus-visible {
+  outline: none;
+}
+.ss-map-box:focus-visible .ss-map-in {
+  outline: 2px solid var(--muted);
+  outline-offset: -2px;
+}
+.ss-map-box.on .ss-map-in {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--ink);
+  font-weight: 500;
+}
+.ss-map-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* a TERMINALS row in the open split: the split's shape, its own pane filled */
+.ss-split-glyph {
+  display: block;
+}
+.tr-n.has-split {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tr-nt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tr-split {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--quiet);
+  vertical-align: -1px;
+}
+.ss-row.tr.split-focus .tr-split {
+  color: var(--accent);
+}
+/* a split that is not in view: its rows keep the shape, dimmer */
+.ss-row.tr.split-away .tr-split {
+  opacity: 0.55;
+}
+
+/* chat sessions */
+/* the controls give way last: only once the path and the name are down to their least does the model's label
+   ellipsize (as in the bot header); the toggle and the panel button never shrink. (A shrink factor under 1 would
+   leave part of the overflow unabsorbed: flex multiplies the free space by the sum of factors below 1.) */
+.ss-head-right {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* icon only, no fill at rest: it must not read as a second model chip next to the filled one */
+.ss-toggle {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  background: none;
+}
+.ss-toggle:hover,
+.ss-toggle.on {
+  color: var(--ink);
+  background: var(--raise);
+}
+.ss-head-st.idle::before {
+  animation: none;
+  background: var(--ok);
+}
+/* a person's own agent: its approvals are the agent's own (one quiet line above the composer) */
+.ss-own {
+  width: min(var(--thread-w), calc(100% - 56px));
+  margin: 0 auto 6px;
+  font-size: 11px;
+  color: var(--quiet);
+  text-align: center;
+  flex: none;
+}
+.ss-ended {
+  width: min(var(--thread-w), calc(100% - 56px));
+  margin: 0 auto 8px;
+  font-size: 11.5px;
+  color: var(--quiet);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ss-ended-t {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* the command to run, as inline code the way an answer shows one */
+.ss-ended-t code {
+  font-size: 11px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.ss-restart {
+  flex: none;
+  font: inherit;
+  font-weight: 560;
+  color: var(--body);
+  background: var(--raise2);
+  border: 0;
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.ss-restart:hover {
+  color: var(--ink);
+}
+/* an approval or question waits: amber, the app's "needs attention" colour (never the brand gradient) */
+:root {
+  --needs: #eaaf55;
+}
+[data-theme="light"] {
+  --needs: #9a6200;
+}
+/* line 2 carries the folder now (it used to be the name): muted, not quiet, so it reads at 4.5:1 or better on the
+   sidebar and on the selected row in both themes */
+.ss-row .bot-p {
+  color: var(--muted);
+}
+/* the mark for the view a row opens to (chat or terminal): at the end of line 2, under the time, in the colour of
+   the line it ends. The terminal's is solid with the prompt cut out in the row's own background, the chat's an
+   outline. The close button takes its place on hover, as it takes the time's. */
+.ss-view {
+  --ss-cut: var(--side);
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  display: grid;
+  place-items: center;
+  height: 17px;
+  color: var(--muted);
+}
+.ss-row.active .ss-view {
+  --ss-cut: var(--active-row);
+}
+/* a solid shape weighs more than an outline of the same colour: the terminal's takes the quieter gray, so a list of
+   terminals is not a column of chips beside the names */
+.ss-view[data-view="terminal"] {
+  color: var(--quiet);
+}
+.ss-row:hover .ss-view {
+  visibility: hidden;
+}
+/* a session's state stands in the time's place as a sign and a word, in one colour: a yellow warning triangle (it
+   waits for you), a red exclamation mark (it stopped on an error), a green check (it finished). No dots. */
+.ss-row .ss-sign {
+  display: inline-block;
+  margin-right: 4px;
+  line-height: 0;
+  vertical-align: -1.5px;
+}
+/* the triangle is the yellow of a warning sign in both themes; its word keeps the amber that reads at 11px */
+.ss-row .ss-sign.needs {
+  color: #e9a23b;
+}
+.ss-row .bot-t.err {
+  color: var(--danger);
+}
+.ss-row .bot-t.ok {
+  color: var(--ok);
+}
+/* 11px green on the light sidebar: a deeper shade, as the amber has */
+[data-theme="light"] .ss-row .bot-t.ok {
+  color: #17693f;
+}
+/* the close button takes the time's place on hover, but a state stays: it moves left of the button */
+.ss-row:hover .bot-t.wait,
+.ss-row:hover .bot-t.err,
+.ss-row:hover .bot-t.ok {
+  visibility: visible;
+  margin-right: 22px;
+}
+/* a session nothing runs in steps back: its agent mark fades and its name is muted, so the running ones lead */
+.ss-row.over .ss-av > * {
+  opacity: 0.5;
+}
+.ss-row.over .bot-n {
+  color: var(--muted);
+}
+.ss-row.over .ss-view {
+  opacity: 0.55;
+}
+/* typing dots end the agent name like they end a bot's live step */
+.ss-row .bot-p.live {
+  flex: 0 1 auto;
+}
+.ss-head-st.needs {
+  color: var(--needs);
+}
+.ss-head-st.needs::before {
+  background: var(--needs);
+}
+/* a session's face outside its row (Needs-you list, typing bubble): the agent mark in the row's box */
+.ss-face {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* a second folder of the same name: its parent, muted, after the name */
+.ss-where {
+  color: var(--quiet);
+  font-weight: 400;
+}
+/* Rename: the name becomes a field of the same size in the row; the row is not a button meanwhile */
+.ss-open.ss-editing {
+  cursor: default;
+}
+.ss-name-in {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: -1px 0;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  outline: 0;
+}
+.ss-name-in:focus {
+  border-color: var(--spin);
+}
+.ss-name-in::placeholder {
+  color: var(--quiet);
+  font-weight: 400;
+}
+.ss-row.menu-open .ss-x {
+  display: none;
+}
+
+/* New session (draft) and a session's composer: the agent in the composer row, the folder under the box (Codex's
+   context line, in manut's own small gray terms: no fills at rest, 4-6px corners) */
+/* their menus open from the composer (.cw), above the box: the folder menu at its left edge, the agents at its
+   right, so neither covers the text being typed */
+.ss-pick-w,
+.ss-chip-w {
+  position: static;
+  display: inline-flex;
+  min-width: 0;
+}
+.ss-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 180px;
+  padding: 0 8px;
+  border-radius: var(--r);
+  color: var(--muted);
+  font-size: 12px;
+  flex: none;
+  white-space: nowrap;
+}
+.ss-pick-n,
+.ss-chip-n {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-pick:not(.ro):hover,
+.ss-pick[aria-expanded="true"] {
+  background: var(--raise2);
+  color: var(--ink);
+}
+/* started: the agent stays where the picker was, quieter, with no chevron and no hover */
+.ss-pick.ro {
+  cursor: default;
+  color: var(--quiet);
+}
+/* New session: Chat | Terminal beside the agent. Plain words; the picked one is gray, a way the agent lacks is dimmed */
+.ss-way {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.ss-way-o {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ss-way-o:hover {
+  color: var(--ink);
+}
+.ss-way-o.on {
+  background: var(--raise2);
+  color: var(--ink);
+  font-weight: 500;
+}
+/* the composer is nearly white in the light theme: the picked word needs a darker gray to read as picked */
+[data-theme="light"] .ss-way-o.on {
+  background: color-mix(in srgb, var(--ink) 11%, transparent);
+}
+.ss-way-o[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+.ss-way-o[aria-disabled="true"]:hover {
+  color: var(--muted);
+}
+.cmp-held {
+  padding: 6px 1px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ss-ctx {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 1px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ss-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  max-width: 320px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.ss-chip > svg {
+  flex: none;
+}
+.ss-chip:not(.ro):not(:disabled):hover,
+.ss-chip[aria-expanded="true"] {
+  background: var(--raise2);
+  color: var(--ink);
+}
+.ss-chip.ro {
+  cursor: default;
+}
+.ss-acct {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* the rest of the line under a running chat: the folder's branch, then how full the context is */
+.ss-branch,
+.ss-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.ss-branch > svg {
+  flex: none;
+}
+.ss-branch-n {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.ss-usage {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+/* a small ring, filled to the share of the context in use */
+.ss-ring {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: conic-gradient(var(--muted) var(--p), color-mix(in srgb, var(--ink) 14%, transparent) 0);
+  -webkit-mask: radial-gradient(circle, transparent 3px, #000 3.5px);
+  mask: radial-gradient(circle, transparent 3px, #000 3.5px);
+}
+/* the permission mode in the composer row: a quiet label like the agent's, a menu on click */
+.ss-mode {
+  gap: 4px;
+}
+.ss-mode:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.ss-mode.set {
+  color: var(--ink);
+}
+/* the agent's own setting asks for nothing or reaches the whole disk: said in the warning text colour, no box */
+.ss-mode.own,
+.ss-mode-own {
+  color: var(--needs);
+}
+/* the sentence is the point: it is never cut to "full disk a…"; the message field gives way */
+.ss-mode.own {
+  max-width: none;
+  flex-shrink: 0;
+}
+.ss-pick-w:has(> .ss-mode.own) {
+  flex-shrink: 0;
+}
+.ss-mode.own .ss-pick-n {
+  overflow: visible;
+}
+.ss-mode-own {
+  padding: 2px 6px 6px;
+  font-size: 12px;
+}
+.ss-dpop .ss-h.ss-h-plain {
+  padding-left: 6px;
+}
+.ss-mode-row {
+  align-items: flex-start;
+  height: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.ss-mode-t {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.ss-mode-d {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: normal;
+}
+.ss-dpop {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.ss-dpop .ss-h {
+  padding-left: 32px; /* over the names, past the icon column */
+}
+.ss-dpop .ss-path {
+  max-width: 140px;
+}
+.ss-ck {
+  width: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+/* the draft's one line sits over the composer it is about, not at the top of an empty column; it steps aside while
+   the agent or folder menu is open over the same strip */
+.ss-draft > .thread > .day:first-child {
+  margin-top: auto;
+  margin-bottom: -6px;
+}
+.ss-draft:has(.ss-dpop) > .thread > .day {
+  visibility: hidden;
+}
+/* Start, for an agent that opens in its terminal: the send button with its word */
+.ss-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r);
+  background: var(--g-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 560;
+  flex: none;
+}
+.ss-go:disabled {
+  background: var(--raise2);
+  color: var(--quiet);
+}
+.ss-go:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+/* "1 still running in the background" (or "1 waiting in the background"): a quiet label after the status, never a
+   button or a chip */
+.ss-head-bg {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* its Stop: a quiet word after the label, set apart by colour and an underline, never a boxed button */
+.ss-head-stop {
+  flex: none;
+  padding: 0 2px;
+  margin-left: -4px;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--body);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line-strong);
+  cursor: pointer;
+}
+.ss-head-stop:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+/* The name, the path, the status, the label and its Stop sit in two boxes that are not there on a wide header, so
+   that line is laid out as it always was. With background work a narrower header gives way in steps, by its own
+   width (the `chathead` container, elsewhere.css), so that the name, the count, Stop and the model's name stay whole:
+   - under 780px the label says it in fewer words ("1 waiting"; the whole sentence is its tooltip) and the first box
+     takes what the controls leave (basis 0, so it never presses on them: the model's name is as long as without
+     background work). It wraps: when the name and the status do not fit side by side, the status, the label and
+     Stop go under the name. The path takes only what its line has left.
+   - under 680px the path goes (it would be a few letters) and the name may take the whole line.
+   - under 470px the agent's mark goes (the composer names the agent), and under 430px the status is its dot
+     alone (its word is the dot's tooltip). */
+.ss-head-id,
+.ss-head-now {
+  display: contents;
+}
+.ss-head-bg.short {
+  display: none;
+}
+@container chathead (max-width: 779px) {
+  .ss-head-bg:not(.short) {
+    display: none;
+  }
+  .ss-head-bg.short {
+    display: block;
+  }
+  .ss-head-id.bg {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: center;
+    gap: 2px 10px;
+    flex: 1 1 0;
+    min-width: 0;
+    line-height: 1.3;
+  }
+  .ss-head-id.bg > .ss-head-path {
+    flex: 1 1 0;
+    max-width: max-content;
+  }
+  .ss-head-id.bg > .ss-head-now {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .ss-head-id.bg .ss-head-st {
+    margin-left: 0;
+  }
+}
+@container chathead (max-width: 679px) {
+  .ss-head-id.bg > .head-title[data-testid="session-title"] {
+    max-width: 100%;
+  }
+  .ss-head-id.bg > .ss-head-path {
+    display: none;
+  }
+}
+@container chathead (max-width: 469px) {
+  .head:has(> .ss-head-id.bg) > .ss-head-mark {
+    display: none;
+  }
+}
+@container chathead (max-width: 429px) {
+  /* the word is still read out, and is the dot's tooltip */
+  .ss-head-id.bg .ss-head-st.running {
+    font-size: 0;
+    gap: 0;
+  }
+}
+.ss-plans-rows {
+  padding: 4px 2px;
+}
+/* the model pill's "Next turn: X" after a pick made while a turn ran */
+.mp-next {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+/* ---- TERMINALS (termui, 2026-11-16): folder groups, one-line rows ------------------------------------------- */
+.ss-list {
+  gap: 0;
+}
+.tg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px; /* cards stand 4px apart (fitMenu's ROW_CLEAR of 2px keeps clear of them) */
+  padding-bottom: 12px; /* and a folder group 12px from the next */
+}
+.tg-h {
+  position: relative;
+  padding: 4px 0 3px;
+  color: var(--ink);
+  border-radius: 8px;
+  flex: none;
+}
+/* the first folder keeps the same air under the TERMINALS label as every folder has above it */
+.tg-h.first {
+  margin-top: 6px;
+}
+.tg-h.lifted {
+  opacity: 0.55;
+}
+.tg-h.drop {
+  box-shadow: inset 0 2px 0 var(--muted);
+}
+/* the whole header is the toggle: chevron, folder icon, name (and, collapsed, its count and live summary); the branch
+   sits under the name */
+.tg-open {
+  display: grid;
+  grid-template-columns: 10px 16px minmax(0, 1fr) auto;
+  column-gap: 5px;
+  align-items: center;
+  width: 100%;
+  padding: 0 8px 0 calc(var(--side-x) - 6px);
+  min-height: 22px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  border-radius: 8px;
+}
+.tg-open:hover {
+  background: var(--hover);
+}
+.tg-open:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: -2px;
+}
+.tg-chev {
+  display: grid;
+  place-items: center;
+  color: var(--quiet);
+}
+/* a collapsed folder's summary sits on the branch's line, at its right: the folder's name keeps the whole first line */
+.tg-sum {
+  grid-column: 4;
+  grid-row: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.side-sec > .bot-list[data-more="above"],
+.side-sec > .bot-list[data-more="both"],
+.side-sec > .ss-list[data-more="above"],
+.side-sec > .ss-list[data-more="both"] {
+  /* rows scrolled away above: a soft shadow under the header (no mask: a mask would clip a row's menu) */
+  box-shadow: inset 0 9px 7px -9px color-mix(in srgb, var(--ink) 35%, transparent);
+}
+.tg-run {
+  color: var(--term-run);
+}
+.tg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.tg-dot.needs {
+  background: var(--needs);
+}
+.tg-dot.err {
+  background: var(--danger);
+}
+.tg.shut {
+  padding-bottom: 2px;
+}
+.tg-ic {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+  color: #d9a03a;
+}
+.tg-n {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tg-b {
+  grid-column: 3 / 5;
+  grid-row: 2;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* an added folder with no session yet: one quiet line where its rows will be, under the folder's name */
+.tg-empty {
+  /* under the folder's name and branch: the header's inset, then its chevron and glyph columns with their gaps */
+  padding: 1px 8px 1px calc(var(--side-x) + 30px);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the folder is no longer on disk: the same line, in the colour of a row that waits on the person */
+.tg-empty.gone {
+  color: var(--needs);
+}
+/* the first row of a group scrolls into view with its folder header */
+.tg > .tg-h + .ss-row {
+  scroll-margin-top: 56px;
+}
+[data-theme="light"] .tg-ic {
+  color: #a8700f;
+}
+/* spacing (2026-11-16): each session is its own card, Orca's feel: 8px corners, a 1px edge that shows on hover and
+   when selected, two lines (status, mark, name, age / the CLI and what it last printed, muted), and a thin amber
+   lane on the left edge while a CLI runs in it */
+.ss-row.tr {
+  position: relative;
+  display: flex;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  flex: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ss-row.tr .ss-open {
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr) auto;
+  grid-template-rows: 18px 15px;
+  column-gap: 7px;
+  row-gap: 1px;
+  align-items: center;
+  height: auto;
+  padding: 6px 8px 6px calc(var(--side-x) + 7px);
+  font-size: 12px;
+  color: var(--body);
+  border-radius: 7px;
+}
+.ss-row.tr .ss-open:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: -2px;
+}
+.ss-row.tr:hover {
+  background: var(--hover);
+  border-color: var(--line-soft);
+}
+.ss-row.tr.active {
+  background: var(--active-row);
+  border-color: var(--line);
+}
+/* the lane sits on the card's inner left edge, the same place on every running card (selected, hovered or neither),
+   inside its rounded box */
+.ss-row.tr.run::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--term-run);
+  pointer-events: none;
+}
+.tr-n {
+  grid-column: 3;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-row.tr .ss-name-in {
+  grid-column: 3 / 5;
+}
+.tr-age {
+  grid-column: 4;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* line 2: under the name, to the card's right edge, one line cut with an ellipsis */
+.tr-sub {
+  grid-column: 3 / 5;
+  grid-row: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tr-cli {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.tr-dot {
+  flex: none;
+  color: var(--quiet);
+}
+/* the folder its shell moved to (OSC 7): kept whole before the last line gives way */
+.tr-cwd {
+  flex: 0 1 auto;
+  min-width: 2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-row.tr:hover .tr-age,
+.ss-row.tr:focus-within .tr-age {
+  visibility: hidden;
+}
+.ss-row.tr .ss-x {
+  right: 5px;
+  top: 6px;
+  transform: none;
+}
+.ss-row.tr .ss-name-in {
+  flex: 1;
+  min-width: 0;
+}
+.tst {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.side,
+.head,
+.dock {
+  --term-run: #f2b705;
+}
+[data-theme="light"] .side,
+[data-theme="light"] .head,
+[data-theme="light"] .dock {
+  --term-run: #c48a00;
+}
+.tst.busy {
+  color: var(--term-run);
+}
+.tst.busy svg {
+  animation: tst-turn 0.9s linear infinite;
+}
+.tst.ok {
+  color: var(--ok);
+}
+.tst.err {
+  color: var(--danger);
+}
+.tst.bell {
+  color: #e8a33c;
+}
+@keyframes tst-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.trm {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--muted);
+}
+/* every mark the same: drawn bare at the slot's size, square corners rounded alike (a full-colour image mark such as
+   pi's or OMH's reads as one set with the line marks), no tile behind any of them */
+.trm img,
+.trm svg {
+  display: block;
+  border-radius: 3px;
+}
+/* the + menu: rows below the cut get a visible cue, not only a fade */
+.ss-more-cue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 20px;
+  margin-top: 2px;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: default;
+}
+.ss-more-cue:hover {
+  color: var(--ink);
+}
+.ss-fold-all {
+  margin-right: 2px;
+}
+/* a bottom-panel tab names the CLI in its shell's foreground with its mark */
+.termpanel-tab-name .trm {
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+.ss-at .ss-path,
+.ss-folders .ss-path {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+.ss-folders {
+  padding-left: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tst.busy svg {
+    animation: none;
+  }
+}
+.tg-open:has(> .tg-sum) > .tg-b {
+  grid-column: 3;
+}
+.tg-open:has(> .tg-sum) > .tg-n {
+  grid-column: 3 / 5;
+}
+
+/* "Link copied" on a terminal for a moment after its link went to the clipboard (⌘⇧C, the row menu) */
+.term-wrap .tlink-copied {
+  position: absolute;
+  top: 10px;
+  right: 22px;
+  z-index: 5;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12px;
+  pointer-events: none;
+  animation: pop 0.14s ease both;
+}
+
+/* an manut://terminal link to a session this computer does not have: a note at the window's foot for a moment */
+.tlink-gone {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 7px 12px;
+  border-radius: var(--r);
+  background: var(--pop);
+  border: 1px solid var(--line);
+  box-shadow: var(--pop-shadow);
+  color: var(--body);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+/* a bot's request to type into this terminal (termShare.ts): approval cards over the terminal's top right, the
+   person's Allow the only way it is typed */
+.term-wrap .tshare-cards,
+.ss-idle > .tshare-cards {
+  position: absolute;
+  top: 10px;
+  right: 22px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(420px, calc(100% - 44px));
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+}
+.term-wrap .tshare-card,
+.ss-idle > .tshare-cards .tshare-card {
+  max-width: none;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+  animation: pop 0.14s ease both;
+}
+[data-theme="light"] .term-wrap .tshare-card,
+[data-theme="light"] .ss-idle > .tshare-cards .tshare-card {
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+}
+
+/* the undo toasts of closed TERMINALS rows (CloseToasts.tsx): bottom right, the newest on top */
+.ss-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.ss-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-bubble);
+  background: var(--pop);
+  color: var(--ink);
+  box-shadow: var(--pop-shadow);
+  font-size: 13px;
+}
+.ss-toast-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ss-toast-s {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.ss-toast-undo {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--active-row);
+  font-weight: 600;
+}
+.ss-toast-undo:hover {
+  background: var(--seg-on);
+}
+/* kshell: Shell ▸ in the TERMINALS + menu: the Shell row with a chevron that opens this computer's shells under it */
+.ss-shell-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ss-shell-row > .ss-item:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ss-item.ss-shell-more {
+  flex: none;
+  width: 26px;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+}
+.ss-item.ss-shell-more svg {
+  transition: transform 0.12s ease;
+}
+.ss-item.ss-shell-more.on svg {
+  transform: rotate(90deg);
+}
+.ss-item.ss-shell-more.on,
+.ss-item.ss-shell-more:hover {
+  color: var(--ink);
+}
+.ss-shells {
+  padding-left: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ss-item.ss-shell-more svg {
+    transition: none;
+  }
+}

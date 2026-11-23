@@ -38,25 +38,20 @@ read-only when needed, and never run their scripts.
 - `docs/pilot-api.md` (backend and web contract), `docs/connectors.md` (what each channel needs and costs),
   `docs/decisions.md`, `docs/plan.md` (state and the cloud task queue), `docs/cloud-routine.md`.
 
-## In progress, not committed
+## Desktop and agent events: committed
 
-Two background helpers of the earlier session were still writing these when this file was written:
+Both landed after this note was first written, and the whole workspace is green (2,165 tests, type checks,
+`cargo check`):
 
-- `apps/desktop`: the fork of Oh My Hermes's `apps/omher`: renamed to Manut AI, the Hermes bridge cut out behind
-  a runtime adapter with a mock runtime, canvas tokens applied, CSP set, updater switched off. Goal: `pnpm
-  typecheck`, `pnpm test` and one `CARGO_BUILD_JOBS=4 cargo check` in `src-tauri` pass.
-- `packages/agent-events`: GoSpark's provider event contract ported to TypeScript, with tolerant decoders and a
-  timeline reducer.
-
-Before touching either folder, run `git status` and `git log`. If they are already committed, carry on. If not,
-ask the owner whether the earlier session is still running; two sessions must not edit the same folder.
-`pnpm-lock.yaml` already lists both folders, so `pnpm install --frozen-lockfile` fails on a clean checkout until
-they are committed.
+- `apps/desktop`: the fork of Oh My Hermes's `apps/omher`, renamed to Manut AI, with no Hermes, Python or bridge
+  process. The transport sits behind `src/runtime/adapter.ts`; the default is an in-process demo runtime
+  (`src/runtime/mock/`). Tokens come from `packages/ui-kit`, fonts are bundled, the CSP is real, the updater is
+  off. Not run: its Playwright suite (156 specs, some expect removed screens) and the Rust tests.
+- `packages/agent-events`: GoSpark's provider event contract in TypeScript (213 tests).
 
 ## Next steps, in order
 
-1. Finish, verify and commit `apps/desktop` and `packages/agent-events`; then `pnpm install`, `pnpm test` and
-   `pnpm typecheck` at the root must pass, and push.
+1. Done: `apps/desktop` and `packages/agent-events` are committed and the workspace is green.
 2. Run the night build once by hand (its page has Run now) and read its log: no run has been tested yet.
 3. Serve `apps/web` from the same Worker as `apps/api` (one origin, so the console needs no CORS and Cloudflare
    Access covers both). Check Cloudflare's current static-assets documentation before writing the config.
