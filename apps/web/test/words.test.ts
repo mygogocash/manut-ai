@@ -550,6 +550,7 @@ describe("the drafts page's words", () => {
     // A figure the API never sends is shown as unknown, not as a wrong amount.
     expect(draftsWords.cost(1.5)).toBe("Model cost unknown");
     expect(draftsWords.passed("nam", "ton")).toBe("Nam passed this job to Ton.");
+    expect(draftsWords.task("worker-task-1")).toBe("task worker-task-1");
     expect(draftsWords.listLabel("Baan Mali")).toBe("Baan Mali's worker jobs");
   });
 

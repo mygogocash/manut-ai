@@ -39,8 +39,11 @@ async function readOverview(api: PilotApi, shops: readonly Shop[]): Promise<Over
   };
 }
 
-export function ShopsView({ shops, onOpen, onForget }: {
+export function ShopsView({ shops, listError, onRetry, onOpen, onForget }: {
   shops: Shop[] | null;
+  /// Why the shop list itself could not be read, which the console's side menu reads, when it could not.
+  listError?: unknown;
+  onRetry?: () => void;
   onOpen: (tenant: string, page: ShopPage) => void;
   onForget: () => void;
 }) {
@@ -65,6 +68,8 @@ export function ShopsView({ shops, onOpen, onForget }: {
     ...data.shops.flatMap((read) => [...(read.usage.ok ? [] : [read.usage.error]), ...(read.audit.ok ? [] : [read.audit.error])]),
   ].find(isAuthError) : undefined;
   const now = Date.now();
+  // Without a shop list there are no rows to read, and the page says why rather than wait for ever.
+  const listFailed = !shops && Boolean(listError);
 
   return (
     <>
@@ -80,7 +85,20 @@ export function ShopsView({ shops, onOpen, onForget }: {
         <p className="hint" style={{ margin: 0, maxWidth: 880 }}>
           {shopsWords.intro}
         </p>
-        {refused ? (
+        {listFailed ? (
+          <div className="banner err" role="alert">
+            <span className="grow">{errorText(listError)}</span>
+            {isAuthError(listError) ? (
+              <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onForget}>
+                {shopsWords.anotherKey}
+              </button>
+            ) : onRetry ? (
+              <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onRetry}>
+                {shopsWords.tryAgain}
+              </button>
+            ) : null}
+          </div>
+        ) : refused ? (
           <div className="banner err" role="alert">
             <span className="grow">{errorText(refused)}</span>
             <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onForget}>
@@ -112,7 +130,7 @@ export function ShopsView({ shops, onOpen, onForget }: {
             <h3>{shopsWords.noShops}</h3>
             <p>{shopsWords.noShopsHint}</p>
           </div>
-        ) : !data ? (
+        ) : listFailed ? null : !data ? (
           <div className="skel" style={{ height: 160 }} aria-label={shopsWords.loading} />
         ) : (
           <div className="tblw">
@@ -188,14 +206,16 @@ function ShopRow({ shop, gate, read, now, onOpen }: {
   const unreadable = <span className="mut">{shopsWords.unreadable}</span>;
   return (
     <tr>
-      <th scope="row" style={{ ...CELL, fontWeight: 500 }}>
+      <th scope="row" style={{ ...CELL, fontWeight: 500, whiteSpace: "nowrap" }}>
         {shop.name}
         <div className="mut" style={{ fontSize: 12, fontWeight: 400 }}>
           {shop.ownerName}
         </div>
       </th>
       <td style={CELL}>{measured && rules ? <Trial shop={measured} trialDays={rules.trialDays} /> : unreadable}</td>
-      <td style={CELL}>{measured && rules ? <Paid shop={measured} priceSatang={rules.priceSatang} /> : unreadable}</td>
+      <td style={{ ...CELL, whiteSpace: "nowrap" }}>
+        {measured && rules ? <Paid shop={measured} priceSatang={rules.priceSatang} /> : unreadable}
+      </td>
       <td style={CELL}>
         {measured ? <span className={ACTIVE_TAG[measured.activeOnDay14]}>{gateWords.active[measured.activeOnDay14]}</span> : unreadable}
       </td>

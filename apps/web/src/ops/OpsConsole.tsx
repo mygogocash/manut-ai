@@ -246,7 +246,7 @@ export function OpsConsole() {
             }}
           />
         ) : page === "overview" ? (
-          <ShopsView shops={shopList} onOpen={open} onForget={forget} />
+          <ShopsView shops={shopList} listError={shops.error} onRetry={shops.reload} onOpen={open} onForget={forget} />
         ) : page === "gate" ? (
           <GateView onForget={forget} />
         ) : page === "audit" ? (
@@ -254,7 +254,7 @@ export function OpsConsole() {
         ) : page === "memory" ? (
           <MemoryView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "drafts" ? (
-          <DraftsView shops={shopList} tenant={tenant} onForget={forget} />
+          <DraftsView shops={shopList} tenant={tenant} listError={shops.error} onRetry={shops.reload} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (

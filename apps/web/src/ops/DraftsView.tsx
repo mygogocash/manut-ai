@@ -6,6 +6,7 @@ import {
   draftSendText,
   draftsErrorText,
   draftsWords,
+  errorText,
   isAuthError,
   jobAboutText,
   jobEndingNote,
@@ -28,9 +29,12 @@ export const DRAFTS_PAGE_SIZE = 10;
 
 type Older = { tenant: string; jobs: WorkerJobEntry[]; next: string | null };
 
-export function DraftsView({ shops, tenant: chosen, onForget }: {
+export function DraftsView({ shops, tenant: chosen, listError, onRetry, onForget }: {
   shops: Shop[] | null;
   tenant: string | null;
+  /// Why the shop list itself could not be read, which the console's side menu reads, when it could not.
+  listError?: unknown;
+  onRetry?: () => void;
   onForget: () => void;
 }) {
   const api = useApi();
@@ -83,6 +87,8 @@ export function DraftsView({ shops, tenant: chosen, onForget }: {
   }
 
   const now = Date.now();
+  // Without a shop list there is no shop to read jobs for, and the page says why rather than wait for ever.
+  const listFailed = !shops && Boolean(listError);
 
   return (
     <>
@@ -123,6 +129,22 @@ export function DraftsView({ shops, tenant: chosen, onForget }: {
           </button>
         </div>
       </div>
+      {listFailed ? (
+        <div style={{ padding: "16px 16px 0" }}>
+          <div className="banner err" role="alert">
+            <span className="grow">{errorText(listError)}</span>
+            {isAuthError(listError) ? (
+              <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onForget}>
+                {draftsWords.anotherKey}
+              </button>
+            ) : onRetry ? (
+              <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={onRetry}>
+                {draftsWords.tryAgain}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {first.error ? (
         <div style={{ padding: "16px 16px 0" }}>
           <div className="banner err" role="alert">
@@ -147,7 +169,7 @@ export function DraftsView({ shops, tenant: chosen, onForget }: {
           <p className="hint" style={{ margin: 0 }}>
             {draftsWords.noShops}
           </p>
-        ) : !shop || (!first.data && !first.error) ? (
+        ) : listFailed ? null : !shop || (!first.data && !first.error) ? (
           <div className="skel" style={{ height: 120 }} aria-label={draftsWords.loading} />
         ) : first.data && jobs.length === 0 && !next ? (
           <>
@@ -194,7 +216,7 @@ function JobRow({ job, ownerName, now }: { job: WorkerJobEntry; ownerName: strin
   const meta = [
     formatStamp(job.at, now),
     jobAboutText(job.draft?.about),
-    `task ${job.taskId}`,
+    draftsWords.task(job.taskId),
     job.costSatang === undefined ? null : draftsWords.cost(job.costSatang),
   ].filter((part): part is string => part !== null).join(" · ");
   return (

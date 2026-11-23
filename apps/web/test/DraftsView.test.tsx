@@ -215,6 +215,27 @@ describe("the Drafts page", () => {
     expect(onForget).toHaveBeenCalledTimes(1);
   });
 
+  it("says so when the shop list itself cannot be read, and offers to try again or to enter another key", async () => {
+    const onRetry = vi.fn();
+    const onForget = vi.fn();
+    // Every route fails loudly if it is reached, so reading jobs for a shop nobody could list would fail this test.
+    const first = renderWithApi(
+      <DraftsView shops={null} tenant={null} listError={new ApiError(0, "network")} onRetry={onRetry} onForget={onForget} />,
+      stubApi({}));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not reach the API.");
+    expect(screen.queryByLabelText("Loading drafts")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    first.unmount();
+    renderWithApi(
+      <DraftsView shops={null} tenant={null} listError={new ApiError(403, "forbidden")} onRetry={onRetry} onForget={onForget} />,
+      stubApi({}));
+    await screen.findByText(/The API refused the operator key/);
+    fireEvent.click(screen.getByRole("button", { name: "Enter another key" }));
+    expect(onForget).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
   it("drops an older page that arrives after the shop was changed, so it is never shown under another shop's jobs", async () => {
     const older = deferred<WorkerJobsPage>();
     const listWorkerJobs = vi.fn(async (tenant: string, query: WorkerJobsQuery = {}): Promise<WorkerJobsPage> => {

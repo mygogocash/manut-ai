@@ -233,6 +233,41 @@ describe("the Shops overview", () => {
     expect(screen.getByLabelText("Loading the shops overview")).toBeTruthy();
   });
 
+  it("says so when the shop list itself cannot be read, and offers to try again or to enter another key", async () => {
+    const onRetry = vi.fn();
+    const onForget = vi.fn();
+    const first = renderWithApi(
+      <ShopsView shops={null} listError={new ApiError(503, "http_503")} onRetry={onRetry} onOpen={noop} onForget={onForget} />,
+      stubApi({}));
+    expect((await screen.findByRole("alert")).textContent).toContain("The API answered with an error (http_503).");
+    expect(screen.queryByLabelText("Loading the shops overview")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    first.unmount();
+    renderWithApi(
+      <ShopsView shops={null} listError={new ApiError(403, "forbidden")} onRetry={onRetry} onOpen={noop} onForget={onForget} />,
+      stubApi({}));
+    await screen.findByText(/The API refused the operator key/);
+    fireEvent.click(screen.getByRole("button", { name: "Enter another key" }));
+    expect(onForget).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the shop list's failure on the overview inside the console, and reads the list again on Try again", async () => {
+    sessionStorage.setItem("manut.pilot.operatorKey", "op-key-123");
+    const api = createFakeApi({ operatorKey: readOperatorKey, now: () => NOW, webOrigin: "https://web.test" });
+    const real = api.listShops.bind(api);
+    const listShops = vi.spyOn(api, "listShops").mockRejectedValueOnce(new ApiError(503, "http_503"));
+    renderWithApi(<OpsConsole />, api);
+    fireEvent.click(await screen.findByRole("button", { name: "Shops" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("The API answered with an error (http_503).");
+    listShops.mockImplementation(real);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("table", { name: "Every shop" });
+    expect(listShops).toHaveBeenCalledTimes(2);
+    expect(table()).toHaveLength(2);
+  });
+
   it("offers nothing that sends: the controls are Refresh and one link to each page of each shop", async () => {
     const { container } = renderWithApi(<ShopsView shops={SHOPS} onOpen={noop} onForget={noop} />, reads());
     await screen.findByRole("table", { name: "Every shop" });

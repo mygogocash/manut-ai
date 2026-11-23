@@ -822,6 +822,8 @@ export const draftsWords = {
   noDraft: "No draft was written.",
   notWritten: "No draft yet.",
   passed: (from: string, to: string) => `${memberName(from)} passed this job to ${memberName(to)}.`,
+  /// The job's task id, for looking its records up, as the audit page names the ids an entry is about.
+  task: (id: string) => `task ${id}`,
   cost: (satang: number) => `Model cost ${moneyText(satang)}`,
 } as const;
 
