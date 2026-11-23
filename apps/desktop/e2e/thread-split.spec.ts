@@ -9,6 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -47,7 +48,7 @@ async function shot(page: Page, name: string) {
 async function setup(page: Page) {
   await page.addInitScript(() => localStorage.setItem("manut.theme", "dark"));
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   // the app has read Kami's threads (so its main-chat turns carry the note)
   await expect.poll(async () => (await calls("thread.list")).some((c) => c.params.bot === "kami")).toBe(true);
   // a watcher: did any raw block text ever show in the timeline (while streaming too)?

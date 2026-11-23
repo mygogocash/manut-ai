@@ -16,6 +16,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { S, webkit2Set } from "./ime-helpers";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -65,6 +66,7 @@ const screen = (page: Page) => page.locator('[data-testid="terminal"] .xterm-row
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder`; its session id once its program printed. */
 async function newTerm(page: Page, agent: string, folder: string): Promise<string> {
   const before = (await list(page)).map((r) => r.id);
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -119,7 +121,7 @@ test("a Shell row closes when its shell exits: the row, its tab and view go, and
   await expect(page.getByTestId(`session-${keep}`)).toHaveCount(0);
   await expect(page.getByTestId("terminal")).toHaveCount(0);
   await expect(page.getByTestId("session-none")).toBeVisible();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 });
 
 test("Ctrl+D at the prompt closes the Shell row; one ending while another session is open closes without moving you", async ({ page }) => {
@@ -154,6 +156,7 @@ test("a shell that cannot start stays listed with its error; one that dies at on
   expect((await list(page)).find((r) => r.id === failed)).toMatchObject({ status: "failed", error: "no login shell: /bin/nosuch is not in /etc/shells" });
 
   await page.evaluate(() => ((window as any).__manutShellDie = { code: 1 }));
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-shell`).click();
   await expect(screen(page)).toContainText("could not read its profile");

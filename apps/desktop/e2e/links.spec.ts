@@ -2,6 +2,7 @@
 // their channel when the bot knows it), a link with its own text keeps it after the mark, a lookalike host
 // stays a plain link, clicks go through the opener, and a chip never makes its line taller.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 import LINKS from "./fixtures/links.json" with { type: "json" };
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
@@ -39,7 +40,7 @@ async function catchOpens(page: Page): Promise<string[]> {
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 const slackBubble = (page: Page) => page.getByTestId("bubble-bot").filter({ hasText: "항목별 Slack 스레드 링크입니다." });

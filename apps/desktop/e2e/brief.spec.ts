@@ -3,6 +3,7 @@
 // Automations row says when it speaks ("When something needs you") instead of "every 15m", and the app never adds a
 // job for it itself (no automations.add).
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -35,7 +36,7 @@ async function open(page: Page) {
     localStorage.removeItem("manut.briefNoticed");
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 test.beforeEach(async () => {
@@ -57,7 +58,7 @@ test("one notice after the briefing is set up; Turn off pauses that job", async 
   await mock("mock.emit", { events: [{ event: "brief.ready", bot: "kami", owner_name: "Hope" }] });
   await expect(notice).toHaveCount(1);
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.emit", { events: [{ event: "brief.ready", bot: "kami", owner_name: "Hope" }] });
   await page.waitForTimeout(300);
   await expect(page.getByTestId("brief-notice")).toHaveCount(0);

@@ -17,6 +17,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -78,6 +79,7 @@ async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder`; its session id. */
 async function newTerm(page: Page, agent: string, folder: string): Promise<string> {
   const before = await page.evaluate(() => (window as any).__manutSessions.getState().list.map((r: { id: string }) => r.id));
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();
@@ -277,6 +279,7 @@ test.describe("shots", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.waitForTimeout(400);
       await shot(page, "terminal-open");
+      await openCode(page);
       await page.getByTestId("session-new").click();
       await expect(page.getByTestId("session-agent-shell")).toBeVisible();
       await shot(page, "plus-menu");

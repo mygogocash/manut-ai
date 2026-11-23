@@ -9,6 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { mock, usePlatform } from "./term-find-helpers";
+import { openCode } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || "";
 const FOLDER = "/home/you/code/web-app";
@@ -47,6 +48,7 @@ async function open(page: Page, o: { theme?: "dark" | "light"; shells?: unknown[
 }
 
 async function plusMenu(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await expect(page.getByTestId("session-agent-shell")).toBeVisible();

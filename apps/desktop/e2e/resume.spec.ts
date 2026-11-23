@@ -4,6 +4,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -61,12 +62,13 @@ async function setup(page: Page, folders: string[] = []) {
     }
   }, folders);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** A New session chat on `agent` in the picker's next folder, started: a chat agent by its first message
  *  (`first`), Grok by Start. */
 async function start(page: Page, agent: string, first = "/status") {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-${agent}`).click();
   await page.getByTestId("session-folder").click();
@@ -210,12 +212,12 @@ test("a saved bot that is gone, or a bad snapshot, opens the app as a fresh star
       );
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-open\b/);
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);
   await page.evaluate(() => sessionStorage.setItem("__step", "2"));
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("composer")).toHaveValue("");
 });
 
@@ -339,6 +341,7 @@ test.skip("an ended terminal session comes back with Restart, which starts it ag
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("a New session chat that never started comes back as a draft after a restart, and nothing starts", async ({ page }) => {
   await setup(page, ["/home/you/code/web-app"]);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-agent-codex").click();
   await page.getByTestId("session-folder").click();

@@ -3,6 +3,7 @@
 // to "Ran 2 subagents · …". The run name opens that run in Plans. Read-only.
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const LIVE = "dag:20261102_235818_fcfb1bdd/codex-coexist-live";
@@ -27,7 +28,7 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 
 async function send(page: Page, text: string) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("composer").fill(text);
   await page.keyboard.press("Enter");
 }

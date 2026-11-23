@@ -7,6 +7,7 @@
 // page's storage) and written back, dimmed, under a "--- restored <time> ---" line before the new output; closing
 // removes it; Settings > Terminal turns it off. The bottom panel's tabs come back with their folders and scrollback.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FOLDER = "/home/you/code/web-app";
@@ -46,6 +47,7 @@ async function open(page: Page) {
 
 /** Start `agent` from the TERMINALS + menu in FOLDER; its session id. */
 async function newTerm(page: Page, agent: string): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();

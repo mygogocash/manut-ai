@@ -1,6 +1,7 @@
 // The terminal engine on the mock host: the GPU renderer (lazy chunk, off/on/auto), a lost context, terminals that
 // leave the page, Unicode 11 widths and `feed`'s `done` callbacks. Chromium; the WebKit numbers are in bench/render.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -41,11 +42,12 @@ async function open(page: Page, gpu: Gpu) {
     await route.fulfill({ response: r, body });
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** A new Claude Code session opened as a terminal; returns its session id. */
 async function newTerminal(page: Page): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

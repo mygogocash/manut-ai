@@ -2,6 +2,7 @@
 // Chinese with no English UI words left, nothing overflows sideways at the 900px minimum width, <html lang> says
 // zh-CN, a first run picks the system's language, and Enter that commits an IME composition never submits.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -27,7 +28,7 @@ test.beforeEach(async () => {
 async function openZh(page: Page) {
   await page.addInitScript(() => localStorage.setItem("manut.lang", "zh"));
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** Words a person reads that are still English: text nodes and UI attributes, minus names that stay in Latin
@@ -107,6 +108,7 @@ for (const width of [1280, 900]) {
     await expect(page.getByTestId("model-search")).toHaveAttribute("placeholder", "搜索模型");
     expect(await englishLeft(page, "[data-testid=model-pop]")).toEqual([]);
     await page.keyboard.press("Escape");
+    await openCode(page);
     await page.getByTestId("session-new").click();
     await expect(page.getByTestId("session-menu")).toContainText("新建会话");
     expect(await englishLeft(page, "[data-testid=session-menu]")).toEqual([]);

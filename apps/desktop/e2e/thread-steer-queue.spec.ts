@@ -2,6 +2,7 @@
 // with the ↵ mark, never "Not sent · a turn is running"), goes out after that turn with `chat.send {session, queued}`,
 // and Steer hands it to that thread's running turn (`chat.steer {session}`). Main-chat cases: steer-queue.spec.ts.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -30,7 +31,7 @@ async function runningThread(page: Page): Promise<string> {
   await mock("mock.reset");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.manual", { bot: "kami" });
   const { threads } = await mock("mock.threads", { bot: "kami", threads: [{ title: "Steer neighbour", cwd: "/work/steer", ago: 1 }] });
   const id = threads[0] as string;
@@ -106,7 +107,7 @@ test("removing a thread that holds messages never sends them; the main chat and 
   await mock("mock.reset");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.manual", { bot: "kami" });
   const { threads } = await mock("mock.threads", {
     bot: "kami",

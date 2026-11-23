@@ -10,6 +10,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -40,7 +41,7 @@ async function setup(page: Page, opts: { theme?: "dark" | "light"; lang?: string
     if (l) localStorage.setItem("manut.lang", l);
   }, [opts.theme ?? "dark", opts.lang ?? ""] as const);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** The thread the app opened last (the one thread.create made). */
@@ -213,7 +214,7 @@ test("shots: sidebar with threads (no New thread line), the ./th picker, the row
     await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
     await page.addInitScript(() => localStorage.setItem("manut.lang", "ko"));
     await page.goto("/");
-    await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+    await chatOpen(page);
     await expect(page.getByTestId("threads-kami").locator("[data-thread]")).toHaveCount(3);
     await expect(page.getByTestId("thread-new")).toHaveCount(0);
     const box = page.getByTestId("composer");

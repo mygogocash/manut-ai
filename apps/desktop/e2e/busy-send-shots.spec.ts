@@ -4,6 +4,7 @@
 import { expect, test } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const DIR = process.env.BUSY_SEND_SHOTS || "";
@@ -41,7 +42,7 @@ test.describe("busy send shots", () => {
           localStorage.setItem("manut.lang", "ko");
         }, [theme]);
         await page.goto("/");
-        await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+        await chatOpen(page);
         await expect(page.getByTestId("bubble-user").first()).toBeVisible();
         const say = async (text: string) => {
           await page.getByTestId("composer").fill(text);

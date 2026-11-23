@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (LIVE_SHOTS dir, else Playwright's ignored test-results).
@@ -35,7 +36,7 @@ const emit = (...events: Record<string, unknown>[]) => mock("mock.emit", { event
 async function open(page: Page, theme: "dark" | "light" = "dark") {
   await page.emulateMedia({ colorScheme: theme });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toContainText("updater");
 }

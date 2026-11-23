@@ -1,9 +1,10 @@
 // Inputs the closing verify broke (D2–D4): an offline bot, a blank away label, the bridge dying mid-turn.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 

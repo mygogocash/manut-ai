@@ -15,6 +15,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -49,7 +50,7 @@ async function setup(page: Page, theme: "dark" | "light" = "dark", lang = "en") 
     [theme, lang] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function shot(page: Page, what: string, theme: string) {

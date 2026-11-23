@@ -20,6 +20,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mock, newTerminal, openApp } from "./term-find-helpers";
 import { S, webkit2Set } from "./ime-helpers";
+import { openCode } from "./start";
 
 test.beforeEach(async () => {
   await mock("mock.reset");
@@ -366,6 +367,7 @@ test("a parked terminal whose CLI ends goes on as the shell in the remade xterm,
 
 test("Korean typed into a terminal made again after parking reaches its shell exactly once", async ({ page }) => {
   await openApp(page);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

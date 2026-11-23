@@ -2,6 +2,7 @@
 // answer does (testId copy-prompt), it puts exactly the typed text on the clipboard, an answer's copy-answer
 // still works beside it, and a thread's prompt (the same Bubble) has it too. A held prompt (not sent yet) has none.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -30,7 +31,7 @@ test.beforeEach(async () => {
 /** Past the onboarding cards, on Kami's main chat. */
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** Chromium on Windows stores clipboard text with the engine's CRLF; every other character must match. */
@@ -87,7 +88,7 @@ test("a thread's prompt carries the same control", async ({ page, context }) => 
   const TEXT = "릴리스 노트 초안 정리해줘";
   const { threads } = await mock("mock.threads", { bot: "kami", threads: [{ title: "릴리스 노트", ago: 60, messages: [["user", TEXT]] }] });
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   const [id] = threads as string[];
   await page.getByTestId(`thread-row-${id}`).getByTestId("thread-open").click();
   const user = page.getByTestId("thread-chat").getByTestId("bubble-user").last();

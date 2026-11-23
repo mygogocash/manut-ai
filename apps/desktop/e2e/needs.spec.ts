@@ -3,6 +3,7 @@
 // interview answered with one clarify.respond, timeout clears the dot, and the row menu (pin / remove from list).
 import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (NEEDS_SHOTS dir, else Playwright's ignored test-results).
@@ -32,7 +33,7 @@ const mod = async (page: Page) => ((await page.evaluate(() => /Mac/.test(navigat
 async function open(page: Page, theme: "dark" | "light" = "dark") {
   await page.emulateMedia({ colorScheme: theme });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   // every other bot's chat is loaded too, so its asks can show in the sidebar
   await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toContainText("updater");
@@ -100,7 +101,7 @@ test("asks on bots you are not looking at: amber dot, strip shows 2, click jumps
   expect(kamiAfter.y).toBeGreaterThan(kamiBefore!.y);
   expect(kamiAfter.y).toBeGreaterThanOrEqual(listBox.y + listBox.height);
   await expect(page.getByTestId("bot-kami")).toBeInViewport({ ratio: 1 });
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.screenshot({ path: join(SHOTS, "T12-strip-dark.png"), animations: "disabled" });
   // Esc closes it (focus back on the strip), so does a click outside
   await items.nth(0).focus();

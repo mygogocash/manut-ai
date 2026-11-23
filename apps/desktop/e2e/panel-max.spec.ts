@@ -6,6 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -46,7 +47,7 @@ const settled = (page: Page) =>
 
 async function openPanel(page: Page, tab: "details" | "runs" | "terminal" = "runs") {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   if (!/\bpanel-open\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "")) await page.getByTestId("places").click();
   await expect(page.getByTestId("window")).toHaveClass(/\bpanel-open\b/);
   // the tabs slide in with the panel: a press on one still moving can be released off it
@@ -98,7 +99,7 @@ test("Plans: the tab row's button maximises the panel in place; the sidebar stay
   await page.getByTestId("bot-friren").click();
   await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
   await page.getByTestId("bot-kami").click();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   // restore: back to the width it had before, and the draft is still in the composer
   await page.getByTestId("panel-max").click();
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);
@@ -153,7 +154,7 @@ test("a dragged width comes back exactly after maximise and restore, for Details
 
 test("⌘⇧G toggles (opening Plans when the panel is closed), Esc restores, double-click on the tab row toggles, closing restores", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-open\b/);
   const m = await mod(page);
   await page.keyboard.press(`${m}+Shift+G`);

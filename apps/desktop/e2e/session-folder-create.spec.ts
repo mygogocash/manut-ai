@@ -18,6 +18,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -264,6 +265,7 @@ test("a folder listed under another spelling of its path is that one group: pick
   expect((await saved(page)).added).toEqual([WEB, NOTES]);
 
   // a terminal whose own folder is spelled with the separator lists under the same header
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await pick(page, `${WEB}/`);

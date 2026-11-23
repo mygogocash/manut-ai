@@ -4,6 +4,7 @@
 // program keeps its Ctrl+F (Ctrl+Shift+F is always find).
 import { expect, test, type Page } from "@playwright/test";
 import { feed, mock, modKey, newTerminal, openApp, platformIsMac, pointAt, settle, typed } from "./term-find-helpers";
+import { openCode } from "./start";
 
 test.use({ colorScheme: "dark" });
 test.beforeEach(async () => {
@@ -130,6 +131,7 @@ test("the counter is not clipped and the bar stays inside a narrow window", asyn
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("the shortcut does nothing in a chat session", async ({ page }) => {
   await openApp(page);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

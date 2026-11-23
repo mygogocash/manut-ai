@@ -8,6 +8,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -122,6 +123,7 @@ test("a mock agent printing then going quiet sends one busy and one idle edge", 
     { busy: false, now: false },
   ]);
   const after = async () => (await powerCalls(page)).slice(2);
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

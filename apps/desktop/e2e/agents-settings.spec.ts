@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -46,7 +47,7 @@ async function open(page: Page, opts: { theme?: string; lang?: string; file?: un
     [opts.theme ?? "dark", opts.lang ?? "", opts.file ?? null] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function agentsPage(page: Page) {
@@ -64,6 +65,7 @@ async function fill(page: Page, label: string, program: string, args = "acp") {
 }
 
 async function plus(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await expect(page.getByTestId("session-agent-claude")).toBeVisible();
   await page.waitForFunction(() => document.querySelector(".ss-pop")?.getAnimations().every((a) => a.playState !== "running"));

@@ -14,6 +14,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -68,6 +69,7 @@ async function open(page: Page, o: { theme?: "dark" | "light"; roster?: string[]
 /** Start `agent` (or `shell`) from the TERMINALS + menu in `folder` (one of the recent folders, else the picker's). */
 async function newTerm(page: Page, agent: string, folder?: string): Promise<string> {
   const before = await page.locator('[data-testid^="session-s"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   if (folder) {
@@ -152,6 +154,7 @@ test.describe("shots", () => {
       await mock("mock.manual", { bot: "kami", on: false });
       await mock("mock.manual", { bot: "friren", on: false });
       if (theme === "dark") {
+        await openCode(page);
         await page.getByTestId("session-new").click();
         await expect(page.getByTestId("session-agent-shell")).toBeVisible();
         await shot(page, "termsessions-plus-menu");

@@ -4,6 +4,7 @@
 // small arrowhead, in the side panel and at full size when the panel is maximised in place (⌘⇧G). Real (redacted) dag runs, real
 // delegation logs for the models and routes, and a synthetic 40-node run for the layout.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FAN = "dag:20261102_235818_fcfb1bdd/codex-coexist";
@@ -48,7 +49,7 @@ async function mockError(op: string, params: Record<string, unknown>): Promise<s
 
 async function openRuns(page: Page, bot = "kami") {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   if (bot !== "kami") {
     await page.getByTestId(`bot-${bot}`).click();
     await page.keyboard.press(`${await mod(page)}+Period`);
@@ -1517,7 +1518,7 @@ test("a delegate fan-out without a dag is its own run of one frontier", async ({
 
 test("a delegate_task in chat: one plain sentence per dag part, a read-only status, and the run opens", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.emit", {
     events: [
       { event: "turn.start", bot: "kami" },

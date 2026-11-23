@@ -2,6 +2,7 @@
 // card). The question card's digit keys must work after a click there too.
 import { existsSync } from "node:fs";
 import { expect, test, webkit } from "@playwright/test";
+import { chatOpen } from "./start";
 
 test.use({ browserName: "webkit" });
 // Only the macOS window is WebKit (Windows' is WebView2, Chromium). CI's macOS job installs WebKit for this spec;
@@ -29,7 +30,7 @@ test.beforeEach(async () => {
 
 test("interview in WebKit: click a row, press a digit, the right row is checked", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await mock("mock.ask", { bot: "friren", kind: "interview" });
   await page.getByTestId("needs-strip").click();
   await page.getByTestId("needs-item").first().click();

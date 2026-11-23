@@ -9,6 +9,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const DEMO = "dag:20261110_091904_d4a1c7e2/docs-dark-mode";
@@ -47,7 +48,7 @@ async function openFull(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("places").click();
   // the tabs slide in with the panel: press one once it has stopped
   await motionDone(page);
@@ -167,7 +168,7 @@ test("graph nodes keep one mark each from the registry: Codex and Claude Code la
 test("the chat's own subagent rows open the same chat view", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.getByTestId("composer").fill("/delegate two lookups");
   await page.keyboard.press("Enter");
   const card = page.getByTestId("fanout-card");

@@ -13,6 +13,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
 import { mkdirSync } from "node:fs";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || process.env.MANUT_SHOTS_DIR || "";
@@ -39,7 +40,7 @@ async function setup(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 const SEED = [
@@ -55,7 +56,7 @@ async function seed(page: Page) {
   await mock("mock.manual", { bot: "kami" });
   const { threads } = await mock("mock.threads", { bot: "kami", threads: SEED });
   await page.reload();
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   const [notes, nightly, slack, docs, og] = threads as string[];
   await expect(page.getByTestId(`thread-row-${og}`)).toBeVisible();
   const sub = (id: string, index: number, extra: Record<string, unknown>) => ({

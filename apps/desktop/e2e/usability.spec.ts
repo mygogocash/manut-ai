@@ -2,6 +2,7 @@
 // approval card, and the sidebar's Automations and Plugins rows opening their pages.
 import { expect, test, type Page } from "@playwright/test";
 import { usePlatform } from "./term-find-helpers";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -49,7 +50,7 @@ const watched = (page: Page, v: boolean) => page.evaluate((x) => ((window as any
 async function open(page: Page) {
   await usePlatform(page);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 
@@ -117,7 +118,7 @@ test("shortcuts: Mod+2 opens the second bot, Mod+K searches, Mod+. toggles Detai
   await page.keyboard.press(`${key}+2`);
   await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
   await page.keyboard.press(`${key}+1`);
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 
   await page.keyboard.press(`${key}+k`);
   await expect(page.getByRole("searchbox", { name: "Search bots and terminals" })).toBeFocused();

@@ -7,6 +7,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -42,6 +43,7 @@ async function session(page: Page, agent: string, theme: string, first?: string,
     [theme, globals] as const,
   );
   await page.goto("/");
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-${agent}`).click();
   await page.getByTestId("session-folder").click();

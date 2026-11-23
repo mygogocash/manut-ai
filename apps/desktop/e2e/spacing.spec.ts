@@ -4,6 +4,7 @@
 // seed and the many-rows seed (12 bots x 6 threads, 15 terminals); MANUT_MEASURE=<file> appends them as JSON lines.
 import { expect, test, type Page } from "@playwright/test";
 import { appendFileSync } from "node:fs";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const MEASURE = process.env.MANUT_MEASURE || "";
@@ -51,6 +52,7 @@ async function open(page: Page, o: { roster?: string[] } = {}) {
 
 async function newTerm(page: Page, agent: string, folder: string): Promise<string> {
   const before = await page.evaluate(() => (window as any).__manutSessions.getState().list.map((r: { id: string }) => r.id));
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();

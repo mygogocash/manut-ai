@@ -3,6 +3,7 @@
 // field filters the list, the preview is a real terminal, and the page fits a 900x700 window.
 import { expect, test, type Page } from "@playwright/test";
 import { feed } from "./term-find-helpers";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -61,11 +62,12 @@ async function open(page: Page) {
     Object.defineProperty(navigator, "platform", { get: () => "MacIntel" });
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 /** A Claude Code session opened as a terminal, its program's first output on screen. */
 async function terminalClaude(page: Page) {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

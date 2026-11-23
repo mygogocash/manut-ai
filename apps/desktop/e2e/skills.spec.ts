@@ -7,6 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || join(homedir(), ".hermes/profiles/kami/cache/scratch/manut-fable/shots3");
@@ -272,6 +273,7 @@ test.skip("a SESSIONS chat keeps its agent's own / menu and never gets the bot s
     w.__manutMockAgents = ["claude", "codex", "omo", "omh"];
   });
   await page.goto("/");
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-agent-claude").click();
   await page.getByTestId("session-folder").click();

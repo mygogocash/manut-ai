@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openSettings } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS_DIR || join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -57,8 +58,8 @@ async function openAccounts(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
   await page.addInitScript(installHost);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
-  await page.getByTestId("me").click();
+  await chatOpen(page);
+  await openSettings(page, "accounts");
   await expect(page.getByTestId("accounts-page")).toBeVisible();
   await expect(page.getByTestId("accounts-codex").getByTestId("account-row")).toHaveCount(2);
 }
@@ -141,7 +142,8 @@ test("the CLI's version sits beside its name as muted text; a CLI with none show
   await expect(page.getByTestId("cli-version-codex")).toHaveText("0.167.0-alpha.4.1");
   await expect(page.getByTestId("cli-version-pi")).toHaveCount(0);
   const head = page.getByTestId("accounts-codex").locator(".acc-gh");
-  await expect(head).toHaveText(/^Codex\s*0\.167\.0-alpha\.4\.1$/);
+  // The leading C is Codex's mark: the fork draws other tools' marks as their first letter (README.md, what was removed).
+  await expect(head).toHaveText(/^C\s*Codex\s*0\.167\.0-alpha\.4\.1$/);
   // text only: no border, fill or icon on the version
   const v = page.getByTestId("cli-version-codex");
   expect(await v.evaluate((e) => { const s = getComputedStyle(e); return [s.backgroundColor, s.borderTopWidth, s.boxShadow, e.children.length].join("|"); })).toBe("rgba(0, 0, 0, 0)|0px|none|0");

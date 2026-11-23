@@ -7,6 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { mock, usePlatform } from "./term-find-helpers";
+import { chatOpen } from "./start";
 
 const SHOTS = process.env.MANUT_SHOTS || "";
 const ASK = "Walk me through the whole retry design, every piece of it";
@@ -23,7 +24,7 @@ async function longAnswer(page: Page, theme: "dark" | "light" = "dark") {
   await usePlatform(page);
   await page.addInitScript((th) => localStorage.setItem("manut.theme", th), theme);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   await mock("mock.answer", { bot: "kami", text: LONG });
   await page.getByTestId("composer").fill(ASK);

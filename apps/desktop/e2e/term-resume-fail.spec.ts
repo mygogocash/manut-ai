@@ -9,6 +9,7 @@
 // the login shell, as before. The mock's Claude Code keeps what it wrote in this page's storage
 // (`__manutMockClaudeConvs`) and refuses `--resume` of a conversation it never wrote, as the real one does.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const FOLDER = "/home/you/code/web-app";
@@ -84,6 +85,7 @@ async function open(page: Page) {
 
 /** Pick `agent` from the TERMINALS + menu in FOLDER; its session id. */
 async function pick(page: Page, agent: string): Promise<string> {
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await page.getByTestId("session-folder").click();

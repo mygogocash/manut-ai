@@ -10,6 +10,7 @@
 // Chromium (Playwright's headless shell) on the mock host; nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
 import { feed, mock, newTerminal, openApp } from "./term-find-helpers";
+import { openCode } from "./start";
 
 test.beforeEach(async () => {
   await mock("mock.reset");
@@ -106,6 +107,7 @@ for (const [prog, draw] of Object.entries(PROGRAMS)) {
 async function openTerminal(page: Page): Promise<string> {
   const term = page.getByTestId("terminal");
   const before = (await term.count()) ? await term.getAttribute("data-session") : null;
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

@@ -11,6 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -46,10 +47,11 @@ async function setup(page: Page, theme: "dark" | "light", globals: Record<string
     [theme, globals, lang] as const,
   );
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function start(page: Page, agent: string, first: string) {
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-${agent}`).click();
   await page.getByTestId("session-folder").click();
@@ -236,6 +238,7 @@ for (const theme of ["dark", "light"] as const) {
 
 async function plusMenu(page: Page, height: number, width = 1280) {
   await page.setViewportSize({ width, height });
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await expect(page.getByTestId("session-more")).toHaveAttribute("aria-expanded", "false");
   await page.getByTestId("session-more").click();
@@ -251,7 +254,7 @@ for (const theme of ["dark", "light"] as const) {
     for (const height of [600, 720, 820]) {
       for (const width of [900, 1100, 1280]) {
         await page.reload();
-        await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+        await chatOpen(page);
         await plusMenu(page, height, width);
         const where = `${width}x${height}`;
         const read = () =>

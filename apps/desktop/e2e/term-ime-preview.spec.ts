@@ -4,6 +4,7 @@
 // syllable is sent as the next one starts, before the program's echo moves the cursor, so the new preview sat on the
 // cell where that syllable was then drawn and hid it, and jumped two cells right on the next keystroke.
 import { expect, test, type Page } from "@playwright/test";
+import { openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -37,6 +38,7 @@ async function shell(page: Page) {
   });
   await page.goto("/");
   await expect(page.getByTestId("bot-kami")).toBeVisible();
+  await openCode(page);
   await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
   await page.getByTestId("session-folder").click();
   await page.getByTestId("session-choose").click();

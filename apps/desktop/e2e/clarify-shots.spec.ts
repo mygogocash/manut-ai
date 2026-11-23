@@ -2,6 +2,7 @@
 // Korean choices. They stay out of the repo (CLARIFY_SHOTS dir, else Playwright's ignored test-results).
 import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.CLARIFY_SHOTS || "test-results";
@@ -25,7 +26,7 @@ async function setup(page: Page, rewrite: (msg: any) => void, kind: string, them
     });
   });
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await page.evaluate(async (th) => {
     const m = await import(/* @vite-ignore */ "/src/state/store.ts");
     m.getStore().actions.setTheme(th as "light" | "dark");

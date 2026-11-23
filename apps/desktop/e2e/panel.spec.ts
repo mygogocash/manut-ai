@@ -1,5 +1,6 @@
 // Right panel tabs: Details · Terminal · Schedule · Worktrees · Diff · Runs, all read-only. Plus the default faces.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -24,7 +25,7 @@ const WRITES = ["chat.send", "chat.interrupt", "approval.respond", "clarify.resp
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   await page.getByTestId("places").click();
   await expect(page.getByTestId("details-panel")).toHaveAttribute("data-tab", "details");
@@ -158,7 +159,7 @@ test("Worktrees and Diff share one worktree list; Terminal reads once on open", 
 
 test("the closed panel takes no focus; it comes after the chat in tab order", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("details")).toHaveAttribute("inert", "");
   // from the composer (focused on open), Tab leaves the page instead of entering the hidden panel
   await expect(page.getByTestId("composer")).toBeFocused();

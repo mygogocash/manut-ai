@@ -2,6 +2,7 @@
 // button, the collapsed Needs-you strip names the newest ask, same-named folders show their parent, a clean exit
 // reads "Ended" in grey, and a missing agent's tooltip carries its install line.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -28,11 +29,12 @@ async function open(page: Page, installed = ["claude", "codex", "omh"]) {
     (window as unknown as { __manutMockAgents: string[] }).__manutMockAgents = agents;
   }, installed);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function start(page: Page, agent: string, folder: string) {
   await page.evaluate((f) => ((window as unknown as { __manutPickFolder: string }).__manutPickFolder = f), folder);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   await page.getByTestId(`session-agent-${agent}`).click();
   await page.getByTestId("session-folder").click();
@@ -132,6 +134,7 @@ test.skip("U13: an agent that exits with code 0 reads Ended in grey, never Faile
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("U14: a missing agent's Not installed tooltip carries its install line, as text only", async ({ page }) => {
   await open(page, ["claude"]);
+  await openCode(page);
   await page.getByTestId("session-new").click();
   const lines: Record<string, string> = {
     codex: "npm i -g @openai/codex",

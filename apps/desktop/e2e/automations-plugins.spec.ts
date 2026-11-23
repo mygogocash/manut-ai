@@ -3,6 +3,7 @@
 // button; the "say it in words" box, Run now and Edit go to the bot's chat; the cards a bot's own changes leave in
 // its chat; the language picker (ko, ja) with no raw keys on either page.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -34,7 +35,7 @@ const submitted = async (bot: string): Promise<string[]> =>
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
 }
 async function openAutomations(page: Page) {

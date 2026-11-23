@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = join(dirname(fileURLToPath(import.meta.url)), "__shots__");
@@ -36,7 +37,7 @@ const callsOf = async (op: string) =>
 
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 async function botPage(page: Page, name = "kami") {
@@ -142,7 +143,7 @@ test("bot page: what the bot has done (sessions per place, skills, routines)", a
   await expect(places).toContainText("since");
   await page.getByTestId("bot-open-chat").click();
   await expect(page.getByTestId("settings-view")).toHaveCount(0);
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 });
 
 test("All bots: a card per bot with status, model and places; search filters; a card opens the bot", async ({ page }) => {

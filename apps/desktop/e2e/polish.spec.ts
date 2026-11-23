@@ -2,6 +2,7 @@
 // runs.spec.ts.)
 import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
+import { chatOpen, openCode } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -19,7 +20,7 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<v
 }
 async function open(page: Page) {
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
 }
 
 test.beforeEach(async () => {
@@ -342,6 +343,7 @@ test.skip("a running terminal session's dot: 6px, solid, inside its tile, readab
       theme,
     );
     await open(page);
+    await openCode(page);
     await page.getByTestId("session-new").click();
     await page.getByTestId("session-agent-grok").click();
     await page.getByTestId("session-folder").click();

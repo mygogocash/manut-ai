@@ -2,6 +2,7 @@
 // "<bot> · <watch>", unread 1, one Dock badge call; a silent run leaves nothing; 40 answers that came in while
 // manut was closed -> one summary notification and unread 40. "Not useful" sends exactly one chat message.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 
@@ -52,7 +53,7 @@ async function setup(page: Page, seen?: number) {
     if (typeof seenAt === "number") localStorage.setItem("manut.watchSeen", JSON.stringify({ friren: seenAt }));
   }, seen ?? null);
   await page.goto("/");
-  await expect(page.getByTestId("bot-kami")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page);
   await expect(page.getByTestId("bot-friren")).toBeVisible();
 }
 
