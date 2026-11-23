@@ -25,6 +25,7 @@
     "@manut/approval-core": "workspace:*",
     "@manut/books": "workspace:*",
     "@manut/member-grants": "workspace:*",
+    "@manut/people-rules": "workspace:*",
     "@manut/shop-memory": "workspace:*"
   }
 }

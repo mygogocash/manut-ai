@@ -7,7 +7,24 @@ export type VerifiedIdentity = {
   tenant: string;
   provider: "apple";
   exp: number;
+  /// The email Apple verified for the account, trimmed and lower-cased, when the signed token carries one with
+  /// `email_verified` true. It never names the tenant, so two Apple accounts are still never joined by an email; it
+  /// only lets an email invite check who is signed in (docs/people.md).
+  email?: string;
 };
+
+/// The longest address an email can be (RFC 5321's path limit), and the shape `@manut/people-rules` accepts.
+const EMAIL_MAX = 254;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+$/;
+
+/// The email in Apple's signed claims if Apple says it verified it. Apple sends `email_verified` as a boolean or as the
+/// string "true", so both count, and anything else (absent, false, "false") leaves the session without an email.
+function verifiedEmail(payload: { email?: unknown; email_verified?: unknown }): string | undefined {
+  if (payload.email_verified !== true && payload.email_verified !== "true") return undefined;
+  if (typeof payload.email !== "string") return undefined;
+  const email = payload.email.trim().toLowerCase();
+  return email.length <= EMAIL_MAX && EMAIL_SHAPE.test(email) ? email : undefined;
+}
 
 export type AppleConfig = {
   clientId: string;
@@ -128,7 +145,8 @@ export async function verifyAppleToken(
   const [headerB64, payloadB64, signatureB64] = parts;
   if (!headerB64 || !payloadB64 || !signatureB64) throw new Error("malformed");
   let header: { alg?: string; kid?: string };
-  let payload: { iss?: string; aud?: string; sub?: string; exp?: number; nonce?: string };
+  let payload: { iss?: string; aud?: string; sub?: string; exp?: number; nonce?: string; email?: unknown;
+    email_verified?: unknown };
   try {
     header = JSON.parse(new TextDecoder().decode(base64UrlDecode(headerB64)));
     payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(payloadB64)));
@@ -169,5 +187,6 @@ export async function verifyAppleToken(
   if (payload.nonce !== (await sha256Hex(nonce))) {
     throw new Error("nonce");
   }
-  return { tenant: `apple:${payload.sub}`, provider: "apple", exp: payload.exp };
+  const email = verifiedEmail(payload);
+  return { tenant: `apple:${payload.sub}`, provider: "apple", exp: payload.exp, ...(email ? { email } : {}) };
 }
