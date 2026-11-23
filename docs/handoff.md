@@ -1,6 +1,6 @@
-# Handoff: where the build stands (23 Nov 2026, about 12:40 Bangkok)
+# Handoff: where the build stands (23 Nov 2026, about 14:45 Bangkok)
 
-Written so a new session in any tool can continue without the earlier conversation. Read `CLAUDE.md` first
+Written so a new session in any tool can continue without the earlier conversations. Read `CLAUDE.md` first
 (rules and the owner's standing permissions), then this file, `docs/plan.md` and `docs/decisions.md`.
 
 ## What this is
@@ -16,71 +16,96 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 | Thing | Where |
 | --- | --- |
-| This repository | `~/Developer/manut-ai`, remote `mygogocash/manut-ai` (private) |
+| This repository | `~/Developer/manut-ai`, remote `mygogocash/manut-ai` (public since 23 Nov 2026) |
 | Working branch | `pilot/week-1`, draft pull request #1 into `main` |
-| Implementation plan | https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr |
+| Dev deployment | https://dev.manut.xyz: `manut-api-dev` (the front door) and `manut-web-dev` (the pages), GoGoCash Cloudflare account |
+| Console login | Cloudflare Access application "Manut AI dev console" on `/ops` and `/v1/admin`, one allowed email |
+| Dev secrets | the Worker, and the owner's macOS Keychain: `manut-dev-operator-key`, `manut-dev-approval-link-secret`, `manut-dev-cred-key` |
+| Cloudflare token | GitHub environment `dev` (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) |
+| Implementation plan | https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr (not reachable from T3 Code sessions) |
 | Design canvas (screen spec) | https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG, sources in `~/Developer/gospark-main/manut-ai-artifacts/app-screens/project/` |
 | GoSpark (source of the backend and the rules) | `~/Developer/gospark` (clone of `mygogocash/gospark`) |
 | Oh My Hermes (desktop base) | https://github.com/rlaope/oh-my-hermes, app in `apps/omher` (forked at commit `77b8646`) |
 | Orca (agent protocol code, worktrees) | https://github.com/stablyai/orca |
 | Night build (cloud routine) | https://claude.ai/code/routines/trig_01W1xtTKRySeLkPiqorkJohN |
 
-Clones of Oh My Hermes and Orca used so far were in a temporary folder and may be gone: clone them again
-read-only when needed, and never run their scripts.
+## Done and pushed (all green: about 2,330 tests plus two local-Worker contracts)
 
-## Done and pushed
+- `apps/api`: GoSpark's Workers backend lifted whole, plus the LINE connector, the owner's signed approval link
+  and payment records.
+  - **One origin:** the API Worker is the front door and hands every page to a pages Worker over a `WEB` service
+    binding. It must never get static assets: Cloudflare's asset router drops `ctx.access`, and the admin gate
+    needs it.
+  - **Export and delete one shop's data:** operator routes that leave an audit record of who deleted what and when.
+- `apps/web`: the owner's approval page, and the operator console with a Shop data tab (export, delete by name),
+  plus practice mode.
+- `apps/desktop`: the Oh My Hermes fork as Manut AI, with the design canvas's side menu.
+  - Rows: New, Needs you, Team, Code, Artifacts, Customize, History, Recent, the account row. Each row opens a page.
+  - New opens Buddy's chat until a Home page exists.
+- Packages: `approval-core`, `promptpay`, `agent-events`, `ui-kit`, and `format` (from the first night build, PR #2).
+- The night build works end to end: its first run opened PR #2, which was reviewed and merged into the working branch.
 
-- `apps/api`: GoSpark's Cloudflare Workers backend lifted whole, plus the LINE Official Account connector, the
-  owner's signed approval link (24 hours, consent, settle-once, exactly-once send) and payment records. 497 tests.
-- `apps/web`: the owner's approval page (`/approve/:token`) and the operator console (`/ops`), with a practice
-  mode that needs no backend. 37 tests.
-- `packages/approval-core` (46 tests), `packages/promptpay` (14 tests), `packages/ui-kit` (canvas tokens and CSS).
-- `docs/pilot-api.md` (backend and web contract), `docs/connectors.md` (what each channel needs and costs),
-  `docs/decisions.md`, `docs/plan.md` (state and the cloud task queue), `docs/cloud-routine.md`.
+## In progress
 
-## Desktop and agent events: committed
-
-Both landed after this note was first written, and the whole workspace is green (2,165 tests, type checks,
-`cargo check`):
-
-- `apps/desktop`: the fork of Oh My Hermes's `apps/omher`, renamed to Manut AI, with no Hermes, Python or bridge
-  process. The transport sits behind `src/runtime/adapter.ts`; the default is an in-process demo runtime
-  (`src/runtime/mock/`). Tokens come from `packages/ui-kit`, fonts are bundled, the CSP is real, the updater is
-  off. Not run: its Playwright suite (156 specs, some expect removed screens) and the Rust tests.
-- `packages/agent-events`: GoSpark's provider event contract in TypeScript (213 tests).
+- **Owner-confirmed deletion of a live shop**, in a separate checkout. A shop with consent or LINE connected is
+  deleted only after its owner confirms through a signed link, run through `packages/approval-core`. It also
+  fixes the client's and the fake's drift from the API's deletion answers. Review it, merge it, then redeploy dev.
+- **Pull request #4** (GitHub Actions CI, CodeQL, Dependabot, Deploy dev, SECURITY.md). Merge it into the
+  working branch once its checks pass. The repository settings it changed are listed with undo commands in its
+  description.
 
 ## Next steps, in order
 
-1. Done: `apps/desktop` and `packages/agent-events` are committed and the workspace is green.
-2. Run the night build once by hand (its page has Run now) and read its log: no run has been tested yet.
-3. Serve `apps/web` from the same Worker as `apps/api` (one origin, so the console needs no CORS and Cloudflare
-   Access covers both). Check Cloudflare's current static-assets documentation before writing the config.
-4. Operator routes to export and delete one shop's pilot data (the functions exist and are tested).
-5. Dev deploy (`manut-api-dev` only) and a dry run with two test shops: a LINE message in, a draft, approval on
-   the web, the reply out, an audit row. Needs the owner's Cloudflare token and a test LINE Official Account.
-6. Desktop, next pass: turn the fork into Manut AI's screens from the design canvas (side menu: New, Needs you,
-   Team, Code, Artifacts, Customize, History).
-7. Each morning: review the night build's `cloud/<task>` branches and draft pull requests, merge the good ones
-   into the working branch (never into `main`), and refill the queue in `docs/plan.md`.
-8. Keep the implementation plan doc and the design canvas in step with what lands.
+1. Merge the two items above, each after the full gate, and redeploy dev (commands below).
+2. Fix the flaky payments-ordering test: `sortableId` in `apps/api/src/pilot-store.ts` breaks
+   same-millisecond ties with a random suffix, so "newest first" can swap. Do this after the deletion work
+   lands, because it edits the same file.
+3. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
+   audit row. It waits for a test LINE Official Account. Turn on `officeInbound`, `officeCloud` and
+   `officeExternalWrites` for dev only when that exists.
+4. Desktop, next slices:
+   - a Home page (`Main.dc.html`: the ask box with Chat, Team and Code modes);
+   - a home for the old member-row actions (new thread, pin, restart);
+   - richer Team, Needs you and History pages.
+   Revive the Playwright suite: 140 of its 156 specs wait for the removed bot rows, so one shared fixture change
+   (wait for `menu-new`) brings most back.
+5. Each morning: review the night build's `cloud/<task>` pull requests and merge the good ones into the
+   working branch, never into `main`. The queue still holds slip-rules, promptpay-read and approval-wire.
+6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
 
 ## Needs the owner
 
-- GitHub Actions cannot run for the organisation: GitHub reports a failed payment or a spending limit to raise.
-  The test workflow is manual until then; tests run locally before every commit.
-- A Cloudflare token for the dev deploy, given through a secure prompt, never pasted into chat or a file.
-- From `docs/connectors.md`: each approved reply is a LINE push, which counts against the shop's monthly quota
-  (the free plan allows 300 a month); Shopee chat is closed to third parties; Lazada and Meta need applications
-  started now.
-- Merging pull request #1 into `main` when happy with it.
-- A look at the approval page on a real phone, and a first real LINE message in dev.
+- **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
+  paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
+  list should load. That proves the admin gate gets `ctx.access` on the deployed front door.
+- **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan and
+  the Deploy dev button, because GitHub reads those from the default branch.
+- **A test LINE Official Account** for the dry run (later, by the owner's choice).
+- **Staging and production in a separate Cloudflare account** before they exist. A Cloudflare token cannot be
+  limited to one Worker.
+- **After a week of green CI,** require the checks on `main`; the command is in pull request #4.
+- **pnpm 12 writes a two-document lockfile** that GitHub's dependency graph cannot read, so npm packages get no
+  Dependabot alerts. The fix (`pmOnFail: ignore`) changes the lockfile and how pnpm is pinned.
+- **From `docs/connectors.md`:** each approved reply is a LINE push, which counts against the shop's monthly
+  quota (300 on the free plan). Shopee chat is closed to third parties. Lazada and Meta need applications started now.
+- **A look at the approval page on a real phone.**
+
+## Known flaky tests (they fail only under heavy load)
+
+- `apps/api` pilot.test.ts, "records payments and lists them newest first": a real ordering bug, step 2.
+- `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
+- `apps/desktop` `src/runs/boxView.test.ts`: can pass 30 seconds when the machine is saturated.
 
 ## Practical notes for this Mac
 
-- 8 GB of memory: run one Rust build at a time (`CARGO_BUILD_JOBS=4`), and no more than about five jobs at once.
-- GitHub: `git push` works in this repository as it is. For `gh`, prefix commands with
+- 8 GB of memory: one Rust build at a time (`CARGO_BUILD_JOBS=4`). Run tests one command at a time when helpers
+  are running. CI now runs the Rust and Playwright suites on GitHub.
+- `pnpm install --frozen-lockfile` works on a clean checkout. `pnpm test` (about one minute) and `pnpm typecheck`
+  must pass before every commit; push only after they pass (`pnpm test && git push`).
+- `pnpm --filter @manut/api dev` runs both Workers on one origin at localhost:8787.
+- Deploy dev from `apps/api`, with the token in `CLOUDFLARE_API_TOKEN` for the command only:
+  `wrangler deploy -c wrangler.web.jsonc --env dev`, then `wrangler deploy --env dev`.
+- GitHub: `git push` works as it is. For `gh`, prefix commands with
   `GH_TOKEN="$(gh auth token --user KunanonJ)"`; the default `gh` account cannot see the organisation.
-- pnpm 12 installs dependencies by itself before running a script. To run a script without that, add
-  `--config.verify-deps-before-run=false`. Only esbuild and workerd may run install scripts.
-- The backend's tests run in real workerd: `pnpm --filter @manut/api test`.
-- Secrets never go into source, logs, tests or chat.
+- Secrets never go into source, logs, tests or chat. A secret the owner gives arrives through T3 Code's secure
+  prompt as a file only a command reads.
