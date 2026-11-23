@@ -1,7 +1,7 @@
 // UI strings by key, in English, Korean, Japanese and Chinese. English is the source: every key lives in `en`, and
 // the other three carry the same keys with the same `{slots}` (i18n.test.ts). On a first run (no `manut.lang` and
 // not onboarded yet) the language comes from the system's preferred languages and is saved; after that it comes
-// from `manut.lang`, which Settings › General › Language (and the first-run card) writes through the store's
+// from `manut.lang`, which Settings › General › Language (and the first-run setup's Welcome) writes through the store's
 // setLanguage, so the app re-renders without a restart. literals.test.ts fails on new hard-coded English.
 import { Fragment, createElement, type ReactNode } from "react";
 import { en } from "./en";

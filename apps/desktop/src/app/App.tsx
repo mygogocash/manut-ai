@@ -23,6 +23,8 @@ import { CodePage } from "../pages/CodePage";
 import { ArtifactsPage } from "../pages/ArtifactsPage";
 import { CustomizePage } from "../pages/CustomizePage";
 import { HistoryPage } from "../pages/HistoryPage";
+import { Onboarding } from "../onboarding/Onboarding";
+import { isFirstRunOpen } from "../onboarding/flow";
 import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
@@ -88,6 +90,10 @@ export function App() {
   const Details = slots.detailsPanel;
   const close = () => s.togglePanel(false);
   const MenuPageView = isMenuPage(s.ui.view) ? MENU_PAGE_VIEWS[s.ui.view] : null;
+
+  // The first-run setup fills the window, as the canvas's Welcome and Onboarding boards have no side menu. The store
+  // still starts behind it (the effect above), so Home and the team are ready when it ends.
+  if (isFirstRunOpen(s.ui)) return <Onboarding />;
 
   return (
     <MentionContext.Provider value={mentions}>

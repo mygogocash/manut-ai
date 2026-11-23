@@ -36,6 +36,16 @@
   color: var(--aui-muted);
   font-weight: 400;
 }
+/* The desktop's own: the shop's name, one quiet line tucked under the brand (the hero's gap would set it apart). A long
+   name wraps rather than widen the column. */
+.home .for {
+  margin: -14px 0 0;
+  max-width: 696px;
+  color: var(--aui-muted);
+  font-size: 15px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 
 /* The ask box: the field over a row of the modes and Send. */
 .home .ask {

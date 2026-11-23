@@ -23,6 +23,7 @@ import { Toggle } from "../pages/kit";
 import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides } from "../lib/power";
 import { AgentsPage } from "./agents/AgentsPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
+import { ShopSettings } from "../onboarding/ShopSettings";
 
 export const slot = "settings";
 
@@ -511,7 +512,9 @@ function GeneralPage() {
   const h = s.hello;
   return (
     <div className="st-page">
-      <div className="st-gh st-gh0">{t("set.appearance")}</div>
+      {/* The first-run setup again, on Your shop: the only place the person and the shop are changed. */}
+      <ShopSettings shop={s.ui.shop} onSetUp={s.openFirstRun} />
+      <div className="st-gh">{t("set.appearance")}</div>
       <Appearance />
       <div className="st-grp st-grp-lang">
         <Row title={t("lang.title")} hint={t("lang.hint")}>
