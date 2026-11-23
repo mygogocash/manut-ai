@@ -10,7 +10,7 @@
 //      is the most visible one.
 // Chromium (Playwright's headless shell); nothing here ran in the Tauri window.
 import { expect, test, type Page } from "@playwright/test";
-import { openCode } from "./start";
+import { openChat, openCode } from "./start";
 import { feed, mock, modKey, newTerminal, openApp, pointAt } from "./term-find-helpers";
 
 test.beforeEach(async () => {
@@ -129,7 +129,7 @@ test.describe("credit through the engine's feed", () => {
     await show(page, a);
     const fedA = sum(await flow(page), "feed", idA);
     await run(page, "after 1500 flood 3");
-    await page.getByTestId("bot-kami").click();
+    await openChat(page, "kami");
     await expect(page.getByTestId("terminal")).toHaveCount(0);
     await expect.poll(async () => sum(await flow(page), "feed", idA), { timeout: 20_000 }).toBeGreaterThanOrEqual(fedA + 3 * MIB);
     await expect.poll(async () => sum(await flow(page), "ack", idA), { timeout: 20_000 }).toBe(sum(await flow(page), "feed", idA));
@@ -174,7 +174,7 @@ test.describe("the renderer, from Settings", () => {
 
     // Auto, the default, on the test browser's software WebGL (SwiftShader): the standard renderer, and the GPU
     // add-on is never fetched (on real hardware Auto draws with the GPU: engine-policy.test.ts)
-    await page.getByTestId("bot-kami").click();
+    await openChat(page, "kami");
     await newTerminal(page);
     expect(await inUse(page)).toBe("standard");
     expect(await canvases(page)).toBe(0);

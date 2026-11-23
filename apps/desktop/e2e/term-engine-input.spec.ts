@@ -3,6 +3,7 @@
 // still reaches the program; and a picture or file pasted on a terminal still goes through the drop/paste path
 // (e2e/sessions-attach.spec.ts has its own check of that path and must stay green).
 import { expect, test, type Page } from "@playwright/test";
+import { openChat, openCode } from "./start";
 import { clipWrites, feed, mock, newTerminal, openApp, pointAt, settle, typed } from "./term-find-helpers";
 
 test.use({ colorScheme: "dark" });
@@ -167,7 +168,7 @@ test("the GPU row's second line says what draws the terminals: standard, then GP
   await page.getByTestId("settings-nav-terminal").click();
   await expect(row).toContainText("Auto"); // the row is there, with Auto / On / Off
   await expect(row).not.toContainText("In use now"); // no terminal is open yet
-  await page.getByTestId("nav-bot-kami").or(page.getByTestId("bot-kami")).first().click();
+  await openChat(page, "kami");
   await newTerminal(page);
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("settings-nav-terminal").click();
@@ -176,6 +177,7 @@ test("the GPU row's second line says what draws the terminals: standard, then GP
   // switching to On re-attaches the open terminal's renderer and the line follows (the terminal is hidden here,
   // so it holds no GPU context; back on the session it does)
   await row.getByRole("radio", { name: "On" }).click();
+  await openCode(page);
   await page.locator("[data-testid=session-list] .ss-row").first().click();
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect.poll(() => page.evaluate(async () => (await import("/src/sessions/term/engine.ts" as string)).rendererInUse())).toBe("gpu");

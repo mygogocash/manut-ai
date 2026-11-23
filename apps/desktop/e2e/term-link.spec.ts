@@ -8,7 +8,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openCode, startDone } from "./start";
+import { openChat, openCode, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -91,6 +91,8 @@ test("each TERMINALS session gets its own link id, saved with it and the same af
     .poll(async () => ((await saved(page))?.sessions ?? []).map((s: { id: string; linkId?: string }) => [s.id, s.linkId]).sort())
     .toEqual([[a, la!.slice(-10)], [b, lb!.slice(-10)]].sort());
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   expect(await linkOf(page, a)).toBe(la);
   expect(await linkOf(page, b)).toBe(lb);
@@ -101,13 +103,14 @@ test("the row menu's Copy link copies the link, and the terminal says so", async
   await open(page);
   const id = await newTerm(page, "shell");
   const row = page.getByTestId(`session-${id}`);
+  await openCode(page);
   await row.click({ button: "right" });
   const menu = page.getByTestId("session-row-menu");
   await expect(menu.getByRole("menuitem")).toHaveText(["Rename", /^Show in (Finder|Explorer|file manager)$/, "Open in Terminal", "Copy link", "New terminal here", "Close session"]);
   await menu.getByTestId("session-copy-link").click();
   await expect.poll(() => clip(page)).toBe(await linkOf(page, id));
-  await expect(page.getByTestId("term-link-copied")).toHaveText("Link copied");
-  await expect(page.getByTestId("term-link-copied")).toHaveCount(0, { timeout: 4000 });
+  // (The terminal said "Link copied" beside the sidebar's row; the Code page shows no terminal, so the line is checked
+  // where a terminal is on screen: the Cmd+Shift+C test below.)
 });
 
 test("⌘⇧C (Alt+Shift+C off macOS) in a terminal copies its link and types nothing into it", async ({ page, context }) => {
@@ -129,7 +132,7 @@ test("⌘⇧C (Alt+Shift+C off macOS) in a terminal copies its link and types no
 
 /** A bot answer in Kami's chat holding `text`. */
 async function answer(page: Page, id: string, text: string) {
-  await page.getByTestId("bot-kami").click();
+  await openChat(page, "kami");
   await mock("mock.emit", { events: [{ event: "message", bot: "kami", id, text }] });
 }
 
@@ -179,14 +182,30 @@ test("a link opened from outside manut opens that session; one it does not have,
   await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", a);
   // the same after a restart: the link still points at it
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${b}`)).toBeVisible();
   expect(await openFromOutside(page, (await linkOf(page, b))!)).toBe(true);
-  await expect(page.getByTestId(`session-${b}`).locator(".ss-open")).toHaveAttribute("aria-current", "true");
+  await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", b);
   for (const url of ["manut://terminal/zzzzzzzzzz", "manut://terminal/ZZZZZZZZZZ", "manut://terminal/abc", "manut://bot/kami"]) {
     expect(await openFromOutside(page, url)).toBe(false);
   }
+  await expect(page.getByTestId("terminal")).toHaveAttribute("data-session", b);
+  // the notice shows where it is mounted, the Code page (over a terminal it does not: the next test)
+  await openCode(page);
+  expect(await openFromOutside(page, "manut://terminal/zzzzzzzzzz")).toBe(false);
   await expect(page.getByTestId("term-link-gone")).toHaveText("Terminal not on this computer");
-  await expect(page.getByTestId(`session-${b}`).locator(".ss-open")).toHaveAttribute("aria-current", "true");
+});
+
+test("a link to a terminal it does not have says so over an open terminal too", async ({ page }) => {
+  // A known app bug since the side menu: the notice (TermLinkGone) is mounted in the TERMINALS header, which is on the
+  // Code page only, so with a terminal on screen such a link opens nothing and says nothing. This test passes as
+  // expected to fail until TermLinkGone is mounted with the app.
+  test.fail(true, "TermLinkGone is mounted with the Code page's TERMINALS header, so a terminal on screen shows no notice");
+  await open(page);
+  await newTerm(page, "shell");
+  expect(await openFromOutside(page, "manut://terminal/zzzzzzzzzz")).toBe(false);
+  await expect(page.getByTestId("term-link-gone")).toHaveText("Terminal not on this computer");
 });
 
 test.describe("shots", () => {
