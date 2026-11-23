@@ -1,0 +1,139 @@
+# Several shops: one person, several shops
+
+How one signed-in person reaches several shops, owning some and helping others, without weakening tenancy; how a
+session names the one shop it acts for; how the desktop shows the shops together; what links an owner's account to a
+pilot shop the operator created; and the slices that follow. This is the roadmap's Phase 6 "several shops in one
+view" (`docs/plan.md`, December item 7). The first slice is built in `apps/api`: `shops.ts` and `shops-store.ts`, with
+the owner's account kept beside the helpers in `people.ts` and `people-store.ts`. The routes are in
+`docs/pilot-api.md`, "Several shops".
+
+## Where things stood
+
+- **One signed-in identity is one tenant.** The lifted Sign in with Apple (`auth.ts`, `auth-object.ts`) makes the
+  verified Apple subject the tenant (`apple:<sub>`), and every session route acts for that tenant and no other.
+- **A pilot shop is a tenant of its own** (`pilot:<uuid>`) that an operator creates. No session can carry it, because
+  a session's tenant always comes from a verified provider subject.
+- **A helper reaches one shop** with a helper session (`mhs1.`), given when they join through an invite or open the
+  shop on another device (`docs/people.md`). Only that shop's approval routes accept it.
+- **Nothing linked an owner's account to their shop.** The owner decided through signed links only.
+
+## The model
+
+Three things, each kept where that kind of thing already lives.
+
+1. **Who a person is: the verified provider subject.** The identity is the lifted session's tenant (`apple:<sub>`),
+   never an email and never anything a request says. The email Apple verified rides along only for the one check that
+   needs it: a helper's invite names an email.
+2. **Who may act for a shop, and as what: the shop's own record.** The shop's people record (its TenantObject,
+   `people:<shop>`, `people-store.ts`) is the authority for both roles. The helpers were already there, matched by the
+   identity their invite named. The record now also keeps the owner's linked account, `{ id, subject, linkedAt }`, one
+   per shop, and the owner's shop sessions beside the helpers' ones. So linking, unlinking, opening a session and
+   ending sessions are each one `transactionSync` with its audit entry, the shop's export carries the link, and
+   deleting the shop wipes it.
+3. **Which shops a person is in: an index per identity.** AuthObject keeps `identity-shops:<subject>`, rows of
+   `{ shop, role, ref, at }`, written when the operator links an owner's account and when a helper joins or opens a
+   shop. It answers "which shops am I in" without reading every shop, as the lifted company membership index answers
+   "which companies am I in" (`auth-object.ts`). It is never the authority: every use reads each shop's record again,
+   so a row the shop no longer holds (an unlinked owner, a removed helper, a deleted shop, or a row planted by mistake)
+   lists nothing and opens nothing. A shop's deletion removes the rows that name it, as the lifted wipe removes the
+   inbound routes that name a tenant.
+
+Tenancy is not weakened:
+
+- No session ever carries a shop's tenant, and a person's own session still acts only for their own tenant.
+- A shop session (below) names one shop and only that shop's approval routes accept it. Every other session route
+  answers it 401, so nobody acts as a shop through it.
+- The role comes from the shop's record of the session: an owner session is held under the shop's linked account, a
+  helper session under a current helper. Never from a body, a query or a header.
+- A shop the person is not linked to answers 404, the same answer as a shop that does not exist.
+
+## How a session names its shop
+
+A person signs in once, with the lifted session, and asks for a **shop session** for each shop they act for:
+`POST /v1/shops/session` with `{ shop }`. The shop's record decides the role, and the answer is a bearer token for that
+one shop:
+
+- as its owner, `mos1.<shop, base64url>.<64 hex characters>`, held in the shop's record under its linked account;
+- as a helper, `mhs1.<shop, base64url>.<64 hex characters>`, the same helper session `POST /v1/people/session` gives.
+
+The shop keeps only the token's SHA-256. A shop session lasts 30 days with no refresh, as a helper session does; the
+app opens the shop again with the signed-in session after that. Unlinking the owner's account ends every owner session
+of that shop in the same write. Removing a helper ends that helper's sessions of that shop. Nothing done to one shop
+ends a session of another.
+
+With a shop session, every read and every decision works as it did, scoped to the session's shop: `GET /v1/approvals`
+lists that shop's requests, the decision route finds requests only in that shop's index, and approval-core decides
+with the role the session holds. A linked owner decides as role `owner` with `decidedBy` the account's id
+(`owner-<uuid>`), so the audit log says which account decided. The shop's own lifted session still decides as
+`owner-session` and the owner's signed link as `owner-link`.
+
+Why a session per shop, rather than one session naming a shop in each request: the shop is fixed when the session is
+made, from the person's verified link, so no later request can point it at another shop; unlinking or removal ends
+exactly the sessions it should, in the same write; and the approval routes needed no change to their scope.
+
+## What links an owner's account to a pilot shop
+
+Nothing did. Now a one-use link code does, with one step for the owner and one for the operator.
+
+1. **The owner** signs in with Apple in the app and asks for a link code (`POST /v1/shops/owner-code`). The app shows
+   it: eight characters, `XXXX-XXXX`, good for 15 minutes. The owner sends it to their operator through the channel
+   they already use for the shop: the shop's LINE chat with the operator, or a call to the owner's known number.
+2. **The operator** checks that the code came from the shop's owner through that channel, then enters it on the shop
+   (`POST /v1/admin/shops/owner` with `{ tenant, code }`, behind the admin gate). The code works once and names only the
+   account that asked for it. The shop's record links that account as its owner, in one write with an `owner.linked`
+   audit entry under the operator's Access identity. The entry names the link by its id, never the account's subject or
+   the code.
+3. The owner's app now lists the shop as theirs (`GET /v1/shops`) and opens an owner session for it.
+
+Why a code and not an email: the code names the exact account, the Apple subject, so two Apple accounts are never
+joined by an email (the lifted sign-in's rule), an owner who chose "Hide My Email" can be linked, and a mistyped code
+links nobody. AuthObject keeps only the code's SHA-256, and asking for a new code replaces the last. A code proves that
+whoever sent it was signed in as that account in the last 15 minutes. It does not prove they are the shop's owner: that
+check is the operator's, through the channel they already trust, as it is for every change the operator makes on the
+owner's word.
+
+A shop has one linked owner account at a time. Linking a second answers 409 `already_linked` until the operator
+unlinks the first (`POST /v1/admin/shops/owner/unlink`), which ends that account's owner sessions at once and writes
+`owner.unlinked`. Linking the same account again changes nothing and writes its index row again, which mends a row a
+failed write left out. The operator sees the link on the shop's People answer (`owner.account`).
+
+## How the desktop shows them (the next slice)
+
+- **One switcher, in the account row.** The account row at the bottom of the side menu shows who is signed in and the
+  shop being viewed. Opening it lists `GET /v1/shops`, the shops the person owns first, each with its role ("Owner",
+  "Helper"). Choosing one switches every page to that shop and its session. A person with one shop sees no switcher.
+- **One "Needs you" across the shops.** The app reads `GET /v1/approvals?state=open` once per shop, each with that
+  shop's own session, and merges them newest first. Each card names its shop and offers only what the person's role
+  there allows: a helper sees "Pass on" where the owner would see "Approve". A decision is always sent with the session
+  of the card's shop, never the shop the switcher shows.
+- **Each shop's data kept apart offline.** The offline cache keys every record by the shop's id, and each shop
+  session's token is stored under its shop. Switching shops never shows one shop's cached data under another's name.
+  Signing out clears every shop's cache and session. A shop that leaves the list (unlinked, removed, deleted) has its
+  cache and session dropped at the next refresh, and an answer of 401 `unlinked` or `removed` drops them at once.
+
+## The slices that follow
+
+1. **Done here (API):** the owner's linked account, the identity index, link codes, `GET /v1/shops`,
+   `POST /v1/shops/session`, owner sessions on the approval routes, the operator's link and unlink, and the link in
+   People.
+2. **Desktop:** the switcher, the combined "Needs you" and the per-shop offline cache, after the desktop's answering
+   slice lands.
+3. **Console:** show the owner's account on the shop's People page, with a box for the link code and an unlink button.
+4. **Owner sessions on more routes**, each its own decision: the shop's consent, export, memory and routines. Today an
+   owner session reaches only the approval routes. Whether the owner manages helpers from their own session belongs
+   here too (`docs/people.md`, "Not built yet").
+5. **Ending shop sessions from the app:** a route for the app to end its own shop sessions when the person signs out.
+   Today they run to their 30 days unless the owner's account is unlinked or the helper removed.
+6. **Co-owners:** more than one linked owner account per shop, if the owner wants it.
+7. **LINE Login as an identity**, parked with the rest of LINE.
+
+## Known limits of the first slice
+
+- A helper who joined before this slice has no row in the index until they open the shop once more
+  (`POST /v1/people/session` or `POST /v1/shops/session`). There are no real helpers yet, so nothing is backfilled.
+- A helper row is written for the Apple account that joined or opened the shop. Another Apple account that verifies
+  the same email can still open the shop by its id, but does not see it listed until it has.
+- A person who deletes their own tenant's data keeps their links: those are the shops' records, and leaving a shop is
+  unlinking or removal. Their pending link code is deleted with their data.
+- A person's index has no cap on its rows. Only an operator's link or an invite an operator made adds a row, so nothing
+  a person does alone can grow it.
