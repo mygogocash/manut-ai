@@ -467,6 +467,16 @@
   outline: none;
   border-color: var(--line-strong);
 }
+/* Settings › General › Notifications: the two quiet-hours time fields (Settings.slot.tsx `QuietHoursView`). Wide enough for
+   a 12-hour clock's "09:30 PM" and the field's own clock button. */
+.st-time {
+  width: 124px;
+  font-variant-numeric: tabular-nums;
+}
+/* the notes under a group of rows (Settings.slot.tsx `OutsideNotes`) sit a little below it */
+.st-grp + .st-note {
+  margin-top: 8px;
+}
 .bots-q {
   height: 28px;
   width: 200px;
