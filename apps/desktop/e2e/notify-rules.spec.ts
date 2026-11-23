@@ -115,7 +115,7 @@ test("Hide details and Quiet hours are in Settings, kept, and a notification fol
   await expect(page.getByTestId("set-hide-details")).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("set-quiet-start")).toHaveValue("00:00");
   await expect(page.getByTestId("set-quiet-end")).toHaveValue("00:00");
-  await expect(page.getByTestId("settings-page-general")).toContainText("Nothing makes a sound. Requests wait in Updates.");
+  await expect(page.getByTestId("settings-page-general")).toContainText("Nothing makes a sound. Requests wait in Needs you.");
   await expect(page.getByTestId("settings-page-general")).toContainText("A live page that stops working and a sign-in from a new device still alert you.");
   await expect(page.getByTestId("settings-page-general")).toContainText("When Unlocked");
 

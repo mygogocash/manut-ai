@@ -477,7 +477,7 @@ export const ja: Record<Key, string> = {
   "out.hideDetailsHint": "通知に名前・金額・お客様を表示せず、確認待ちの依頼が何件あるかだけを知らせます。",
   "out.lockNote": "システム設定 › 通知 › プレビューを表示 が「ロック解除時」のとき、macOS はロック画面でプレビューを隠します。Manut AI は画面がロックされているかどうかを自分では判断できません。",
   "out.quiet": "静かな時間",
-  "out.quietHint": "音は鳴りません。依頼は「お知らせ」で待ちます。",
+  "out.quietHint": "音は鳴りません。依頼は「対応が必要」で待ちます。",
   "out.quietAlerts": "止まった公開ページと、新しいデバイスからのサインインは、静かな時間でもお知らせします。",
   "out.quietStart": "静かな時間の開始",
   "out.quietEnd": "静かな時間の終了",

@@ -78,7 +78,7 @@ describe("Quiet hours", () => {
 describe("what Settings says under the group", () => {
   it("uses the canvas's words for quiet hours and the two alerts that still ring", () => {
     vi.stubGlobal("localStorage", fake());
-    expect(words(renderToString(<OutsideRows />))).toContain("Nothing makes a sound. Requests wait in Updates.");
+    expect(words(renderToString(<OutsideRows />))).toContain("Nothing makes a sound. Requests wait in Needs you.");
     expect(words(renderToString(<OutsideNotes />))).toContain("A live page that stops working and a sign-in from a new device still alert you.");
   });
 

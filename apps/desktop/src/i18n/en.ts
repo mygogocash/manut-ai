@@ -479,7 +479,7 @@ export const en = {
   "out.hideDetailsHint": "A notification shows no names, amounts or customers. It only says how many requests need you.",
   "out.lockNote": "macOS hides previews on the lock screen when System Settings › Notifications › Show previews is “When Unlocked”. Manut AI cannot tell by itself when the screen is locked.",
   "out.quiet": "Quiet hours",
-  "out.quietHint": "Nothing makes a sound. Requests wait in Updates.",
+  "out.quietHint": "Nothing makes a sound. Requests wait in Needs you.",
   "out.quietAlerts": "A live page that stops working and a sign-in from a new device still alert you.",
   "out.quietStart": "Quiet hours start",
   "out.quietEnd": "Quiet hours end",

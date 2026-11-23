@@ -477,7 +477,7 @@ export const zh: Record<Key, string> = {
   "out.hideDetailsHint": "通知里不显示姓名、金额或顾客，只告诉你有几项请求需要处理。",
   "out.lockNote": "当“系统设置 › 通知 › 显示预览”为“解锁时”，macOS 会在锁屏上隐藏预览。Manut AI 自己无法知道屏幕是否已锁定。",
   "out.quiet": "静音时段",
-  "out.quietHint": "不会发出任何声音。请求会在“动态”里等你。",
+  "out.quietHint": "不会发出任何声音。请求会在“需要你处理”里等你。",
   "out.quietAlerts": "线上页面停止运行，以及有新设备登录，仍然会提醒你。",
   "out.quietStart": "静音开始时间",
   "out.quietEnd": "静音结束时间",

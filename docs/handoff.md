@@ -69,26 +69,29 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 03:40 from `2a8fb77`, with the People page, routines running, shop templates and
   the drafts and shops pages (pages `55687ba9`, API `45d1a91e`); smoke-tested the same way, plus the routines and
   team routes refusing without a session and the templates route behind Access.
+- Dev was redeployed on 24 Nov at 04:23 from `91fc300`, with the desktop's approvals contract, several shops, the console's
+  owner link and the outpost's step channel (pages `d40cf7a7`, API `a20dfc84`, the new `OUTPOST_LIMITER` bound);
+  smoke-tested: the step and shop-session routes answer 401 without a credential, the admin routes are behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Three helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
+1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 6, macOS notifications on `@manut/notify-rules` (`feat/macos-notifications`, Sonnet);
    - item 11, the Playwright follow-up: the failing specs and a sharded CI job (`test/playwright-follow-up`, Sonnet;
      it opens a draft pull request into `pilot/week-1`: watch its CI, merge when the Playwright shards are green);
    - item 8b, the outpost in the desktop shell (`feat/desktop-outpost`, Opus; the first local Rust build, in the
-     shared target folder `~/Library/Caches/manut-ai-cargo-target`).
-   Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 7 (several shops,
-   the API side) and its console owner link and session end, 8a (the outpost's step channel), 9 (desktop
-   leftovers), the Playwright revival (#15) and `notify-rules` (#16).
+     shared target folder `~/Library/Caches/manut-ai-cargo-target`);
+   - browser control's slice 2, submitting steps through approval-core (`feat/browser-submit-steps`, Opus, API only);
+   - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2,
+     `feat/desktop-shop-switcher`, Opus).
+   Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
+   notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, 8a
+   (the outpost's step channel), 9 (desktop leftovers), the Playwright revival (#15) and `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2),
-     after item 6, which changes the same approvals code (Opus: per-shop sessions);
-   - browser control's slice 2, submitting steps through approval-core with member-grants' decide first, after 8b.
+   - the desktop running submit steps, after 8b and browser control's slice 2; the cloud outpost after that.
    - Before the next dev deploy: check that the new `OUTPOST_LIMITER` namespace ids in `apps/api/wrangler.jsonc`
      (2026112329 to 2026112332) do not clash with another rate limiter in the Cloudflare account.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
@@ -143,6 +146,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   toward the pilot gate (they do not now).
 - **The console's first page:** it opens on the first shop's messages; say if it should open on the new Shops
   overview instead.
+- **Notifications (item 6):** try a built app, not `tauri dev` (dev borrows Terminal's identity), to see the
+  Approve and Look first buttons; the new window and badge permissions take effect at the next Tauri build. Quiet
+  hours are on from the first run, 22:00 to 08:00 Bangkok time, with no time zone picker; say if they should start
+  off. The Dock number now counts only what waits for an answer, not unread automation answers.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's

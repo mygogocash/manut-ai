@@ -477,7 +477,7 @@ export const ko: Record<Key, string> = {
   "out.hideDetailsHint": "알림에 이름, 금액, 고객이 보이지 않고 확인이 필요한 요청이 몇 건인지만 알려 줘요.",
   "out.lockNote": "시스템 설정 › 알림 › 미리 보기 표시가 “잠금 해제됨”이면 macOS가 잠금 화면에서 미리 보기를 숨겨요. Manut AI는 화면이 잠겼는지 스스로 알 수 없어요.",
   "out.quiet": "조용한 시간",
-  "out.quietHint": "아무 소리도 나지 않아요. 요청은 소식에서 기다려요.",
+  "out.quietHint": "아무 소리도 나지 않아요. 요청은 확인 필요에서 기다려요.",
   "out.quietAlerts": "멈춘 라이브 페이지와 새 기기에서의 로그인은 그래도 알려 드려요.",
   "out.quietStart": "조용한 시간 시작",
   "out.quietEnd": "조용한 시간 끝",
