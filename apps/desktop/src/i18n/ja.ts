@@ -1689,7 +1689,7 @@ export const ja: Record<Key, string> = {
   "team.emptyTitle": "まだチームがいません",
   "team.emptyText": "アプリが Buddy とチームにつながると、ここに表示されます。",
   "history.find": "履歴を検索",
-  "history.findPh": "タイトルで検索",
+  "history.findPh": "タイトルと最新メッセージを検索",
   "history.emptyTitle": "まだ履歴はありません",
   "history.emptyText": "Buddy やチームとのスレッドが、新しい順にここに表示されます。",
   "history.none": "「{q}」に一致するスレッドはありません",
@@ -2135,4 +2135,8 @@ export const ja: Record<Key, string> = {
   "team.line.stuck": "前回の仕事が途中で止まりました。",
   "team.line.idleLast": "いまはやることがありません。最後の仕事：{when}。",
   "team.line.idle": "いまはやることがありません。",
+  // Needs you says since when an ask waits; History's chips and kinds
+  "needs.since": "{when}から待機中",
+  "history.show": "表示",
+  "history.lane.all": "すべて",
 };

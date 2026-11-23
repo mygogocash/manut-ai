@@ -233,6 +233,57 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The desktop's own: History's filter chips (the canvas's .fchip, scoped) beside the page's name, and a row's kind tag, a fixed
+   width so the titles line up. */
+.mpage .chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mpage .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.mpage .fchip:hover {
+  background: var(--hov);
+}
+.mpage .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.mpage .tag.kind {
+  flex: 0 0 52px;
+  justify-content: center;
+}
+/* Needs you: an ask's exact action sits under what is asked, as Home sets it, and Look first stands beside the row. */
+.mpage .need code.act {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: var(--rad-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.mpage .need .look {
+  flex: none;
+  margin: 0 6px;
+}
+
 /* A member's role sits beside their name on the first line, as the canvas sets it, and what they are doing is the second line,
    with how long it has run or how many more asks wait quietly at its end. Look first sits between the row and its menu. */
 .mpage .l1 .role {

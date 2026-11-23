@@ -1691,7 +1691,7 @@ export const en = {
   "team.emptyTitle": "No team yet",
   "team.emptyText": "Buddy and the team show here when the app reaches them.",
   "history.find": "Search history",
-  "history.findPh": "Search by title",
+  "history.findPh": "Search titles and latest messages",
   "history.emptyTitle": "Nothing here yet",
   "history.emptyText": "Threads with Buddy and the team show here, newest first.",
   "history.none": "No thread matches “{q}”",
@@ -2148,4 +2148,8 @@ export const en = {
   "team.line.stuck": "The last job stopped part way.",
   "team.line.idleLast": "Nothing to do right now. Last job: {when}.",
   "team.line.idle": "Nothing to do right now.",
+  // Needs you says since when an ask waits; History's chips and kinds
+  "needs.since": "Waiting since {when}",
+  "history.show": "Show",
+  "history.lane.all": "All",
 };
