@@ -14,3 +14,4 @@ export * from "./standing";
 export * from "./transitions";
 export * from "./store";
 export * from "./in-memory-store";
+export * from "./wire";
