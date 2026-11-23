@@ -94,6 +94,8 @@ export interface HomeViewProps {
   onSeeTeam: () => void;
   /** offered when the runtime has automations: how many jobs there are, and the page's opener */
   automations?: { count: number; open: () => void };
+  /** the shop's name as the first-run setup took it; "" or absent until then */
+  shop?: string;
 }
 
 /** The canvas's send arrow, routines calendar and settled tick, on its 16-unit grid (menuPages.css gives `.ic`). */
@@ -142,6 +144,13 @@ export function HomeView(p: HomeViewProps) {
           <span>Manut AI</span>
           <span className="mut">{t(words.word)}</span>
         </div>
+        {/* The desktop's own: the canvas's Home names the person and the shop only in the menu's account row. Home names
+            the shop here too, once the first-run setup took it, so the person sees the app is set up for their shop. */}
+        {p.shop && (
+          <p className="for" data-testid="home-shop">
+            {t("home.forShop", { shop: p.shop })}
+          </p>
+        )}
         <form
           className="ask"
           onKeyDown={holdImeEnter}
@@ -431,6 +440,7 @@ export function HomePage() {
       working={workingRows(s, now)}
       onSeeTeam={() => s.openPage("team")}
       automations={can("automations") ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
+      shop={s.ui.shop.shop}
     />
   );
 }

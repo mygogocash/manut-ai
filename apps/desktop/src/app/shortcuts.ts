@@ -22,6 +22,7 @@ import { SESSIONS_ENTRY } from "../sessions/entry";
 import { isTerminalRec } from "../sessions/agents";
 import { composing } from "../lib/ime";
 import { getTermPanel, toggleTerminal } from "../terminal/state";
+import { isFirstRunOpen } from "../onboarding/flow";
 import { listenMenuClose } from "./menuClose";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -90,104 +91,111 @@ function stepTerminal(step: 1 | -1) {
   if (to) store.actions.openSession(to);
 }
 
+// Ctrl+` is taken on the way down, before a focused terminal (xterm stops the keys it handles) can claim it. The
+// panel lives under the chat column, which a maximised side panel hides: showing it restores the side panel first
+export function onTerminalKey(e: KeyboardEvent): void {
+  // While the first-run setup fills the window, every key is the setup's: a shortcut would open a page, a chat or
+  // the terminal behind it, where the person cannot see what changed.
+  if (isFirstRunOpen(getStore().getState().ui)) return;
+  const hit = shortcutFor(e, isMac());
+  // Ctrl+Shift+] / [ on Windows and Linux: manut's own chord, which no shell needs; inside a terminal xterm would
+  // take it (as Ctrl+] / Ctrl+[), so it is taken here first. Every other Ctrl+key in a terminal stays the program's
+  if (hit?.kind === "session" && !isMac() && SESSIONS_ENTRY && inTerminal(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    stepTerminal(hit.step);
+    return;
+  }
+  if (hit?.kind !== "terminal") return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.repeat) return;
+  const store = getStore();
+  if (!getTermPanel().open && store.getState().ui.panelMax) store.actions.setPanelMax(false);
+  toggleTerminal();
+}
+
+/** Every other shortcut, as its key goes up through the page (exported so a test can press one). */
+export function onShortcutKey(e: KeyboardEvent): void {
+  if (isFirstRunOpen(getStore().getState().ui)) return;
+  const hit = shortcutFor(e, isMac());
+  if (!hit || hit.kind === "terminal") return;
+  if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session")) return;
+  // In a terminal session, Ctrl+<key> belongs to the program (Ctrl+K kills a line); ⌘ on macOS stays ours.
+  if (!isMac() && inTerminal(e.target)) return;
+  const store = getStore();
+  const s = store.getState();
+  const a = store.actions;
+  if (hit.kind === "stop") {
+    // Esc belongs to whatever is open first (popover, search field, inline rename, a card's input).
+    if (e.defaultPrevented) return;
+    const t = e.target as HTMLElement | null;
+    if (t && t.closest("input, [role=dialog], [role=menu], [role=listbox]")) return;
+    // Esc in the bottom terminal panel is the shell's: it neither stops an answer nor closes the panel
+    if (t && t.closest(".termpanel")) return;
+    // a maximised panel goes back to its own width first (the chat behind it is inert anyway)
+    if (s.ui.panelMax && s.ui.panelOpen) {
+      e.preventDefault();
+      a.setPanelMax(false);
+      return;
+    }
+    const bot = s.selectedBot;
+    if (s.ui.view === "chat" && bot && s.chats[bot]?.turn) {
+      e.preventDefault();
+      void a.interrupt();
+    } else if (s.ui.view === "session" && s.ui.session) {
+      // a SESSIONS chat: Esc is the agent's own interrupt (Claude Code `interrupt`, Codex `turn/interrupt`,
+      // pi `abort`, Hermes `session.interrupt`)
+      const key = getSessions().chatKey(s.ui.session);
+      if (key && s.chats[key]?.turn) {
+        e.preventDefault();
+        void getSessions().interrupt(s.ui.session);
+      }
+    }
+    return;
+  }
+  e.preventDefault();
+  if (hit.kind === "graph") {
+    // maximise the side panel in place, or restore it; a closed panel opens on Plans
+    if (s.ui.panelMax && s.ui.panelOpen) a.setPanelMax(false);
+    else if (s.selectedBot) {
+      if (s.ui.view !== "chat") a.closeSettings();
+      a.setPanelMax(true, s.ui.panelOpen ? undefined : "runs");
+    }
+  } else if (hit.kind === "bot") {
+    const b = selectSidebarBots(s)[hit.index];
+    if (b) void a.selectBot(b.name);
+  } else if (hit.kind === "new-session") {
+    // The + menu lives on the Code page. Away from it, the page opens first and its menu opens as it mounts (newMenu.ts).
+    if (s.ui.view !== "code") a.openPage("code");
+    openNewSessionMenu();
+  } else if (hit.kind === "session") {
+    stepTerminal(hit.step);
+  } else if (hit.kind === "next-ask") {
+    const n = nextAsk(selectAsks(s), s.ui.focusAsk);
+    if (n) void a.jumpToAsk(n.bot, n.item.id);
+  } else if (hit.kind === "search") {
+    // This is the menu's Search button: History opens with its search box focused (HistoryPage.tsx reads ui.findSeq).
+    a.openPage("history", { find: true });
+  } else if (hit.kind === "details") {
+    // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first
+    if (s.ui.view !== "chat" && s.ui.view !== "session") a.closeSettings();
+    a.togglePanel();
+  } else if (hit.kind === "settings") {
+    if (s.ui.view === "settings") a.closeSettings();
+    else a.openSettings();
+  }
+}
+
 export function useShortcuts(): void {
   useEffect(() => {
     // Close Window (⌘W) from the menu bar: a split pane with the keyboard closes before the window does
     listenMenuClose();
-    // Ctrl+` is taken on the way down, before a focused terminal (xterm stops the keys it handles) can claim it. The
-    // panel lives under the chat column, which a maximised side panel hides: showing it restores the side panel first
-    const onTerminalKey = (e: KeyboardEvent) => {
-      const hit = shortcutFor(e, isMac());
-      // Ctrl+Shift+] / [ on Windows and Linux: manut's own chord, which no shell needs; inside a terminal xterm would
-      // take it (as Ctrl+] / Ctrl+[), so it is taken here first. Every other Ctrl+key in a terminal stays the program's
-      if (hit?.kind === "session" && !isMac() && SESSIONS_ENTRY && inTerminal(e.target)) {
-        e.preventDefault();
-        e.stopPropagation();
-        stepTerminal(hit.step);
-        return;
-      }
-      if (hit?.kind !== "terminal") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.repeat) return;
-      const store = getStore();
-      if (!getTermPanel().open && store.getState().ui.panelMax) store.actions.setPanelMax(false);
-      toggleTerminal();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      const hit = shortcutFor(e, isMac());
-      if (!hit || hit.kind === "terminal") return;
-      if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session")) return;
-      // In a terminal session, Ctrl+<key> belongs to the program (Ctrl+K kills a line); ⌘ on macOS stays ours.
-      if (!isMac() && inTerminal(e.target)) return;
-      const store = getStore();
-      const s = store.getState();
-      const a = store.actions;
-      if (hit.kind === "stop") {
-        // Esc belongs to whatever is open first (popover, search field, inline rename, a card's input).
-        if (e.defaultPrevented) return;
-        const t = e.target as HTMLElement | null;
-        if (t && t.closest("input, [role=dialog], [role=menu], [role=listbox]")) return;
-        // Esc in the bottom terminal panel is the shell's: it neither stops an answer nor closes the panel
-        if (t && t.closest(".termpanel")) return;
-        // a maximised panel goes back to its own width first (the chat behind it is inert anyway)
-        if (s.ui.panelMax && s.ui.panelOpen) {
-          e.preventDefault();
-          a.setPanelMax(false);
-          return;
-        }
-        const bot = s.selectedBot;
-        if (s.ui.view === "chat" && bot && s.chats[bot]?.turn) {
-          e.preventDefault();
-          void a.interrupt();
-        } else if (s.ui.view === "session" && s.ui.session) {
-          // a SESSIONS chat: Esc is the agent's own interrupt (Claude Code `interrupt`, Codex `turn/interrupt`,
-          // pi `abort`, Hermes `session.interrupt`)
-          const key = getSessions().chatKey(s.ui.session);
-          if (key && s.chats[key]?.turn) {
-            e.preventDefault();
-            void getSessions().interrupt(s.ui.session);
-          }
-        }
-        return;
-      }
-      e.preventDefault();
-      if (hit.kind === "graph") {
-        // maximise the side panel in place, or restore it; a closed panel opens on Plans
-        if (s.ui.panelMax && s.ui.panelOpen) a.setPanelMax(false);
-        else if (s.selectedBot) {
-          if (s.ui.view !== "chat") a.closeSettings();
-          a.setPanelMax(true, s.ui.panelOpen ? undefined : "runs");
-        }
-      } else if (hit.kind === "bot") {
-        const b = selectSidebarBots(s)[hit.index];
-        if (b) void a.selectBot(b.name);
-      } else if (hit.kind === "new-session") {
-        // The + menu lives on the Code page. Away from it, the page opens first and its menu opens as it mounts (newMenu.ts).
-        if (s.ui.view !== "code") a.openPage("code");
-        openNewSessionMenu();
-      } else if (hit.kind === "session") {
-        stepTerminal(hit.step);
-      } else if (hit.kind === "next-ask") {
-        const n = nextAsk(selectAsks(s), s.ui.focusAsk);
-        if (n) void a.jumpToAsk(n.bot, n.item.id);
-      } else if (hit.kind === "search") {
-        // This is the menu's Search button: History opens with its search box focused (HistoryPage.tsx reads ui.findSeq).
-        a.openPage("history", { find: true });
-      } else if (hit.kind === "details") {
-        // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first
-        if (s.ui.view !== "chat" && s.ui.view !== "session") a.closeSettings();
-        a.togglePanel();
-      } else if (hit.kind === "settings") {
-        if (s.ui.view === "settings") a.closeSettings();
-        else a.openSettings();
-      }
-    };
     window.addEventListener("keydown", onTerminalKey, true);
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onShortcutKey);
     return () => {
       window.removeEventListener("keydown", onTerminalKey, true);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onShortcutKey);
     };
   }, []);
 }

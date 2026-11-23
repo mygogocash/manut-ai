@@ -56,3 +56,31 @@ describe("⌘⇧[ ] step order", () => {
     expect(terminalOrder(rows, ["/w/other"])).toEqual(["b", "a", "c"]);
   });
 });
+
+describe("the shortcuts while the first-run setup fills the window", () => {
+  it("change nothing behind it, the terminal included, and work again once it ends", async () => {
+    const { getStore } = await import("../state/store");
+    const { getTermPanel } = await import("../terminal/state");
+    const { isMac, onShortcutKey, onTerminalKey } = await import("./shortcuts");
+    const store = getStore();
+    await store.actions.init();
+    // the test node keeps nothing, so this is a first run
+    expect(store.getState().ui.firstRun?.screen).toBe("welcome");
+    const mod = isMac() ? { metaKey: true } : { ctrlKey: true };
+    const press = (e: K) => {
+      const ev = { ...e, target: null, repeat: false, defaultPrevented: false, preventDefault() {}, stopPropagation() {} } as unknown as KeyboardEvent;
+      onTerminalKey(ev);
+      onShortcutKey(ev);
+    };
+    const before = store.getState();
+    press(k("k", "KeyK", mod)); // History with its search box
+    press(k(",", "Comma", mod)); // Settings
+    press(k("2", "Digit2", mod)); // the second member's chat
+    press(k("`", "Backquote", { ctrlKey: true })); // the terminal panel
+    expect(store.getState()).toBe(before);
+    expect(getTermPanel().open).toBe(false);
+    store.actions.firstRunEnd();
+    press(k("k", "KeyK", mod));
+    expect(store.getState().ui.view).toBe("history");
+  });
+});

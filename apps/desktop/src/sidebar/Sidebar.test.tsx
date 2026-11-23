@@ -12,7 +12,7 @@ const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " 
 const count = (html: string, needle: string) => html.split(needle).length - 1;
 const noop = () => {};
 
-function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentItem[]; settings?: boolean } = {}) {
+function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentItem[]; settings?: boolean; account?: { name: string; initial: string } } = {}) {
   setLang("en");
   return renderToString(
     <SideMenu
@@ -20,6 +20,7 @@ function menu(over: { current?: MenuRow | null; needs?: number; recent?: RecentI
       needs={over.needs ?? 0}
       recent={over.recent ?? []}
       settings={over.settings ?? false}
+      account={over.account}
       onRow={noop}
       onSearch={noop}
       onAccount={noop}
@@ -71,6 +72,14 @@ describe("the side menu", () => {
     expect(menu({ current: null, settings: true })).toMatch(/class="acct" aria-current="page"/);
   });
 
+  it("names the person and the shop on the account row once they are known, as the canvas's Fon, Baan Mali", () => {
+    const html = menu({ account: { name: "Fon, Baan Mali", initial: "F" } });
+    expect(html).toMatch(/<span class="av" aria-hidden="true">F<\/span><span class="acct-n">Fon, Baan Mali<\/span>/);
+    expect(words(html)).toMatch(/Fon, Baan Mali , Settings/);
+    // until then it says You, as before
+    expect(menu()).toMatch(/<span class="av" aria-hidden="true">Y<\/span><span class="acct-n">You<\/span>/);
+  });
+
   it("shows no budget until the runtime has one: no invented numbers", () => {
     const html = menu();
     expect(html).not.toContain("planp");
@@ -102,5 +111,20 @@ describe("the menu on the app's store", () => {
     expect(count(html, 'class="nav')).toBe(7);
     expect(html).not.toMatch(/class="nav[^"]*" aria-current/);
     expect(html).toMatch(/class="acct" aria-current="page"/);
+  });
+
+  it("names the person and the shop the first-run setup kept, as soon as a step's Next keeps them", async () => {
+    setLang("en");
+    const store = getStore();
+    await store.actions.init();
+    const a = store.actions;
+    a.openFirstRun();
+    a.firstRunDo({ type: "edit", field: "person", value: "Fon" });
+    a.firstRunDo({ type: "edit", field: "shop", value: "Baan Mali" });
+    a.firstRunDo({ type: "place", channel: "line" });
+    expect(words(renderToString(<Sidebar />))).not.toContain("Baan Mali");
+    a.firstRunDo({ type: "next" });
+    expect(renderToString(<Sidebar />)).toMatch(/<span class="av" aria-hidden="true">F<\/span><span class="acct-n">Fon, Baan Mali<\/span>/);
+    a.firstRunEnd();
   });
 });

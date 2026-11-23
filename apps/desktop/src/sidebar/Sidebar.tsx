@@ -17,6 +17,7 @@ import { t, type Key } from "../i18n";
 import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, useStore } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
+import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentThreads, rowPage, type MenuRow } from "./menu";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
@@ -45,6 +46,7 @@ export function SideMenu({
   needs,
   recent,
   settings,
+  account = accountLabel(EMPTY_SHOP),
   onRow,
   onSearch,
   onAccount,
@@ -57,6 +59,8 @@ export function SideMenu({
   recent: RecentItem[];
   /** Settings is open: the account row is current, as on the canvas's Settings board */
   settings: boolean;
+  /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
+  account?: { name: string; initial: string };
   onRow: (row: MenuRow) => void;
   onSearch: () => void;
   onAccount: () => void;
@@ -110,13 +114,14 @@ export function SideMenu({
       )}
       <div className="sb-foot">
         {foot}
-        {/* Who uses the app, and their settings. The canvas names the owner and the shop here, but the runtime names
-            neither yet, so the row says "You" and adds nothing made up. */}
+        {/* Who uses the app, and their settings. The canvas names the owner and the shop here ("Fon, Baan Mali"): the
+            row names them as the first-run setup took them on this computer, and says "You" for what it was not told,
+            never anything made up. */}
         <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
           <span className="av" aria-hidden="true">
-            {Array.from(t("nav.you"))[0]}
+            {account.initial}
           </span>
-          <span className="acct-n">{t("nav.you")}</span>
+          <span className="acct-n">{account.name}</span>
           <span className="vh">, {t("nav.settings")}</span>
         </button>
       </div>
@@ -141,6 +146,7 @@ export function Sidebar() {
       needs={selectAsks(s).length}
       recent={recent}
       settings={s.ui.view === "settings"}
+      account={accountLabel(s.ui.shop)}
       onRow={go}
       onSearch={() => s.openPage("history", { find: true })}
       onAccount={() => s.openSettings()}
