@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import { LANGS, setLang, t } from "../i18n";
 import type { MemoryFact, MemorySource } from "../runtime/memory";
+import { MockHost, MockRuntime } from "../runtime/mock";
 import {
   correctionReady,
   groupFacts,
   MEMORY_START,
+  memoryDo,
   memoryReduce,
   memoryStep,
   refusalText,
@@ -17,6 +19,7 @@ import {
   sourceLine,
   withFact,
   withoutFact,
+  type MemoryCalls,
   type MemoryUi,
 } from "./memory";
 
@@ -268,14 +271,116 @@ describe("how a refusal reaches the owner", () => {
     const refused = await memoryStep(async () => {
       throw { code: "already_known", message: "The team already knows this." };
     });
-    expect(refused).toEqual({ ok: false, message: "Your team already knows this." });
+    expect(refused).toEqual({ ok: false, code: "already_known", message: "Your team already knows this." });
     const notYet = await memoryStep(async () => {
       throw { code: "not_yet", message: "Not yet: Connected mode only reads for now." };
     });
-    expect(notYet).toEqual({ ok: false, message: "Not yet: Connected mode only reads for now." });
+    expect(notYet).toEqual({ ok: false, code: "not_yet", message: "Not yet: Connected mode only reads for now." });
     const broken = await memoryStep(async () => {
       throw new Error("the socket closed");
     });
-    expect(broken).toEqual({ ok: false, message: "the socket closed" });
+    expect(broken).toEqual({ ok: false, code: "internal", message: "the socket closed" });
+  });
+});
+
+describe("an action the owner takes, applied to the list the page shows", () => {
+  /** The demo runtime, as the store's own actions reach it. */
+  async function demo(): Promise<{ calls: MemoryCalls; facts: MemoryFact[] }> {
+    const rt = new MockRuntime(new MockHost({ now: () => 1_800_000_000 }));
+    await rt.connect();
+    const calls: MemoryCalls = {
+      memoryRemember: (text) => rt.request("memory.remember", { text }),
+      memoryConfirm: (fact) => rt.request("memory.confirm", { fact }),
+      memoryCorrect: (fact, text) => rt.request("memory.correct", { fact, text }),
+      memoryForget: (fact) => rt.request("memory.forget", { fact }),
+    };
+    return { calls, facts: (await rt.request("memory.list", {})).facts };
+  }
+  const refuses = (code: string, message: string): MemoryCalls => {
+    const no = async (): Promise<never> => {
+      throw { code, message };
+    };
+    return { memoryRemember: no, memoryConfirm: no, memoryCorrect: no, memoryForget: no };
+  };
+
+  it("adds a fact the owner remembered at the end of the list, and ends the question", async () => {
+    const { calls, facts } = await demo();
+    const step = await memoryDo(calls, facts, { what: "remember", text: "We ship on weekdays" });
+    expect(step.facts.map((f) => f.text)).toEqual([...facts.map((f) => f.text), "We ship on weekdays"]);
+    expect(step.facts.at(-1)).toMatchObject({ status: "confirmed", source: { kind: "owner" } });
+    expect(step.action).toEqual({ type: "done", what: "remember" });
+  });
+
+  it("keeps the list and says why when the runtime already knows it", async () => {
+    const { calls, facts } = await demo();
+    const step = await memoryDo(calls, facts, { what: "remember", text: "jasmine is the best seller" });
+    expect(step.facts).toEqual(facts);
+    expect(step.action).toEqual({ type: "failed", message: "Your team already knows this." });
+  });
+
+  it("confirms a waiting fact where it stands, so it joins what the team knows", async () => {
+    const { calls, facts } = await demo();
+    const waiting = facts.find((f) => f.status === "waiting") as MemoryFact;
+    const step = await memoryDo(calls, facts, { what: "confirm", fact: waiting.id });
+    expect(step.facts.map((f) => f.id)).toEqual(facts.map((f) => f.id));
+    expect(step.facts.find((f) => f.id === waiting.id)?.status).toBe("confirmed");
+    expect(groupFacts(step.facts).waiting).toEqual([]);
+    expect(step.action).toEqual({ type: "done", what: "confirm" });
+  });
+
+  it("replaces a corrected fact's words where it stands, and marks it corrected", async () => {
+    const { calls, facts } = await demo();
+    const step = await memoryDo(calls, facts, { what: "correct", fact: facts[0].id, text: "Free shipping on orders over ฿900" });
+    expect(step.facts.map((f) => f.id)).toEqual(facts.map((f) => f.id));
+    expect(step.facts[0]).toMatchObject({ text: "Free shipping on orders over ฿900", status: "confirmed" });
+    expect(step.facts[0].correctedAt).not.toBeNull();
+    expect(step.action).toEqual({ type: "done", what: "correct" });
+  });
+
+  it("takes a forgotten fact out of the list, and leaves none of its words anywhere in what comes back", async () => {
+    const { calls, facts } = await demo();
+    const step = await memoryDo(calls, facts, { what: "forget", fact: facts[2].id });
+    expect(step.facts.map((f) => f.id)).not.toContain(facts[2].id);
+    expect(step.facts).toHaveLength(facts.length - 1);
+    expect(JSON.stringify(step)).not.toContain("best seller");
+    expect(step.action).toEqual({ type: "done", what: "forget" });
+  });
+
+  it("drops a fact the runtime says is gone, since the owner is looking at a list that has gone out of date", async () => {
+    const { calls, facts } = await demo();
+    for (const todo of [
+      { what: "forget", fact: "f999" },
+      { what: "confirm", fact: "f999" },
+      { what: "correct", fact: "f999", text: "Anything" },
+    ] as const) {
+      const ghost = [...facts, { ...facts[0], id: "f999", text: "A fact that is already gone" }];
+      const step = await memoryDo(calls, ghost, todo);
+      expect(step.facts.map((f) => f.id), todo.what).toEqual(facts.map((f) => f.id));
+      expect(JSON.stringify(step), todo.what).not.toContain("already gone");
+      expect(step.action, todo.what).toEqual({ type: "failed", message: "That fact is gone already." });
+    }
+  });
+
+  it("keeps the whole list, and says the runtime's own words, when the runtime says not yet", async () => {
+    const { facts } = await demo();
+    const calls = refuses("not_yet", "Not yet: Connected mode only reads for now.");
+    for (const todo of [
+      { what: "remember", text: "We ship on weekdays" },
+      { what: "confirm", fact: facts[4].id },
+      { what: "correct", fact: facts[0].id, text: "Other words" },
+      { what: "forget", fact: facts[0].id },
+    ] as const) {
+      const step = await memoryDo(calls, facts, todo);
+      expect(step.facts, todo.what).toEqual(facts);
+      expect(step.action, todo.what).toEqual({ type: "failed", message: "Not yet: Connected mode only reads for now." });
+    }
+  });
+
+  it("does not change the list it was given", async () => {
+    const { calls, facts } = await demo();
+    const before = JSON.stringify(facts);
+    await memoryDo(calls, facts, { what: "forget", fact: facts[0].id });
+    await memoryDo(calls, facts, { what: "remember", text: "One more" });
+    expect(JSON.stringify(facts)).toBe(before);
   });
 });
