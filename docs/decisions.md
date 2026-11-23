@@ -6,6 +6,7 @@ calls only). Anything about money, legal, launch dates or customers goes to the 
 
 | Date | Decision | Why | By | Undo by |
 | --- | --- | --- | --- | --- |
+| 23 Nov 2026 | A cloud routine works on the repository at night (22:00 to 06:00 Bangkok, every 2 hours, Sonnet 5.5): one queued task per run, on a `cloud/<task>` branch with a draft pull request into the active `pilot/*` branch | Progress while the owner's Mac is closed; the schedule and model are the owner's choice | Owner | Pause or delete it at claude.ai/code/routines |
 | 23 Nov 2026 | The GitHub Actions test workflow is manual only; tests run on the developer Mac before every commit | GitHub refused to start jobs for the organisation: a payment failed or the spending limit needs raising. Billing is the owner's call | Claude | Restore the `pull_request` trigger in `.github/workflows/test.yml` once billing is sorted |
 | 23 Nov 2026 | `.claude/settings.json` denies pushing to main, force pushes, merging pull requests and staging or production deploys | The owner's limits hold in every permission mode, not only by habit | Claude | Edit the deny list |
 | 23 Nov 2026 | A decision on an older revision is refused even when it is a decline; a helper can neither approve nor decline owner-only kinds | The person must act on the exact request they saw; stricter than GoSpark, which let a decline through | Claude | `evaluateDecision` in `packages/approval-core` |

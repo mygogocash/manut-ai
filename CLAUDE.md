@@ -3,8 +3,8 @@
 One app for Thai shop owners who are not technical: a chat with Buddy, an AI team that does the work and asks
 before anything public, costly or irreversible, and a code editor. Write the product name as "Manut AI".
 
-Read `README.md` for the layout and commands, `docs/pilot-api.md` for the backend and web contract, and
-`docs/decisions.md` for every decision so far. The plan is the implementation plan doc
+Read `README.md` for the layout and commands, `docs/plan.md` for where things stand and the task queue,
+`docs/pilot-api.md` for the backend and web contract, and `docs/decisions.md` for every decision so far. The plan is the implementation plan doc
 (https://claude.ai/artifact/UBrAFtxwR159AM2rxbLTMr); the screen spec is the design canvas
 (https://claude.ai/artifact/Qd8PtNKK48ji7cFU4SpTsG).
 
