@@ -58,6 +58,18 @@ export const AUDIT_ACTIONS = [
   "memory.confirmed",
   "memory.corrected",
   "memory.forgotten",
+  // The team's routines and setup (routine-store.ts): changes by an operator or the shop's own session, each run of a
+  // routine by the system, a shop template applied, and a first-week question answered. Each names a routine, a
+  // template, a question or a fact by its id, never a routine's name, a question or an answer.
+  "routine.created",
+  "routine.paused",
+  "routine.resumed",
+  "routine.removed",
+  "routine.ran",
+  "team.paused",
+  "team.resumed",
+  "template.applied",
+  "question.answered",
   // The people around the shop (people-store.ts): the owner's changes through the console, and what a helper did. Each
   // names an invite, a helper or a request by its id, never a name, a note or an identity's value.
   "invite.created",
@@ -98,6 +110,9 @@ export const AUDIT_OUTCOMES = [
   "done",
   "cancelled",
   "superseded",
+  // A routine's run that did not start: paused, refused by a switch or consent, or too late to run (routine-store.ts).
+  "skipped",
+  "missed",
 ] as const;
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 
@@ -113,6 +128,9 @@ export const AUDIT_SUBJECT_KEYS = [
   "previousConnectionId",
   "confirmationId",
   "factId",
+  "routineId",
+  "templateId",
+  "questionId",
   "inviteId",
   "helperId",
   "signInId",

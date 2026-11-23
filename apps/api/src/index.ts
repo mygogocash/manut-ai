@@ -15,6 +15,7 @@ import { memoryAdminRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { peopleRoute } from "./people";
 import { pilotRoute } from "./pilot";
+import { routinesRoute } from "./routines";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
@@ -222,6 +223,12 @@ const ADMIN_METHODS = new Set([
   // query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
   "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
+  // The team's routines (routines.ts): list a shop's with the team, make one, pause, resume or remove one, and pause or
+  // resume the whole team; the shop templates a new shop can start from, and a shop's first-week questions with the
+  // owner's answer relayed. The tenant and the ids travel in the query or the body.
+  "GET /v1/admin/routines", "POST /v1/admin/routines", "POST /v1/admin/routines/pause", "POST /v1/admin/routines/resume",
+  "POST /v1/admin/routines/remove", "POST /v1/admin/team/pause", "POST /v1/admin/team/resume",
+  "GET /v1/admin/templates", "GET /v1/admin/questions", "POST /v1/admin/questions/answer",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -661,6 +668,12 @@ export default {
     if (vault) return vault;
     const outpost = await outpostRoute(request, url, env, () => featureFlags(env));
     if (outpost) return outpost;
+
+    // The team's routines, Pause everyone, shop templates and their first-week questions (routines.ts): the
+    // operator's routes, under the admin gate above, and the shop's own session's routes. Making or changing a routine
+    // runs nothing; each run reads the switches and the owner's consent again.
+    const routines = await routinesRoute(request, url, env, ctx);
+    if (routines) return routines;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

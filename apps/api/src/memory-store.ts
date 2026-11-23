@@ -166,22 +166,39 @@ function apply(storage: DurableObjectStorage, tenant: string, body: Record<strin
   }
   const input: Input = { id: typeof id === "string" ? id : "", text: body.text, source: body.source, nowMs: isTime(nowMs) ? nowMs : 0 };
   const actor = actorOr(body.actor, SYSTEM);
-  const answer = storage.transactionSync((): { status: number; body: unknown } => {
-    const kv = storage.kv;
-    const before = readState(kv, tenant);
-    const result = operation.run(before, input);
-    if (!result.ok) return { status: STATUS[result.reason], body: { error: result.reason } };
-    const fact = "fact" in result ? result.fact : null;
-    if (result.state !== before) {
-      kv.put(key(tenant), result.state);
-      // A proposal that waits for the owner says so, so the log shows what is waiting on whom.
-      const outcome: AuditOutcome = operation.action === "memory.proposed" && fact?.status === "waiting" ? "awaiting_owner" : "ok";
-      auditPutSync(kv, tenant, actor ? { actor, action: operation.action, subject: { factId: fact?.id ?? input.id }, outcome } : null,
-        operation.action);
-    }
-    return { status: 200, body: fact ?? { id: input.id } };
-  });
+  const answer = storage.transactionSync(() => applyWithin(storage.kv, tenant, operation, input, actor));
   return json(answer.body, answer.status);
+}
+
+/// The body of one change, inside a transaction the caller already holds: the state read, the rule applied, and the
+/// new state and its audit entry written, all through the synchronous API, so they commit or roll back with whatever
+/// else the caller writes in that transaction.
+function applyWithin(kv: SyncKvStorage, tenant: string, operation: Operation, input: Input, actor: AuditActor | undefined):
+  { status: number; body: unknown } {
+  const before = readState(kv, tenant);
+  const result = operation.run(before, input);
+  if (!result.ok) return { status: STATUS[result.reason], body: { error: result.reason } };
+  const fact = "fact" in result ? result.fact : null;
+  if (result.state !== before) {
+    kv.put(key(tenant), result.state);
+    // A proposal that waits for the owner says so, so the log shows what is waiting on whom.
+    const outcome: AuditOutcome = operation.action === "memory.proposed" && fact?.status === "waiting" ? "awaiting_owner" : "ok";
+    auditPutSync(kv, tenant, actor ? { actor, action: operation.action, subject: { factId: fact?.id ?? input.id }, outcome } : null,
+      operation.action);
+  }
+  return { status: 200, body: fact ?? { id: input.id } };
+}
+
+/// The owner's own fact, as `POST /memory/remember` makes it (the package's `remember`, with the owner as its source),
+/// inside a transaction the caller holds. routine-store.ts records a first-week answer this way and links its question
+/// to the fact in the same transaction, so an answer is never kept without its fact, or a fact without its question.
+/// Answers the fact, or the package's refusal with the status the routes give it.
+export function rememberWithin(kv: SyncKvStorage, tenant: string, text: unknown, nowMs: number, actor: AuditActor):
+  { ok: true; fact: rules.Fact } | { ok: false; status: number; error: Refusal } {
+  const answer = applyWithin(kv, tenant, OPERATIONS["POST /memory/remember"]!, { id: "", text, source: undefined, nowMs },
+    actor);
+  if (answer.status === 200) return { ok: true, fact: answer.body as rules.Fact };
+  return { ok: false, status: answer.status, error: (answer.body as { error: Refusal }).error };
 }
 
 /// Part of the TenantObject's tenant wipe: the shop's state, the fingerprints in it included.

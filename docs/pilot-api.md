@@ -132,7 +132,7 @@ type DeletionView = {
 
 | Method and path | Body or query | Answer |
 | --- | --- | --- |
-| `POST /v1/admin/pilot/shops` | `{ name, ownerName }` | `{ tenant, name, ownerName }` |
+| `POST /v1/admin/pilot/shops` | `{ name, ownerName, template? }` | `{ tenant, name, ownerName, template? }`. 400 `{ "error": "unknown_template" }`, making no shop, for a template that is not one ("Shop templates", below) |
 | `GET /v1/admin/pilot/shops` | none | `{ shops: Shop[] }` |
 | `POST /v1/admin/pilot/line-connections` | `{ tenant, channelId, botUserId, channelSecret, channelAccessToken }` | `{ connectionId, webhookUrl }` |
 | `GET /v1/admin/pilot/messages` | `?tenant=` | `{ messages: InboundMessage[] }`, newest first |
@@ -171,6 +171,7 @@ type Shop = {
   name: string;
   ownerName: string;
   lineConnectionId?: string;
+  template?: string;            // the shop template it was made from, if any ("Shop templates", below)
   consent: boolean;
   deletion?: DeletionRequest;   // the shop's latest deletion put to its owner, if any
 };
@@ -437,7 +438,7 @@ What is written, and by whom:
 | `attempt.started` | system | `taskId`, `attemptId` | `ok` |
 | `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
 | `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
-| `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
+| `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the linked account's id for an owner session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
 | `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
@@ -456,8 +457,10 @@ What is written, and by whom:
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply decided through the owner's link keeps its
 `reply.*` entries and writes no `approval.*` one; a reply decided from a session ("Deciding from a session", below)
-writes `approval.decided`, naming the shop's own session or the helper. The people entries name invites, helpers and
-requests by id only: never a name, a note, or an identity's value.
+writes `approval.decided`, naming the shop's own session, the owner's linked account or the helper. The people entries
+name invites, helpers and requests by id only: never a name, a note, or an identity's value. The several-shops entries
+(`owner.linked`, `owner.unlinked`, `owner.session_opened`) name the owner's linked account by its id
+(`ownerAccountId`), never the account itself or a code.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
   and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
@@ -1162,7 +1165,8 @@ type HelperSession = {
 
 A helper session is accepted by `GET /v1/approvals`, `POST /v1/approvals/{requestId}/decision` and
 `POST /v1/approvals/{requestId}/pass-on`, for its own shop only. Every other session route answers it 401: a helper
-never acts as the shop. The shop keeps only its SHA-256.
+never acts as the shop. The team's routines (`/v1/routines`, `/v1/team/*`, "Routines", below) answer it 403
+`owner_only` instead, so a helper's app does not read its session as ended. The shop keeps only its SHA-256.
 
 **`POST /v1/approvals/{requestId}/pass-on`** with `{ note }` and a helper session: the helper hands the owner a request
 they may not decide, with a note of 1 to 500 characters (trimmed). It decides nothing: the request keeps waiting for
@@ -1179,6 +1183,198 @@ people record, never in the audit log.
 | 409 | `{ error: "decide_yourself" }` | A message or a reply, which the helper decides |
 | 409 | `{ error: "already_decided", by, at }` | Someone decided it: who and when |
 | 409 | `{ error: "already_passed" }` | A request is passed on once |
+
+## Routines
+
+What Buddy's team does on its own schedule, per shop (`apps/api/src/routines.ts`, `routine-store.ts`,
+`routine-setup.ts`), on `@manut/routine-rules`: a morning brief every day at 08:00, a weekly growth brief, the books on
+the last day of the month. A run only ever makes a worker's draft for the owner to read: nothing is sent, posted or
+paid by a routine, and a routine that would reply, send, pay or delete always asks first.
+
+### Routes
+
+An operator's, under the admin gate as exact `ADMIN_METHODS` entries. The tenant travels in the query or the body, and a
+change needs an existing pilot shop (404 `shop_not_found` otherwise), as the console's other writes do.
+
+| Method and path | Body or query | Answer |
+| --- | --- | --- |
+| `GET /v1/admin/routines` | `?tenant=` | `RoutinesView` |
+| `POST /v1/admin/routines` | `{ tenant, name, action, trigger, timeZone?, asksFirst?, member? }` | `{ routine: Routine }`, switched on |
+| `POST /v1/admin/routines/pause` | `{ tenant, routineId }` | `{ routine }`. Pausing a paused routine changes nothing and logs nothing |
+| `POST /v1/admin/routines/resume` | `{ tenant, routineId }` | `{ routine }`, its next run worked out from now |
+| `POST /v1/admin/routines/remove` | `{ tenant, routineId }` | `{ removed: routineId }`: the routine, its runs and its clock go |
+| `POST /v1/admin/team/pause` | `{ tenant }` | `{ team: Team }`: Pause everyone |
+| `POST /v1/admin/team/resume` | `{ tenant }` | `{ team }` |
+
+The shop's own session (the lifted auth's, whose tenant is the shop) has the same routes for its own shop, with no
+`tenant` in the body (a body that names one is refused): `GET /v1/routines`, `POST /v1/routines`,
+`POST /v1/routines/pause`, `POST /v1/routines/resume`, `POST /v1/routines/remove` (each `{ routineId }`), and
+`POST /v1/team/pause` and `POST /v1/team/resume` (`{}`). No session answers 401 `unauthorized`, and so does the operator
+key; a helper's session answers 403 `owner_only`, because the team's routines are the owner's. A pilot shop's tenant can
+never be a session, so its routines are the operator's until the operator links the owner's account: that account's
+owner session then has these routes for its shop ("Several shops", below), and the log names the account's id.
+
+Making, pausing, resuming or removing a routine needs neither a switch nor the owner's consent: nothing runs then. Every
+run reads both.
+
+```ts
+type Trigger =
+  | { kind: "daily"; at: string }                          // "08:00"
+  | { kind: "weekly"; weekdays: number[]; at: string }     // 0 is Sunday
+  | { kind: "monthly"; day: number | "last"; at: string }  // a day from 1 to 28, or the last day
+  | { kind: "window"; from: string; to: string }           // may cross midnight: 21:00 to 08:00
+  | { kind: "stockBelow"; threshold: number };             // a whole number from 1
+
+type Routine = {
+  id: string;                    // "rt-…": sorts by when it was made, so the list reads in that order
+  name: string;                  // 1 to 80 characters, trimmed
+  action: "brief" | "draft" | "reply" | "send" | "pay" | "delete";
+  trigger: Trigger;
+  timeZone: string;              // "Asia/Bangkok" unless the body says another IANA zone
+  asksFirst: boolean;
+  member: "nam" | "pim" | "ton"; // whose job each run starts
+  when: string;                  // describeTrigger: "Every day at 08:00", "When stock drops under 5"
+  paused: boolean;
+  next: string | null;           // nextRun; null while it or the team is paused, its member is off, or it waits on stock
+  waitsFor?: "stock_feed";       // a stock routine: there is no stock feed yet, so it never runs
+  template?: string;             // the shop template it came from
+  createdAt: string;
+  lastRun: RoutineRun | null;
+};
+
+type RoutineRun = {
+  routineId: string;
+  instant: string;               // the instant the run was meant for, never when an alarm came
+  status: "running" | "done" | "failed" | "skipped" | "missed";
+  reason?: string;               // a code (below)
+  member: "nam" | "pim" | "ton";
+  taskId?: string;               // the job's task, for a run that started one
+  at: string;
+};
+
+type Team = {
+  paused: boolean;               // Pause everyone
+  since: string | null;
+  members: ("nam" | "pim" | "ton")[];  // the members on: all three, unless a shop template turned on fewer
+};
+
+type RoutinesView = { tenant: string; team: Team; routines: Routine[] };
+```
+
+A refusal answers `{ "error": code }`, and nothing is kept:
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `invalid_name`, `invalid_action`, `invalid_time_zone`, `invalid_trigger`, `invalid_time`, `invalid_weekdays`, `invalid_day`, `invalid_window`, `invalid_threshold` | routine-rules' own refusals |
+| 400 | `must_ask_first` | `asksFirst: false` for a routine that replies, sends, pays or deletes: refused, never quietly changed |
+| 400 | `unknown_member` | `member` is not `nam`, `pim` or `ton` |
+| 400 | `wrong_member` | The routine is not that member's work (below) |
+| 400 | `invalid_request`, `tenant_required` | Another field, a `routineId` that is not one, no valid tenant |
+| 404 | `not_found` | The shop has no routine with that id |
+| 409 | `full` | The shop already has 50 routines |
+| 503 | `clock_unavailable`, `routines_unavailable` | The schedule object or the shop's object could not be reached |
+
+**Rules**
+
+- **Asks first.** Left out, `asksFirst` is true for a reply, a send, a payment or a deletion, and false for a brief or a
+  draft, which only the owner sees. A brief or a draft may still be made to ask.
+- **Who runs it.** Nam drafts replies (`reply`); Pim drafts posts (`draft`, or `send` for a post that sending will ask
+  for); Ton drafts the owner's briefs and the books (`brief`, `draft`, `send`, `pay`, `delete`). Left out, the member
+  is Nam for a reply and Ton for the rest.
+- **Clocks.** A daily or weekly routine is a schedule on the shop's lifted schedule object, through routine-rules'
+  `toSchedule` (its `ScheduleJSON` carries `routineId`, and the public `/v1/schedules` routes answer 409
+  `routine_schedule` to saving over it or deleting it). A monthly or window routine is a timer in the same object, timed
+  by `nextRun`, and swept by the same alarm; a window runs once a day, at its start. A stock routine has no clock. A
+  clock is made before its routine and removed after it, so a change that stops part way leaves at most a clock with no
+  routine, which removes itself at its first instant.
+- **One run per instant.** Each run is claimed in the shop's object by the routine and the instant it was meant for, so
+  a duplicate alarm or a clock saved again never runs it twice. An alarm more than 15 minutes late records the run
+  `missed` and does not run it. Only the latest instant is considered: older ones are not caught up, and a new clock
+  never opens with old misses.
+- **Skipped, and why.** A run does not start, and says so as `skipped` with a reason, while the routine is paused
+  (`routine_paused`), everyone is paused (`team_paused`), its member is not on the team (`member_off`), routines or cloud
+  work are off by the environment's default with no switch set (`routines_off`, `cloud_off`), or the owner has not
+  consented to cloud work (`consent_required`). A template's routines start paused, so they record `skipped` at each
+  time they would have run until the owner turns them on.
+- **Kill switches.** An operator's `officeRoutines` or `officeCloud` switch set off stops every clock, as it stops every
+  schedule: nothing runs and nothing is recorded while it is off, and a withdrawn consent does the same. Once it is on
+  again, the latest instant is recorded `missed` if it is past the grace.
+- **A run.** The job flow's own worker (`runWorker`, "Workers", above), started by the system: Ton's summary of
+  yesterday's sales, Pim's post about the routine's name, or Nam's reply to the newest customer message with no reply
+  that came in since the routine last ran (`skipped` with `nothing_to_answer` when there is none). It ends `done` with
+  its task, or `failed` with its task when it had one and the job's reason (`not_configured`, `budget`,
+  `shop_not_found`, ..., or `job_error` when the job broke part way). A claimed run is never run again, whatever its
+  end. The draft is on the job's task, and nothing on it is sent.
+- **Audit.** `routine.created`, `routine.paused`, `routine.resumed` and `routine.removed` by whoever made the change (the
+  operator's Access identity, or the owner's session as `owner-session`); `routine.ran` by the system, with the run's
+  outcome (`done`, `failed`, `skipped` or `missed`) and its reason; `team.paused` and `team.resumed`. Each names the
+  routine by id (and the job's task for a run that started one), never its name.
+- **Export and deletion.** The shop's export carries `routines`: the team, every routine, the first-week questions
+  (below) and every run kept (the newest 30 of each routine). Deleting the shop removes them with its other records,
+  and its clocks with its schedules.
+
+## Shop templates
+
+A new shop can start from one of `@manut/shop-templates`' three templates: `handmade` ("Handmade and gifts"),
+`fashion` ("Clothes and accessories") or `food` ("Packaged food and drinks"). The console's new-shop form offers them.
+
+**`GET /v1/admin/templates`** answers `{ templates: ShopTemplate[] }`, in the package's own words:
+
+```ts
+type ShopTemplate = {
+  id: string;
+  name: string;
+  fits: string;                  // one line saying which shops it fits
+  team: string[];                // the members it turns on; Buddy is always on
+  routines: { when: string; does: string; asksFirst: boolean }[];
+  questions: string[];           // what Buddy asks the owner in the first week
+};
+```
+
+**`POST /v1/admin/pilot/shops`** takes `template` (an id, or null or left out for none). A template must be one of the
+three, with no problem `checkTemplate` finds; anything else answers 400 `unknown_template` before anything is made.
+Applying one:
+
+- records the template on the shop (`Shop.template` in the shop list);
+- turns on its members (`Team.members`): a routine whose member is not on is skipped (`member_off`);
+- makes its routines, each **paused** until the owner turns it on, so nothing runs by surprise. Each trigger is read
+  from the template's words; "When a size drops under 3" is kept as stock below 3, and the routine's name keeps what it
+  is for. A reminder is a `brief`, and a post is a `send`, which asks first. Pim drafts the new-arrivals post; Ton runs
+  the rest;
+- keeps its first-week questions, `q1` onwards, for Buddy to ask the owner.
+
+All of it is one write to the shop's object, after the clocks and before the shop is listed: a shop whose setup could
+not be written answers 503 `shop_unavailable` and is never listed, and asking again makes a whole one. The log has
+`template.applied` (naming the template by id) and one `routine.created` for each routine.
+
+**`GET /v1/admin/questions?tenant=`** answers `{ tenant, template, questions: Question[] }`: the template the shop was
+made from (null for none), and each question with its answer as the team now knows it.
+
+```ts
+type Question = {
+  id: string;                    // "q1", "q2", ...
+  text: string;
+  answer: { factId: string; text: string | null; answeredAt: string } | null;
+};
+```
+
+**`POST /v1/admin/questions/answer`** with `{ tenant, questionId, text }`: the owner's answer, relayed by the
+operator. It becomes the owner's own fact through memory's `remember` (confirmed at once, the owner its source), and the
+question keeps the fact's id, in one transaction. Write it as a sentence that stands on its own ("Free shipping on
+orders over ฿1,000"), as any fact the team is told to remember. Answers `{ question, fact }`.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `invalid_text` | Blank, or over 280 characters (memory's limit) |
+| 400 | `invalid_request`, `tenant_required` | Another field, or no valid tenant |
+| 404 | `shop_not_found` | The tenant is not a pilot shop |
+| 404 | `not_found` | The shop has no such question |
+| 409 | `already_answered` | A question is answered once: a change is a correction of its fact on the Memory page |
+| 409 | `already_known`, `full` | Memory's own refusals: the team knows exactly these words, or holds 200 facts |
+
+The answer's words live only in the fact. The owner's Forget removes them, and the question then reads as answered with
+`text: null`. The log has `memory.remembered` (the fact by id) and `question.answered` (the question and the fact by
+id), by the operator's Access identity, never the question or the answer.
 
 ## Several shops
 
@@ -1222,10 +1418,12 @@ type ShopSession = {
 };
 ```
 
-An owner session is accepted by `GET /v1/approvals` and `POST /v1/approvals/{requestId}/decision`, for its own shop only,
-as the owner, and decisions name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` answers it 403
-`not_a_helper`, as it answers the shop's own session. Every other route answers it 401, so it never acts as the shop. The
-shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then
+An owner session is accepted by `GET /v1/approvals` and `POST /v1/approvals/{requestId}/decision`, and by the team's
+routines (`/v1/routines`, `/v1/team/*`, "Routines", above), for its own shop only, as the owner: those routes take who is
+calling from one place (`callerOf`), and the routines' own rule is that they are the owner's. Decisions and routine
+changes name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` answers it 403 `not_a_helper`, as it
+answers the shop's own session. Every other session route answers it 401, so it never acts as the shop: not the tasks,
+consent, export, deletion, connections or schedules. The shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then
 on each answers 401 `unlinked` with `unlinkedAt`. Opening one writes `owner.session_opened` to the shop's audit log,
 naming the account by its id.
 

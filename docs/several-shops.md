@@ -41,8 +41,10 @@ Three things, each kept where that kind of thing already lives.
 Tenancy is not weakened:
 
 - No session ever carries a shop's tenant, and a person's own session still acts only for their own tenant.
-- A shop session (below) names one shop and only that shop's approval routes accept it. Every other session route
-  answers it 401, so nobody acts as a shop through it.
+- A shop session (below) names one shop, and only that shop's routes that learn who is calling from `callerOf`
+  (`people.ts`) accept it: the approval routes, and for an owner the team's routines, which are the owner's by their own
+  rule. Every other session route (tasks, consent, export, deletion, connections, schedules) answers it 401, so nobody
+  acts as the shop through it.
 - The role comes from the shop's record of the session: an owner session is held under the shop's linked account, a
   helper session under a current helper. Never from a body, a query or a header.
 - A shop the person is not linked to answers 404, the same answer as a shop that does not exist.
@@ -65,7 +67,9 @@ With a shop session, every read and every decision works as it did, scoped to th
 lists that shop's requests, the decision route finds requests only in that shop's index, and approval-core decides
 with the role the session holds. A linked owner decides as role `owner` with `decidedBy` the account's id
 (`owner-<uuid>`), so the audit log says which account decided. The shop's own lifted session still decides as
-`owner-session` and the owner's signed link as `owner-link`.
+`owner-session` and the owner's signed link as `owner-link`. The team's routines (`/v1/routines`, `/v1/team/*`) learn
+who is calling the same way, so a linked owner's session reads and changes that shop's routines and pauses its team,
+and the log names the account there too; a helper's session is refused there, as before.
 
 Why a session per shop, rather than one session naming a shop in each request: the shop is fixed when the session is
 made, from the person's verified link, so no later request can point it at another shop; unlinking or removal ends
@@ -114,14 +118,14 @@ failed write left out. The operator sees the link on the shop's People answer (`
 ## The slices that follow
 
 1. **Done here (API):** the owner's linked account, the identity index, link codes, `GET /v1/shops`,
-   `POST /v1/shops/session`, owner sessions on the approval routes, the operator's link and unlink, and the link in
-   People.
+   `POST /v1/shops/session`, owner sessions on the approval routes and the team's routines, the operator's link and
+   unlink, and the link in People.
 2. **Desktop:** the switcher, the combined "Needs you" and the per-shop offline cache, after the desktop's answering
    slice lands.
 3. **Console:** show the owner's account on the shop's People page, with a box for the link code and an unlink button.
-4. **Owner sessions on more routes**, each its own decision: the shop's consent, export, memory and routines. Today an
-   owner session reaches only the approval routes. Whether the owner manages helpers from their own session belongs
-   here too (`docs/people.md`, "Not built yet").
+4. **Owner sessions on more routes**, each its own decision: the shop's consent, export and memory. Today an owner
+   session reaches the approval routes and the team's routines. Whether the owner manages helpers from their own
+   session belongs here too (`docs/people.md`, "Not built yet").
 5. **Ending shop sessions from the app:** a route for the app to end its own shop sessions when the person signs out.
    Today they run to their 30 days unless the owner's account is unlinked or the helper removed.
 6. **Co-owners:** more than one linked owner account per shop, if the owner wants it.

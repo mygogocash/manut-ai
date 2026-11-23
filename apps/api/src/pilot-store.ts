@@ -61,6 +61,9 @@ export type PilotShopRecord = {
   /// that first points the shop at LINE, and never moved by a later one. A shop connected before this field
   /// existed has none, and the gate reads its first connection's time from the vault.
   trialStartedAt?: string;
+  /// The shop template it was made from (`@manut/shop-templates`), when it was: its team, routines and first-week
+  /// questions are the routines' records (routine-store.ts).
+  template?: string;
 };
 
 export type InboundMessage = {
@@ -271,6 +274,10 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
   if (!bounded(body.name, 200) || !bounded(body.ownerName, 200) || !bounded(body.taskId)) {
     return json({ error: "invalid_request" }, 400);
   }
+  // The Worker checked the template against @manut/shop-templates; this keeps the record to an id's shape.
+  if (body.template !== undefined && !(typeof body.template === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(body.template))) {
+    return json({ error: "invalid_request" }, 400);
+  }
   if (await storage.get(keys.shop(tenant))) return json({ error: "already_exists" }, 409);
   const shop: PilotShopRecord = {
     tenant,
@@ -278,6 +285,7 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
     ownerName: body.ownerName,
     taskId: body.taskId,
     createdAt: new Date().toISOString(),
+    ...(typeof body.template === "string" ? { template: body.template } : {}),
   };
   await storage.put({
     [keys.shop(tenant)]: shop,

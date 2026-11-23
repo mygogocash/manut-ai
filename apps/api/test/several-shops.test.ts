@@ -517,7 +517,7 @@ describe("the shop and the role", () => {
     expect((await decide(asOwnerOfMali, maliRefund, DECLINE)).status).toBe(200);
   });
 
-  it("an owner's shop session opens the shop's approvals and no other route", async () => {
+  it("an owner's shop session opens no route of the shop's beyond its approvals and routines", async () => {
     const { fon, mali } = await fonsShops();
     const asOwnerOfMali = await shopSession(fon, mali, "owner");
     for (const [method, path] of [["GET", "/v1/tenant/export"], ["DELETE", "/v1/tenant/data"],
@@ -541,6 +541,33 @@ describe("the shop and the role", () => {
     expect((await asSession(fon.headers, "PUT", "/v1/shops")).status).toBe(405);
     expect((await asSession(fon.headers, "GET", "/v1/shops/session")).status).toBe(405);
   });
+});
+
+describe("the owner's routines", () => {
+  it("are the linked owner's to read and change through that shop's session alone, and the log names the account",
+    async () => {
+      const { fon, mali, khaoHom, maliAccount } = await fonsShops();
+      const asOwnerOfMali = await shopSession(fon, mali, "owner");
+      const asOwnerOfKhaoHom = await shopSession(fon, khaoHom, "owner");
+      const routineIds = async (headers: Headers) =>
+        (await asSession<{ routines: { id: string }[] }>(headers, "GET", "/v1/routines")).body.routines.map((r) => r.id);
+      const created = await asSession<{ routine: { id: string } }>(asOwnerOfMali, "POST", "/v1/routines",
+        { name: "Weekly growth brief", action: "brief", trigger: { kind: "weekly", weekdays: [1], at: "08:00" } });
+      expect(created.status).toBe(200);
+      const id = created.body.routine.id;
+      expect(await routineIds(asOwnerOfMali)).toContain(id);
+      // Khao Hom's session, Fon's too, neither sees nor changes Baan Mali's routine.
+      expect(await routineIds(asOwnerOfKhaoHom)).not.toContain(id);
+      expect(await asSession(asOwnerOfKhaoHom, "POST", "/v1/routines/pause", { routineId: id })).toEqual({ status: 404,
+        body: { error: "not_found" } });
+      // The log names the linked account, as the owner's decisions do.
+      expect((await auditEntries(mali.tenant)).find((entry) => entry.action === "routine.created" &&
+        entry.subject.routineId === id)).toMatchObject({ actor: { kind: "owner", id: maliAccount } });
+      // Once the account is unlinked, its session changes nothing there.
+      expect((await unlinkOwner(mali)).status).toBe(200);
+      expect(await asSession(asOwnerOfMali, "POST", "/v1/team/pause", {})).toMatchObject({ status: 401,
+        body: { error: "unlinked" } });
+    });
 });
 
 describe("a deleted shop", () => {
