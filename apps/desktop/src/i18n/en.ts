@@ -1888,4 +1888,6 @@ export const en = {
   "mode.offline": "Offline · {host}",
   "mode.unavailable": "Not answering · {host}",
   "mode.open": "Runtime settings",
+  // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
+  "rt.notYetShow": "Not yet: Connected mode cannot show this for now. It comes in a later version.",
 };

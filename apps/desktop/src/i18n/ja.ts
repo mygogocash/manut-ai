@@ -1875,4 +1875,6 @@ export const ja: Record<Key, string> = {
   "mode.offline": "オフライン · {host}",
   "mode.unavailable": "応答なし · {host}",
   "mode.open": "ランタイムの設定",
+  // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
+  "rt.notYetShow": "まだできません。接続モードでは今のところこれを表示できません。今後のバージョンで対応します。",
 };

@@ -1875,4 +1875,6 @@ export const zh: Record<Key, string> = {
   "mode.offline": "离线 · {host}",
   "mode.unavailable": "无响应 · {host}",
   "mode.open": "运行时设置",
+  // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
+  "rt.notYetShow": "暂时还不行：连接模式目前无法显示这些内容。之后的版本会提供。",
 };

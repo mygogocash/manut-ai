@@ -1875,4 +1875,6 @@ export const ko: Record<Key, string> = {
   "mode.offline": "오프라인 · {host}",
   "mode.unavailable": "응답 없음 · {host}",
   "mode.open": "런타임 설정",
+  // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
+  "rt.notYetShow": "아직 안 돼요. 연결 모드에서는 지금은 이것을 볼 수 없어요. 다음 버전에 나와요.",
 };
