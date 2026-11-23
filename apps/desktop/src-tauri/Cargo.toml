@@ -13,7 +13,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value: the outpost reads a redeemed password as raw JSON borrowed from a buffer that is wiped, and writes it out
+# itself, so no copy is left that is not (outpost/api.rs). Tauri already builds serde_json with it.
+serde_json = { version = "1", features = ["raw_value"] }
 regex = "1"
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
@@ -35,6 +37,13 @@ libc = "0.2"
 # app's commands name (api_link.rs). Other systems have no keychain support yet, so Connected cannot sign in there.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+# The outpost's browser reads its page through WKWebView's own callAsyncJavaScript, in a content world of its own,
+# through Tauri's with_webview (outpost/browser.rs). These are the crates wry already builds on, at the versions
+# Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026).
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again.

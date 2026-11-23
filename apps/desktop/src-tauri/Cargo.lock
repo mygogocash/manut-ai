@@ -2060,8 +2060,12 @@ dependencies = [
 name = "manut"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "core-foundation",
  "libc",
+ "objc2",
+ "objc2-foundation",
+ "objc2-web-kit",
  "open",
  "plist",
  "portable-pty",
