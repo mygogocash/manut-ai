@@ -1804,6 +1804,7 @@ export const ja: Record<Key, string> = {
   "rt.signedOut": "サインアウトしました。設定 › 開発者 でサインインしてください。",
   "rt.notFound": "このお店にはもうありません。",
   "rt.untitled": "無題のタスク",
+  "rt.whenUnknown": "時間がわかりません",
   "rt.task": "**{title}**\n\n{objective}",
   "rt.taskNow": "現在：{state}",
   "rt.taskAction": "{action}（{state}）",

@@ -1804,6 +1804,7 @@ export const zh: Record<Key, string> = {
   "rt.signedOut": "已退出登录。请在 设置 › 开发者 中登录。",
   "rt.notFound": "这家店里已经没有这一项了。",
   "rt.untitled": "无标题任务",
+  "rt.whenUnknown": "时间未知",
   "rt.task": "**{title}**\n\n{objective}",
   "rt.taskNow": "当前：{state}",
   "rt.taskAction": "{action}（{state}）",

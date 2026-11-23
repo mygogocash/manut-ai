@@ -8,6 +8,7 @@
 
 import type { MemoryOps } from "../runtime/memory";
 import type { MissionOps } from "../runtime/mission";
+import type { RoutineOps } from "../runtime/routines";
 import type { AgentRunSummary, CliAgent, CliAgentStatus, NodePr, RunDetail } from "./runs";
 
 export type BotStatus = "online" | "offline" | "starting";
@@ -321,8 +322,8 @@ export interface FolderResumeResult extends FolderOpenResult {
  *  the bridge created with `folder.open`; without it an op acts on the bot's main chat. `id` is the frame's
  *  own request id, so no op takes a param named `id` (accounts use `account`). Mission Control's ops (jobs, the activity
  *  log, Pause everyone) are declared in `src/runtime/mission.ts` and joined here, and so are the Customize page's (what the
- *  team knows, in `src/runtime/memory.ts`). */
-export interface OpMap extends MissionOps, MemoryOps {
+ *  team knows, in `src/runtime/memory.ts`, and its routines, in `src/runtime/routines.ts`). */
+export interface OpMap extends MissionOps, MemoryOps, RoutineOps {
   hello: { params: Record<string, never>; result: HelloResult };
   "bots.list": { params: Record<string, never>; result: { bots: Bot[] } };
   "chat.open": { params: { bot: string; existing_only?: boolean }; result: ChatOpenResult };

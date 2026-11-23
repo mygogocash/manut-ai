@@ -19,6 +19,7 @@ import type { BridgeEvent, OpMap } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
+import { shopRoutines } from "./customize";
 import type { ApiSession, SignInState } from "./session";
 import { readShop, type ReadFailure, type ShopRead, type ShopSnapshot } from "./shop";
 import { attentionRows, automationRows, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
@@ -370,6 +371,11 @@ export class HttpHost {
       "memory.confirm": notYet,
       "memory.correct": notYet,
       "memory.forget": notYet,
+      // The team's routines are the shop's schedules, read as they are. Changing one is not built yet.
+      "routine.list": async () => ({ routines: shopRoutines(await this.current()) }),
+      "routine.create": notYet,
+      "routine.pause": notYet,
+      "routine.resume": notYet,
     };
   })();
 }

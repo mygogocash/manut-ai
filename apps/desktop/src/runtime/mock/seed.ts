@@ -1,6 +1,7 @@
 // What the in-process runtime starts with: Buddy and a small team, a few lines of history each, and the model list
 // the picker shows. Everything here is staged. The names follow the design canvas's team (Nam, Pim, Ton, Kit); the
 // models are labelled as a demo so nobody reads them as a real provider.
+import type { RoutineInput } from "@manut/routine-rules";
 import type { FactSource } from "@manut/shop-memory";
 import type { BotStatus, ModelProvider, Skill, SlashCommand } from "../../lib/protocol";
 import { OWNER, type ActivityEvent, type JobRecipient, type JobStage, type TraceStep } from "../mission";
@@ -283,13 +284,16 @@ export const ACTIVITY_SEED: readonly ActivitySeed[] = [
   { id: "e14", ago: 19 * DAY + 7 * HOUR, who: OWNER, kind: "settings", title: "You set the AI budget limit to ฿300", item: "Budget and plan", job: null, approval: "Your own change", status: "changed", where: "Customize, budget and plan", undo: "Yes. Change the limit at any time.", note: "Before: ฿250.", text: null },
 ];
 
-/** The routines Pause everyone would hold: their runs are skipped while the team is paused, and History says so. */
-export const ROUTINE_SEED: readonly string[] = [
-  "Morning brief",
-  "Weekly growth brief",
-  "Tell me and draft a restock order",
-  "Send the books to FlowAccount",
-  "Answer order-status questions",
+/** The routines the design canvas's Customize board lists, as `@manut/routine-rules` takes them: the runtime builds each with
+ *  `createRoutine`, so a staged routine obeys the rules a routine the owner adds does (the books and the night replies ask
+ *  first because the package says a send and a reply must). They are also the routines Pause everyone would hold: their runs
+ *  are skipped while the team is paused, and History says so. All five start switched on. */
+export const ROUTINE_SEED: readonly RoutineInput[] = [
+  { id: "morning-brief", name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" } },
+  { id: "weekly-growth-brief", name: "Weekly growth brief", action: "brief", trigger: { kind: "weekly", weekdays: [1], at: "08:00" } },
+  { id: "restock-alert", name: "Tell me and draft a restock order", action: "draft", trigger: { kind: "stockBelow", threshold: 5 } },
+  { id: "monthly-books", name: "Send the books to FlowAccount", action: "send", trigger: { kind: "monthly", day: "last", at: "18:00" } },
+  { id: "night-replies", name: "Answer order-status questions", action: "reply", trigger: { kind: "window", from: "21:00", to: "08:00" } },
 ];
 
 /** A fact as it is staged: `ago` is the seconds before the runtime started. The runtime teaches them to the package one by

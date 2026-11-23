@@ -1804,6 +1804,7 @@ export const ko: Record<Key, string> = {
   "rt.signedOut": "로그아웃됐어요. 설정 › 개발자에서 로그인하세요.",
   "rt.notFound": "이 가게에 더 이상 없는 항목이에요.",
   "rt.untitled": "제목 없는 작업",
+  "rt.whenUnknown": "시간을 알 수 없어요",
   "rt.task": "**{title}**\n\n{objective}",
   "rt.taskNow": "지금: {state}",
   "rt.taskAction": "{action} ({state})",

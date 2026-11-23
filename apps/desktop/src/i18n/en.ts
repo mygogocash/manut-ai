@@ -1815,6 +1815,7 @@ export const en = {
   "rt.signedOut": "Signed out. Sign in under Settings › Developer.",
   "rt.notFound": "That is not in this shop any more.",
   "rt.untitled": "Untitled task",
+  "rt.whenUnknown": "Time not known",
   "rt.task": "**{title}**\n\n{objective}",
   "rt.taskNow": "Now: {state}",
   "rt.taskAction": "{action} ({state})",
