@@ -35,6 +35,7 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     forgetFact: missing("forgetFact"),
     getModelUsage: missing("getModelUsage"),
     setModelCap: missing("setModelCap"),
+    listWorkerJobs: missing("listWorkerJobs"),
     ...overrides,
   };
 }

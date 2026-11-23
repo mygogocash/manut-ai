@@ -20,7 +20,10 @@ import {
   type ReplyAction,
   type Shop,
   type SubscriptionPayment,
+  type WorkerDraft,
+  type WorkerJobEntry,
 } from "./types";
+import { formatIsoDate } from "../format";
 import { pilotGate } from "./gate";
 import * as shopMemory from "@manut/shop-memory";
 import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
@@ -66,6 +69,11 @@ import {
 /// reservations still open, and an operator's cap override. Months and totals are read from the records, so a total can
 /// never disagree with what it adds up. Baan Mali has ฿186 spent of an operator's ฿300 cap with one call in progress, and
 /// Sabai Tea the default cap and no calls. A cap set in practice is kept with the rest of the world.
+///
+/// What Nam, Pim and Ton did for each shop (docs/pilot-api.md, "Workers' drafts") is kept as the API lists it back: one
+/// entry per job, oldest first as the shop's task index keeps them, read newest first by a job's task id. Baan Mali has
+/// seven jobs, one for each way a job can end here, and Sabai Tea none. Nothing in practice starts a job, so they are the
+/// sample's own; they are deleted with the shop, and the practice export does not carry them.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -126,8 +134,10 @@ type FakeConfirmation = {
 };
 /// An audit entry with the shop it belongs to, which the API keeps by the shop's own object instead.
 type FakeAuditEntry = AuditEntry & { tenant: string };
+/// A job with the shop it belongs to, which the API finds through the shop's own task index.
+type FakeWorkerJob = WorkerJobEntry & { tenant: string };
 type FakeDb = {
-  version: 6;
+  version: 7;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -143,12 +153,14 @@ type FakeDb = {
   /// What the team knows, per shop, as `@manut/shop-memory` keeps it. A shop with no entry has been told nothing.
   memory: Record<string, MemoryState>;
   model: FakeModel;
+  /// Every shop's worker jobs, oldest first, the order the API's task index keeps them in.
+  workers: FakeWorkerJob[];
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
-/// (version 3), before what the team knows (version 4) or before the model meter (version 5) is replaced by a fresh
-/// one rather than read without them.
+/// (version 3), before what the team knows (version 4), before the model meter (version 5) or before the workers' jobs
+/// (version 6) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -192,10 +204,10 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 6 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+      return parsed && parsed.version === 7 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
-        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds)
+        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers)
         ? parsed
         : null;
     } catch {
@@ -315,6 +327,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     // What the team knew goes too, the fingerprints of what it forgot with it.
     delete db.memory[record.tenant];
     wipeMeter(db.model, record.tenant);
+    // The jobs of its team go with it, drafts included.
+    db.workers = db.workers.filter((job) => !mine(job));
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
   }
@@ -897,6 +911,34 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         }
         return capOf(db.model, tenant, defaultCapSatang);
       }),
+
+    // As the API: the tenant, then the page (a size of 1 to 25, ten when absent, and a cursor that is a job's task id), then
+    // the shop, then that the cursor is one of its jobs. Newest first; the page after a job is the jobs older than it.
+    listWorkerJobs: (tenant, query = {}) =>
+      run(() => {
+        admin();
+        if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+        const limit = query.limit ?? 10;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) throw new ApiError(400, "invalid_request");
+        const { before } = query;
+        if (before !== undefined && !WORKER_TASK.test(before)) throw new ApiError(400, "invalid_request");
+        if (!db.shops.some((shop) => shop.tenant === tenant)) throw new ApiError(404, "shop_not_found");
+        const newest = db.workers.filter((job) => job.tenant === tenant).reverse();
+        let start = 0;
+        if (before !== undefined) {
+          const at = newest.findIndex((job) => job.taskId === before);
+          if (at < 0) throw new ApiError(400, "invalid_request");
+          start = at + 1;
+        }
+        const page = newest.slice(start, start + limit);
+        const last = page[page.length - 1];
+        const more = start + limit < newest.length;
+        return {
+          tenant,
+          jobs: page.map(({ tenant: _tenant, ...job }) => job),
+          next: more && last ? last.taskId : null,
+        };
+      }),
   };
 
 }
@@ -920,6 +962,9 @@ const SYSTEM: AuditActor = { kind: "system" };
 /// The API's entry ids: a base-36 millisecond clock, a sequence and a random tail, so ids sort by time and page with
 /// the same cursor the API takes.
 const AUDIT_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
+
+/// The ids the API gives a worker job's task, which are also all a page's cursor may be.
+const WORKER_TASK = /^worker-task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function auditId(ms: number, seq: number): string {
   return sortableId("aud", ms, seq);
@@ -1087,7 +1132,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 6,
+    version: 7,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -1138,6 +1183,7 @@ function seed(at: number): FakeDb {
     audit: sampleAudit(at, tenant, connectionId),
     memory: { [tenant]: sampleMemory(at) },
     model: seedModel(at, tenant),
+    workers: sampleWorkers(at, tenant),
   };
 }
 
@@ -1235,6 +1281,47 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     entry(tenant, 70, operator, "reply.proposed", reply("act_tracking", "msg_tracking")),
     entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
     entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
+  ];
+}
+
+/// What Nam, Pim and Ton did for Baan Mali, oldest first, as the API's task index would list it: one job for each way a job
+/// can end, and the two ways a handover shows. The jobs answer the messages of the sample world above, every draft is a draft
+/// nobody has sent, and the money is whole satang as the gateway prices a small model call. Its LINE account is past its
+/// three days of practice, so a reply says it needs Fon's approval to be sent. Ids look like the API's: `worker-task-` and a UUID.
+function sampleWorkers(at: number, tenant: string): FakeWorkerJob[] {
+  const ago = (minutes: number) => new Date(at - minutes * MINUTE_MS).toISOString();
+  // A summary covers the day before the job ran, on the shop's calendar.
+  const dayBefore = (minutes: number) => formatIsoDate(ago(minutes + 24 * 60));
+  let count = 0;
+  const job = (minutesAgo: number, entry: Omit<WorkerJobEntry, "taskId" | "at">): FakeWorkerJob => {
+    count += 1;
+    return { tenant, taskId: `worker-task-6a7c1f00-0000-4000-8000-${String(count).padStart(12, "0")}`, at: ago(minutesAgo),
+      ...entry };
+  };
+  const draft = (minutesAgo: number, text: string, extra: Pick<WorkerDraft, "about" | "send"> = {}): WorkerDraft =>
+    ({ text, at: ago(minutesAgo), ...extra });
+  const send = { answer: "ask", kind: "reply" } as const;
+  const day = 24 * 60;
+  return [
+    // Nam was asked for yesterday's numbers, which are Ton's job, and passed it on.
+    job(day + 120, { member: "ton", passedFrom: "nam", job: "daily_summary", ending: { state: "done" },
+      draft: draft(day + 119, "Yesterday: 3 paid orders, ฿2,370 in sales. Nothing needs checking.",
+        { about: { date: dayBefore(day + 120) } }), costSatang: 2 }),
+    job(20 * 60, { member: "pim", job: "post", ending: { state: "done" },
+      draft: draft(20 * 60 - 1, "เซ็ตของขวัญเทียนหอม 3 กลิ่น ห่อฟรีตลอดเดือนธันวาคม สั่งได้ทาง LINE ร้านค่ะ"), costSatang: 3 }),
+    job(5 * 60, { member: "nam", job: "reply", ending: { state: "done" },
+      draft: draft(5 * 60 - 1, "Hi Khun Nok, thank you for waiting. Order SP-2296 is being packed and ships tomorrow morning, so it should reach you by Tuesday.",
+        { about: { messageId: "msg_nok" }, send }), costSatang: 2 }),
+    job(3 * 60, { member: "ton", job: "daily_summary", ending: { state: "failed", reason: "payments_unavailable" },
+      draft: null }),
+    job(90, { member: "pim", job: "post", ending: { state: "awaiting_owner" },
+      draft: draft(88, "Free gift wrapping all December. Order by 15 December and it reaches you before Christmas."),
+      costSatang: 3 }),
+    // Pim was asked for a reply, which is Nam's job, and passed it on; Nam has not taken it up.
+    job(40, { member: "pim", job: "reply", ending: { state: "handed_over", to: "nam" }, draft: null }),
+    job(8, { member: "nam", job: "reply", ending: { state: "done" },
+      draft: draft(7, "ขออภัยที่พัสดุล่าช้านะคะ ตอนนี้ของออกจากคลังแล้ว คาดว่าจะถึงภายในวันอังคารค่ะ",
+        { about: { messageId: "msg_ploy" }, send }), costSatang: 2 }),
   ];
 }
 
