@@ -116,7 +116,7 @@ export function noteFor(
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only
-        ask: { id: ev.request_id, approval: ev.kind ?? "", member: who, canApprove: ev.choices.includes("once") && !ev.outdated, waiting: ctx.waiting?.() ?? 1 },
+        ask: { id: ev.request_id, approval: ev.kind ?? "", member: who, canApprove: Array.isArray(ev.choices) && ev.choices.includes("once") && !ev.outdated, waiting: ctx.waiting?.() ?? 1 },
       };
     case "clarify.request":
       return {

@@ -100,6 +100,43 @@ test("an empty question followed by a texted one within 8 s rings once", async (
   expect(await notes(page)).toHaveLength(1);
 });
 
+/** "HH:MM" in Bangkok, the clock quiet hours follow, `plusMin` minutes from now. */
+function bangkokClock(plusMin = 0): string {
+  const at = new Date(Date.now() + plusMin * 60_000);
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+  const part = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${part("hour")}:${part("minute")}`;
+}
+
+test("Hide details and Quiet hours are in Settings, kept, and a notification follows them", async ({ page }) => {
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  // the suite starts with quiet hours off (playwright.config.ts: the same start and end), and details shown
+  await expect(page.getByTestId("set-hide-details")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("set-quiet-start")).toHaveValue("00:00");
+  await expect(page.getByTestId("set-quiet-end")).toHaveValue("00:00");
+  await expect(page.getByTestId("settings-page-general")).toContainText("Nothing makes a sound. Requests wait in Updates.");
+  await expect(page.getByTestId("settings-page-general")).toContainText("A live page that stops working and a sign-in from a new device still alert you.");
+  await expect(page.getByTestId("settings-page-general")).toContainText("When Unlocked");
+
+  // Hide details: a question waiting for the owner says only how many requests wait
+  await page.getByTestId("set-hide-details").click();
+  expect(await page.evaluate(() => localStorage.getItem("manut.notify.hide"))).toBe("on");
+  await watched(page, false);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q-hide", question: "Which branch should I deploy?" }] });
+  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([{ title: "Manut AI", body: "1 request needs you." }]);
+
+  // Quiet hours around now: the next request is not shown, and waits in the app
+  const from = bangkokClock(-60);
+  const to = bangkokClock(60);
+  await page.getByTestId("set-quiet-start").fill(from);
+  await page.getByTestId("set-quiet-end").fill(to);
+  expect(await page.evaluate(() => localStorage.getItem("manut.notify.quiet"))).toBe(`${from}-${to}`);
+  await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q-quiet", question: "Which size should I order?" }] });
+  await page.waitForTimeout(1500);
+  expect(await notes(page)).toHaveLength(1);
+});
+
 for (const theme of ["dark", "light"] as const) {
   test(`shot: Settings notifications, ${theme}`, async ({ page }) => {
     test.skip(!SHOTS, "MANUT_SHOTS not set");

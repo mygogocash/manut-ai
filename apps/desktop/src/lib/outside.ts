@@ -2,7 +2,8 @@
 // `@manut/notify-rules` decides everything that is a rule: whether a notification shows, whether it makes a sound,
 // which buttons it carries, what quiet hours and hidden details do. This file only feeds it events and puts what it
 // answers into the app's words (notify-rules writes English), so nothing here may add a second way to show, to answer
-// or to approve (CLAUDE.md: approvals settle once). Pure: the clock, the settings and the language come in.
+// or to approve (CLAUDE.md: approvals settle once). What it presents is pure: the clock, the settings and the language
+// come into `presentOutside`. Only the two settings below are read from this computer's storage.
 //
 // - Money and public posts never get Approve, and neither does anything this build does not know: notify-rules decides
 //   that from the request's approval-core kind. Approve is also dropped when the card itself offers no Allow once.

@@ -83,7 +83,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
 | 11 | Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job) | | Haiku |
 | running | 9. Desktop leftovers, and three app bugs the revival found | | Sonnet |
-| running | 6. macOS notifications on `@manut/notify-rules` | | Sonnet |
+| done | 6. macOS notifications on `@manut/notify-rules`: every notification and the Dock count follow its rules, Approve for messages and replies only, Hide details and quiet hours in Settings | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
 

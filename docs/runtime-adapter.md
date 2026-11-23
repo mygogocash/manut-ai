@@ -149,13 +149,34 @@ the listing has told this app (a note they passed on carries it); the session ro
 name yet. A card closes in these words through the protocol's `prompt.expired`, which now carries an optional `note`
 the store keeps on the card (`expiredNote`).
 
-### Never from a notification
+### From a notification
 
-The app's notifications answer nothing: a title and a body, and a click opens the chat where the card is. So money and
-public posts are approved only in the app window, as the canvas's "Money never from a notification" asks, and so is
-everything else for now. `src/lib/notify.ask.test.ts` pins it for every kind of ask. Approving a message from a
-notification, which the canvas allows, is not built; when it is, it must read the request's kind and leave money and
-public posts to the window.
+The canvas allows one answer from a notification: "A message request can be approved from the notification", and
+"Money never from a notification". Every notification the desktop shows goes through `@manut/notify-rules`
+(`src/lib/outside.ts`, `src/lib/notify.ts`), which decides from the request's approval-core kind (the connected runtime's
+asks carry it in the protocol event's `kind`; any other ask has none and is owner-only):
+
+- A `message` or a `reply` carries Look first and Approve. Money, public posts, payments, commands and any kind this build
+  does not know carry Look first and Later, and nothing that could approve. No notification carries Approve while
+  Settings' Hide details is on, or for an ask the card itself offers no Allow once (Update the app to answer this).
+- **Approve is the card's own Allow once.** `approveFromNotification` (`store.ts`) calls `settleApproval`, the one path every
+  button uses, so the host's `answer` sends exactly `{ optionId, seenRevision }` for the revision the notification named,
+  through the decide route, and never a role. If the request is not waiting any more, or the answer is refused, or no word
+  came back, the app comes forward on that card (from the menu bar or minimised too) and the card says what happened under
+  its buttons, in the API's words (`src/chat/cards/askNote.ts`). A notification answers once; a second press is ignored.
+- Look first opens the app on that request, scrolled into view and focused; a click on the notification itself is Look first.
+  Later only dismisses.
+- Nothing is shown in quiet hours (the request waits in the app), and an ask notifies once per id and revision.
+- `src/lib/notify.ask.test.ts` pins all of it for every approval kind, end to end over the fake API, and
+  `src/lib/notify.outside.test.ts` pins what reaches the system.
+
+What the plugin does on macOS, read from its installed sources (`@tauri-apps/plugin-notification` 2.8.1,
+`tauri-plugin-notification` 2.8.0, `notify-rust` 4.19.0; not run in a live app): a notification shows its action type's
+buttons only if an `onAction` listener existed when it was shown, so the page listens once before its first notification;
+two or more buttons fold into an "Options" menu, and a click on that menu button itself reports the first button, so the
+system is given Approve last; the pressed button is reported by id (`tap` for a click on the notification). The window
+badge and Look first need `core:window:allow-set-badge-count`, `allow-show`, `allow-unminimize` and `allow-set-focus`
+(`src-tauri/capabilities/default.json`); no Rust changed.
 
 ### Offline
 
@@ -350,7 +371,7 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    `GET /v1/approvals?state=recent` when an ask leaves would do it, at one more request).
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
-   already); a helper's own session on the desktop; approving a message from a notification (never money or a post).
+   already); a helper's own session on the desktop.
 
 ## Undoing it
 
@@ -361,6 +382,10 @@ in `session.ts`, `answering.test.ts`, the `note` of `prompt.expired` and the car
 from the actions in `view.ts`, remove `src/runtime/http/approvals.ts`, the fourth read in `shop.ts`, the requests in the
 cache (version 1 again), the `outdated` field (protocol, store, card) and `rt.updateToAnswer`, and the
 `@manut/approval-core` dependency.
+
+To take only the buttons out of notifications: pass no `approve` handler in `notifySessionEvent` (`store.ts`) and remove
+`approveFromNotification`, `src/chat/cards/askNote.ts` and its use in `Cards.slot.tsx`; notifications then carry Look first and
+Later. The protocol event's `kind` (`view.ts`, `protocol.ts`) is read only for this.
 
 Practice is the default and Connected is reached only through Settings › Developer. To take the slice out, remove
 `src/runtime/http/`, `src/runtime/setting.ts`, `src/runtime/link.ts`, `src/settings/DeveloperPage.tsx`,
