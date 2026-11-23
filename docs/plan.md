@@ -88,6 +88,9 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 6. macOS notifications on `@manut/notify-rules`: every notification and the Dock count follow its rules, Approve for messages and replies only, Hide details and quiet hours in Settings | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
 | running | 8b. The outpost in the desktop shell (this Mac): registering, heartbeat, fetching steps, typing a sign-in only on its origins, reporting | | Opus |
+| running | Browser control, slice 2: a write step (`submit`) asked for through member-grants' decide and one approval-core request naming the exact site, page and values (API) | | Opus |
+| running | Several shops, slice 2: the desktop's switcher in the account row, one Needs you across the shops with each decision sent with its own shop's session, and each shop's offline cache kept apart | | Opus |
+| 12 | The desktop outpost running an approved submit step | 8b, browser control slice 2 | Opus |
 
 ## Queue for cloud routines
 
@@ -407,3 +410,5 @@ Done when: each event kind, the Approve rule for every approval kind, hidden det
 setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.
 
 Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).
+Wired into the desktop on 24 Nov 2026 (December item 6, merged into `pilot/week-1`): every notification and the Dock badge
+go through it, with a `notice` event added for news that asks nothing (24 tests).
