@@ -9,6 +9,7 @@ import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
+import { memoryAdminRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
@@ -196,6 +197,10 @@ const ADMIN_METHODS = new Set([
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
   // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
   "GET /v1/admin/audit",
+  // What the team knows about the shop (memory.ts): read it, and the owner's say over each fact as an operator relays
+  // it. A worker's proposal is a function, not a route. The tenant travels in the query or the body.
+  "GET /v1/admin/memory", "POST /v1/admin/memory/remember", "POST /v1/admin/memory/confirm",
+  "POST /v1/admin/memory/correct", "POST /v1/admin/memory/forget",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -610,6 +615,11 @@ export default {
     // the exact method.
     const audit = await auditAdminRoute(request, url, env);
     if (audit) return audit;
+
+    // What the team knows about the shop (memory.ts). The admin gate above already required both credentials and the
+    // exact method.
+    const memory = await memoryAdminRoute(request, url, env, ctx);
+    if (memory) return memory;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

@@ -51,6 +51,13 @@ export const AUDIT_ACTIONS = [
   "approval.requested",
   "approval.decided",
   "approval.superseded",
+  // What the team knows about the shop (memory-store.ts): the operator's changes through the console, and what a worker
+  // learned. Each names the fact by its id and never by its words.
+  "memory.remembered",
+  "memory.proposed",
+  "memory.confirmed",
+  "memory.corrected",
+  "memory.forgotten",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -81,6 +88,7 @@ export const AUDIT_SUBJECT_KEYS = [
   "connectionId",
   "previousConnectionId",
   "confirmationId",
+  "factId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 

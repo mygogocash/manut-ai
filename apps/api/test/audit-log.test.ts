@@ -134,6 +134,23 @@ describe("appending to a shop's audit log", () => {
     expect((await page(tenant)).entries.map((entry) => entry.actor).reverse()).toEqual(actors);
   });
 
+  it("keeps what the team knows about a shop by the fact's id, in each of the memory actions, and never by its words", async () => {
+    const tenant = freshTenant("memory");
+    const actions = ["memory.remembered", "memory.proposed", "memory.confirmed", "memory.corrected", "memory.forgotten"];
+    for (const action of actions) {
+      const kept = await append(tenant, { actor: { kind: "operator", email: "ops@manut.test" }, action,
+        subject: { factId: "f12" }, outcome: action === "memory.proposed" ? "awaiting_owner" : "ok" });
+      expect(kept.status).toBe(200);
+      expect(kept.body.entry).toMatchObject({ action, subject: { factId: "f12" } });
+    }
+    expect((await page(tenant)).entries.map((entry) => entry.action).reverse()).toEqual(actions);
+    // An id is ASCII letters, digits and ._:- and nothing a person wrote: not Thai, not a sentence.
+    for (const factId of ["ร้านปิดวันจันทร์", "we close on mondays", "", "f".repeat(257)]) {
+      expect(await append(tenant, { actor: { kind: "system" }, action: "memory.remembered", subject: { factId }, outcome: "ok" }))
+        .toEqual({ status: 400, body: { error: "invalid_request" } });
+    }
+  });
+
   it("takes only the Worker's writes, and only metadata: never free text, a name it does not know or a fraction", async () => {
     const tenant = freshTenant("refusals");
     expect((await append(tenant, shopCreated(), {})).status).toBe(403);

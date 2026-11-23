@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
+import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
 import { modelTenantRoute, wipeModelTenant } from "./model-meter";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 
@@ -59,6 +60,10 @@ export class TenantObject extends DurableObject {
     // The shop's audit log: who did what and when, metadata only (audit-log.ts).
     if (url.pathname === "/audit" || url.pathname.startsWith("/audit/")) {
       return auditTenantRoute(this.ctx.storage, request, url);
+    }
+    // What the team knows about the shop: its facts, and the owner's say over each (memory-store.ts).
+    if (url.pathname === "/memory" || url.pathname.startsWith("/memory/")) {
+      return memoryTenantRoute(this.ctx.storage, request, url);
     }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
@@ -187,8 +192,9 @@ export class TenantObject extends DurableObject {
 
   /// Wipes the tenant's consent, task index, attention items, pilot records
   /// (shop, customer messages, replies, payments), model meter (cap
-  /// override, monthly totals, reservations, per-call records) and audit log
-  /// (entries and the miss count), then writes a tombstone.
+  /// override, monthly totals, reservations, per-call records), audit log
+  /// (entries and the miss count) and memory (facts and the fingerprints of
+  /// forgotten texts), then writes a tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
   /// afterwards as new, never restored.
@@ -208,6 +214,7 @@ export class TenantObject extends DurableObject {
     await this.ctx.storage.delete([`attention:${body.tenant}`, `attention-deliveries:${body.tenant}`]);
     await wipePilotTenant(this.ctx.storage, body.tenant);
     await wipeModelTenant(this.ctx.storage, body.tenant);
+    await wipeMemoryTenant(this.ctx.storage, body.tenant);
     await wipeAuditTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
