@@ -73,13 +73,13 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | Order | Work | Waits on | Model |
 | --- | --- | --- | --- |
 | done | The desktop's Customize page (memory and routines) | | Sonnet |
-| running | 1. Console: the workers' drafts and a shops overview | | Sonnet |
+| done | 1. Console: the workers' drafts and a shops overview | | Sonnet |
+| running | 5. The desktop answering approvals | | Opus |
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | running | 4. Console: the People page | | Sonnet |
 | running | The Playwright revival | | Haiku |
-| 5 | The desktop answering approvals through the session decide route (tested with test sign-in) | the helpers' API | Opus |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
 | 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
 | 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |

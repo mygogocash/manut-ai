@@ -205,9 +205,10 @@ const ADMIN_METHODS = new Set([
   // it. A worker's proposal is a function, not a route. The tenant travels in the query or the body.
   "GET /v1/admin/memory", "POST /v1/admin/memory/remember", "POST /v1/admin/memory/confirm",
   "POST /v1/admin/memory/correct", "POST /v1/admin/memory/forget",
-  // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
-  // model through the gateway, never the route. The tenant travels in the body.
-  "POST /v1/admin/workers/run",
+  // Nam, Pim and Ton (workers.ts): start one member's job for a shop, and read a shop's jobs back, newest first, a page
+  // at a time. Every result is a draft; the runner calls the model through the gateway, never a route. The tenant travels
+  // in the body (run) or the query (drafts).
+  "POST /v1/admin/workers/run", "GET /v1/admin/workers/drafts",
   // The people around a shop (people.ts), on the owner's word: read them, invite a helper (a link to copy; nothing is
   // sent), revoke an invite, remove a helper, and set or clear cover. The tenant travels in the query or the body.
   "GET /v1/admin/people", "POST /v1/admin/people/invites", "POST /v1/admin/people/invites/revoke",

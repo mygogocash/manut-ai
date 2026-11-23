@@ -1138,7 +1138,9 @@ describe("the fake's people, kept as the API keeps them", () => {
   });
 
   it("replaces a practice world saved before people existed, whether it is a version behind or only lacks them", async () => {
-    for (const change of [{ version: 6, people: undefined }, { people: undefined }]) {
+    // Version 7 is a world saved with the workers' jobs and no people; a world that says it is version 8 but lacks them is read as
+    // the half it holds, so it is replaced too.
+    for (const change of [{ version: 7, people: undefined }, { people: undefined }]) {
       const { saved, storage } = kept();
       const first = createFakeApi({ now: () => NOW, storage });
       await first.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" });
@@ -1161,5 +1163,125 @@ describe("the fake's people, kept as the API keeps them", () => {
       () => api.setAway({ tenant: BAAN_MALI, helperId: "helper-mint", until: "2030-01-01T00:00:00.000Z" }),
       () => api.clearAway({ tenant: BAAN_MALI }),
     ]) await expect(call()).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+});
+
+describe("the fake's worker jobs, read as GET /v1/admin/workers/drafts reads them", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 on 23 November in Bangkok
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const JOB = /^worker-task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  function memory() {
+    const saved = new Map<string, string>();
+    return {
+      saved,
+      storage: {
+        getItem: (key: string) => saved.get(key) ?? null,
+        setItem: (key: string, value: string) => void saved.set(key, value),
+        removeItem: (key: string) => void saved.delete(key),
+      },
+    };
+  }
+
+  it("gives Baan Mali a believable run of jobs, newest first, with each way a job can end that Nam, Pim and Ton reach", async () => {
+    const { tenant, jobs, next } = await createFakeApi({ now: () => NOW }).listWorkerJobs(BAAN_MALI);
+    expect(tenant).toBe(BAAN_MALI);
+    expect(next).toBeNull();
+    expect(jobs).toHaveLength(7);
+    expect(jobs.every((job) => JOB.test(job.taskId))).toBe(true);
+    expect(new Set(jobs.map((job) => job.taskId)).size).toBe(7);
+    // Newest first, all of them already run.
+    expect(jobs.map((job) => job.at)).toEqual([...jobs.map((job) => job.at)].sort().reverse());
+    expect(jobs.every((job) => Date.parse(job.at) < NOW)).toBe(true);
+    expect(new Set(jobs.map((job) => job.ending.state))).toEqual(new Set(["done", "failed", "awaiting_owner", "handed_over"]));
+    expect(new Set(jobs.map((job) => job.member))).toEqual(new Set(["nam", "pim", "ton"]));
+    expect(new Set(jobs.map((job) => job.job))).toEqual(new Set(["reply", "post", "daily_summary"]));
+
+    // A job Nam passed to Ton, who did it; a job Pim passed to Nam, who has not taken it up; one that failed with its
+    // reason and wrote nothing; one waiting for the owner, with the draft it wrote.
+    expect(jobs.find((job) => job.passedFrom)).toMatchObject({ member: "ton", passedFrom: "nam", job: "daily_summary",
+      ending: { state: "done" } });
+    expect(jobs.find((job) => job.ending.state === "handed_over")).toMatchObject({ member: "pim", job: "reply",
+      ending: { state: "handed_over", to: "nam" }, draft: null });
+    expect(jobs.find((job) => job.ending.state === "failed")).toMatchObject({ member: "ton",
+      ending: { state: "failed", reason: "payments_unavailable" }, draft: null });
+    expect(jobs.find((job) => job.ending.state === "awaiting_owner")).toMatchObject({ member: "pim", job: "post",
+      draft: { text: expect.any(String) } });
+
+    // Money is whole satang, and a reply says what sending it would take and which message it answers.
+    for (const job of jobs) {
+      if (job.costSatang !== undefined) expect(Number.isSafeInteger(job.costSatang) && job.costSatang >= 0).toBe(true);
+    }
+    const replies = jobs.filter((job) => job.job === "reply" && job.draft);
+    expect(replies.length).toBeGreaterThan(0);
+    for (const reply of replies) {
+      expect(reply.draft).toMatchObject({ about: { messageId: expect.stringMatching(/^msg_/) },
+        send: { answer: "ask", kind: "reply" } });
+    }
+    // A summary names the day it covers.
+    expect(jobs.find((job) => job.job === "daily_summary" && job.draft)?.draft?.about)
+      .toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+  });
+
+  it("gives Sabai Tea no jobs yet, and answers a tenant that is no shop 404 shop_not_found, as the API does", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    expect(await api.listWorkerJobs(SABAI_TEA)).toEqual({ tenant: SABAI_TEA, jobs: [], next: null });
+    await expect(api.listWorkerJobs("shop_nobody")).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+  });
+
+  it("pages newest first by a job's task id, and refuses what the API refuses, in the API's order", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const everything = (await api.listWorkerJobs(BAAN_MALI)).jobs;
+    const first = await api.listWorkerJobs(BAAN_MALI, { limit: 3 });
+    expect(first.jobs).toEqual(everything.slice(0, 3));
+    expect(first.next).toBe(everything[2]!.taskId);
+    const second = await api.listWorkerJobs(BAAN_MALI, { limit: 3, before: first.next! });
+    expect(second.jobs).toEqual(everything.slice(3, 6));
+    expect(second.next).toBe(everything[5]!.taskId);
+    const third = await api.listWorkerJobs(BAAN_MALI, { limit: 3, before: second.next! });
+    expect(third).toEqual({ tenant: BAAN_MALI, jobs: everything.slice(6), next: null });
+
+    await expect(api.listWorkerJobs("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    for (const limit of [0, 26, 1.5, -1, Number.NaN]) {
+      await expect(api.listWorkerJobs(BAAN_MALI, { limit })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    for (const before of ["nope", "pilot-task-6a7c1f00-0000-4000-8000-000000000001", `${everything[0]!.taskId}\n`,
+      // Well formed, but none of the shop's jobs.
+      "worker-task-00000000-0000-4000-8000-000000000000"]) {
+      await expect(api.listWorkerJobs(BAAN_MALI, { before })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    }
+    // The page is checked before the shop is read, so a bad size for a tenant that is no shop is still a 400.
+    await expect(api.listWorkerJobs("shop_nobody", { limit: 0 })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    await expect(api.listWorkerJobs("shop_nobody", { limit: 5 })).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+  });
+
+  it("refuses the route without an operator key", async () => {
+    await expect(createFakeApi({ operatorKey: () => null }).listWorkerJobs(BAAN_MALI)).rejects.toMatchObject({ status: 403,
+      code: "forbidden" });
+  });
+
+  it("takes a shop's jobs with it when the shop is deleted", async () => {
+    const kept = memory();
+    const api = createFakeApi({ now: () => NOW, storage: kept.storage, webOrigin: "https://web.test" });
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    await expect(api.listWorkerJobs(BAAN_MALI)).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    // Gone from what is stored, not only hidden behind the missing shop.
+    const world = JSON.parse(kept.saved.get("manut.pilot.fake.v1")!) as { workers: { tenant: string }[] };
+    expect(world.workers.filter((job) => job.tenant === BAAN_MALI)).toEqual([]);
+  });
+
+  it("replaces a practice world saved before the workers' jobs were kept, whether it is a version behind or only lacks them", async () => {
+    const world = { seq: 100, shops: [], connections: [], messages: [], actions: [], payments: [], subscriptionPayments: [],
+      deletions: [], confirmations: [], expiredTokens: [], audit: [], memory: {}, model: { overrides: [], calls: [], holds: [] } };
+    // Version 6 is a world saved when the model meter was the newest state: it holds that, but no jobs.
+    for (const saved of [{ version: 6, ...world }, { version: 7, ...world }]) {
+      const kept = memory();
+      kept.saved.set("manut.pilot.fake.v1", JSON.stringify(saved));
+      const api = createFakeApi({ now: () => NOW, storage: kept.storage });
+      expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+      expect((await api.listWorkerJobs(BAAN_MALI)).jobs).toHaveLength(7);
+    }
   });
 });

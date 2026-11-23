@@ -370,6 +370,56 @@ export type NewModelCap = { tenant: string; capSatang: number | null };
 /// The largest cap the API takes: ฿10 million, far above any shop's month.
 export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
 
+/// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
+export type WorkerMember = "nam" | "pim" | "ton";
+
+/// What a job is: a reply to a customer's message, a post about a topic, or yesterday's sales summary.
+export type WorkerJobKind = "reply" | "post" | "daily_summary";
+
+/// How a worker's job stands. `failed` carries the code the job ended with, which this console puts in words and shows as it
+/// is when it does not know the code yet. `handed_over` is a job passed on to a member who has not taken it up; a job passed
+/// on and taken up shows the member who took it up, and its ending is theirs.
+export type WorkerJobEnding =
+  | { state: "running" }
+  | { state: "done" }
+  | { state: "failed"; reason: string }
+  | { state: "awaiting_owner" }
+  | { state: "handed_over"; to: WorkerMember }
+  | { state: "cancelled" };
+
+/// What a member wrote for the owner to read. It is a draft: it has not been sent to anyone. `about` names the message a
+/// reply answers or the day a summary covers. `send` says what sending a reply would take: `draft_only` while the shop's LINE
+/// connection is in practice mode, `ask` once it is over, when the owner's approval is needed.
+export type WorkerDraft = {
+  text: string;
+  at: string;
+  about?: { messageId?: string; date?: string };
+  send?: { answer: "draft_only" | "ask"; kind: string };
+};
+
+/// One job of a shop's team (docs/pilot-api.md, "Workers' drafts"). `member` is who has the job now, and `passedFrom` who
+/// passed it to them. `draft` is the newest the job wrote, or null. `costSatang` is what the job's model calls cost, in
+/// whole satang, and is absent for a job that called none.
+export type WorkerJobEntry = {
+  taskId: string;
+  member: WorkerMember;
+  passedFrom?: WorkerMember;
+  job: WorkerJobKind;
+  /// When the job started.
+  at: string;
+  ending: WorkerJobEnding;
+  draft: WorkerDraft | null;
+  costSatang?: number;
+};
+
+/// One page of a shop's jobs, newest first. `next` is the cursor for the page after it, null when nothing is older. A page
+/// can hold fewer than asked, or none, while `next` says there is more.
+export type WorkerJobsPage = { tenant: string; jobs: WorkerJobEntry[]; next: string | null };
+
+/// Which page to read: the jobs before the cursor `before` (a job's task id), at most `limit` of them (1 to 25; the API
+/// reads 10 when the console does not say).
+export type WorkerJobsQuery = { before?: string; limit?: number };
+
 /// The reply text the broker accepts: 1 to 5,000 characters.
 export const REPLY_MAX_LENGTH = 5000;
 
@@ -468,6 +518,12 @@ export interface PilotApi {
   /// `invalid_request` for a cap that is missing, not whole or out of range, 503 `not_configured` naming the setting,
   /// and 503 `meter_unavailable`, which does not say whether the cap was written.
   setModelCap(input: NewModelCap): Promise<ModelCap>;
+
+  /// `GET /v1/admin/workers/drafts`: one page of what Nam, Pim and Ton did for a shop, newest first, drafts and handovers
+  /// included. It only reads: a draft in it has not been sent. Rejects with 400 `tenant_required`, 400 `invalid_request` for a
+  /// cursor that is not one of the shop's jobs or a size out of range, 404 `shop_not_found`, and 503 `shop_unavailable` or
+  /// `drafts_unavailable`.
+  listWorkerJobs(tenant: string, query?: WorkerJobsQuery): Promise<WorkerJobsPage>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.

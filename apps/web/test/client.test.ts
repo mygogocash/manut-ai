@@ -68,6 +68,7 @@ async function everyAdminRoute(api: PilotApi) {
   await api.confirmFact({ tenant: "t1", id: "f2" });
   await api.correctFact({ tenant: "t1", id: "f2", text: "We close on Tuesdays" });
   await api.forgetFact({ tenant: "t1", id: "f2" });
+  await api.listWorkerJobs("t1", { before: "worker-task-6a7c1f00-0000-4000-8000-000000000001", limit: 5 });
 }
 
 describe("the API client", () => {
@@ -95,6 +96,7 @@ describe("the API client", () => {
       "POST https://api.example.test/v1/admin/memory/confirm",
       "POST https://api.example.test/v1/admin/memory/correct",
       "POST https://api.example.test/v1/admin/memory/forget",
+      "GET https://api.example.test/v1/admin/workers/drafts?tenant=t1&before=worker-task-6a7c1f00-0000-4000-8000-000000000001&limit=5",
     ]);
     for (const call of calls) {
       expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
@@ -220,6 +222,44 @@ describe("the API client", () => {
       "https://api.example.test/v1/admin/audit?tenant=pilot%3A1",
       "https://api.example.test/v1/admin/audit?tenant=pilot%3A1&before=bad",
     ]);
+  });
+
+  it("reads a shop's worker jobs a page at a time, asking only for what it was given, and keeps the API's refusals", async () => {
+    const page = {
+      tenant: "pilot:1",
+      jobs: [{ taskId: "worker-task-6a7c1f00-0000-4000-8000-000000000001", member: "ton", passedFrom: "nam",
+        job: "daily_summary", at: "2026-11-23T02:00:00.000Z", ending: { state: "done" },
+        draft: { text: "Yesterday: 3 paid orders.", at: "2026-11-23T02:00:05.000Z", about: { date: "2026-11-22" } },
+        costSatang: 2 }],
+      next: null,
+    };
+    const refusals: Record<string, [number, string]> = {
+      "tenant=gone": [404, "shop_not_found"],
+      "limit=99": [400, "invalid_request"],
+      "tenant=slow": [503, "drafts_unavailable"],
+    };
+    const { api, calls } = harness("op-key-123", (url) => {
+      const refused = Object.entries(refusals).find(([part]) => url.includes(part));
+      return refused ? json({ error: refused[1][1] }, refused[1][0]) : json(page);
+    });
+
+    expect(await api.listWorkerJobs("pilot:1")).toEqual(page);
+    expect(await api.listWorkerJobs("pilot:1", { limit: 10 })).toEqual(page);
+    await expect(api.listWorkerJobs("gone")).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.listWorkerJobs("pilot:1", { limit: 99 })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    await expect(api.listWorkerJobs("slow")).rejects.toMatchObject({ status: 503, code: "drafts_unavailable" });
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.test/v1/admin/workers/drafts?tenant=pilot%3A1",
+      "https://api.example.test/v1/admin/workers/drafts?tenant=pilot%3A1&limit=10",
+      "https://api.example.test/v1/admin/workers/drafts?tenant=gone",
+      "https://api.example.test/v1/admin/workers/drafts?tenant=pilot%3A1&limit=99",
+      "https://api.example.test/v1/admin/workers/drafts?tenant=slow",
+    ]);
+    // It only reads: every call is a GET with the key and no body.
+    for (const call of calls) {
+      expect(call.method).toBe("GET");
+      expect(call.body).toBeUndefined();
+    }
   });
 
   it("reads a shop's model spend for a month and sets or clears its cap, as docs/model-gateway.md answers", async () => {

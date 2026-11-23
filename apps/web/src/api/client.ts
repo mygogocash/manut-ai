@@ -33,6 +33,7 @@ import {
   type ShopDeletion,
   type ShopExport,
   type SubscriptionPayment,
+  type WorkerJobsPage,
 } from "./types";
 
 export type HttpApiOptions = {
@@ -267,6 +268,19 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         method: "PUT",
         path: "/v1/admin/model/cap",
         body: { tenant: input.tenant, capSatang: input.capSatang },
+        admin: true,
+      }),
+
+    // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
+    listWorkerJobs: (tenant, query = {}) =>
+      request<WorkerJobsPage>({
+        method: "GET",
+        path: "/v1/admin/workers/drafts",
+        query: {
+          tenant,
+          ...(query.before !== undefined ? { before: query.before } : {}),
+          ...(query.limit !== undefined ? { limit: String(query.limit) } : {}),
+        },
         admin: true,
       }),
   };

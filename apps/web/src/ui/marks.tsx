@@ -96,6 +96,23 @@ export const MemoryIcon = () => (
   </Icon>
 );
 
+/// Four tiles: every shop at once.
+export const ShopsIcon = () => (
+  <Icon>
+    <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.8" />
+    <rect x="9" y="2.5" width="4.5" height="4.5" rx="0.8" />
+    <rect x="2.5" y="9" width="4.5" height="4.5" rx="0.8" />
+    <rect x="9" y="9" width="4.5" height="4.5" rx="0.8" />
+  </Icon>
+);
+
+/// A page with its corner turned and a few lines: what the team wrote, for the owner to read.
+export const DraftIcon = () => (
+  <Icon>
+    <path d="M4.5 2.5h5l3 3v7.5a1 1 0 01-1 1h-7a1 1 0 01-1-1v-9.5a1 1 0 011-1zM9.5 2.5v3h3M6 8.5h4M6 11h3" />
+  </Icon>
+);
+
 /// Two people: who can use Manut AI for a shop.
 export const PeopleIcon = () => (
   <Icon>
