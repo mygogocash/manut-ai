@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
+import { modelTenantRoute, wipeModelTenant } from "./model-meter";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -48,6 +49,11 @@ export class TenantObject extends DurableObject {
     // Manut AI pilot records for this tenant (pilot-store.ts).
     if (url.pathname.startsWith("/pilot/")) {
       return pilotTenantRoute(this.ctx.storage, request, url);
+    }
+    // The model gateway's ledger for this tenant: cap, monthly spend, open
+    // reservations and one metering record per call (model-meter.ts).
+    if (url.pathname.startsWith("/model/")) {
+      return modelTenantRoute(this.ctx.storage, request, url);
     }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
@@ -164,9 +170,10 @@ export class TenantObject extends DurableObject {
     return Response.json({ items: [...items].reverse() });
   }
 
-  /// Wipes the tenant's consent, task index, attention items and pilot
-  /// records (shop, customer messages, replies, payments), then writes a
-  /// tombstone.
+  /// Wipes the tenant's consent, task index, attention items, pilot records
+  /// (shop, customer messages, replies, payments) and model meter (cap
+  /// override, monthly totals, reservations, per-call records), then writes
+  /// a tombstone.
   /// Sessions are wiped by AuthObject through the worker; the tombstone
   /// proves the deletion happened and marks any data that reappears
   /// afterwards as new, never restored.
@@ -185,6 +192,7 @@ export class TenantObject extends DurableObject {
     await this.ctx.storage.delete(`consent:${body.tenant}`);
     await this.ctx.storage.delete([`attention:${body.tenant}`, `attention-deliveries:${body.tenant}`]);
     await wipePilotTenant(this.ctx.storage, body.tenant);
+    await wipeModelTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
     return Response.json(tombstone);
