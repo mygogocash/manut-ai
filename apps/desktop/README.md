@@ -29,17 +29,19 @@ answers it through `src/runtime`:
 | File | What it is |
 | --- | --- |
 | `src/runtime/adapter.ts` | `RuntimeAdapter`: `connect`, `close`, `request(op, params)`, `on`, `onAny`, `onStatus`, plus `kind` and `capabilities` |
-| `src/runtime/index.ts` | `createRuntime()` picks the adapter; `can(feature)` asks what the runtime has |
-| `src/runtime/mock/` | The in-process runtime: Buddy and a small team, scripted turns, approvals that settle once. The default |
+| `src/runtime/index.ts` | `createRuntime()` picks the adapter from the choice this page started with; `can(feature)` asks what the runtime has |
+| `src/runtime/setting.ts` | Settings › Developer's choice, kept in `manut.runtime`: Practice or Connected with an API origin |
+| `src/runtime/mock/` | The in-process runtime: Buddy and a small team, scripted turns, approvals that settle once. The default, called Practice |
+| `src/runtime/http/` | Connected: a read-only runtime over `apps/api` at one origin, signed in through the backend's own sign-in, with the session in the macOS keychain and requests through the shell's `api_request` command (`src-tauri/src/api_link.rs`). Every write answers "not yet". See `docs/runtime-adapter.md` |
 | `src/lib/bridge.ts` | The WebSocket adapter (omher's original transport). Used only when `VITE_MANUT_BRIDGE` or the page's `__MANUT_BRIDGE_URL__` names a URL, which is how the Playwright suite reaches `e2e/mock-bridge.mjs` |
 
 In the demo runtime, type anything for a sample answer, or `/approve`, `/clarify`, `/interview`, `/delegate`.
 
-A real backend arrives as one more adapter that implements `RuntimeAdapter` and is returned by `createRuntime()`.
 Feature groups a runtime lacks are declared in its `RuntimeCapabilities` (`elsewhere`, `automations`, `plugins`,
 `restart`, `accounts`); the app hides those screens instead of showing ones that cannot work. The in-process
-runtime has none of them. **A release build would also run on the demo runtime today**, because no real one exists
-yet: do not ship this build to an owner.
+runtime has none of them; Connected has `automations` (read-only). A quiet line above the account row says which
+runtime the app runs on. **A release build runs on the demo runtime by default**, and Connected only reads and needs a
+developer to sign it in: do not ship this build to an owner.
 
 ## What was removed from omher, and why
 
