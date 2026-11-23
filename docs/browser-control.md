@@ -12,11 +12,12 @@ The design canvas says it in the owner's words:
 - States: limits and States: outside the app: the work carries on in the cloud outpost, and quitting never silently
   stops work.
 
-Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault object) and
-`apps/api/src/browser-control.ts` (the operator and outpost routes). The worker's side is four methods on the job
-flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
-`sign-in-grants.test.ts` and `browser-steps.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and
-outposts".
+Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault object),
+`apps/api/src/browser-control.ts` (the operator and outpost routes) and `apps/api/src/browser-writes.ts` (submitting:
+the write step, its table of kinds, and its hand-out and report). The worker's side is five methods on the job flow's
+port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
+`sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes are in `docs/pilot-api.md`,
+"Vault sign-ins and outposts".
 
 ## The promises
 
@@ -107,7 +108,39 @@ write goes the way every write goes:
   gate the broker uses, and reports how it went.
 
 So there is no second way round: a browser step is just another place a write can be made, and it is made the same
-way.
+way. As built (`apps/api/src/browser-writes.ts`; the contract is `docs/pilot-api.md`, "Submitting through a browser"):
+
+1. **The write.** A worker asks with the exact write, `port.askSubmit({ action, signInId, url, form, values })`: a typed
+   action from a fixed list (`send_reply`, `place_order`, `change_order`, `refund`, `publish_post`, `change_setting`),
+   the site as one of the shop's sign-ins, the page, the form it submits (or the button it presses) as a selector, and
+   every value it types or chooses, each a field's selector and exactly what goes in it. That is all an outpost needs to
+   run it, and all an owner reads to approve it.
+2. **Asking first.** The control plane reads the switches (with `officeExternalWrites`), consent and the attempt's
+   heartbeat, which gives the member. Then member-grants' `decide` for that member and the action's job, through the
+   sign-in as the connection: `not_my_job` (naming whose job it is), `not_connected` and `refused` stop there, and in
+   the site's practice days `draft_only` keeps the write's text as the attempt's draft and raises no request. The member
+   must be named on the sign-in, and the page on one of its origins. Only then does the task object store the exact
+   write as an immutable proposal and open one approval-core request naming the site, the page, the form and every
+   value, with a sentence of the control plane's own that quotes each value exactly as it will be typed.
+3. **The kind comes from the action**, through a fixed table, never the worker's word: `send_reply` is `reply`;
+   `place_order`, `change_order` and `refund` are `money`; `publish_post` is `public_post`; `change_setting` is
+   `command`; anything else is `command`. Only `message` and `reply` may be decided by a helper or approved from a
+   notification (approval-core's `mayDecide`, `@manut/notify-rules`), so only a private answer to a customer who wrote
+   first is one; a public answer, to a review say, is a post. Each job's kind in member-grants' roster agrees with the
+   table, and a disagreement is refused.
+4. **Submitting once.** Once the request is approved, the worker queues one `submit` step naming the outpost, the
+   request and the revision it was approved at, and nothing else: the step carries no values. As the outpost takes it,
+   the control plane reads the switches (with `officeExternalWrites`), consent and the attempt again, the vault checks
+   that the page's origin is still a working sign-in's for the member, and then the task object's one-use begin gate
+   moves the write to dispatching, checking in the same step that its request is still approved at that revision and
+   that the step's attempt still holds the task. Only a begun write's step is handed out, once, to the outpost it names,
+   with the action, page, form and values of the approved copy the gate hands back. Nothing else begins a browser
+   write: not a session's dispatch, not the broker's send after a decision, not a read of how the request stands.
+5. **The outpost reports once**, as for every step. The write settles as it said: done is confirmed; a failure it
+   reports only before it submits (the page did not load, a field was missing, the site refused the form) is failed; any
+   other is unknown, since the site may have taken it. The outcome lands in the attempt's events as a tool call.
+
+Every ask, decision, hand-out and report is written to the audit log with ids only, never a value or a page.
 
 ### A broken sign-in
 
@@ -129,14 +162,14 @@ with no password in either.
    - `sign_in` carries a grant from `port.signIn` (`grantId`); the outpost redeems it as above and types into the page
      it has open.
 
-   Any other kind is refused (`step_kind_not_allowed`): a step that submits is the next slice. As at every step, the
-   control plane reads the switches and the owner's consent, then the attempt's own heartbeat, which proves the
-   attempt runs and gives the member from the task object's record. The vault then checks the outpost (the shop's,
-   and online) and what the kind needs. An `open`'s address is https, with no account in it, and its origin is one of
-   the origins of a working sign-in the member is named on. A `read` needs at least one such sign-in, since its outpost
-   may only be on their origins. A `sign_in`'s grant is this attempt's, for this outpost, unused, on time, and in no
-   other step. A step lives two minutes, or as long as its grant if that is shorter; an outpost holds at most 20
-   waiting or running.
+   Any other kind is refused (`step_kind_not_allowed`), but for `submit`, a write step, which is queued only for an
+   approved request (the section above). As at every step, the control plane reads the switches and the owner's consent,
+   then the attempt's own heartbeat, which proves the attempt runs and gives the member from the task object's record.
+   The vault then checks the outpost (the shop's, and online) and what the kind needs. An `open`'s address is https,
+   with no account in it, and its origin is one of the origins of a working sign-in the member is named on. A `read`
+   needs at least one such sign-in, since its outpost may only be on their origins. A `sign_in`'s grant is this
+   attempt's, for this outpost, unused, on time, and in no other step. A step lives two minutes, or as long as its grant
+   if that is shorter; an outpost holds at most 20 waiting or running.
 2. **The outpost asks for its steps** every few seconds while it is awake, with its own credential, and sees only its
    own: another outpost's steps, and another shop's, are not there for it. Before any step is handed out, the control
    plane reads the switches and consent again, and reads the task object to see that the step's attempt still runs
@@ -196,6 +229,26 @@ The step channel, and two of the smaller gaps (24 Nov 2026):
 - **Export and deletion**: steps are not exported (an outcome that landed is in the task's events, which are); the
   shop's deletion wipes them with its vault.
 
+Submitting steps through approval-core, with member-grants' decide first (24 Nov 2026; December, browser control slice
+2; API only):
+
+- **The port**: `askSubmit`, and the `submit` kind of `browserStep`.
+- **The write's rules** (`apps/api/src/browser-writes.ts`): the typed actions, the table from an action to its kind, the
+  job each action is in member-grants' roster, the write's shape, the owner's sentence, and how a report settles a
+  write.
+- **Member-grants**: Nam's `place_orders` and `change_orders`, both writes of kind `money`.
+- **The task object**: a worker's browser write stored with its approval-core request (`/attempts/:id/ask-submit`), and
+  the begin gate begins one only for the control plane at a hand-out, with the step's revision and attempt checked in
+  the same step. The gate now reads an action again and moves it in one transaction, so two begins at once can no longer
+  both move it; that was possible before, for every action the broker sends (`test/task-actions.test.ts`).
+- **The vault**: write steps (queued through their own path from the approved request, never from what a worker said),
+  checked against their sign-in as they are handed out, and refused when they could not be begun.
+- **The outposts' routes**: a write step handed out only once begun, with the approved write's values; its report
+  settles the write. A new failure code, `submit_refused`.
+- **The audit log**: no new actions. An ask writes `approval.requested` (refused, or `skipped` with `draft_only`, as
+  well as `ok`); a write step's begin and settlement write `dispatch.started` and `dispatch.settled`, as the broker's
+  do; `browser_step.*` name a write step's request.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -250,13 +303,54 @@ The step channel's (24 Nov 2026):
   credential's digest, and nothing can authenticate as an outpost that is not there. A new credential puts the outpost
   to sleep until its new holder beats; the grants and steps waiting for it stay, for the new credential.
 
+Submitting's (24 Nov 2026):
+
+- The typed actions are six, mapped to member-grants' jobs one each: `send_reply` (Nam's `reply_customers`),
+  `place_order` and `change_order` (Nam's new `place_orders` and `change_orders`: "Nam uses it for orders and chat"),
+  `refund` (Ton's `ask_refund`), `publish_post` (Pim's `publish_posts`) and `change_setting` (Kit's `run_command`). No
+  action maps to `message` or `payment_confirmation` yet: none of the team's site jobs is one.
+- Kinds err strict. `place_order` and `change_order` are `money`, since either can spend, charge or refund. A public
+  answer to a review is `publish_post`, never `send_reply`, because who sees it decides the kind.
+- A write's sign-in is its connection for `decide`: its practice days run from when it was added, as the canvas says
+  ("Nam and Ton work there in practice mode for the first 3 days"); a sign-in the site refused is not connected.
+- A write is at most 20 values, each at most 5,000 characters, the whole at most 12 KB as JSON, so its request (which
+  names every value twice) and a practice-mode draft stay small stored values. A value may hold tabs and line breaks.
+- The owner's sentence quotes each value as JSON and names each field and the form by its selector, the exact things the
+  outpost acts on, rather than a label the worker wrote, which could say one thing while the selector does another.
+- A browser write is never revised: a changed write is asked again, as a new request, as a reply is. A step names the
+  revision it was approved at, and the begin gate checks it again, so a revision from anywhere would stop the step.
+- The step carries no values. The outpost gets them from the approved copy the begin gate hands back, whose hash the
+  gate checks, so what it types is what the owner read.
+- The vault takes a write step before the gate begins it, so only one fetch can ever try to begin it; a step the gate
+  refuses is refused for good, and the write stays approved for a new step. A write begun but not handed out after all
+  is settled failed: the outpost never had it.
+- A write step's attempt must hold the task as the gate begins it, as a decision on its request would need. A read step
+  only needs its attempt to run.
+- One step at a time carries a request; once that step is refused or out of time, a new one may carry the still-approved
+  write.
+- A write settles from its step's report even when the report cannot land in the attempt (an attempt that ended, consent
+  withdrawn): what was done on the site is a fact, and the action's record says what was done. The failures that mean
+  nothing was submitted are the ones an outpost finds before it submits; `origin_not_allowed`, `timed_out` and
+  `browser_error` may come after, so they settle unknown.
+- A write's proposal names its sign-in as both its connection and its account, its page's origin as its target, and a
+  grant revision of 1: a sign-in has no grant revisions.
+- No new audit actions, so the console's Audit page has words for every entry without a change to it.
+
 ## Next slices
 
 1. **The outpost in the desktop shell (this Mac).** It registers through the owner's session, beats every 30 seconds
    while the app is open, asks for its steps every few seconds, redeems grants, types only into the sign-in's origins,
    stays on each step's origins, and reports each step's outcome. The Connections page shows the sign-ins ("Change"
    types a new password) and the outposts.
-2. **Submitting steps** through approval-core, as above, with member-grants' decide first.
+2. **The desktop showing a browser write word for word, then its outpost running write steps.** Today the desktop puts a
+   request into words from a LINE reply's fields or from the task's action, so a browser write reads only
+   "browser.submit on https://seller.shopee.co.th", and a `send_reply` write, kind `reply`, may be approved from a
+   notification. Before any outpost runs a write step, the desktop's cards and notifications must show the request's
+   `detail.text`, which names the site, the page, the form and every value, and a notification may offer Approve only
+   when it shows that text whole (one clipped to a line is a hidden detail, as notify-rules treats one). Then the
+   outpost runs a `submit` step: be on its page, check that the form and every field are there before typing anything
+   (`selector_not_found` otherwise), set each value in order, submit the form or press its button, and report `done`, or
+   `submit_refused` when the site kept the form with an error.
 3. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
