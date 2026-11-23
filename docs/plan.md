@@ -72,11 +72,11 @@ Mac; each starts when a slot frees and what it waits on has merged.
 
 | Order | Work | Waits on | Model |
 | --- | --- | --- | --- |
-| running | The desktop's Customize page (memory and routines) | | Sonnet |
+| done | The desktop's Customize page (memory and routines) | | Sonnet |
+| running | 1. Console: the workers' drafts and a shops overview | | Sonnet |
 | running | The owner's helpers, and deciding approvals from a session | | Opus |
 | running | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | running | The Playwright revival | | Haiku |
-| 1 | Console: the workers' drafts and handovers, and a shops overview (the admin panel) | | Sonnet |
 | 2 | Applying a shop template when a shop is created | | Sonnet |
 | 3 | Routines running on schedule (the schedule object for daily and weekly, a timer for the rest), each run a worker's draft | Customize | Opus |
 | 4 | Console: the People page | the helpers' API | Sonnet |
