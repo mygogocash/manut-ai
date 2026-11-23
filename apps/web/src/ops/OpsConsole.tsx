@@ -5,11 +5,12 @@ import { DeletionNotices } from "./DeletionNotices";
 import { GateView } from "./GateView";
 import { MessagesTab } from "./MessagesTab";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
+import { OwnerLineTab } from "./OwnerLineTab";
 import { PaymentsTab } from "./PaymentsTab";
 import { ShopDataTab } from "./ShopDataTab";
 import { useLoad } from "./useLoad";
 import { deletionOf, useShopDeletion } from "./useShopDeletion";
-import { errorText, gateWords, isAuthError, shopDataWords } from "./words";
+import { errorText, gateWords, isAuthError, ownerLineWords, shopDataWords } from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
 /// the side menu, the chosen shop's messages, replies, payments and data in the main column. The Pilot gate,
@@ -17,7 +18,7 @@ import { errorText, gateWords, isAuthError, shopDataWords } from "./words";
 
 export const REFRESH_MS = 15000;
 
-type Tab = "messages" | "payments" | "data";
+type Tab = "messages" | "payments" | "data" | "owner";
 /// What the main column shows: the chosen shop, or the Pilot gate across all of them.
 type Page = "shop" | "gate";
 
@@ -173,6 +174,9 @@ export function OpsConsole() {
                   <span className={shop.consent ? "tag ok" : "tag warn"}>
                     {shop.consent ? "Owner allowed sending" : "Owner has not allowed sending yet"}
                   </span>
+                  <span className={shop.ownerLinkedAt ? "tag ok" : "tag"}>
+                    {shop.ownerLinkedAt ? ownerLineWords.linkedTag : ownerLineWords.notLinkedTag}
+                  </span>
                   {shopDeletion?.state === "awaiting_owner" && (
                     <span className="tag warn">{shopDataWords.waitingTag(shop.ownerName)}</span>
                   )}
@@ -212,6 +216,17 @@ export function OpsConsole() {
                   onClick={() => setTab("data")}
                 >
                   {shopDataWords.tab}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-owner"
+                  className="tab"
+                  aria-selected={tab === "owner"}
+                  aria-controls="panel-owner"
+                  onClick={() => setTab("owner")}
+                >
+                  {ownerLineWords.tab}
                 </button>
               </div>
               <div className="acts">
@@ -262,6 +277,8 @@ export function OpsConsole() {
                 />
               ) : tab === "payments" ? (
                 <PaymentsTab key={shop.tenant} shop={shop} />
+              ) : tab === "owner" ? (
+                <OwnerLineTab key={shop.tenant} shop={shop} onChanged={shops.reload} />
               ) : (
                 <ShopDataTab
                   key={shop.tenant}

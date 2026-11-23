@@ -152,6 +152,51 @@ describe("the API client", () => {
       .toMatchObject({ status: 409, code: "slip_already_recorded" });
   });
 
+  it("reaches every owner-on-LINE route with the operator key, and Manut AI's webhook without it", async () => {
+    const account = { channelId: "2000000999", botUserId: `U${"e".repeat(32)}`, basicId: "@manutai",
+      webhookUrl: "https://api.example.test/v1/inbound/owner-line", connectedAt: "2026-11-23T03:00:00.000Z" };
+    const card = { state: "sent", attempts: 2, lastTriedAt: "2026-11-23T03:00:00.000Z", sentAt: "2026-11-23T03:00:01.000Z" };
+    const { api, calls } = harness("op-key-123", (url) => {
+      if (url.includes("/inbound/")) return new Response(null, { status: 200 });
+      if (url.endsWith("/cards")) return json({ ownerCard: card });
+      if (url.endsWith("/link-codes")) return json({ code: "12345678", expiresAt: "2026-11-23T03:30:00.000Z" });
+      if (url.endsWith("/unlink")) return json({ unlinked: true });
+      if (url.endsWith("/account")) return json(account);
+      return json({ enabled: false, account: null });
+    });
+
+    expect(await api.getOwnerLine()).toEqual({ enabled: false, account: null });
+    const secrets = { channelSecret: "fixture-secret", channelAccessToken: "fixture-token" };
+    expect(await api.setOwnerLineAccount({ channelId: "2000000999", botUserId: account.botUserId, basicId: "@manutai",
+      ...secrets })).toEqual(account);
+    expect(await api.createOwnerLinkCode("t1")).toEqual({ code: "12345678", expiresAt: "2026-11-23T03:30:00.000Z" });
+    expect(await api.unlinkOwner("t1")).toEqual({ unlinked: true });
+    expect(await api.retryOwnerCard("t1", "a1")).toEqual(card);
+    await api.deliverOwnerLineWebhook('{"events":[]}', "c2ln");
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET https://api.example.test/v1/admin/pilot/owner-line",
+      "POST https://api.example.test/v1/admin/pilot/owner-line/account",
+      "POST https://api.example.test/v1/admin/pilot/owner-line/link-codes",
+      "POST https://api.example.test/v1/admin/pilot/owner-line/unlink",
+      "POST https://api.example.test/v1/admin/pilot/owner-line/cards",
+      "POST https://api.example.test/v1/inbound/owner-line",
+    ]);
+    for (const call of calls.slice(0, 5)) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    expect(calls[1]?.body).toEqual({ channelId: "2000000999", botUserId: account.botUserId, basicId: "@manutai", ...secrets });
+    expect(calls[2]?.body).toEqual({ tenant: "t1" });
+    expect(calls[3]?.body).toEqual({ tenant: "t1" });
+    expect(calls[4]?.body).toEqual({ tenant: "t1", actionId: "a1" });
+    const webhook = calls[5]!;
+    expect(webhook.headers.has("authorization")).toBe(false);
+    expect(webhook.credentials).toBe("omit");
+    expect(webhook.headers.get("x-line-signature")).toBe("c2ln");
+    expect(webhook.raw).toBe('{"events":[]}');
+  });
+
   it("refuses an admin call with no key and sends nothing", async () => {
     const { api, fetch } = harness(null);
     await expect(api.listShops()).rejects.toMatchObject({ code: "operator_key_missing" });

@@ -11,7 +11,12 @@ import {
   type NewPayment,
   type NewReply,
   type NewShop,
+  type NewOwnerLineAccount,
   type NewSubscriptionPayment,
+  type OwnerCard,
+  type OwnerLineAccount,
+  type OwnerLineStatus,
+  type OwnerLinkCode,
   type Payment,
   type PilotApi,
   type PilotGate,
@@ -180,6 +185,32 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         })
       ).payments,
     getGate: () => request<PilotGate>({ method: "GET", path: "/v1/admin/pilot/gate", admin: true }),
+
+    getOwnerLine: () => request<OwnerLineStatus>({ method: "GET", path: "/v1/admin/pilot/owner-line", admin: true }),
+    setOwnerLineAccount: (input: NewOwnerLineAccount) =>
+      request<OwnerLineAccount>({ method: "POST", path: "/v1/admin/pilot/owner-line/account", body: input, admin: true }),
+    createOwnerLinkCode: (tenant) =>
+      request<OwnerLinkCode>({ method: "POST", path: "/v1/admin/pilot/owner-line/link-codes", body: { tenant }, admin: true }),
+    unlinkOwner: (tenant) =>
+      request<{ unlinked: boolean }>({ method: "POST", path: "/v1/admin/pilot/owner-line/unlink", body: { tenant },
+        admin: true }),
+    retryOwnerCard: async (tenant, actionId) =>
+      (
+        await request<{ ownerCard: OwnerCard }>({
+          method: "POST",
+          path: "/v1/admin/pilot/owner-line/cards",
+          body: { tenant, actionId },
+          admin: true,
+        })
+      ).ownerCard,
+    deliverOwnerLineWebhook: (rawBody, signature) =>
+      request<void>({
+        method: "POST",
+        path: "/v1/inbound/owner-line",
+        body: rawBody,
+        headers: { "x-line-signature": signature },
+        empty: true,
+      }),
   };
 }
 

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { isAwaitingOwner, type AwaitingOwner, type DeletedShop } from "../src/api";
-import { createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET } from "../src/api/fake";
+import {
+  createFakeApi,
+  DEMO_DELETION_TOKENS,
+  DEMO_TOKENS,
+  lineSignature,
+  PRACTICE_CHANNEL_SECRET,
+  PRACTICE_OWNER_LINE_SECRET,
+} from "../src/api/fake";
 
 function tokenOf(url: string): string {
   return decodeURIComponent(url.split("/approve/")[1] ?? "");
@@ -377,5 +384,108 @@ describe("the fake's pilot gate, measured as the API measures it", () => {
     expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
     expect(await api.listSubscriptionPayments("shop_baanmali")).toEqual([]);
     expect((await api.getGate()).shops).toHaveLength(2);
+  });
+});
+
+describe("owner messages on LINE in practice mode", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 in Bangkok
+  const DAO = `U${"d".repeat(32)}`;
+  let counter = 0;
+
+  /// What Manut AI's practice account receives when `userId` writes `text` in its chat.
+  async function says(api: ReturnType<typeof createFakeApi>, userId: string, text: string, secret = PRACTICE_OWNER_LINE_SECRET) {
+    const body = JSON.stringify({ destination: "Umanutpractice", events: [{ type: "message", webhookEventId: `ev${counter++}`,
+      replyToken: "practice", source: { type: "user", userId }, message: { type: "text", id: "1", text } }] });
+    await api.deliverOwnerLineWebhook(body, await lineSignature(secret, body));
+  }
+
+  const linkedAt = async (api: ReturnType<typeof createFakeApi>, tenant: string) =>
+    (await api.listShops()).find((shop) => shop.tenant === tenant)?.ownerLinkedAt;
+
+  it("links the owner who sends a code, once, and never shows the console who that is", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    expect(await api.getOwnerLine()).toMatchObject({ enabled: true, account: { basicId: "@manutai" } });
+    const { code, expiresAt } = await api.createOwnerLinkCode("shop_sabaitea");
+    expect(code).toMatch(/^[0-9]{8}$/);
+    expect(Date.parse(expiresAt) - NOW).toBe(30 * 60 * 1000);
+
+    await says(api, DAO, `${code.slice(0, 4)} ${code.slice(4)}`);
+    expect(await linkedAt(api, "shop_sabaitea")).toBe("2026-11-23T03:00:00.000Z");
+    expect(JSON.stringify(await api.listShops())).not.toContain(DAO);
+    expect((await api.exportShop("shop_sabaitea")).pilot).toMatchObject({ shop: { ownerLineUserId: DAO } });
+
+    // Used once: anyone else sending it links nobody.
+    await says(api, `U${"9".repeat(32)}`, code);
+    expect((await api.exportShop("shop_sabaitea")).pilot).toMatchObject({ shop: { ownerLineUserId: DAO } });
+
+    expect(await api.unlinkOwner("shop_sabaitea")).toEqual({ unlinked: true });
+    expect(await linkedAt(api, "shop_sabaitea")).toBeUndefined();
+    expect(await api.unlinkOwner("shop_sabaitea")).toEqual({ unlinked: false });
+  });
+
+  it("refuses a delivery it cannot verify, and takes no code from a user past five wrong ones", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const { code } = await api.createOwnerLinkCode("shop_sabaitea");
+    await expect(says(api, DAO, code, "another-secret")).rejects.toMatchObject({ status: 401 });
+    for (let i = 0; i < 5; i++) await says(api, DAO, code === `0000000${i}` ? "99999999" : `0000000${i}`);
+    await says(api, DAO, code);
+    expect(await linkedAt(api, "shop_sabaitea")).toBeUndefined();
+    // A newer code retires the older one.
+    const newer = await api.createOwnerLinkCode("shop_sabaitea");
+    await says(api, `U${"8".repeat(32)}`, code);
+    expect(await linkedAt(api, "shop_sabaitea")).toBeUndefined();
+    await says(api, `U${"8".repeat(32)}`, newer.code);
+    expect(await linkedAt(api, "shop_sabaitea")).toBeDefined();
+  });
+
+  it("sends a card for each reply proposed for a linked owner, and retries one that failed", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const cards = async () => new Map((await api.listActions("shop_baanmali")).map((a) => [a.actionId, a.ownerCard]));
+    const seeded = await cards();
+    expect(seeded.get("act_ploy")).toMatchObject({ state: "sent" });
+    expect(seeded.get("act_nok")).toMatchObject({ state: "failed", reason: "provider_429" });
+    expect(seeded.get("act_tracking")).toMatchObject({ state: "unknown" });
+
+    expect(await api.retryOwnerCard("shop_baanmali", "act_nok")).toMatchObject({ state: "sent", attempts: 2,
+      sentAt: "2026-11-23T03:00:00.000Z" });
+    expect(await api.retryOwnerCard("shop_baanmali", "act_ploy")).toEqual(seeded.get("act_ploy"));
+    await expect(api.retryOwnerCard("shop_baanmali", "act_mai")).rejects.toMatchObject({ status: 409,
+      code: "reply_not_waiting" });
+    await expect(api.retryOwnerCard("shop_baanmali", "nope")).rejects.toMatchObject({ status: 404, code: "reply_not_found" });
+
+    const [message] = (await api.listMessages("shop_baanmali")).filter((m) => !m.replyActionId);
+    const proposed = await api.proposeReply({ tenant: "shop_baanmali", messageId: message!.id, text: "ได้ค่ะ" });
+    expect((await cards()).get(proposed.actionId)).toEqual({ state: "sent", attempts: 1,
+      lastTriedAt: "2026-11-23T03:00:00.000Z", sentAt: "2026-11-23T03:00:00.000Z" });
+    await expect(api.retryOwnerCard("shop_sabaitea", "act_nok")).rejects.toMatchObject({ status: 409,
+      code: "owner_not_linked" });
+  });
+
+  it("does nothing for owners while owner messages are off", async () => {
+    const api = createFakeApi({ now: () => NOW, ownerLineEnabled: false });
+    expect((await api.getOwnerLine()).enabled).toBe(false);
+    await expect(api.createOwnerLinkCode("shop_sabaitea")).rejects.toMatchObject({ status: 403, code: "feature_disabled" });
+    await expect(api.retryOwnerCard("shop_baanmali", "act_nok")).rejects.toMatchObject({ status: 403,
+      code: "feature_disabled" });
+    await expect(says(api, DAO, "12345678")).rejects.toMatchObject({ status: 404 });
+    const [message] = (await api.listMessages("shop_baanmali")).filter((m) => !m.replyActionId);
+    const proposed = await api.proposeReply({ tenant: "shop_baanmali", messageId: message!.id, text: "ได้ค่ะ" });
+    expect((await api.listActions("shop_baanmali")).find((a) => a.actionId === proposed.actionId)?.ownerCard).toBeUndefined();
+  });
+
+  it("forgets a deleted shop's code, and sets Manut AI's account without ever answering its secrets", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    const { code } = await api.createOwnerLinkCode("shop_sabaitea");
+    await api.deleteShop({ tenant: "shop_sabaitea", confirmName: "Sabai Tea" });
+    await says(api, DAO, code);
+    await expect(api.listShops()).resolves.toHaveLength(1);
+
+    const set = await api.setOwnerLineAccount({ channelId: "2000000999", botUserId: `U${"e".repeat(32)}`,
+      channelSecret: "practice-new-secret", channelAccessToken: "practice-new-token", basicId: "@manutnew" });
+    expect(set).toMatchObject({ channelId: "2000000999", basicId: "@manutnew" });
+    expect(JSON.stringify([set, await api.getOwnerLine()])).not.toMatch(/practice-new-(secret|token)/);
+    await expect(says(api, DAO, "12345678")).rejects.toMatchObject({ status: 401 });
+    await expect(api.setOwnerLineAccount({ channelId: "1", botUserId: "bot", channelSecret: "s",
+      channelAccessToken: "t" })).rejects.toMatchObject({ status: 400, code: "invalid_request" });
   });
 });

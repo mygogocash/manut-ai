@@ -4,9 +4,11 @@ import {
   type DeletedShop,
   type DeletionRequest,
   type GateStatus,
+  type OwnerCard,
   type PilotGate,
   type Shop,
 } from "../api";
+import { canRetryOwnerCard } from "../api/ownerLine";
 import { dayOffset, formatBaht, formatClock, formatDate, formatStamp } from "../format";
 
 /// The console's status words. Operators read them; the owner never does.
@@ -296,6 +298,91 @@ export const gateWords = {
 export function subscriptionErrorText(error: unknown, shop: string): string {
   if (error instanceof ApiError && error.code === "slip_already_recorded") return gateWords.alreadyRecorded(shop);
   return errorText(error);
+}
+
+/// Owner messages on LINE (docs/pilot-api.md, "Owner messages on LINE"): whether a shop's owner is linked to Manut
+/// AI's own LINE account, the code that links them, and each reply's card. Operators read these; owners never do.
+export const ownerLineWords = {
+  tab: "Owner on LINE",
+  linkedTag: "Owner linked on LINE",
+  notLinkedTag: "Owner not linked on LINE",
+  title: (owner: string) => `${owner} on LINE`,
+  what: (owner: string) =>
+    `Once linked, ${owner} gets a card on LINE for each reply to approve, and a short summary at 08:00 each morning, from Manut AI's own LINE account.`,
+  linked: (owner: string, at: string, now: number = Date.now()) => `${owner} linked on LINE ${whenText(at, now)}.`,
+  notLinked: (owner: string) => `${owner} is not linked yet.`,
+  loading: "Loading",
+  tryAgain: "Try again",
+  off: "Owner messages on LINE are turned off. Codes get no answer and nothing is sent until they are turned on.",
+  noAccount:
+    "Manut AI's LINE account is not set up yet, so codes get no answer. Set it with POST /v1/admin/pilot/owner-line/account.",
+  getCode: "Get a link code",
+  newCode: "Get a new link code",
+  gettingCode: "Getting a code",
+  codeTitle: (owner: string) => `Link code for ${owner}`,
+  codeLabel: "Link code",
+  codeWhat: "link code",
+  /// How the owner uses the code, step by step, and until when it works.
+  codeSteps: (owner: string, basicId: string | undefined, expiresAt: string, now: number = Date.now()) => [
+    basicId
+      ? `Ask ${owner} to add Manut AI (${basicId}) as a friend on LINE.`
+      : `Ask ${owner} to add Manut AI's LINE account as a friend.`,
+    `${owner} sends this code in that chat. Spaces do not matter.`,
+    `It works once, until ${formatStamp(expiresAt, now)}. ${owner} gets an answer in the chat when it works. Refresh to see it here.`,
+  ],
+  unlink: "Unlink",
+  unlinkTitle: (owner: string) => `Unlink ${owner}?`,
+  unlinkText: (owner: string) =>
+    `${owner} gets no more cards or morning summaries until linked again with a new code. Nothing else changes.`,
+  unlinkConfirm: (owner: string) => `Unlink ${owner}`,
+  unlinking: "Unlinking",
+  keep: "Keep linked",
+  retry: "Send the card again",
+  retrying: "Sending",
+} as const;
+
+/// Why a card did not go through, in words, from the API's reason code.
+function cardReasonText(reason: string | undefined): string {
+  if (reason === "account_not_set") return "Manut AI's LINE account is not set up";
+  if (reason === "provider_unreachable" || /^provider_5\d\d$/.test(reason ?? "")) return "LINE did not answer";
+  if (reason && /^provider_4\d\d$/.test(reason)) return `LINE refused it (${reason})`;
+  return `it could not be prepared (${reason ?? "no reason given"})`;
+}
+
+/// Where a reply's card to its owner stands, for the reply's row.
+export function cardText(card: OwnerCard, owner: string, now: number = Date.now()): string {
+  switch (card.state) {
+    case "sent":
+      return `Card sent to ${owner} on LINE ${whenText(card.sentAt ?? card.lastTriedAt, now)}.`;
+    case "sending":
+      return `Sending the card to ${owner} on LINE.`;
+    case "failed":
+      return `The card to ${owner} did not go out: ${cardReasonText(card.reason)}.`;
+    case "unknown":
+      return `Not sure the card reached ${owner}: ${cardReasonText(card.reason)}. Sending it again is safe, since LINE never shows it twice.`;
+  }
+}
+
+/// What the API said to a link code or an unlink that did nothing. A 403 here is the flag, not the operator key.
+export function ownerLineErrorText(error: unknown): string {
+  if (error instanceof ApiError && error.code === "feature_disabled") return ownerLineWords.off;
+  if (error instanceof ApiError && error.code === "account_not_set") return ownerLineWords.noAccount;
+  return errorText(error);
+}
+
+/// What the API said to sending a card again that sent nothing.
+export function cardRetryErrorText(error: unknown, owner: string): string {
+  if (error instanceof ApiError) {
+    if (error.code === "reply_not_waiting") return `This reply no longer waits for ${owner}, so it needs no card.`;
+    if (error.code === "owner_not_linked") return `${owner} is not linked on LINE, so there is nowhere to send it.`;
+    if (error.code === "card_sending") return "The card is being sent right now. Refresh in a minute to see how it went.";
+  }
+  return ownerLineErrorText(error);
+}
+
+/// Whether the reply's row offers to send its card again (the API's rules, `apps/web/src/api/ownerLine.ts`).
+export function canRetryCard(card: OwnerCard, replyState: ApprovalState, now: number = Date.now()): boolean {
+  return canRetryOwnerCard(card, replyState, now);
 }
 
 /// "at 10:00" today, "on 23 November at 10:00" on any other day of the shop's calendar.

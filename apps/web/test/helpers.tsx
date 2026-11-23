@@ -27,6 +27,12 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     recordSubscriptionPayment: missing("recordSubscriptionPayment"),
     listSubscriptionPayments: missing("listSubscriptionPayments"),
     getGate: missing("getGate"),
+    getOwnerLine: missing("getOwnerLine"),
+    setOwnerLineAccount: missing("setOwnerLineAccount"),
+    createOwnerLinkCode: missing("createOwnerLinkCode"),
+    unlinkOwner: missing("unlinkOwner"),
+    retryOwnerCard: missing("retryOwnerCard"),
+    deliverOwnerLineWebhook: missing("deliverOwnerLineWebhook"),
     ...overrides,
   };
 }

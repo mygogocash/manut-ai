@@ -12,6 +12,8 @@ import {
   type DeletionState,
   type DeletionView,
   type InboundMessage,
+  type OwnerCard,
+  type OwnerLineAccount,
   type Payment,
   type PilotApi,
   type ReplyAction,
@@ -19,6 +21,7 @@ import {
   type SubscriptionPayment,
 } from "./types";
 import { pilotGate } from "./gate";
+import { CLAIM_LEASE_MS, GUESS_LIMIT, GUESS_WINDOW_MS, LINK_CODE_DIGITS, LINK_CODE_TTL_MS, linkCodeAttempt } from "./ownerLine";
 
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
@@ -32,6 +35,11 @@ import { pilotGate } from "./gate";
 /// open the owner's page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined,
 /// demo-old and demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
 /// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
+///
+/// Owner messages on LINE are on in practice mode, from Manut AI's practice account (@manutai): Fon is linked and
+/// Baan Mali's replies carry cards in every state, one refused and one unanswered to practise sending again; Dao is not
+/// linked, to practise getting a code. A code is linked by delivering a signed webhook (`deliverOwnerLineWebhook`) as
+/// the owner's message would arrive; with no LINE here, a card sent again always arrives.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -45,12 +53,21 @@ export type FakeApiOptions = {
   webOrigin?: string;
   /// Keeps the sample data across reloads and tabs, so an approval link opened in a new tab still works.
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined;
+  /// The `ownerLine` flag. On in practice mode, where nothing reaches LINE; off, nothing is sent to owners.
+  ownerLineEnabled?: boolean;
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
 
-/// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list.
-type FakeShop = Shop & { trialStartedAt?: string };
+/// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list,
+/// and the owner's LINE user id only in the shop's export.
+type FakeShop = Shop & { trialStartedAt?: string; ownerLineUserId?: string };
+/// Manut AI's practice account. Its channel secret checks deliveries to it, as the API's vault does; the access token
+/// is dropped, as the real one is never answered.
+type FakeOwnerAccount = OwnerLineAccount & { channelSecret: string };
+/// A link code, kept as the SHA-256 of its digits, never the digits.
+type FakeLinkCode = { tenant: string; hash: string; expiresAt: string; claimedBy?: string };
+type FakeGuesses = { lineUserId: string; windowStart: number; failures: number };
 type FakeConnection = {
   connectionId: string;
   tenant: string;
@@ -64,6 +81,7 @@ type FakeAction = Omit<ReplyAction, "approvalUrl"> & {
   token: string;
   expiresAt: string;
   outcome: Outcome;
+  ownerCard?: OwnerCard;
 };
 /// The API's deletion record: who asked and when (the practice key has no Access identity, so nobody), the owner
 /// confirmation it names for a live shop, and when the wipe finished.
@@ -89,7 +107,7 @@ type FakeConfirmation = {
   decidedAt?: string;
 };
 type FakeDb = {
-  version: 3;
+  version: 4;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -101,17 +119,22 @@ type FakeDb = {
   confirmations: FakeConfirmation[];
   /// Tokens that answer 410, standing in for links whose signed expiry has passed.
   expiredTokens: string[];
+  ownerAccount: FakeOwnerAccount | null;
+  linkCodes: FakeLinkCode[];
+  guesses: FakeGuesses[];
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
-/// (version 1) or before trial starts and subscription payments were kept (version 2) is replaced by a fresh one
-/// rather than read without them.
+/// (version 1), before trial starts and subscription payments were kept (version 2), or before owner messages on LINE
+/// (version 3) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 
 export const PRACTICE_CHANNEL_SECRET = "practice-channel-secret";
+/// The channel secret of Manut AI's practice account, which signs deliveries to `deliverOwnerLineWebhook`.
+export const PRACTICE_OWNER_LINE_SECRET = "practice-owner-line-secret";
 
 export const DEMO_TOKENS = {
   waiting: "demo",
@@ -138,6 +161,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const latencyMs = options.latencyMs ?? 0;
   const settleMs = options.settleMs ?? 3000;
   const storage = options.storage;
+  const ownerLineEnabled = options.ownerLineEnabled ?? true;
   const webOrigin =
     options.webOrigin ?? (typeof location !== "undefined" ? location.origin : "http://localhost:5173");
 
@@ -149,8 +173,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 3 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
-        Array.isArray(parsed.subscriptionPayments)
+      return parsed && parsed.version === 4 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+        Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.linkCodes) && Array.isArray(parsed.guesses)
         ? parsed
         : null;
     } catch {
@@ -251,8 +275,35 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.actions = db.actions.filter((a) => !mine(a));
     db.payments = db.payments.filter((p) => !mine(p));
     db.subscriptionPayments = db.subscriptionPayments.filter((p) => !mine(p));
+    // No link code outlives the shop it would link.
+    db.linkCodes = db.linkCodes.filter((c) => !mine(c));
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
+  }
+
+  /// What the console sees of Manut AI's account: never its secret.
+  function publicAccount(account: FakeOwnerAccount): OwnerLineAccount {
+    const { channelSecret: _secret, ...shown } = account;
+    return shown;
+  }
+
+  /// One code from one LINE user, under the API's rules: past five wrong codes in an hour no code is checked; a
+  /// live code links its sender once (the same sender again is linked again); anything else counts as wrong.
+  function redeem(lineUserId: string, hash: string): void {
+    const at = now();
+    const guesses = db.guesses.find((g) => g.lineUserId === lineUserId);
+    const window = guesses && at - guesses.windowStart < GUESS_WINDOW_MS ? guesses : null;
+    if (window && window.failures >= GUESS_LIMIT) return;
+    const code = db.linkCodes.find((c) => c.hash === hash);
+    const shop = code ? db.shops.find((s) => s.tenant === code.tenant) : undefined;
+    if (code && shop && at < Date.parse(code.expiresAt) && (!code.claimedBy || code.claimedBy === lineUserId)) {
+      code.claimedBy = lineUserId;
+      shop.ownerLineUserId = lineUserId;
+      shop.ownerLinkedAt = iso(at);
+      return;
+    }
+    if (window) window.failures += 1;
+    else db.guesses = [...db.guesses.filter((g) => g.lineUserId !== lineUserId), { lineUserId, windowStart: at, failures: 1 }];
   }
 
   function deletionLinkOf(confirmation: FakeConfirmation): string {
@@ -449,7 +500,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map(({ trialStartedAt: _trial, ...shop }) => {
+        return db.shops.map(({ trialStartedAt: _trial, ownerLineUserId: _owner, ...shop }) => {
           const deletion = deletionRequestOf(shop.tenant);
           return deletion ? { ...shop, deletion } : shop;
         });
@@ -490,7 +541,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     proposeReply: (input) =>
       run(() => {
         admin();
-        shopOf(input.tenant);
+        const shop = shopOf(input.tenant);
         const message = db.messages.find((m) => m.id === input.messageId && m.tenant === input.tenant);
         if (!message) throw new ApiError(404, "unknown_message");
         if (input.text.length < 1 || input.text.length > REPLY_MAX_LENGTH) throw new ApiError(400, "invalid_text");
@@ -507,6 +558,14 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           expiresAt: iso(proposedAt + DAY_MS),
           outcome: "confirmed",
         };
+        // The owner's card, as the API sends it after the proposal: there is no LINE here, so it arrives, unless
+        // Manut AI's account was never set.
+        if (ownerLineEnabled && shop.ownerLineUserId) {
+          const at = iso(proposedAt);
+          action.ownerCard = db.ownerAccount
+            ? { state: "sent", attempts: 1, lastTriedAt: at, sentAt: at }
+            : { state: "failed", attempts: 1, lastTriedAt: at, reason: "account_not_set" };
+        }
         db.actions.push(action);
         message.replyActionId = action.actionId;
         return {
@@ -535,6 +594,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           };
           if (a.decidedAt) action.decidedAt = a.decidedAt;
           if (a.dispatchedAt) action.dispatchedAt = a.dispatchedAt;
+          if (a.ownerCard) action.ownerCard = a.ownerCard;
           return action;
         });
       }),
@@ -592,6 +652,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
               .map(({ token: _token, outcome: _outcome, ...reply }) => reply),
             payments: db.payments.filter((p) => p.tenant === tenant),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === tenant),
+            // Morning briefs come from the API's daily run, which practice mode does not have.
+            briefs: [],
           },
         };
       }),
@@ -681,7 +743,124 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           now(),
         );
       }),
+
+    getOwnerLine: () =>
+      run(() => {
+        admin();
+        return { enabled: ownerLineEnabled, account: db.ownerAccount ? publicAccount(db.ownerAccount) : null };
+      }),
+
+    // As the API: refused whole unless every part is one LINE could use; the access token is never kept or answered.
+    setOwnerLineAccount: (input) =>
+      run(() => {
+        admin();
+        if (!input.channelId || input.channelId.length > 64 || !/^U[0-9a-f]{32}$/.test(input.botUserId) ||
+            !input.channelSecret || !input.channelAccessToken ||
+            (input.basicId !== undefined && !/^@[0-9A-Za-z._-]{1,40}$/.test(input.basicId))) {
+          throw new ApiError(400, "invalid_request");
+        }
+        db.ownerAccount = {
+          channelId: input.channelId,
+          botUserId: input.botUserId,
+          ...(input.basicId ? { basicId: input.basicId } : {}),
+          webhookUrl: `${FAKE_API_ORIGIN}/v1/inbound/owner-line`,
+          connectedAt: iso(now()),
+          channelSecret: input.channelSecret,
+        };
+        return publicAccount(db.ownerAccount);
+      }),
+
+    // As the API: the shop first, then the flag, then the account. A new code retires the shop's previous one.
+    async createOwnerLinkCode(tenant) {
+      const code = randomCode();
+      const hash = await sha256Hex(code);
+      return run(() => {
+        admin();
+        shopOf(tenant);
+        if (!ownerLineEnabled) throw new ApiError(403, "feature_disabled");
+        if (!db.ownerAccount) throw new ApiError(409, "account_not_set");
+        const expiresAt = iso(now() + LINK_CODE_TTL_MS);
+        db.linkCodes = [...db.linkCodes.filter((c) => c.tenant !== tenant), { tenant, hash, expiresAt }];
+        return { code, expiresAt };
+      });
+    },
+
+    unlinkOwner: (tenant) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        db.linkCodes = db.linkCodes.filter((c) => c.tenant !== tenant);
+        if (!shop.ownerLineUserId) return { unlinked: false };
+        delete shop.ownerLineUserId;
+        delete shop.ownerLinkedAt;
+        return { unlinked: true };
+      }),
+
+    // As the API's retry: refused unless the owner is linked and the reply still waits; a card already sent is
+    // answered as it stands. With no LINE here, a card sent again always arrives.
+    retryOwnerCard: (tenant, actionId) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        if (!ownerLineEnabled) throw new ApiError(403, "feature_disabled");
+        if (!shop.ownerLineUserId) throw new ApiError(409, "owner_not_linked");
+        const action = db.actions.find((a) => a.tenant === tenant && a.actionId === actionId);
+        if (!action) throw new ApiError(404, "reply_not_found");
+        if (action.state !== "proposed" || now() >= Date.parse(action.expiresAt)) {
+          throw new ApiError(409, "reply_not_waiting");
+        }
+        const card = action.ownerCard;
+        if (card?.state === "sent") return card;
+        if (card?.state === "sending" && now() - Date.parse(card.lastTriedAt) < CLAIM_LEASE_MS) {
+          throw new ApiError(409, "card_sending");
+        }
+        const at = iso(now());
+        action.ownerCard = { state: "sent", attempts: (card?.attempts ?? 0) + 1, lastTriedAt: at, sentAt: at };
+        return action.ownerCard;
+      }),
+
+    // As Manut AI's webhook: 404 while owner messages are off or no account is set, 401 for a delivery its secret did
+    // not sign, and only codes from users to its own bot are looked at.
+    async deliverOwnerLineWebhook(rawBody, signature) {
+      if (latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, latencyMs));
+      db = load() ?? db;
+      const account = db.ownerAccount;
+      if (!ownerLineEnabled || !account) throw new ApiError(404, "http_404");
+      if (!signature || signature !== (await lineSignature(account.channelSecret, rawBody))) {
+        throw new ApiError(401, "http_401");
+      }
+      let parsed: { destination?: unknown; events?: unknown } = {};
+      try {
+        parsed = JSON.parse(rawBody) as typeof parsed;
+      } catch {
+        return;
+      }
+      if (parsed.destination !== account.botUserId || !Array.isArray(parsed.events)) return;
+      for (const event of parsed.events) {
+        const e = event as { type?: string; source?: { type?: string; userId?: string }; message?: { type?: string; text?: string } };
+        if (e.type !== "message" || e.message?.type !== "text" || e.source?.type !== "user" || !e.source.userId) continue;
+        const code = linkCodeAttempt(e.message.text ?? "");
+        if (!code) continue;
+        redeem(e.source.userId, await sha256Hex(code));
+      }
+      save();
+    },
   };
+}
+
+/// A uniformly random code of LINK_CODE_DIGITS digits.
+function randomCode(): string {
+  const span = 10 ** LINK_CODE_DIGITS;
+  const limit = Math.floor(0x1_0000_0000 / span) * span;
+  const word = new Uint32Array(1);
+  do crypto.getRandomValues(word);
+  while (word[0]! >= limit);
+  return String(word[0]! % span).padStart(LINK_CODE_DIGITS, "0");
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /// LINE's `x-line-signature`: base64 HMAC-SHA256 of the raw body under the channel secret.
@@ -799,6 +978,22 @@ function seed(at: number): FakeDb {
     const m = messages.find((x) => x.id === a.messageId);
     if (m) m.replyActionId = a.actionId;
   }
+  // Fon's cards on LINE, one in each state: Ploy's arrived; Nok's was refused and Anon's went unanswered, so the
+  // console offers to send both again; the decided replies' cards arrived when they were proposed.
+  const sentCard = (minutesAgo: number): OwnerCard => ({ state: "sent", attempts: 1, lastTriedAt: ago(minutesAgo),
+    sentAt: ago(minutesAgo) });
+  const cards: Record<string, OwnerCard> = {
+    act_ploy: sentCard(10),
+    act_nok: { state: "failed", attempts: 1, lastTriedAt: ago(40), reason: "provider_429" },
+    act_tracking: { state: "unknown", attempts: 1, lastTriedAt: ago(70), reason: "provider_unreachable" },
+    act_mai: sentCard(290),
+    act_fah: sentCard(410),
+    act_joy: sentCard(1320),
+  };
+  for (const a of actions) {
+    const card = cards[a.actionId];
+    if (card) a.ownerCard = card;
+  }
 
   // The deletion page's demo links, each about its own copy of Khao Soi Nimman, a shop that is not on the console's
   // list. Each copy has the deletion record its state needs, so answering one never changes another.
@@ -837,10 +1032,11 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 3,
+    version: 4,
     seq: 100,
     shops: [
-      // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
+      // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active. Fon's
+      // LINE was linked to Manut AI's account three days ago.
       {
         tenant,
         name: "Baan Mali",
@@ -848,6 +1044,8 @@ function seed(at: number): FakeDb {
         lineConnectionId: connectionId,
         consent: false,
         trialStartedAt: ago(13 * 24 * 60),
+        ownerLineUserId: "Ufonpractice",
+        ownerLinkedAt: ago(3 * 24 * 60),
       },
       { tenant: "shop_sabaitea", name: "Sabai Tea", ownerName: "Dao", consent: false },
     ],
@@ -885,5 +1083,15 @@ function seed(at: number): FakeDb {
     deletions: demos.map((entry) => entry.record),
     confirmations: demos.map((entry) => entry.confirmation),
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
+    ownerAccount: {
+      channelId: "2009876543",
+      botUserId: "Umanutpractice",
+      basicId: "@manutai",
+      webhookUrl: `${FAKE_API_ORIGIN}/v1/inbound/owner-line`,
+      connectedAt: ago(7 * 24 * 60),
+      channelSecret: PRACTICE_OWNER_LINE_SECRET,
+    },
+    linkCodes: [],
+    guesses: [],
   };
 }

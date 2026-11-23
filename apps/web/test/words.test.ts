@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type DeletedShop, type PilotGate, type Shop } from "../src/api";
-import { deletedText, deleteRefusalText, deleteWhatText, gateWords, subscriptionErrorText, unfinishedText } from "../src/ops/words";
+import { ApiError, type DeletedShop, type OwnerCard, type PilotGate, type Shop } from "../src/api";
+import {
+  canRetryCard,
+  cardText,
+  deletedText,
+  deleteRefusalText,
+  deleteWhatText,
+  gateWords,
+  ownerLineWords,
+  subscriptionErrorText,
+  unfinishedText,
+} from "../src/ops/words";
 
 const RESULT: DeletedShop = {
   tasksWiped: 1,
@@ -112,5 +122,47 @@ describe("the Pilot gate's words", () => {
       "This slip is already recorded for Baan Mali. Nothing was recorded again.");
     expect(subscriptionErrorText(new ApiError(400, "invalid_request"), "Baan Mali")).toBe(
       "The API did not accept this (invalid_request).");
+  });
+});
+
+describe("the words for owner messages on LINE", () => {
+  const TRIED = "2026-11-23T03:02:00Z";
+  const card = (overrides: Partial<OwnerCard>): OwnerCard => ({ state: "sent", attempts: 1, lastTriedAt: TRIED, ...overrides });
+
+  it("says where each card stands", () => {
+    expect(cardText(card({ sentAt: TRIED }), "Fon", SAME_DAY)).toBe("Card sent to Fon on LINE at 10:02.");
+    expect(cardText(card({ sentAt: TRIED }), "Fon", NEXT_DAY)).toBe("Card sent to Fon on LINE on 23 November at 10:02.");
+    expect(cardText(card({ state: "sending" }), "Fon", SAME_DAY)).toBe("Sending the card to Fon on LINE.");
+    expect(cardText(card({ state: "failed", reason: "provider_429" }), "Fon", SAME_DAY))
+      .toBe("The card to Fon did not go out: LINE refused it (provider_429).");
+    expect(cardText(card({ state: "failed", reason: "account_not_set" }), "Fon", SAME_DAY))
+      .toBe("The card to Fon did not go out: Manut AI's LINE account is not set up.");
+    expect(cardText(card({ state: "failed", reason: "vault_unavailable" }), "Fon", SAME_DAY))
+      .toBe("The card to Fon did not go out: it could not be prepared (vault_unavailable).");
+    expect(cardText(card({ state: "unknown", reason: "provider_unreachable" }), "Fon", SAME_DAY))
+      .toBe("Not sure the card reached Fon: LINE did not answer. Sending it again is safe, since LINE never shows it twice.");
+    expect(cardText(card({ state: "unknown", reason: "provider_500" }), "Fon", SAME_DAY))
+      .toBe("Not sure the card reached Fon: LINE did not answer. Sending it again is safe, since LINE never shows it twice.");
+  });
+
+  it("offers to send a card again only when it may not have arrived and the reply still waits", () => {
+    expect(canRetryCard(card({ state: "failed" }), "proposed", SAME_DAY)).toBe(true);
+    expect(canRetryCard(card({ state: "unknown" }), "proposed", SAME_DAY)).toBe(true);
+    expect(canRetryCard(card({ state: "failed" }), "confirmed", SAME_DAY)).toBe(false);
+    expect(canRetryCard(card({ state: "sent" }), "proposed", SAME_DAY)).toBe(false);
+    // A push still under way is left alone for two minutes; after that it was cut off.
+    expect(canRetryCard(card({ state: "sending" }), "proposed", Date.parse(TRIED) + 60_000)).toBe(false);
+    expect(canRetryCard(card({ state: "sending" }), "proposed", Date.parse(TRIED) + 120_000)).toBe(true);
+  });
+
+  it("tells the operator how a link code is used, and when it stops working", () => {
+    expect(ownerLineWords.codeSteps("Dao", "@manutai", "2026-11-23T03:30:00Z", SAME_DAY)).toEqual([
+      "Ask Dao to add Manut AI (@manutai) as a friend on LINE.",
+      "Dao sends this code in that chat. Spaces do not matter.",
+      "It works once, until 10:30. Dao gets an answer in the chat when it works. Refresh to see it here.",
+    ]);
+    expect(ownerLineWords.codeSteps("Dao", undefined, "2026-11-23T03:30:00Z", SAME_DAY)[0])
+      .toBe("Ask Dao to add Manut AI's LINE account as a friend.");
+    expect(ownerLineWords.linked("Fon", "2026-11-20T03:00:00Z", SAME_DAY)).toBe("Fon linked on LINE on 20 November at 10:00.");
   });
 });
