@@ -51,14 +51,14 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 0 Spikes | Drive the DeepSeek Harness; pause and resume approvals with LangGraph.js; draft the worker adapter contract | built: all three answered in `docs/phase-0-spikes.md` (the gate's question; a model account for `dsh` is the owner's) |
 | 1 Pilot | Buddy on LINE run by operators; simple web approval view; tenant and owner records; simplest approval object | built |
 | 1 Pilot | Approval cards and a morning brief sent to owners on LINE | not yet; sending to real owners needs the owner's go and Manut's own LINE Official Account |
-| 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | being built |
+| 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | built: `GET /v1/admin/pilot/gate` and the console's Pilot gate page; the gate itself waits for real shops |
 | 1 Pilot | Audit log an operator can read | partial (task history and deletion records) |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` used by deletion only) |
-| 2 Control plane | The model gateway with spending caps, and cost per shop | being built |
+| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`); no model is called until the owner adds an Anthropic key and settles the rate and the cap |
 | 2 Control plane | Memory; the job queue; the audit log | partial (tasks and schedules lifted; the shop memory rules are queued for the night build) |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | not yet (can be a test) |
 | 3 Desktop MVP | Mission Control and the session view | partial (Home, side menu and pages; sessions from the fork) |
-| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | not yet (onboarding is being built; the approvals wire format the adapter needs is queued for the night build) |
+| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | partial: the three-step first run is built (kept on this computer until sign-in exists); the offline cache and the runtime adapter are not yet (the approvals wire format the adapter needs is queued for the night build) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet (models cost money: the owner; Ton's books arithmetic is queued for the night build) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the rest need the owner's applications, `docs/connectors.md`) |
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, PromptPay payloads, the console; slip rules and reading PromptPay payloads are queued for the night build) |
