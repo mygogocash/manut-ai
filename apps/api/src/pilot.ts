@@ -114,7 +114,7 @@ export type ApprovalView = {
 /// - `deleted`: the wipe finished;
 /// - `declined`: the owner kept the data, and nothing was deleted;
 /// - `expired`: nobody answered in time, and nothing was deleted.
-export type DeletionLinkState = "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
+export type DeletionState = "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
 
 /// What the owner's deletion page shows. `goes` is counted afresh while the
 /// shop's data is there, and once it is gone, is what the shop held when the
@@ -122,15 +122,15 @@ export type DeletionLinkState = "awaiting_owner" | "deleting" | "deleted" | "dec
 export type DeletionView = {
   shopName: string;
   goes: DeletionGoes;
-  state: DeletionLinkState;
+  state: DeletionState;
   expiresAt: string;
   decidedAt?: string;
 };
 
 /// A shop's latest deletion request as the console's shop list shows it. The
 /// link is re-minted on each read at the same expiry, like a reply's.
-export type ShopDeletion = {
-  state: DeletionLinkState;
+export type DeletionRequest = {
+  state: DeletionState;
   confirmUrl: string;
   expiresAt: string;
   decidedAt?: string;
@@ -569,7 +569,7 @@ async function deletionFinishedAt(env: PilotEnv, tenant: string, deletion: Pilot
   return typeof tombstone?.deletedAt === "string" ? tombstone.deletedAt : null;
 }
 
-async function deletionLinkState(env: PilotEnv, loaded: LoadedDeletion, nowMs: number): Promise<DeletionLinkState> {
+async function deletionLinkState(env: PilotEnv, loaded: LoadedDeletion, nowMs: number): Promise<DeletionState> {
   const { confirmation, deletion, detail } = loaded;
   if (confirmation.status === "decided") {
     if (!approvedDeletion(confirmation)) return "declined";
@@ -895,7 +895,7 @@ async function listShops(env: PilotEnv): Promise<Response> {
 /// The shop's current owner confirmation as the console shows it, its link
 /// re-minted at the same expiry (minting is deterministic, so a read never
 /// extends it). Null when no deletion of this shop was ever put to its owner.
-async function shopDeletion(env: PilotEnv, tenant: string, stored: StoredDeletion): Promise<ShopDeletion | null> {
+async function shopDeletion(env: PilotEnv, tenant: string, stored: StoredDeletion): Promise<DeletionRequest | null> {
   const { confirmation } = stored;
   if (!confirmation) return null;
   const loaded = asLoaded(stored, { tenant, confirmationId: confirmation.request.id, expiresAtMs: 0 });

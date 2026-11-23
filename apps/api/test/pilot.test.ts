@@ -833,29 +833,32 @@ async function listedShop(tenant: string) {
   return listed.body.shops.find((entry) => entry.tenant === tenant);
 }
 
-/// The Worker's environment with the task wipe answering 500 the next `times` times, as when a TaskObject cannot be
-/// reached part way through a deletion. Every other call reaches the real objects.
-function failingTaskWipes(times: number): Env {
+/// The Worker's environment with one kind of call to one namespace answering 500 the next `times` times, as when an
+/// object cannot be reached part way through. Every other call reaches the real objects.
+function failingCalls(binding: "TASK" | "TENANT", method: string, path: string, times: number): Env {
   let left = times;
-  const tasks = bindings.TASK;
-  const TASK = {
-    idFromName: (name: string) => tasks.idFromName(name),
+  const namespace = bindings[binding];
+  const wrapped = {
+    idFromName: (name: string) => namespace.idFromName(name),
     get: (id: DurableObjectId) => {
-      const stub = tasks.get(id);
+      const stub = namespace.get(id);
       return {
         fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = new Request(input, init);
-          if (request.method === "DELETE" && new URL(request.url).pathname === "/wipe" && left > 0) {
+          if (request.method === method && new URL(request.url).pathname === path && left > 0) {
             left--;
-            return Response.json({ error: "fixture_wipe_failed" }, { status: 500 });
+            return Response.json({ error: "fixture_call_failed" }, { status: 500 });
           }
           return stub.fetch(request);
         },
       };
     },
   } as unknown as DurableObjectNamespace;
-  return { ...bindings, TASK };
+  return { ...bindings, [binding]: wrapped };
 }
+
+/// The task wipe failing, as when a TaskObject cannot be reached part way through a deletion.
+const failingTaskWipes = (times: number) => failingCalls("TASK", "DELETE", "/wipe", times);
 
 /// A live shop with something of everything: two messages, one proposed reply and one payment.
 async function liveShopWithData() {
@@ -922,6 +925,27 @@ describe("deleting a live shop needs its owner's confirmation", () => {
       body: JSON.stringify({ tenant: shop.tenant, cloudWork: true }) })).status).toBe(200);
     expect((await askToDelete(shop.tenant, "Khao Man Gai Lek")).status).toBe(202);
     expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).status).toBe(200);
+  });
+
+  it("asks nobody and deletes nothing when it cannot tell a shop is not live, or cannot make the owner's link", async () => {
+    const quiet = await newShop("Sabai Tea");
+    const unreadable = failingCalls("TENANT", "GET", "/consent", 1);
+    expect(await adminWith(unreadable, "POST", "/v1/admin/pilot/deletions", { tenant: quiet.tenant,
+      confirmName: "Sabai Tea" })).toEqual({ status: 503, body: { error: "consent_unavailable" } });
+    expect(await deletionRecord(quiet.tenant)).toEqual({ deletion: null, confirmation: null });
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(quiet.tenant)}`)).status).toBe(200);
+
+    const { shop } = await liveShopWithData();
+    const { WEB_ORIGIN: _unset, ...withoutOrigin } = bindings;
+    for (const [setting, target] of [
+      ["WEB_ORIGIN", withoutOrigin as Env],
+      ["APPROVAL_LINK_SECRET", { ...bindings, APPROVAL_LINK_SECRET: "too-short-to-sign-with" }],
+    ] as const) {
+      expect(await adminWith(target, "POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant,
+        confirmName: "Baan Somtam" })).toEqual({ status: 503, body: { error: "not_configured", setting } });
+    }
+    expect(await deletionRecord(shop.tenant)).toEqual({ deletion: null, confirmation: null });
+    expect(await messages(shop.tenant)).toHaveLength(2);
   });
 
   it("records who asked before anything else happens, as a confirmation only the owner can decide", async () => {
