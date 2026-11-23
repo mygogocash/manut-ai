@@ -17,7 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { getStore } from "../state/store";
 import { CloseIcon, ExpandIcon } from "../ui";
 import { t } from "../i18n";
-import { getSessions, useSessions } from "./sessions";
+import { getSessions, useSessions, type SessionsStore } from "./sessions";
 import { SHELL, termFallbackName, tildePath, type SessionRec } from "./agents";
 import { pickTitle } from "./titles";
 import { termActs } from "./termActivity";
@@ -85,8 +85,7 @@ export function onSplitKey(id: string, k: PaneKey): boolean {
 /** Close TERMINALS session `id` the way a terminal app closes a tab (⌘W or the menu's Close Window on a terminal that
  *  is not split): as its row's x does, a running one only when the close can be undone (the toast brings it back),
  *  an ended one at once. False when it was left alone (the undo window is Off and its program runs). */
-export function closeLone(id: string): boolean {
-  const ss = getSessions();
+export function closeLone(id: string, ss: Pick<SessionsStore, "getState" | "closeUndoable" | "close"> = getSessions()): boolean {
   const r = ss.getState().list.find((x) => x.id === id);
   if (!r) return false;
   const running = r.status === "running" || r.status === "starting";

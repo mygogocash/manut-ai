@@ -40,7 +40,6 @@ import { TermLinkGone } from "./termLinkOpen";
 import type { Account, AccountCli, AccountGroup } from "../lib/protocol";
 import { useAccounts } from "../settings/accounts/useAccounts";
 import { accountForNewSessions } from "../settings/accounts/rules";
-import { CloseToasts } from "./CloseToasts";
 
 /** The Accounts CLI a new session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
 const SESSION_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
@@ -105,7 +104,6 @@ export function SessionsHeader() {
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={plus} />}
       </span>
       <TermLinkGone />
-      <CloseToasts />
     </div>
   );
 }
