@@ -56,6 +56,8 @@ async function everyAdminRoute(api: PilotApi) {
   await api.listActions("t1");
   await api.recordPayment({ tenant: "t1", orderRef: "SP-2301", amountSatang: 129000, promptPayId: "0812345678" });
   await api.listPayments("t1");
+  await api.exportShop("t1");
+  await api.deleteShop({ tenant: "t1", confirmName: "Baan Mali" });
 }
 
 describe("the API client", () => {
@@ -72,6 +74,8 @@ describe("the API client", () => {
       "GET https://api.example.test/v1/admin/pilot/actions?tenant=t1",
       "POST https://api.example.test/v1/admin/pilot/payments",
       "GET https://api.example.test/v1/admin/pilot/payments?tenant=t1",
+      "GET https://api.example.test/v1/admin/pilot/export?tenant=t1",
+      "POST https://api.example.test/v1/admin/pilot/deletions",
     ]);
     for (const call of calls) {
       expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
@@ -84,6 +88,7 @@ describe("the API client", () => {
       amountSatang: 129000,
       promptPayId: "0812345678",
     });
+    expect(calls[9]?.body).toEqual({ tenant: "t1", confirmName: "Baan Mali" });
   });
 
   it("never sends the key, or cookies, on the owner's routes or the LINE webhook", async () => {

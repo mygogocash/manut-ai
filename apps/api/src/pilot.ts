@@ -34,7 +34,7 @@ import { readConnectionSecret } from "./cred-broker";
 import type { FeatureFlags } from "./index";
 import type { InboundMessage, Payment, PilotReplyRecord, PilotShopRecord } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
-import { authCall, credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
+import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
 export type PilotEnv = TenantDataEnv & {
   /// Where the owner's approval page lives: `approvalUrl` is
@@ -465,6 +465,9 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
     if (route === "GET /v1/admin/pilot/messages") return listFrom(env, tenant, "/pilot/messages", "messages");
     if (route === "GET /v1/admin/pilot/payments") return listFrom(env, tenant, "/pilot/payments", "payments");
     if (route === "GET /v1/admin/pilot/actions") return listActions(env, tenant);
+    // Everything stored for the shop, at its request: the same tenant export
+    // a shop's own session gets, so LINE secrets never appear in it.
+    if (route === "GET /v1/admin/pilot/export") return tenantExport(env, tenant);
     return json({ error: "not_found" }, 404);
   }
   if (request.method !== "POST") return json({ error: "not_found" }, 404);
@@ -480,7 +483,23 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
+  if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body);
   return json({ error: "not_found" }, 404);
+}
+
+/// Deletes everything stored for one pilot shop, at the shop's request,
+/// through the same tenant deletion a shop's own session uses: its task with
+/// every reply, the sealed LINE secrets and the webhook route, messages,
+/// payments and consent, then its registry row, leaving a tombstone that
+/// records when. Nothing can bring the data back, so the operator types the
+/// shop's exact name as well as sending its id, and an id pasted for the
+/// wrong shop deletes nothing. A partial wipe answers 500 wipe_incomplete
+/// naming what is left, and sending the same request again finishes it.
+/// Pilot shops belong to no company, so unlike the session route there are
+/// no company indexes to prune afterwards.
+async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>): Promise<Response> {
+  if (body.confirmName !== shop.name) return json({ error: "name_mismatch" }, 409);
+  return tenantDelete(env, shop.tenant);
 }
 
 /// A pilot shop is a tenant of its own (`pilot:<uuid>`), so every existing

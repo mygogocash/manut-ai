@@ -4,6 +4,7 @@ import {
   REPLY_MAX_LENGTH,
   type ApprovalState,
   type ApprovalView,
+  type DeletedShop,
   type InboundMessage,
   type Payment,
   type PilotApi,
@@ -378,6 +379,51 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           db.payments.filter((p) => p.tenant === tenant),
           (p) => p.confirmedAt,
         );
+      }),
+
+    // Like the backend's export: connection metadata without the channel secret, and replies without their
+    // link tokens, which the backend never stores.
+    exportShop: (tenant) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        return {
+          tenant,
+          exportedAt: iso(now()),
+          connections: db.connections
+            .filter((c) => c.tenant === tenant)
+            .map(({ channelSecret: _secret, ...connection }) => connection),
+          pilot: {
+            shop,
+            messages: db.messages.filter((m) => m.tenant === tenant),
+            replies: db.actions
+              .filter((a) => a.tenant === tenant)
+              .map(({ token: _token, outcome: _outcome, ...reply }) => reply),
+            payments: db.payments.filter((p) => p.tenant === tenant),
+          },
+        };
+      }),
+
+    deleteShop: (input) =>
+      run(() => {
+        admin();
+        const shop = shopOf(input.tenant);
+        if (input.confirmName !== shop.name) throw new ApiError(409, "name_mismatch");
+        const mine = <T extends { tenant: string }>(item: T) => item.tenant === shop.tenant;
+        const deleted: DeletedShop = {
+          tasksWiped: new Set(db.actions.filter(mine).map((a) => a.taskId)).size,
+          connectionsWiped: db.connections.filter(mine).length,
+          schedulesWiped: 0,
+          occurrencesWiped: 0,
+          sessionsWiped: 0,
+          deletedAt: iso(now()),
+        };
+        db.shops = db.shops.filter((s) => !mine(s));
+        db.connections = db.connections.filter((c) => !mine(c));
+        db.messages = db.messages.filter((m) => !mine(m));
+        db.actions = db.actions.filter((a) => !mine(a));
+        db.payments = db.payments.filter((p) => !mine(p));
+        return deleted;
       }),
   };
 }

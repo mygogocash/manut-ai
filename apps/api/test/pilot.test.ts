@@ -542,6 +542,7 @@ describe("operator routes", () => {
     ["POST", "/v1/admin/pilot/line-connections"], ["GET", "/v1/admin/pilot/messages"],
     ["POST", "/v1/admin/pilot/replies"], ["GET", "/v1/admin/pilot/actions"],
     ["POST", "/v1/admin/pilot/payments"], ["GET", "/v1/admin/pilot/payments"],
+    ["GET", "/v1/admin/pilot/export"], ["POST", "/v1/admin/pilot/deletions"],
   ] as const;
 
   async function send(method: string, path: string, options: { audience?: string; bearer?: string }) {
@@ -664,5 +665,71 @@ describe("pilot data under retention, export and deletion", () => {
     await runInDurableObject(tenantObject, async (_instance, state) => {
       expect([...(await state.storage.list({ prefix: "pilot-" })).keys()]).toEqual([]);
     });
+  });
+
+  it("exports one shop through the operator route, without its LINE secrets", async () => {
+    const shop = await setupShop();
+    const message = await customerWrites(shop, "is the somtam spicy?");
+    expect((await propose(shop, message.id, "Medium, and we can make it mild")).status).toBe(200);
+    expect((await admin("POST", "/v1/admin/pilot/payments",
+      { tenant: shop.tenant, orderRef: "ORD-7", amountSatang: 12000, promptPayId: "0812345678" })).status).toBe(200);
+
+    const exported = await admin<{ tenant: string; tasks: unknown[];
+      pilot: { shop: { name: string }; messages: unknown[]; replies: unknown[]; payments: unknown[] } }>(
+      "GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`);
+    expect(exported.status).toBe(200);
+    expect(exported.body.tenant).toBe(shop.tenant);
+    expect(exported.body.pilot.shop.name).toBe("Baan Somtam");
+    expect(exported.body.pilot.messages).toHaveLength(1);
+    expect(exported.body.pilot.replies).toHaveLength(1);
+    expect(exported.body.pilot.payments).toHaveLength(1);
+    expect(exported.body.tasks).toHaveLength(1);
+    expect(JSON.stringify(exported.body)).not.toContain(CHANNEL_SECRET);
+    expect(JSON.stringify(exported.body)).not.toContain(CHANNEL_TOKEN);
+
+    expect((await admin("GET", "/v1/admin/pilot/export?tenant=pilot%3Anobody")).body).toEqual({ error: "shop_not_found" });
+    expect((await admin("GET", "/v1/admin/pilot/export")).body).toEqual({ error: "tenant_required" });
+  });
+
+  it("deletes one shop through the operator route only with its exact name, and its links stop working", async () => {
+    const shop = await setupShop();
+    const other = await admin<{ tenant: string }>("POST", "/v1/admin/pilot/shops",
+      { name: "Khao Man Gai Lek", ownerName: "Khun Lek" });
+    expect(other.status).toBe(200);
+    const message = await customerWrites(shop, "open today?");
+    const reply = await propose(shop, message.id, "Yes, until 8pm");
+    expect(reply.status).toBe(200);
+    const token = tokenOf(reply.body.approvalUrl);
+
+    // Nothing can bring the data back, so anything but this shop's exact name deletes nothing: a near miss,
+    // another shop's name (the id of the wrong shop pasted with it), or no name at all.
+    for (const confirmName of ["Baan Som", "baan somtam", "Khao Man Gai Lek", undefined]) {
+      const refused = await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName });
+      expect(refused).toEqual({ status: 409, body: { error: "name_mismatch" } });
+    }
+    expect((await view(token)).status).toBe(200);
+    expect(await messages(shop.tenant)).toHaveLength(1);
+
+    const deleted = await admin<{ tasksWiped: number; connectionsWiped: number; deletedAt: string }>(
+      "POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Baan Somtam" });
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toMatchObject({ tasksWiped: 1, connectionsWiped: 1, deletedAt: expect.any(String) });
+
+    // The owner's link, the shop's LINE webhook and every operator route now know nothing of the shop.
+    expect(await view(token)).toMatchObject({ status: 404, body: { error: "link_invalid" } });
+    expect((await deliver(shop.connectionId, { destination: BOT, events: [textEvent("after deletion")] })).status)
+      .toBe(404);
+    for (const path of [`/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`,
+      `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`]) {
+      expect((await admin("GET", path)).body).toEqual({ error: "shop_not_found" });
+    }
+    expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Baan Somtam" })).body)
+      .toEqual({ error: "shop_not_found" });
+    const remaining = (await admin<{ shops: { tenant: string }[] }>("GET", "/v1/admin/pilot/shops")).body.shops
+      .map((entry) => entry.tenant);
+    expect(remaining).toContain(other.body.tenant);
+    expect(remaining).not.toContain(shop.tenant);
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(other.body.tenant)}`)).status)
+      .toBe(200);
   });
 });

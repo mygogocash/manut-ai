@@ -45,6 +45,32 @@ describe("the in-memory fake", () => {
     expect((await api.getApproval(DEMO_TOKENS.expiredRequest)).state).toBe("expired");
   });
 
+  it("exports a shop without secrets or link tokens, and deletes it only by its exact name", async () => {
+    const api = createFakeApi({ webOrigin: "https://web.test" });
+    const [message] = await api.listMessages("shop_baanmali");
+    const proposed = await api.proposeReply({ tenant: "shop_baanmali", messageId: message!.id, text: "ได้ค่ะ" });
+    const token = tokenOf(proposed.approvalUrl);
+
+    const exported = await api.exportShop("shop_baanmali");
+    expect(exported.tenant).toBe("shop_baanmali");
+    const saved = JSON.stringify(exported);
+    expect(saved).toContain(message!.text);
+    expect(saved).not.toContain(PRACTICE_CHANNEL_SECRET);
+    expect(saved).not.toContain(token);
+
+    await expect(api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan" })).rejects.toMatchObject({
+      status: 409,
+      code: "name_mismatch",
+    });
+    expect((await api.getApproval(token)).state).toBe("proposed");
+
+    const deleted = await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" });
+    expect(deleted).toMatchObject({ tasksWiped: 1, connectionsWiped: 1, deletedAt: expect.any(String) });
+    await expect(api.getApproval(token)).rejects.toMatchObject({ status: 404, code: "link_invalid" });
+    expect((await api.listShops()).map((shop) => shop.tenant)).toEqual(["shop_sabaitea"]);
+    await expect(api.exportShop("shop_baanmali")).rejects.toMatchObject({ status: 404 });
+  });
+
   it("refuses admin calls without an operator key", async () => {
     const api = createFakeApi({ operatorKey: () => null });
     await expect(api.listShops()).rejects.toMatchObject({ status: 403, code: "forbidden" });

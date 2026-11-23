@@ -163,6 +163,7 @@ const ADMIN_METHODS = new Set([
   "POST /v1/admin/pilot/shops", "GET /v1/admin/pilot/shops", "POST /v1/admin/pilot/line-connections",
   "GET /v1/admin/pilot/messages", "POST /v1/admin/pilot/replies", "GET /v1/admin/pilot/actions",
   "POST /v1/admin/pilot/payments", "GET /v1/admin/pilot/payments",
+  "GET /v1/admin/pilot/export", "POST /v1/admin/pilot/deletions",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
