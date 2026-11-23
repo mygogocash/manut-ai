@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { answerSlot, answerSoFar, activityText, chatRoute, createStore, folderKey, setChatRoute, initialState, MENU_PAGES, reduce, replyChipFor, selectTimeline, type Action, type AppState, type BridgeLike, type MessageItem } from "./store";
 import type { Away, BridgeEvent, ChatOpenResult } from "../lib/protocol";
 import type { BridgeStatus } from "../lib/bridge";
+import type { ResumeSnap } from "../app/resume";
 
 // The recorded Hermes turn (real-turn-events.json), already converted to protocol events.
 const T0 = 1_800_000_000_000;
@@ -896,13 +897,58 @@ describe("store", () => {
     const f = fakeBridge();
     const store = createStore(f.bridge, { now: () => T0 });
     await store.actions.init();
-    expect(MENU_PAGES).toEqual(["needs", "team", "code", "artifacts", "customize", "history"]);
+    expect(MENU_PAGES).toEqual(["home", "needs", "team", "code", "artifacts", "customize", "history"]);
     for (const page of MENU_PAGES) {
       store.actions.openPage(page);
       expect(store.getState().ui.view).toBe(page);
     }
     await store.actions.selectBot("kami");
     expect(store.getState().ui).toMatchObject({ view: "chat", thread: null });
+  });
+
+  it("starts on Home: on a first run, after a restart that left Home open, and when the member saved is gone", async () => {
+    const snap = (over: Partial<ResumeSnap>): ResumeSnap => ({
+      v: 1,
+      at: T0,
+      bot: "kami",
+      view: "chat",
+      session: null,
+      panelOpen: false,
+      panelTab: "details",
+      runsFull: false,
+      runId: null,
+      drafts: {},
+      sessions: [],
+      ...over,
+    });
+    const startsOn = async (resume: ResumeSnap | null) => {
+      const store = createStore(fakeBridge().bridge, { now: () => T0, resume: () => resume, hiddenBots: () => [] });
+      await store.actions.init();
+      return store.getState();
+    };
+    // a first run: Home, with the first member chosen behind it
+    expect(await startsOn(null)).toMatchObject({ selectedBot: "kami", ui: { view: "home" } });
+    expect(await startsOn(snap({ view: "home" }))).toMatchObject({ selectedBot: "kami", ui: { view: "home" } });
+    expect(await startsOn(snap({ bot: "gone" }))).toMatchObject({ ui: { view: "home" } });
+  });
+
+  it("starts where the person left off instead: the chat they had open, or the terminal session", async () => {
+    const f = fakeBridge();
+    const resume = { v: 1 as const, at: T0, bot: "friren", view: "chat" as const, session: null, panelOpen: false, panelTab: "details" as const, runsFull: false, runId: null, drafts: {}, sessions: [] };
+    const store = createStore(f.bridge, { now: () => T0, resume: () => resume, hiddenBots: () => [] });
+    await store.actions.init();
+    expect(store.getState()).toMatchObject({ selectedBot: "friren", ui: { view: "chat", thread: null } });
+    const inSession = createStore(fakeBridge().bridge, { now: () => T0, resume: () => ({ ...resume, view: "session" as const, session: "s1" }), hiddenBots: () => [] });
+    await inSession.actions.init();
+    expect(inSession.getState().ui).toMatchObject({ view: "session", session: "s1" });
+  });
+
+  it("Home is a menu page: Settings opened from it returns to it", () => {
+    const store = createStore(fakeBridge().bridge);
+    store.actions.openPage("home");
+    store.actions.openSettings();
+    store.actions.closeSettings();
+    expect(store.getState().ui.view).toBe("home");
   });
 
   it("a page opened from a menu page returns to that menu page: Settings, Automations, Plugins and Tasks", () => {

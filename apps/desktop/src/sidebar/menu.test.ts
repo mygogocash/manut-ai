@@ -1,12 +1,12 @@
-// The side menu's rules as the design canvas draws them: which row is current for each place in the app, which member
-// stands for Home, and which threads the Recent list names.
+// The side menu's rules as the design canvas draws them: which row is current for each place in the app, the page each
+// row opens, which member Home's ask box talks to, and which threads the Recent list names.
 import { describe, expect, it } from "vitest";
-import { currentRow, homeBot, MENU_ROWS, recentThreads } from "./menu";
+import { currentRow, homeBot, MENU_ROWS, recentThreads, rowPage } from "./menu";
 import type { Ui } from "../state/store";
 import type { ThreadRow } from "../threads/types";
 
-/** The row marked current with `view` open, Buddy as the home member. */
-const at = (view: Ui["view"], selectedBot: string | null = "buddy", thread: string | null = null) => currentRow({ view, thread }, selectedBot, "buddy");
+/** The row marked current with `view` open. */
+const at = (view: Ui["view"], selectedBot: string | null = "buddy", thread: string | null = null) => currentRow({ view, thread }, selectedBot);
 
 const row = (thread: string, title: string, started_at: number, last?: number): ThreadRow => ({
   thread,
@@ -25,17 +25,24 @@ describe("the side menu's rows", () => {
   });
 });
 
+describe("the page a row opens", () => {
+  it("is Home for New, and each other row's own page", () => {
+    expect(rowPage("new")).toBe("home");
+    for (const row of ["needs", "team", "code", "artifacts", "customize", "history"] as const) expect(rowPage(row), row).toBe(row);
+  });
+});
+
 describe("the current row", () => {
-  it("is New on Buddy's main chat, which stands in for Home until Home exists", () => {
-    expect(at("chat", "buddy")).toBe("new");
+  it("is New on Home, the page the New row and the brand mark open", () => {
+    expect(at("home")).toBe("new");
   });
 
-  it("is New before any member is open, where the app starts", () => {
+  it("is New before any member is open, as the app starts on Home", () => {
     expect(at("chat", null)).toBe("new");
   });
 
-  it("is Team on another member's main chat, as a member's page marks Team", () => {
-    for (const bot of ["nam", "pim", "ton", "kit"]) expect(at("chat", bot), bot).toBe("team");
+  it("is Team on any member's main chat, Buddy's too: a member's page marks Team", () => {
+    for (const bot of ["buddy", "nam", "pim", "ton", "kit"]) expect(at("chat", bot), bot).toBe("team");
   });
 
   it("is none in a thread, Buddy's or another member's", () => {
@@ -58,14 +65,9 @@ describe("the current row", () => {
   it("is none in Settings", () => {
     expect(at("settings")).toBeNull();
   });
-
-  it("follows the home member the runtime names, not a fixed id", () => {
-    expect(currentRow({ view: "chat", thread: null }, "kami", "kami")).toBe("new");
-    expect(currentRow({ view: "chat", thread: null }, "buddy", "kami")).toBe("team");
-  });
 });
 
-describe("the home member", () => {
+describe("the home member, whom Home's Chat and Team modes talk to", () => {
   const bot = (name: string, is_default = false) => ({ name, is_default });
 
   it("is the member the runtime marks as its default", () => {

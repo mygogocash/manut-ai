@@ -1,6 +1,6 @@
 // Pick up where the person left off after manut restarts (an update, a quit and reopen, a crash): one snapshot
-// under `manut.resume` in this computer's storage, with a version and a time. It holds the selected bot or
-// session, the right panel, the Plans full view, the composers' unsent text, and the SESSIONS list (agent,
+// under `manut.resume` in this computer's storage, with a version and a time. It holds the selected bot, and the
+// session or Home when one of them filled the main column, the right panel, the Plans full view, the composers' unsent text, and the SESSIONS list (agent,
 // folder, account, view, the agent's own conversation id, whether it was running, and the last messages of its
 // chat, which manut draws itself). These functions are pure; resumeBoot.ts reads, writes and applies them.
 import type { PanelTabId, Ui } from "../state/store";
@@ -74,7 +74,8 @@ export interface ResumeSnap {
   /** ms since epoch */
   at: number;
   bot: string | null;
-  view: "chat" | "session";
+  /** What filled the main column: the selected member's chat, a terminal session, or Home. */
+  view: "chat" | "session" | "home";
   session: string | null;
   panelOpen: boolean;
   panelTab: PanelTabId;
@@ -156,7 +157,7 @@ export function parseResume(raw: string | null | undefined): ResumeSnap | null {
     v: RESUME_VERSION,
     at: v.at,
     bot: v.bot || null,
-    view: v.view === "session" && session ? "session" : "chat",
+    view: v.view === "session" && session ? "session" : v.view === "home" ? "home" : "chat",
     session,
     panelOpen: v.panelOpen === true,
     panelTab: PANEL_TABS.includes(v.panelTab as PanelTabId) ? (v.panelTab as PanelTabId) : "details",
@@ -211,8 +212,9 @@ export function buildResume(i: ResumeInput, now: number): ResumeSnap {
     v: RESUME_VERSION,
     at: now,
     bot: i.bot,
-    // Settings is a place you pass through: a restart opens the chat (or session) behind it
-    view: session ? "session" : "chat",
+    // Settings and the other menu pages are places you pass through: a restart opens the chat (or session) behind
+    // them. Home is where the app starts, so a restart that left it open comes back to it.
+    view: session ? "session" : i.view === "home" ? "home" : "chat",
     session,
     panelOpen: i.panelOpen,
     panelTab: i.panelTab,

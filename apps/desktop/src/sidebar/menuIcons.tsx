@@ -63,16 +63,17 @@ export function OnGlyph() {
   );
 }
 
-/** The brand mark: a person in profile with the tick cut out, on the mark's light ground, at 28px. */
-export function BrandMark() {
+/** The brand mark: a person in profile with the tick cut out, on the mark's light ground. It is 28px in the menu and
+ *  46px in Home's lockup, where the canvas draws the tick thinner (20 units of 512 instead of 28) so it keeps its weight. */
+export function BrandMark({ size = 28 }: { size?: number }) {
   return (
-    <svg className="sb-mark" width="28" height="28" viewBox="0 0 512 512" aria-hidden="true">
+    <svg className="sb-mark" width={size} height={size} viewBox="0 0 512 512" aria-hidden="true">
       <rect width="512" height="512" fill="#E3E1DB" />
       <path
         fill="#1F2022"
         d="M186 168 C180 196 176 208 170 226 C162 244 146 256 138 270 C134 278 142 284 160 286 C164 292 158 298 158 304 C158 310 168 310 168 314 C168 320 158 322 160 330 C162 338 170 338 170 346 C172 366 178 386 204 392 C222 396 240 392 252 388 C258 410 256 430 246 444 C216 456 150 468 122 512 L512 512 L512 372 C470 366 428 356 404 330 C438 334 462 306 446 280 C478 268 482 222 452 208 C476 184 462 140 428 138 C432 104 392 76 362 92 C342 64 296 62 280 86 C252 70 212 84 208 116 C188 124 180 148 186 168 Z"
       />
-      <path fill="none" stroke="#E3E1DB" strokeWidth="28" strokeLinecap="round" strokeLinejoin="round" d="M192 232 L206 246 L232 216" />
+      <path fill="none" stroke="#E3E1DB" strokeWidth={size > 28 ? 20 : 28} strokeLinecap="round" strokeLinejoin="round" d="M192 232 L206 246 L232 216" />
     </svg>
   );
 }

@@ -79,11 +79,17 @@ describe("the side menu", () => {
 });
 
 describe("the menu on the app's store", () => {
-  it("marks New on Buddy's main chat, Team on another member's, a page its own row, and nothing in Settings", async () => {
+  it("marks New on Home, where the app starts, Team on a member's main chat, a page its own row, and nothing in Settings", async () => {
     setLang("en");
     const store = getStore();
     await store.actions.init();
     expect(store.getState().selectedBot).toBe("buddy");
+    expect(store.getState().ui.view).toBe("home");
+    expect(currentOf(renderToString(<Sidebar />))).toBe("menu-new");
+    // Buddy's main chat is Buddy's page now that Home is its own place
+    await store.actions.selectBot("buddy");
+    expect(currentOf(renderToString(<Sidebar />))).toBe("menu-team");
+    store.actions.openPage("home");
     expect(currentOf(renderToString(<Sidebar />))).toBe("menu-new");
     await store.actions.selectBot("ton");
     expect(currentOf(renderToString(<Sidebar />))).toBe("menu-team");

@@ -3,26 +3,33 @@
 // Artifacts, Customize and History, a Recent list, and the account row at the bottom.
 //
 // Which row is current comes from the canvas too: Home marks New, a member's page marks Team, the menu's own pages
-// mark themselves, and a thread, a job and Settings mark none. Home does not exist in the app yet, so the home
-// member's main chat stands in for it; any other member's main chat is that member's page.
+// mark themselves, and a thread, a job and Settings mark none. New opens Home (src/pages/HomePage.tsx), and every
+// member's main chat, Buddy's included, is that member's page.
 import type { Bot } from "../lib/protocol";
 import type { MenuPage, Ui } from "../state/store";
 import type { ThreadRow } from "../threads/types";
 
-export type MenuRow = "new" | MenuPage;
+/** A row of the menu. New is the row whose page is Home, so Home itself is not a row's name. */
+export type MenuRow = "new" | Exclude<MenuPage, "home">;
 
 /** The rows, top to bottom. */
 export const MENU_ROWS: readonly MenuRow[] = ["new", "needs", "team", "code", "artifacts", "customize", "history"];
 
-/** The row marked current (`aria-current="page"`) for what the main column shows, or null when none is. `home` is the
- *  member whose main chat stands in for Home (homeBot). */
-export function currentRow(ui: Pick<Ui, "view" | "thread">, selectedBot: string | null, home: string | null): MenuRow | null {
+/** The page a row opens: Home for New, as the canvas's New row and brand mark link to Home; each other row its own. */
+export function rowPage(row: MenuRow): MenuPage {
+  return row === "new" ? "home" : row;
+}
+
+/** The row marked current (`aria-current="page"`) for what the main column shows, or null when none is. */
+export function currentRow(ui: Pick<Ui, "view" | "thread">, selectedBot: string | null): MenuRow | null {
   switch (ui.view) {
+    case "home":
+      return "new";
     case "chat":
-      // A thread is a conversation, not a place in the menu. Before any member is open the app is at its start,
-      // which is Home.
+      // A thread is a conversation, not a place in the menu. Before any member is open the app is still starting,
+      // and it starts on Home.
       if (ui.thread) return null;
-      return selectedBot === null || selectedBot === home ? "new" : "team";
+      return selectedBot === null ? "new" : "team";
     case "needs":
     case "team":
     case "code":
@@ -43,8 +50,8 @@ export function currentRow(ui: Pick<Ui, "view" | "thread">, selectedBot: string 
   }
 }
 
-/** The member whose main chat stands in for Home: the one the runtime marks as its default (Buddy in the demo),
- *  else the first listed member, so New always leads somewhere while there is a team. */
+/** The member Home's Chat and Team modes talk to: the one the runtime marks as its default (Buddy in the demo), else
+ *  the first listed member, so the ask box always reaches someone while there is a team. */
 export function homeBot(bots: readonly Pick<Bot, "name" | "is_default">[], listed: readonly string[]): string | null {
   return bots.find((b) => b.is_default)?.name ?? listed[0] ?? null;
 }
