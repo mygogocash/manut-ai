@@ -35,6 +35,16 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - Approving an external write still needs the shop's consent (`cloudWork`), recorded from the owner through
   the link (`/consent` below), never by an operator.
 - A decision settles once. The task object already refuses a second decision; the link routes keep that.
+- A reply is decided through `packages/approval-core`, as a worker's request and a deletion's confirmation are. Each
+  proposed reply is stored with one approval-core request of kind `reply`, opened in the same task object storage
+  transaction, which names the exact reply: its action id, the operation, the bot it is sent from, the one customer it
+  goes to (`recipient`), the draft (`text`) and the hash the send is checked against. The owner's link decides that
+  request as the owner (role `owner`, `decidedBy: "owner-link"`), at its one revision (a reply is never revised; a
+  changed reply is a new one with a new link), and only before its expiry, which is the reply's and the link's. The
+  request and the reply's action change in one transaction, so of any number of decisions exactly one settles, and no
+  route moves a reply's action without its request: the task object's older decision route decides a reply through
+  its request too. A reply stored before replies had requests is read as the request it would have opened and stores
+  it with its first decision. None of the answers below changed.
 - Customer message text is stored for the pilot (the operator must read it to draft a reply) and falls under
   the backend's existing retention and tenant export/delete.
 
@@ -406,7 +416,8 @@ What is written, and by whom:
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
-section 3); a pilot shop has none until a worker runs for it.
+section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
+entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
   and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
@@ -465,5 +476,56 @@ A reply is one action proposal on the shop's task with `operationType: "line.mes
 - `recipients`: `[lineUserId]` of the customer who wrote the message being answered.
 - `payload`: `{ "text": string }`, 1 to 5,000 characters.
 
+Proposing it opens its approval-core request ("Security rules", above), whichever route proposes it.
+
 The broker pushes it with the LINE Messaging API, sending the action id as the retry key so a retry can never
 send twice, and settles `confirmed`, `failed` or `unknown` as it does for every provider.
+
+## Approvals for a session
+
+`GET /v1/approvals?state=open` or `GET /v1/approvals?state=recent`, with a signed-in session
+(`Authorization: Bearer <access token>`), answers the session's own approval-core records and where each stands now,
+for the desktop's answering slice. It only reads: nothing is decided through it.
+
+- **What is listed.** Every approval-core request in the tenant's tasks: a worker's request (the job flow) and every
+  LINE reply. A proposal that no request decides, such as a session's own `linear.issue.create` through
+  `POST /v1/tasks/:id/actions`, is not an approval-core approval and is not listed.
+- **The wire format.** Each record is encoded with approval-core's `encodeRecord` and its standing with
+  `encodeStanding` (`packages/approval-core/src/wire.ts`), so a client reads both with approval-core's own decoders.
+  The standing is read now, at the record's current revision and against the attempt holding its task.
+- **Kinds.** The task object sets each request's kind from the operation it decides, never from whoever proposed it:
+  a LINE reply (`line.message.push`) is `reply`; a worker's `linear.issue.create` is `command`.
+- **`state`**, required: `open` lists every record whose standing is `open`, still waiting for a decision; `recent`
+  lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
+  (`request.createdAt`), then by id.
+- **`limit`**: 1 to 200, 50 when absent. It bounds `recent` only; `open` is never cut short.
+- **Scope.** The session's own tenant, as the tenant export reads it: every task in the tenant's index, read with the
+  tenant the session verified and nothing else. So one tenant never reads another's approvals, even through a task id
+  planted in its own index or an action planted in its own task. Fellow members' company tasks are not listed:
+  reading those takes a verified company assertion, which this route does not make. Like reading a task, it needs no
+  feature switch and no consent.
+- **A reply stored before replies had requests** and still waiting is listed as the request it would have opened:
+  asked when the reply was proposed, expiring with it. A reply decided before then has no record and is not listed;
+  its history stays in the export.
+
+Errors: 401 `unauthorized` without a session (the operator key is not a session), 400 `invalid_state`, 400
+`invalid_limit`, 405 `method_not_allowed` for anything but `GET`, and 503 `approvals_unavailable` when the tenant's
+index or one of its tasks cannot be read, never a partial list.
+
+```ts
+// WireRecord and WireStanding are approval-core's wire JSON (packages/approval-core/src/wire.ts).
+type Approvals = {
+  state: "open" | "recent";
+  approvals: { taskId: string; record: WireRecord; standing: WireStanding }[];
+};
+
+// What a LINE reply's request names, in `record.request.detail`. Its id is the reply's action id.
+type ReplyDetail = {
+  actionId: string;
+  operationType: "line.message.push";
+  targetResourceId: string;   // the bot user id the reply is sent from
+  recipient: string;          // the LINE user id of the customer who wrote
+  text: string;               // exactly what will be sent
+  payloadHash: string;
+};
+```

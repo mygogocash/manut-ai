@@ -1,4 +1,5 @@
 import { auditAdminRoute } from "./audit-log";
+import { listApprovals } from "./approvals";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
@@ -975,6 +976,17 @@ export default {
           new Request(`https://schedules/schedules/${scheduleMatch[1]}`, { method: "DELETE", headers }),
         );
       }
+    }
+
+    // Approvals for a session (approvals.ts): the tenant's approval-core
+    // records and where each stands, as approval-core's wire JSON. Reading
+    // only, so, like reading a task, it needs neither a switch nor consent.
+    if (url.pathname === "/v1/approvals") {
+      const context = await contextOf(request, env);
+      if (!context) return json({ error: "unauthorized" }, 401);
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!context.tenant) return json({ error: "tenant_required" }, 400);
+      return listApprovals(env, context.tenant, url);
     }
 
     // Exact-action approvals. Proposals and decisions pass through to the

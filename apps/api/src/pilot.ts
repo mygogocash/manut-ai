@@ -5,21 +5,23 @@
 /// owner approves or declines that one exact reply through a link.
 ///
 /// Nothing here adds a way around the lifted backend's guarantees. A reply is
-/// an ordinary exact-action proposal on the shop's task, decided once by the
-/// task object, dispatched at most once by the broker's begin gate, checked
+/// an ordinary exact-action proposal on the shop's task, stored with the
+/// approval-core request that alone decides it (a `reply`, naming the draft
+/// and its one recipient), decided once through that request in the task
+/// object, dispatched at most once by the broker's begin gate, checked
 /// against the live connection grant before any LINE traffic, and settled
-/// confirmed, failed or unknown. The link adds only who may decide: whoever
-/// holds a link this backend signed for that one action, before it expires.
-/// Approving still needs the shop's cloud-work consent, which only the owner
-/// can record, through the link, and the same kill switches as the session
-/// routes.
+/// confirmed, failed or unknown. The link adds only who decides: whoever
+/// holds a link this backend signed for that one action, before it expires,
+/// is the owner. Approving still needs the shop's cloud-work consent, which
+/// only the owner can record, through the link, and the same kill switches as
+/// the session routes.
 ///
 /// Deleting a live shop's data is the same shape: the operator's request opens
 /// one owner confirmation in approval-core's store (pilot-store.ts), the
 /// owner's link names exactly that confirmation, and the wipe starts only once
 /// the owner's yes is settled there.
 
-import type { ApprovalRecord } from "@manut/approval-core";
+import type { ApprovalRecord, DecideResult } from "@manut/approval-core";
 import {
   APPROVAL_LINK_TTL_MS,
   checkApprovalToken,
@@ -64,7 +66,7 @@ import {
   type StoredDeletion,
   type SubscriptionPayment,
 } from "./pilot-store";
-import type { ActionProposalJSON } from "./task-object";
+import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
 export type PilotEnv = TenantDataEnv & {
@@ -435,7 +437,10 @@ async function recordOwnerConsent(request: Request, env: PilotEnv, claim: Approv
 /// decision and dispatch routes, in the same order: the officeCloud switch
 /// for any decision; for an approval, the officeExternalWrites switch and the
 /// shop's consent, all checked before anything is recorded, so a refusal
-/// leaves the reply waiting. The task object then settles the decision once.
+/// leaves the reply waiting. The task object then settles the decision once,
+/// through the reply's approval-core request, as the owner (approval-core's
+/// rules: settle once, before the reply's expiry, the one revision a reply
+/// has, an option it offers), and moves the reply with it.
 /// An approval goes straight on to the broker's begin gate (one-use,
 /// re-checking freshness, grant revision and task state) and the provider
 /// call runs after the answer, in waitUntil, exactly as the session dispatch
@@ -462,28 +467,30 @@ async function decideByLink(
   if (before.action.state !== "proposed") return json({ error: "already_decided", view: before.view }, 409);
   if (approve && before.view.needsConsent) return json({ error: "consent_required" }, 403);
 
+  // The reply's approval-core request decides it, and the task object moves the reply with it in one transaction.
+  // Whoever holds the link is the owner, so the role is set here and never read from the request; a reply is never
+  // revised, so the owner saw its one revision.
   const stub = env.TASK.get(env.TASK.idFromName(claim.taskId));
   const decided = await stub.fetch(
-    new Request(`https://task/actions/${encodeURIComponent(claim.actionId)}/decision`, {
+    new Request(`https://task/requests/${encodeURIComponent(claim.actionId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-tenant": claim.tenant },
-      // `by` is required by the object but ignored when a tenant is sent:
-      // the approval is stamped with the shop's tenant, as a session's is.
-      body: JSON.stringify({ approve, by: "owner-link" }),
+      body: JSON.stringify({ optionId: approve ? "approve" : "decline", seenRevision: REPLY_REVISION,
+        decidedBy: "owner-link", role: "owner" }),
     }),
   );
-  if (!decided.ok) {
-    const refusal = (await decided.json().catch(() => null)) as { error?: unknown } | null;
-    if (decided.status === 409 && refusal?.error === "action_expired") return json({ error: "link_expired" }, 410);
-    if (decided.status === 409) {
-      // Lost a race with another decision on the same link.
-      const raced = await loadView(env, claim);
-      return raced ? json({ error: "already_decided", view: raced.view }, 409) : json({ error: "link_invalid" }, 404);
-    }
-    if (decided.status === 404) return json({ error: "link_invalid" }, 404);
-    return json({ error: "decision_unavailable" }, 503);
+  if (decided.status === 404) return json({ error: "link_invalid" }, 404);
+  if (decided.status === 409) return raced(env, claim);
+  if (!decided.ok) return json({ error: "decision_unavailable" }, 503);
+  const settled = (await decided.json()) as { result: DecideResult; action: ActionProposalJSON };
+  if (!settled.result.ok) {
+    // Lost a race with another decision on the same reply.
+    if (settled.result.refused === "already_decided") return raced(env, claim);
+    if (settled.result.refused === "expired") return json({ error: "link_expired" }, 410);
+    // Withdrawn, not permitted, or an option or revision the link never showed: nothing this link can decide.
+    return json({ error: "link_invalid" }, 404);
   }
-  const action = (await decided.json()) as ActionProposalJSON;
+  const action = settled.action;
   // The decision time and the audit log's entry for the owner's decision share one write. Neither may hold up the
   // decision the task object already settled, so a failed write is only counted as a miss in the log.
   const recorded = await pilotWrite(env, claim.tenant, "/pilot/reply-decided", {
@@ -496,6 +503,12 @@ async function decideByLink(
   if (approve) await startSend(env, ctx, claim, action);
   const after = await loadView(env, claim);
   return after ? json(after.view) : json({ error: "link_invalid" }, 404);
+}
+
+/// The answer to a decision that another one beat to the reply: the view as it now stands.
+async function raced(env: PilotEnv, claim: ApprovalClaim): Promise<Response> {
+  const loaded = await loadView(env, claim);
+  return loaded ? json({ error: "already_decided", view: loaded.view }, 409) : json({ error: "link_invalid" }, 404);
 }
 
 /// Begins the send of an approved reply. The begin gate compares against the
