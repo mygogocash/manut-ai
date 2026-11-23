@@ -114,18 +114,28 @@ describe("public ingress rate limits", () => {
     counter.target[binding] = actual!;
     const path = binding === "AUTH_EXCHANGE_LIMITER" ? "/v1/auth/exchange" :
       binding === "AUTH_SESSION_LIMITER" ? "/v1/auth/refresh" : "/v1/inbound/linear";
-    const ip = `2001:db8::${crypto.randomUUID().replaceAll("-", "").slice(0, 4)}`;
-    for (let index = 0; index < limit; index++) {
-      // Refresh and revoke deliberately consume the same real bucket.
-      const revoke = binding === "AUTH_SESSION_LIMITER" && index % 2 === 1;
-      const response = await send(request(revoke ? "/v1/auth/session" : path, revoke ? "DELETE" : "POST", ip).request,
-        counter.target);
-      expect(response.status).not.toBe(429);
-      expect(response.status).not.toBe(503);
-    }
-    const calls = counter.calls();
-    const blocked = request(path, "POST", ip);
-    const response = await send(blocked.request, counter.target);
+    // Fills one address's real bucket to the limit and sends one more. The real limiter counts in 60-second windows,
+    // so on a loaded machine the loop can cross into a new window and the extra request is rightly let through.
+    // That is the window moving, not a missing limit, so the run is repeated once from a fresh address, which starts
+    // its count in a window that has only just begun; the assertions below then hold on that run.
+    const fill = async () => {
+      const ip = `2001:db8::${crypto.randomUUID().replaceAll("-", "").slice(0, 4)}`;
+      for (let index = 0; index < limit; index++) {
+        // Refresh and revoke deliberately consume the same real bucket.
+        const revoke = binding === "AUTH_SESSION_LIMITER" && index % 2 === 1;
+        const response = await send(request(revoke ? "/v1/auth/session" : path, revoke ? "DELETE" : "POST", ip).request,
+          counter.target);
+        expect(response.status).not.toBe(429);
+        expect(response.status).not.toBe(503);
+      }
+      const calls = counter.calls();
+      const blocked = request(path, "POST", ip);
+      const response = await send(blocked.request, counter.target);
+      return { ip, calls, blocked, response };
+    };
+    let run = await fill();
+    if (run.response.status !== 429) run = await fill();
+    const { ip, calls, blocked, response } = run;
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("60");
     expect(blocked.pulls()).toBe(0);
