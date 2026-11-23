@@ -1,0 +1,18 @@
+{
+  "name": "@manut/sheets-rows",
+  "private": true,
+  "type": "module",
+  "description": "The Sheets API request that would append a month of Ton's books to a Google Sheet, with every cell stored as given.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@manut/books": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
