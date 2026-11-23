@@ -24,6 +24,15 @@ export async function chatOpen(page: Page, bot = "kami", name = MEMBERS[bot] ?? 
   await expect(page.getByTestId("who").locator(".head-title")).toHaveText(name);
 }
 
+/** The whole start is done: every listed member's chat and threads were read too, not only the open one (the store's
+ *  `resumed`). A spec saw that before in the bot rows' previews, which left with the sidebar. */
+export async function startDone(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { resumed: Promise<void> } };
+    await store.getStore().resumed;
+  });
+}
+
 /** Open `bot`'s main chat as a person does now: Team in the menu, then the member's row. */
 export async function openChat(page: Page, bot: string, name?: string): Promise<void> {
   await page.getByTestId("menu-team").click();

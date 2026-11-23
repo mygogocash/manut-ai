@@ -1,6 +1,7 @@
 // Files the bot sends: `MEDIA:/path` lines in an answer become an image tile (with a lightbox), a video
 // player and a file card, read through the read-only `media.read` op. The line itself is never shown.
 import { expect, test, type Page } from "@playwright/test";
+import { chatOpen, openChat } from "./start";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +28,8 @@ async function mock(op: string, params: Record<string, unknown> = {}): Promise<a
 
 async function openHermes(page: Page) {
   await page.goto("/");
-  await page.getByTestId("bot-default").click();
+  await chatOpen(page);
+  await openChat(page, "default");
   await expect(page.getByTestId("header").getByText("Hermes", { exact: true })).toBeVisible();
   return page.getByTestId("timeline");
 }
@@ -40,8 +42,8 @@ test("MEDIA lines become an image tile, a video and a file card, never literal t
   const tl = await openHermes(page);
   const bubble = tl.getByTestId("bubble-bot").filter({ hasText: "Here they are." });
   await expect(bubble).toBeVisible();
+  // (the bot row's preview, which showed the text without the MEDIA lines, left with the sidebar)
   await expect(tl).not.toContainText("MEDIA:");
-  await expect(page.getByTestId("bot-default")).toContainText("Before and after:");
 
   const media = bubble.getByTestId("media");
   // in the order the lines came: image, video, file

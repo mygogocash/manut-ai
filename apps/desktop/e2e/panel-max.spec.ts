@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { motionDone } from "./motion";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chatOpen } from "./start";
+import { chatOpen, openChat } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 const SHOTS = process.env.MANUT_SHOTS || "";
@@ -94,12 +94,10 @@ test("Plans: the tab row's button maximises the panel in place; the sidebar stay
   // the Plans graph renders at the bigger width: the full drawing with its zoom tools
   await expect(page.getByTestId("run-graph-box")).toHaveClass(/\bmax\b/);
   await expect(page.getByTestId("run-zoom")).toBeVisible();
-  // the sidebar is visible and clickable
+  // the side menu is visible and clickable: Team, then a member, as the sidebar's rows were
   await expect(page.getByTestId("sidebar")).toBeVisible();
-  await page.getByTestId("bot-friren").click();
-  await expect(page.getByTestId("bot-friren")).toHaveAttribute("aria-current", "true");
-  await page.getByTestId("bot-kami").click();
-  await chatOpen(page);
+  await openChat(page, "friren");
+  await openChat(page, "kami");
   // restore: back to the width it had before, and the draft is still in the composer
   await page.getByTestId("panel-max").click();
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);

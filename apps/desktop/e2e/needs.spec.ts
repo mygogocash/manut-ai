@@ -1,9 +1,10 @@
-// Needs you: approvals and questions from bots you are not looking at. A plain amber dot on the bot row (no
-// number, so it never reads as unread), a "N need you" strip above BOTS that expands in place and jumps to the card, 1/2/3 on a focused approval card only, a 3-question
-// interview answered with one clarify.respond, timeout clears the dot, and the row menu (pin / remove from list).
+// Needs you: approvals and questions from bots you are not looking at. The side menu's Needs you row counts them,
+// Team marks who waits, and the Needs you page (the sidebar's old strip made a page) lists them and jumps to the card;
+// 1/2/3 on a focused approval card only, a 3-question interview answered with one clarify.respond, and a timeout
+// clears the count. The bot rows' amber dot, preview and menu left with the sidebar.
 import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
-import { chatOpen } from "./start";
+import { chatOpen, openChat, startDone } from "./start";
 
 const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
 // Screenshots stay out of the repo (NEEDS_SHOTS dir, else Playwright's ignored test-results).
@@ -35,8 +36,8 @@ async function open(page: Page, theme: "dark" | "light" = "dark") {
   await page.goto("/");
   await chatOpen(page);
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
-  // every other bot's chat is loaded too, so its asks can show in the sidebar
-  await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toContainText("updater");
+  // every other bot's chat is loaded too, so its asks count
+  await startDone(page);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -50,72 +51,34 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("asks on bots you are not looking at: amber dot, strip shows 2, click jumps and focuses the card", async ({ page }) => {
+test("asks on bots you are not looking at: the menu counts them, Needs you lists them, a row jumps and focuses the card", async ({ page }) => {
   await open(page);
   await mock("mock.ask", { bot: "friren", kind: "approval" });
   await mock("mock.ask", { bot: "default", kind: "clarify" });
+  // a count on the menu's Needs you row, and Team marks both members as waiting on you
+  await expect(page.getByTestId("menu-needs-count")).toHaveText("2");
+  await page.getByTestId("menu-team").click();
+  await expect(page.getByTestId("team-friren")).toContainText("Needs you");
+  await expect(page.getByTestId("team-default")).toContainText("Needs you");
+  await expect(page.getByTestId("team-kami")).not.toContainText("Needs you");
 
-  const friren = page.getByTestId("bot-friren");
-  const dot = friren.getByTestId("needs");
-  await expect(dot).toBeVisible();
-  // a dot, not a count: numbers stay with unread (and the strip)
-  await expect(dot).toHaveText("");
-  await expect(dot).toHaveAttribute("aria-label", "Needs your answer");
-  await expect(friren.getByTestId("unread")).toHaveCount(0);
-  // the command shows as code, not with raw backticks
-  await expect(friren.getByTestId("bot-sub")).toHaveText("Allow rm -rf build/?");
-  await expect(friren.getByTestId("bot-sub").locator("code")).toHaveText("rm -rf build/");
-  const hermesSub = page.getByTestId("bot-default").getByTestId("bot-sub");
-  await expect(hermesSub).toHaveText("Which environment should I deploy to?");
-  // the ask wraps to a second line instead of being cut mid-word
-  expect(await hermesSub.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-  // amber, not the accent gradient of an unread badge
-  const look = await dot.evaluate((el) => {
-    const cs = getComputedStyle(el);
-    return { bg: cs.backgroundColor, img: cs.backgroundImage };
-  });
-  expect(look.img).toBe("none");
-  const [r, g, b] = (look.bg.match(/[\d.]+/g) ?? []).map(Number);
-  expect(r).toBeGreaterThan(180);
-  expect(g).toBeGreaterThan(120);
-  expect(b).toBeLessThan(110);
-
-  const strip = page.getByTestId("needs-strip");
-  await expect(strip).toContainText("2 need you");
-  await page.screenshot({ path: join(SHOTS, "T12-needs-dark.png"), animations: "disabled" });
-  // the list expands in place and pushes BOTS down: it never covers a bot row, and the open bot stays visible
-  const kamiBefore = await page.getByTestId("bot-kami").boundingBox();
-  await strip.click();
-  const items = page.getByTestId("needs-item");
+  // the page lists each ask with who asks and which kind; asks of the same second keep no fixed order, so the rows
+  // are found by who asks
+  await page.getByTestId("menu-needs").click();
+  const items = page.getByTestId("needs-row");
   await expect(items).toHaveCount(2);
-  await expect(items.nth(0)).toContainText("Friren");
-  await expect(items.nth(0)).toContainText("Allow rm -rf build/?");
-  await expect(items.nth(0).getByTestId("needs-tag")).toHaveText("Approve");
-  await expect(items.nth(1)).toContainText("Hermes");
-  await expect(items.nth(1).getByTestId("needs-tag")).toHaveText("Question");
-  // two lines for the ask: the full question shows, not "Which environment shoul…"
-  const q = items.nth(1).locator(".needs-q");
-  expect(await q.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-  const listBox = (await page.getByTestId("needs-list").boundingBox())!;
-  const kamiAfter = (await page.getByTestId("bot-kami").boundingBox())!;
-  expect(kamiAfter.y).toBeGreaterThan(kamiBefore!.y);
-  expect(kamiAfter.y).toBeGreaterThanOrEqual(listBox.y + listBox.height);
-  await expect(page.getByTestId("bot-kami")).toBeInViewport({ ratio: 1 });
-  await chatOpen(page);
-  await page.screenshot({ path: join(SHOTS, "T12-strip-dark.png"), animations: "disabled" });
-  // Esc closes it (focus back on the strip), so does a click outside
-  await items.nth(0).focus();
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("needs-list")).toHaveCount(0);
-  await expect(strip).toBeFocused();
-  await strip.click();
-  await expect(page.getByTestId("needs-list")).toBeVisible();
-  await page.getByTestId("timeline").click({ position: { x: 20, y: 20 } });
-  await expect(page.getByTestId("needs-list")).toHaveCount(0);
-  await strip.click();
+  const friren = items.filter({ hasText: "Friren" });
+  const hermes = items.filter({ hasText: "Hermes" });
+  // the command shows as code, not with raw backticks
+  await expect(friren.locator(".l1")).toHaveText("Allow rm -rf build/?");
+  await expect(friren.locator(".l1 code")).toHaveText("rm -rf build/");
+  await expect(friren.locator(".tag")).toHaveText("Approve");
+  await expect(hermes.locator(".l1")).toHaveText("Which environment should I deploy to?");
+  await expect(hermes.locator(".tag")).toHaveText("Question");
+  await page.screenshot({ path: join(SHOTS, "T12-needs-dark.png"), animations: "disabled" });
 
-  await items.nth(0).click();
-  await expect(friren).toHaveAttribute("aria-current", "true");
+  await friren.click();
+  await chatOpen(page, "friren");
   const card = page.getByTestId("timeline").getByTestId("card-approval");
   await expect(card).toBeFocused();
   await expect(card).toBeInViewport();
@@ -123,14 +86,15 @@ test("asks on bots you are not looking at: amber dot, strip shows 2, click jumps
   // ⌘J goes to the next ask (Hermes' question), then wraps back
   const key = await mod(page);
   await page.keyboard.press(`${key}+j`);
-  await expect(page.getByTestId("bot-default")).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "default");
   await expect(page.getByTestId("timeline").getByTestId("card-clarify")).toBeFocused();
   await page.keyboard.press(`${key}+j`);
-  await expect(friren).toHaveAttribute("aria-current", "true");
+  await chatOpen(page, "friren");
   await expect(page.getByTestId("timeline").getByTestId("card-approval")).toBeFocused();
 });
 
 test("a command in the row preview never breaks across lines: one line box, whole or ellipsized as one", async ({ page }) => {
+  test.skip(true, "the bot row's one-line preview left with the sidebar; the Needs you page shows the ask on a full-width row");
   await open(page);
   const ask = (request_id: string, command: string) =>
     mock("mock.emit", { events: [{ event: "approval.request", bot: "friren", request_id, title: "Run shell command", command, choices: ["once", "deny"] }] });
@@ -163,7 +127,7 @@ test("a command in the row preview never breaks across lines: one line box, whol
 test("1/2/3 answer an approval only while its card has focus", async ({ page }) => {
   await open(page);
   await mock("mock.ask", { bot: "friren", kind: "approval" });
-  await page.getByTestId("bot-friren").click();
+  await openChat(page, "friren");
   const card = page.getByTestId("timeline").getByTestId("card-approval");
   await expect(card).toBeVisible();
 
@@ -188,16 +152,16 @@ test("1/2/3 answer an approval only while its card has focus", async ({ page }) 
   expect(await calls("approval.respond")).toEqual([
     expect.objectContaining({ params: expect.objectContaining({ bot: "friren", choice: "once" }) }),
   ]);
-  await expect(page.getByTestId("bot-friren").getByTestId("needs")).toHaveCount(0);
-  await expect(page.getByTestId("needs-strip")).toHaveCount(0);
+  await expect(page.getByTestId("menu-needs-count")).toHaveCount(0);
 });
 
 test("interview: three questions in one card, answers go back in one clarify.respond (skips allowed)", async ({ page }) => {
   await open(page);
   await mock("mock.ask", { bot: "friren", kind: "interview" });
-  await expect(page.getByTestId("bot-friren").getByTestId("bot-sub")).toHaveText(/^3 questions: Who is the release note for\?/);
-  await page.getByTestId("needs-strip").click();
-  await page.getByTestId("needs-item").first().click();
+  await page.getByTestId("menu-needs").click();
+  const row = page.getByTestId("needs-row");
+  await expect(row.locator(".l1")).toHaveText(/^3 questions: Who is the release note for\?/);
+  await row.click();
 
   const card = page.getByTestId("timeline").getByTestId("card-interview");
   await expect(card).toBeFocused();
@@ -286,25 +250,24 @@ test("interview: three questions in one card, answers go back in one clarify.res
     answers: { q1: "Both", q2: JSON.stringify(["Highlights", "Fixes", "Upgrade notes"]), q3: null },
   });
   await expect(page.getByTestId("bubble-bot").filter({ hasText: "Got it, using 2 of 3 answers." })).toBeVisible();
-  await expect(page.getByTestId("needs-strip")).toHaveCount(0);
+  await expect(page.getByTestId("menu-needs-count")).toHaveCount(0);
   await expect(page.getByTestId("composer")).toHaveAttribute("placeholder", "Message Friren");
 });
 
-test("a timed-out ask shows Timed out and the dot clears", async ({ page }) => {
+test("a timed-out ask shows Timed out and the count clears", async ({ page }) => {
   await open(page);
   await mock("mock.ask", { bot: "friren", kind: "approval", timeout_ms: 1500 });
-  const dot = page.getByTestId("bot-friren").getByTestId("needs");
-  await expect(dot).toBeVisible();
-  await expect(page.getByTestId("needs-strip")).toContainText("1 needs you");
-  await expect(dot).toHaveCount(0, { timeout: 6_000 });
-  await expect(page.getByTestId("needs-strip")).toHaveCount(0);
-  await page.getByTestId("bot-friren").click();
+  const count = page.getByTestId("menu-needs-count");
+  await expect(count).toHaveText("1");
+  await expect(count).toHaveCount(0, { timeout: 6_000 });
+  await openChat(page, "friren");
   await expect(page.getByTestId("timeline").getByTestId("card-line")).toHaveText(/Timed out/);
   await expect(page.getByTestId("timeline").getByTestId("card-approval")).toHaveCount(0);
   expect(await calls("approval.respond")).toEqual([]);
 });
 
 test("row menu: pin moves a bot to the top (and ⌘1 follows), Remove from list takes it out, + brings it back", async ({ page }) => {
+  test.skip(true, "the bot rows' menu (pin, Remove from list, Edit bot) and the + to add a bot left with the sidebar; Team has none of them yet");
   await open(page);
   const order = () => page.locator(".bot-list button.bot").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
   expect(await order()).toEqual(["bot-kami", "bot-friren", "bot-default", "bot-omh-tui"]);
@@ -346,16 +309,15 @@ test("row menu: pin moves a bot to the top (and ⌘1 follows), Remove from list 
   await expect(page.getByTestId("bot-name")).toHaveText("Friren");
 });
 
-test("light theme: dot, strip and interview stay readable", async ({ page }) => {
+test("light theme: the Needs you page and the interview stay readable", async ({ page }) => {
   await open(page, "light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await mock("mock.ask", { bot: "friren", kind: "interview" });
   await mock("mock.ask", { bot: "default", kind: "approval" });
-  await expect(page.getByTestId("needs-strip")).toContainText("2 need you");
+  await expect(page.getByTestId("menu-needs-count")).toHaveText("2");
+  await page.getByTestId("menu-needs").click();
   await page.screenshot({ path: join(SHOTS, "T12-needs-light.png"), animations: "disabled" });
-  await page.getByTestId("needs-strip").click();
-  await page.screenshot({ path: join(SHOTS, "T12-strip-light.png"), animations: "disabled" });
-  await page.getByTestId("needs-item").first().click();
+  await page.getByTestId("needs-row").filter({ hasText: "Friren" }).click();
   const card = page.getByTestId("timeline").getByTestId("card-interview");
   await expect(card).toBeFocused();
   await card.getByRole("radio", { name: "Developers" }).click();
@@ -366,7 +328,4 @@ test("light theme: dot, strip and interview stay readable", async ({ page }) => 
   expect(Math.max(lr, lg, lb)).toBeLessThan(60); // light theme: dark ink fill
   await card.locator(".card-title").click();
   await page.screenshot({ path: join(SHOTS, "T12-interview-light.png"), animations: "disabled" });
-  await page.getByTestId("bot-default").click({ button: "right" });
-  await expect(page.getByTestId("row-menu")).toBeVisible();
-  await page.screenshot({ path: join(SHOTS, "T12-menu-light.png"), animations: "disabled" });
 });
