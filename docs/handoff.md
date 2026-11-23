@@ -123,6 +123,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - **Mission Control's words:** a native speaker's check of the new Korean, Japanese and Chinese strings; the
   activity log's "Kept for 12 months, then deleted for good" is a policy promise the API must keep before any
   shop sees it.
+- **The offline cache's contents:** the desktop keeps reply drafts, recipients' LINE ids and schedule prompts
+  unencrypted in an owner-only file for up to 7 days; say if that is acceptable, or if 7 days is wrong.
+- **Workers:** whether drafts should age out after 7 days like the messages they quote; whether the owner can end
+  practice mode early and whether 3 days is right.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's

@@ -7,12 +7,12 @@ import { clock, fakeApi, memoryVault, ORIGIN, tokens, type FakeApi } from "./tes
 const IDENTITY = "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qta2V5LTEifQ.eyJzdWIiOiJvd25lciJ9.c2ln";
 const NONCE = "client-nonce-value";
 
-function setup(saved: StoredSession | string | null = null) {
+function setup(saved: StoredSession | string | null = null, onEnd?: () => unknown) {
   const api = fakeApi();
   const vault = memoryVault(saved === null ? null : typeof saved === "string" ? saved : JSON.stringify(saved));
   const c = clock();
   let devices = 0;
-  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault, now: c.now, deviceId: () => `device-${++devices}` });
+  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault, now: c.now, deviceId: () => `device-${++devices}`, onEnd });
   return { api, vault, c, session };
 }
 
@@ -299,5 +299,95 @@ describe("signing out", () => {
     const { session, api } = setup();
     expect(await session.signOut()).toEqual({ revoked: false });
     expect(api.calls).toEqual([]);
+  });
+});
+
+describe("telling what was read with a session that it is over", () => {
+  /** A session whose hook records, in order with the requests it makes to the API, when it was called. */
+  function hooked(saved: StoredSession | null) {
+    const api = fakeApi();
+    const vault = memoryVault(saved === null ? null : JSON.stringify(saved));
+    const c = clock();
+    const log: string[] = [];
+    let devices = 0;
+    const session = new ApiSession({
+      origin: ORIGIN,
+      vault,
+      now: c.now,
+      deviceId: () => `device-${++devices}`,
+      fetch: (url, init) => {
+        log.push(`${init.method} ${new URL(url).pathname}`);
+        return api.fetch(url, init);
+      },
+      onEnd: () => void log.push("ended"),
+    });
+    return { api, vault, c, session, log };
+  }
+
+  it("is called when the person signs out, before the API is asked and whatever the API answers", async () => {
+    for (const answer of [{ status: 200, json: { revoked: true } }, "offline"] as const) {
+      const { session, api, log } = hooked(stored(clock().now()));
+      api.on("DELETE", "/v1/auth/session", answer);
+      await session.signOut();
+      expect(log).toEqual(["ended", "DELETE /v1/auth/session"]);
+    }
+  });
+
+  it("is called when the API ends the session, a refresh refused or a token refused twice", async () => {
+    const refused = hooked(stored(clock().now()));
+    refused.api.on("GET", "/v1/schedules", { status: 401, json: {} }).on("POST", "/v1/auth/refresh", { status: 401, json: { error: "session_expired" } });
+    await refused.session.read("/v1/schedules");
+    expect(refused.log.filter((x) => x === "ended")).toHaveLength(1);
+    const twice = hooked(stored(clock().now()));
+    twice.api.on("GET", "/v1/schedules", { status: 401, json: {} }).on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) });
+    await twice.session.read("/v1/schedules");
+    expect(twice.log.filter((x) => x === "ended")).toHaveLength(1);
+  });
+
+  it("is called when a new sign-in replaces this origin's session, and before the new one is made", async () => {
+    const { session, api, log } = hooked(stored(clock().now()));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(2, "apple:owner-2") });
+    await session.load();
+    await session.signIn(IDENTITY, NONCE);
+    expect(log).toEqual(["ended", "DELETE /v1/auth/session", "POST /v1/auth/exchange"]);
+  });
+
+  it("is called when a new sign-in replaces another API's session left in the keychain", async () => {
+    const { session, api, log } = hooked(stored(clock().now(), { origin: "https://staging.manut.xyz" }));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(1) });
+    await session.load();
+    await session.signIn(IDENTITY, NONCE);
+    expect(log).toEqual(["ended", "DELETE /v1/auth/session", "POST /v1/auth/exchange"]);
+  });
+
+  it("is called by a sign-out with no session held, which still forgets a read an earlier session left", async () => {
+    const { session, log } = hooked(null);
+    await session.signOut();
+    expect(log).toEqual(["ended"]);
+  });
+
+  it("is not called by a sign-in that fails, or by a read that works", async () => {
+    const { session, api, log } = hooked(null);
+    api.on("POST", "/v1/auth/exchange", { status: 401, json: { error: "invalid_identity" } });
+    await session.load();
+    await session.signIn(IDENTITY, NONCE);
+    expect(log).toEqual(["POST /v1/auth/exchange"]);
+    const live = hooked(stored(clock().now()));
+    live.api.on("GET", "/v1/schedules", { status: 200, json: {} });
+    await live.session.read("/v1/schedules");
+    expect(live.log).toEqual(["GET /v1/schedules"]);
+  });
+
+  it("never lets a hook that throws, or that rejects, stop a sign-out", async () => {
+    const { session, api, vault } = setup(stored(clock().now()), () => {
+      throw new Error("disk");
+    });
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } });
+    expect(await session.signOut()).toEqual({ revoked: true });
+    expect(vault.value).toBeNull();
+    const rejecting = setup(stored(clock().now()), () => Promise.reject(new Error("disk")));
+    rejecting.api.on("DELETE", "/v1/auth/session", { status: 200, json: {} });
+    expect((await rejecting.session.signOut()).revoked).toBe(true);
+    expect(rejecting.vault.value).toBeNull();
   });
 });

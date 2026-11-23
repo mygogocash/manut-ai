@@ -116,7 +116,11 @@ export type AttemptJSON = {
   /// trusting every closed attempt. Records finished before this field
   /// existed have none; a reader must take that as unknown, never as success.
   /// `cancelled` is the control plane stopping the attempt (job-flow.ts).
-  outcome?: "done" | "failed" | "cancelled";
+  /// `awaiting_owner` is a worker that asked and stopped until the owner
+  /// answers: its attempt can do nothing more, and while it is the newest
+  /// claim its open requests stay open until their own expiry, not its
+  /// deadline (`runningAttemptSync`).
+  outcome?: "done" | "failed" | "cancelled" | "awaiting_owner";
   /// Why it failed or was cancelled, as a code: `budget`, `silent` (it stopped
   /// reporting), `deadline`, or one the worker gave.
   reason?: string;
@@ -545,6 +549,66 @@ function isRole(value: unknown): value is Role {
   return typeof value === "string" && (ROLES as readonly string[]).includes(value);
 }
 
+/// A worker's result for the owner to read (job-flow.ts, `draft`; workers.ts): what one attempt wrote, and for which
+/// job. A draft is not an action: it proposes nothing and opens no request, so nothing can ever be sent from it here.
+/// Anything that leaves the app still goes through an approval of its own.
+export type DraftJSON = {
+  /// The attempt that wrote it. One draft per attempt, so a retried write can never leave two.
+  attemptId: string;
+  /// Who wrote it and for what, as codes: `nam` and `reply`, `pim` and `post`, `ton` and `daily_summary`.
+  member: string;
+  job: string;
+  /// The words, for the owner to read.
+  text: string;
+  /// What it is about, as ids only: the message a reply answers, the day a summary covers.
+  about?: Record<string, string>;
+  /// What sending it would take, as the member's permissions answered (@manut/member-grants `decide`): `draft_only`
+  /// while the connection is in practice mode, `ask` with the approval kind after it. Absent for a draft that never
+  /// leaves the app.
+  send?: { answer: "draft_only" | "ask"; kind: string };
+  at: string;
+};
+
+/// The most one draft may take, serialized. A reply, a post or a day's summary is far shorter, and the bound keeps
+/// every draft one small stored value.
+const MAX_DRAFT_BYTES = 16 * 1024;
+const DRAFT_FIELDS: ReadonlySet<string> = new Set(["member", "job", "text", "about", "send"]);
+const ABOUT_KEY = /^[a-z][A-Za-z0-9]{0,31}$/;
+const ABOUT_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_ABOUT = 8;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/// A draft the task can keep as given: known fields only, codes for who wrote it and what for, and ids for what it is
+/// about, so nothing but the draft's own words can carry free text. A field the task does not know is refused, not
+/// dropped, so a caller's mistake shows.
+function isDraft(value: unknown): value is Omit<DraftJSON, "attemptId" | "at"> {
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => DRAFT_FIELDS.has(key))) return false;
+  const { member, job, text, about, send } = value;
+  if (typeof member !== "string" || !REASON_CODE.test(member) || typeof job !== "string" || !REASON_CODE.test(job)) {
+    return false;
+  }
+  if (typeof text !== "string" || text.trim().length === 0) return false;
+  if (about !== undefined) {
+    if (!isPlainObject(about)) return false;
+    const entries = Object.entries(about);
+    if (entries.length > MAX_ABOUT ||
+        !entries.every(([key, id]) => ABOUT_KEY.test(key) && typeof id === "string" && ABOUT_ID.test(id))) {
+      return false;
+    }
+  }
+  if (send !== undefined) {
+    if (!isPlainObject(send) || Object.keys(send).some((key) => key !== "answer" && key !== "kind")) return false;
+    if ((send.answer !== "draft_only" && send.answer !== "ask") || typeof send.kind !== "string" ||
+        !REASON_CODE.test(send.kind)) {
+      return false;
+    }
+  }
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_DRAFT_BYTES;
+}
+
 /// An answer worked out inside a synchronous storage transaction, sent once the transaction has committed.
 type SyncAnswer = { status: number; body: unknown };
 
@@ -593,10 +657,16 @@ export class TaskObject extends DurableObject {
         attempts: allAttempts.slice(0, MAX_EXPORT_ATTEMPTS),
         attemptsTruncated: truncated,
         requests,
+        drafts: await this.drafts(),
       });
     }
     if (request.method === "GET" && url.pathname === "/events") {
       return this.replay(request, url);
+    }
+    if (request.method === "GET" && url.pathname === "/drafts") {
+      const doc = await this.load();
+      if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+      return Response.json({ drafts: await this.drafts() });
     }
     if (request.method === "DELETE" && url.pathname === "/wipe") {
       // Tenant deletion, worker-orchestrated. The headers are set by the
@@ -801,12 +871,13 @@ export class TaskObject extends DurableObject {
     if (request.method === "POST" && url.pathname === "/attempts/sweep") {
       return this.sweepAttempts(request);
     }
-    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|end)$/);
+    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|draft|end)$/);
     if (request.method === "POST" && attemptJob) {
       const attemptId = attemptJob[1];
       if (!attemptId) return Response.json({ error: "invalid_request" }, { status: 400 });
       if (attemptJob[2] === "events") return this.reportEvents(request, attemptId);
       if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
+      if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
     if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request);
@@ -865,10 +936,16 @@ export class TaskObject extends DurableObject {
   /// The attempt that holds the task now, for approval-core's binding: the newest claim, while it is active and
   /// neither its lease nor its deadline has lapsed. A worker that stopped reporting therefore stops holding the task
   /// the moment its lease lapses, before anything sweeps it. When nothing holds it, `NO_ATTEMPT`.
+  ///
+  /// The one exception is a worker that asked and stopped until the owner answers (`awaiting_owner`): it did not go
+  /// silent, it handed the next step to a person, who may take longer than any attempt's deadline. It holds the task
+  /// until a newer claim, so its requests stay open until their own expiry. It can do nothing itself meanwhile, since
+  /// every fenced call needs an active attempt.
   private runningAttemptSync(kv: SyncKvStorage, nowS: number): string {
     const id = kv.get<string>("current-attempt");
     if (!id) return NO_ATTEMPT;
     const attempt = kv.get<AttemptJSON>(`attempt:${id}`);
+    if (attempt?.outcome === "awaiting_owner") return id;
     if (!attempt || attempt.status !== "active" || attempt.leaseUntil <= nowS || attempt.deadline <= nowS) {
       return NO_ATTEMPT;
     }
@@ -945,6 +1022,49 @@ export class TaskObject extends DurableObject {
         via: `attempt:events:${attemptId}`, attemptId, event })));
       return { status: 200, body: { stored: events.length, leaseUntil, tip } };
     }));
+  }
+
+  /// `POST /attempts/:id/draft` with `{ fence, draft }`: what the worker wrote, kept on the task under its attempt for
+  /// the owner to read. One per attempt: a second is refused, so a retried write never leaves two. Like a report, it is
+  /// a sign of life and extends the lease. It proposes nothing and opens no request.
+  private async storeDraft(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<{ fence?: unknown; draft?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { fence, draft } = parsed.value;
+    if (!isDraft(draft)) return Response.json({ error: "invalid_request" }, { status: 400 });
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const doc = this.writableDocSync(kv, request);
+      if ("status" in doc) return doc;
+      const nowMs = Date.now();
+      const nowS = nowMs / 1000;
+      const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
+      if (!live.ok) return live.answer;
+      if (kv.get(`draft:${attemptId}`) !== undefined) return { status: 409, body: { error: "draft_exists" } };
+      const stamps = this.takeWriteStampSync(kv);
+      if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      const kept: DraftJSON = {
+        attemptId,
+        member: draft.member,
+        job: draft.job,
+        text: draft.text,
+        ...(draft.about !== undefined ? { about: draft.about } : {}),
+        ...(draft.send !== undefined ? { send: draft.send } : {}),
+        at: new Date(nowMs).toISOString(),
+      };
+      kv.put(`draft:${attemptId}`, kept);
+      kv.put(`attempt:${attemptId}`, { ...live.attempt, leaseUntil: nowS + LEASE_SECONDS } satisfies AttemptJSON);
+      kv.put("writeStamps", stamps);
+      this.appendEventsSync(kv, doc, [{ kind: "updated", via: `attempt:draft:${attemptId}` }]);
+      return { status: 200, body: kept };
+    }));
+  }
+
+  /// The task's drafts, oldest first.
+  private async drafts(): Promise<DraftJSON[]> {
+    const drafts = [...(await this.ctx.storage.list<DraftJSON>({ prefix: "draft:" })).values()];
+    return drafts.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   }
 
   /// `POST /attempts/:id/ask` with `{ fence, action }`: the worker stops before an external write and proposes the
@@ -1109,13 +1229,22 @@ export class TaskObject extends DurableObject {
     }));
   }
 
+  /// The requests an attempt asked that still wait for a decision.
+  private pendingRequestsSync(kv: SyncKvStorage, attemptId: string): string[] {
+    return [...kv.list<ApprovalRecord>({ prefix: "request:" })]
+      .filter(([, record]) => record.status === "pending" && record.request.attemptId === attemptId)
+      .map(([, record]) => record.request.id);
+  }
+
   /// Closes an attempt with its outcome and answers the requests it leaves waiting, which approval-core's binding
   /// now supersedes (`attempt_ended`): nothing is written to them, since where an attempt stands is what decides it.
+  /// An attempt that ends waiting for the owner supersedes nothing: its requests are what it waits on, and they stay
+  /// open (`runningAttemptSync`).
   private closeAttemptSync(
     kv: SyncKvStorage,
     doc: TaskDocJSON,
     attempt: AttemptJSON,
-    outcome: "done" | "failed" | "cancelled",
+    outcome: "done" | "failed" | "cancelled" | "awaiting_owner",
     reason: string | undefined,
     nowS: number,
     via: string,
@@ -1123,9 +1252,7 @@ export class TaskObject extends DurableObject {
     const ended: AttemptJSON = { ...attempt, status: "done", outcome, ...(reason ? { reason } : {}), finishedAt: nowS };
     kv.put(`attempt:${attempt.id}`, ended);
     this.appendEventsSync(kv, doc, [{ kind: "updated", via }]);
-    const superseded = [...kv.list<ApprovalRecord>({ prefix: "request:" })]
-      .filter(([, record]) => record.status === "pending" && record.request.attemptId === attempt.id)
-      .map(([, record]) => record.request.id);
+    const superseded = outcome === "awaiting_owner" ? [] : this.pendingRequestsSync(kv, attempt.id);
     return { attempt: ended, superseded };
   }
 
@@ -1133,14 +1260,19 @@ export class TaskObject extends DurableObject {
   /// With the fence it closes the attempt for its own worker (the worker's finish, through the control plane), under
   /// the same checks as `finish`; without, the control plane stops it on its own (budget, cancellation), which needs
   /// only that it is still active. Never rate limited: an attempt must always be able to end.
+  ///
+  /// `awaiting_owner` is the worker's own end only, with its fence, and only while a request it asked still waits:
+  /// otherwise there is nobody to wait for, and the attempt would hold the task for nothing.
   private async endAttempt(request: Request, attemptId: string): Promise<Response> {
     if (request.headers.get("x-control") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
     const parsed = await readJsonBody<{ fence?: unknown; outcome?: unknown; reason?: unknown }>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
     const { fence, outcome, reason } = parsed.value;
-    if ((outcome !== "done" && outcome !== "failed" && outcome !== "cancelled") ||
-        (reason !== undefined && (outcome === "done" || typeof reason !== "string" || !REASON_CODE.test(reason))) ||
-        (fence !== undefined && typeof fence !== "string")) {
+    const waits = outcome === "awaiting_owner";
+    if ((outcome !== "done" && outcome !== "failed" && outcome !== "cancelled" && !waits) ||
+        (reason !== undefined && (outcome === "done" || waits || typeof reason !== "string" ||
+          !REASON_CODE.test(reason))) ||
+        (fence !== undefined && typeof fence !== "string") || (waits && fence === undefined)) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
@@ -1157,6 +1289,9 @@ export class TaskObject extends DurableObject {
         attempt = live.attempt;
       } else if (attempt.status !== "active") {
         return { status: 409, body: { error: "stale_attempt" } };
+      }
+      if (waits && this.pendingRequestsSync(kv, attemptId).length === 0) {
+        return { status: 409, body: { error: "nothing_waiting" } };
       }
       return { status: 200, body: this.closeAttemptSync(kv, doc, attempt, outcome, reason, nowS,
         `attempt:end:${attemptId}`) };

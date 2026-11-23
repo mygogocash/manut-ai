@@ -20,6 +20,7 @@ mod power;
 mod pty_bench;
 mod session_files;
 mod sessions;
+mod shop_cache;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -427,6 +428,29 @@ async fn api_session_write(value: String) -> Result<(), String> {
 #[tauri::command]
 async fn api_session_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(api_link::session_clear).await.map_err(|_| "keychain".to_string())?
+}
+
+/// The connected runtime's last good read of the shop, kept for when the API cannot be reached (shop_cache.rs,
+/// src/runtime/http/cache.ts): `~/.manut/shop-cache/<key>.json`, owner-only, written through a temporary file and renamed,
+/// and only ever one shop's. `key` is the 64 hex digits the page makes of the shop; the shell takes no path.
+#[tauri::command]
+async fn shop_cache_write(key: String, text: String) -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::write(&home, &key, &text)).await.map_err(|e| e.to_string())?
+}
+
+/// What the saved read of shop `key` holds, or null when none is kept.
+#[tauri::command]
+async fn shop_cache_read(key: String) -> Result<Option<String>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::read(&home, &key)).await.map_err(|e| e.to_string())?
+}
+
+/// Removes the saved read of the shop (signing out, a session the API ended, switching to Practice or to another origin).
+#[tauri::command]
+async fn shop_cache_clear() -> Result<(), String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || shop_cache::clear(&home)).await.map_err(|e| e.to_string())?
 }
 
 /// Keystrokes (and pastes) from the terminal view into session `id`.
@@ -979,6 +1003,9 @@ pub fn run() {
             api_session_read,
             api_session_write,
             api_session_clear,
+            shop_cache_write,
+            shop_cache_read,
+            shop_cache_clear,
             term_link::term_link_take,
             disk::disk_watch
         ])

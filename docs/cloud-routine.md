@@ -11,7 +11,8 @@ Read `CLAUDE.md`, `docs/plan.md`, `docs/decisions.md` and `README.md` in full. `
 ## 2. Pick one task
 A task's id is its heading in the queue (`### slip-rules` is the task `slip-rules`). First list the taken ones:
 `git ls-remote --heads origin 'refs/heads/cloud/*'`. A task is taken or done when that list has
-`refs/heads/cloud/<task-id>`, or when `docs/plan.md` already says `Done on cloud/<task-id>` under it. Go down the
+`refs/heads/cloud/<task-id>`, or when `docs/plan.md` already has a line starting `Done on` under it (whatever
+branch it names: a task can also be done outside the night build). Go down the
 queue in order and take the first task that is neither; write its id in your report before you start. Just
 before creating its branch, check once more that `git ls-remote --exit-code --heads origin cloud/<task-id>`
 finds nothing. If every task is taken, stop and report that the queue is empty; do nothing else. If your push is

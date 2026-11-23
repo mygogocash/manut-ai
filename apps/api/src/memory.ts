@@ -8,7 +8,7 @@
 /// proposes what it learned, and what a customer said waits for the owner. So `proposeFact` is a function the job flow
 /// calls, and no route leads to it.
 
-import type { Fact, FactSource, Refusal } from "@manut/shop-memory";
+import { emptyState, usable, type Fact, type FactSource, type Refusal } from "@manut/shop-memory";
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
@@ -117,6 +117,34 @@ function isFact(value: unknown): value is Fact {
   return isRecord(value) && typeof value.id === "string" && typeof value.text === "string" &&
     (value.status === "confirmed" || value.status === "waiting") && typeof value.createdAt === "number" &&
     typeof value.updatedAt === "number" && isRecord(value.source);
+}
+
+/// What a worker may read of a shop's memory: the facts the owner's own data says or the owner confirmed, oldest first,
+/// as `@manut/shop-memory`'s `usable` decides. A fact a customer told the team waits for the owner's "It's true", and
+/// until then this never hands it out, so it can never reach a model. Like `proposeFact`, a function the job flow's
+/// workers call (workers.ts), with no route to it.
+///
+/// It never throws. A stored fact that is not whole is left out rather than passed on, and a shop's object that cannot
+/// be reached or answers anything but its facts is `memory_unavailable`: a worker must hear that, not run as if the team
+/// knew nothing.
+export async function usableFacts(
+  env: MemoryEnv,
+  tenant: string,
+): Promise<{ ok: true; facts: Fact[] } | { ok: false; error: "invalid_request" | "memory_unavailable" }> {
+  if (!isValidTenant(tenant)) return { ok: false, error: "invalid_request" };
+  try {
+    const response = await tenantCall(env, tenant, `/memory?tenant=${encodeURIComponent(tenant)}`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      return { ok: false, error: "memory_unavailable" };
+    }
+    const answer: unknown = await response.json();
+    if (!isRecord(answer) || !Array.isArray(answer.facts)) return { ok: false, error: "memory_unavailable" };
+    // The package's rule, applied to the whole facts the object holds: the state around them is only what `usable` reads.
+    return { ok: true, facts: usable({ ...emptyState(), facts: answer.facts.filter(isFact) }) };
+  } catch {
+    return { ok: false, error: "memory_unavailable" };
+  }
 }
 
 /// A worker's proposal for the job flow to call: the team learned something about a shop. What comes from the owner's

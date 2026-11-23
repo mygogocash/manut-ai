@@ -205,6 +205,11 @@
   font-size: 11px;
   color: var(--danger);
 }
+/* an ask shown from a kept read: it says why it cannot be answered, quietly (it is not a failure) */
+.card-note {
+  font-size: 11px;
+  color: var(--muted);
+}
 /* collapsed: one gray line */
 .card-line .line-t {
   color: var(--muted);

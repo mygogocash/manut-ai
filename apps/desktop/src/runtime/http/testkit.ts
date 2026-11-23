@@ -1,10 +1,54 @@
-// Fakes for the connected runtime's tests: an API that answers by method and path and records every request, and a
-// keychain that keeps one value in memory. They stand where the desktop shell's `api_request` and `session_*`
-// commands stand in the app (shell.ts), so the tests run without a shell or a network.
+// Fakes for the connected runtime's tests: an API that answers by method and path and records every request, a
+// keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
+// shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
+// without a shell or a network.
+import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
+import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
 import { LinkDown, VaultUnavailable } from "./shell";
+import { readShop } from "./shop";
 
 export const ORIGIN = "https://dev.manut.xyz";
+
+/** Every op the connected runtime refuses because it only reads: each answers `not_yet` while connected and `offline` while only a kept read is shown. */
+export const WRITE_OPS = [
+  "chat.send",
+  "chat.steer",
+  "chat.interrupt",
+  "approval.respond",
+  "clarify.respond",
+  "chat.set_model",
+  "chat.attach",
+  "folder.open",
+  "folder.close",
+  "folder.resume",
+  "thread.create",
+  "thread.remove",
+  "bots.rename",
+  "bots.set_avatar",
+  "bots.restart",
+  "automations.add",
+  "automations.pause",
+  "automations.resume",
+  "automations.remove",
+  "plugins.inspect",
+  "plugins.install",
+  "plugins.toggle",
+  "plugins.update",
+  "plugins.reload",
+  "plugins.remove",
+  "peers.probe",
+  "peers.attach",
+  "peers.detach",
+  "accounts.add",
+  "accounts.set_active",
+  "accounts.remove",
+  "accounts.label",
+  "accounts.discard",
+  "team.pause",
+  "team.resume",
+] as const;
+
 
 export interface Recorded {
   method: string;
@@ -90,6 +134,34 @@ export function memoryVault(value: string | null = null): SessionVault & { value
     },
   };
   return vault;
+}
+
+/** The shell's saved-read commands in memory, with a log of the calls. Like the shell's, it keeps the one read of the one
+ *  signed-in shop: a write replaces whatever was kept. `refuse` makes every call fail, as a full or unreadable disk
+ *  would. */
+export function memoryCacheStore(files: Record<string, string> = {}): CacheStore & { files: Map<string, string>; calls: string[]; refuse: boolean } {
+  const store = {
+    files: new Map(Object.entries(files)),
+    calls: [] as string[],
+    refuse: false,
+    async write(key: string, text: string) {
+      store.calls.push("write");
+      if (store.refuse) throw new Error("disk");
+      store.files.clear();
+      store.files.set(key, text);
+    },
+    async read(key: string) {
+      store.calls.push("read");
+      if (store.refuse) throw new Error("disk");
+      return store.files.get(key) ?? null;
+    },
+    async clear() {
+      store.calls.push("clear");
+      if (store.refuse) throw new Error("disk");
+      store.files.clear();
+    },
+  };
+  return store;
 }
 
 // ---- what the API answers, in the shapes apps/api writes (task-object.ts, schedule-object.ts, inbound.ts) ----------
@@ -200,4 +272,14 @@ export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: u
 export function clock(start = Date.UTC(2026, 10, 23, 3, 0, 0)) {
   const c = { ms: start, now: () => c.ms, pass: (ms: number) => void (c.ms += ms) };
   return c;
+}
+
+/** What an earlier run left on disk for the shop, as the shell holds it (the file's name, and its text): the read of
+ *  `serveShop(api, over)` as of `at`. */
+export async function savedRead(at: number, over: Parameters<typeof serveShop>[1] = {}): Promise<Record<string, string>> {
+  const api = serveShop(fakeApi(), over);
+  const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(Date.now())) });
+  const read = await readShop(session, () => at);
+  if (!read.ok) throw new Error("the fixture's read failed");
+  return { [cacheKey(ORIGIN, "apple:owner-1")]: encodeSnapshot(read.snapshot) };
 }

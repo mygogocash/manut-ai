@@ -20,6 +20,7 @@ import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
+import { workersAdminRoute } from "./workers";
 
 export { AuthObject, CompanyObject, CredObject, RelayObject, ScheduleObject, TaskObject, TenantObject };
 
@@ -202,6 +203,9 @@ const ADMIN_METHODS = new Set([
   // it. A worker's proposal is a function, not a route. The tenant travels in the query or the body.
   "GET /v1/admin/memory", "POST /v1/admin/memory/remember", "POST /v1/admin/memory/confirm",
   "POST /v1/admin/memory/correct", "POST /v1/admin/memory/forget",
+  // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
+  // model through the gateway, never the route. The tenant travels in the body.
+  "POST /v1/admin/workers/run",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -621,6 +625,11 @@ export default {
     // exact method.
     const memory = await memoryAdminRoute(request, url, env, ctx);
     if (memory) return memory;
+
+    // Nam, Pim and Ton (workers.ts). The admin gate above already required both credentials and the exact method; the
+    // runner reads the kill switches and the owner's consent before it creates anything.
+    const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
+    if (workers) return workers;
 
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.

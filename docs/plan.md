@@ -54,13 +54,13 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | built: `GET /v1/admin/pilot/gate` and the console's Pilot gate page; the gate itself waits for real shops |
 | 1 Pilot | Audit log an operator can read | built: one log per shop, metadata only (`GET /v1/admin/audit`), and the console's Audit page |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` decides every send: replies, deletions and workers' requests; sessions read approvals as its wire records) |
-| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`); no model is called until the owner adds an Anthropic key and settles the rate and the cap |
+| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`), with the console's Model spend page; no model is called until the owner adds an Anthropic key and settles the rate and the cap |
 | 2 Control plane | Memory; the job queue; the audit log | built: the job flow, the audit log, and what the team knows (stored per shop, with the console's Memory page); workers read memory when they are built in Phase 4 |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | built: Home, the side menu and pages, the job view, the activity log and Pause everyone (in Practice; the connected runtime answers "not yet" until the API serves jobs) |
-| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | partial: the three-step first run and a read-only connected runtime (Settings › Developer) are built; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked); the offline cache is not yet |
-| 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | not yet: the workers' side of the job flow is built and tested with a stand-in; Ton's books are `@manut/books`, each member's jobs and practice mode `@manut/member-grants`; each member's model request and a Sheets export are queued for the night build; real models cost money (the owner) |
-| 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the rest need the owner's applications, `docs/connectors.md`) |
+| 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a read-only connected runtime (Settings › Developer) and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
+| 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
+| 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, the console). PromptPay billing: owner, parked for later (23 Nov); the payload writer and reader and the slip rules exist as packages. The rules for routines (`@manut/routine-rules`) and three shop templates (`@manut/shop-templates`) are built as packages; the routines page and applying a template are not yet |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions; approval-core's helper role; the rules for invites, passing on, cover and removal are `@manut/people-rules`, not yet wired) |
 
@@ -334,6 +334,8 @@ gateway, built from the shop's own data. It may use `@manut/shop-memory` (`works
 Done when: each member's request, only usable facts, the limit and what is dropped first, customer text never
 in the system prompt, Thai text, and an empty memory are tested.
 
+Done on pilot/week-1, 23 Nov 2026: `packages/agent-prompts` with `buildRequest`, `estimateTokens` and `describeSource` (14 tests), built in the lead session because the night build routine was no longer there.
+
 ### sheets-rows
 `packages/sheets-rows` (`@manut/sheets-rows`). The request that would append a month of Ton's books to a Google
 Sheet, built from `@manut/books` (`workspace:*`). Pure: no network call and no sign-in; sending it is a later
@@ -351,3 +353,30 @@ task behind the owner's own Google connection.
 
 Done when: the request's shape, RAW, the A1 quoting, the amounts' JSON text, an empty month, and a ref that
 looks like a formula staying plain text are tested.
+
+Done on pilot/week-1, 23 Nov 2026: `packages/sheets-rows` with `appendRequest`, `quoteSheetName` and `bahtNumber` (9 tests), checked against the Sheets API reference, built in the lead session.
+
+### notify-rules
+`packages/notify-rules` (`@manut/notify-rules`). What the app may show outside its window, from the design canvas
+board "States: outside the app" (`~/Developer/gospark-main/manut-ai-artifacts/app-screens/project/StatesOutside.dc.html`
+on the owner's Mac; its rules are quoted here). Pure functions: showing a notification is not part of this task.
+No function throws: a refusal is a result value.
+
+- Events: a request waiting for the owner (its approval-core kind: `message`, `reply`, `money`, `public_post`,
+  `payment_confirmation` or `command`, the member who asks, and a one-line summary), a live page that stopped
+  working, a sign-in from a new device, and a job that waited while the Mac slept.
+- `notificationFor(event, settings, now)` answers whether to show it, whether it makes a sound, its title and body,
+  and its buttons. "A message request can be approved from the notification": a `message` or `reply` request gets
+  "Approve" and "Look first". "Money never from a notification": every other kind gets "Look first" and "Later",
+  never "Approve". The title names the member ("Nam needs you") and the body is the summary.
+- Details hidden: on the lock screen, or with the setting "Hide details" on, "no names, amounts or customers are
+  shown": the title is "Manut AI" and the body says how many requests need the owner ("1 request needs you.").
+- Quiet hours (a start and an end time, which may cross midnight, in the owner's time zone; default 22:00 to
+  08:00, Asia/Bangkok): "Nothing makes a sound. Requests wait in Updates." Only "A live page that stops working and
+  a sign-in from a new device still alert you", with sound.
+- A job that waited while the Mac slept is shown once after waking, and only if something had to wait.
+- `badgeCount(requests)`: "The number on the Dock icon is the number of requests waiting, and nothing else."
+- A request kind this build does not know is treated as owner-only: no "Approve" button.
+
+Done when: each event kind, the Approve rule for every approval kind, hidden details on the lock screen and by the
+setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.

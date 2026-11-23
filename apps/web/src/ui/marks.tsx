@@ -96,6 +96,14 @@ export const MemoryIcon = () => (
   </Icon>
 );
 
+/// A coin with a baht-like B: what the AI team spends on language models.
+export const SpendIcon = () => (
+  <Icon>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M6.75 5v6M6.75 5h1.75a1.5 1.5 0 010 3H6.75M6.75 8h2a1.5 1.5 0 010 3H6.75" />
+  </Icon>
+);
+
 /// The viewer's light or dark setting, kept current while the page is open.
 export function useColorScheme(): "light" | "dark" {
   const query = "(prefers-color-scheme: dark)";

@@ -9,6 +9,7 @@ import "./cards.css";
 import { useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref, type RefObject } from "react";
 import type { SlotProps } from "../../features";
 import type { ApprovalChoice, AskSubagent, ClarifyAnswers, ClarifyQuestion } from "../../lib/protocol";
+import { useShowingCache } from "../../runtime/link";
 import { askOpen, getStore, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
 import { answerOf, EMPTY, type Pick } from "./answers";
 import { choiceIndexForKey, parseChoice } from "./choices";
@@ -70,6 +71,9 @@ function useOpen(bot: string, item: ApprovalItem | ClarifyItem): boolean {
 
 function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const open = useOpen(bot, item);
+  // The runtime can show only a kept read of the shop while the API cannot be reached: the ask is there to read, but
+  // answering needs the live record, so no answer is offered (the runtime refuses one too).
+  const kept = useShowingCache();
   const [busy, setBusy] = useState<ApprovalChoice | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -83,7 +87,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={item.command || item.title} testid="card-line" />;
 
   const pick = async (choice: ApprovalChoice) => {
-    if (busy) return;
+    if (busy || kept) return;
     setBusy(choice);
     setErr(null);
     // Home's Approve settles through this same call (respond.ts), so there is one way an approval is answered.
@@ -111,7 +115,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       data-testid="card-approval"
       role="group"
       aria-label={title}
-      aria-keyshortcuts={shown.map((b) => b.key).join(" ")}
+      aria-keyshortcuts={kept ? undefined : shown.map((b) => b.key).join(" ")}
       onKeyDown={onKey}
     >
       <AskedBy who={item.subagent} />
@@ -136,13 +140,19 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       )}
       <div className="card-acts">
         {shown.map((b) => (
-          <button key={b.choice} type="button" className={`card-btn soft ${b.choice}`} data-choice={b.choice} disabled={!!busy} onClick={() => void pick(b.choice)}>
+          <button key={b.choice} type="button" className={`card-btn soft ${b.choice}`} data-choice={b.choice} disabled={!!busy || kept} onClick={() => void pick(b.choice)}>
             {t(b.label)}
           </button>
         ))}
-        <span className="card-keys" aria-hidden="true">
-          {shown.map((b) => b.key).join(" · ")}
-        </span>
+        {kept ? (
+          <span className="card-note" data-testid="card-offline">
+            {t("rt.connectToAnswer")}
+          </span>
+        ) : (
+          <span className="card-keys" aria-hidden="true">
+            {shown.map((b) => b.key).join(" · ")}
+          </span>
+        )}
         {err && <span className="card-err">{t("card.notSent", { error: err })}</span>}
       </div>
     </div>

@@ -245,6 +245,66 @@ export type FactRef = { tenant: string; id: string };
 /// The owner's correction: new words for a fact.
 export type FactCorrection = { tenant: string; id: string; text: string };
 
+/// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
+/// service token (and in practice mode, whose key has no identity).
+export type ModelCapOverride = { capSatang: number; setAt: string; setBy: string | null };
+
+/// Where a shop's cap comes from: an operator's override for that shop, or the default every shop without one gets.
+export type ModelCapSource = "override" | "default";
+
+/// One model call as the meter records it (docs/model-gateway.md, "The metering record"). `at` is when its budget was
+/// reserved. `millisatang` is the exact cost in thousandths of a satang, and `satang` is that rounded up, for reading.
+/// Token counts are zero for a call that failed, could not be read or was abandoned. `outcome` is `ok`, `failed`,
+/// `unreadable` or `abandoned`; a code this console does not know yet is shown as it is, so it is kept a string.
+export type ModelCall = {
+  id: string;
+  at: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  millisatang: number;
+  satang: number;
+  outcome: string;
+};
+
+/// A reservation still open: a call in progress, counted against the cap at its worst case until it settles.
+export type ModelHold = { callId: string; model: string; worstMillisatang: number; at: string; expiresAt: string };
+
+/// Calls by how they ended, and `refused`: calls stopped at the cap, which never reached a provider.
+export type ModelCounts = { ok: number; failed: number; unreadable: number; abandoned: number; refused: number };
+
+/// `GET /v1/admin/model/usage`: a shop's spend, cap and calls for one Bangkok month. Spend and holds are rounded up and
+/// `remainingSatang` down, so the page never shows a shop more room than it has. `calls` lists the month's newest 200
+/// records, newest first. The contract always sends `calls` and `holds`; they are optional here so a page never breaks
+/// on an answer that leaves one out.
+export type ModelUsage = {
+  tenant: string;
+  /// `YYYY-MM`, in Bangkok.
+  month: string;
+  capSatang: number;
+  capSource: ModelCapSource;
+  capOverride: ModelCapOverride | null;
+  spentSatang: number;
+  spentMillisatang: number;
+  heldSatang: number;
+  heldMillisatang: number;
+  remainingSatang: number;
+  counts: ModelCounts;
+  tokens: { input: number; output: number };
+  calls?: ModelCall[];
+  holds?: ModelHold[];
+};
+
+/// `PUT /v1/admin/model/cap`: the cap as it now stands, which is what the page confirms.
+export type ModelCap = { tenant: string; capSatang: number; capSource: ModelCapSource; capOverride: ModelCapOverride | null };
+
+/// `capSatang` is whole satang from 0 to `MODEL_CAP_MAX_SATANG`, or null to clear the override so the default applies
+/// again. It must be present: a request that forgot it never clears a cap by accident.
+export type NewModelCap = { tenant: string; capSatang: number | null };
+
+/// The largest cap the API takes: ฿10 million, far above any shop's month.
+export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
+
 /// The reply text the broker accepts: 1 to 5,000 characters.
 export const REPLY_MAX_LENGTH = 5000;
 
@@ -315,6 +375,16 @@ export interface PilotApi {
   correctFact(input: FactCorrection): Promise<Fact>;
   /// Forget: the fact and its words are gone, and only a fingerprint is kept so the team does not learn them again.
   forgetFact(input: FactRef): Promise<{ id: string }>;
+
+  /// `GET /v1/admin/model/usage`: a shop's model spend, cap and calls for one Bangkok month (`YYYY-MM`), the current
+  /// one when none is given. Rejects with 400 `tenant_required`, 400 `invalid_request` for a month that is not one, 503
+  /// `not_configured` naming the setting it could not read (`ApiError.setting`), and 503 `meter_unavailable`.
+  getModelUsage(tenant: string, month?: string): Promise<ModelUsage>;
+  /// `PUT /v1/admin/model/cap`: sets a shop's monthly cap, or clears its override with `capSatang: null`. A new cap
+  /// applies from the next call; calls already holding budget keep it. Rejects with 400 `tenant_required`, 400
+  /// `invalid_request` for a cap that is missing, not whole or out of range, 503 `not_configured` naming the setting,
+  /// and 503 `meter_unavailable`, which does not say whether the cap was written.
+  setModelCap(input: NewModelCap): Promise<ModelCap>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.
@@ -326,6 +396,8 @@ export type ApiErrorDetails = {
   /// When and by whom a shop was deleted, on a 404 `tenant_deleted`. `deletedBy` is null for a service token.
   deletedAt?: string;
   deletedBy?: string | null;
+  /// The API setting that is missing or cannot be read, on a 503 `not_configured` from the model routes.
+  setting?: string;
 };
 
 /// An answer other than success. `status` is 0 when the request never got an answer. `code` is the
@@ -339,6 +411,7 @@ export class ApiError extends Error {
   readonly failed: string[] | undefined;
   readonly deletedAt: string | undefined;
   readonly deletedBy: string | null | undefined;
+  readonly setting: string | undefined;
 
   constructor(status: number, code: string, view?: ApprovalView, details: ApiErrorDetails = {}) {
     super(`${status} ${code}`);
@@ -350,5 +423,6 @@ export class ApiError extends Error {
     this.failed = details.failed;
     this.deletedAt = details.deletedAt;
     this.deletedBy = details.deletedBy;
+    this.setting = details.setting;
   }
 }
