@@ -62,7 +62,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, the console). PromptPay billing: owner, parked for later (23 Nov); the payload writer and reader and the slip rules exist as packages. The rules for routines (`@manut/routine-rules`) and three shop templates (`@manut/shop-templates`) are built as packages; the routines page and applying a template are not yet |
-| 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions; approval-core's helper role; the rules for invites, passing on, cover and removal are `@manut/people-rules`, not yet wired) |
+| 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial: more roles built (the owner's helpers, deciding from a session by role); three shop kinds as templates; the desktop fork's terminals and coding sessions; several shops in one view and computer control are in the December plan; phone apps wait for the desktop |
 
 ## December engineering (the owner's go, 23 Nov 2026)
 
@@ -74,11 +74,10 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | --- | --- | --- | --- |
 | done | The desktop's Customize page (memory and routines) | | Sonnet |
 | running | 1. Console: the workers' drafts and a shops overview | | Sonnet |
-| running | The owner's helpers, and deciding approvals from a session | | Opus |
+| done | The owner's helpers, and deciding approvals from a session | | Opus |
+| running | 2 and 3. Routines running on schedule, and applying a shop template | | Opus |
 | running | Browser control, first slice: vault sign-ins and outposts | | Opus |
 | running | The Playwright revival | | Haiku |
-| 2 | Applying a shop template when a shop is created | | Sonnet |
-| 3 | Routines running on schedule (the schedule object for daily and weekly, a timer for the rest), each run a worker's draft | Customize | Opus |
 | 4 | Console: the People page | the helpers' API | Sonnet |
 | 5 | The desktop answering approvals through the session decide route (tested with test sign-in) | the helpers' API | Opus |
 | 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
