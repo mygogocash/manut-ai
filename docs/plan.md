@@ -47,7 +47,7 @@ decision only the owner can give).
 
 | Phase | Deliverable | Status |
 | --- | --- | --- |
-| 0 Spikes | Drive the DeepSeek Harness; pause and resume approvals with LangGraph.js; draft the worker adapter contract | not yet (the event contract exists in `packages/agent-events`) |
+| 0 Spikes | Drive the DeepSeek Harness; pause and resume approvals with LangGraph.js; draft the worker adapter contract | built: all three answered in `docs/phase-0-spikes.md` (the gate's question; a model account for `dsh` is the owner's) |
 | 1 Pilot | Buddy on LINE run by operators; simple web approval view; tenant and owner records; simplest approval object | built |
 | 1 Pilot | Approval cards and a morning brief sent to owners on LINE | not yet; sending to real owners needs the owner's go and Manut's own LINE Official Account |
 | 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | not yet |
