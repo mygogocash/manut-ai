@@ -224,11 +224,13 @@ type SubscriptionPayment = {
 // `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
 // for the shop's customers, `{ lineUserId, displayName }[]`. `audit: { entries, missed }` is the shop's audit log,
 // oldest first ("Audit log", below). `memory: { facts, forgottenCount }` is what the team knows about the shop
-// ("Memory", below). `deletedAt` is there once the shop was deleted.
+// ("Memory", below). `signIns` and `outposts` are the vault's site sign-ins and the outposts, as the operator lists
+// them, never a password or a credential ("Vault sign-ins and outposts", below). `deletedAt` is there once the shop
+// was deleted.
 // Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
-// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "audit", "memory",
-// "schedules", "tombstone"),
+// the parts ("index", a task id, "connections", "signIns", "outposts", "consent", "attention", "pilot", "model",
+// "audit", "memory", "schedules", "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
 type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
 
@@ -394,10 +396,12 @@ type AuditActor =
   | { kind: "owner"; id?: string }               // through a signed link (no id), or a signed-in device's id
   | { kind: "helper"; id: string }               // staff the owner trusts with conversations
   | { kind: "worker"; attemptId: string }        // a worker, by the attempt it was given
+  | { kind: "outpost"; id: string }              // an outpost, by its id, with its own credential
   | { kind: "system" };                          // the control plane or the broker, on its own
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
-  "connectionId" | "previousConnectionId" | "confirmationId" | "factId", string>>;
+  "connectionId" | "previousConnectionId" | "confirmationId" | "factId" | "signInId" | "outpostId" | "grantId",
+  string>>;
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -424,6 +428,11 @@ What is written, and by whom:
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
 | `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
+| `signin.created`, `signin.password_replaced`, `signin.removed` | operator | `signInId` | `ok` |
+| `outpost.registered` | operator | `outpostId` | `ok` |
+| `signin.requested` | worker | `signInId`, `outpostId`, `taskId`, `attemptId`, and `grantId` when a grant was issued | `ok`, or `refused` with the vault's refusal as the `reason` |
+| `signin.broken` | worker | `signInId`, `taskId`, `attemptId` | `ok`, or `refused` (`member_not_allowed`, `sign_in_not_found`) |
+| `signin.redeemed` | outpost | `outpostId`; for a grant the vault found, also `signInId`, `taskId`, `attemptId`, `grantId` | `ok`, or `refused` with the refusal as the `reason` |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
@@ -663,6 +672,160 @@ A job that started answers 200, also when it failed, because its task and the au
 - **Audit.** Metadata only: `attempt.started` for each attempt (by the operator's Access identity, or by the system
   for the member a job was passed to), and `attempt.ended` with its outcome and reason. No entry holds a customer's
   words, a draft or a secret.
+
+## Vault sign-ins and outposts
+
+How the team signs in to the sites a shop uses, such as Shopee Seller Centre, without any AI holding a password. The
+design, and what comes next, is `docs/browser-control.md`; the code is `apps/api/src/sign-in-vault.ts` (the records, in
+the shop's vault object) and `apps/api/src/browser-control.ts` (the routes).
+
+- A **sign-in** is one account on one site, kept in the shop's vault with the members who may use it. Its password is
+  sealed with the vault's keys and answered by one route only: a redeem, to the outpost a grant names.
+- An **outpost** is a machine that runs the team's browser: this Mac (through the desktop app) or a cloud outpost. It
+  has a credential of its own, given once when it is registered.
+- A **grant** is one outpost's permission to type one sign-in for one worker's attempt, once, within 60 seconds. A
+  worker asks for it through the job flow's port (below); there is no route to ask for one.
+
+The operator's routes are under the admin gate, each an exact `ADMIN_METHODS` entry, with the tenant and ids in the
+query or the body. The outposts' routes are public paths that need the outpost's credential as
+`Authorization: Bearer <credential>`, and nothing else opens them: not the operator's key, not an owner's session.
+
+```ts
+type SignIn = {
+  id: string;
+  site: string;                  // the name people use: "Shopee Seller Centre"
+  origins: string[];             // 1 to 5 https origins, written exactly as a browser writes `location.origin`
+  username: string;              // the account on the site; shown to the owner, never given to a model
+  members: string[];             // who may use it: "nam", "pim", "ton", "kit"
+  state: "working" | "broken";   // broken: a member reported that the site refused the saved password
+  passwordSet: true;             // the only thing any answer says about the password
+  passwordSetAt: string;
+  brokenAt: string | null;       // when it broke: the first report
+  brokenBy: string | null;       // the member who reported it
+  lastUsedAt: string | null;     // when an outpost last redeemed a grant for it
+  lastUsedBy: string | null;     // the member whose step that was
+  createdAt: string;
+};
+
+type Outpost = {
+  id: string;
+  name: string;                  // "This Mac", "Cloud outpost"
+  kind: "this_mac" | "cloud";
+  status: "online" | "asleep";   // online while its last heartbeat is under 90 seconds old; asleep before its first
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+};
+```
+
+Any route here can also answer 503 `vault_unavailable` when the shop's vault does not answer, and a route with a body
+400 `invalid_json`, 400 `invalid_request` (not a JSON object) or 413 `body_too_large` (over 16 KB).
+
+### `GET /v1/admin/vault/sign-ins?tenant=`
+
+`{ tenant, signIns: SignIn[] }`, oldest first: the shop's sign-ins, not those removed. 400 `tenant_required`.
+
+### `POST /v1/admin/vault/sign-ins`
+
+`{ tenant, site, origins, username, password, members }` answers `{ signIn: SignIn }`.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `tenant_required` | No valid tenant |
+| 400 | `invalid_site` | Blank once trimmed, over 80 characters, or holding a control character |
+| 400 | `invalid_origins` | Not 1 to 5 distinct origins, or one that is not `https`, or not written as a browser writes an origin (a path, an account, a default port or capital letters in it) |
+| 400 | `invalid_username` | Blank, over 256 characters, or holding a control character |
+| 400 | `invalid_password` | Not text of 1 to 1,024 characters |
+| 400 | `invalid_members` | None, a repeat, or one who is not Nam, Pim, Ton or Kit |
+| 409 | `too_many_sign_ins` | The shop already has 50 |
+| 503 | `vault_not_configured` | The vault's key (`CRED_KEY`) is not set |
+
+The members a sign-in may name come from `@manut/member-grants`' roster: those whose jobs run through a connection.
+Buddy routes work and never signs in to a site.
+
+### `POST /v1/admin/vault/sign-ins/password`
+
+`{ tenant, signInId, password }` seals the new password in place of the old and answers `{ signIn: SignIn }`. It also
+mends a broken sign-in: `state` is `working` again and `brokenAt` and `brokenBy` are null. 404 `sign_in_not_found`,
+400 `invalid_password`, 503 `vault_not_configured`.
+
+### `POST /v1/admin/vault/sign-ins/remove`
+
+`{ tenant, signInId }` answers `{ removed: true, signInId }`. The record stays as a tombstone with no username and no
+seal, as a revoked connection does, so a restored backup cannot bring the password back. A grant waiting for it is
+refused. 404 `sign_in_not_found`, also when it was already removed.
+
+### `POST /v1/admin/outposts`
+
+`{ tenant, name, kind }` answers `{ outpost: Outpost, credential: string }`. The credential (`mo1_` and 43 base64url
+characters) is in this answer and nowhere else: the vault keeps only its SHA-256, so an outpost that loses it is
+registered again. 400 `tenant_required`, `invalid_name` (blank once trimmed, over 80 characters, or holding a control
+character), `invalid_kind`; 409 `too_many_outposts` (20 per shop).
+
+### `GET /v1/admin/outposts?tenant=`
+
+`{ tenant, outposts: Outpost[] }`, oldest first, each `online` or `asleep` as of now. 400 `tenant_required`.
+
+### `POST /v1/outposts/heartbeat`
+
+With the outpost's credential, `{ tenant, outpostId }` answers `{ outpost: Outpost }`, now `online`. An outpost beats
+every 30 seconds while it is awake. A missing or wrong credential, another shop's outpost and an unknown outpost all
+answer 401 `unauthorized` alike, and record nothing. Beats are not written to the audit log.
+
+### `POST /v1/outposts/redeem`
+
+With the outpost's credential, `{ tenant, outpostId, grantId }` answers, with `Cache-Control: no-store`:
+
+```ts
+type Redeemed = { signInId: string; site: string; origins: string[]; username: string; password: string };
+```
+
+The outpost types the username and password into a page whose origin is one of `origins`, and keeps them nowhere.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 401 | `unauthorized` | The outpost's own credential is missing or wrong. Nothing is used up and nothing is logged |
+| 404 | `grant_not_found` | The shop has no such grant |
+| 403 | `wrong_outpost` | The grant names another outpost. It stays for its own |
+| 409 | `grant_used` | It was redeemed before, whatever came of that |
+| 409 | `grant_expired` | Its 60 seconds are over |
+| 404 | `sign_in_not_found` | The sign-in was removed since |
+| 403 | `member_not_allowed` | The member is no longer named on the sign-in |
+| 409 | `sign_in_broken` | A member reported the password broken since |
+| 403 | `feature_disabled` with `feature: "officeCloud"`, or `consent_required` | The kill switch is off, or the owner withdrew consent |
+| 409 | `attempt_ended` | The attempt it was issued to ended, its lease or deadline lapsed, or its task settled |
+| 503 | `task_unavailable`, `vault_not_configured` | The task or the vault's key could not be read |
+
+From `sign_in_not_found` down the table, the vault had found the grant to be the outpost's own, unused and on time, and
+the redeem used it up there: whatever the answer, it cannot be redeemed again. Every answer after the vault checked
+the outpost's credential is written to the audit log; a 401, a malformed body, and a vault that did not answer that
+check are not.
+
+### The worker's side
+
+No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and the port has two steps for this.
+
+- `signIn(signInId, outpostId)` answers `{ grantId, signInId, site, outpostId, expiresAt }`. The control plane reads
+  the switches (`officeCloud`) and the owner's consent, then the attempt's own heartbeat, which also gives the member
+  the attempt was started for, from the task object's record. The vault then issues the grant if the member is named
+  on the sign-in, it is working, and the outpost is online. Refusals: the port's own (`feature_disabled`,
+  `consent_required`, and the attempt's, with `ended`), `sign_in_not_found`, `member_not_allowed`, `sign_in_broken`,
+  `outpost_not_found`, `outpost_asleep`, `vault_unavailable`. The model asks for a sign-in by its site's name only; it
+  never sees a username, a password or a grant.
+- `signInBroken(signInId)` answers `{ signInId, state: "broken" }`: the site refused the saved password, and no grant
+  is issued for the sign-in until a new password is typed. Only a member named on it can report it
+  (`member_not_allowed`). A second report keeps the first's time and member.
+
+**Rules**
+
+- **No password anywhere else.** No answer, task event, log line, audit entry or export holds a password, except the
+  redeem's answer to the outpost its grant names. The tests search every answer for it.
+- **Reading by default.** This slice builds the sign-in step only. A browser step that would submit anything other
+  than a read (an order, a reply, a refund, a post) will go through member-grants' `decide` and an approval-core
+  request naming the exact action first, as every write does (`docs/browser-control.md`).
+- **Audit.** `signin.*` and `outpost.registered`, with ids only ("Audit log", above).
+- **Export and deletion.** The tenant export carries `signIns` and `outposts` as the operator lists them. The tenant
+  deletion wipes every sign-in (tombstones too), outpost and grant with the shop's vault. Grants are not exported:
+  they live a minute, and the audit log keeps their history.
 
 ## One origin
 
