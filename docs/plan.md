@@ -244,6 +244,8 @@ must not change approval-core.
 Done when: every default member's jobs, each answer, practice mode's edges (the moment it ends, ended early),
 `not_my_job` naming the right member, and the rules that no data can change are tested.
 
+Done on cloud/member-grants, 23 Nov 2026: `packages/member-grants` with the default roster, `decide` (allowed, ask, draft_only, not_my_job, not_connected, refused) and per-connection practice mode (18 tests).
+
 ### people-rules
 `packages/people-rules` (`@manut/people-rules`). The rules for the people around a shop, from the canvas board
 "States: people and roles": the owner and helpers, invites, passing a request on with a note, cover while the
