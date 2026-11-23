@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi, type Shop } from "../api";
 import { downloadText, exportFileName } from "./download";
 import { deleteAfterText, deleteRefusalText, deleteWhatText, errorText, shopDataWords as W } from "./words";
@@ -16,6 +16,16 @@ export function ShopDataTab({ shop, onDelete }: { shop: Shop; onDelete: (name: s
   // lose the answer the form is waiting to show.
   const [deleteBusy, setDeleteBusy] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
+  const focusOpener = useRef(false);
+
+  // When the form closes, focus goes back to the button that opened it rather than to the page. It waits for
+  // the render that enables that button again: after an answer, closing and the end of the wait arrive
+  // together, and a disabled button takes no focus.
+  useEffect(() => {
+    if (deleting || deleteBusy || !focusOpener.current) return;
+    focusOpener.current = false;
+    opener.current?.focus();
+  }, [deleting, deleteBusy]);
 
   async function exportData() {
     if (exporting) return;
@@ -36,9 +46,8 @@ export function ShopDataTab({ shop, onDelete }: { shop: Shop; onDelete: (name: s
   }
 
   function closeDeletion() {
+    focusOpener.current = true;
     setDeleting(false);
-    // The dialog is gone, so focus goes back to the button that opened it rather than to the page.
-    opener.current?.focus();
   }
 
   return (

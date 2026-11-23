@@ -160,6 +160,11 @@ describe("deleting a shop", () => {
     expect(alert.textContent).toContain(
       "Deleting Baan Mali did not finish. Part of its data is deleted and the rest is still stored. Run it again to finish the job.",
     );
+    // The form has closed in favour of the note above every tab, and focus is back on the button that opened it.
+    expect(within(panel).queryByRole("form")).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(panel).getByRole("button", { name: "Delete this shop" })),
+    );
     const finish = within(alert).getByRole("button", { name: "Finish deleting" });
     expect(finish.className).toBe("btn danger solid");
     fireEvent.click(finish);
