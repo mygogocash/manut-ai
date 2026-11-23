@@ -6,8 +6,8 @@ import { errorText, factSourceText, isAuthError, memoryErrorText, memoryWords as
 
 /// The Memory page: what Buddy's team knows about one shop, as the API keeps it (`GET /v1/admin/memory`), laid out as
 /// the design canvas's "Customize: memory and routines" board. "What your team knows" lists each fact with where it came
-/// from, and Correct and Forget on it; "Waiting for your OK: not used until you confirm" lists what a customer said,
-/// with "It's true" and Forget; "Tell Buddy something to remember" is a box for the owner's own words.
+/// from (said once, on the band) and Correct and Forget on it; "Waiting for your OK" lists what a customer said, tinted and
+/// tagged "Not confirmed", with "It's true" and Forget; "Tell Buddy something to remember" is a box for the owner's own words.
 ///
 /// The owner has no account in the pilot, so the operator relays the owner's word, and the page says so. Forget asks once
 /// more in its row, because the words are gone for good once it is answered. One change runs at a time: every button
@@ -31,7 +31,7 @@ function loadErrorText(error: unknown): string {
 }
 
 const listStyle = { listStyle: "none", margin: 0, padding: 0 } as const;
-const sectionStyle = { display: "flex", flexDirection: "column", gap: 8 } as const;
+const sectionStyle = { display: "flex", flexDirection: "column", gap: 4 } as const;
 const textareaStyle = { padding: "10px 12px", minHeight: 76, resize: "vertical", lineHeight: 1.5 } as const;
 
 export function MemoryView({ shops, tenant: chosen, onForget }: {
@@ -176,7 +176,7 @@ function MemoryBoard({ shop, memory, reload }: { shop: Shop; memory: Memory; rel
           <h2 id="memory-known" className="h2" style={{ fontSize: 13, color: "inherit" }}>
             {W.knownTitle}
           </h2>
-          <span>{W.knownCount(confirmed.length)}</span>
+          <span>{W.sourceLabel}</span>
         </div>
         {notice?.place === "known" && <Said text={notice.text} />}
         {confirmed.length === 0 ? (
@@ -201,27 +201,20 @@ function MemoryBoard({ shop, memory, reload }: { shop: Shop; memory: Memory; rel
             <h2 id="memory-waiting" className="h2" style={{ fontSize: 13, color: "inherit" }}>
               {W.waitingTitle}
             </h2>
-            <span>{W.waitingCount(waiting.length)}</span>
+            <span>{W.waitingNote}</span>
           </div>
-          <ul aria-label={W.waitingTitle} style={listStyle}>
+          <ul aria-label={W.waitingLabel} style={listStyle}>
             {waiting.map((fact) => row(fact, "waiting"))}
           </ul>
         </section>
       )}
 
-      <section aria-labelledby="memory-tell" style={sectionStyle}>
-        <div className="band">
-          <h2 id="memory-tell" className="h2" style={{ fontSize: 13, color: "inherit" }}>
-            {W.tellTitle}
-          </h2>
-        </div>
-        <RememberForm
-          busy={busy}
-          error={errors[TELL]}
-          notice={notice?.place === "tell" ? notice.text : null}
-          onRemember={remember}
-        />
-      </section>
+      <RememberForm
+        busy={busy}
+        error={errors[TELL]}
+        notice={notice?.place === "tell" ? notice.text : null}
+        onRemember={remember}
+      />
     </>
   );
 }
@@ -234,8 +227,9 @@ function Said({ text }: { text: string }) {
   );
 }
 
-/// One fact: its words, where it came from, and what the operator can do with it for the owner. A known fact can be
-/// corrected in place or forgotten; a waiting one is confirmed ("It's true") or forgotten.
+/// One fact, as the board draws it: its words in medium weight with where it came from under them, and what the operator
+/// can do with it for the owner on the right. A known fact has Correct and Forget as quiet links, and Correct opens its
+/// words in place; a waiting fact is tinted and tagged "Not confirmed", with "It's true" and Forget. Forget asks once more.
 function FactRow({ fact, group, ownerName, busy, error, onConfirm, onCorrect, onForget }: {
   fact: Fact;
   group: "known" | "waiting";
@@ -257,7 +251,12 @@ function FactRow({ fact, group, ownerName, busy, error, onConfirm, onCorrect, on
   const length = [...trimmed].length;
   const tooLong = length > MAX_TEXT;
 
-  const frame = { flexWrap: "nowrap", alignItems: "flex-start", borderTop: "1px solid var(--line)" } as const;
+  const frame = {
+    borderTop: "1px solid var(--line)",
+    ...(group === "waiting" ? { background: "var(--warnbg)" } : {}),
+  } as const;
+  // A quiet link is a button that looks like one, so a locked one shows it.
+  const quiet = { opacity: locked ? 0.5 : undefined } as const;
   if (gone) {
     return (
       <li className="rowl" style={frame}>
@@ -291,7 +290,7 @@ function FactRow({ fact, group, ownerName, busy, error, onConfirm, onCorrect, on
             </div>
           </>
         ) : (
-          <span id={textId} style={{ overflowWrap: "anywhere" }}>
+          <div id={textId} style={{ fontWeight: 500, overflowWrap: "anywhere" }}>
             {fact.text}
             {fact.correctedAt !== undefined && (
               <>
@@ -299,11 +298,11 @@ function FactRow({ fact, group, ownerName, busy, error, onConfirm, onCorrect, on
                 <span className="tag">{W.corrected}</span>
               </>
             )}
-          </span>
+          </div>
         )}
-        <span className="mut" style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>
-          {W.sourceLabel} {factSourceText(fact.source, ownerName)}
-        </span>
+        <div className="mut" style={{ fontSize: 13, overflowWrap: "anywhere" }}>
+          {factSourceText(fact.source, ownerName)}
+        </div>
         {error && (
           <div className="banner err" role="alert">
             <span className="grow">{error}</span>
@@ -343,44 +342,53 @@ function FactRow({ fact, group, ownerName, busy, error, onConfirm, onCorrect, on
           </div>
         )}
       </div>
-      {mode === "view" && (
-        <div className="chips" style={{ flex: "none" }}>
-          {group === "waiting" ? (
-            <button
-              type="button"
-              className="btn dark"
-              disabled={locked}
-              aria-busy={working ? true : undefined}
-              aria-describedby={textId}
-              onClick={() => void onConfirm()}
-            >
-              {W.confirm}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn"
-              disabled={locked}
-              aria-describedby={textId}
-              onClick={() => {
-                setDraft(fact.text);
-                setMode("correct");
-              }}
-            >
-              {W.correct}
-            </button>
-          )}
-          <button type="button" className="btn ghost" disabled={locked} aria-describedby={textId} onClick={() => setMode("forget")}>
+      {mode === "view" && group === "waiting" && (
+        <>
+          <span className="tag" style={{ background: "var(--bg)" }}>
+            {W.notConfirmed}
+          </span>
+          <button
+            type="button"
+            className="btn dark"
+            disabled={locked}
+            aria-busy={working ? true : undefined}
+            aria-describedby={textId}
+            onClick={() => void onConfirm()}
+          >
+            {W.confirm}
+          </button>
+          <button type="button" className="btn" disabled={locked} aria-describedby={textId} onClick={() => setMode("forget")}>
             {W.forget}
           </button>
-        </div>
+        </>
+      )}
+      {mode === "view" && group === "known" && (
+        <>
+          <button
+            type="button"
+            className="lk"
+            style={quiet}
+            disabled={locked}
+            aria-describedby={textId}
+            onClick={() => {
+              setDraft(fact.text);
+              setMode("correct");
+            }}
+          >
+            {W.correct}
+          </button>
+          <button type="button" className="lk" style={quiet} disabled={locked} aria-describedby={textId} onClick={() => setMode("forget")}>
+            {W.forget}
+          </button>
+        </>
       )}
     </li>
   );
 }
 
-/// "Tell Buddy something to remember": the owner's own fact, 1 to 280 characters, counted the way the API counts them.
-/// What was typed stays in the box when the API refuses it, so it can be fixed rather than typed again.
+/// "Tell Buddy something to remember": the owner's own fact, 1 to 280 characters, counted the way the API counts them, in
+/// the board's one-line box with its "Remember" button. What was typed stays in the box when the API refuses it, so it can
+/// be fixed rather than typed again. The count and any answer sit under the box, inside the form.
 function RememberForm({ busy, error, notice, onRemember }: {
   busy: string | null;
   error: string | undefined;
@@ -401,34 +409,43 @@ function RememberForm({ busy, error, notice, onRemember }: {
   }
 
   return (
-    <form aria-label={W.tellTitle} onSubmit={(event) => void submit(event)} style={{ ...sectionStyle, padding: "0 10px" }}>
-      <div className="field">
-        <label htmlFor="memory-new">{W.tellLabel}</label>
-        <textarea
-          id="memory-new"
-          className="input"
-          rows={3}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          aria-invalid={tooLong ? true : undefined}
-          aria-describedby="memory-new-help"
-          style={textareaStyle}
-        />
-        <div id="memory-new-help" className={tooLong ? "help err" : "help"}>
-          {W.tellHelp(length)}
-        </div>
+    <form
+      className="box"
+      aria-label={W.tellTitle}
+      onSubmit={(event) => void submit(event)}
+      style={{ marginTop: 10, padding: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
+    >
+      <label className="vh" htmlFor="memory-new">
+        {W.tellTitle}
+      </label>
+      <input
+        id="memory-new"
+        className="askin"
+        type="text"
+        autoComplete="off"
+        placeholder={W.tellTitle}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        aria-invalid={tooLong ? true : undefined}
+        aria-describedby="memory-new-help"
+        style={{ flex: "1 1 220px", width: "auto" }}
+      />
+      <button type="submit" className="btn dark" disabled={blocked} aria-busy={working ? true : undefined}>
+        {W.remember}
+      </button>
+      <div id="memory-new-help" className={tooLong ? "help err" : "help"} style={{ flexBasis: "100%", padding: "0 8px" }}>
+        {W.tellHelp(length)}
       </div>
       {error && (
-        <div className="banner err" role="alert">
+        <div className="banner err" role="alert" style={{ flexBasis: "100%" }}>
           <span className="grow">{error}</span>
         </div>
       )}
-      {notice && <Said text={notice} />}
-      <div>
-        <button type="submit" className="btn dark" disabled={blocked} aria-busy={working ? true : undefined}>
-          {W.remember}
-        </button>
-      </div>
+      {notice && (
+        <div className="banner ok" role="status" style={{ flexBasis: "100%" }}>
+          <span className="grow">{notice}</span>
+        </div>
+      )}
     </form>
   );
 }

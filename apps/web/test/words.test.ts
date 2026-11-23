@@ -225,8 +225,8 @@ describe("the memory page's words", () => {
     const priceList = { kind: "document" as const, name: "your price list", date: Date.parse("2026-11-03T05:00:00Z") };
     expect(factSourceText(priceList, "Fon")).toBe("From your price list, 3 November");
     expect(factSourceText({ kind: "edits", count: 12 }, "Fon")).toBe("Learned from 12 of your edits");
-    expect(factSourceText({ kind: "orders", days: 30 }, "Fon")).toBe("Learned from 30 days of your orders");
-    expect(factSourceText({ kind: "orders", days: 1 }, "Fon")).toBe("Learned from 1 day of your orders");
+    expect(factSourceText({ kind: "orders", days: 90 }, "Fon")).toBe("From the last 90 days of orders");
+    expect(factSourceText({ kind: "orders", days: 1 }, "Fon")).toBe("From the last day of orders");
     expect(factSourceText({ kind: "connection", name: "Google Sheets", detail: "cost sheet" }, "Fon"))
       .toBe("From your cost sheet in Google Sheets");
     expect(factSourceText({ kind: "connection", name: "Google Sheets", detail: " " }, "Fon")).toBe("From Google Sheets");
@@ -240,10 +240,15 @@ describe("the memory page's words", () => {
     expect(factSourceText(null as never, "Fon")).toBe("From somewhere this console does not know yet");
   });
 
-  it("counts facts, and characters the way the API does", () => {
-    expect(memoryWords.knownCount(0)).toBe("No facts");
-    expect(memoryWords.knownCount(1)).toBe("1 fact");
-    expect(memoryWords.knownCount(1234)).toBe("1,234 facts");
+  it("says the board's own words once, and counts characters the way the API does", () => {
+    expect(memoryWords.knownTitle).toBe("What your team knows");
+    expect(memoryWords.sourceLabel).toBe("Where it came from");
+    expect(memoryWords.waitingTitle).toBe("Waiting for your OK");
+    expect(memoryWords.waitingNote).toBe("Not used until you confirm");
+    expect(memoryWords.waitingLabel).toBe("Waiting for your OK: not used until you confirm");
+    expect([memoryWords.confirm, memoryWords.correct, memoryWords.forget, memoryWords.remember, memoryWords.notConfirmed])
+      .toEqual(["It's true", "Correct", "Forget", "Remember", "Not confirmed"]);
+    expect(memoryWords.tellTitle).toBe("Tell Buddy something to remember");
     expect(memoryWords.tellHelp(0)).toBe("0 of 280 characters. The team uses it as soon as you save it.");
     expect(memoryWords.forgottenNote(1)).toBe(
       "1 text was forgotten. Only a fingerprint of it is kept, so the team does not learn it again.");

@@ -476,8 +476,8 @@ function listOf(parts: string[]): string {
 }
 
 /// The Memory page: what Buddy's team knows about one shop, laid out as the design canvas's "Customize: memory and
-/// routines" board. The headings are the board's own words. The operator acts for the owner, so the words that say what
-/// an action does name the owner, and a fact is never shown again once it is forgotten.
+/// routines" board. The titles and labels are the board's own words. The operator acts for the owner, so the words that say
+/// what an action does name the owner, and a fact is never shown again once it is forgotten.
 export const memoryWords = {
   nav: "Memory",
   title: "Memory",
@@ -491,17 +491,19 @@ export const memoryWords = {
   noShops: "No shops yet.",
   unavailable: "The API could not read what the team knows. Try again.",
 
-  // The board's three groups
+  // The board's groups: each band has its title, and a note on what its rows are
   knownTitle: "What your team knows",
+  sourceLabel: "Where it came from",
   knownEmpty: "Nothing yet. Tell Buddy something to remember below.",
-  knownCount: (n: number) => (n === 0 ? "No facts" : n === 1 ? "1 fact" : `${n.toLocaleString("en-US")} facts`),
-  waitingTitle: "Waiting for your OK: not used until you confirm",
-  waitingCount: (n: number) => `${n.toLocaleString("en-US")} waiting`,
+  waitingTitle: "Waiting for your OK",
+  waitingNote: "Not used until you confirm",
+  /// The group's one name for a list or a screen reader: the band's two parts as the plan writes them.
+  waitingLabel: "Waiting for your OK: not used until you confirm",
   tellTitle: "Tell Buddy something to remember",
 
   // One fact
-  sourceLabel: "Where it came from:",
   corrected: "Corrected",
+  notConfirmed: "Not confirmed",
   confirm: "It's true",
   correct: "Correct",
   forget: "Forget",
@@ -519,10 +521,9 @@ export const memoryWords = {
       : `${n.toLocaleString("en-US")} texts were forgotten. Only a fingerprint of each is kept, so the team does not learn them again.`,
 
   // Telling the team something new
-  tellLabel: "What should the team remember?",
   tellHelp: (n: number) =>
     `${n.toLocaleString("en-US")} of ${MAX_TEXT} characters. The team uses it as soon as you save it.`,
-  remember: "Remember this",
+  remember: "Remember",
 
   // What an action did, and why one did not
   remembered: "Remembered.",
@@ -538,8 +539,8 @@ export const memoryWords = {
 
 const UNKNOWN_SOURCE = "From somewhere this console does not know yet";
 
-/// A fact's source as the board says it: "From your price list, 3 November", "Learned from 12 of your edits", "From your
-/// cost sheet in Google Sheets". It never fails on what it cannot read: a date that is not one is left out, and a kind
+/// A fact's source as the board says it: "From your price list, 3 November", "Learned from 12 of your edits", "From the
+/// last 90 days of orders", "From your cost sheet in Google Sheets". It never fails on what it cannot read: a date that is not one is left out, and a kind
 /// this console does not know yet is shown as it is.
 export function factSourceText(source: FactSource, ownerName: string): string {
   if (typeof source !== "object" || source === null) return UNKNOWN_SOURCE;
@@ -553,7 +554,7 @@ export function factSourceText(source: FactSource, ownerName: string): string {
     case "edits":
       return `Learned from ${source.count} of your edits`;
     case "orders":
-      return `Learned from ${source.days} ${source.days === 1 ? "day" : "days"} of your orders`;
+      return source.days === 1 ? "From the last day of orders" : `From the last ${source.days} days of orders`;
     case "connection": {
       const detail = source.detail.trim();
       return detail ? `From your ${detail} in ${source.name}` : `From ${source.name}`;

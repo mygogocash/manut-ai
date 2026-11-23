@@ -19,16 +19,19 @@ const SHOPS: Shop[] = [
 ];
 
 const KNOWN = "What your team knows";
+// The waiting group's name for assistive technology and its list; the band shows the board's two parts, "Waiting for your
+// OK" and "Not used until you confirm".
 const WAITING = "Waiting for your OK: not used until you confirm";
 const TELL = "Tell Buddy something to remember";
 
-const SHOPEE = "The large candle is cheaper on Shopee.";
-const GIFT = "Gift wrapping is free on orders over ฿500.";
-const KERRY = "Most orders ship by Kerry Express within 2 working days.";
-const MONDAYS = "The shop is closed on Mondays.";
+// Baan Mali's sample facts, the board's own: two a customer said, which wait, and two of the five the team knows.
+const CLOSED = "Closed on Mondays";
+const DISCOUNT = "Customers expect 20% off when they buy 5 sets";
+const JASMINE = "Jasmine is the best seller";
+const WRAPPING = "Gift wrapping is free in December.";
 // A fact's source line is shown whatever the row is doing, so it finds a row while its words are being edited.
-const KERRY_SOURCE = "Learned from 30 days of your orders";
-const MONDAYS_SOURCE = "Told to the team by Fon";
+const JASMINE_SOURCE = "From the last 90 days of orders";
+const WRAPPING_SOURCE = "Told to the team by Fon";
 
 /// The practice-mode fake as the page uses it: any key is accepted. The console test reads the key it stored instead.
 function fakeApi(operatorKey?: () => string | null) {
@@ -65,14 +68,16 @@ describe("the Memory page", () => {
     expect(nav.getAttribute("aria-current")).toBe("page");
 
     await screen.findByRole("list", { name: KNOWN });
+    // The board's bands: each group's title, and what the column or the group is, said once.
     expect(screen.getByRole("heading", { name: KNOWN })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: WAITING })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: TELL })).toBeTruthy();
+    expect(screen.getByText("Where it came from")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Waiting for your OK" })).toBeTruthy();
+    expect(screen.getByText("Not used until you confirm")).toBeTruthy();
     const known = texts(KNOWN);
     expect(known).toHaveLength(5);
     // Newest first: what the sheet taught the team two days ago, down to what Fon said twelve days ago.
-    expect(known.map((text) => ["costs ฿38", "Kerry Express", "ขอบคุณค่ะ", "฿90", "closed on Mondays"].findIndex((part) => text.includes(part)))).toEqual([0, 1, 2, 3, 4]);
-    expect(texts(WAITING).map((text) => [GIFT, SHOPEE].findIndex((words) => text.includes(words)))).toEqual([1, 0]);
+    expect(known.map((text) => ["costs ฿118", "best seller", "Reply warmly", "Free shipping", "Gift wrapping"].findIndex((part) => text.includes(part)))).toEqual([0, 1, 2, 3, 4]);
+    expect(texts(WAITING).map((text) => [CLOSED, DISCOUNT].findIndex((words) => text.includes(words)))).toEqual([1, 0]);
     expect(screen.getByRole("form", { name: TELL })).toBeTruthy();
 
     // Going back to a shop leaves the Memory page.
@@ -86,11 +91,13 @@ describe("the Memory page", () => {
     await screen.findByRole("list", { name: KNOWN });
 
     const source = (words: string) => rowWith(KNOWN, words).textContent ?? "";
-    expect(source("closed on Mondays")).toContain("Where it came from: Told to the team by Fon");
-    expect(source("฿90")).toContain("Where it came from: From your price list, 3 November");
-    expect(source("ขอบคุณค่ะ")).toContain("Where it came from: Learned from 12 of your edits");
-    expect(source("Kerry Express")).toContain("Where it came from: Learned from 30 days of your orders");
-    expect(source("costs ฿38")).toContain("Where it came from: From your cost sheet in Google Sheets");
+    expect(source("Gift wrapping")).toContain("Told to the team by Fon");
+    expect(source("Free shipping")).toContain("From your price list, 3 November");
+    expect(source("Reply warmly")).toContain("Learned from 12 of your edits");
+    expect(source("best seller")).toContain("From the last 90 days of orders");
+    expect(source("costs ฿118")).toContain("From your cost sheet in Google Sheets");
+    // The band says it once; the rows only say where.
+    expect(texts(KNOWN).some((text) => text.includes("Where it came from"))).toBe(false);
     for (const row of rowsOf(KNOWN)) {
       expect(within(row).getByRole("button", { name: "Correct" })).toBeTruthy();
       expect(within(row).getByRole("button", { name: "Forget" })).toBeTruthy();
@@ -101,7 +108,8 @@ describe("the Memory page", () => {
       expect(within(row).getByRole("button", { name: "Forget" })).toBeTruthy();
       expect(within(row).queryByRole("button", { name: "Correct" })).toBeNull();
     }
-    expect(rowWith(WAITING, GIFT).textContent).toContain("Where it came from: A customer said it, in chat line:Ufah");
+    expect(rowWith(WAITING, CLOSED).textContent).toContain("A customer said it, in chat line:Ujoy");
+    for (const row of rowsOf(WAITING)) expect(within(row).getByText("Not confirmed")).toBeTruthy();
     expect(screen.getByText(/Correct or forget a fact only when Fon asks you to\./)).toBeTruthy();
   });
 
@@ -109,7 +117,7 @@ describe("the Memory page", () => {
     memoryView(fakeApi(), SHOPS, "shop_sabaitea");
     expect(await screen.findByText("Nothing yet. Tell Buddy something to remember below.")).toBeTruthy();
     expect(screen.queryByRole("list", { name: KNOWN })).toBeNull();
-    expect(screen.queryByRole("heading", { name: WAITING })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Waiting for your OK" })).toBeNull();
     expect(screen.getByRole("form", { name: TELL })).toBeTruthy();
   });
 });
@@ -120,8 +128,9 @@ describe("telling Buddy something to remember", () => {
     const remember = vi.spyOn(api, "rememberFact");
     await screen.findByRole("list", { name: KNOWN });
     const form = screen.getByRole("form", { name: TELL });
-    const box = within(form).getByLabelText("What should the team remember?") as HTMLTextAreaElement;
-    const save = within(form).getByRole("button", { name: "Remember this" }) as HTMLButtonElement;
+    const box = within(form).getByLabelText(TELL) as HTMLInputElement;
+    const save = within(form).getByRole("button", { name: "Remember" }) as HTMLButtonElement;
+    expect(box.placeholder).toBe(TELL);
     expect(save.disabled).toBe(true);
 
     const typed = "We wrap gifts for free in December";
@@ -135,7 +144,7 @@ describe("telling Buddy something to remember", () => {
     expect(box.value).toBe("");
     await waitFor(() => expect(texts(KNOWN)).toHaveLength(6));
     expect(texts(KNOWN)[0]).toContain(typed);
-    expect(texts(KNOWN)[0]).toContain("Where it came from: Told to the team by Fon");
+    expect(texts(KNOWN)[0]).toContain("Told to the team by Fon");
   });
 
   it("will not save text that is over 280 characters, and keeps what was typed when the team already knows it", async () => {
@@ -143,8 +152,8 @@ describe("telling Buddy something to remember", () => {
     const remember = vi.spyOn(api, "rememberFact");
     await screen.findByRole("list", { name: KNOWN });
     const form = screen.getByRole("form", { name: TELL });
-    const box = within(form).getByLabelText("What should the team remember?") as HTMLTextAreaElement;
-    const save = within(form).getByRole("button", { name: "Remember this" }) as HTMLButtonElement;
+    const box = within(form).getByLabelText(TELL) as HTMLInputElement;
+    const save = within(form).getByRole("button", { name: "Remember" }) as HTMLButtonElement;
 
     fireEvent.change(box, { target: { value: "x".repeat(281) } });
     expect(box.getAttribute("aria-invalid")).toBe("true");
@@ -152,11 +161,11 @@ describe("telling Buddy something to remember", () => {
     expect(save.disabled).toBe(true);
     expect(remember).not.toHaveBeenCalled();
 
-    fireEvent.change(box, { target: { value: "the shop is closed on  MONDAYS." } });
+    fireEvent.change(box, { target: { value: "gift wrapping is free  in DECEMBER." } });
     expect(box.getAttribute("aria-invalid")).toBeNull();
     fireEvent.click(save);
     expect((await within(form).findByRole("alert")).textContent).toBe("The team already knows this: a fact says the same.");
-    expect(box.value).toBe("the shop is closed on  MONDAYS.");
+    expect(box.value).toBe("gift wrapping is free  in DECEMBER.");
     expect(texts(KNOWN)).toHaveLength(5);
   });
 
@@ -164,11 +173,11 @@ describe("telling Buddy something to remember", () => {
     memoryView();
     await screen.findByRole("list", { name: KNOWN });
     const form = screen.getByRole("form", { name: TELL });
-    fireEvent.change(within(form).getByLabelText("What should the team remember?"), { target: { value: SHOPEE.toUpperCase() } });
-    fireEvent.click(within(form).getByRole("button", { name: "Remember this" }));
+    fireEvent.change(within(form).getByLabelText(TELL), { target: { value: DISCOUNT.toUpperCase() } });
+    fireEvent.click(within(form).getByRole("button", { name: "Remember" }));
     await waitFor(() => expect(texts(KNOWN)).toHaveLength(6));
     expect(texts(WAITING)).toHaveLength(1);
-    expect(rowWith(KNOWN, SHOPEE).textContent).toContain("Where it came from: A customer said it, in chat line:Unok");
+    expect(rowWith(KNOWN, DISCOUNT).textContent).toContain("A customer said it, in chat line:Ufah");
   });
 });
 
@@ -178,16 +187,16 @@ describe("It's true", () => {
     const confirm = vi.spyOn(api, "confirmFact");
     await screen.findByRole("list", { name: WAITING });
 
-    fireEvent.click(within(rowWith(WAITING, GIFT)).getByRole("button", { name: "It's true" }));
+    fireEvent.click(within(rowWith(WAITING, CLOSED)).getByRole("button", { name: "It's true" }));
     expect((await screen.findByRole("status")).textContent).toBe("Confirmed.");
     expect(confirm).toHaveBeenCalledWith({ tenant: "shop_baanmali", id: "f6" });
     await waitFor(() => expect(texts(WAITING)).toHaveLength(1));
     expect(texts(KNOWN)).toHaveLength(6);
-    expect(rowWith(KNOWN, GIFT)).toBeTruthy();
+    expect(rowWith(KNOWN, CLOSED)).toBeTruthy();
 
-    fireEvent.click(within(rowWith(WAITING, SHOPEE)).getByRole("button", { name: "It's true" }));
+    fireEvent.click(within(rowWith(WAITING, DISCOUNT)).getByRole("button", { name: "It's true" }));
     await waitFor(() => expect(screen.queryByRole("list", { name: WAITING })).toBeNull());
-    expect(screen.queryByRole("heading", { name: WAITING })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Waiting for your OK" })).toBeNull();
     expect(texts(KNOWN)).toHaveLength(7);
   });
 
@@ -212,19 +221,19 @@ describe("Correct", () => {
     const correct = vi.spyOn(api, "correctFact");
     await screen.findByRole("list", { name: KNOWN });
 
-    fireEvent.click(within(rowWith(KNOWN, KERRY_SOURCE)).getByRole("button", { name: "Correct" }));
-    const box = within(rowWith(KNOWN, KERRY_SOURCE)).getByLabelText("Corrected words") as HTMLTextAreaElement;
-    expect(box.value).toBe(KERRY);
-    fireEvent.change(box, { target: { value: " Most orders ship by Kerry Express within 3 working days. " } });
-    fireEvent.click(within(rowWith(KNOWN, KERRY_SOURCE)).getByRole("button", { name: "Save correction" }));
+    fireEvent.click(within(rowWith(KNOWN, JASMINE_SOURCE)).getByRole("button", { name: "Correct" }));
+    const box = within(rowWith(KNOWN, JASMINE_SOURCE)).getByLabelText("Corrected words") as HTMLTextAreaElement;
+    expect(box.value).toBe(JASMINE);
+    fireEvent.change(box, { target: { value: " Jasmine is our best selling candle " } });
+    fireEvent.click(within(rowWith(KNOWN, JASMINE_SOURCE)).getByRole("button", { name: "Save correction" }));
 
     expect((await screen.findByRole("status")).textContent).toBe("Corrected.");
-    expect(correct).toHaveBeenCalledWith({ tenant: "shop_baanmali", id: "f4", text: "Most orders ship by Kerry Express within 3 working days." });
-    await waitFor(() => expect(rowWith(KNOWN, "within 3 working days")).toBeTruthy());
-    const row = rowWith(KNOWN, "within 3 working days");
+    expect(correct).toHaveBeenCalledWith({ tenant: "shop_baanmali", id: "f4", text: "Jasmine is our best selling candle" });
+    await waitFor(() => expect(rowWith(KNOWN, "best selling")).toBeTruthy());
+    const row = rowWith(KNOWN, "best selling");
     expect(row.textContent).toContain("Corrected");
-    expect(row.textContent).toContain(`Where it came from: ${KERRY_SOURCE}`);
-    expect(texts(KNOWN).some((text) => text.includes("within 2 working days"))).toBe(false);
+    expect(row.textContent).toContain(JASMINE_SOURCE);
+    expect(texts(KNOWN).some((text) => text.includes("the best seller"))).toBe(false);
     expect(within(row).queryByLabelText("Corrected words")).toBeNull();
   });
 
@@ -232,29 +241,29 @@ describe("Correct", () => {
     const api = memoryView();
     const correct = vi.spyOn(api, "correctFact");
     await screen.findByRole("list", { name: KNOWN });
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS_SOURCE)).getByRole("button", { name: "Correct" }));
-    fireEvent.change(within(rowWith(KNOWN, MONDAYS_SOURCE)).getByLabelText("Corrected words"), { target: { value: "Something else" } });
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS_SOURCE)).getByRole("button", { name: "Cancel" }));
-    expect(within(rowWith(KNOWN, MONDAYS_SOURCE)).queryByLabelText("Corrected words")).toBeNull();
-    expect(rowWith(KNOWN, MONDAYS_SOURCE).textContent).toContain(MONDAYS);
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING_SOURCE)).getByRole("button", { name: "Correct" }));
+    fireEvent.change(within(rowWith(KNOWN, WRAPPING_SOURCE)).getByLabelText("Corrected words"), { target: { value: "Something else" } });
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING_SOURCE)).getByRole("button", { name: "Cancel" }));
+    expect(within(rowWith(KNOWN, WRAPPING_SOURCE)).queryByLabelText("Corrected words")).toBeNull();
+    expect(rowWith(KNOWN, WRAPPING_SOURCE).textContent).toContain(WRAPPING);
     expect(correct).not.toHaveBeenCalled();
 
     // A waiting fact has "It's true" or Forget. Its words are corrected once the team knows it.
-    expect(within(rowWith(WAITING, SHOPEE)).queryByRole("button", { name: "Correct" })).toBeNull();
+    expect(within(rowWith(WAITING, DISCOUNT)).queryByRole("button", { name: "Correct" })).toBeNull();
   });
 
   it("says why when the new words are another fact's, or not 1 to 280 characters, and keeps them open to fix", async () => {
     memoryView();
     await screen.findByRole("list", { name: KNOWN });
-    fireEvent.click(within(rowWith(KNOWN, KERRY_SOURCE)).getByRole("button", { name: "Correct" }));
-    const row = () => rowWith(KNOWN, KERRY_SOURCE);
+    fireEvent.click(within(rowWith(KNOWN, JASMINE_SOURCE)).getByRole("button", { name: "Correct" }));
+    const row = () => rowWith(KNOWN, JASMINE_SOURCE);
     const box = () => within(row()).getByLabelText("Corrected words");
     const save = () => within(row()).getByRole("button", { name: "Save correction" }) as HTMLButtonElement;
 
-    fireEvent.change(box(), { target: { value: "the SHOP is closed on mondays." } });
+    fireEvent.change(box(), { target: { value: "GIFT wrapping is free in december." } });
     fireEvent.click(save());
     expect((await within(row()).findByRole("alert")).textContent).toBe("The team already knows this: a fact says the same.");
-    expect((box() as HTMLTextAreaElement).value).toBe("the SHOP is closed on mondays.");
+    expect((box() as HTMLTextAreaElement).value).toBe("GIFT wrapping is free in december.");
 
     fireEvent.change(box(), { target: { value: "   " } });
     expect(save().disabled).toBe(true);
@@ -270,30 +279,30 @@ describe("Forget", () => {
     const forget = vi.spyOn(api, "forgetFact");
     await screen.findByRole("list", { name: KNOWN });
 
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS)).getByRole("button", { name: "Forget" }));
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING)).getByRole("button", { name: "Forget" }));
     const ask = "Forget this fact? The team stops using it and will not learn it again unless Fon says it again.";
-    expect(within(rowWith(KNOWN, MONDAYS)).getByText(ask)).toBeTruthy();
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS)).getByRole("button", { name: "Keep it" }));
-    expect(within(rowWith(KNOWN, MONDAYS)).queryByText(ask)).toBeNull();
+    expect(within(rowWith(KNOWN, WRAPPING)).getByText(ask)).toBeTruthy();
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING)).getByRole("button", { name: "Keep it" }));
+    expect(within(rowWith(KNOWN, WRAPPING)).queryByText(ask)).toBeNull();
     expect(forget).not.toHaveBeenCalled();
 
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS)).getByRole("button", { name: "Forget" }));
-    fireEvent.click(within(rowWith(KNOWN, MONDAYS)).getByRole("button", { name: "Yes, forget it" }));
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING)).getByRole("button", { name: "Forget" }));
+    fireEvent.click(within(rowWith(KNOWN, WRAPPING)).getByRole("button", { name: "Yes, forget it" }));
     expect((await screen.findByRole("status")).textContent).toBe("Forgotten.");
     expect(forget).toHaveBeenCalledWith({ tenant: "shop_baanmali", id: "f1" });
     await waitFor(() => expect(texts(KNOWN)).toHaveLength(4));
-    expect(document.body.textContent).not.toContain(MONDAYS);
+    expect(document.body.textContent).not.toContain(WRAPPING);
     expect(screen.getByText("1 text was forgotten. Only a fingerprint of it is kept, so the team does not learn it again.")).toBeTruthy();
   });
 
   it("forgets a waiting fact the same way", async () => {
     memoryView();
     await screen.findByRole("list", { name: WAITING });
-    fireEvent.click(within(rowWith(WAITING, SHOPEE)).getByRole("button", { name: "Forget" }));
-    fireEvent.click(within(rowWith(WAITING, SHOPEE)).getByRole("button", { name: "Yes, forget it" }));
+    fireEvent.click(within(rowWith(WAITING, DISCOUNT)).getByRole("button", { name: "Forget" }));
+    fireEvent.click(within(rowWith(WAITING, DISCOUNT)).getByRole("button", { name: "Yes, forget it" }));
     await waitFor(() => expect(texts(WAITING)).toHaveLength(1));
     expect(texts(KNOWN)).toHaveLength(5);
-    expect(document.body.textContent).not.toContain(SHOPEE);
+    expect(document.body.textContent).not.toContain(DISCOUNT);
   });
 });
 
@@ -312,9 +321,9 @@ describe("what goes wrong", () => {
   it("says the team is full when it holds 200 facts, and keeps what was typed", async () => {
     const rememberFact = vi.fn(async () => { throw new ApiError(409, "full"); });
     memoryView(stubApi({ getMemory: async () => ({ tenant: "t1", facts: [], forgottenCount: 0 }), rememberFact }), owner, "t1");
-    const box = (await screen.findByLabelText("What should the team remember?")) as HTMLTextAreaElement;
+    const box = (await screen.findByRole("textbox", { name: TELL })) as HTMLInputElement;
     fireEvent.change(box, { target: { value: "One more" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remember this" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remember" }));
     expect((await screen.findByRole("alert")).textContent).toBe("The team already holds 200 facts. Forget one to make room.");
     expect(box.value).toBe("One more");
   });

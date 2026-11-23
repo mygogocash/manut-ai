@@ -563,8 +563,8 @@ describe("the fake's memory, kept as the API keeps it", () => {
     const api = fresh();
     const tenant = "shop_baanmali";
     const before = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f7")!;
-    const corrected = await api.correctFact({ tenant, id: "f7", text: " The large candle costs the same on Shopee " });
-    expect(corrected).toEqual({ ...before, text: "The large candle costs the same on Shopee", status: "confirmed", updatedAt: NOW, correctedAt: NOW });
+    const corrected = await api.correctFact({ tenant, id: "f7", text: " Customers expect 15% off when they buy 5 sets " });
+    expect(corrected).toEqual({ ...before, text: "Customers expect 15% off when they buy 5 sets", status: "confirmed", updatedAt: NOW, correctedAt: NOW });
     const other = (await api.getMemory(tenant)).facts.find((fact) => fact.id === "f1")!;
     await expect(api.correctFact({ tenant, id: "f7", text: other.text.toLowerCase() })).rejects.toMatchObject({ status: 409, code: "already_known" });
     await expect(api.correctFact({ tenant, id: "f7", text: "" })).rejects.toMatchObject({ status: 400, code: "invalid_text" });

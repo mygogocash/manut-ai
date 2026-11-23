@@ -1124,9 +1124,10 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
   ];
 }
 
-/// What Baan Mali's team knows, as its sample world would have taught it: what Fon said herself, what a price list, twelve
-/// of her edits, thirty days of orders and a cost sheet taught it, and two things customers said, which wait for Fon. Built
-/// by the package's own rules, so the practice world holds exactly what the API would. Ids are f1 to f7 and the next is f8.
+/// What Baan Mali's team knows, as its sample world would have taught it, and the design canvas's own sample facts: what Fon
+/// said herself, what a price list, twelve of her edits, ninety days of orders and a cost sheet taught it, and two things
+/// customers said, which wait for Fon. Built by the package's own rules, so the practice world holds exactly what the API
+/// would. Ids are f1 to f7 and the next is f8.
 function sampleMemory(at: number): MemoryState {
   const ago = (minutes: number) => at - minutes * MINUTE_MS;
   const day = 24 * 60;
@@ -1135,14 +1136,14 @@ function sampleMemory(at: number): MemoryState {
     if (!result.ok) throw new Error(`the sample fact was refused: ${result.reason}`);
     state = result.state;
   };
-  keep(shopMemory.remember(state, "The shop is closed on Mondays.", ago(12 * day)));
-  keep(shopMemory.propose(state, "Small scented candles are ฿90 and large ones are ฿320.",
+  keep(shopMemory.remember(state, "Gift wrapping is free in December.", ago(12 * day)));
+  keep(shopMemory.propose(state, "Free shipping on orders over ฿800",
     { kind: "document", name: "your price list", date: ago(20 * day) }, ago(11 * day)));
-  keep(shopMemory.propose(state, "Replies are short and warm, and end with ขอบคุณค่ะ.", { kind: "edits", count: 12 }, ago(6 * day)));
-  keep(shopMemory.propose(state, "Most orders ship by Kerry Express within 2 working days.", { kind: "orders", days: 30 }, ago(3 * day)));
-  keep(shopMemory.propose(state, "A small candle costs ฿38 to make.",
+  keep(shopMemory.propose(state, "Reply warmly and end with ค่ะ", { kind: "edits", count: 12 }, ago(6 * day)));
+  keep(shopMemory.propose(state, "Jasmine is the best seller", { kind: "orders", days: 90 }, ago(3 * day)));
+  keep(shopMemory.propose(state, "A jasmine candle costs ฿118 to make",
     { kind: "connection", name: "Google Sheets", detail: "cost sheet" }, ago(2 * day)));
-  keep(shopMemory.propose(state, "Gift wrapping is free on orders over ฿500.", { kind: "customer", chat: "line:Ufah" }, ago(90)));
-  keep(shopMemory.propose(state, "The large candle is cheaper on Shopee.", { kind: "customer", chat: "line:Unok" }, ago(50)));
+  keep(shopMemory.propose(state, "Closed on Mondays", { kind: "customer", chat: "line:Ujoy" }, ago(90)));
+  keep(shopMemory.propose(state, "Customers expect 20% off when they buy 5 sets", { kind: "customer", chat: "line:Ufah" }, ago(50)));
   return state;
 }
