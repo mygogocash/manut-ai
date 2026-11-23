@@ -10,7 +10,10 @@ import {
   deletedText,
   deleteRefusalText,
   deleteWhatText,
+  factSourceText,
   gateWords,
+  memoryErrorText,
+  memoryWords,
   subscriptionErrorText,
   unfinishedText,
 } from "../src/ops/words";
@@ -196,5 +199,72 @@ describe("the audit log's words", () => {
       .toBe("1 entry could not be written, so this log is not complete. The last was at 10:05 (dispatch.settled).");
     expect(auditWords.missed({ count: 3, lastAt: "2026-11-23T03:05:00.000Z", lastAction: "reply.decided" }, NEXT_DAY))
       .toBe("3 entries could not be written, so this log is not complete. The last was at 23 November 10:05 (reply.decided).");
+  });
+
+  it("says what a change to the team's memory did, naming the fact by its id", () => {
+    const fact = { factId: "f3" };
+    expect(auditSentence(entry({ actor: op, action: "memory.remembered", subject: fact }), "Fon"))
+      .toBe("ops@manut.test told the team something to remember.");
+    expect(auditSentence(entry({ actor: op, action: "memory.confirmed", subject: fact }), "Fon"))
+      .toBe("ops@manut.test confirmed a fact as true.");
+    expect(auditSentence(entry({ actor: op, action: "memory.corrected", subject: fact }), "Fon"))
+      .toBe("ops@manut.test corrected a fact.");
+    expect(auditSentence(entry({ actor: op, action: "memory.forgotten", subject: fact }), "Fon"))
+      .toBe("ops@manut.test made the team forget a fact.");
+    expect(auditSentence(entry({ action: "memory.proposed", subject: fact, outcome: "awaiting_owner" }), "Fon"))
+      .toBe("Manut AI added something the team learned.");
+    expect(auditSentence(entry({ actor: { kind: "worker", attemptId: "6f9d1f0e-9a7e" }, action: "memory.proposed", subject: fact }),
+      "Fon")).toBe("Worker attempt 6f9d1f0e added something the team learned.");
+    expect(auditSubjectText(fact)).toBe("fact f3");
+    expect(auditSubjectText({ taskId: "t1", factId: "f3" })).toBe("task t1 · fact f3");
+  });
+});
+
+describe("the memory page's words", () => {
+  it("says where each fact came from, in the words of the canvas's board", () => {
+    const priceList = { kind: "document" as const, name: "your price list", date: Date.parse("2026-11-03T05:00:00Z") };
+    expect(factSourceText(priceList, "Fon")).toBe("From your price list, 3 November");
+    expect(factSourceText({ kind: "edits", count: 12 }, "Fon")).toBe("Learned from 12 of your edits");
+    expect(factSourceText({ kind: "orders", days: 90 }, "Fon")).toBe("From the last 90 days of orders");
+    expect(factSourceText({ kind: "orders", days: 1 }, "Fon")).toBe("From the last day of orders");
+    expect(factSourceText({ kind: "connection", name: "Google Sheets", detail: "cost sheet" }, "Fon"))
+      .toBe("From your cost sheet in Google Sheets");
+    expect(factSourceText({ kind: "connection", name: "Google Sheets", detail: " " }, "Fon")).toBe("From Google Sheets");
+    expect(factSourceText({ kind: "owner" }, "Fon")).toBe("Told to the team by Fon");
+    expect(factSourceText({ kind: "customer", chat: "line:Ufah" }, "Fon")).toBe("A customer said it, in chat line:Ufah");
+  });
+
+  it("never fails on a source it cannot read: a date that is not one is left out, and a kind it does not know is shown as it is", () => {
+    expect(factSourceText({ kind: "document", name: "your price list", date: 1e300 }, "Fon")).toBe("From your price list");
+    expect(factSourceText({ kind: "satellite", name: "x" } as never, "Fon")).toBe("From satellite");
+    expect(factSourceText(null as never, "Fon")).toBe("From somewhere this console does not know yet");
+  });
+
+  it("says the board's own words once, and counts characters the way the API does", () => {
+    expect(memoryWords.knownTitle).toBe("What your team knows");
+    expect(memoryWords.sourceLabel).toBe("Where it came from");
+    expect(memoryWords.waitingTitle).toBe("Waiting for your OK");
+    expect(memoryWords.waitingNote).toBe("Not used until you confirm");
+    expect(memoryWords.waitingLabel).toBe("Waiting for your OK: not used until you confirm");
+    expect([memoryWords.confirm, memoryWords.correct, memoryWords.forget, memoryWords.remember, memoryWords.notConfirmed])
+      .toEqual(["It's true", "Correct", "Forget", "Remember", "Not confirmed"]);
+    expect(memoryWords.tellTitle).toBe("Tell Buddy something to remember");
+    expect(memoryWords.tellHelp(0)).toBe("0 of 280 characters. The team uses it as soon as you save it.");
+    expect(memoryWords.forgottenNote(1)).toBe(
+      "1 text was forgotten. Only a fingerprint of it is kept, so the team does not learn it again.");
+    expect(memoryWords.forgottenNote(3)).toBe(
+      "3 texts were forgotten. Only a fingerprint of each is kept, so the team does not learn them again.");
+  });
+
+  it("explains each refusal the memory routes give, and the console's usual words for the rest", () => {
+    expect(memoryErrorText(new ApiError(409, "already_known"))).toBe("The team already knows this: a fact says the same.");
+    expect(memoryErrorText(new ApiError(409, "full"))).toBe("The team already holds 200 facts. Forget one to make room.");
+    expect(memoryErrorText(new ApiError(400, "invalid_text"))).toBe("Write between 1 and 280 characters.");
+    expect(memoryErrorText(new ApiError(404, "not_found"))).toBe("That fact is already gone. The list was refreshed.");
+    expect(memoryErrorText(new ApiError(503, "memory_unavailable"))).toBe(
+      "The API could not read or save what the team knows. Try again.");
+    expect(memoryErrorText(new ApiError(403, "forbidden"))).toMatch(/^The API refused the operator key/);
+    expect(memoryErrorText(new ApiError(0, "network"))).toBe("Could not reach the API. Check the connection and try again.");
+    expect(memoryErrorText(new Error("x"))).toBe("Something unexpected went wrong. Try again.");
   });
 });

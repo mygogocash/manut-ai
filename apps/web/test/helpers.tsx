@@ -28,6 +28,11 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     listSubscriptionPayments: missing("listSubscriptionPayments"),
     getGate: missing("getGate"),
     listAudit: missing("listAudit"),
+    getMemory: missing("getMemory"),
+    rememberFact: missing("rememberFact"),
+    confirmFact: missing("confirmFact"),
+    correctFact: missing("correctFact"),
+    forgetFact: missing("forgetFact"),
     ...overrides,
   };
 }
