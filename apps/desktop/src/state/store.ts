@@ -4,7 +4,9 @@ import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
 import { createRuntime, type RuntimeAdapter } from "../runtime";
+import type { MemoryFact } from "../runtime/memory";
 import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
+import type { RoutineRow } from "../runtime/routines";
 import { createNoteGate, noteFor, sessionNote, sessionRings, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
 import { promptText } from "../chat/parts/attachFiles";
@@ -1994,6 +1996,18 @@ export interface Actions {
    *  `bots.update`. */
   teamPause(): Promise<TeamState>;
   teamResume(): Promise<TeamState>;
+  /** Customize: what the team knows and its routines, straight from the runtime and never cached in the store (the page keeps
+   *  its own copy). They reject with the runtime's own error: a refusal from the rules (`already_known`, `must_ask_first`),
+   *  or "not yet" for what the connected runtime cannot do. */
+  memoryList(): Promise<{ facts: MemoryFact[] }>;
+  memoryRemember(text: string): Promise<{ fact: MemoryFact }>;
+  memoryConfirm(fact: string): Promise<{ fact: MemoryFact }>;
+  memoryCorrect(fact: string, text: string): Promise<{ fact: MemoryFact }>;
+  memoryForget(fact: string): Promise<{ fact: string }>;
+  routineList(): Promise<{ routines: RoutineRow[] }>;
+  routineCreate(params: OpMap["routine.create"]["params"]): Promise<{ routine: RoutineRow }>;
+  routinePause(routine: string): Promise<{ routine: RoutineRow }>;
+  routineResume(routine: string): Promise<{ routine: RoutineRow }>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
   /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
@@ -2863,6 +2877,15 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     teamState: () => bridge.request("team.state", {}),
     teamPause: () => bridge.request("team.pause", {}),
     teamResume: () => bridge.request("team.resume", {}),
+    memoryList: () => bridge.request("memory.list", {}),
+    memoryRemember: (text) => bridge.request("memory.remember", { text }),
+    memoryConfirm: (fact) => bridge.request("memory.confirm", { fact }),
+    memoryCorrect: (fact, text) => bridge.request("memory.correct", { fact, text }),
+    memoryForget: (fact) => bridge.request("memory.forget", { fact }),
+    routineList: () => bridge.request("routine.list", {}),
+    routineCreate: (params) => bridge.request("routine.create", params),
+    routinePause: (routine) => bridge.request("routine.pause", { routine }),
+    routineResume: (routine) => bridge.request("routine.resume", { routine }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
       try {

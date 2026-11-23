@@ -6,6 +6,22 @@
 // The handler table is typed against the protocol's own op map, so an op added to the protocol does not compile
 // until this runtime answers it. Features the runtime does not have (see `RuntimeCapabilities`) still answer: a read
 // comes back empty and a write is refused with `unsupported`, so a stray call can never hang a screen.
+import { createRoutine, describeTrigger, nextRun, type Routine, type RoutineRefusal } from "@manut/routine-rules";
+import {
+  MAX_FACTS,
+  MAX_TEXT,
+  confirm as confirmFact,
+  correct as correctFact,
+  emptyState,
+  forget as forgetFact,
+  propose,
+  remember as rememberFact,
+  type Fact,
+  type FactSource,
+  type MemoryState,
+  type Refusal,
+  type Result,
+} from "@manut/shop-memory";
 import type {
   ApprovalChoice,
   Bot,
@@ -17,7 +33,9 @@ import type {
 } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import { firstWords, type ThreadEvent, type ThreadOps } from "../../threads/types";
+import type { MemoryFact, MemorySource } from "../memory";
 import type { ActivityEvent, Job, PausedJob, TeamState } from "../mission";
+import type { RoutineRow } from "../routines";
 import {
   ACTIVITY_KEPT_MONTHS,
   ACTIVITY_SEED,
@@ -28,6 +46,7 @@ import {
   HISTORY_SEED,
   INTERVIEW_SEED,
   JOB_SEED,
+  MEMORY_SEED,
   NORMAL_ANSWER,
   PROVIDERS,
   REASONING_LEVELS,
@@ -88,6 +107,44 @@ const PAUSED = "The team is paused. Resume everyone first.";
 /** A copy no caller can change the host's own state through, as a frame that crossed a socket would be. */
 const copy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
+/** The words a memory refusal carries for a caller with none of its own. The Customize page says each one itself, in the
+ *  owner's language, and keys on the code, which is the package's own reason. */
+const MEMORY_REFUSAL: Record<Refusal, string> = {
+  invalid_text: `A fact is 1 to ${MAX_TEXT} characters.`,
+  invalid_source: "That is not somewhere a fact can come from.",
+  already_known: "The team already knows this.",
+  forgotten: "You asked the team to forget this.",
+  not_found: "No such fact.",
+  full: `The team already holds ${MAX_FACTS} facts. Forget one first.`,
+};
+
+/** Where a fact came from, with a document's date in seconds as the protocol counts them. The package writes milliseconds. */
+function sourceView(s: FactSource): MemorySource {
+  return s.kind === "document" ? { ...s, date: Math.floor(s.date / 1000) } : { ...s };
+}
+
+/** The words a routine refusal carries for a caller with none of its own. The form on the Customize page stops most of
+ *  these before they are sent, and says the rest itself; the code is the package's own reason. */
+const ROUTINE_REFUSAL: Record<RoutineRefusal, string> = {
+  invalid_id: "A routine needs an id.",
+  invalid_name: "A routine's name is 1 to 80 characters.",
+  invalid_action: "That is not something a routine can do.",
+  invalid_time_zone: "That is not a time zone.",
+  invalid_trigger: "A routine needs to say when it runs.",
+  invalid_time: "A time is written HH:MM, such as 08:00.",
+  invalid_weekdays: "Pick at least one day of the week.",
+  invalid_day: "A day of the month is 1 to 28, or the last day.",
+  invalid_window: "A window needs two different times.",
+  invalid_threshold: "The stock number is a whole number from 1.",
+  must_ask_first: "A routine that replies, sends, pays or deletes always asks first.",
+};
+
+/** A routine and whether it is switched on. The routine is the package's own, so it can never be one that breaks its rules. */
+interface StoredRoutine {
+  routine: Routine;
+  enabled: boolean;
+}
+
 /** A folder chat's or thread's turn runs under its own key; its events go out as the bot's, tagged `session`. */
 const turnKey = (bot: string, session: string) => `${bot}\u0000${session}`;
 const splitKey = (key: string): [string, string | undefined] => {
@@ -124,6 +181,10 @@ export class MockHost {
   private jobs: Job[] = [];
   private activity: ActivityEvent[] = [];
   private paused: { since: number; stopped: string[] } | null = null;
+  /** What the team knows about the shop, in `@manut/shop-memory`'s own state: the package decides every change to it. */
+  private memory: MemoryState = emptyState();
+  /** The team's routines, in the order they were made. */
+  private routines: StoredRoutine[] = [];
 
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
@@ -171,6 +232,16 @@ export class MockHost {
       };
     });
     this.activity = ACTIVITY_SEED.map(({ ago, ...e }) => ({ ...e, text: e.text ? { ...e.text } : null, at: boot - ago }));
+    this.memory = MEMORY_SEED.reduce((state, s) => {
+      const learned = propose(state, s.text, s.source, Math.round((boot - s.ago) * 1000));
+      if (!learned.ok) throw new Error(`the staged fact "${s.text}" was refused: ${learned.reason}`);
+      return learned.state;
+    }, emptyState());
+    this.routines = ROUTINE_SEED.map((input) => {
+      const made = createRoutine(input);
+      if (!made.ok) throw new Error(`the staged routine "${input.name}" was refused: ${made.reason}`);
+      return { routine: made.routine, enabled: true };
+    });
   }
 
   subscribe(fn: (ev: MockEvent) => void): () => void {
@@ -298,7 +369,7 @@ export class MockHost {
       paused: !!this.paused,
       since: this.paused?.since ?? null,
       members: Object.values(this.bots).filter((b) => !b.is_default).map((b) => b.name),
-      routines: ROUTINE_SEED.length,
+      routines: this.routines.filter((r) => r.enabled).length,
       running,
     };
   }
@@ -306,6 +377,58 @@ export class MockHost {
   /** Every member the pause changed learns of it the way a real runtime would say a member changed. */
   private tellMembers(): void {
     for (const b of Object.values(this.bots)) if (!b.is_default) this.broadcast({ event: "bots.update", bot: b.name });
+  }
+
+  // ---- what the team knows -----------------------------------------------------------------------------------------
+
+  /** The package counts milliseconds and the protocol seconds; this is the one place the clock crosses. */
+  private nowMs(): number {
+    return Math.round(this.now() * 1000);
+  }
+
+  private factView(f: Fact): MemoryFact {
+    return {
+      id: f.id,
+      text: f.text,
+      status: f.status,
+      source: sourceView(f.source),
+      at: f.updatedAt / 1000,
+      correctedAt: f.correctedAt === undefined ? null : f.correctedAt / 1000,
+    };
+  }
+
+  /** Keeps the state a package call came back with when it accepted the call. A refusal leaves the memory as it was (the
+   *  package hands back the state it was given) and rejects with the package's reason as its code. */
+  private applyMemory(r: Result): MemoryFact {
+    if (!r.ok) throw new OpError(r.reason, MEMORY_REFUSAL[r.reason]);
+    this.memory = r.state;
+    return this.factView(r.fact);
+  }
+
+  // ---- the team's routines -----------------------------------------------------------------------------------------
+
+  /** A routine as the runtime reports it now. A routine that is off has no next run, and the package gives none to an event
+   *  (stock); it counts milliseconds and the protocol seconds. */
+  private routineView({ routine, enabled }: StoredRoutine): RoutineRow {
+    const next = enabled ? nextRun(routine, this.nowMs()) : null;
+    return {
+      id: routine.id,
+      name: routine.name,
+      when: describeTrigger(routine),
+      action: routine.action,
+      asksFirst: routine.asksFirst,
+      enabled,
+      next: next === null ? null : next / 1000,
+      timeZone: routine.timeZone,
+    };
+  }
+
+  private switchRoutine(id: unknown, enabled: boolean): RoutineRow {
+    const key = this.needText(id, "routine");
+    const stored = this.routines.find((r) => r.routine.id === key);
+    if (!stored) throw new OpError("not_found", "No such routine.");
+    stored.enabled = enabled;
+    return this.routineView(stored);
   }
 
   // ---- scripted turns ---------------------------------------------------------------------------------------
@@ -827,6 +950,33 @@ export class MockHost {
       }
       return this.teamState();
     },
+
+    // ---- what the team knows: every answer is the package's, with the clock and the units changed at the edge
+    "memory.list": () => ({ facts: this.memory.facts.map((f) => this.factView(f)) }),
+    "memory.remember": (p) => ({ fact: this.applyMemory(rememberFact(this.memory, p.text, this.nowMs())) }),
+    "memory.confirm": (p) => ({ fact: this.applyMemory(confirmFact(this.memory, this.needText(p.fact, "fact"), this.nowMs())) }),
+    "memory.correct": (p) => ({ fact: this.applyMemory(correctFact(this.memory, this.needText(p.fact, "fact"), p.text, this.nowMs())) }),
+    "memory.forget": (p) => {
+      const id = this.needText(p.fact, "fact");
+      const forgotten = forgetFact(this.memory, id);
+      if (!forgotten.ok) throw new OpError(forgotten.reason, MEMORY_REFUSAL[forgotten.reason]);
+      this.memory = forgotten.state;
+      return { fact: id };
+    },
+
+    // ---- the team's routines: the package makes each routine, says its timing and works out its next run
+    "routine.list": () => ({ routines: this.routines.map((r) => this.routineView(r)) }),
+    "routine.create": (p) => {
+      // The caller's own timing object is not kept: a routine made from it must not change when the caller later edits it.
+      const trigger = typeof p.trigger === "object" && p.trigger !== null ? copy(p.trigger) : p.trigger;
+      const made = createRoutine({ id: this.nextId("routine"), name: p.name, action: p.action, trigger, ...(p.asksFirst === undefined ? {} : { asksFirst: p.asksFirst }) });
+      if (!made.ok) throw new OpError(made.reason, ROUTINE_REFUSAL[made.reason]);
+      const stored: StoredRoutine = { routine: made.routine, enabled: true };
+      this.routines.push(stored);
+      return { routine: this.routineView(stored) };
+    },
+    "routine.pause": (p) => ({ routine: this.switchRoutine(p.routine, false) }),
+    "routine.resume": (p) => ({ routine: this.switchRoutine(p.routine, true) }),
   };
 
   private unsupported(): never {
