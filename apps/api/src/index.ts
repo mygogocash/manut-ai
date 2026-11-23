@@ -641,7 +641,7 @@ export default {
     // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
     const vault = await vaultAdminRoute(request, url, env, ctx);
     if (vault) return vault;
-    const outpost = await outpostRoute(request, url, env);
+    const outpost = await outpostRoute(request, url, env, () => featureFlags(env));
     if (outpost) return outpost;
 
     // Capability flags and kill switches. Operator only: sessions never

@@ -10,13 +10,26 @@
 /// lives in the vault object and the log in the TenantObject, so the entry is best effort and never holds the change
 /// up. No entry, and no answer here, holds a password.
 
-import { appendAudit, type AuditAction } from "./audit-log";
+import { appendAudit, type AuditAction, type AuditSubject } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
+import { workGate, type JobFlags } from "./job-flow";
 import { operatorIdentity } from "./pilot";
 import { base64url } from "./relay";
-import { vaultAnswer, vaultCall, type OutpostView, type SignInView, type VaultEnv } from "./sign-in-vault";
+import {
+  vaultAnswer,
+  vaultCall,
+  type GrantBinding,
+  type OutpostView,
+  type SignInView,
+  type VaultEnv,
+} from "./sign-in-vault";
+import type { AttemptJSON, TaskDocJSON } from "./task-object";
+import type { TenantDataEnv } from "./tenant-data";
+
+/// The redeem reads the task object too, to see that the grant's attempt still runs.
+type RedeemEnv = VaultEnv & Pick<TenantDataEnv, "TASK">;
 
 const MAX_BODY_BYTES = 16 * 1024;
 /// An outpost's credential: `mo1_` and 32 random bytes in base64url. Checked before anything is read or woken, so a
@@ -58,10 +71,102 @@ export async function vaultAdminRoute(
 
 /// `/v1/outposts/*`, the outposts' own routes. Answers null for any other path, and for a method or path under it that
 /// is not a route, so those answer the Worker's final not_found like any path that does not exist.
-export async function outpostRoute(request: Request, url: URL, env: VaultEnv): Promise<Response | null> {
+export async function outpostRoute(request: Request, url: URL, env: RedeemEnv, flags: JobFlags):
+  Promise<Response | null> {
   const route = `${request.method} ${url.pathname}`;
   if (route === "POST /v1/outposts/heartbeat") return outpostHeartbeat(request, env);
+  if (route === "POST /v1/outposts/redeem") return redeemGrant(request, env, flags);
   return null;
+}
+
+/// `POST /v1/outposts/redeem` with `{ tenant, outpostId, grantId }`: the outpost is about to type a sign-in for a
+/// worker's step, and asks for it. In order:
+///
+/// 1. The vault checks the outpost's credential and that the grant is its own, unused and on time, and uses it up. A
+///    request without the outpost's credential is refused 401, uses nothing up and writes nothing to the shop's log,
+///    so nobody can fill a shop's log from outside.
+/// 2. The switches and the owner's consent, as at every step of the job flow.
+/// 3. The attempt the grant was issued to still runs.
+/// 4. The vault answers the username, the password and the origins, and marks the sign-in used.
+///
+/// Every answer after the first check writes `signin.redeemed`, by the outpost, with ids only. Only the last holds the
+/// password, and it is not to be stored anywhere on the way (`no-store`).
+async function redeemGrant(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
+  const read = await outpostRequest(request);
+  if (read instanceof Response) return read;
+  const { tenant, fields, credentialHash } = read;
+  const proof = { grantId: fields.grantId, outpostId: fields.outpostId, credentialHash };
+  let claimed: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    claimed = await vaultAnswer(await vaultCall(env, tenant, "POST", "/sign-in-grants/claim", proof));
+  } catch {
+    claimed = null;
+  }
+  if (!claimed) return json({ error: "vault_unavailable" }, 503);
+  if (claimed.status === 401) return json({ error: "unauthorized" }, 401);
+  // Past the vault's check the outpost is known, so its id is one the vault minted.
+  const outpostId = String(fields.outpostId);
+  const binding = isRecord(claimed.body.binding) ? claimed.body.binding as GrantBinding : null;
+  const subject: AuditSubject = binding
+    ? { signInId: binding.signInId, taskId: binding.taskId, attemptId: binding.attemptId, outpostId,
+      grantId: String(fields.grantId) }
+    : { outpostId };
+  const record = async (outcome: "ok" | "refused", reason?: string) => appendAudit(env, tenant, {
+    actor: { kind: "outpost", id: outpostId }, action: "signin.redeemed", subject, outcome,
+    ...(reason !== undefined ? { reason } : {}) });
+  const refuse = async (status: number, error: string, extra: Record<string, unknown> = {}) => {
+    await record("refused", error);
+    return json({ error, ...extra }, status);
+  };
+  if (claimed.status !== 200 || !binding) {
+    return refuse(claimed.status === 200 ? 503 : claimed.status,
+      typeof claimed.body.error === "string" ? claimed.body.error : "vault_unavailable");
+  }
+  const gated = await workGate(env, tenant, flags, false);
+  if (gated) return refuse(gated.status, gated.error, gated.feature ? { feature: gated.feature } : {});
+  const running = await attemptRuns(env, tenant, binding.taskId, binding.attemptId);
+  if (running === undefined) return refuse(503, "task_unavailable");
+  if (!running) return refuse(409, "attempt_ended");
+  let opened: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    opened = await vaultAnswer(await vaultCall(env, tenant, "POST", "/sign-in-grants/open", proof));
+  } catch {
+    opened = null;
+  }
+  if (!opened) return refuse(503, "vault_unavailable");
+  if (opened.status !== 200) {
+    return refuse(opened.status, typeof opened.body.error === "string" ? opened.body.error : "vault_unavailable");
+  }
+  await record("ok");
+  return Response.json(opened.body, { headers: { "cache-control": "no-store" } });
+}
+
+/// Whether the attempt a grant was issued to still runs, by the task object's own rules for a fenced step: active,
+/// neither its lease nor its deadline passed, and its task not settled. Read from the task's export, which changes
+/// nothing, rather than a heartbeat, which would extend the lease: an outpost redeeming a grant must not keep a silent
+/// worker's attempt alive. An attempt the export does not carry (it carries 200) reads as ended. Undefined when the task
+/// cannot be read.
+async function attemptRuns(env: RedeemEnv, tenant: string, taskId: string, attemptId: string):
+  Promise<boolean | undefined> {
+  try {
+    const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request("https://task/export",
+      { headers: { "x-tenant": tenant } }));
+    if (response.status === 404) {
+      await response.body?.cancel();
+      return false;
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    const { task, attempts } = (await response.json()) as { task: TaskDocJSON; attempts: AttemptJSON[] };
+    const attempt = attempts.find((entry) => entry.id === attemptId);
+    const nowS = Date.now() / 1000;
+    return attempt !== undefined && attempt.status === "active" && attempt.leaseUntil > nowS &&
+      attempt.deadline > nowS && task.state !== "completed" && task.state !== "cancelled";
+  } catch {
+    return undefined;
+  }
 }
 
 /// The outpost's credential from `Authorization: Bearer`, or null when there is none of the right shape.

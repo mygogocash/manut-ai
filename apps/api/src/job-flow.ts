@@ -25,6 +25,7 @@ import { callModel, type ModelGatewayEnv } from "./model-gateway";
 import type { UsageState } from "./model-meter";
 import { bangkokMonth, effectiveCap, floorSatang, gatewaySettings, MILLISATANG_PER_SATANG } from "./model-price";
 import type { ChatRequest, ChatUsage, ModelProvider } from "./model-provider";
+import { issueSignInGrant, reportSignInBroken, type AttemptRef, type SignInGrant } from "./sign-in-vault";
 import {
   JOB_REQUEST_OPTIONS,
   type ActionProposalJSON,
@@ -103,6 +104,11 @@ export interface WorkerPort {
   draft(draft: NewDraft): Promise<PortAnswer<DraftJSON>>;
   waitForOwner(): Promise<PortAnswer<{ outcome: "awaiting_owner" }>>;
   finish(outcome: "done" | "failed", reason?: string): Promise<PortAnswer<{ outcome: "done" | "failed" }>>;
+  /// Browser control (docs/browser-control.md): a one-time grant for the outpost named to type one of the shop's site
+  /// sign-ins in this attempt's browser step. It names the grant and never holds an account or a password.
+  signIn(signInId: string, outpostId: string): Promise<PortAnswer<SignInGrant>>;
+  /// The site refused a sign-in's saved password: nobody uses it until the owner types a new one.
+  signInBroken(signInId: string): Promise<PortAnswer<{ signInId: string; state: "broken" }>>;
 }
 
 /// The provider each operation a worker may ask for writes to. The connection that carries it is the shop's live
@@ -296,12 +302,27 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
   };
 
   /// The attempt's heartbeat: the task object checks the fence, the lease, the deadline and the task, and extends
-  /// the lease. Every step that is not a report starts with it, so a worker whose attempt ended learns so first.
-  const heartbeat = async (): Promise<PortAnswer<{ leaseUntil: number }>> => {
+  /// the lease. Every step that is not a report starts with it, so a worker whose attempt ended learns so first. It
+  /// answers the attempt as the task object holds it, whose executor is the member the control plane started it for.
+  const beat = async (): Promise<PortAnswer<AttemptJSON>> => {
     const response = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/heartbeat`, { method: "POST",
       body: { fence: job.fence } });
     if (!response.ok) return portRefusal(response);
-    return { ok: true, value: { leaseUntil: ((await response.json()) as AttemptJSON).leaseUntil } };
+    return { ok: true, value: (await response.json()) as AttemptJSON };
+  };
+  const heartbeat = async (): Promise<PortAnswer<{ leaseUntil: number }>> => {
+    const live = await beat();
+    return live.ok ? { ok: true, value: { leaseUntil: live.value.leaseUntil } } : live;
+  };
+  /// Where a browser control step happens, after the switches, consent and the heartbeat: the member comes from the
+  /// task object's record of the attempt, never from the worker's word.
+  const signInStep = async (): Promise<PortAnswer<AttemptRef>> => {
+    const refused = await gate();
+    if (refused) return refused;
+    const live = await beat();
+    if (!live.ok) return live;
+    return { ok: true, value: { tenant: job.tenant, taskId: job.taskId, attemptId: job.attemptId,
+      member: live.value.executorId } };
   };
 
   return {
@@ -418,6 +439,18 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
         { fence: job.fence, outcome, ...(reason !== undefined ? { reason } : {}) }, worker);
       if (!ended.ok) return portRefusal(ended.response);
       return { ok: true, value: { outcome } };
+    },
+
+    /// The vault issues the grant (sign-in-vault.ts) if the member is named on a working sign-in and the outpost is
+    /// online; only that outpost can redeem it, once, within a minute, with its own credential.
+    async signIn(signInId, outpostId) {
+      const step = await signInStep();
+      return step.ok ? issueSignInGrant(env, step.value, signInId, outpostId) : step;
+    },
+
+    async signInBroken(signInId) {
+      const step = await signInStep();
+      return step.ok ? reportSignInBroken(env, step.value, signInId) : step;
     },
   };
 }

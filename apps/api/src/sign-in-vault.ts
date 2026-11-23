@@ -1,9 +1,12 @@
-/// The shop's site sign-ins and the outposts that type them, kept in its vault object (`CredObject`, `t:${tenant}`)
-/// beside its connections (docs/browser-control.md). This is the object's side; the routes are browser-control.ts's.
+/// The shop's site sign-ins, the outposts that type them, and the one-time grants between the two, kept in its vault
+/// object (`CredObject`, `t:${tenant}`) beside its connections (docs/browser-control.md). This is the object's side,
+/// and the Worker's calls into it; the routes are browser-control.ts's, and the worker's two steps are on the job
+/// flow's port (job-flow.ts).
 ///
-/// A sign-in's password is sealed with the vault's own keys (cred-crypto.ts). No answer from here holds it: each
-/// answers the public view, which says only that a password is set. An outpost's credential is never here at all: the
-/// Worker mints it, hands it out once, and gives this object only its SHA-256 digest.
+/// A sign-in's password is sealed with the vault's own keys (cred-crypto.ts) and leaves this object in one place only:
+/// `POST /sign-in-grants/open`, for the outpost that has just used up a grant bound to it. Every other answer is the
+/// public view, which says only that a password is set. An outpost's credential is never here at all: the Worker mints
+/// it, hands it out once, and gives this object only its SHA-256 digest.
 ///
 /// Paths, each with the Worker's `x-tenant` (a record of another tenant reads as not found), and writes also with
 /// `x-vault`, the same defence in depth as `x-pilot` and `x-audit`:
@@ -11,15 +14,23 @@
 /// - `GET /sign-ins`: the live sign-ins, oldest first.
 /// - `POST /sign-ins` `{ site, origins, username, password, members }`: a new sign-in.
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
+/// - `POST /sign-ins/broken` `{ signInId, member }`: a member named on it reports that the site refused the password.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
 /// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
+/// - `POST /sign-in-grants` `{ signInId, outpostId, member, taskId, attemptId }`: a grant, for a member named on a
+///   working sign-in, to an online outpost, for 60 seconds.
+/// - `POST /sign-in-grants/claim` `{ grantId, outpostId, credentialHash }`: the outpost's redeem, first half. Checks the
+///   grant is its own, unused and on time, and uses it up whatever comes next; answers what it is bound to.
+/// - `POST /sign-in-grants/open` `{ grantId, outpostId, credentialHash }`: the second half, once the Worker has seen the
+///   attempt still runs. Answers the username, the password and the origins, once per grant.
 
 import { DEFAULT_ROSTER } from "@manut/member-grants";
+import { appendAudit, type AuditActor, type AuditSubject } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
-import { sealSecret, type SealedSecret } from "./cred-crypto";
+import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
 import { credStub, type TenantDataEnv } from "./tenant-data";
 
 export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
@@ -80,6 +91,35 @@ export type OutpostView = Omit<OutpostRecord, "tenant" | "credentialHash"> & { s
 /// An outpost beats every 30 seconds while it is awake, so one silent for 90 has missed three beats and is asleep.
 export const ONLINE_WINDOW_MS = 90_000;
 
+/// One outpost's permission to type one sign-in for one attempt's member, once, within a minute.
+type GrantRecord = {
+  id: string;
+  tenant: string;
+  signInId: string;
+  outpostId: string;
+  taskId: string;
+  attemptId: string;
+  /// The attempt's member, as the task object recorded it when the grant was asked for.
+  member: string;
+  issuedAt: string;
+  expiresAt: string;
+  /// When its outpost first redeemed it, whatever came of that. From then on it is used up.
+  usedAt: string | null;
+  /// When the password was answered for it.
+  openedAt: string | null;
+};
+
+/// What a grant is bound to, which the Worker needs to check the attempt and write the log. Never the password.
+export type GrantBinding = { signInId: string; taskId: string; attemptId: string; member: string };
+
+/// What a worker is told of its grant: enough to hand the outpost its step, nothing it could type.
+export type SignInGrant = { grantId: string; signInId: string; site: string; outpostId: string; expiresAt: string };
+
+/// A grant lives one minute.
+export const GRANT_TTL_MS = 60_000;
+/// Dead grants are deleted when the next one is issued, once they have been dead this long.
+const GRANT_KEEP_MS = 10 * 60_000;
+
 const MAX_BODY_BYTES = 16 * 1024;
 /// Live sign-ins per shop, so one shop's vault cannot grow without bound.
 const MAX_SIGN_INS = 50;
@@ -95,13 +135,21 @@ const MAX_NAME = 80;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
+/// A task or attempt id as the job flow mints them, in the audit log's own alphabet.
+const TASK_REF = /^[A-Za-z0-9._:-]{1,256}$/;
+/// An attempt's executor, as the task object bounds it.
+const MAX_MEMBER = 128;
 const EMPTY_SEAL: SealedSecret = { keyTag: "", iv: "", data: "" };
+/// Durable Object storage takes at most 128 keys per delete call.
+const STORAGE_BATCH = 128;
 
 const keys = {
   signIn: (id: string) => `signin:${id}`,
   signIns: "signin:",
   outpost: (id: string) => `outpost:${id}`,
   outposts: "outpost:",
+  grant: (id: string) => `signin-grant:${id}`,
+  grants: "signin-grant:",
 };
 
 function json(data: unknown, status = 200): Response {
@@ -115,7 +163,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /// The paths this module answers inside the vault object.
 export function isSignInVaultPath(pathname: string): boolean {
   return pathname === "/sign-ins" || pathname.startsWith("/sign-ins/") || pathname === "/outposts" ||
-    pathname.startsWith("/outposts/");
+    pathname.startsWith("/outposts/") || pathname === "/sign-in-grants" || pathname.startsWith("/sign-in-grants/");
 }
 
 /// Whether two hex digests are the same, in time that does not depend on where they differ.
@@ -266,15 +314,166 @@ export async function signInVaultRoute(
       return createSignIn(storage, vaultKeys, tenant, body);
     case "POST /sign-ins/password":
       return replacePassword(storage, vaultKeys, tenant, body);
+    case "POST /sign-ins/broken":
+      return markBroken(storage, tenant, body);
     case "POST /sign-ins/remove":
       return removeSignIn(storage, tenant, body);
     case "POST /outposts":
       return registerOutpost(storage, tenant, body);
     case "POST /outposts/heartbeat":
       return outpostHeartbeat(storage, tenant, body);
+    case "POST /sign-in-grants":
+      return issueGrant(storage, tenant, body);
+    case "POST /sign-in-grants/claim":
+      return claimGrant(storage, tenant, body);
+    case "POST /sign-in-grants/open":
+      return openGrant(storage, vaultKeys, tenant, body);
     default:
       return json({ error: "not_found" }, 404);
   }
+}
+
+/// The site refused the saved password: a member named on the sign-in says so, and nobody uses it until the owner
+/// types a new one. A second report keeps the first's time and member, which is when it broke.
+async function markBroken(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const record = await liveSignIn(storage, tenant, body.signInId);
+  if (!record) return json(NOT_FOUND, 404);
+  if (typeof body.member !== "string" || !record.members.includes(body.member)) {
+    return json({ error: "member_not_allowed" }, 403);
+  }
+  if (record.state === "broken") return json({ signIn: viewOf(record) });
+  const broken: SignInRecord = { ...record, state: "broken", brokenAt: new Date().toISOString(),
+    brokenBy: body.member };
+  await storage.put(keys.signIn(record.id), broken);
+  return json({ signIn: viewOf(broken) });
+}
+
+/// Why a grant's sign-in cannot be used for its member now, or null when it can: removed, the member since taken off
+/// it, or broken. The member is checked before the state, so a member who may not use a sign-in learns nothing of it.
+function unusable(record: SignInRecord | null, member: string): { status: number; error: string } | null {
+  if (!record) return { status: 404, error: "sign_in_not_found" };
+  if (!record.members.includes(member)) return { status: 403, error: "member_not_allowed" };
+  if (record.state === "broken") return { status: 409, error: "sign_in_broken" };
+  return null;
+}
+
+/// A grant for the attempt's member to have `outpostId` type the sign-in, if the member is named on it, it is working,
+/// and the outpost is online. The member, the task and the attempt come from the control plane, which read them from
+/// the task object; the sign-in and the outpost are what the worker named.
+async function issueGrant(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const { member, taskId, attemptId } = body;
+  if (typeof member !== "string" || member.length === 0 || member.length > MAX_MEMBER ||
+      typeof taskId !== "string" || !TASK_REF.test(taskId) || typeof attemptId !== "string" ||
+      !TASK_REF.test(attemptId)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  const signIn = await liveSignIn(storage, tenant, body.signInId);
+  const refused = unusable(signIn, member);
+  if (refused || !signIn) return json({ error: refused?.error ?? "sign_in_not_found" }, refused?.status ?? 404);
+  const outpost = typeof body.outpostId === "string" && UUID.test(body.outpostId)
+    ? await storage.get<OutpostRecord>(keys.outpost(body.outpostId)) : undefined;
+  if (!outpost || outpost.tenant !== tenant) return json({ error: "outpost_not_found" }, 404);
+  const nowMs = Date.now();
+  // One that is asleep could not use it within its minute; better the worker hears so now.
+  if (outpostStatus(outpost.lastHeartbeatAt, nowMs) !== "online") return json({ error: "outpost_asleep" }, 409);
+  await pruneGrants(storage, nowMs);
+  const grant: GrantRecord = { id: crypto.randomUUID(), tenant, signInId: signIn.id, outpostId: outpost.id, taskId,
+    attemptId, member, issuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + GRANT_TTL_MS).toISOString(),
+    usedAt: null, openedAt: null };
+  await storage.put(keys.grant(grant.id), grant);
+  return json({ grant: { grantId: grant.id, signInId: signIn.id, site: signIn.site, outpostId: outpost.id,
+    expiresAt: grant.expiresAt } satisfies SignInGrant });
+}
+
+/// Deletes the grants that have been dead for ten minutes, so the vault does not keep one per step for ever. Their
+/// history is in the audit log.
+async function pruneGrants(storage: DurableObjectStorage, nowMs: number): Promise<void> {
+  const dead: string[] = [];
+  for (const [key, grant] of await storage.list<GrantRecord>({ prefix: keys.grants })) {
+    if (Date.parse(grant.expiresAt) + GRANT_KEEP_MS < nowMs) dead.push(key);
+  }
+  for (let i = 0; i < dead.length; i += STORAGE_BATCH) await storage.delete(dead.slice(i, i + STORAGE_BATCH));
+}
+
+/// The grant an authenticated outpost names, or a refusal. The binding goes with every refusal about a grant that
+/// exists, for the Worker's audit entry; the Worker never passes it to the outpost.
+async function grantFor(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<{ outpost: OutpostRecord; grant: GrantRecord } | Response> {
+  const outpost = await authenticated(storage, tenant, body.outpostId, body.credentialHash);
+  if (!outpost) return json(UNAUTHORIZED, 401);
+  const grant = typeof body.grantId === "string" && UUID.test(body.grantId)
+    ? await storage.get<GrantRecord>(keys.grant(body.grantId)) : undefined;
+  if (!grant || grant.tenant !== tenant) return json({ error: "grant_not_found" }, 404);
+  if (grant.outpostId !== outpost.id) return json({ error: "wrong_outpost", binding: bindingOf(grant) }, 403);
+  return { outpost, grant };
+}
+
+function bindingOf(grant: GrantRecord): GrantBinding {
+  return { signInId: grant.signInId, taskId: grant.taskId, attemptId: grant.attemptId, member: grant.member };
+}
+
+/// The redeem's first half. Another outpost's grant is refused without being used, so it stays for its own; past that
+/// point the grant is used up in the same step as these checks, before anything else can run, so of any number of
+/// redeems at most one ever gets further.
+async function claimGrant(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const found = await grantFor(storage, tenant, body);
+  if (found instanceof Response) return found;
+  const { grant } = found;
+  const binding = bindingOf(grant);
+  if (grant.usedAt !== null) return json({ error: "grant_used", binding }, 409);
+  const nowMs = Date.now();
+  if (!(nowMs < Date.parse(grant.expiresAt))) return json({ error: "grant_expired", binding }, 409);
+  await storage.put(keys.grant(grant.id), { ...grant, usedAt: new Date(nowMs).toISOString() } satisfies GrantRecord);
+  const refused = unusable(await liveSignIn(storage, tenant, grant.signInId), grant.member);
+  if (refused) return json({ error: refused.error, binding }, refused.status);
+  return json({ binding });
+}
+
+/// The redeem's second half: the password, once per grant, for a grant its outpost has just claimed and still on time.
+/// The grant is marked opened before the password is unsealed, so a failure part way can only lose it, never answer it
+/// twice; and the sign-in's last use is written only once the password is out.
+async function openGrant(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
+  body: Record<string, unknown>): Promise<Response> {
+  const found = await grantFor(storage, tenant, body);
+  if (found instanceof Response) return found;
+  const { grant } = found;
+  if (grant.usedAt === null || grant.openedAt !== null) return json({ error: "grant_used" }, 409);
+  const nowMs = Date.now();
+  if (!(nowMs < Date.parse(grant.expiresAt))) return json({ error: "grant_expired" }, 409);
+  const signIn = await liveSignIn(storage, tenant, grant.signInId);
+  const refused = unusable(signIn, grant.member);
+  if (refused || !signIn) return json({ error: refused?.error ?? "sign_in_not_found" }, refused?.status ?? 404);
+  const key = vaultKeys.CRED_KEY;
+  if (!key) return json({ error: "vault_not_configured" }, 503);
+  await storage.put(keys.grant(grant.id), { ...grant, openedAt: new Date(nowMs).toISOString() } satisfies GrantRecord);
+  let password: string;
+  try {
+    password = await openSecret(signIn.sealed, key, vaultKeys.CRED_KEY_PREVIOUS);
+  } catch {
+    return json({ error: "unseal_failed" }, 500);
+  }
+  // Read again before writing, since unsealing let other requests in: a sign-in removed meanwhile stays removed.
+  const current = await liveSignIn(storage, tenant, grant.signInId);
+  if (current) {
+    await storage.put(keys.signIn(current.id), { ...current, lastUsedAt: new Date(nowMs).toISOString(),
+      lastUsedBy: grant.member } satisfies SignInRecord);
+  }
+  return json({ signInId: signIn.id, site: signIn.site, origins: signIn.origins, username: signIn.username, password });
+}
+
+/// Part of the vault's tenant wipe (cred-object.ts): every sign-in, tombstones included, every outpost and every grant.
+export async function wipeSignInVault(storage: DurableObjectStorage):
+  Promise<{ signInsWiped: number; outpostsWiped: number; grantsWiped: number }> {
+  const doomed = async (prefix: string) => [...(await storage.list({ prefix })).keys()];
+  const signIns = await doomed(keys.signIns);
+  const outposts = await doomed(keys.outposts);
+  const grants = await doomed(keys.grants);
+  const all = [...signIns, ...outposts, ...grants];
+  for (let i = 0; i < all.length; i += STORAGE_BATCH) await storage.delete(all.slice(i, i + STORAGE_BATCH));
+  return { signInsWiped: signIns.length, outpostsWiped: outposts.length, grantsWiped: grants.length };
 }
 
 async function registerOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
@@ -385,4 +584,71 @@ export async function vaultAnswer(response: Response): Promise<{ status: number;
   if (!isRecord(body)) return null;
   if (response.status === 503 && body.error !== "vault_not_configured") return null;
   return { status: response.status, body };
+}
+
+/// The vault's refusal code, or `vault_unavailable` for an answer that names none.
+function refusalOf(body: Record<string, unknown>): string {
+  return typeof body.error === "string" ? body.error : "vault_unavailable";
+}
+
+/// Ids a worker named, kept in an audit entry only when they could be the vault's (a UUID), so the log never refuses
+/// the entry for a malformed one.
+function namedIds(ids: { signInId?: unknown; outpostId?: unknown }): AuditSubject {
+  return {
+    ...(typeof ids.signInId === "string" && UUID.test(ids.signInId) ? { signInId: ids.signInId } : {}),
+    ...(typeof ids.outpostId === "string" && UUID.test(ids.outpostId) ? { outpostId: ids.outpostId } : {}),
+  };
+}
+
+/// Where the worker's step happens: the attempt, and the member the task object recorded it for.
+export type AttemptRef = { tenant: string; taskId: string; attemptId: string; member: string };
+
+/// The worker's sign-in step (job-flow.ts, `signIn`), once the port has read the switches and consent and the
+/// attempt's own heartbeat. Asks the vault for a grant and writes `signin.requested`, issued or refused, under the
+/// attempt.
+export async function issueSignInGrant(env: VaultEnv, attempt: AttemptRef, signInId: unknown, outpostId: unknown):
+  Promise<{ ok: true; value: SignInGrant } | { ok: false; error: string }> {
+  const { tenant, taskId, attemptId, member } = attempt;
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, tenant, "POST", "/sign-in-grants",
+      { signInId, outpostId, member, taskId, attemptId }));
+  } catch {
+    answer = null;
+  }
+  if (!answer) return { ok: false, error: "vault_unavailable" };
+  const actor: AuditActor = { kind: "worker", attemptId };
+  const subject: AuditSubject = { ...namedIds({ signInId, outpostId }), taskId, attemptId };
+  if (answer.status !== 200 || !isRecord(answer.body.grant)) {
+    const error = refusalOf(answer.body);
+    await appendAudit(env, tenant, { actor, action: "signin.requested", subject, outcome: "refused", reason: error });
+    return { ok: false, error };
+  }
+  const grant = answer.body.grant as SignInGrant;
+  await appendAudit(env, tenant, { actor, action: "signin.requested", subject: { ...subject, grantId: grant.grantId },
+    outcome: "ok" });
+  return { ok: true, value: grant };
+}
+
+/// The worker's report that the site refused a sign-in's password (job-flow.ts, `signInBroken`), once the port has read
+/// the switches and consent and the attempt's own heartbeat. Writes `signin.broken`, done or refused, under the attempt.
+export async function reportSignInBroken(env: VaultEnv, attempt: AttemptRef, signInId: unknown):
+  Promise<{ ok: true; value: { signInId: string; state: "broken" } } | { ok: false; error: string }> {
+  const { tenant, taskId, attemptId, member } = attempt;
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, tenant, "POST", "/sign-ins/broken", { signInId, member }));
+  } catch {
+    answer = null;
+  }
+  if (!answer) return { ok: false, error: "vault_unavailable" };
+  const actor: AuditActor = { kind: "worker", attemptId };
+  const subject: AuditSubject = { ...namedIds({ signInId }), taskId, attemptId };
+  if (answer.status !== 200 || !isRecord(answer.body.signIn)) {
+    const error = refusalOf(answer.body);
+    await appendAudit(env, tenant, { actor, action: "signin.broken", subject, outcome: "refused", reason: error });
+    return { ok: false, error };
+  }
+  await appendAudit(env, tenant, { actor, action: "signin.broken", subject, outcome: "ok" });
+  return { ok: true, value: { signInId: String(answer.body.signIn.id), state: "broken" } };
 }

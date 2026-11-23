@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
-import { isSignInVaultPath, signInVaultRoute } from "./sign-in-vault";
+import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";
 
 type CredEnv = {
   CRED_KEY?: string;
@@ -326,13 +326,15 @@ export class CredObject extends DurableObject {
     if (typeof body.tenant !== "string" || !body.tenant) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
-    // The vault is per-tenant, so wiping is deleting every connection record.
+    // The vault is per-tenant, so wiping is deleting every connection record, and every site sign-in, outpost and
+    // sign-in grant (sign-in-vault.ts).
     const keys: string[] = [];
     for (const [key] of await this.ctx.storage.list({ prefix: "conn:" })) {
       keys.push(key);
     }
     await this.ctx.storage.delete(keys);
-    return Response.json({ connectionsWiped: keys.length });
+    const signIns = await wipeSignInVault(this.ctx.storage);
+    return Response.json({ connectionsWiped: keys.length, ...signIns });
   }
 
   private public(record: ConnectionRec): object {
