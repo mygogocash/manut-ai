@@ -886,3 +886,280 @@ describe("the fake's model spend, answered as docs/model-gateway.md says", () =>
     }
   });
 });
+
+// The owner's people, kept by `@manut/people-rules`' own rules as the API keeps them (docs/people.md): the same statuses
+// and codes, a change recorded in the shop's audit log by ids only, and the people exported with the shop and deleted with it.
+describe("the fake's people, kept as the API keeps them", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z");
+  const DAY = 24 * 60 * 60 * 1000;
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const fresh = (now = () => NOW) => createFakeApi({ now, webOrigin: "https://web.test" });
+  const operator = { kind: "operator", email: null };
+  const mint = { kind: "email", address: "mint@baanmali.example" } as const;
+  const beam = { kind: "line", id: "beam.baanmali" } as const;
+  const kai = { kind: "email", address: "kai@sabai.example" } as const;
+
+  /// The people entries of a shop's log, oldest first, as what they say: no id and no time.
+  async function peopleTrail(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const page = await api.listAudit(tenant, { limit: 200 });
+    return page.entries.reverse().filter((entry) => /^(invite|helper|away|request)\./.test(entry.action))
+      .map(({ id: _id, at: _at, ...said }) => said);
+  }
+
+  /// A browser's storage for the saved world, with the saved text where a test can reach it.
+  function kept() {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    return { saved, storage };
+  }
+
+  it("starts Baan Mali with Fon, Mint covering for her, Beam invited and a note Mint passed on, and Sabai Tea with Dao alone", async () => {
+    const api = fresh();
+    expect(await api.getPeople(BAAN_MALI)).toEqual({
+      tenant: BAAN_MALI,
+      owner: { name: "Fon" },
+      helpers: [{ id: "helper-mint", name: "Mint", identity: mint, joinedAt: "2026-11-13T03:05:00.000Z", devices: 2 }],
+      invites: [
+        { id: "inv-mint", name: "Mint", identity: mint, status: "used", createdAt: "2026-11-13T03:00:00.000Z",
+          expiresAt: "2026-11-20T03:00:00.000Z" },
+        { id: "inv-beam", name: "Beam", identity: beam, status: "pending", createdAt: "2026-11-23T01:00:00.000Z",
+          expiresAt: "2026-11-30T01:00:00.000Z", inviteUrl: "https://web.test/join/practice-inv-beam" },
+      ],
+      // Until the end of Friday 27 November, the shop's day: Mint covers messages while Fon is away.
+      away: { helperId: "helper-mint", name: "Mint", until: "2026-11-27T16:59:59.000Z", inForce: true },
+      passedOn: [{ requestId: "req_refund", kind: "money", by: "helper-mint", name: "Mint",
+        note: "The customer sent a photo of the broken jar. It looks right to me.", at: "2026-11-23T00:00:00.000Z" }],
+      removed: [],
+    });
+    expect(await api.getPeople(SABAI_TEA)).toEqual({ tenant: SABAI_TEA, owner: { name: "Dao" }, helpers: [], invites: [],
+      away: null, passedOn: [], removed: [] });
+  });
+
+  it("answers as the API does for no tenant, a tenant that is not a shop, and a shop that was deleted", async () => {
+    const api = fresh();
+    await expect(api.getPeople("")).rejects.toMatchObject({ status: 400, code: "tenant_required" });
+    await expect(api.getPeople("shop_nobody")).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.createInvite({ tenant: "shop_nobody", name: "Beam", identity: beam })).rejects
+      .toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.createInvite({ tenant: "", name: "Beam", identity: beam })).rejects
+      .toMatchObject({ status: 400, code: "tenant_required" });
+    // The people routes only ever say shop_not_found, a deleted shop's included.
+    await api.deleteShop({ tenant: SABAI_TEA, confirmName: "Sabai Tea" });
+    await expect(api.getPeople(SABAI_TEA)).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+    await expect(api.clearAway({ tenant: SABAI_TEA })).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+  });
+
+  it("makes an invite for 7 days with a link to copy, shows the same link again, and logs only its id", async () => {
+    const api = fresh();
+    const made = await api.createInvite({ tenant: SABAI_TEA, name: "  Café Kai ", identity: { kind: "email", address: " Kai@Sabai.example " } });
+    expect(made.invite).toEqual({ id: expect.stringMatching(/^inv-/), name: "Café Kai",
+      identity: { kind: "email", address: "Kai@Sabai.example" }, status: "pending", createdAt: "2026-11-23T03:00:00.000Z",
+      expiresAt: "2026-11-30T03:00:00.000Z" });
+    expect(made.inviteUrl).toMatch(/^https:\/\/web\.test\/join\/practice-inv-\d+$/);
+    expect((await api.getPeople(SABAI_TEA)).invites).toEqual([{ ...made.invite, inviteUrl: made.inviteUrl }]);
+    expect(await peopleTrail(api, SABAI_TEA)).toEqual([
+      { actor: operator, action: "invite.created", subject: { inviteId: made.invite.id }, outcome: "ok" }]);
+    // The log names ids only: never the name the owner gave, nor the account's value.
+    const written = JSON.stringify(await api.listAudit(SABAI_TEA));
+    expect(written).not.toContain("Kai");
+    expect(written).not.toContain("sabai.example");
+  });
+
+  it("keeps a name of up to 80 characters, and refuses what the API refuses without writing anything", async () => {
+    const api = fresh();
+    const tenant = SABAI_TEA;
+    expect((await api.createInvite({ tenant, name: "x".repeat(80), identity: kai })).invite.name).toBe("x".repeat(80));
+    const refusals: [unknown, number, string][] = [
+      [{ name: "", identity: beam }, 400, "invalid_request"],
+      [{ name: "   ", identity: beam }, 400, "invalid_request"],
+      [{ name: "x".repeat(81), identity: beam }, 400, "invalid_request"],
+      [{ name: "Be\u0007am", identity: beam }, 400, "invalid_request"],
+      [{ name: 5, identity: beam }, 400, "invalid_request"],
+      [{ name: "Beam", identity: "beam" }, 400, "invalid_request"],
+      [{ name: "Beam", identity: { kind: "phone", number: "0812345678" } }, 400, "invalid_request"],
+      [{ name: "Beam" }, 400, "invalid_request"],
+      [{ name: "Beam", identity: { kind: "line", id: "" } }, 400, "bad_identity"],
+      [{ name: "Beam", identity: { kind: "email", address: "beam" } }, 400, "bad_identity"],
+      [{ name: "Beam", identity: { kind: "email", address: "be am@x" } }, 400, "bad_identity"],
+    ];
+    for (const [input, status, code] of refusals) {
+      await expect(api.createInvite({ tenant, ...(input as object) } as never)).rejects.toMatchObject({ status, code });
+    }
+    expect((await api.getPeople(tenant)).invites).toHaveLength(1);
+    expect(await peopleTrail(api, tenant)).toHaveLength(1);
+  });
+
+  it("refuses a second open invite for the same account and an invite for a current helper, comparing emails without case", async () => {
+    const api = fresh();
+    await expect(api.createInvite({ tenant: BAAN_MALI, name: "Beam again", identity: beam })).rejects
+      .toMatchObject({ status: 409, code: "already_invited" });
+    // A LINE account id is compared exactly, so another capitalisation is another account.
+    expect(await api.createInvite({ tenant: BAAN_MALI, name: "Beam B", identity: { kind: "line", id: "Beam.Baanmali" } }))
+      .toMatchObject({ invite: { status: "pending" } });
+    await expect(api.createInvite({ tenant: BAAN_MALI, name: "Mint again",
+      identity: { kind: "email", address: " MINT@baanmali.EXAMPLE " } })).rejects.toMatchObject({ status: 409, code: "already_helper" });
+    await api.createInvite({ tenant: SABAI_TEA, name: "Kai", identity: kai });
+    await expect(api.createInvite({ tenant: SABAI_TEA, name: "Kai again",
+      identity: { kind: "email", address: "KAI@SABAI.EXAMPLE" } })).rejects.toMatchObject({ status: 409, code: "already_invited" });
+  });
+
+  it("reads an invite as expired once its 7 days are over, with no link, and lets the same account be invited again", async () => {
+    let now = NOW;
+    const api = fresh(() => now);
+    const first = await api.createInvite({ tenant: SABAI_TEA, name: "Kai", identity: kai });
+    now += 7 * DAY - 1;
+    expect((await api.getPeople(SABAI_TEA)).invites[0]).toMatchObject({ status: "pending", inviteUrl: first.inviteUrl });
+    now += 1;
+    const expired = (await api.getPeople(SABAI_TEA)).invites[0];
+    expect(expired).toMatchObject({ id: first.invite.id, status: "expired" });
+    expect(expired?.inviteUrl).toBeUndefined();
+    const second = await api.createInvite({ tenant: SABAI_TEA, name: "Kai", identity: kai });
+    expect(second.invite.id).not.toBe(first.invite.id);
+  });
+
+  it("cancels an invite that waits, once, and refuses what the API refuses", async () => {
+    const api = fresh();
+    const cancelled = await api.revokeInvite({ tenant: BAAN_MALI, inviteId: "inv-beam" });
+    expect(cancelled).toEqual({ invite: { id: "inv-beam", name: "Beam", identity: beam, status: "revoked",
+      createdAt: "2026-11-23T01:00:00.000Z", expiresAt: "2026-11-30T01:00:00.000Z" } });
+    expect((await api.getPeople(BAAN_MALI)).invites.find((invite) => invite.id === "inv-beam")).toEqual(cancelled.invite);
+    // Cancelled and used invites cannot be cancelled again; an id the shop does not hold is unknown.
+    for (const inviteId of ["inv-beam", "inv-mint"]) {
+      await expect(api.revokeInvite({ tenant: BAAN_MALI, inviteId })).rejects.toMatchObject({ status: 409, code: "not_pending" });
+    }
+    await expect(api.revokeInvite({ tenant: BAAN_MALI, inviteId: "inv-nobody" })).rejects
+      .toMatchObject({ status: 404, code: "unknown_invite" });
+    await expect(api.revokeInvite({ tenant: SABAI_TEA, inviteId: "inv-beam" })).rejects
+      .toMatchObject({ status: 404, code: "unknown_invite" });
+    await expect(api.revokeInvite({ tenant: BAAN_MALI, inviteId: 5 as never })).rejects
+      .toMatchObject({ status: 400, code: "invalid_request" });
+    expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action === "invite.revoked")).toEqual([
+      { actor: operator, action: "invite.revoked", subject: { inviteId: "inv-beam" }, outcome: "ok" }]);
+  });
+
+  it("removes a helper, ending their cover and sessions in the same step, and keeps their name for the log", async () => {
+    const api = fresh();
+    expect(await api.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" })).toEqual({ removed: "helper-mint",
+      sessionsEnded: 2, invitesRevoked: [], coverEnded: true });
+    const people = await api.getPeople(BAAN_MALI);
+    expect(people.helpers).toEqual([]);
+    expect(people.away).toBeNull();
+    expect(people.removed).toEqual([{ id: "helper-mint", name: "Mint" }]);
+    // What Mint passed on stays, with Mint's name.
+    expect(people.passedOn).toEqual([expect.objectContaining({ by: "helper-mint", name: "Mint" })]);
+    await expect(api.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" })).rejects
+      .toMatchObject({ status: 404, code: "not_a_helper" });
+    await expect(api.removeHelper({ tenant: BAAN_MALI, helperId: 7 as never })).rejects
+      .toMatchObject({ status: 400, code: "invalid_request" });
+    expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action === "helper.removed")).toEqual([
+      { actor: operator, action: "helper.removed", subject: { helperId: "helper-mint" }, outcome: "ok" }]);
+    // A removed helper can be invited again, as a new helper.
+    expect(await api.createInvite({ tenant: BAAN_MALI, name: "Mint", identity: mint })).toMatchObject({ invite: { status: "pending" } });
+  });
+
+  it("sets cover until a date in the future, says when it is over, and clears it, recording only what changed", async () => {
+    let now = NOW;
+    const api = fresh(() => now);
+    const until = "2026-11-30T16:59:59.000Z";
+    expect(await api.setAway({ tenant: BAAN_MALI, helperId: "helper-mint", until })).toEqual({
+      away: { helperId: "helper-mint", name: "Mint", until, inForce: true } });
+    expect((await api.getPeople(BAAN_MALI)).away).toEqual({ helperId: "helper-mint", name: "Mint", until, inForce: true });
+
+    const refusals: [object, number, string][] = [
+      [{ helperId: "helper-mint", until: "2026-11-23T03:00:00.000Z" }, 400, "bad_date"],
+      [{ helperId: "helper-mint", until: "2026-11-22T03:00:00.000Z" }, 400, "bad_date"],
+      [{ helperId: "helper-mint", until: "next friday" }, 400, "bad_date"],
+      [{ helperId: "helper-mint", until: 5 }, 400, "bad_date"],
+      [{ helperId: "helper-nobody", until }, 404, "not_a_helper"],
+      [{ helperId: 5, until }, 400, "invalid_request"],
+    ];
+    for (const [input, status, code] of refusals) {
+      await expect(api.setAway({ tenant: BAAN_MALI, ...input } as never)).rejects.toMatchObject({ status, code });
+    }
+    expect((await api.getPeople(BAAN_MALI)).away).toMatchObject({ until });
+
+    // Cover holds until its date exactly, and stays on record, no longer in force, until it is cleared.
+    now = Date.parse(until);
+    expect((await api.getPeople(BAAN_MALI)).away).toEqual({ helperId: "helper-mint", name: "Mint", until, inForce: false });
+    expect(await api.clearAway({ tenant: BAAN_MALI })).toEqual({ away: null });
+    expect((await api.getPeople(BAAN_MALI)).away).toBeNull();
+    const written = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries.length;
+    expect(await api.clearAway({ tenant: BAAN_MALI })).toEqual({ away: null });
+    expect((await api.listAudit(BAAN_MALI, { limit: 200 })).entries.length).toBe(written);
+    expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action.startsWith("away."))).toEqual([
+      { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
+      { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
+      { actor: operator, action: "away.cleared", subject: { helperId: "helper-mint" }, outcome: "ok" },
+    ]);
+  });
+
+  it("starts the log with what the sample people did, by ids only", async () => {
+    const api = fresh();
+    const mintDid = { kind: "helper", id: "helper-mint" };
+    expect(await peopleTrail(api, BAAN_MALI)).toEqual([
+      { actor: operator, action: "invite.created", subject: { inviteId: "inv-mint" }, outcome: "ok" },
+      { actor: mintDid, action: "helper.joined", subject: { inviteId: "inv-mint", helperId: "helper-mint" }, outcome: "ok" },
+      { actor: mintDid, action: "helper.session_opened", subject: { helperId: "helper-mint" }, outcome: "ok" },
+      { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
+      { actor: mintDid, action: "request.passed_on", subject: { requestId: "req_refund", taskId: "task_shop_baanmali" },
+        outcome: "ok" },
+      { actor: operator, action: "invite.created", subject: { inviteId: "inv-beam" }, outcome: "ok" },
+    ]);
+    const written = JSON.stringify(await api.listAudit(BAAN_MALI, { limit: 200 }));
+    for (const private_ of ["Mint", "mint@baanmali", "Beam", "beam.baanmali", "broken jar"]) expect(written).not.toContain(private_);
+    // The newest entry is still the newest reply of the sample world.
+    expect((await api.listAudit(BAAN_MALI)).entries[0]).toMatchObject({ action: "reply.proposed" });
+  });
+
+  it("exports the people with the shop, and deletes them with it", async () => {
+    const api = fresh();
+    const exported = await api.exportShop(BAAN_MALI);
+    expect(exported.people).toMatchObject({ names: { "helper-mint": "Mint", "inv-beam": "Beam" },
+      state: { shop: BAAN_MALI, ownerId: "owner", helpers: [expect.objectContaining({ id: "helper-mint" })] } });
+    expect((await api.exportShop(SABAI_TEA)).people).toEqual({ names: {},
+      state: { shop: SABAI_TEA, ownerId: "owner", helpers: [], invites: [], away: null, passedOn: [], removed: [] } });
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    await expect(api.getPeople(BAAN_MALI)).rejects.toMatchObject({ status: 404, code: "shop_not_found" });
+  });
+
+  it("keeps people changed in practice across a reload, and starts again on reset", async () => {
+    const { storage } = kept();
+    await createFakeApi({ now: () => NOW, storage }).removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    expect((await reloaded.getPeople(BAAN_MALI)).helpers).toEqual([]);
+    reloaded.reset();
+    expect((await reloaded.getPeople(BAAN_MALI)).helpers).toHaveLength(1);
+  });
+
+  it("replaces a practice world saved before people existed, whether it is a version behind or only lacks them", async () => {
+    for (const change of [{ version: 6, people: undefined }, { people: undefined }]) {
+      const { saved, storage } = kept();
+      const first = createFakeApi({ now: () => NOW, storage });
+      await first.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" });
+      const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+      saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, ...change }));
+      const api = createFakeApi({ now: () => NOW, storage });
+      // The world was read as a fresh one: Mint is back, and the shops are the sample's.
+      expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+      expect((await api.getPeople(BAAN_MALI)).helpers.map((helper) => helper.name)).toEqual(["Mint"]);
+    }
+  });
+
+  it("refuses every people route without an operator key", async () => {
+    const api = createFakeApi({ operatorKey: () => null });
+    for (const call of [
+      () => api.getPeople(BAAN_MALI),
+      () => api.createInvite({ tenant: BAAN_MALI, name: "Beam", identity: beam }),
+      () => api.revokeInvite({ tenant: BAAN_MALI, inviteId: "inv-beam" }),
+      () => api.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" }),
+      () => api.setAway({ tenant: BAAN_MALI, helperId: "helper-mint", until: "2030-01-01T00:00:00.000Z" }),
+      () => api.clearAway({ tenant: BAAN_MALI }),
+    ]) await expect(call()).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+});

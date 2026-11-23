@@ -389,3 +389,144 @@ describe("the API client", () => {
     await expect(api.getApproval("t")).rejects.toMatchObject({ status: 0, code: "network" });
   });
 });
+
+// The owner's people (docs/pilot-api.md, "Helpers", "Operator routes"): six routes under the admin gate. Each change sends
+// the tenant and exactly what its route takes, and answers what the API answers.
+describe("the API client, for the owner's helpers", () => {
+  const line = { kind: "line", id: "beam.baanmali" } as const;
+  const email = { kind: "email", address: "mint@baanmali.example" } as const;
+  const invite = { id: "inv-1", name: "Beam", identity: line, status: "pending", createdAt: "2026-11-23T01:00:00.000Z",
+    expiresAt: "2026-11-30T01:00:00.000Z", inviteUrl: "https://web.test/join/tok" };
+  const people = {
+    tenant: "pilot:1",
+    owner: { name: "Fon" },
+    helpers: [{ id: "helper-1", name: "Mint", identity: email, joinedAt: "2026-11-13T03:05:00.000Z", devices: 2 }],
+    invites: [invite],
+    away: { helperId: "helper-1", name: "Mint", until: "2026-11-27T16:59:59.000Z", inForce: true },
+    passedOn: [{ requestId: "req_1", kind: "money", by: "helper-1", name: "Mint", note: "It looks right to me.",
+      at: "2026-11-23T00:00:00.000Z" }],
+    removed: [{ id: "helper-0", name: "Kai" }],
+  };
+  const answers: Record<string, unknown> = {
+    "/v1/admin/people": people,
+    "/v1/admin/people/invites": { invite: { ...invite, inviteUrl: undefined }, inviteUrl: "https://web.test/join/tok" },
+    "/v1/admin/people/invites/revoke": { invite: { ...invite, status: "revoked", inviteUrl: undefined } },
+    "/v1/admin/people/remove": { removed: "helper-1", sessionsEnded: 2, invitesRevoked: ["inv-9"], coverEnded: true },
+    "/v1/admin/people/away": { away: people.away },
+    "/v1/admin/people/away/clear": { away: null },
+  };
+  const answering = (url: string) => json(answers[new URL(url).pathname] ?? {});
+
+  async function everyPeopleRoute(api: PilotApi) {
+    await api.getPeople("pilot:1");
+    await api.createInvite({ tenant: "pilot:1", name: "Beam", identity: line });
+    await api.createInvite({ tenant: "pilot:1", name: "Mint", identity: email });
+    await api.revokeInvite({ tenant: "pilot:1", inviteId: "inv-1" });
+    await api.removeHelper({ tenant: "pilot:1", helperId: "helper-1" });
+    await api.setAway({ tenant: "pilot:1", helperId: "helper-1", until: "2026-11-27T16:59:59.000Z" });
+    await api.clearAway({ tenant: "pilot:1" });
+  }
+
+  it("sends the operator key to the contract's six paths, with the tenant and exactly what each route takes", async () => {
+    const { api, calls } = harness("op-key-123", answering);
+    await everyPeopleRoute(api);
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET https://api.example.test/v1/admin/people?tenant=pilot%3A1",
+      "POST https://api.example.test/v1/admin/people/invites",
+      "POST https://api.example.test/v1/admin/people/invites",
+      "POST https://api.example.test/v1/admin/people/invites/revoke",
+      "POST https://api.example.test/v1/admin/people/remove",
+      "POST https://api.example.test/v1/admin/people/away",
+      "POST https://api.example.test/v1/admin/people/away/clear",
+    ]);
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    expect(calls[1]?.body).toEqual({ tenant: "pilot:1", name: "Beam", identity: { kind: "line", id: "beam.baanmali" } });
+    expect(calls[2]?.body).toEqual({ tenant: "pilot:1", name: "Mint",
+      identity: { kind: "email", address: "mint@baanmali.example" } });
+    expect(calls[3]?.body).toEqual({ tenant: "pilot:1", inviteId: "inv-1" });
+    expect(calls[4]?.body).toEqual({ tenant: "pilot:1", helperId: "helper-1" });
+    expect(calls[5]?.body).toEqual({ tenant: "pilot:1", helperId: "helper-1", until: "2026-11-27T16:59:59.000Z" });
+    expect(calls[6]?.body).toEqual({ tenant: "pilot:1" });
+  });
+
+  it("never sends a field its route does not take, a role above all", async () => {
+    const { api, calls } = harness("op-key-123", answering);
+    const extra = { role: "owner", decidedBy: "owner-session" };
+    await api.createInvite({ tenant: "t1", name: "Beam", identity: { ...line, ...extra }, ...extra } as never);
+    await api.revokeInvite({ tenant: "t1", inviteId: "inv-1", ...extra } as never);
+    await api.removeHelper({ tenant: "t1", helperId: "helper-1", ...extra } as never);
+    await api.setAway({ tenant: "t1", helperId: "helper-1", until: "2026-11-27T16:59:59.000Z", ...extra } as never);
+    await api.clearAway({ tenant: "t1", ...extra } as never);
+
+    expect(calls.map((c) => c.raw)).toEqual([
+      '{"tenant":"t1","name":"Beam","identity":{"kind":"line","id":"beam.baanmali"}}',
+      '{"tenant":"t1","inviteId":"inv-1"}',
+      '{"tenant":"t1","helperId":"helper-1"}',
+      '{"tenant":"t1","helperId":"helper-1","until":"2026-11-27T16:59:59.000Z"}',
+      '{"tenant":"t1"}',
+    ]);
+  });
+
+  it("answers what the API answers: the people, the invite with its link, the removal's counts, the cover", async () => {
+    const { api } = harness("op-key-123", answering);
+    expect(await api.getPeople("pilot:1")).toEqual(people);
+    expect(await api.createInvite({ tenant: "pilot:1", name: "Beam", identity: line })).toEqual({
+      invite: { ...invite, inviteUrl: undefined }, inviteUrl: "https://web.test/join/tok" });
+    expect(await api.revokeInvite({ tenant: "pilot:1", inviteId: "inv-1" })).toMatchObject({ invite: { status: "revoked" } });
+    expect(await api.removeHelper({ tenant: "pilot:1", helperId: "helper-1" })).toEqual({ removed: "helper-1",
+      sessionsEnded: 2, invitesRevoked: ["inv-9"], coverEnded: true });
+    expect(await api.setAway({ tenant: "pilot:1", helperId: "helper-1", until: "2026-11-27T16:59:59.000Z" }))
+      .toEqual({ away: people.away });
+    expect(await api.clearAway({ tenant: "pilot:1" })).toEqual({ away: null });
+  });
+
+  it("turns every refusal of the people routes into an ApiError with the API's status and code", async () => {
+    const calls: [string, (api: PilotApi) => Promise<unknown>, number, string][] = [
+      ["read", (api) => api.getPeople("t1"), 400, "tenant_required"],
+      ["read", (api) => api.getPeople("t1"), 404, "shop_not_found"],
+      ["read", (api) => api.getPeople("t1"), 503, "people_unavailable"],
+      ["invite", (api) => api.createInvite({ tenant: "t1", name: "", identity: line }), 400, "invalid_request"],
+      ["invite", (api) => api.createInvite({ tenant: "t1", name: "Beam", identity: { kind: "line", id: "" } }), 400, "bad_identity"],
+      ["invite", (api) => api.createInvite({ tenant: "t1", name: "Beam", identity: line }), 409, "already_invited"],
+      ["invite", (api) => api.createInvite({ tenant: "t1", name: "Mint", identity: email }), 409, "already_helper"],
+      ["revoke", (api) => api.revokeInvite({ tenant: "t1", inviteId: "inv-9" }), 404, "unknown_invite"],
+      ["revoke", (api) => api.revokeInvite({ tenant: "t1", inviteId: "inv-1" }), 409, "not_pending"],
+      ["remove", (api) => api.removeHelper({ tenant: "t1", helperId: "helper-9" }), 404, "not_a_helper"],
+      ["away", (api) => api.setAway({ tenant: "t1", helperId: "helper-1", until: "yesterday" }), 400, "bad_date"],
+      ["away", (api) => api.setAway({ tenant: "t1", helperId: "helper-9", until: "2026-11-27T16:59:59.000Z" }), 404, "not_a_helper"],
+      ["clear", (api) => api.clearAway({ tenant: "t1" }), 503, "people_unavailable"],
+    ];
+    for (const [, call, status, code] of calls) {
+      const { api } = harness("op-key-123", () => json({ error: code }, status));
+      const failed = await call(api).catch((e: unknown) => e);
+      expect(failed).toBeInstanceOf(ApiError);
+      expect(failed).toMatchObject({ status, code });
+    }
+  });
+
+  it("keeps the setting a 503 not_configured names when an invite's link cannot be made", async () => {
+    for (const setting of ["WEB_ORIGIN", "APPROVAL_LINK_SECRET"]) {
+      const { api } = harness("op-key-123", () => json({ error: "not_configured", setting }, 503));
+      await expect(api.createInvite({ tenant: "t1", name: "Beam", identity: line })).rejects.toMatchObject({ status: 503,
+        code: "not_configured", setting });
+    }
+  });
+
+  it("refuses every people route with no key and sends nothing", async () => {
+    const { api, fetch } = harness(null);
+    await expect(everyPeopleRoute(api)).rejects.toMatchObject({ code: "operator_key_missing" });
+    for (const call of [
+      () => api.getPeople("t1"),
+      () => api.createInvite({ tenant: "t1", name: "Beam", identity: line }),
+      () => api.revokeInvite({ tenant: "t1", inviteId: "inv-1" }),
+      () => api.removeHelper({ tenant: "t1", helperId: "helper-1" }),
+      () => api.setAway({ tenant: "t1", helperId: "helper-1", until: "2026-11-27T16:59:59.000Z" }),
+      () => api.clearAway({ tenant: "t1" }),
+    ]) await expect(call()).rejects.toMatchObject({ code: "operator_key_missing" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

@@ -8,20 +8,29 @@ import {
   type AuditActor,
   type AuditEntry,
   type AwaitingOwner,
+  type AwayView,
+  type CreatedInvite,
   type DeletedShop,
   type DeletionGoes,
   type DeletionRequest,
   type DeletionState,
   type DeletionView,
   type Fact,
+  type HelperRemoval,
+  type Identity,
   type InboundMessage,
+  type InviteView,
   type Payment,
+  type People,
   type PilotApi,
   type ReplyAction,
   type Shop,
   type SubscriptionPayment,
 } from "./types";
 import { pilotGate } from "./gate";
+import { endOfShopDay, formatIsoDate } from "../format";
+import * as peopleRules from "@manut/people-rules";
+import type { Away, Invite, PeopleState } from "@manut/people-rules";
 import * as shopMemory from "@manut/shop-memory";
 import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
 import {
@@ -61,6 +70,12 @@ import {
 /// answers the API's status and code, a change is recorded in the shop's audit log by the fact's id and never its
 /// words, and the facts are exported with the shop and deleted with it. Baan Mali starts with five facts the team
 /// learned and two a customer said, which wait for its owner; Sabai Tea has been told nothing.
+///
+/// The owner's people (docs/people.md) are kept by `@manut/people-rules`' own rules, as the API keeps them: an invite for
+/// one LINE account or email, once, for 7 days; removal that ends cover and sessions in one step; cover until a date. A
+/// refusal answers the API's status and code, a change is recorded in the shop's audit log by ids only, and the people are
+/// exported with the shop and deleted with it. Baan Mali starts with Mint, who helps and covers while Fon is away, Beam
+/// invited and not yet joined, and a note Mint passed on; Sabai Tea has only its owner.
 ///
 /// Each shop's model spend (docs/model-gateway.md) is kept as the API's meter keeps it: one record per call, the
 /// reservations still open, and an operator's cap override. Months and totals are read from the records, so a total can
@@ -126,8 +141,11 @@ type FakeConfirmation = {
 };
 /// An audit entry with the shop it belongs to, which the API keeps by the shop's own object instead.
 type FakeAuditEntry = AuditEntry & { tenant: string };
+/// One shop's people as the API keeps them, without the sessions' hashes the fake has no use for: the rules' whole state,
+/// and the name the owner gave each invite and helper (kept after a helper is removed, so the log can still name them).
+type FakePeople = { state: PeopleState; names: Record<string, string> };
 type FakeDb = {
-  version: 6;
+  version: 7;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -142,13 +160,15 @@ type FakeDb = {
   audit: FakeAuditEntry[];
   /// What the team knows, per shop, as `@manut/shop-memory` keeps it. A shop with no entry has been told nothing.
   memory: Record<string, MemoryState>;
+  /// The owner's people, per shop. A shop with no entry has only its owner.
+  people: Record<string, FakePeople>;
   model: FakeModel;
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
-/// (version 3), before what the team knows (version 4) or before the model meter (version 5) is replaced by a fresh
-/// one rather than read without them.
+/// (version 3), before what the team knows (version 4), before the model meter (version 5) or before the owner's people
+/// (version 6) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -192,10 +212,11 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 6 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+      return parsed && parsed.version === 7 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
-        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds)
+        Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) &&
+        typeof parsed.people === "object" && parsed.people !== null
         ? parsed
         : null;
     } catch {
@@ -314,6 +335,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     db.audit = db.audit.filter((e) => !mine(e));
     // What the team knew goes too, the fingerprints of what it forgot with it.
     delete db.memory[record.tenant];
+    // The people go too, with the names the owner gave them.
+    delete db.people[record.tenant];
     wipeMeter(db.model, record.tenant);
     writeRecord({ ...record, deletedAt: deleted.deletedAt });
     return deleted;
@@ -475,6 +498,71 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       audit(tenant, PRACTICE_OPERATOR, action, { factId: result.fact.id });
     }
     return result.fact;
+  }
+
+  /// A shop's people: only its owner for a shop that was never given any.
+  function peopleOf(tenant: string): FakePeople {
+    return db.people[tenant] ?? { state: peopleRules.emptyPeople(tenant, OWNER_ID), names: {} };
+  }
+
+  /// The API's checks before any people route reads the shop: a tenant of 1 to 256 characters, then a pilot shop. The
+  /// people routes say `shop_not_found` for anything that is not one, a deleted shop included.
+  function peopleShop(tenant: unknown): FakeShop {
+    if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+    const shop = db.shops.find((s) => s.tenant === tenant);
+    if (!shop) throw new ApiError(404, "shop_not_found");
+    return shop;
+  }
+
+  /// The id of an invite or a helper in a body: text of 1 to 256 characters, which is what the shop's record keeps.
+  function peopleId(id: unknown): string {
+    if (typeof id !== "string" || id.length < 1 || id.length > 256) throw new ApiError(400, "invalid_request");
+    return id;
+  }
+
+  /// The link for an invite, the same each time it is shown while the invite waits. Nothing sends it, and a practice link
+  /// opens nothing: it only has the shape of the API's `${WEB_ORIGIN}/join/{token}`.
+  function inviteLink(invite: Invite): string {
+    return `${webOrigin.replace(/\/+$/, "")}/join/practice-${invite.id}`;
+  }
+
+  /// An invite past its 7 days is never used, so it reads as expired whatever the record still says. The view has no link:
+  /// the list adds one for an invite that waits, and creating one answers its link beside the invite.
+  function inviteView(invite: Invite, name: string, nowMs: number): InviteView {
+    return {
+      id: invite.id,
+      name,
+      identity: invite.identity,
+      status: invite.status === "pending" && nowMs >= invite.expiresAt ? "expired" : invite.status,
+      createdAt: iso(invite.createdAt),
+      expiresAt: iso(invite.expiresAt),
+    };
+  }
+
+  function awayView(state: PeopleState, away: Away, names: Record<string, string>, nowMs: number): AwayView {
+    return { helperId: away.helperId, name: names[away.helperId] ?? "", until: iso(away.until),
+      inForce: peopleRules.coverAt(state, nowMs) !== null };
+  }
+
+  /// What the API's people list answers for the shop.
+  function peopleList(shop: FakeShop): People {
+    const { state, names } = peopleOf(shop.tenant);
+    const nowMs = now();
+    return {
+      tenant: shop.tenant,
+      owner: { name: shop.ownerName },
+      // `devices` is the sessions open now: the fake never lets one run out, so it is every session of the helper's.
+      helpers: state.helpers.map((helper) => ({ id: helper.id, name: names[helper.id] ?? "", identity: helper.identity,
+        joinedAt: iso(helper.joinedAt), devices: helper.sessions.length })),
+      invites: state.invites.map((invite) => {
+        const shown = inviteView(invite, names[invite.id] ?? "", nowMs);
+        return shown.status === "pending" ? { ...shown, inviteUrl: inviteLink(invite) } : shown;
+      }),
+      away: state.away ? awayView(state, state.away, names, nowMs) : null,
+      passedOn: state.passedOn.map((passed) => ({ requestId: passed.requestId, kind: passed.kind, by: passed.by,
+        name: names[passed.by] ?? "", note: passed.note, at: iso(passed.at) })),
+      removed: state.removed.map((id) => ({ id, name: names[id] ?? "" })),
+    };
   }
 
   return {
@@ -714,6 +802,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           audit: { entries: auditOf(tenant).reverse(), missed: null },
           // What the team knows: every fact, waiting ones included, and only how many it was told to forget.
           memory: shopMemory.exportFacts(memoryOf(tenant)),
+          // Who the people are and what they passed on, as the API's export carries them (it never carries a session's hash).
+          people: peopleOf(tenant),
         };
       }),
 
@@ -869,6 +959,89 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         return { id };
       }),
 
+    // As the API's people routes: the admin key, the shop (400 `tenant_required`, 404 `shop_not_found`), the body's own
+    // checks, and then `@manut/people-rules`' rule, whose refusals answer the API's statuses. A change is kept and recorded
+    // in the shop's audit log by ids only, never a name or an account's value; a refusal writes nothing.
+    getPeople: (tenant) =>
+      run(() => {
+        admin();
+        return peopleList(peopleShop(tenant));
+      }),
+
+    createInvite: (input) =>
+      run((): CreatedInvite => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const name = keptName(input.name);
+        const identity = keptIdentity(input.identity);
+        if (!name || !identity) throw new ApiError(400, "invalid_request");
+        const record = peopleOf(shop.tenant);
+        db.seq += 1;
+        const made = peopleRules.invite(record.state, `inv-${db.seq}`, identity, now());
+        if (!made.ok) throw new ApiError(made.refused === "bad_identity" || made.refused === "bad_id" ? 400 : 409, made.refused);
+        db.people[shop.tenant] = { state: made.state, names: { ...record.names, [made.invite.id]: name } };
+        audit(shop.tenant, PRACTICE_OPERATOR, "invite.created", { inviteId: made.invite.id });
+        return { invite: inviteView(made.invite, name, now()), inviteUrl: inviteLink(made.invite) };
+      }),
+
+    revokeInvite: (input) =>
+      run(() => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const inviteId = peopleId(input.inviteId);
+        const record = peopleOf(shop.tenant);
+        const revoked = peopleRules.revokeInvite(record.state, inviteId);
+        if (!revoked.ok) throw new ApiError(revoked.refused === "unknown_invite" ? 404 : 409, revoked.refused);
+        db.people[shop.tenant] = { ...record, state: revoked.state };
+        audit(shop.tenant, PRACTICE_OPERATOR, "invite.revoked", { inviteId });
+        const invite = revoked.state.invites.find((one) => one.id === inviteId)!;
+        return { invite: inviteView(invite, record.names[inviteId] ?? "", now()) };
+      }),
+
+    removeHelper: (input) =>
+      run((): HelperRemoval => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const helperId = peopleId(input.helperId);
+        const record = peopleOf(shop.tenant);
+        const removed = peopleRules.removeHelper(record.state, helperId);
+        if (!removed.ok) throw new ApiError(404, removed.refused);
+        db.people[shop.tenant] = { ...record, state: removed.state };
+        audit(shop.tenant, PRACTICE_OPERATOR, "helper.removed", { helperId });
+        return { removed: helperId, sessionsEnded: removed.endSessions.length, invitesRevoked: [...removed.revokedInvites],
+          coverEnded: removed.coverEnded };
+      }),
+
+    // A date the rules can compare, or `bad_date`, as the API answers one it cannot read; then the rule's own `bad_date`
+    // for a time that is not in the future, and `not_a_helper` for someone who is not one.
+    setAway: (input) =>
+      run(() => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const helperId = peopleId(input.helperId);
+        const until = typeof input.until === "string" ? Date.parse(input.until) : Number.NaN;
+        if (!Number.isFinite(until)) throw new ApiError(400, "bad_date");
+        const record = peopleOf(shop.tenant);
+        const set = peopleRules.setAway(record.state, helperId, until, now());
+        if (!set.ok) throw new ApiError(set.refused === "not_a_helper" ? 404 : 400, set.refused);
+        db.people[shop.tenant] = { ...record, state: set.state };
+        audit(shop.tenant, PRACTICE_OPERATOR, "away.set", { helperId });
+        return { away: awayView(set.state, set.state.away!, record.names, now()) };
+      }),
+
+    // Clearing when nobody covers changes and records nothing, as the API does.
+    clearAway: (input) =>
+      run((): { away: null } => {
+        admin();
+        const shop = peopleShop(input.tenant);
+        const record = peopleOf(shop.tenant);
+        if (record.state.away === null) return { away: null };
+        const covering = record.state.away.helperId;
+        db.people[shop.tenant] = { ...record, state: peopleRules.clearAway(record.state) };
+        audit(shop.tenant, PRACTICE_OPERATOR, "away.cleared", { helperId: covering });
+        return { away: null };
+      }),
+
     // As the API: the tenant, then the month (the current Bangkok month unless one is named), then the settings and the
     // meter. Any tenant reads, as in the API; a shop it never metered has an empty month on the default cap.
     getModelUsage: (tenant, month) =>
@@ -910,6 +1083,37 @@ const MEMORY_STATUS: Record<Refusal, number> = {
   forgotten: 409,
   full: 409,
 };
+
+/// The id the API gives a shop's owner in the rules' state: in the pilot the owner has no account.
+const OWNER_ID = "owner";
+
+/// The longest name the owner may give a helper, in characters after outer spaces are trimmed, as the API keeps it.
+const MAX_NAME = 80;
+/// The longest id, name or account the API's record keeps.
+const MAX_FIELD = 256;
+
+/// A name as a person reads it, by the API's rule: no outer spaces, 1 to 80 characters, composed the same way whatever the
+/// keyboard, and no control character, so a name can never break a line in the console or a log. Null for anything else.
+function keptName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.normalize("NFC").trim();
+  return name.length > 0 && [...name].length <= MAX_NAME && !/\p{Cc}/u.test(name) ? name : null;
+}
+
+/// The identity as the API keeps it: only the fields its kind has, an email without outer spaces (its case kept, and
+/// compared without it) and a LINE account id exactly. Null for what is not an identity at all; one of the right shape with
+/// a value the rules refuse (an empty id, an address with no `@`) is left for them to refuse.
+function keptIdentity(value: unknown): Identity | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const identity = value as Record<string, unknown>;
+  if (identity.kind === "line" && typeof identity.id === "string" && identity.id.length <= MAX_FIELD) {
+    return { kind: "line", id: identity.id };
+  }
+  if (identity.kind === "email" && typeof identity.address === "string" && identity.address.length <= MAX_FIELD) {
+    return { kind: "email", address: identity.address.trim() };
+  }
+  return null;
+}
 
 /// Who the fake's log names. Practice actions come from the practice key, which has no Access identity: the API
 /// records such an operator as `email: null`, as it records a service token.
@@ -1087,7 +1291,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 6,
+    version: 7,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -1137,6 +1341,7 @@ function seed(at: number): FakeDb {
     expiredTokens: [DEMO_TOKENS.expiredLink, DEMO_DELETION_TOKENS.expiredLink],
     audit: sampleAudit(at, tenant, connectionId),
     memory: { [tenant]: sampleMemory(at) },
+    people: { [tenant]: samplePeople(at, tenant) },
     model: seedModel(at, tenant),
   };
 }
@@ -1208,6 +1413,7 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     return { tenant: shop, id: auditId(ms, seq), at: new Date(ms).toISOString(), actor, action, subject, outcome,
       ...(amountSatang !== undefined ? { amountSatang } : {}) };
   };
+  const helper: AuditActor = { kind: "helper", id: "helper-mint" };
   const reply = (actionId: string, messageId: string) => ({ taskId, actionId, messageId });
   const decided = (actionId: string) => ({ taskId, actionId });
   return [
@@ -1232,10 +1438,49 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     entry(tenant, 120, operator, "payment.recorded", { paymentId: "pay_2301" }, "ok", 129000),
     entry(tenant, 90, system, "memory.proposed", { factId: "f6" }, "awaiting_owner"),
     entry(tenant, 50, system, "memory.proposed", { factId: "f7" }, "awaiting_owner"),
+    // What the people of `samplePeople` did, by ids only: Mint invited and joined ten days ago, opened the shop on a second
+    // device, was set to cover yesterday, passed a note on this morning, and Beam was invited two hours ago.
+    entry(tenant, 10 * 24 * 60, operator, "invite.created", { inviteId: "inv-mint" }),
+    entry(tenant, 10 * 24 * 60 - 5, helper, "helper.joined", { inviteId: "inv-mint", helperId: "helper-mint" }),
+    entry(tenant, 2 * 24 * 60, helper, "helper.session_opened", { helperId: "helper-mint" }),
+    entry(tenant, 24 * 60, operator, "away.set", { helperId: "helper-mint" }),
+    entry(tenant, 180, helper, "request.passed_on", { requestId: "req_refund", taskId }),
+    entry(tenant, 120, operator, "invite.created", { inviteId: "inv-beam" }),
     entry(tenant, 70, operator, "reply.proposed", reply("act_tracking", "msg_tracking")),
     entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
     entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
   ];
+}
+
+/// Baan Mali's people as its sample world would have made them, by the package's own rules, as the design canvas's People
+/// board draws them: Mint, a helper for ten days with two devices, who covers messages until the end of the fourth day from
+/// now while Fon is away and passed on a note about a refund this morning; and Beam, invited on LINE two hours ago, whose
+/// link still waits. The ids are the ones `sampleAudit` names.
+function samplePeople(at: number, tenant: string): FakePeople {
+  const mint: Identity = { kind: "email", address: "mint@baanmali.example" };
+  const beam: Identity = { kind: "line", id: "beam.baanmali" };
+  const joinedAt = at - 10 * DAY_MS + 5 * MINUTE_MS;
+  const refused = (what: string, why: string) => new Error(`the sample ${what} was refused: ${why}`);
+  let state = peopleRules.emptyPeople(tenant, OWNER_ID);
+
+  const invitedMint = peopleRules.invite(state, "inv-mint", mint, at - 10 * DAY_MS);
+  if (!invitedMint.ok) throw refused("invite for Mint", invitedMint.refused);
+  const joined = peopleRules.acceptInvite(invitedMint.state, "inv-mint", mint, "helper-mint", "hs-mint-1", joinedAt);
+  if (joined.answer !== "joined") throw refused("joining of Mint", joined.answer);
+  const second = peopleRules.addSession(joined.state, "helper-mint", "hs-mint-2");
+  if (!second.ok) throw refused("second device of Mint", second.refused);
+  // "Until Friday" is the end of that day on the shop's calendar, the moment a date field's day ends at.
+  const until = Date.parse(endOfShopDay(formatIsoDate(new Date(at + 4 * DAY_MS).toISOString()))!);
+  const covering = peopleRules.setAway(second.state, "helper-mint", until, at - DAY_MS);
+  if (!covering.ok) throw refused("cover", covering.refused);
+  const note = peopleRules.passOn(covering.state, "helper-mint", { id: "req_refund", kind: "money", decided: null },
+    "The customer sent a photo of the broken jar. It looks right to me.", at - 3 * 60 * MINUTE_MS);
+  if (!note.ok) throw refused("note", note.refused);
+  const invitedBeam = peopleRules.invite(note.state, "inv-beam", beam, at - 2 * 60 * MINUTE_MS);
+  if (!invitedBeam.ok) throw refused("invite for Beam", invitedBeam.refused);
+  state = invitedBeam.state;
+
+  return { state, names: { "inv-mint": "Mint", "helper-mint": "Mint", "inv-beam": "Beam" } };
 }
 
 /// What Baan Mali's team knows, as its sample world would have taught it, and the design canvas's own sample facts: what Fon

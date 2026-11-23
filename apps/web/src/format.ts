@@ -78,6 +78,37 @@ export function formatStamp(iso: string, now: number = Date.now()): string {
   return dayOffset(iso, now) === 0 ? clock : `${formatDate(iso)} ${clock}`;
 }
 
+const weekdayFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: SHOP_TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+/// Friday 27 November: a day with its weekday, as the canvas writes "away until Friday 27 November". Built from the parts,
+/// as `formatIsoDate` is, so it never depends on how a locale happens to punctuate a date.
+export function formatWeekdayDate(iso: string): string {
+  const parts = weekdayFormat.formatToParts(new Date(iso));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("weekday")} ${part("day")} ${part("month")}`;
+}
+
+/// The shop's zone has no daylight saving, so its offset from UTC never changes.
+const SHOP_OFFSET = "+07:00";
+const CALENDAR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/// The last second of a day on the shop's calendar ("2026-11-27", as a date field writes it), as an ISO 8601 time in UTC:
+/// the moment an owner who says "until Friday" is still away at. Null for anything that is not a day that exists.
+export function endOfShopDay(day: string): string | null {
+  if (!CALENDAR_DAY.test(day)) return null;
+  const ms = Date.parse(`${day}T23:59:59${SHOP_OFFSET}`);
+  if (!Number.isFinite(ms)) return null;
+  // A day that does not exist ("2026-02-30") may be rolled into the next month: only a time that reads back as the same
+  // day on the shop's calendar is that day.
+  const iso = new Date(ms).toISOString();
+  return formatIsoDate(iso) === day ? iso : null;
+}
+
 /// Thai text gets `lang="th"` so it is read and shaped as Thai; anything else is left to the page language.
 export function langOf(text: string): "th" | undefined {
   return /[฀-๿]/.test(text) ? "th" : undefined;
