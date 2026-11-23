@@ -52,7 +52,7 @@ export async function tenantCall(
 
 /// Assembles a tenant's task documents with their histories, connection
 /// metadata, site sign-ins and outposts (no secret), schedules, consent, inbound attention items, pilot records,
-/// model meter, audit log, memory, people and deletion tombstone. Each task answers with its document, event
+/// routines, model meter, audit log, memory, people and deletion tombstone. Each task answers with its document, event
 /// log, action proposals and attempts, so the export no longer leaves the
 /// history behind (the old "task record only" gap is closed below).
 ///
@@ -108,6 +108,11 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
   const pilotResp = await tenantCall(env, tenant, `/pilot/export?${query}`);
   if (!pilotResp.ok) failed.push("pilot");
   const pilot: unknown = pilotResp.ok ? await pilotResp.json() : null;
+  // The team's routines, whether it is paused, a shop template's first-week questions (an answer is a memory fact,
+  // below), and every run kept (routine-store.ts).
+  const routinesResp = await tenantCall(env, tenant, `/routines/export?${query}`);
+  if (!routinesResp.ok) failed.push("routines");
+  const routines: unknown = routinesResp.ok ? await routinesResp.json() : null;
   // The model gateway's meter: the cap override, monthly totals, open
   // reservations and one metadata record per model call (model-meter.ts).
   const modelResp = await tenantCall(env, tenant, `/model/export?${query}`);
@@ -153,6 +158,7 @@ async function assembleExport(env: TenantDataEnv, tenant: string): Promise<Respo
     consent,
     attention: attention.items ?? [],
     pilot,
+    routines,
     model,
     audit,
     memory,

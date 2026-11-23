@@ -6,6 +6,7 @@ import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
 import { modelTenantRoute, wipeModelTenant } from "./model-meter";
 import { peopleTenantRoute, wipePeopleTenant } from "./people-store";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
+import { routineTenantRoute, wipeRoutineTenant } from "./routine-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
 /// Attention items kept per tenant, newest last. Older items fall off rather
@@ -57,6 +58,11 @@ export class TenantObject extends DurableObject {
     // reservations and one metering record per call (model-meter.ts).
     if (url.pathname.startsWith("/model/")) {
       return modelTenantRoute(this.ctx.storage, request, url);
+    }
+    // The team's routines and their runs, whether the team is paused, and a shop template's first-week questions
+    // (routine-store.ts).
+    if (url.pathname === "/routines" || url.pathname.startsWith("/routines/")) {
+      return routineTenantRoute(this.ctx.storage, request, url);
     }
     // The shop's audit log: who did what and when, metadata only (audit-log.ts).
     if (url.pathname === "/audit" || url.pathname.startsWith("/audit/")) {
@@ -196,7 +202,8 @@ export class TenantObject extends DurableObject {
   }
 
   /// Wipes the tenant's consent, task index, attention items, pilot records
-  /// (shop, customer messages, replies, payments), model meter (cap
+  /// (shop, customer messages, replies, payments), routines (the team's
+  /// setup, its first-week questions and every run), model meter (cap
   /// override, monthly totals, reservations, per-call records), audit log
   /// (entries and the miss count), memory (facts and the fingerprints of
   /// forgotten texts) and people (helpers, invites and every helper
@@ -219,6 +226,7 @@ export class TenantObject extends DurableObject {
     await this.ctx.storage.delete(`consent:${body.tenant}`);
     await this.ctx.storage.delete([`attention:${body.tenant}`, `attention-deliveries:${body.tenant}`]);
     await wipePilotTenant(this.ctx.storage, body.tenant);
+    await wipeRoutineTenant(this.ctx.storage, body.tenant);
     await wipeModelTenant(this.ctx.storage, body.tenant);
     await wipeMemoryTenant(this.ctx.storage, body.tenant);
     await wipePeopleTenant(this.ctx.storage, body.tenant);

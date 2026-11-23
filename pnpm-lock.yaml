@@ -192,9 +192,15 @@ importers:
       '@manut/people-rules':
         specifier: workspace:*
         version: link:../../packages/people-rules
+      '@manut/routine-rules':
+        specifier: workspace:*
+        version: link:../../packages/routine-rules
       '@manut/shop-memory':
         specifier: workspace:*
         version: link:../../packages/shop-memory
+      '@manut/shop-templates':
+        specifier: workspace:*
+        version: link:../../packages/shop-templates
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.6.0

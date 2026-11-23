@@ -59,6 +59,8 @@ export type Shop = {
   name: string;
   ownerName: string;
   lineConnectionId?: string;
+  /// The shop template it was made from, when it was.
+  template?: string;
   consent: boolean;
   deletion?: DeletionRequest;
 };
@@ -147,8 +149,31 @@ export type PilotGate = {
   cohort: { counted: number; paid: GateMeasure; active: GateMeasure; status: GateStatus };
 };
 
-export type NewShop = { name: string; ownerName: string };
-export type CreatedShop = { tenant: string; name: string; ownerName: string };
+/// `template` is a shop template's id (`GET /v1/admin/templates`); left out, the shop starts with none.
+export type NewShop = { name: string; ownerName: string; template?: string };
+export type CreatedShop = { tenant: string; name: string; ownerName: string; template?: string };
+
+/// A shop template a new shop can start from, in the API's own words (`@manut/shop-templates`): the members it turns
+/// on, its routines (each made paused until the owner turns it on), and what Buddy asks the owner in the first week.
+export type ShopTemplate = {
+  id: string;
+  name: string;
+  /// One line saying which shops it fits.
+  fits: string;
+  team: string[];
+  routines: { when: string; does: string; asksFirst: boolean }[];
+  questions: string[];
+};
+
+/// One first-week question and its answer as the team now knows it: the owner's fact, whose words are null once the
+/// owner had the team forget it.
+export type ShopQuestion = {
+  id: string;
+  text: string;
+  answer: { factId: string; text: string | null; answeredAt: string } | null;
+};
+export type ShopQuestions = { tenant: string; template: string | null; questions: ShopQuestion[] };
+export type NewAnswer = { tenant: string; questionId: string; text: string };
 
 export type NewLineConnection = {
   tenant: string;
@@ -449,8 +474,16 @@ export interface PilotApi {
   giveConsent(token: string): Promise<ApprovalView>;
   decide(token: string, approve: boolean): Promise<ApprovalView>;
 
+  /// Rejects with 400 `unknown_template`, making no shop, for a template that is not one of the API's.
   createShop(input: NewShop): Promise<CreatedShop>;
   listShops(): Promise<Shop[]>;
+  /// `GET /v1/admin/templates`: the shop templates a new shop can start from.
+  listTemplates(): Promise<ShopTemplate[]>;
+  /// `GET /v1/admin/questions`: what Buddy asks a shop's owner in the first week, from its template, with each answer.
+  getQuestions(tenant: string): Promise<ShopQuestions>;
+  /// `POST /v1/admin/questions/answer`: the owner's answer, relayed by the operator, becomes the owner's own fact. Rejects
+  /// with 409 `already_answered`, 404 `not_found`, 400 `invalid_text`, or memory's 409 `already_known` or `full`.
+  answerQuestion(input: NewAnswer): Promise<ShopQuestion>;
   createLineConnection(input: NewLineConnection): Promise<CreatedLineConnection>;
   listMessages(tenant: string): Promise<InboundMessage[]>;
   proposeReply(input: NewReply): Promise<ProposedReply>;
