@@ -3,7 +3,7 @@
 // sign-in state and restart Settings › Developer shows. The runtime choice is read once at start (index.ts), so these
 // read that choice, while Settings shows the choice saved for the next start.
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { hhmm, monthDay, sameDay } from "../app/time";
+import { dayTime } from "../app/time";
 import type { Key } from "../i18n";
 import type { RuntimeKind } from "./adapter";
 import { forgetShop, sessionFor, sharedHttpHost, type CacheView, type HttpHost, type LinkState } from "./http";
@@ -22,8 +22,7 @@ const LINK_KEY: Record<LinkState, Key> = {
 /** When a kept read was made, as the mode line says it: "14:05" on the day it was read, and the day first on any other
  *  day ("Nov 22 14:05"), so a read from yesterday is never taken for one from this morning. */
 export function readTime(at: number, now: number = Date.now()): string {
-  const d = new Date(at);
-  return sameDay(at / 1000, now / 1000) ? hhmm(d) : `${monthDay(d)} ${hhmm(d)}`;
+  return dayTime(at, now);
 }
 
 /** The mode line's words: Practice, or the host and how the link to it stands. While the API cannot be reached (offline,

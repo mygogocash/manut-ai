@@ -214,6 +214,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@manut/approval-core':
+        specifier: workspace:*
+        version: link:../../packages/approval-core
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules

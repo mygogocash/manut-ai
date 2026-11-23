@@ -32,6 +32,16 @@ export function dayLabel(ts: number, nowMs = Date.now()): string {
 
 export const sameDay = (a: number, b: number) => startOfDay(new Date(a * 1000)) === startOfDay(new Date(b * 1000));
 
+/** A moment as a one-line note says it: "14:05" on the day it is, and the day first on any other day ("Nov 22 14:05"),
+ *  so a time from yesterday is never taken for one from this morning. Both in ms. */
+export function dayTime(atMs: number, nowMs = Date.now()): string {
+  const d = new Date(atMs);
+  return sameDay(atMs / 1000, nowMs / 1000) ? hhmm(d) : `${monthDay(d)} ${hhmm(d)}`;
+}
+
+/** A day in full: "Sunday, November 22" / "11月22日星期日". `atMs` in ms. */
+export const longDay = (atMs: number) => new Date(atMs).toLocaleDateString(locale(), { weekday: "long", month: "long", day: "numeric" });
+
 /** "38s", "2m 41s", "1h 4m". */
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

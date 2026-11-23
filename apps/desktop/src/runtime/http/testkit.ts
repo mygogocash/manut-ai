@@ -2,6 +2,7 @@
 // keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
 // shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
 // without a shell or a network.
+import { decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
 import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
 import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
@@ -265,6 +266,55 @@ export function storedSession(now: number, over: Record<string, unknown> = {}): 
     signedInAt: now,
     ...over,
   });
+}
+
+/** What every request the API opens offers: approve or decline the exact action (`JOB_REQUEST_OPTIONS` in task-object.ts). */
+export const OPTIONS = [
+  { id: "approve", label: "Approve", effect: "approve" },
+  { id: "decline", label: "Decline", effect: "decline" },
+];
+
+/** What a LINE reply's request names (`replyRequest` in task-object.ts, `ReplyDetail` in docs/pilot-api.md). */
+export function replyDetail(id = "action-1", text = "Your order ships tomorrow morning.") {
+  return { actionId: id, operationType: "line.message.push", targetResourceId: "bot-user-1", recipient: "U-customer", text, payloadHash: "hash" };
+}
+
+export interface ApprovalOver {
+  id?: string;
+  taskId?: string;
+  kind?: string;
+  revision?: number;
+  status?: string;
+  options?: unknown[];
+  detail?: unknown;
+  createdAt?: number;
+  expiresAt?: number;
+  attemptId?: string;
+  decision?: Record<string, unknown>;
+  standing?: Record<string, unknown>;
+  passedOn?: Record<string, unknown>;
+}
+
+/** One entry of `GET /v1/approvals`: a request and where it stands, as approval-core's wire JSON, encoded the way the API
+ *  encodes it (`encodeRecord(decodeRecord(record))` in approvals.ts). By default a LINE reply waiting for the owner. */
+export function approvalJson(over: ApprovalOver = {}) {
+  const id = over.id ?? "action-1";
+  const request = {
+    id,
+    kind: over.kind ?? "reply",
+    options: over.options ?? OPTIONS,
+    revision: over.revision ?? 1,
+    createdAt: over.createdAt ?? T0 + 90_000,
+    expiresAt: over.expiresAt ?? T0 + 24 * 3600_000,
+    ...(over.attemptId ? { attemptId: over.attemptId } : {}),
+    detail: over.detail ?? replyDetail(id),
+  };
+  return {
+    taskId: over.taskId ?? "task-1",
+    record: encodeRecord(decodeRecord({ status: over.status ?? "pending", request, ...(over.decision ? { decision: over.decision } : {}) })),
+    standing: over.standing ?? encodeStanding({ state: "open", reason: "waiting" }),
+    ...(over.passedOn ? { passedOn: over.passedOn } : {}),
+  };
 }
 
 /** Serves the three routes a read of the shop makes. Later calls to `api.on` replace one of them. */
