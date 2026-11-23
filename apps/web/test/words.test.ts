@@ -20,9 +20,19 @@ import {
   deletedText,
   deleteRefusalText,
   deleteWhatText,
+  draftSendText,
+  draftsErrorText,
+  draftsWords,
   errorText,
   factSourceText,
   gateWords,
+  jobAboutText,
+  jobEndingNote,
+  jobEndingTag,
+  jobKindText,
+  jobReasonText,
+  memberName,
+  memberRole,
   memoryErrorText,
   memoryWords,
   modelErrorText,
@@ -31,6 +41,7 @@ import {
   monthName,
   monthsBack,
   percentUsed,
+  shopsWords,
   spendLevel,
   subscriptionErrorText,
   unfinishedText,
@@ -449,5 +460,133 @@ describe("the model spend page's words", () => {
   it("holds the form's refusals, which name the limit from the API's own", () => {
     expect(modelSpendWords.badCap).toBe("Write the cap in baht, like 300 or 300.50. It must be more than ฿0.");
     expect(modelSpendWords.tooBigCap).toBe("The cap can be at most ฿10,000,000.");
+  });
+});
+
+describe("the drafts page's words", () => {
+  it("says plainly, in the intro and on every draft, that nothing has been sent and that this page cannot send it", () => {
+    expect(draftsWords.intro).toContain("has not been sent to anyone");
+    expect(draftsWords.intro).toContain("nothing on this page sends it");
+    expect(draftsWords.notSent).toBe("Not sent");
+    expect(draftsWords.notSentNote).toBe("This is a draft. It has not been sent to anyone.");
+    // No word on the page offers to send: the only verbs about sending say it is not done.
+    for (const text of [draftsWords.nav, draftsWords.title, draftsWords.refresh, draftsWords.older, draftsWords.notSent]) {
+      expect(text).not.toMatch(/\bsend\b/i);
+    }
+  });
+
+  it("names the members as people say them, with the part each plays, and shows one it does not know as it is", () => {
+    expect([memberName("nam"), memberName("pim"), memberName("ton")]).toEqual(["Nam", "Pim", "Ton"]);
+    expect([memberRole("nam"), memberRole("pim"), memberRole("ton")]).toEqual(["sales chat", "content", "books"]);
+    expect(memberName("kit")).toBe("kit");
+    expect(memberRole("kit")).toBeNull();
+    // An own property only: a name that is on every object is not a member.
+    expect(memberName("constructor")).toBe("constructor");
+    expect(memberRole("toString")).toBeNull();
+  });
+
+  it("names each kind of job, and shows a kind it does not know as it is", () => {
+    expect([jobKindText("reply"), jobKindText("post"), jobKindText("daily_summary")]).toEqual([
+      "Reply to a customer", "Post", "Sales summary"]);
+    expect(jobKindText("refund")).toBe("refund");
+  });
+
+  it("tags each ending, naming the owner who is waited for and the member a job was passed to", () => {
+    expect(jobEndingTag({ state: "running" }, "Fon")).toEqual({ label: "Running", className: "tag run" });
+    expect(jobEndingTag({ state: "done" }, "Fon")).toEqual({ label: "Done", className: "tag ok" });
+    expect(jobEndingTag({ state: "failed", reason: "budget" }, "Fon")).toEqual({ label: "Failed", className: "tag err" });
+    expect(jobEndingTag({ state: "awaiting_owner" }, "Fon")).toEqual({ label: "Waiting for Fon", className: "tag warn" });
+    expect(jobEndingTag({ state: "handed_over", to: "ton" }, "Fon")).toEqual({ label: "Passed to Ton", className: "tag" });
+    expect(jobEndingTag({ state: "cancelled" }, "Fon")).toEqual({ label: "Cancelled", className: "tag" });
+    // A state a newer API sends is shown as it is, never dropped.
+    expect(jobEndingTag({ state: "paused" } as never, "Fon")).toEqual({ label: "paused", className: "tag" });
+  });
+
+  it("says in a line how a job that did not simply finish stands", () => {
+    expect(jobEndingNote({ state: "done" })).toBeNull();
+    expect(jobEndingNote({ state: "running" })).toBe("Still working on it.");
+    expect(jobEndingNote({ state: "failed", reason: "budget" })).toBe("The shop's model budget ran out.");
+    expect(jobEndingNote({ state: "awaiting_owner" })).toBe("Asked for an approval and stopped until it is answered.");
+    expect(jobEndingNote({ state: "handed_over", to: "nam" })).toBe("Nam has not taken it up yet.");
+    expect(jobEndingNote({ state: "cancelled" })).toBe("It was stopped before it finished.");
+    expect(jobEndingNote({ state: "paused" } as never)).toBeNull();
+  });
+
+  it("explains why a job failed in plain words, and shows a code it does not know as it is", () => {
+    expect(jobReasonText("not_connected")).toBe("The shop's LINE connection to that customer is gone.");
+    expect(jobReasonText("payments_unavailable")).toBe("The shop's recorded payments could not be read.");
+    expect(jobReasonText("empty_draft")).toBe("The model wrote nothing, so there is no draft.");
+    expect(jobReasonText("unknown")).toBe("It ended without saying why.");
+    // The attempt's own codes keep the audit page's words.
+    expect(jobReasonText("budget")).toBe("The shop's model budget ran out.");
+    expect(jobReasonText("silent")).toBe("The worker stopped reporting.");
+    expect(jobReasonText("deadline")).toBe("The attempt ran out of time.");
+    expect(jobReasonText("flood")).toBe("Reason: flood.");
+    expect(jobReasonText("constructor")).toBe("Reason: constructor.");
+  });
+
+  it("says what a draft is about: the message a reply answers, the day a summary covers", () => {
+    expect(jobAboutText({ messageId: "msg_nok" })).toBe("Answers message msg_nok");
+    expect(jobAboutText({ date: "2026-11-21" })).toBe("Sales on 21 November");
+    expect(jobAboutText({ messageId: "msg_1", date: "2026-11-21" })).toBe("Answers message msg_1 · Sales on 21 November");
+    expect(jobAboutText({ date: "last Friday" })).toBe("Sales on last Friday");
+    expect(jobAboutText({})).toBeNull();
+    expect(jobAboutText(undefined)).toBeNull();
+  });
+
+  it("says what sending a reply would take, which is never sending it here", () => {
+    expect(draftSendText({ answer: "ask", kind: "reply" }, "Fon")).toBe(
+      "To send it, propose it as a reply on the Messages tab. Fon approves it before anything is sent.");
+    expect(draftSendText({ answer: "draft_only", kind: "reply" }, "Fon")).toBe(
+      "The shop's LINE connection is still in practice mode, so a reply can only be drafted for now.");
+    expect(draftSendText(undefined, "Fon")).toBeNull();
+    expect(draftSendText({ answer: "ask", kind: "post" }, "Fon")).toBeNull();
+  });
+
+  it("writes a cost as baht from whole satang, and a handover as one sentence", () => {
+    expect(draftsWords.cost(2)).toBe("Model cost ฿0.02");
+    expect(draftsWords.cost(129000)).toBe("Model cost ฿1,290");
+    expect(draftsWords.cost(0)).toBe("Model cost ฿0");
+    // A figure the API never sends is shown as unknown, not as a wrong amount.
+    expect(draftsWords.cost(1.5)).toBe("Model cost unknown");
+    expect(draftsWords.passed("nam", "ton")).toBe("Nam passed this job to Ton.");
+    expect(draftsWords.listLabel("Baan Mali")).toBe("Baan Mali's worker jobs");
+  });
+
+  it("puts the drafts route's own refusals in words, and the console's usual words for the rest", () => {
+    expect(draftsErrorText(new ApiError(503, "drafts_unavailable"))).toBe("The API could not read this shop's jobs. Try again.");
+    expect(draftsErrorText(new ApiError(503, "shop_unavailable"))).toBe("The API could not read this shop's record. Try again.");
+    expect(draftsErrorText(new ApiError(404, "shop_not_found"))).toBe(errorText(new ApiError(404, "shop_not_found")));
+    expect(draftsErrorText(new ApiError(403, "forbidden"))).toMatch(/refused the operator key/);
+    expect(draftsErrorText(new ApiError(0, "network"))).toBe("Could not reach the API. Check the connection and try again.");
+  });
+});
+
+describe("the shops overview's words", () => {
+  it("names each part of a shop that could not be read, and which shop it was", () => {
+    expect(shopsWords.shopsFailed([{ name: "Sabai Tea", parts: ["model spend"] }])).toBe(
+      "Some shops could not be read in full: Sabai Tea (model spend). Try again.");
+    expect(shopsWords.shopsFailed([
+      { name: "Sabai Tea", parts: ["model spend", "audit log"] },
+      { name: "Baan Mali", parts: ["audit log"] },
+    ])).toBe(
+      "Some shops could not be read in full: Sabai Tea (model spend and audit log) and Baan Mali (audit log). Try again.");
+    expect(shopsWords.parts).toEqual({ usage: "model spend", audit: "audit log" });
+  });
+
+  it("writes a month's spend against the cap as baht, and names the page each link opens for the shop", () => {
+    expect(shopsWords.spendOf(18600, 30000)).toBe("฿186 of ฿300");
+    expect(shopsWords.spendOf(0, 20000)).toBe("฿0 of ฿200");
+    expect(shopsWords.spendOf(5, 20000)).toBe("฿0.05 of ฿200");
+    expect(shopsWords.openLabel("Audit", "Baan Mali")).toBe("Audit for Baan Mali");
+    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "Model spend"]);
+  });
+
+  it("says why nothing is shown for the trial, payment and activity when the gate could not be read", () => {
+    expect(shopsWords.gateFailed).toBe(
+      "The pilot gate could not be read, so trials, payments and activity are not shown. Try again.");
+    expect(shopsWords.unreadable).toBe("Could not be read");
+    expect(shopsWords.columns.active(14)).toBe("Active on day 14");
+    expect(shopsWords.columns.activeUnknown).toBe("Active");
   });
 });
