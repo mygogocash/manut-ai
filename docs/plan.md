@@ -57,6 +57,8 @@ argument so Thai can be added later.
 
 Done when: the cases above and their edges (midnight, year change, zero and negative amounts refused) are tested.
 
+Done on cloud/format, 23 Nov 2026: `packages/format` with money, typed-amount parsing, VAT split and relative times (55 tests).
+
 ### slip-rules
 `packages/slip-rules` (`@manut/slip-rules`). Pure rules that compare a payment slip, already read into fields,
 with an order. Reading the image is not part of this task.

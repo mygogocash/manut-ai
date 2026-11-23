@@ -1,0 +1,15 @@
+{
+  "name": "@manut/format",
+  "private": true,
+  "type": "module",
+  "description": "How the app writes money and times: integer satang to text, typed text to satang, VAT split, relative times.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
