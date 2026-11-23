@@ -107,11 +107,23 @@ const keys = {
   payment: (tenant: string, id: string) => `pilot-pay:${enc(tenant)}:${id}`,
 };
 
+/// The last clock and sequence an id was issued with, in this isolate.
+let lastIssued = { ms: 0, seq: -1 };
+
 /// Ids that sort by creation time: a fixed-width base-36 millisecond clock,
-/// a sequence within the call, then randomness. Lists read newest first by
-/// walking keys backwards instead of loading and sorting everything.
-function sortableId(prefix: string, ms: number, seq: number): string {
-  return `${prefix}-${ms.toString(36).padStart(9, "0")}-${seq.toString(36).padStart(3, "0")}-${crypto.randomUUID().slice(0, 8)}`;
+/// a sequence, then randomness. Lists read newest first by walking keys
+/// backwards instead of loading and sorting everything, so ids must sort in
+/// the order they were made. Two calls in the same millisecond (Workers'
+/// clock only moves on I/O), or a clock that steps back, continue from the
+/// last id issued instead of letting the random tail decide their order.
+/// `seq` orders several ids made in one call (one webhook's messages).
+export function sortableId(prefix: string, ms: number, seq: number): string {
+  let issued = { ms, seq };
+  if (ms < lastIssued.ms || (ms === lastIssued.ms && seq <= lastIssued.seq)) {
+    issued = { ms: lastIssued.ms, seq: lastIssued.seq + 1 };
+  }
+  lastIssued = issued;
+  return `${prefix}-${issued.ms.toString(36).padStart(9, "0")}-${issued.seq.toString(36).padStart(3, "0")}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 async function putAll(storage: DurableObjectStorage, entries: [string, unknown][]): Promise<void> {
