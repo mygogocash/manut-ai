@@ -14,6 +14,7 @@ import {
   parseQuiet,
   presentOutside,
   quietHours,
+  quietNow,
   routeAction,
   setHideDetails,
   setQuietHours,
@@ -27,8 +28,6 @@ const at = (hhmm: string, day = 24) => Date.parse(`2026-11-${String(day).padStar
 const ctx = (over: Partial<PresentContext> = {}): PresentContext => ({ hideDetails: false, quiet: DEFAULT_QUIET, now: at("12:00"), waiting: 1, ...over });
 const ask = (kind: string, over: Partial<RequestInfo> = {}): Outside => ({
   kind: "request",
-  id: "req-5@1",
-  bot: "buddy",
   approval: kind,
   member: "Nam",
   summary: "Send on LINE: “Thanks, Mali!”",
@@ -210,6 +209,17 @@ describe("the buttons' words", () => {
   });
 });
 
+describe("the buttons' titles, which macOS builds its Options menu from", () => {
+  it("never hold a comma: the menu is made from one comma-joined list, so a comma would split a button in two", () => {
+    for (const l of LANGS) {
+      setLang(l);
+      for (const src of [ask("reply"), ask("money"), { kind: "notice", title: "x", body: "y" } as Outside]) {
+        for (const a of presentOutside(src, ctx())!.actions) expect(a.title, `${l} ${a.id}`).not.toMatch(/[,，、]/);
+      }
+    }
+  });
+});
+
 describe("reading a pressed button", () => {
   const withApprove = presentOutside(ask("reply"), ctx())!;
   const withoutApprove = presentOutside(ask("money"), ctx())!;
@@ -316,5 +326,19 @@ describe("the number on the Dock icon", () => {
   });
   it("stops at 99, as the Dock cuts longer labels", () => {
     expect(dockCount(new Array(150).fill({}))).toBe(99);
+  });
+});
+
+describe("whether it is quiet now", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("follows the quiet hours the owner chose, in Bangkok time", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    expect(quietNow(at("23:30"))).toBe(true);
+    expect(quietNow(at("12:00"))).toBe(false);
+    vi.stubGlobal("localStorage", { getItem: (k: string) => (k === "manut.notify.quiet" ? "11:00-13:00" : null), setItem: () => {} });
+    expect(quietNow(at("12:00"))).toBe(true);
+    expect(quietNow(at("23:30"))).toBe(false);
+    vi.stubGlobal("localStorage", { getItem: (k: string) => (k === "manut.notify.quiet" ? "00:00-00:00" : null), setItem: () => {} });
+    expect(quietNow(at("03:00"))).toBe(false);
   });
 });

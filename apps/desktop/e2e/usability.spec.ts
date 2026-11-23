@@ -81,12 +81,12 @@ test("a background answer and an approval raise notifications; a watched chat ra
   const body = (await notes(page))[0].body as string;
   expect(body).not.toMatch(/[`*#]/);
 
-  // an approval waiting in the background notifies too, naming the command
+  // an approval waiting in the background notifies too, naming who asks and the command (notify-rules: "<member> needs you")
   await send(page, "/approve clean the build");
   await expect.poll(async () => (await notes(page)).map((n: any) => n.title), { timeout: 10_000 }).toContain(
-    "Kami needs your approval",
+    "Kami needs you",
   );
-  expect((await notes(page)).find((n: any) => n.title === "Kami needs your approval").body).toBe("rm -rf ./build");
+  expect((await notes(page)).find((n: any) => n.title === "Kami needs you").body).toBe("rm -rf ./build");
 });
 
 test("Notify me can be turned off in Settings and stays off", async ({ page }) => {

@@ -95,7 +95,7 @@ test("an empty question followed by a texted one within 8 s rings once", async (
   await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q0", question: "" }] });
   await page.waitForTimeout(1500);
   await mock("mock.emit", { events: [{ event: "clarify.request", bot: "friren", request_id: "q1", question: "Which branch should I deploy? main or next." }] });
-  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([{ title: "Friren has a question", body: "Which branch should I deploy?" }]);
+  await expect.poll(() => notes(page), { timeout: 10_000 }).toEqual([{ title: "Friren needs you", body: "Which branch should I deploy?" }]);
   await page.waitForTimeout(8000);
   expect(await notes(page)).toHaveLength(1);
 });

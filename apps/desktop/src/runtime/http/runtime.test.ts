@@ -191,6 +191,7 @@ describe("reading", () => {
         title: "Reply to Khun Mali",
         command: "Send on LINE: “Your order ships tomorrow morning.”",
         choices: ["once", "deny"],
+        kind: "reply",
       },
     ]);
   });

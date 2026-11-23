@@ -14,6 +14,7 @@
 import {
   badgeCount as requestsWaiting,
   DEFAULT_QUIET_HOURS,
+  inQuietHours,
   notificationFor,
   type ButtonId,
   type NotifyEvent,
@@ -30,10 +31,6 @@ export const DEFAULT_QUIET: QuietHours = DEFAULT_QUIET_HOURS;
 
 /** A request waiting for the owner. */
 export interface RequestInfo {
-  /** The ask's id with the revision shown, `req-5@1`: the card's own. */
-  id: string;
-  /** The bot whose chat holds the card. */
-  bot: string;
   /** approval-core's kind of the request, as text; "" when it has none (a bot's question, a terminal's ring, a request this
    *  build reads no kind for). notify-rules treats a kind it does not know as owner-only. */
   approval: string;
@@ -110,6 +107,9 @@ export const formatQuiet = (q: QuietHours): string => `${q.start}-${q.end}`;
 export const quietHours = (): QuietHours => parseQuiet(read(QUIET_KEY));
 export const setQuietHours = (q: QuietHours): void => write(QUIET_KEY, formatQuiet(q));
 
+/** Whether `now` (ms) falls in the owner's quiet hours: "Nothing makes a sound", the app's own sounds included. */
+export const quietNow = (now: number): boolean => inQuietHours(now, { quietHours: quietHours() });
+
 /** Both settings, as read now. */
 export const outsideSettings = (): { hideDetails: boolean; quiet: QuietHours } => ({ hideDetails: hideDetails(), quiet: quietHours() });
 
@@ -139,8 +139,6 @@ export interface Shown {
   sound: boolean;
   /** Its buttons in the order the system gets them: the one that does something is last. */
   actions: ShownAction[];
-  /** The request it is about, so a pressed button finds its card. */
-  ask?: { id: string; bot: string };
   /** The wake a "waited while the Mac slept" notice is for, so it is shown once. */
   wokeAt?: number;
 }
@@ -195,7 +193,6 @@ export function presentOutside(src: Outside, c: PresentContext): Shown | null {
     body,
     sound: rule.sound,
     actions: ordered.map((b) => ({ id: b.id, title: t(LABEL[b.id]) })),
-    ...(src.kind === "request" ? { ask: { id: src.id, bot: src.bot } } : {}),
     ...(src.kind === "slept" ? { wokeAt: src.wokeAt } : {}),
   };
 }

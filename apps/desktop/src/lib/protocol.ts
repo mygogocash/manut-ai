@@ -684,6 +684,10 @@ export type BridgeEvent =
       /** This app cannot answer it: its kind, an answer it offers or where it stands is one this version does not know.
        *  It is shown, with no answer offered, and says to update the app (the connected runtime's approvals). */
       outdated?: boolean;
+      /** approval-core's kind of the request, as text (`message`, `reply`, `money`, …; one this build does not know is the
+       *  text the API sent): what a notification may offer depends on it (notify-rules). Only the connected runtime's asks
+       *  carry one; any other ask has none, which a notification reads as owner-only. */
+      kind?: string;
     })
   | (EventBase & {
       event: "clarify.request";
