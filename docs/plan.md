@@ -61,7 +61,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run, a connected runtime (Settings › Developer) that reads the shop and answers its approvals through the session decide route, and the offline cache; real sign-in needs the owner (an Apple developer team, or LINE Login, which is parked) |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial (LINE built; the Google Sheets append request for Ton's books is `@manut/sheets-rows`, sending it needs the owner's Google connection; the rest need the owner's applications, `docs/connectors.md`) |
-| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines run on the schedule object and a shop made from a template gets its routines and first-week questions (runs wait for the owner's switches); the outpost's browser is next. Parked by the owner: PromptPay billing and the LINE client |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: the vault's site sign-ins and outposts (browser control's first slice), routine and template rules, the desktop's routines page, the console (gate, audit, memory, model spend) are built; routines run on the schedule object and a shop made from a template gets its routines and first-week questions (runs wait for the owner's switches); the outpost's step channel (open, read and sign-in steps to one outpost and back, no password in either) with a rate limit, removal and credential rotation; the outpost in the desktop shell is being built. Parked by the owner: PromptPay billing and the LINE client |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial: more roles built (the owner's helpers, deciding from a session by role); three shop kinds as templates; the desktop fork's terminals and coding sessions; several shops in one view is built on the API side (`docs/several-shops.md`), with the desktop's switcher next; computer control is in the December plan (the outpost's step channel first); phone apps wait for the desktop |
 
 ## December engineering (the owner's go, 23 Nov 2026)
@@ -78,14 +78,24 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | The owner's helpers, and deciding approvals from a session | | Opus |
 | done | 2 and 3. Routines running on schedule, and applying a shop template (runs wait for the owner's `officeRoutines` and `officeCloud` switches) | | Opus |
 | done | Browser control, first slice: vault sign-ins and outposts | | Opus |
+| done | 8a. The outpost's step channel in the API: workers' browser steps (open, read, sign in) reach an outpost and land in the attempt's events; removing an outpost and replacing its credential; an ingress limit on the outpost routes | | Opus |
 | done | 4. Console: the People page | | Sonnet |
 | done | 7. Several shops in one view: the design and the API side (`docs/several-shops.md`); the desktop switcher is next | | Opus |
+| done | Several shops: the console's owner link, and ending a shop session (`docs/several-shops.md`, slices 3 and 5) | | Sonnet |
 | done | The Playwright revival (pull request #15): 555 specs pass in CI | | Haiku |
 | done | 11. Playwright follow-up: the 31 specs still failing (the old sidebar's Tasks bar, zoomed split panes, reply there, a font width on Linux) and the 219 the 35-minute cap leaves unrun (shard the job): all 31 fixed or deleted, and six shards run every spec | | Sonnet |
 | done | 9. Desktop leftovers (the Team page's member menu and lines, Needs you, History's chips) and three app bugs the revival found (the undo toast, the folder reveal, the usage caret) | | Sonnet |
-| running | 6. macOS notifications on `@manut/notify-rules` | | Sonnet |
+| done | 6. macOS notifications on `@manut/notify-rules`: every notification and the Dock count follow its rules, Approve for messages and replies only, Hide details and quiet hours in Settings | | Sonnet |
 | 10 | A join page for helpers' invite links (`/join/{token}`), once real sign-in exists | sign-in (owner) | Sonnet |
-| 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
+| running | 8b. The outpost in the desktop shell (this Mac): registering, heartbeat, fetching steps, typing a sign-in only on its origins, reporting | | Opus |
+| running | Browser control, slice 2: a write step (`submit`) asked for through member-grants' decide and one approval-core request naming the exact site, page and values (API) | | Opus |
+| running | Several shops, slice 2: the desktop's switcher in the account row, one Needs you across the shops with each decision sent with its own shop's session, and each shop's offline cache kept apart | | Opus |
+| 12 | The desktop outpost running an approved submit step | 8b, browser control slice 2 | Opus |
+| 13 | Several shops, slice 4: an owner's shop session reaches the shop's consent, export and memory, and the owner manages helpers (invite, remove, cover) from it, each route its own decision (`docs/several-shops.md`, `docs/people.md` "Not built yet") | | Opus |
+| 14 | Who decided: the owner's link page names the helper who approved or declined a reply, from the names the shop's people record keeps | | Sonnet |
+| 15 | A helper's new device: the owner's session reads the shop's new helper sessions, and the desktop shows notify-rules' `new_device` alert | 13 | Sonnet |
+| 16 | Deletion follow-up: a shop whose wipe stopped after its registry row went stays in the console's list as deleting, and its wipe can be resumed | | Sonnet |
+| 17 | The owner's pages as an installable web app on a phone (a manifest, icons and an offline page; no app store) | | Sonnet |
 
 ## Queue for cloud routines
 
@@ -405,3 +415,5 @@ Done when: each event kind, the Approve rule for every approval kind, hidden det
 setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.
 
 Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).
+Wired into the desktop on 24 Nov 2026 (December item 6, merged into `pilot/week-1`): every notification and the Dock badge
+go through it, with a `notice` event added for news that asks nothing (24 tests).

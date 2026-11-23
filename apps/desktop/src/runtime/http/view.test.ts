@@ -144,8 +144,17 @@ describe("what waits for the owner", () => {
         title: "Reply to Khun Mali",
         command: "Send on LINE: “Your order ships tomorrow morning.”",
         choices: ["once", "deny"],
+        kind: "reply",
       },
     ]);
+  });
+
+  it("says each request's approval-core kind as text, and a kind it does not know as the API wrote it", () => {
+    // what a notification may offer depends on the kind (notify-rules): Approve for a message or a reply only
+    for (const kind of ["message", "reply", "money", "public_post", "payment_confirmation", "command"]) {
+      expect(pendingAsks(snap({ approvals: [approval({ kind })] })).map((a) => a.kind), kind).toEqual([kind]);
+    }
+    expect(pendingAsks(snap({ approvals: [approval({ kind: "refund_partial", detail: {} })] })).map((a) => a.kind)).toEqual(["refund_partial"]);
   });
 
   it("is never an action the export lists as proposed with no request to decide it: that is not the owner's to answer here", () => {
@@ -165,7 +174,7 @@ describe("what waits for the owner", () => {
   it("asks a request of a kind this build does not know, and offers no answer: update the app to answer it", () => {
     const refund = approval({ id: "req-9", kind: "refund_partial", detail: {} });
     expect(pendingAsks(snap({ approvals: [refund] }))).toEqual([
-      { event: "approval.request", bot: TEAM, request_id: "req-9@1", title: "Reply to Khun Mali", command: "refund_partial", choices: [], outdated: true },
+      { event: "approval.request", bot: TEAM, request_id: "req-9@1", title: "Reply to Khun Mali", command: "refund_partial", choices: [], outdated: true, kind: "refund_partial" },
     ]);
     const unknownState = approval({ standing: { state: "paused_by_owner" } });
     expect(pendingAsks(snap({ approvals: [unknownState] }))).toEqual([expect.objectContaining({ request_id: "action-1@1", choices: [], outdated: true })]);

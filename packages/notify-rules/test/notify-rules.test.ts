@@ -109,6 +109,32 @@ describe("a job that waited while the Mac slept", () => {
   });
 });
 
+describe("a plain notice", () => {
+  // News the team has for the owner (an answer, a program that ended, low disk space): it asks nothing, so it carries no
+  // Approve, makes no sound, and quiet hours and hidden details apply to it as to everything else the app shows.
+  const notice: NotifyEvent = { type: "notice", title: "Nam", body: "Replied to Mali about the candle set." };
+  it("says what it was given, silently, with Look first and Later", () => {
+    const n = notificationFor(notice, {}, at("12:00"));
+    expect(n).toMatchObject({ show: true, sound: false, title: "Nam", body: "Replied to Mali about the candle set.", reason: "shown" });
+    expect(ids(n)).toEqual(["look_first", "later"]);
+  });
+  it("shows no name or words while details are hidden, by the setting or on the lock screen", () => {
+    for (const settings of [{ hideDetails: true }, { screenLocked: true }]) {
+      const n = notificationFor(notice, settings, at("12:00"));
+      expect(n).toMatchObject({ show: true, sound: false, title: "Manut AI", body: "Something happened." });
+      expect(JSON.stringify(n)).not.toMatch(/Nam|Mali|candle/);
+    }
+  });
+  it("waits in Updates during quiet hours", () => {
+    expect(notificationFor(notice, {}, at("23:30"))).toMatchObject({ show: false, sound: false, reason: "waits_in_updates" });
+  });
+  it("falls back to the app's name for a blank title, and refuses what is not text", () => {
+    expect(notificationFor({ ...notice, title: "  " } as NotifyEvent, {}, at("12:00")).title).toBe("Manut AI");
+    expect(notificationFor({ type: "notice", title: 5, body: "x" } as never, {}, at("12:00")).reason).toBe("unreadable");
+    expect(notificationFor({ type: "notice", title: "x" } as never, {}, at("12:00")).reason).toBe("unreadable");
+  });
+});
+
 describe("badgeCount", () => {
   it("is the number of requests waiting and nothing else", () => {
     expect(badgeCount([])).toBe(0);

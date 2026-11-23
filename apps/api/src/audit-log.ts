@@ -81,10 +81,13 @@ export const AUDIT_ACTIONS = [
   "away.cleared",
   "request.passed_on",
   // Several shops (shops.ts, people-store.ts): the operator links or unlinks the account the shop's owner signs in with,
-  // and that account opens the shop. Each names the link by its id, never the account itself or the code.
+  // and that account opens the shop. Each names the link by its id, never the account itself or the code. A device's
+  // sign-out ends its own shop session, an owner's or a helper's, and names the account or the helper by its id too.
   "owner.linked",
   "owner.unlinked",
   "owner.session_opened",
+  "owner.session_ended",
+  "helper.session_ended",
   // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
   // sign-in or the outpost by its id, never an account, a password or a credential.
   "signin.created",
@@ -94,6 +97,13 @@ export const AUDIT_ACTIONS = [
   "signin.requested",
   "signin.redeemed",
   "outpost.registered",
+  "outpost.removed",
+  "outpost.credential_rotated",
+  // The step channel: a worker's browser step queued for an outpost, handed out to it, and how it went. Each names the
+  // step and what it is bound to by id, never its page, what it read, or anything typed.
+  "browser_step.queued",
+  "browser_step.fetched",
+  "browser_step.reported",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -135,6 +145,7 @@ export const AUDIT_SUBJECT_KEYS = [
   "helperId",
   "signInId",
   "outpostId",
+  "stepId",
   "grantId",
   "ownerAccountId",
 ] as const;

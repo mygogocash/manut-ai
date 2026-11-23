@@ -4,7 +4,7 @@ import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
-import { outpostRoute, vaultAdminRoute } from "./browser-control";
+import { isOutpostRoute, outpostRoute, vaultAdminRoute } from "./browser-control";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
@@ -78,6 +78,8 @@ export interface Env {
   /// which the page polls while a send settles.
   LINE_INBOUND_LIMITER?: RateLimit;
   PILOT_APPROVAL_LIMITER?: RateLimit;
+  /// The outposts' own routes (browser-control.ts), which take an outpost's credential: one bucket per address.
+  OUTPOST_LIMITER?: RateLimit;
   /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
   /// Unbound, those paths answer this Worker's own 404.
   WEB?: Fetcher;
@@ -122,6 +124,8 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {
     binding = env.PILOT_APPROVAL_LIMITER;
   }
+  // An outpost's heartbeat, redeem and steps carry its credential, so every try counts, before the credential is read.
+  else if (isOutpostRoute(request.method, pathname)) binding = env.OUTPOST_LIMITER;
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
@@ -223,6 +227,9 @@ const ADMIN_METHODS = new Set([
   // query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
   "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
+  // Remove an outpost, refusing what waits for it, or replace its credential, the new one shown once. The tenant and the
+  // outpost's id travel in the body.
+  "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
   // The team's routines (routines.ts): list a shop's with the team, make one, pause, resume or remove one, and pause or
   // resume the whole team; the shop templates a new shop can start from, and a shop's first-week questions with the
   // owner's answer relayed. The tenant and the ids travel in the query or the body.

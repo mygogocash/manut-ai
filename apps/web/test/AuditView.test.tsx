@@ -15,8 +15,8 @@ const SHOPS: Shop[] = [
 ];
 
 /// A shop with no helpers: what the people list answers when the page has no names to read off it.
-const NO_PEOPLE: People = { tenant: "t1", owner: { name: "Fon" }, helpers: [], invites: [], away: null, passedOn: [],
-  removed: [] };
+const NO_PEOPLE: People = { tenant: "t1", owner: { name: "Fon", account: null }, helpers: [], invites: [], away: null,
+  passedOn: [], removed: [] };
 const noPeople = async () => NO_PEOPLE;
 
 function entry(n: number, overrides: Partial<AuditEntry> = {}): AuditEntry {

@@ -28,6 +28,8 @@ export default defineConfig({
           origin: `http://127.0.0.1:${port}`,
           localStorage: [
             { name: "manut.onboarded", value: "1" },
+            // quiet hours (22:00 to 08:00 Bangkok by default) would hold notifications back by the hour the suite runs at
+            { name: "manut.notify.quiet", value: "00:00-00:00" },
             { name: "manut.roster", value: JSON.stringify(["kami", "friren", "default", "omh-tui"]) },
             { name: "manut.resume", value: chatResume("kami") },
           ],

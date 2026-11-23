@@ -6,6 +6,7 @@ type LimitedEnv = Env & {
   AUTH_EXCHANGE_LIMITER?: RateLimit;
   AUTH_SESSION_LIMITER?: RateLimit;
   LINEAR_INBOUND_LIMITER?: RateLimit;
+  OUTPOST_LIMITER?: RateLimit;
 };
 const bindings = env as unknown as LimitedEnv;
 const routes = [
@@ -13,6 +14,12 @@ const routes = [
   ["/v1/auth/refresh", "POST", "AUTH_SESSION_LIMITER"],
   ["/v1/auth/session", "DELETE", "AUTH_SESSION_LIMITER"],
   ["/v1/inbound/linear", "POST", "LINEAR_INBOUND_LIMITER"],
+  // The outposts' own routes (browser-control.ts) take a bearer credential, so each is limited before the credential
+  // is even looked at, and all of them share one bucket per address.
+  ["/v1/outposts/heartbeat", "POST", "OUTPOST_LIMITER"],
+  ["/v1/outposts/redeem", "POST", "OUTPOST_LIMITER"],
+  ["/v1/outposts/steps", "POST", "OUTPOST_LIMITER"],
+  ["/v1/outposts/steps/report", "POST", "OUTPOST_LIMITER"],
 ] as const;
 
 function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
@@ -24,6 +31,7 @@ function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
   } } as RateLimit;
   const target: LimitedEnv = { ...bindings,
     AUTH_EXCHANGE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
+    OUTPOST_LIMITER: limiter,
     AUTH: { idFromName: (name: string) => bindings.AUTH.idFromName(name),
       get: () => ({ fetch: async () => { calls++; return Response.json({ fixture: true }); } }),
     } as unknown as DurableObjectNamespace,
@@ -102,18 +110,20 @@ describe("public ingress rate limits", () => {
     const counter = fixture(async () => { throw new Error("must_not_limit"); });
     expect((await send(new Request("https://test/v1/health"), counter.target)).status).toBe(200);
     expect((await send(new Request("https://test/v1/auth/exchange"), counter.target)).status).toBe(404);
+    expect((await send(new Request("https://test/v1/outposts/heartbeat"), counter.target)).status).toBe(404);
     expect(counter.keys).toEqual([]);
   });
 
   it.each([
     ["AUTH_EXCHANGE_LIMITER", 10], ["AUTH_SESSION_LIMITER", 60], ["LINEAR_INBOUND_LIMITER", 300],
+    ["OUTPOST_LIMITER", 300],
   ] as const)("uses the real workerd %s binding at its configured boundary", async (binding, limit) => {
     const actual = bindings[binding];
     expect(actual).toBeDefined();
     const counter = fixture();
     counter.target[binding] = actual!;
-    const path = binding === "AUTH_EXCHANGE_LIMITER" ? "/v1/auth/exchange" :
-      binding === "AUTH_SESSION_LIMITER" ? "/v1/auth/refresh" : "/v1/inbound/linear";
+    const path = ({ AUTH_EXCHANGE_LIMITER: "/v1/auth/exchange", AUTH_SESSION_LIMITER: "/v1/auth/refresh",
+      LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat" } as const)[binding];
     // Fills one address's real bucket to the limit and sends one more. The real limiter counts in 60-second windows,
     // so on a loaded machine the loop can cross into a new window and the extra request is rightly let through.
     // That is the window moving, not a missing limit, so the run is repeated once from a fresh address, which starts

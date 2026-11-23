@@ -42,10 +42,12 @@ function board(opts: { on?: boolean; state?: AudioContextState } = {}) {
   const audio = fakeAudio(opts.state);
   const clock = { t: 1_000_000 };
   let on = opts.on ?? true;
+  let quiet = false;
   let gesture: (() => void) | null = null;
   const b = new SoundBoard({
     now: () => clock.t,
     enabled: () => on,
+    quiet: () => quiet,
     audio: audio.factory,
     onGesture: (fn) => (gesture = fn),
   });
@@ -54,6 +56,7 @@ function board(opts: { on?: boolean; state?: AudioContextState } = {}) {
     audio,
     clock,
     turn: (v: boolean) => (on = v),
+    hush: (v: boolean) => (quiet = v),
     gesture: () => gesture?.(),
     hasGesture: () => gesture !== null,
     /** Settle the board and let the quiet window after it pass. */
@@ -256,6 +259,36 @@ describe("SoundBoard", () => {
     const x = board();
     expect(x.b.preview()).toBe(true);
     expect(x.audio.log.started).toHaveLength(RECIPES.chime.length);
+  });
+
+  it("makes no sound in quiet hours, not even the tick of your own send: nothing makes a sound", () => {
+    const x = board();
+    x.ready();
+    x.hush(true);
+    for (const s of ["send", "pop", "chime", "error"] as const) {
+      expect(x.b.offer(s), s).toBe(false);
+      x.clock.t += GAP_MS;
+    }
+    expect(x.audio.log.made).toBe(0);
+    // and plays again as soon as they end
+    x.hush(false);
+    expect(x.b.offer("chime")).toBe(true);
+  });
+
+  it("an ask offered in quiet hours is not kept for later: it waits in the app, silent, and rings no more", () => {
+    const x = board();
+    x.ready();
+    x.hush(true);
+    expect(x.b.offer("chime", { chat: "kami", id: "a1" })).toBe(false);
+    x.hush(false);
+    x.clock.t += GAP_MS;
+    expect(x.b.offer("chime", { chat: "kami", id: "a1" })).toBe(false);
+  });
+
+  it("Settings' Play button still plays in quiet hours: it is the person asking for the sound", () => {
+    const x = board();
+    x.hush(true);
+    expect(x.b.preview()).toBe(true);
   });
 
   it("a context the browser holds is resumed on the next gesture, and the sound is dropped", async () => {

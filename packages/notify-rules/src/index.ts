@@ -9,6 +9,8 @@ const APPROVABLE_FROM_NOTIFICATION: readonly string[] = ["message", "reply"];
 
 export type NotifyEvent =
   | { readonly type: "request"; readonly kind: string; readonly member: string; readonly summary: string }
+  /** News that asks nothing of the owner: an answer, a program that ended, low disk space. Silent, never approvable. */
+  | { readonly type: "notice"; readonly title: string; readonly body: string }
   | { readonly type: "page_down"; readonly page?: string }
   | { readonly type: "new_device"; readonly device?: string }
   | { readonly type: "waited_while_asleep"; readonly count: number; readonly wokeAt: number };
@@ -134,6 +136,19 @@ export function notificationFor(event: NotifyEvent, settings: NotifySettings, no
         title: hidden ? "Manut AI" : `${member} needs you`,
         body: hidden ? hiddenBody(s.waitingCount ?? 1) : event.summary,
         buttons,
+        reason: quiet ? "waits_in_updates" : "shown",
+      };
+    }
+    // News is not an alarm: it makes no sound and, like a request, waits in the app during quiet hours. While details
+    // are hidden it says nothing of what happened, since the title and words are the details.
+    case "notice": {
+      if (typeof event.title !== "string" || typeof event.body !== "string") return unreadable;
+      return {
+        show: !quiet,
+        sound: false,
+        title: hidden ? "Manut AI" : nonEmpty(event.title, "Manut AI"),
+        body: hidden ? "Something happened." : event.body,
+        buttons: [LOOK, LATER],
         reason: quiet ? "waits_in_updates" : "shown",
       };
     }

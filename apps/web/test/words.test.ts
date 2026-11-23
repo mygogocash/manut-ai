@@ -38,6 +38,7 @@ import {
   memberName,
   memberRole,
   memoryErrorText,
+  ownerAccountErrorText,
   memoryWords,
   modelErrorText,
   modelSpendWords,
@@ -607,6 +608,66 @@ describe("the People page's words", () => {
   });
 });
 
+// The owner's linked account on the People page (docs/several-shops.md): what the owner's row says, the code box, the question before
+// unlinking, and a refusal of either route in plain words.
+describe("the People page's words for the owner's linked account", () => {
+  it("says on the owner's row whether an account is linked, in plain words", () => {
+    expect(peopleWords.ownerLinked("2026-11-12T03:00:00.000Z")).toBe("Linked to the owner's account on 12 November");
+    expect(peopleWords.ownerNotLinked).toBe("Not linked to an account yet");
+    expect(peopleWords.intro("Fon")).toBe(
+      "Who can use Manut AI for this shop. Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to.");
+  });
+
+  it("takes the code only from the owner, and says how it is written and what Link does", () => {
+    expect(peopleWords.linkTitle).toBe("Link the owner's account");
+    expect(peopleWords.codeLabel).toBe("Link code");
+    expect(peopleWords.codeHelp).toBe(
+      "8 letters and numbers, as the owner's app shows them: like K7M4-X9RQ. Capitals or small letters, with or without the dash.");
+    expect(peopleWords.codeTake).toBe("Take the code only from the owner, on a call or in the shop's own chat.");
+    expect([peopleWords.link, peopleWords.linking]).toEqual(["Link", "Linking"]);
+    expect(peopleWords.linked("Fon", "Baan Mali")).toBe("Linked. Baan Mali now shows in Fon's app.");
+  });
+
+  it("asks once more before unlinking with what it does, and says what it did from the API's own count", () => {
+    expect(peopleWords.unlink).toBe("Unlink");
+    expect(peopleWords.unlinkTitle("Fon")).toBe("Unlink Fon's account?");
+    expect(peopleWords.unlinkEffect("Fon")).toBe("Fon's app will be signed out of this shop on every device.");
+    expect(peopleWords.unlinkNote("Fon")).toBe("Fon can link the account again later with a new code.");
+    expect(peopleWords.unlinkYes("Fon")).toBe("Unlink Fon's account");
+    expect(peopleWords.unlinkNo).toBe("Keep the link");
+    expect(peopleWords.unlinking).toBe("Unlinking");
+    expect(peopleWords.unlinked(2)).toBe("Unlinked. 2 sessions ended.");
+    expect(peopleWords.unlinked(1)).toBe("Unlinked. 1 session ended.");
+    expect(peopleWords.unlinked(0)).toBe("Unlinked. 0 sessions ended.");
+  });
+
+  it("explains each refusal of linking in plain words, and the console's usual words for the rest", () => {
+    const said = (status: number, code: string) => ownerAccountErrorText(new ApiError(status, code), "link");
+    expect(said(404, "unknown_code")).toBe("That code is not known or has run out. Ask the owner for a new one.");
+    expect(said(410, "code_expired")).toBe("That code has run out. A code works for 15 minutes. Ask the owner for a new one.");
+    expect(said(409, "already_linked")).toBe("This shop is already linked to an account. Unlink it first.");
+    expect(said(400, "invalid_request")).toBe("Write the code the owner's app shows: 8 letters and numbers, like K7M4-X9RQ.");
+    expect(said(503, "index_unavailable")).toBe(
+      "The account is linked, but the owner's app cannot list the shop yet. Ask the owner for a new code and link again to put it there.");
+    expect(said(503, "shops_unavailable")).toBe(
+      "The API could not link the account just now. Press Refresh to see whether it did, then try again with a new code from the owner.");
+    expect(said(404, "shop_not_found")).toBe("Not found (shop_not_found). It may have been removed.");
+    expect(said(403, "forbidden")).toContain("The API refused the operator key");
+    expect(said(0, "network")).toBe("Could not reach the API. Check the connection and try again.");
+    expect(ownerAccountErrorText(new Error("boom"), "link")).toBe("Something unexpected went wrong. Try again.");
+  });
+
+  it("explains each refusal of unlinking in plain words, and does not borrow the link's words for the same code", () => {
+    const said = (status: number, code: string) => ownerAccountErrorText(new ApiError(status, code), "unlink");
+    expect(said(404, "not_linked")).toBe("This shop has no linked account now. The list was refreshed.");
+    expect(said(503, "shops_unavailable")).toBe("The API could not read or save this shop's people. Check the list, then try again.");
+    // `invalid_request` means a bad code only when linking: unlinking sends no code.
+    expect(said(400, "invalid_request")).toBe("The API did not accept this (invalid_request).");
+    expect(said(404, "unknown_code")).toBe("Not found (unknown_code). It may have been removed.");
+    expect(said(403, "forbidden")).toContain("The API refused the operator key");
+  });
+});
+
 // The new audit actions: the owner's people and browser control. Each reads as one sentence by who did it, with the
 // people's names when the people list knows them, and none is ever shown by its raw action name.
 describe("the audit log's words for the owner's people and for browser control", () => {
@@ -663,7 +724,7 @@ describe("the audit log's words for the owner's people and for browser control",
   it("reads the names off the people list: helpers, removed helpers and invites, skipping any it has no name for", () => {
     const people: People = {
       tenant: "t1",
-      owner: { name: "Fon" },
+      owner: { name: "Fon", account: null },
       helpers: [{ id: "helper-1", name: "Mint", identity: { kind: "email", address: "mint@baanmali.example" },
         joinedAt: "2026-11-13T03:05:00.000Z", devices: 1 }],
       invites: [{ id: "inv-1", name: "Beam", identity: { kind: "line", id: "beam.baanmali" }, status: "pending",
@@ -728,7 +789,8 @@ describe("the audit log's words for the owner's people and for browser control",
     expect(auditReasonText("outpost_not_found")).toBe("There was no such outpost.");
     expect(auditReasonText("outpost_asleep")).toBe("The outpost was asleep.");
     expect(auditReasonText("grant_not_found")).toBe("The shop had no such grant.");
-    expect(auditReasonText("wrong_outpost")).toBe("The grant was for another outpost.");
+    // A grant's or a browser step's: either way, it was another outpost's.
+    expect(auditReasonText("wrong_outpost")).toBe("It was for another outpost.");
     expect(auditReasonText("grant_used")).toBe("The grant had already been used.");
     expect(auditReasonText("grant_expired")).toBe("The grant had run out of its 60 seconds.");
     expect(auditReasonText("feature_disabled")).toBe("That kind of work was switched off.");
@@ -740,6 +802,78 @@ describe("the audit log's words for the owner's people and for browser control",
     // The reasons that already had words keep them.
     expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
     expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
+  });
+
+  it("says what the step channel and an outpost's removal or new credential did, never by raw name", () => {
+    expect(said({ actor: op, action: "outpost.removed", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test removed an outpost.");
+    expect(said({ actor: op, action: "outpost.credential_rotated", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test gave an outpost a new credential.");
+    expect(said({ actor: worker, action: "browser_step.queued", subject: { stepId: "st1", outpostId: "o1" } }))
+      .toBe("Worker attempt 6f9d1f0e asked an outpost to run a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.fetched", subject: { stepId: "st1", outpostId: "o1" } }))
+      .toBe("Outpost b4c8d1e2 picked up a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: { stepId: "st1", outpostId: "o1" },
+      outcome: "done" })).toBe("Outpost b4c8d1e2 reported how a browser step went.");
+    expect(auditSubjectText({ outpostId: "o1", stepId: "st1", attemptId: "a1", taskId: "t1" }))
+      .toBe("task t1 · attempt a1 · outpost o1 · browser step st1");
+    for (const [reason, words] of [
+      ["step_kind_not_allowed", "Only steps that read are allowed so far."],
+      ["origin_not_allowed", "The page was not on a site that member may use."],
+      ["step_expired", "The step had run out of its two minutes."],
+      ["text_withheld", "What it read held a saved password, so it was kept nowhere."],
+      ["sign_in_refused", "The site refused the saved password."],
+      ["outpost_removed", "The outpost had been removed."],
+    ] as const) {
+      expect(auditReasonText(reason)).toBe(words);
+    }
+    for (const reason of ["invalid_url", "invalid_selector", "too_many_steps", "grant_queued", "step_not_found",
+      "step_not_fetched", "step_reported", "invalid_report", "page_unavailable", "selector_not_found", "grant_refused",
+      "timed_out", "browser_error"]) {
+      expect(auditReasonText(reason), reason).not.toContain(reason);
+    }
+  });
+});
+
+// The owner's linked account and the shop sessions (docs/several-shops.md): the operator links and unlinks an account, and a
+// device opens and ends its own session. Each reads as one sentence by who did it, by ids only, never by its raw action name.
+describe("the audit log's words for the owner's linked account", () => {
+  const op = { kind: "operator" as const, email: "ops@manut.test" };
+  const owner = { kind: "owner" as const, id: "owner-1" };
+  const helper = { kind: "helper" as const, id: "helper-1" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>, names: Record<string, string> = {}) =>
+    auditSentence(entry(overrides), "Fon", names);
+
+  it("says what linking, unlinking, opening and ending a session did, with the owner's name where it helps", () => {
+    expect(said({ actor: op, action: "owner.linked", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("ops@manut.test linked Fon's account to the shop.");
+    expect(said({ actor: op, action: "owner.unlinked", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("ops@manut.test unlinked Fon's account from the shop.");
+    expect(said({ actor: owner, action: "owner.session_opened", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("Fon (owner-1) signed in to the shop on a device.");
+    expect(said({ actor: owner, action: "owner.session_ended", subject: { ownerAccountId: "owner-1" } }))
+      .toBe("Fon (owner-1) signed out of the shop on a device.");
+    expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }))
+      .toBe("Helper helper-1 signed out on a device.");
+    expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }, { "helper-1": "Mint" }))
+      .toBe("Mint signed out on a device.");
+  });
+
+  it("has words for each of them: none is shown by its raw name or as an action it does not know", () => {
+    for (const [action, actor] of [["owner.linked", op], ["owner.unlinked", op], ["owner.session_opened", owner],
+      ["owner.session_ended", owner], ["helper.session_ended", helper]] as const) {
+      const sentence = said({ actor, action });
+      expect(sentence, action).not.toContain(action);
+      expect(sentence, action).not.toMatch(/\bdid\b/);
+      expect(sentence.endsWith("."), action).toBe(true);
+    }
+  });
+
+  it("labels the link's id an entry is about", () => {
+    expect(auditSubjectText({ ownerAccountId: "owner-1" })).toBe("owner account owner-1");
+    expect(auditSubjectText({ helperId: "helper-1", ownerAccountId: "owner-1" })).toBe("helper helper-1 · owner account owner-1");
   });
 });
 

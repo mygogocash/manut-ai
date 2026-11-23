@@ -7,7 +7,9 @@ import { createRuntime, type RuntimeAdapter } from "../runtime";
 import type { MemoryFact } from "../runtime/memory";
 import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
 import type { RoutineRow } from "../runtime/routines";
-import { createNoteGate, noteFor, sessionNote, sessionRings, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
+import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
+import { noteAsk } from "../chat/cards/askNote";
+import { settleApproval } from "../chat/cards/respond";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
 import { promptText } from "../chat/parts/attachFiles";
 import { findTokens, toWire } from "../chat/parts/skillTokens";
@@ -3330,21 +3332,51 @@ const noteGate = createNoteGate();
 /** A system notification for a chat event, unless the person is looking at that chat. SESSIONS chats
  *  (`fold:` / `agent:` keys) name themselves through their route and open their own view. A question with no text
  *  waits for a texted one (8 s); an error notifies only with "Also notify on errors". */
-export function notifySessionEvent(ev: BridgeEvent, state: AppState): void {
+export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pick<Store, "getState" | "actions">): void {
   if (!notifyEnabled()) return;
   const watching = (bot: string) => watchingChat(state, bot);
   const name = (bot: string) => chatRoute(bot)?.label ?? state.bots.find((b) => b.name === bot)?.display_name ?? bot;
-  const note = noteFor(ev, { name, watching, errors: notifyErrorsEnabled() });
+  const note = noteFor(ev, { name, watching, errors: notifyErrorsEnabled(), waiting: () => selectAsks(state).length });
   if (!note) return;
   const asks = ev.event === "approval.request" || ev.event === "clarify.request";
   const empty = ev.event === "clarify.request" && !ev.question.trim();
-  noteGate.offer(note.bot, empty ? "empty" : asks ? "ask" : "plain", () =>
-    void showNote(note, () => {
-      const route = chatRoute(note.bot);
-      if (route) route.open();
-      else void singleton?.actions.selectBot(note.bot);
-    }, ev.event === "message" && !!ev.watch),
-  );
+  const app = () => store ?? singleton ?? undefined;
+  // Look first opens the app on the request itself, scrolled into view and focused; any other note opens its chat
+  const open = () => {
+    if (asks) {
+      void app()?.actions.jumpToAsk(note.bot, `${ev.event === "approval.request" ? "approval" : "clarify"}-${ev.request_id}`);
+      return;
+    }
+    const route = chatRoute(note.bot);
+    if (route) route.open();
+    else void singleton?.actions.selectBot(note.bot);
+  };
+  // Approve is offered only to a request the card itself can answer, and the system reads it only for a message or a reply
+  // (notify-rules): what it does is the card's Allow once
+  const approve =
+    ev.event === "approval.request" && note.ask?.canApprove
+      ? () => {
+          const target = app();
+          return target ? approveFromNotification(target, note.bot, ev.request_id) : undefined;
+        }
+      : undefined;
+  noteGate.offer(note.bot, empty ? "empty" : asks ? "ask" : "plain", () => void showNote(note, open, ev.event === "message" && !!ev.watch, approve));
+}
+
+/** Approve pressed on a notification: the card's own Allow once, through the card's own path (`settleApproval`, the one way
+ *  every button settles an approval; the runtime's decide route then settles it once). If the request is no longer waiting,
+ *  or the answer was refused or no word came back, the app comes forward on that card with what happened (a refusal's
+ *  words under it), so a notification never swallows an answer. */
+export async function approveFromNotification(store: Pick<Store, "getState" | "actions">, bot: string, requestId: string): Promise<void> {
+  const chat = store.getState().chats[bot];
+  const item = chat?.items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === requestId);
+  if (item && askOpen(chat.items, item)) {
+    const error = await settleApproval(store, bot, item, "once");
+    if (error === null) return;
+    noteAsk(requestId, error);
+  }
+  await bringToFront();
+  await store.actions.jumpToAsk(bot, item?.id ?? `approval-${requestId}`);
 }
 
 /** One note for the automation answers `bot` got while manut was closed ("<bot>: N watch alerts"). */

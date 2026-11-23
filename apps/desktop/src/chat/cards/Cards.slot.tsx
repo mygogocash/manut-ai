@@ -12,6 +12,7 @@ import type { ApprovalChoice, AskSubagent, ClarifyAnswers, ClarifyQuestion } fro
 import { useShowingCache } from "../../runtime/link";
 import { askOpen, getStore, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
 import { answerOf, EMPTY, type Pick } from "./answers";
+import { clearAskNote, useAskNote } from "./askNote";
 import { choiceIndexForKey, parseChoice } from "./choices";
 import { ALLOW_LABEL, respond, settleApproval } from "./respond";
 import { riskOf } from "./risk";
@@ -79,6 +80,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const outdated = !!item.outdated;
   const [busy, setBusy] = useState<ApprovalChoice | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // what became of an Approve pressed on a notification, which the app had no card on screen to show (askNote.ts)
+  const noted = useAskNote(item.request_id);
   const ref = useRef<HTMLDivElement>(null);
   useFocusRequest(bot, item.id, ref, open);
 
@@ -94,7 +97,9 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     if (busy || kept || outdated) return;
     setBusy(choice);
     setErr(null);
-    // Home's Approve settles through this same call (respond.ts), so there is one way an approval is answered.
+    clearAskNote(item.request_id);
+    // Home's Approve, and Approve on a notification, settle through this same call (respond.ts), so there is one way an
+    // approval is answered.
     const e = await settleApproval(getStore(), bot, item, choice);
     setErr(e);
     setBusy(null);
@@ -161,7 +166,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
             {shown.map((b) => b.key).join(" · ")}
           </span>
         )}
-        {err && <span className="card-err">{t("card.notSent", { error: err })}</span>}
+        {(err ?? noted) && <span className="card-err">{t("card.notSent", { error: (err ?? noted) as string })}</span>}
       </div>
     </div>
   );

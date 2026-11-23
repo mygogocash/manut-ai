@@ -144,6 +144,14 @@
             "limit": 120,
             "period": 60
           }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112330",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
         }
       ]
     },
@@ -221,6 +229,14 @@
           "namespace_id": "2026112326",
           "simple": {
             "limit": 120,
+            "period": 60
+          }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112331",
+          "simple": {
+            "limit": 300,
             "period": 60
           }
         }
@@ -302,6 +318,14 @@
             "limit": 120,
             "period": 60
           }
+        },
+        {
+          "name": "OUTPOST_LIMITER",
+          "namespace_id": "2026112332",
+          "simple": {
+            "limit": 300,
+            "period": 60
+          }
         }
       ]
     }
@@ -312,7 +336,10 @@
   // The relay limiters (2026100404/05, and 14/15, 24/25 and 34/35 in dev,
   // staging and prod) are proposed the same way and are equally unverified.
   // So are the pilot limiters (2026112321/22 here, 23/24, 25/26 and 27/28
-  // in dev, staging and prod).
+  // in dev, staging and prod), and the outposts' limiter (2026112329 here,
+  // 30, 31 and 32 in dev, staging and prod), which covers an outpost's
+  // heartbeat, redeem and browser steps (browser-control.ts), keyed per
+  // source address.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -373,6 +400,14 @@
       "namespace_id": "2026112322",
       "simple": {
         "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "OUTPOST_LIMITER",
+      "namespace_id": "2026112329",
+      "simple": {
+        "limit": 300,
         "period": 60
       }
     }

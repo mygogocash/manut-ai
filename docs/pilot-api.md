@@ -415,7 +415,7 @@ type AuditActor =
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
   "connectionId" | "previousConnectionId" | "confirmationId" | "factId" | "inviteId" | "helperId" | "signInId" |
-  "outpostId" | "grantId", string>>;
+  "outpostId" | "stepId" | "grantId", string>>;
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -445,6 +445,8 @@ What is written, and by whom:
 | `invite.created`, `invite.revoked` | operator | `inviteId` | `ok` |
 | `helper.joined` | helper | `inviteId`, `helperId` | `ok` |
 | `helper.session_opened` | helper | `helperId` | `ok` |
+| `helper.session_ended` | helper, ending their own shop session (`POST /v1/shops/session/end`) | `helperId` | `ok` |
+| `owner.session_ended` | the owner's linked account, by its id, ending its own shop session | `ownerAccountId` | `ok` |
 | `helper.removed` | operator | `helperId` | `ok` |
 | `away.set`, `away.cleared` | operator | `helperId` (who covers, or covered) | `ok` |
 | `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
@@ -453,13 +455,17 @@ What is written, and by whom:
 | `signin.requested` | worker | `signInId`, `outpostId`, `taskId`, `attemptId`, and `grantId` when a grant was issued | `ok`, or `refused` with the vault's refusal as the `reason` |
 | `signin.broken` | worker | `signInId`, `taskId`, `attemptId` | `ok`, or `refused` (`member_not_allowed`, `sign_in_not_found`) |
 | `signin.redeemed` | outpost | `outpostId`; for a grant the vault found, also `signInId`, `taskId`, `attemptId`, `grantId` | `ok`, or `refused` with the refusal as the `reason` |
+| `outpost.removed`, `outpost.credential_rotated` | operator | `outpostId` | `ok` |
+| `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId` | `ok`, or `refused` with the refusal as the `reason` |
+| `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
+| `browser_step.reported` | outpost | `outpostId`; for a step the vault found, also `stepId`, `taskId`, `attemptId`, and a sign-in step's `signInId` and `grantId` | `done`, `failed` with the outpost's code (or `text_withheld`) as the `reason`, or `refused` with the refusal |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply decided through the owner's link keeps its
 `reply.*` entries and writes no `approval.*` one; a reply decided from a session ("Deciding from a session", below)
 writes `approval.decided`, naming the shop's own session, the owner's linked account or the helper. The people entries
 name invites, helpers and requests by id only: never a name, a note, or an identity's value. The several-shops entries
-(`owner.linked`, `owner.unlinked`, `owner.session_opened`) name the owner's linked account by its id
+(`owner.linked`, `owner.unlinked`, `owner.session_opened`, `owner.session_ended`) name the owner's linked account by its id
 (`ownerAccountId`), never the account itself or a code.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
@@ -769,10 +775,16 @@ the shop's vault object) and `apps/api/src/browser-control.ts` (the routes).
   has a credential of its own, given once when it is registered.
 - A **grant** is one outpost's permission to type one sign-in for one worker's attempt, once, within 60 seconds. A
   worker asks for it through the job flow's port (below); there is no route to ask for one.
+- A **browser step** is one thing a worker asks an outpost's browser to do in its attempt: open a page, read it, or
+  sign in with a grant. Reading only, for now. A worker queues it through the port; the outpost asks for its steps and
+  reports how each went, and the outcome lands in the attempt's events.
 
 The operator's routes are under the admin gate, each an exact `ADMIN_METHODS` entry, with the tenant and ids in the
 query or the body. The outposts' routes are public paths that need the outpost's credential as
 `Authorization: Bearer <credential>`, and nothing else opens them: not the operator's key, not an owner's session.
+They share one ingress limit per source address (`OUTPOST_LIMITER`, 300 a minute), checked before the credential or
+the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Retry-After: 60`, and without a working
+limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`.
 
 ```ts
 type SignIn = {
@@ -798,6 +810,34 @@ type Outpost = {
   status: "online" | "asleep";   // online while its last heartbeat is under 90 seconds old; asleep before its first
   lastHeartbeatAt: string | null;
   createdAt: string;
+};
+
+// A browser step as the worker that queued it sees it.
+type BrowserStep = {
+  stepId: string;
+  kind: "open" | "read" | "sign_in";
+  outpostId: string;
+  // queued until its outpost takes it, taken while it runs (and until its report has landed in the attempt's events),
+  // then how it ended; expired when it did not end within its time
+  state: "queued" | "taken" | "done" | "failed" | "refused" | "expired";
+  queuedAt: string;
+  expiresAt: string;             // two minutes after it was queued, or its grant's end if sooner
+  url?: string;                  // open: the page
+  selector?: string;             // read: the part of the page; absent reads the whole page
+  signInId?: string;             // sign_in: the grant's sign-in
+  code?: string;                 // failed or refused: why
+  text?: string;                 // a read that is done: what it read
+};
+
+// A browser step as its outpost is handed it.
+type OutpostStep = {
+  stepId: string;
+  kind: "open" | "read" | "sign_in";
+  url?: string;                  // open
+  selector?: string;             // read, when it reads part of the page
+  grantId?: string;              // sign_in: redeem it, then type into the page that is open
+  origins: string[];             // the origins its browser may be on for this step; anywhere else stops it
+  expiresAt: string;
 };
 ```
 
@@ -849,6 +889,21 @@ character), `invalid_kind`; 409 `too_many_outposts` (20 per shop).
 
 `{ tenant, outposts: Outpost[] }`, oldest first, each `online` or `asleep` as of now. 400 `tenant_required`.
 
+### `POST /v1/admin/outposts/credential`
+
+`{ tenant, outpostId }` answers `{ outpost: Outpost, credential: string }`, with `Cache-Control: no-store`: a new
+credential, in this answer and nowhere else, kept as its SHA-256 like the first. The old one stops working at once,
+and the outpost is `asleep` until the holder of the new one beats. Grants and steps waiting for it stay, for the new
+credential. 400 `tenant_required`; 404 `outpost_not_found` (also another shop's, or one removed).
+`POST /v1/admin/outposts` answers with `no-store` too.
+
+### `POST /v1/admin/outposts/remove`
+
+`{ tenant, outpostId }` answers `{ removed: true, outpostId, stepsRefused: number, grantsRefused: number }`. The
+outpost is deleted, so its credential stops working at once; in the same step each of its steps still waiting or
+running is refused (`outpost_removed`), and each of its grants not yet redeemed and on time is used up. 400
+`tenant_required`; 404 `outpost_not_found`, also when it was already removed.
+
 ### `POST /v1/outposts/heartbeat`
 
 With the outpost's credential, `{ tenant, outpostId }` answers `{ outpost: Outpost }`, now `online`. An outpost beats
@@ -884,6 +939,67 @@ the redeem used it up there: whatever the answer, it cannot be redeemed again. E
 the outpost's credential is written to the audit log; a 401, a malformed body, and a vault that did not answer that
 check are not.
 
+### `POST /v1/outposts/steps`
+
+With the outpost's credential, `{ tenant, outpostId }` answers `{ steps: OutpostStep[] }`, with
+`Cache-Control: no-store`: the browser steps waiting for this outpost, oldest first, five at most. Each is handed out
+once; ask again for the next. An outpost asks every few seconds while it is awake (the ingress limit is sized for every
+3). It sees only its own steps: another outpost's, and another shop's, are not there for it.
+
+Before a step is handed out, the switches (`officeCloud`) and the owner's consent are read, and the task object is read
+to see that the step's attempt still runs. A step whose attempt ended is refused (`attempt_ended`) and left out; a step
+whose task cannot be read waits for the next ask. Each step's `origins` are read from the sign-ins as it is handed out,
+so a sign-in removed or broken since it was queued takes its origins with it, and a step left with none, or a
+`sign_in` step whose grant was used or ran out, is refused and left out.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 401 | `unauthorized` | The outpost's own credential is missing or wrong. Nothing is read or written |
+| 403 | `feature_disabled` with `feature: "officeCloud"`, or `consent_required` | The kill switch is off, or the owner withdrew consent. Every step that was waiting is refused for good, with this code |
+
+With no step waiting the answer is `{ steps: [] }`, and the switches, consent and the audit log are not touched.
+
+### `POST /v1/outposts/steps/report`
+
+With the outpost's credential, `{ tenant, outpostId, stepId, outcome, code?, text? }` reports how a step it was handed
+went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
+
+- `outcome: "done"`: for a `read`, `text` is what it read, at most 4 KB once written as JSON in UTF-8 (`""` for a page
+  with no text); the other kinds carry no text.
+- `outcome: "failed"` with `code`, one of `origin_not_allowed` (a page was, or went, off the step's origins, and the
+  outpost stopped there), `page_unavailable`, `selector_not_found`, `sign_in_refused` (the site refused the saved
+  password), `grant_refused` (the redeem was refused), `timed_out`, `browser_error`; and no text.
+
+The outcome lands in the attempt's events as two agent events, a tool call in the agent event contract:
+`{ type: "toolStarted", id: stepId, call: { kind: "web", title, output: "", status: "running", edits: [], startedAt } }`
+(the title says what was asked, such as "Open https://seller.shopee.co.th/portal/sale/order", "Read .order-status" or
+"Sign in to Shopee Seller Centre") and `{ type: "toolUpdated", id: stepId, update: { status, output } }`, where `status`
+is `completed` or `failed` and `output` is the read's text or the failure's code. They are appended by the control
+plane only while the attempt runs (active, its lease and deadline not passed, its task not settled), and they never
+extend its lease. The worker sees the outcome only once it has landed.
+
+A read whose text holds the password of any of the shop's sign-ins is taken as `failed` with `text_withheld`, and the
+text is kept nowhere: the answer is `{ step: { stepId, state: "failed" } }`.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `invalid_report` | An outcome other than `done` or `failed`, a failure without a known code, a code or text where none goes, a read reported done without its text, or a text that is not a string. Nothing is used up |
+| 400 | `text_too_long` | A read's text over 4 KB as JSON. Nothing is used up: cut it and report again |
+| 401 | `unauthorized` | The outpost's own credential is missing or wrong. Nothing is read or written |
+| 404 | `step_not_found` | The shop has no such step |
+| 403 | `wrong_outpost` | The step is another outpost's. It stays for its own |
+| 409 | `step_not_fetched` | The outpost was never handed the step |
+| 409 | `step_reported` | It was reported before, whatever came of that |
+| 409 | `step_expired` | Its time is over |
+| 403 | `feature_disabled` with `feature: "officeCloud"`, or `consent_required` | The kill switch is off, or the owner withdrew consent |
+| 409 | `attempt_ended` | The attempt ended, its lease or deadline lapsed, or its task settled |
+| 503 | `task_unavailable` | The attempt's events could not be written |
+
+From `feature_disabled` down the table, the vault had taken the report; the outcome is then taken back, the step reads
+`refused` with that code, and what it read is dropped. A step reported once cannot be reported again. Every answer
+after the vault checked the outpost's credential is written to the audit log (`browser_step.reported`); a 401 and a
+malformed report are not.
+
 ### The worker's side
 
 No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and the port has two steps for this.
@@ -898,18 +1014,35 @@ No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), 
 - `signInBroken(signInId)` answers `{ signInId, state: "broken" }`: the site refused the saved password, and no grant
   is issued for the sign-in until a new password is typed. Only a member named on it can report it
   (`member_not_allowed`). A second report keeps the first's time and member.
+- `browserStep(step)` answers a `BrowserStep`, `queued`. The step is `{ kind: "open", outpostId, url }`,
+  `{ kind: "read", outpostId, selector? }` or `{ kind: "sign_in", outpostId, grantId }`. The port reads the switches,
+  consent and the attempt's own heartbeat as for `signIn`, and the member is the task object's record of the attempt.
+  Refusals: the port's own; `step_kind_not_allowed` (any other kind: a step that submits is the next slice);
+  `invalid_request` (a field another kind takes); `outpost_not_found`, `outpost_asleep`; `invalid_url` (not https, an
+  account in it, a space, over 2,048 characters); `origin_not_allowed` (an `open` whose origin is not one of a working
+  sign-in the member is named on, or a `read` for a member named on none); `invalid_selector` (blank, over 256
+  characters, or a control character); for `sign_in`, `grant_not_found` (also another attempt's or member's),
+  `wrong_outpost`, `grant_used`, `grant_expired`, `grant_queued` (another step carries it), and the sign-in's
+  `sign_in_not_found`, `member_not_allowed`, `sign_in_broken`; `too_many_steps` (the outpost holds 20 waiting or
+  running); `vault_unavailable`. A `sign_in` step expires with its grant.
+- `browserStepOutcome(stepId)` answers the `BrowserStep` as it stands, with `code` once it failed or was refused and
+  `text` once a read is done; `step_not_found` for another attempt's step. A step whose outpost reported
+  `sign_in_refused` carries its `signInId`, for `signInBroken`.
 
 **Rules**
 
-- **No password anywhere else.** No answer, task event, log line, audit entry or export holds a password, except the
-  redeem's answer to the outpost its grant names. The tests search every answer for it.
-- **Reading by default.** This slice builds the sign-in step only. A browser step that would submit anything other
-  than a read (an order, a reply, a refund, a post) will go through member-grants' `decide` and an approval-core
-  request naming the exact action first, as every write does (`docs/browser-control.md`).
-- **Audit.** `signin.*` and `outpost.registered`, with ids only ("Audit log", above).
+- **No password anywhere else.** No answer, task event, browser step, log line, audit entry or export holds a
+  password, except the redeem's answer to the outpost its grant names. A read whose text holds one is withheld. The
+  tests search every answer, the vault's records and the export for it.
+- **Reading by default.** Browser steps open, read and sign in. A step that would submit anything other than a read
+  (an order, a reply, a refund, a post) is refused (`step_kind_not_allowed`) until it can go through member-grants'
+  `decide` and an approval-core request naming the exact action first, as every write does
+  (`docs/browser-control.md`).
+- **Audit.** `signin.*`, `outpost.*` and `browser_step.*`, with ids only ("Audit log", above).
 - **Export and deletion.** The tenant export carries `signIns` and `outposts` as the operator lists them. The tenant
-  deletion wipes every sign-in (tombstones too), outpost and grant with the shop's vault. Grants are not exported:
-  they live a minute, and the audit log keeps their history.
+  deletion wipes every sign-in (tombstones too), outpost, grant and browser step with the shop's vault. Grants and
+  steps are not exported: they live a minute or two, the audit log keeps their history, and a step's outcome that
+  landed is in its task's events, which are.
 
 ## One origin
 
@@ -1166,7 +1299,8 @@ type HelperSession = {
 A helper session is accepted by `GET /v1/approvals`, `POST /v1/approvals/{requestId}/decision` and
 `POST /v1/approvals/{requestId}/pass-on`, for its own shop only. Every other session route answers it 401: a helper
 never acts as the shop. The team's routines (`/v1/routines`, `/v1/team/*`, "Routines", below) answer it 403
-`owner_only` instead, so a helper's app does not read its session as ended. The shop keeps only its SHA-256.
+`owner_only` instead, so a helper's app does not read its session as ended. The shop keeps only its SHA-256. The helper's
+app ends its own session with `POST /v1/shops/session/end` ("Several shops", below); removal ends every one at once.
 
 **`POST /v1/approvals/{requestId}/pass-on`** with `{ note }` and a helper session: the helper hands the owner a request
 they may not decide, with a note of 1 to 500 characters (trimmed). It decides nothing: the request keeps waiting for
@@ -1425,12 +1559,51 @@ changes name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` a
 answers the shop's own session. Every other session route answers it 401, so it never acts as the shop: not the tasks,
 consent, export, deletion, connections or schedules. The shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then
 on each answers 401 `unlinked` with `unlinkedAt`. Opening one writes `owner.session_opened` to the shop's audit log,
-naming the account by its id.
+naming the account by its id; the app ends its own with `POST /v1/shops/session/end` ("Ending a shop session", below),
+which writes `owner.session_ended`.
 
 **`POST /v1/shops/owner-code`** with no body, or `{}`: a code the owner sends their operator so the operator can link this
 account to their shop ("Operator routes", below). 200 `{ code, expiresAt }`: `code` is eight characters of Crockford's
 base 32, shown as `XXXX-XXXX`. It names only the account that asked for it, works once, for 15 minutes, and asking again
 replaces it. Only its SHA-256 is kept. A body with any field, an account above all, answers 400 `invalid_request`.
+
+### Ending a shop session
+
+**`POST /v1/shops/session/end`** with exactly `{}` and the shop session itself as the bearer (`mos1.` for an owner,
+`mhs1.` for a helper): the app ends its own session of one shop when the person signs out of that device. It ends exactly
+that session, in one write to the shop's people record with its audit entry. The person's other devices at the shop, their
+other shops and their own sign-in are untouched, and they can open the shop again with the sign-in. The same token answers
+401 `unauthorized` on every route from then on, as any session the shop's record no longer holds does. The shop keeps no
+mark of it: nothing removed the helper or unlinked the account, so the token reads as unknown, never as `removed` or
+`unlinked`.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ ended: { shop, role } }` | The session worked and is ended; `role` is `"owner"` or `"helper"` |
+| 401 | `{ error: "unauthorized" }` | No credential, the operator key, a token no shop holds, a session already ended by signing out, or one past its 30 days. Two devices sending one token at once: one gets 200, the other this |
+| 401 | `{ error: "removed", removedAt }` or `{ error: "unlinked", unlinkedAt }` | A session that removal or unlinking ended, answered as every shop-session route answers it. Nothing is written |
+| 403 | `{ error: "not_a_shop_session" }` | The credential is a person's sign-in or the shop's own pilot session (the lifted auth's). Nothing is ended. It is 403 and not 401 so an app that sent the wrong one does not read its sign-in as ended |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST` |
+| 400 | `{ error: "invalid_request" }` | A body that is not exactly `{}`: any field (a shop, a role or an account above all), an array, or a value that is not an object |
+| 400 | `{ error: "invalid_json" }` | A body that is not JSON, or none |
+| 503 | `{ error: "people_unavailable" }` | The shop's record could not be read or written. Nothing is known to have ended: the session still works |
+
+- **Order.** Who is asking comes first, as on every session route, so a caller with no session learns nothing about the route,
+  not even its method: the session (401), then its kind (403), then the method (405), then the body (400). The session is
+  checked with the same check every shop-session route makes (`callerOf`), so a token ends here exactly while it still
+  works there. The shop's record checks it again where it ends it, so a second device sending the same token is never
+  recorded twice.
+- **What is ended.** An owner session leaves `ownerSessions` and a helper session leaves `sessions`, and its id leaves the
+  helper's open sessions in the rules' state (`endSession` in `@manut/people-rules`), so a later removal reports and ends
+  only the sessions still open. The helper stays a helper, with their cover and their notes, and the owner's account stays
+  linked. `GET /v1/admin/people` counts one device fewer (`devices`).
+- **The log.** `owner.session_ended` (the actor is the account, by its id; the subject is `ownerAccountId`) or
+  `helper.session_ended` (the actor is the helper, by their id; the subject is `helperId`), outcome `ok`. Ids only: never the
+  token, the account's subject, an email or a name. Nothing is written for a refusal.
+- **What the app does.** On sign-out it calls this once for each shop session it holds, then drops them and their cached
+  data. A call that cannot be made leaves that session running to its 30 days (there is no refresh), or until the account is
+  unlinked or the helper removed; the person's sign-in is ended by the lifted auth's own `DELETE /v1/auth/session`, which
+  this route does not call.
 
 ### Operator routes
 

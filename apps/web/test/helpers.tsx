@@ -42,6 +42,8 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     removeHelper: missing("removeHelper"),
     setAway: missing("setAway"),
     clearAway: missing("clearAway"),
+    linkOwner: missing("linkOwner"),
+    unlinkOwner: missing("unlinkOwner"),
     getModelUsage: missing("getModelUsage"),
     setModelCap: missing("setModelCap"),
     listWorkerJobs: missing("listWorkerJobs"),

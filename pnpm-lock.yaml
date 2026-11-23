@@ -223,6 +223,9 @@ importers:
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
+      '@manut/notify-rules':
+        specifier: workspace:*
+        version: link:../../packages/notify-rules
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules

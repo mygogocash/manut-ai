@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createEdges, working } from "./power";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createEdges, jobsWorking, working } from "./power";
 
 describe("power busy edges", () => {
   it("sends busy once and idle only after the quiet spell", () => {
@@ -49,5 +49,51 @@ describe("what counts as work", () => {
   it("a plain shell printing, or an ended program, is not", () => {
     expect(working([{ agent: false, running: true, lastOut: now }], false, now, 5_000)).toBe(false);
     expect(working([{ agent: true, running: false, lastOut: now }], false, now, 5_000)).toBe(false);
+  });
+});
+
+describe("the one note that says Manut AI still runs", () => {
+  // The first time the window's close hides it to the tray, one notification says where Manut AI went. It is only told once
+  // it was shown: quiet hours or a missing permission hold it back, and the next close tells it instead of losing it.
+  const hidden = async (shown: boolean) => {
+    const calls: string[] = [];
+    const store: Record<string, string> = {};
+    vi.resetModules();
+    vi.doMock("./notify", () => ({
+      showNote: async (n: { tag: string }) => {
+        calls.push(n.tag);
+        return shown;
+      },
+    }));
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => void (store[k] = v) });
+    const { onWindowHidden } = await import("./power");
+    await onWindowHidden();
+    await onWindowHidden();
+    return { calls, told: store["manut.window.hiddenNoted"] };
+  };
+  afterEach(() => {
+    vi.doUnmock("./notify");
+    vi.unstubAllGlobals();
+  });
+
+  it("is told once it was shown, and then not again", async () => {
+    expect(await hidden(true)).toEqual({ calls: ["manut:hidden"], told: "1" });
+  });
+  it("is tried again at the next close when nothing was shown", async () => {
+    expect(await hidden(false)).toEqual({ calls: ["manut:hidden", "manut:hidden"], told: undefined });
+  });
+});
+
+describe("how many jobs work now", () => {
+  const term = (over: Partial<{ agent: boolean; running: boolean; lastOut: number; progress: boolean }> = {}) => ({ agent: true, running: true, ...over });
+  it("counts each bot answering and each agent terminal that printed lately or reports progress", () => {
+    const now = 100_000;
+    const terms = [term({ lastOut: now - 1_000 }), term({ progress: true }), term({ lastOut: now - 60_000 }), term({ agent: false, lastOut: now - 1_000 }), term({ running: false, lastOut: now - 1_000 })];
+    expect(jobsWorking(terms, 2, now)).toBe(4);
+    expect(jobsWorking([], 0, now)).toBe(0);
+  });
+  it("agrees with whether anything works at all", () => {
+    const now = 100_000;
+    for (const [terms, bots] of [[[], 0], [[term({ progress: true })], 0], [[], 1], [[term({ lastOut: 1 })], 0]] as const) expect(jobsWorking([...terms], bots, now) > 0).toBe(working([...terms], bots > 0, now));
   });
 });
