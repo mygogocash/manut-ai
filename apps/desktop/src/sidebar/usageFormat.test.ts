@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageProvider } from "../lib/protocol";
-import { accountRow, duration, limitName, meterDot, meterLabel, ringLevel, stateText, topPercent, windowRow } from "./usageFormat";
+import { accountRow, caretOffset, duration, limitName, meterDot, meterLabel, ringLevel, stateText, topPercent, windowRow } from "./usageFormat";
 
 const NOW = 1_794_200_000;
 const codex: UsageProvider = {
@@ -97,5 +97,33 @@ describe("one line per Claude login", () => {
       "CLIProxyAPI login",
       "Limited",
     ]);
+  });
+});
+
+describe("the card's caret", () => {
+  // Measured in the side menu at 1280px: the marks are 26px wide and sit 4px in from the row's left edge (x 8), so at
+  // x 12 and 44. The card is `left: calc(var(--side-x) - 4px)`, another 4px in from the row, at x 12, with a 1px border.
+  const codex = { left: 12, width: 26 };
+  const claude = { left: 44, width: 26 };
+  const card = { left: 12 };
+
+  it("is measured from the card's own inner edge, which is where an absolutely placed caret starts", () => {
+    // the marks' middles are at 25 and 57; the card's inner edge is at 13
+    expect(caretOffset(codex, card, 1)).toBe(12);
+    expect(caretOffset(claude, card, 1)).toBe(44);
+  });
+
+  it("is 5px less than the measure from the row the marks sit in, which missed the card's 4px inset and its 1px border", () => {
+    // what `--caret` was: the mark's middle in the row (offsetLeft + width / 2 = 4 + 13 = 17), not in the card
+    const fromRow = 4 + codex.width / 2;
+    expect(fromRow - caretOffset(codex, card, 1)).toBe(5);
+  });
+
+  it("puts the caret's middle under the mark's middle however far in the card is placed", () => {
+    for (const cardLeft of [0, 4, 12, 30]) {
+      const at = caretOffset(codex, { left: cardLeft }, 1);
+      // the caret is 9px wide and starts `at - 4.5` from the inner edge, so its middle is at `at` from it
+      expect(cardLeft + 1 + at).toBe(codex.left + codex.width / 2);
+    }
   });
 });

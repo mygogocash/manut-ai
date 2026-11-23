@@ -17,6 +17,14 @@ export function ringLevel(percent: number): "gray" | "amber" | "red" {
   return percent > 90 ? "red" : percent >= 70 ? "amber" : "gray";
 }
 
+/** How far from the card's inner left edge (inside its border) the middle of its caret goes, so the caret points at the
+ *  middle of the open mark. Both boxes are read from the screen and the card is not assumed to start where the marks'
+ *  row does: it sits `--side-x` less 4px inside the row, and a measure from the row pointed past the mark by that and
+ *  by the card's border. `border` is the card's left border width (`clientLeft`). */
+export function caretOffset(mark: { left: number; width: number }, card: { left: number }, border: number): number {
+  return mark.left + mark.width / 2 - (card.left + border);
+}
+
 /** "1h 47m", "4d 23h", "12m", "<1m". */
 export function duration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));

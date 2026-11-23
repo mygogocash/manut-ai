@@ -732,7 +732,7 @@ button.upd:hover {
 }
 /* the card: from the first mark's edge to the same inset on the right, so it covers the nav rows it sits on whole
    (a narrower card left their "Soon" tags peeking out beside it); a caret points at its mark (--caret, the mark's
-   centre) */
+   centre measured from the card's inner edge: Usage.tsx) */
 .usage-card {
   left: calc(var(--side-x) - 4px);
   right: calc(var(--side-x) - 4px);
@@ -752,7 +752,8 @@ button.upd:hover {
   content: "";
   position: absolute;
   bottom: -5px;
-  left: calc(var(--caret, 20px) - 5px);
+  /* its middle, not its edge, is --caret: half of its 9px */
+  left: calc(var(--caret, 20px) - 4.5px);
   width: 9px;
   height: 9px;
   background: var(--pop);
