@@ -104,7 +104,7 @@ export async function outpostRoute(request: Request, url: URL, env: RedeemEnv, f
   if (route === "POST /v1/outposts/heartbeat") return outpostHeartbeat(request, env);
   if (route === "POST /v1/outposts/redeem") return redeemGrant(request, env, flags);
   if (route === "POST /v1/outposts/steps") return fetchSteps(request, env, flags);
-  return reportStep(request, env, flags);
+  return takeReport(request, env, flags);
 }
 
 /// An answer that names steps, which no cache on the way may keep: they say where the shop's browser goes.
@@ -191,7 +191,7 @@ async function fetchSteps(request: Request, env: RedeemEnv, flags: JobFlags): Pr
 ///
 /// A refusal at 3 or 4 takes the report back: the step reads refused, with that code, and what it read is dropped.
 /// Every answer after the vault's credential check writes `browser_step.reported`, by the outpost, with ids only.
-async function reportStep(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
+async function takeReport(request: Request, env: RedeemEnv, flags: JobFlags): Promise<Response> {
   const read = await outpostRequest(request);
   if (read instanceof Response) return read;
   const { tenant, fields, credentialHash } = read;

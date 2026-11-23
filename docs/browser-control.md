@@ -13,9 +13,10 @@ The design canvas says it in the owner's words:
   stops work.
 
 Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault object) and
-`apps/api/src/browser-control.ts` (the operator and outpost routes). The worker's side is two methods on the job
-flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts` and
-`sign-in-grants.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and outposts".
+`apps/api/src/browser-control.ts` (the operator and outpost routes). The worker's side is four methods on the job
+flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
+`sign-in-grants.test.ts` and `browser-steps.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and
+outposts".
 
 ## The promises
 
@@ -56,6 +57,12 @@ that wakes when work arrives. An outpost has a name, a kind (`this_mac` or `clou
 given once when it is registered and kept only as a SHA-256 digest. It sends a heartbeat while it is awake. It is
 `online` while its last heartbeat is under 90 seconds old (it beats every 30) and `asleep` otherwise, including
 before its first beat.
+
+An operator can give an outpost a new credential, shown once and kept as its digest like the first: the old one stops
+working at once, and the outpost is asleep until the holder of the new one beats, so nothing new is sent to a machine
+that may not hold it. An operator can also remove an outpost: its credential stops working at once, and whatever
+waited for it (a step waiting or running, a grant not yet redeemed) is refused in the same step. Every outpost route
+is limited per source address before its credential is even read.
 
 ### The sign-in step
 
@@ -110,9 +117,60 @@ then reads "Needs a new password", no grant is issued for it, and an unredeemed 
 types a new password (in the pilot an operator relays it); the sign-in is working again, and the next grant gives the
 new password.
 
-## Built in this slice
+### The step channel
 
-`apps/api` only, with the outpost's side played by a stub in tests (no real browser and no real site):
+How a worker's browser step reaches an outpost, and how what the outpost did comes back into the attempt's events,
+with no password in either.
+
+1. **The worker queues a step** through its port: `port.browserStep({ kind, outpostId, ... })`. There are three
+   kinds, and each of them reads:
+   - `open` goes to a page (`url`);
+   - `read` reads the text of the page the outpost has open, or of the part a `selector` names;
+   - `sign_in` carries a grant from `port.signIn` (`grantId`); the outpost redeems it as above and types into the page
+     it has open.
+
+   Any other kind is refused (`step_kind_not_allowed`): a step that submits is the next slice. As at every step, the
+   control plane reads the switches and the owner's consent, then the attempt's own heartbeat, which proves the
+   attempt runs and gives the member from the task object's record. The vault then checks the outpost (the shop's,
+   and online) and what the kind needs. An `open`'s address is https, with no account in it, and its origin is one of
+   the origins of a working sign-in the member is named on. A `read` needs at least one such sign-in, since its outpost
+   may only be on their origins. A `sign_in`'s grant is this attempt's, for this outpost, unused, on time, and in no
+   other step. A step lives two minutes, or as long as its grant if that is shorter; an outpost holds at most 20
+   waiting or running.
+2. **The outpost asks for its steps** every few seconds while it is awake, with its own credential, and sees only its
+   own: another outpost's steps, and another shop's, are not there for it. Before any step is handed out, the control
+   plane reads the switches and consent again, and reads the task object to see that the step's attempt still runs
+   (a read, never a heartbeat). Each step is handed out once, five at most at a time, with the origins its browser may
+   be on for it, read from the sign-ins at that moment: a sign-in removed or broken since takes its origins with it. A
+   step that may no longer run is refused for good, with the reason.
+3. **The outpost runs it** and stays on the step's origins: a page anywhere else stops the step
+   (`origin_not_allowed`).
+4. **The outpost reports how it went**, once: `done` (with the text, for a read, at most 4 KB once written as JSON), or
+   `failed` with a code from a fixed list. A second report, a late one, one for a step it was not handed, or one from
+   another outpost is refused. The control plane reads the switches and consent again, then lands the outcome in the
+   attempt's events as a tool call in the agent event contract (`toolStarted` as it was queued, then `toolUpdated` with
+   how it ended), through the task object's control path: only while the attempt runs, and without extending its lease,
+   so an outpost can never keep a silent worker's attempt alive. Only then does the worker see the outcome
+   (`port.browserStepOutcome(stepId)`). An outcome that cannot land is taken back: the step reads refused, and what it
+   read is dropped.
+5. **A sign-in the site refused** comes back as `failed`, `sign_in_refused`, with the sign-in's id, and the worker
+   reports it broken (`port.signInBroken`) as above.
+
+No password is in a step, its outcome or its audit entries. A step carries a grant's id, never what it unlocks, and
+the outpost types the password and keeps it nowhere. The control plane checks this too: a read whose text holds the
+password of any of the shop's sign-ins is withheld (`failed`, `text_withheld`) and the text is kept nowhere. The vault
+makes that comparison inside itself, so no password leaves it for the check.
+
+Every queue, every step handed out or refused at a fetch, and every report is written to the audit log with ids only
+(`browser_step.queued`, `browser_step.fetched`, `browser_step.reported`): the step, the outpost, the task and the
+attempt, and for a sign-in step the sign-in and the grant. Never a page, a selector or what a step read. An empty fetch
+writes nothing, as a heartbeat writes nothing.
+
+## Built so far
+
+`apps/api`, with the outpost's side played by a stub in tests (no real browser and no real site).
+
+The first slice, the vault and its outposts (23 Nov 2026):
 
 - **Operator routes** (exact `ADMIN_METHODS` entries): create a sign-in, list them without any secret, replace a
   password, remove one; register an outpost (its credential is answered once), list them with `online` or `asleep`.
@@ -123,7 +181,22 @@ new password.
 - **Export and deletion**: the export carries the sign-ins and outposts without any secret or credential digest; the
   shop's deletion wipes them and every grant with its vault.
 
-## Choices made in this slice
+The step channel, and two of the smaller gaps (24 Nov 2026):
+
+- **The port**: `browserStep` and `browserStepOutcome`.
+- **Outpost routes**: asking for its steps (`POST /v1/outposts/steps`) and reporting one
+  (`POST /v1/outposts/steps/report`).
+- **The task object**: a control-plane path that lands an outpost's events in a running attempt's log without the
+  fence and without extending the lease (`/attempts/:id/outpost-events`).
+- **Operator routes**: removing an outpost (`POST /v1/admin/outposts/remove`) and giving it a new credential
+  (`POST /v1/admin/outposts/credential`).
+- **An ingress limit** on every outpost route, per source address, failing closed (`OUTPOST_LIMITER`).
+- **The audit log**: `browser_step.queued`, `browser_step.fetched`, `browser_step.reported`, `outpost.removed` and
+  `outpost.credential_rotated`, with ids only, and words for each on the console's Audit page.
+- **Export and deletion**: steps are not exported (an outcome that landed is in the task's events, which are); the
+  shop's deletion wipes them with its vault.
+
+## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
 
@@ -145,18 +218,49 @@ Each can be undone later; none is the owner's to make, so none waited.
 - Grants are not exported: they live a minute, and the audit log keeps their history. Dead grants are deleted ten
   minutes after their minute ends, when the next grant is issued.
 
+The step channel's (24 Nov 2026):
+
+- Steps live in the shop's vault object beside the outposts and grants, so an outpost's fetch and report are checked
+  against its credential in the same place, and removing an outpost refuses its steps in the same step.
+- The outpost asks for its steps (it polls); nothing is pushed to it. Every few seconds is expected (3 is what the
+  ingress limit is sized for), and an empty ask reads one list and writes nothing.
+- A step's origins are those of every working sign-in its member is named on, read again as it is handed out; a
+  `sign_in` step's are its sign-in's. A `read` has no address of its own: it reads the page the outpost has open, which
+  the outpost keeps on those origins.
+- A step lives two minutes, or as long as its grant: long enough for a slow site, well inside the attempt's
+  five-minute lease, and short enough that a step for an outpost that stopped answering fails quickly. Dead steps are
+  deleted ten minutes after their time ends, when the next step is queued.
+- A step is handed out once (at most once is enough for reads, and a lost answer just runs out of time); five at most
+  per fetch, and an outpost holds at most 20 waiting or running.
+- A read brings back at most 4 KB as JSON, which fits one agent event with room to spare and keeps what a worker's
+  model reads small. Longer is refused without using the step up, so the outpost can cut it and report again.
+- An outpost says a step failed with a code from a fixed list, never free text: `origin_not_allowed`,
+  `page_unavailable`, `selector_not_found`, `sign_in_refused`, `grant_refused`, `timed_out`, `browser_error`.
+- An outcome lands in the attempt's events as a tool call (`toolStarted`, then `toolUpdated`), the agent event
+  contract's existing kinds, so no reader needs a new one. It lands when it is reported, so a step's row appears once
+  it ended; the worker sees an outcome only once it has landed.
+- The switches, consent and the attempt are read when a step is queued, when it is handed out, and when it is
+  reported; a refusal when it is handed out or reported is for good (the step reads refused with the code).
+- A read whose text holds a sign-in's password is withheld whole (`text_withheld`), rather than having the password
+  cut out, which would show where it was. A seal the vault cannot open counts as a match.
+- Steps are not exported: an outcome that landed is in the task's events, and the audit log keeps every step's history.
+- The outposts' routes share one ingress limit per source address, 300 a minute: an outpost asking every 3 seconds and
+  beating every 30 uses some 25, so a dozen can share an address.
+- Removing an outpost deletes its record rather than leaving a tombstone: the record is only its name, its kind and a
+  credential's digest, and nothing can authenticate as an outpost that is not there. A new credential puts the outpost
+  to sleep until its new holder beats; the grants and steps waiting for it stay, for the new credential.
+
 ## Next slices
 
 1. **The outpost in the desktop shell (this Mac).** It registers through the owner's session, beats every 30 seconds
-   while the app is open, receives browser steps, redeems grants, types only into the sign-in's origins, enforces
-   reading by default, and reports each step's outcome. The Connections page shows the sign-ins ("Change" types a new
-   password) and the outposts.
-2. **The step channel.** How a worker's browser step and its grant id reach an outpost, and how the result comes back
-   into the attempt's events, without the password ever being in either.
-3. **Submitting steps** through approval-core, as above, with member-grants' decide first.
-4. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state; moving
-   work there when the owner quits the app on this Mac ("Move them to the cloud outpost and quit").
-5. **Smaller gaps**: re-sealing sign-ins after a vault key rotation (they open under the previous key until then);
-   removing an outpost and rotating its credential; changing a sign-in's members; an ingress limit on the outpost
-   routes; listing to a worker, by site name, the sign-ins its member may use; words for the new audit entries in the
-   console's Audit page (it shows "did signin.redeemed" until then).
+   while the app is open, asks for its steps every few seconds, redeems grants, types only into the sign-in's origins,
+   stays on each step's origins, and reports each step's outcome. The Connections page shows the sign-ins ("Change"
+   types a new password) and the outposts.
+2. **Submitting steps** through approval-core, as above, with member-grants' decide first.
+3. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
+   waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
+   quits the app on this Mac ("Move them to the cloud outpost and quit").
+4. **Smaller gaps**: re-sealing sign-ins after a vault key rotation (they open under the previous key until then);
+   changing a sign-in's members; listing to a worker, by site name, the sign-ins its member may use; a live row for a
+   step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
+   as data, never as instructions, when it reaches a model.
