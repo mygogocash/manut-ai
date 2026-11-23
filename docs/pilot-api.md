@@ -11,7 +11,8 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   sends the owner an approval link, confirms PromptPay slips. Uses `/v1/admin/pilot/*`.
 - **Owner**: the shop owner. Has no account in week 1. Approves or declines one reply through a signed,
   single-use link: `/v1/pilot/approvals/{token}`. Confirms or refuses the deletion of a live shop's data the same
-  way: `/v1/pilot/deletions/{token}`.
+  way: `/v1/pilot/deletions/{token}`. From the several-shops slice, the operator can also link the account the owner
+  signs in with to the shop, and that account then decides with an owner session ("Several shops", below).
 - **Helper**: someone the owner trusts with conversations (the canvas's Mint). Invited by the operator on the owner's
   word, signs in with Apple, and approves private messages and replies with a helper session, never money, public
   posts, payment confirmations or commands ("Helpers", below; `docs/people.md`).
@@ -437,7 +438,7 @@ What is written, and by whom:
 | `attempt.started` | system | `taskId`, `attemptId` | `ok` |
 | `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
 | `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
-| `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
+| `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the linked account's id for an owner session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
 | `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
@@ -456,8 +457,10 @@ What is written, and by whom:
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply decided through the owner's link keeps its
 `reply.*` entries and writes no `approval.*` one; a reply decided from a session ("Deciding from a session", below)
-writes `approval.decided`, naming the shop's own session or the helper. The people entries name invites, helpers and
-requests by id only: never a name, a note, or an identity's value.
+writes `approval.decided`, naming the shop's own session, the owner's linked account or the helper. The people entries
+name invites, helpers and requests by id only: never a name, a note, or an identity's value. The several-shops entries
+(`owner.linked`, `owner.unlinked`, `owner.session_opened`) name the owner's linked account by its id
+(`ownerAccountId`), never the account itself or a code.
 
 - **Metadata only.** The log checks every entry it is given rather than trusting the writer: the action, the outcome
   and the subject's keys come from fixed lists, ids and codes may hold only ASCII letters, digits and `._:-`, an
@@ -982,8 +985,11 @@ shop it was given for. It only reads: deciding is the next section.
   note and when. It is shown to whoever lists the shop's approvals.
 
 Errors: 401 `unauthorized` without a session (the operator key is not a session), 401 `removed` with `removedAt` for a
-helper the owner removed, 400 `invalid_state`, 400 `invalid_limit`, 405 `method_not_allowed` for anything but `GET`, and
-503 `approvals_unavailable` when the shop's index, one of its tasks or its people cannot be read, never a partial list.
+helper the owner removed, 401 `unlinked` with `unlinkedAt` for an owner session whose account the operator unlinked
+("Several shops", below), 400 `invalid_state`, 400 `invalid_limit`, 400 `invalid_request` for a query naming `shop`,
+`tenant` or `role` (the session decides those, so they are refused rather than read), 405 `method_not_allowed` for
+anything but `GET`, and 503 `approvals_unavailable` when the shop's index, one of its tasks or its people cannot be read,
+never a partial list.
 
 ```ts
 // WireRecord and WireStanding are approval-core's wire JSON (packages/approval-core/src/wire.ts).
@@ -1017,7 +1023,9 @@ one of the shop's approval-core requests: the path the desktop's answering slice
 request id is the one the listing above gives (`record.request.id`).
 
 - **Who decides comes from the session, never from the body.** The shop's own session decides as the owner (role
-  `owner`, `decidedBy: "owner-session"`); a helper session as that helper (role `helper`, `decidedBy` the helper's id).
+  `owner`, `decidedBy: "owner-session"`); an owner session ("Several shops", below) as the owner too, with `decidedBy`
+  the id of the account linked to the shop (`owner-<uuid>`); a helper session as that helper (role `helper`, `decidedBy`
+  the helper's id).
   The body is exactly `optionId` (1 to 64 characters) and `seenRevision` (a whole number from 1); a body with any other
   field, a `role` or a `decidedBy` above all, answers 400 `invalid_request` and decides nothing.
 - **approval-core decides the rest**, in the request's own task object, as for a worker's request and the owner's
@@ -1047,6 +1055,7 @@ Answers:
 | 400 | `{ error: "not_offered", result }` | The request offers no such option |
 | 401 | `{ error: "unauthorized" }` | No session, an ended one, or the operator key |
 | 401 | `{ error: "removed", removedAt }` | A helper session of a helper the owner removed |
+| 401 | `{ error: "unlinked", unlinkedAt }` | An owner session whose account the operator unlinked ("Several shops") |
 | 403 | `{ error: "feature_disabled", feature }` | `officeCloud` is off, or `officeExternalWrites` for an approval |
 | 403 | `{ error: "consent_required" }` | An approval while the shop has not consented |
 | 403 | `{ error: "not_permitted", result }` | The caller's role may not decide the request's kind |
@@ -1103,7 +1112,7 @@ type Identity = { kind: "line"; id: string } | { kind: "email"; address: string 
 
 type People = {
   tenant: string;
-  owner: { name: string };
+  owner: { name: string; account: OwnerAccountView | null };   // the account linked as the owner's ("Several shops")
   helpers: { id: string; name: string; identity: Identity; joinedAt: string; devices: number }[]; // devices: sessions open now
   invites: InviteView[];
   away: AwayView | null;
@@ -1201,8 +1210,9 @@ The shop's own session (the lifted auth's, whose tenant is the shop) has the sam
 `tenant` in the body (a body that names one is refused): `GET /v1/routines`, `POST /v1/routines`,
 `POST /v1/routines/pause`, `POST /v1/routines/resume`, `POST /v1/routines/remove` (each `{ routineId }`), and
 `POST /v1/team/pause` and `POST /v1/team/resume` (`{}`). No session answers 401 `unauthorized`, and so does the operator
-key; a helper's session answers 403 `owner_only`, because the team's routines are the owner's. A pilot shop has no
-session (its tenant can never be one), so its routines are the operator's.
+key; a helper's session answers 403 `owner_only`, because the team's routines are the owner's. A pilot shop's tenant can
+never be a session, so its routines are the operator's until the operator links the owner's account: that account's
+owner session then has these routes for its shop ("Several shops", below), and the log names the account's id.
 
 Making, pausing, resuming or removing a routine needs neither a switch nor the owner's consent: nothing runs then. Every
 run reads both.
@@ -1365,3 +1375,93 @@ orders over ฿1,000"), as any fact the team is told to remember. Answers `{ que
 The answer's words live only in the fact. The owner's Forget removes them, and the question then reads as answered with
 `text: null`. The log has `memory.remembered` (the fact by id) and `question.answered` (the question and the fact by
 id), by the operator's Access identity, never the question or the answer.
+
+## Several shops
+
+One signed-in person can own some pilot shops and help at others (`docs/several-shops.md`). Each shop's own people
+record decides who may act for it and as what; each person's index of their shops, in AuthObject, only finds them. To act
+for a shop, a person asks for a **shop session** for it with their signed-in session, and uses that shop session on the
+approval routes ("Approvals for a session", "Deciding from a session"). No route takes a shop or a role from a request
+where the session decides it.
+
+### A person's own routes
+
+Each needs the lifted signed-in session (`Authorization: Bearer <access token>` from `POST /v1/auth/exchange`): no
+session, a shop session and the operator key all answer 401 `unauthorized`. A wrong method answers 405
+`method_not_allowed`, after the session is checked, and 503 `shops_unavailable` means a shop's records or the person's
+index could not be read.
+
+**`GET /v1/shops`**: the shops the person is in, with their role at each: the ones they own first, then the ones they
+help at, each by name. Every shop is read again from its own record, so a shop whose owner account was unlinked, where
+the person's helper was removed, or that was deleted, is not listed. A shop that cannot be read fails the whole answer
+with 503, never a shorter list.
+
+```ts
+type Shops = { shops: { id: string; name: string; ownerName: string; role: "owner" | "helper" }[] };
+```
+
+**`POST /v1/shops/session`** with exactly `{ shop }`: a shop session for one shop. The shop's record decides the role:
+the owner's session while the person's account is the one linked to the shop, else a helper's while a current helper has
+the identity they signed in with.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ shop: { id, name, ownerName }, role: "owner", account: { id }, session: ShopSession }` | The person's account is the shop's linked owner account; `account.id` is what their decisions name |
+| 200 | `{ shop, role: "helper", helper: { id, name }, session: ShopSession }` | The person is a current helper: the same helper session `POST /v1/people/session` gives |
+| 404 | `{ error: "not_found" }` | The person is in the shop neither way, or there is no such pilot shop: one answer for both, so nobody learns which shops exist |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ shop }` with a shop id; a `role` above all |
+
+```ts
+type ShopSession = {
+  accessToken: string;   // "mos1.<shop, base64url>.<64 hex>" for an owner, "mhs1.<…>" for a helper: send as `Authorization: Bearer <accessToken>`
+  expiresAt: string;     // 30 days on; open the shop again with the signed-in session after that
+};
+```
+
+An owner session is accepted by `GET /v1/approvals` and `POST /v1/approvals/{requestId}/decision`, and by the team's
+routines (`/v1/routines`, `/v1/team/*`, "Routines", above), for its own shop only, as the owner: those routes take who is
+calling from one place (`callerOf`), and the routines' own rule is that they are the owner's. Decisions and routine
+changes name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` answers it 403 `not_a_helper`, as it
+answers the shop's own session. Every other session route answers it 401, so it never acts as the shop: not the tasks,
+consent, export, deletion, connections or schedules. The shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then
+on each answers 401 `unlinked` with `unlinkedAt`. Opening one writes `owner.session_opened` to the shop's audit log,
+naming the account by its id.
+
+**`POST /v1/shops/owner-code`** with no body, or `{}`: a code the owner sends their operator so the operator can link this
+account to their shop ("Operator routes", below). 200 `{ code, expiresAt }`: `code` is eight characters of Crockford's
+base 32, shown as `XXXX-XXXX`. It names only the account that asked for it, works once, for 15 minutes, and asking again
+replaces it. Only its SHA-256 is kept. A body with any field, an account above all, answers 400 `invalid_request`.
+
+### Operator routes
+
+Under the admin gate, as exact `ADMIN_METHODS` entries. Each names an existing pilot shop (else 404 `shop_not_found`;
+400 `tenant_required` without a tenant), checked before a code is used, and each change is written to the shop's audit
+log under the operator's Access identity, naming the link by its id, never the account itself or the code.
+
+| Method and path | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/admin/shops/owner` | `{ tenant, code }` | `{ tenant, ownerAccount: { id, linkedAt } }`; the log gets `owner.linked` |
+| `POST /v1/admin/shops/owner/unlink` | `{ tenant }` | `{ tenant, unlinked, sessionsEnded }`; the log gets `owner.unlinked` |
+
+- **Linking.** The operator first checks that the code came from the shop's owner, through the channel they already use
+  for the shop. `code` may be typed in any case, with or without the dash or spaces, and O, I and L are read as 0, 1 and
+  1. The code is used up first, whatever follows: 404 `unknown_code` for a code never made, already used or replaced,
+  and for text that cannot be a code; 410 `code_expired` past its 15 minutes. Then the shop's record links the account:
+  409 `already_linked` while another account is linked (unlink it first). Linking the account already linked changes
+  nothing, writes no entry, answers the same link, and writes the account's index row again. 503 `index_unavailable`
+  means the link was made but the account's index could not be written: the shop is not on the owner's list yet, and
+  linking the same account again with a new code puts it there. 400 `invalid_request` for a body that is not exactly
+  `{ tenant, code }` with a string `code`.
+- **Unlinking** ends every owner session of the shop in the same write, takes the shop off the account's list, and
+  answers how many sessions it ended. 404 `not_linked` when no account is linked; 400 `invalid_request` for a body that
+  is not exactly `{ tenant }`.
+- **People.** `GET /v1/admin/people` shows the link as `owner.account`, or `null`:
+
+```ts
+type OwnerAccountView = { id: string; linkedAt: string; devices: number };   // devices: owner sessions open now
+```
+
+- **Export and deletion.** The shop's export carries the link in `people.ownerAccount`: `{ id, subject, linkedAt }` or
+  `null`, where `subject` is the account's verified Apple subject; never a session's hash. Deleting the shop wipes the
+  link and every owner session with the rest of its people, and takes the shop out of every person's index. A person who
+  deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet.

@@ -4,9 +4,9 @@
 /// are the shop's schedule object (schedule-object.ts).
 ///
 /// Routes. An operator's, under the admin gate's exact `ADMIN_METHODS` entries (index.ts), name the shop in the query
-/// or the body, and a change needs an existing pilot shop, as the console's other writes do. The shop's own session
-/// reads and changes its own routines and pauses its own team; a helper's session is refused, because the team's
-/// routines are the owner's. Making, pausing, resuming or removing a routine needs neither a switch nor consent:
+/// or the body, and a change needs an existing pilot shop, as the console's other writes do. The shop's own session,
+/// or the owner session of the account linked to the shop (docs/several-shops.md), reads and changes its own routines
+/// and pauses its own team; a helper's session is refused, because the team's routines are the owner's. Making, pausing, resuming or removing a routine needs neither a switch nor consent:
 /// nothing runs then. Each run reads both again.
 ///
 /// A run, start to end (`runRoutineOccurrence`):
@@ -97,7 +97,9 @@ export async function routinesRoute(request: Request, url: URL, env: RoutineEnv,
   if (body instanceof Response) return body;
   // The shop is the session's: a body that names one is refused rather than read as another shop.
   if ("tenant" in body) return json({ error: "invalid_request" }, 400);
-  return change(route, env, tenant, body, { kind: "owner", id: OWNER_SESSION });
+  // The log names the owner's linked account when an owner session made the change, as the owner's decisions do
+  // (docs/several-shops.md), and the shop's own session otherwise.
+  return change(route, env, tenant, body, { kind: "owner", id: caller.accountId ?? OWNER_SESSION });
 }
 
 async function bodyOf(request: Request): Promise<Record<string, unknown> | Response> {

@@ -6,8 +6,10 @@
 /// - `POST /v1/approvals/{requestId}/decision` with `{ optionId, seenRevision }` decides one of them.
 /// - `POST /v1/approvals/{requestId}/pass-on` with `{ note }` is a helper handing one to the owner (people.ts).
 ///
-/// Who is calling comes from the credential alone (`callerOf` in people.ts): the shop's own session is its owner, and a
-/// helper session is a helper of the one shop it names. Every route here works on that shop's requests and no other.
+/// Who is calling comes from the credential alone (`callerOf` in people.ts): the shop's own session is its owner, a
+/// helper session is a helper of the one shop it names, and an owner session is the owner of the one shop it names
+/// (docs/several-shops.md). Every route here works on that shop's requests and no other, and a shop or a role named in
+/// the listing's query is refused rather than read.
 ///
 /// The scope is the shop's own, as for the tenant export: every task in the shop's index, each read with only the
 /// shop's tenant, so the task object's tenancy rules apply as they do to every task read. A task of another tenant
@@ -32,8 +34,11 @@ const MAX_RECENT = 200;
 const MAX_BODY_BYTES = 16 * 1024;
 /// The longest request id a route looks up: every request shares its action's id, a UUID.
 const MAX_REQUEST_ID = 128;
-/// Who the decision names when the shop's own session decides, as `owner-link` names the owner's link (pilot.ts).
+/// Who the decision names when the shop's own session decides, as `owner-link` names the owner's link (pilot.ts). An
+/// owner session of a linked account names that account's id instead (docs/several-shops.md).
 export const OWNER_SESSION = "owner-session";
+/// What only the session decides: a request naming any of these in the listing's query is refused.
+const SESSION_DECIDES = ["shop", "tenant", "role"] as const;
 
 type Found = { taskId: string; record: ApprovalRecord; standing: Standing };
 
@@ -55,7 +60,13 @@ export async function approvalsRoute(request: Request, url: URL, env: ApprovalsE
   if (url.pathname !== "/v1/approvals" && !item) return null;
   const caller = await callerOf(request, env);
   if (caller instanceof Response) return caller;
-  if (!item) return request.method === "GET" ? listApprovals(env, caller.shop, url) : json({ error: "method_not_allowed" }, 405);
+  if (!item) {
+    if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+    // The session names the shop and the role. A query naming either is refused, so it never even looks as if it were
+    // read.
+    if (SESSION_DECIDES.some((name) => url.searchParams.has(name))) return json({ error: "invalid_request" }, 400);
+    return listApprovals(env, caller.shop, url);
+  }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   let requestId: string;
   try {
@@ -104,7 +115,7 @@ async function decideFromSession(request: Request, env: ApprovalsEnv, flags: Job
     requestId,
     optionId: body.optionId,
     seenRevision: body.seenRevision,
-    decidedBy: caller.role === "owner" ? OWNER_SESSION : caller.helperId,
+    decidedBy: caller.role === "owner" ? (caller.accountId ?? OWNER_SESSION) : caller.helperId,
     role: caller.role,
   }, { flags });
   if (!decided.ok) return json({ error: decided.error, ...(decided.feature ? { feature: decided.feature } : {}) }, decided.status);
