@@ -31,6 +31,16 @@ zeroize = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# macOS: the connected runtime keeps its API session in the login keychain, as one generic password item only this
+# app's commands name (api_link.rs). Other systems have no keychain support yet, so Connected cannot sign in there.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again.
+security-framework-sys = "2"
+core-foundation = "0.10"
+
 # Windows and Linux: a link opened while manut runs starts a second manut; this hands its link to the first one.
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
