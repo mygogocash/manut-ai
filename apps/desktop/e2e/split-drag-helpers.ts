@@ -5,6 +5,11 @@ import { expect, type Page } from "@playwright/test";
 
 export type Side = "left" | "right" | "up" | "down";
 
+/** Why a spec does not drag a TERMINALS row onto an open terminal. The list left the sidebar for the Code page, which
+ *  takes the main column the terminal fills, so a row and a pane are never on screen together. */
+export const NO_ROW_DRAG =
+  "a TERMINALS row can no longer be dragged onto an open terminal: the list is on the Code page, which replaces the terminal in the main column, so a row and a pane are never on screen together (the sidebar's list left with the side menu)";
+
 /** The box a session shows in: its split pane, else its terminal. */
 const paneBox = async (page: Page, id: string) => (await page.locator(`[data-testid="split-pane"][data-session="${id}"], [data-testid="terminal"][data-session="${id}"]`).first().boundingBox())!;
 
@@ -40,6 +45,20 @@ export async function dragRowOnto(page: Page, id: string, onto: string, side: Si
   await open.scrollIntoViewIfNeeded();
   const r = (await open.boundingBox())!;
   await dragFrom(page, { x: r.x + Math.min(40, r.width / 2), y: r.y + r.height / 2 }, onto, side, o);
+}
+
+/** Put session `add` in a new pane on the `side` of `at`'s pane, as a row dropped there does: the same store action
+ *  (src/sessions/SplitView.tsx `splitWith`) that the drop calls. A row cannot be dragged onto an open terminal any more
+ *  (the list is on the Code page, which takes the main column the terminal fills), so a spec whose subject is not the
+ *  drop builds its split with this instead, and says so where it does. */
+export async function splitBeside(page: Page, at: string, add: string, side: Side = "right") {
+  await page.evaluate(
+    async ([a, b, s]) => {
+      const m = (await import(/* @vite-ignore */ "/src/sessions/SplitView.tsx" as string)) as { splitWith(at: string, add: string, dir: Side): void };
+      m.splitWith(a, b, s);
+    },
+    [at, add, side] as const,
+  );
 }
 
 /** Drag split pane `id` by its grip onto the `side` part of `onto`'s pane. */

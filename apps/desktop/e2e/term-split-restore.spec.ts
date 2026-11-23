@@ -5,7 +5,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { openCode, startDone } from "./start";
 import { mock, usePlatform } from "./term-find-helpers";
-import { dragRowOnto, type Side } from "./split-drag-helpers";
+import { splitBeside, type Side } from "./split-drag-helpers";
 
 type Sessions = { startTerminal(a: string, cwd: string): string };
 const start = (page: Page, cwd: string) => page.evaluate((c) => (window as unknown as { __manutSessions: Sessions }).__manutSessions.startTerminal("shell", c), cwd);
@@ -26,9 +26,10 @@ async function open(page: Page) {
   await startDone(page);
 }
 
-/** `pick`'s TERMINALS row dragged onto the `side` part of `from`'s pane (`from` is on screen). */
+/** `pick` put in a new pane on the `side` of `from`'s pane (`from` is on screen). The drop of a row onto a terminal is no
+ *  longer reachable from a test (the list is on the Code page), so the split is made by the store action the drop calls. */
 async function split(page: Page, from: string, side: Side, pick: string) {
-  await dragRowOnto(page, pick, from, side);
+  await splitBeside(page, from, pick, side);
   await expect(pane(page, pick)).toHaveAttribute("data-focused", "true");
 }
 
@@ -61,9 +62,10 @@ test("the split comes back after a restart, its layout and sizes kept; paused se
   await expect.poll(() => page.evaluate(() => localStorage.getItem("manut.splits"))).toContain('"ratio":0.4');
 
   await page.reload();
+  await startDone(page);
+  await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toBeVisible();
   // the shells come back paused; opening one shows the whole split again, each pane paused with Resume
-  await openCode(page);
   await page.getByTestId(`session-${b}`).locator(".ss-open").click();
   await expect(page.getByTestId("session-split")).toHaveAttribute("data-panes", "3");
   for (const id of [a, b, c]) await expect(pane(page, id).getByTestId("session-paused")).toBeVisible();
@@ -90,10 +92,14 @@ test("a closed session leaves its split, and a split left with one pane ends", a
   await expect(term(page, b).locator(".xterm-rows")).toContainText("(mock)");
   await split(page, b, "right", a);
   await expect(page.getByTestId("session-split")).toBeVisible();
-  // close b from its row (stop): a is alone, no split, nothing saved
+  // close b from its row (stop), on the Code page where the rows are now: then a is shown alone, with no split, and
+  // nothing saved
+  await openCode(page);
   await page.getByTestId(`session-${b}`).hover();
   await page.getByTestId(`session-${b}`).getByTestId("session-close").click();
   await page.getByTestId("session-stop").click();
+  await page.getByTestId(`session-${a}`).locator(".ss-open").click();
+  await expect(term(page, a)).toBeVisible();
   await expect(page.getByTestId("session-split")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("manut.splits"))).toBeNull();
 });
