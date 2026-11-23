@@ -120,7 +120,8 @@ mod tests {
             assert!(ACP_ARGS.contains(&e.args), "{id}: {:?}", e.args);
             assert_eq!((e.acp.id, e.acp.label), (id, e.agent.label), "{id}");
             assert!(e.acp.skill_tool.is_none() && e.acp.rules.is_none(), "{id}: a generic agent has no rule probe");
-            assert!(e.mark.ends_with(".svg") && !e.mark.contains('/'), "{id}: {}", e.mark);
+            // A plain file name of a kind the desktop's asset loader reads (src/harness/assets.ts: *.svg, *.png).
+            assert!((e.mark.ends_with(".svg") || e.mark.ends_with(".png")) && !e.mark.contains('/'), "{id}: {}", e.mark);
             assert!(!assets.join(e.mark).exists(), "{id}: {} ships, but the vendors' logos are left out", e.mark);
             assert!(e.install.starts_with("npm install -g "), "{id}");
             assert!(crate::sessions::AGENTS.iter().all(|a| a.id != id), "{id} is also a built-in");
