@@ -1,5 +1,6 @@
-import { runInDurableObject } from "cloudflare:test";
+import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import worker from "../src/index";
 import type { PeopleRecord } from "../src/people-store";
 import { mintApprovalToken, mintDeletionToken, mintInviteToken } from "../src/approval-link";
 import { tenantDelete, tenantExport, tenantStub } from "../src/tenant-data";
@@ -416,6 +417,50 @@ describe("passing a request on", () => {
     expect(await pass("no-such-request", "where")).toMatchObject({ status: 404, body: { error: "not_found" } });
     expect(await pass(await plantRequest(shop.tenant, taskId, "money"), "for me", owner)).toMatchObject({ status: 403,
       body: { error: "not_a_helper" } });
+  });
+});
+
+describe("the shop's record", () => {
+  it("knows a session only by its own hash, never by a name every object inherits", async () => {
+    const shop = await setupShop();
+    await joinHelper(shop, "Mint");
+    for (const tokenHash of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      const checked = await tenantStub(bindings, shop.tenant).fetch(new Request("https://tenant/people/session-check", {
+        method: "POST", headers: { "content-type": "application/json", "x-people": "1" },
+        body: JSON.stringify({ tenant: shop.tenant, tokenHash }) }));
+      expect(await checked.json()).toEqual({ ok: false, error: "unauthorized" });
+    }
+  });
+
+  it("keeps an invited email without outer spaces, and still matches it without case", async () => {
+    const shop = await setupShop();
+    const made = await invite(shop, "Mint", { kind: "email", address: "  Mint@BaanMali.example  " });
+    expect(made.body.invite).toMatchObject({ identity: { kind: "email", address: "Mint@BaanMali.example" } });
+    expect((await accept(await signIn("mint@baanmali.example"), inviteToken(made.body.inviteUrl))).status).toBe(200);
+  });
+
+  it("fails the shop's approvals rather than listing them without the notes passed on", async () => {
+    const shop = await setupShop();
+    await proposeReply(shop, "We open at nine.");
+    const owner = await tenantSession(shop.tenant);
+    const namespace = bindings.TENANT;
+    const failing = { ...bindings, TENANT: {
+      idFromName: (name: string) => namespace.idFromName(name),
+      get: (id: DurableObjectId) => {
+        const stub = namespace.get(id);
+        return { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          if (new URL(request.url).pathname === "/people") return Response.json({ error: "fixture" }, { status: 500 });
+          return stub.fetch(request);
+        } };
+      },
+    } as unknown as DurableObjectNamespace };
+    const context = createExecutionContext();
+    const response = await worker.fetch(new Request("https://api.manut.test/v1/approvals?state=open",
+      { headers: owner }), failing, context);
+    await waitOnExecutionContext(context);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "approvals_unavailable" });
   });
 });
 

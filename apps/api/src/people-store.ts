@@ -89,7 +89,9 @@ function readRecord(kv: SyncKvStorage, tenant: string): PeopleRecord {
 }
 
 /// The identity as it will be kept: only the fields its kind has, so nothing else can ride along into the shop's record.
-/// `null` for what is not an identity at all; an identity of the right shape with a value the rules refuse (an empty
+/// An email is kept without outer spaces, which the rules ignore when they compare, so the console never shows them; its
+/// case is kept as the owner typed it, and the rules compare without it. A LINE id is kept exactly, as the rules compare
+/// it. `null` for what is not an identity at all; an identity of the right shape with a value the rules refuse (an empty
 /// LINE id, an address with no `@`) is left for the rules to refuse.
 export function keptIdentity(value: unknown): Identity | null {
   if (!isRecord(value)) return null;
@@ -97,7 +99,7 @@ export function keptIdentity(value: unknown): Identity | null {
     return { kind: "line", id: value.id };
   }
   if (value.kind === "email" && typeof value.address === "string" && value.address.length <= MAX_FIELD) {
-    return { kind: "email", address: value.address };
+    return { kind: "email", address: value.address.trim() };
   }
   return null;
 }
@@ -262,7 +264,9 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 
   /// `{ tokenHash }`: whether a helper session still works, and whose it is. Reads only.
   "POST /people/session-check": (record, body, nowMs) => {
-    const session = typeof body.tokenHash === "string" ? record.sessions[body.tokenHash] : undefined;
+    // Only a SHA-256 the record holds as its own key names a session: never a name every object inherits.
+    const hash = typeof body.tokenHash === "string" && SHA256_HEX.test(body.tokenHash) ? body.tokenHash : null;
+    const session = hash !== null && Object.hasOwn(record.sessions, hash) ? record.sessions[hash] : undefined;
     const unauthorized: SessionCheck = { ok: false, error: "unauthorized" };
     if (!session) return { answer: { status: 200, body: unauthorized } };
     if (session.endedAt !== undefined) {

@@ -102,6 +102,11 @@ describe("a helper deciding from their session", () => {
       }
       expect((await storedRequest(shop.tenant, task, requestId)).record.status).toBe("pending");
     }
+    // Each attempt is in the log under the helper's id, refused with approval-core's reason.
+    const attempts = (await auditEntries(shop.tenant)).filter((entry) => entry.action === "approval.decided");
+    expect(attempts).toHaveLength(requests.length * 2);
+    expect(attempts.every((entry) => entry.actor.kind === "helper" && entry.actor.id === helper.id &&
+      entry.outcome === "refused" && entry.reason === "not_permitted")).toBe(true);
     // The owner decides them.
     const owner = await tenantSession(shop.tenant);
     for (const [, requestId] of requests) {
