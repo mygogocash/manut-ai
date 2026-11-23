@@ -69,12 +69,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four helpers are running, each on its own branch from `pilot/week-1`: the Playwright revival (it opens a
-   draft pull request into `pilot/week-1`, merge it when CI's Playwright job passes), the Phase 2 job flow with
-   an audit log (`feat/job-flow-audit-log`), Phase 1's LINE cards and morning brief for owners
-   (`feat/owner-line-cards`, behind a flag that stays off) and the Phase 3 runtime adapter
-   (`feat/desktop-runtime-adapter`, read-only first). Review each, merge it after the full root gate, add its
-   decisions to `docs/decisions.md` and mark the tracker.
+1. Three helpers are running, each on its own branch from `pilot/week-1`: the Playwright revival (draft pull
+   request #5 into `pilot/week-1`, merge it when CI's Playwright job passes), the Phase 2 job flow with an audit
+   log (`feat/job-flow-audit-log`) and the Phase 3 runtime adapter (`feat/desktop-runtime-adapter`, read-only
+   first). Review each, merge it after the full root gate, add its decisions to `docs/decisions.md` and mark the
+   tracker. LINE work is parked by the owner: `feat/owner-line-cards` (51b3a85) holds owner cards and the morning
+   brief behind the `ownerLine` flag (API, console, contract), not yet reviewed or merged; two unfinished test
+   edits are uncommitted in the checkout `~/.t3/worktrees/manut-ai/t3-fcdf6354-43bf14b50ea88b80`.
 2. Review the night build's draft pull requests (`cloud/<task>`): slip-rules now, then promptpay-read,
    approval-wire, shop-memory, books and routine-rules. Merge the good ones into `pilot/week-1`, never into
    `main`.

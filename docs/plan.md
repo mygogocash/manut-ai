@@ -50,7 +50,7 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | --- | --- | --- |
 | 0 Spikes | Drive the DeepSeek Harness; pause and resume approvals with LangGraph.js; draft the worker adapter contract | built: all three answered in `docs/phase-0-spikes.md` (the gate's question; a model account for `dsh` is the owner's) |
 | 1 Pilot | Buddy on LINE run by operators; simple web approval view; tenant and owner records; simplest approval object | built |
-| 1 Pilot | Approval cards and a morning brief sent to owners on LINE | not yet; sending to real owners needs the owner's go and Manut's own LINE Official Account |
+| 1 Pilot | Approval cards and a morning brief sent to owners on LINE | owner: parked for later (23 Nov); built on `feat/owner-line-cards` (API, console, contract), not reviewed or merged |
 | 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | built: `GET /v1/admin/pilot/gate` and the console's Pilot gate page; the gate itself waits for real shops |
 | 1 Pilot | Audit log an operator can read | partial (task history and deletion records) |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | partial (lifted from GoSpark; `packages/approval-core` used by deletion only) |

@@ -9,9 +9,13 @@ Read `CLAUDE.md`, `docs/plan.md`, `docs/decisions.md` and `README.md` in full. `
 "Queue for cloud routines".
 
 ## 2. Pick one task
-Go down the queue in order. A task whose branch `origin/cloud/<task-id>` already exists is taken or done: skip
-it. Take the first task with no such branch. If every task has a branch, stop and report that the queue is
-empty; do nothing else.
+A task's id is its heading in the queue (`### slip-rules` is the task `slip-rules`). First list the taken ones:
+`git ls-remote --heads origin 'refs/heads/cloud/*'`. A task is taken or done when that list has
+`refs/heads/cloud/<task-id>`, or when `docs/plan.md` already says `Done on cloud/<task-id>` under it. Go down the
+queue in order and take the first task that is neither; write its id in your report before you start. Just
+before creating its branch, check once more that `git ls-remote --exit-code --heads origin cloud/<task-id>`
+finds nothing. If every task is taken, stop and report that the queue is empty; do nothing else. If your push is
+later refused because the branch exists after all, stop and report it: never take a second task in one run.
 
 ## 3. Do it
 - Create the branch `cloud/<task-id>` from the active branch.
