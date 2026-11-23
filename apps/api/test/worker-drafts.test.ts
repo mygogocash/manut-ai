@@ -1,4 +1,4 @@
-import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 import { cancelAttempt, startAttempt, workerPort, type JobFlags, type WorkerPort } from "../src/job-flow";
@@ -474,5 +474,38 @@ describe("which jobs it lists, and in what order", () => {
     // It never read the pilot's own task: only tasks the runner names.
     expect(seen.every((label) => label.includes("worker-task-"))).toBe(true);
     expect(seen.some((label) => label.includes(never))).toBe(true);
+  });
+});
+
+describe("what an attempt's record can leave out", () => {
+  it("reads a finished attempt with no recorded outcome as failed for an unknown reason, never as done", async () => {
+    const s = await shop();
+    const result = await run(s, "pim", { kind: "post", topic: "before outcomes were kept" });
+    // Take the outcome and reason off the stored attempt, as a record finished before outcomes existed would lack them.
+    await runInDurableObject(bindings.TASK.get(bindings.TASK.idFromName(result.taskId)), async (_instance, state) => {
+      for (const [key, value] of await state.storage.list({ prefix: "attempt:" })) {
+        const { outcome: _outcome, reason: _reason, ...old } = value as AttemptJSON;
+        await state.storage.put(key, old);
+      }
+    });
+    expect((await attemptsOf(result.taskId, s.tenant))[0]).not.toHaveProperty("outcome");
+    expect(only((await list(s)).body)).toMatchObject({ taskId: result.taskId, member: "pim",
+      ending: { state: "failed", reason: "unknown" }, draft: { text: expect.any(String) } });
+  });
+
+  it("shows the newest draft when a job was drafted twice, and the member of the newest attempt", async () => {
+    const s = await shop();
+    const taskId = await taskFor(s, { kind: "post", topic: "drafted twice" });
+    const first = await begin(s, taskId, "pim");
+    expect((await first.draft({ member: "pim", job: "post", text: "The first draft." })).ok).toBe(true);
+    expect((await first.finish("done")).ok).toBe(true);
+    const second = await begin(s, taskId, "pim");
+    expect((await second.draft({ member: "pim", job: "post", text: "The second, better draft." })).ok).toBe(true);
+    expect((await second.finish("done")).ok).toBe(true);
+    const job = only((await list(s)).body);
+    expect(job).toMatchObject({ taskId, member: "pim", ending: { state: "done" },
+      draft: { text: "The second, better draft." } });
+    // Two attempts by the same member are not a handover.
+    expect(job).not.toHaveProperty("passedFrom");
   });
 });
