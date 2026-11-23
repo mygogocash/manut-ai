@@ -1,6 +1,8 @@
+import { formatMoney } from "@manut/format";
 import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
   ApiError,
+  MODEL_CAP_MAX_SATANG,
   type ApprovalState,
   type AuditActor,
   type AuditEntry,
@@ -9,6 +11,9 @@ import {
   type DeletionRequest,
   type FactSource,
   type GateStatus,
+  type ModelCap,
+  type ModelCounts,
+  type ModelUsage,
   type PilotGate,
   type Shop,
 } from "../api";
@@ -457,6 +462,204 @@ export function auditSubjectText(subject: Record<string, string>): string {
 export function subscriptionErrorText(error: unknown, shop: string): string {
   if (error instanceof ApiError && error.code === "slip_already_recorded") return gateWords.alreadyRecorded(shop);
   return errorText(error);
+}
+
+/// The Model spend page: one shop's model spend for one Bangkok month against its monthly cap (docs/model-gateway.md,
+/// "Operator routes"). Money is whole satang, written with `formatMoney` and read with `parseMoney` from @manut/format and
+/// never through a float. Spend is shown as the API rounds it, up, and what is left rounded down, so the page never shows
+/// a shop more room than it has. Sentences that hold a figure or a name are functions.
+
+const UNKNOWN_AMOUNT = "unknown";
+const NO_IDENTITY = "an operator (no Access identity)";
+
+/// An amount of satang as baht: ฿186, ฿113.41. A figure that is not a whole, non-negative number of satang, which the API
+/// never sends, is shown as "unknown" rather than crashing the page or showing a wrong amount.
+export function moneyText(satang: number): string {
+  return Number.isSafeInteger(satang) && satang >= 0 ? formatMoney(satang) : UNKNOWN_AMOUNT;
+}
+
+export type SpendLevel = "empty" | "ok" | "half" | "cap";
+
+/// Where a month stands against the cap. At the cap when nothing is left, however it came about: spend, calls in progress,
+/// a cap lowered under the spend, or a zero cap. Over half when spend and holds together are more than half of it. Empty
+/// when nothing was spent, held, called or refused; a failed call costs nothing but still means calls were made.
+export function spendLevel(usage: ModelUsage): SpendLevel {
+  if (usage.remainingSatang === 0) return "cap";
+  const { ok, failed, unreadable, abandoned, refused } = usage.counts;
+  if (usage.spentSatang === 0 && usage.heldSatang === 0 && ok + failed + unreadable + abandoned + refused === 0) {
+    return "empty";
+  }
+  return (usage.spentSatang + usage.heldSatang) * 2 > usage.capSatang ? "half" : "ok";
+}
+
+/// Whole percent of the cap that spend and holds take, rounded down and never past 100. The remainder is taken first,
+/// so the division is exact. A zero cap is all used.
+export function percentUsed(usage: ModelUsage): number {
+  if (usage.capSatang <= 0) return 100;
+  const scaled = (usage.spentSatang + usage.heldSatang) * 100;
+  const percent = (scaled - (scaled % usage.capSatang)) / usage.capSatang;
+  return percent > 100 ? 100 : percent;
+}
+
+const MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+  "November", "December"] as const;
+
+/// "2026-11" as "November 2026"; anything that is not a month is shown as it is.
+export function monthName(month: string): string {
+  const match = MONTH.exec(month);
+  return match ? `${MONTH_NAMES[Number(match[2]) - 1]} ${match[1]}` : month;
+}
+
+/// The `count` months before `month`, newest first: 2026-02 gives 2026-01, 2025-12, 2025-11.
+export function monthsBack(month: string, count: number): string[] {
+  const match = MONTH.exec(month);
+  if (!match) return [];
+  const index = Number(match[1]) * 12 + Number(match[2]) - 1;
+  return Array.from({ length: count }, (_, i) => {
+    const earlier = index - (i + 1);
+    return `${String(Math.floor(earlier / 12)).padStart(4, "0")}-${String((earlier % 12) + 1).padStart(2, "0")}`;
+  });
+}
+
+/// How one call ended, as a tag. A code this console does not know yet is shown as it is, never dropped.
+export function callOutcomeTag(outcome: string): { label: string; className: string } {
+  switch (outcome) {
+    case "ok":
+      return { label: "Done", className: "tag ok" };
+    case "failed":
+      return { label: "Failed, not charged", className: "tag" };
+    case "unreadable":
+      return { label: "Worst case charged", className: "tag warn" };
+    case "abandoned":
+      return { label: "Never finished, worst case charged", className: "tag warn" };
+    default:
+      return { label: outcome, className: "tag" };
+  }
+}
+
+/// What went wrong with one of the two model routes. `write` is setting or clearing a cap, where a 503 `meter_unavailable`
+/// does not say whether the cap was written, so the words say so. Anything else is the console's usual words.
+export function modelErrorText(error: unknown, action: "read" | "write"): string {
+  if (error instanceof ApiError) {
+    if (error.code === "not_configured") return modelSpendWords.notConfigured(error.setting);
+    if (error.code === "meter_unavailable") {
+      return action === "read" ? modelSpendWords.unavailable : modelSpendWords.capUnconfirmed;
+    }
+  }
+  return errorText(error);
+}
+
+export const modelSpendWords = {
+  nav: "Model spend",
+  title: "Model spend",
+  intro:
+    "What each shop's AI team has spent on language models in a month, against the shop's monthly cap. Every call is priced and held against the cap before it is made, and a call that would pass the cap is refused. Spend is shown rounded up and what is left rounded down, so a shop never looks to have more room than it has.",
+  shopLabel: "Shop",
+  monthLabel: "Month",
+  thisMonth: "This month",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading model spend",
+  noShops: "No shops yet.",
+  /// The API names the setting it cannot read: a model setting it was given that is not a whole number, or one it needs.
+  notConfigured: (setting?: string) =>
+    `The model gateway is not set up: ${setting ? `the API setting ${setting}` : "one of the API's model settings"} is missing or cannot be read. Ask whoever deploys the API to fix it, then try again.`,
+  unavailable: "The API could not read this shop's model meter, so no spend is shown. Try again.",
+  capUnconfirmed: "The API could not confirm the cap, so it may not have changed. Check the cap shown, then try again.",
+
+  // Where the month stands
+  level: {
+    empty: { label: "No spend yet", className: "tag" },
+    ok: { label: "Under half of the cap", className: "tag ok" },
+    half: { label: "Over half of the cap", className: "tag warn" },
+    cap: { label: "At the cap", className: "tag err" },
+  } satisfies Record<SpendLevel, { label: string; className: string }>,
+  usedText: (percent: number) => `${percent}% of the cap is used`,
+  emptyText: (month: string, current: boolean) =>
+    current ? "No model calls yet this month." : `No model calls in ${monthName(month)}.`,
+  atCapText: (current: boolean, capSatang: number) =>
+    capSatang === 0
+      ? `The cap is ${moneyText(0)}, so every call is refused.`
+      : current
+        ? "New calls are refused until the cap is raised or the month turns."
+        : "That month's spend and holds reached the cap.",
+  /// The API keeps one cap per shop, not one per month, so an earlier month is read against the cap as it is now.
+  pastNote:
+    "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.",
+
+  // The four figures
+  spentLabel: "Spent",
+  spentHelp: (tokens: { input: number; output: number }) =>
+    `${tokens.input.toLocaleString("en-US")} tokens in, ${tokens.output.toLocaleString("en-US")} out.`,
+  heldLabel: "Held for calls in progress",
+  heldHelp: (count: number | null) =>
+    count === null
+      ? "Calls in progress, counted at their worst case."
+      : count === 0
+        ? "No calls in progress."
+        : `${count} ${count === 1 ? "call" : "calls"} in progress, counted at ${count === 1 ? "its" : "their"} worst case.`,
+  leftLabel: "Left",
+  leftHelp: "The cap less what is spent and held.",
+  capLabel: "Monthly cap",
+  capSource: (usage: Pick<ModelUsage, "capSource" | "capOverride">, now: number = Date.now()) => {
+    if (usage.capSource !== "override") return "The default. No operator has set one for this shop.";
+    const set = usage.capOverride;
+    return set ? `Set by ${set.setBy ?? NO_IDENTITY}${whenAfter(set.setAt, now)}.` : "Set by an operator.";
+  },
+
+  // The calls
+  callsText: (counts: ModelCounts) =>
+    `${countOf(counts.ok + counts.failed + counts.unreadable + counts.abandoned, "call", "calls")} made, ${counts.refused.toLocaleString("en-US")} refused at the cap.`,
+  /// What became of the calls that did not simply finish, naming what each one cost; empty when every call finished.
+  outcomesText: (counts: ModelCounts) => {
+    const parts: string[] = [];
+    if (counts.failed) parts.push(`${counts.failed.toLocaleString("en-US")} failed (not charged)`);
+    if (counts.unreadable) {
+      parts.push(`${counts.unreadable.toLocaleString("en-US")} answered without a usable token count (charged at the worst case)`);
+    }
+    if (counts.abandoned) parts.push(`${counts.abandoned.toLocaleString("en-US")} never finished (charged at the worst case)`);
+    return parts.length === 0 ? "" : `Of these, ${listOf(parts)}.`;
+  },
+  callsTitle: "Calls",
+  callsLabel: (shop: string, month: string) => `${shop}'s model calls in ${monthName(month)}`,
+  columns: { when: "When", model: "Model", tokens: "Tokens", cost: "Cost", outcome: "How it ended" },
+  tokensText: (input: number, output: number) =>
+    `${input.toLocaleString("en-US")} in, ${output.toLocaleString("en-US")} out`,
+  /// The API lists a month's newest 200 records. Refused calls have no record, so only calls made count against the list.
+  newestNote: (shown: number, counts: ModelCounts) => {
+    const made = counts.ok + counts.failed + counts.unreadable + counts.abandoned;
+    return shown < made ? `Showing the newest ${shown.toLocaleString("en-US")} of ${made.toLocaleString("en-US")} calls.` : null;
+  },
+  roundingNote:
+    "Each cost is rounded up to a whole satang, so the rows can add up to a little more than the month's spend.",
+
+  // Changing the cap
+  formTitle: "Change the cap",
+  capInputLabel: "New monthly cap in baht",
+  capInputHelp: `Like 300 or 300.50, up to ${moneyText(MODEL_CAP_MAX_SATANG)}. A new cap applies from the next call; calls already in progress keep the budget they hold.`,
+  setButton: "Set cap",
+  setting: "Setting",
+  clearButton: "Use the default cap",
+  clearing: "Clearing",
+  clearHelp: (hasOverride: boolean) =>
+    hasOverride ? "Removes this shop's own cap, so the default applies again." : "This shop already uses the default cap.",
+  badCap: "Write the cap in baht, like 300 or 300.50. It must be more than ฿0.",
+  tooBigCap: `The cap can be at most ${moneyText(MODEL_CAP_MAX_SATANG)}.`,
+  /// The cap as the API's answer says it now stands, so what the page confirms is what was written, not what was typed.
+  capAnswer: (shop: string, answer: ModelCap, now: number = Date.now()) => {
+    const cap = moneyText(answer.capSatang);
+    if (answer.capSource !== "override") return `The cap for ${shop} is now ${cap}, the default. The override is cleared.`;
+    const set = answer.capOverride;
+    const by = set ? `, set by ${set.setBy ?? NO_IDENTITY}${whenAfter(set.setAt, now)}` : "";
+    return `The cap for ${shop} is now ${cap}${by}. It applies from the next call; calls already in progress keep the budget they hold.`;
+  },
+} as const;
+
+/// " at 10:00" or " on 23 November at 10:00", or nothing for a time that is not one.
+function whenAfter(iso: string, now: number): string {
+  return Number.isNaN(Date.parse(iso)) ? "" : ` ${whenText(iso, now)}`;
 }
 
 /// "at 10:00" today, "on 23 November at 10:00" on any other day of the shop's calendar.

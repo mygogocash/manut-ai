@@ -33,6 +33,8 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     confirmFact: missing("confirmFact"),
     correctFact: missing("correctFact"),
     forgetFact: missing("forgetFact"),
+    getModelUsage: missing("getModelUsage"),
+    setModelCap: missing("setModelCap"),
     ...overrides,
   };
 }
