@@ -142,4 +142,5 @@ device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_
   shop again.)
 - The owner managing helpers from their own session; the operator routes do it in the pilot.
 - Telling the owner about a helper's new device (the canvas does it on LINE, which is parked). The audit log has it.
-- Showing on the owner's link page who decided a reply.
+- (Built since, 24 Nov 2026: the owner's link page names the helper who approved or declined a reply, as the canvas's
+  "Approved by Mint at 19:42." and "Mint approved this at 19:42", from `decidedByHelper` in `docs/pilot-api.md`.)

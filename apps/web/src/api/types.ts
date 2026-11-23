@@ -24,6 +24,9 @@ export type ApprovalView = {
   replyText: string;
   state: ApprovalState;
   decidedAt?: string;
+  /// The name the owner gave the helper who approved or declined this reply, when a helper did. Absent when the owner
+  /// decided, wherever from: this is the owner's own page.
+  decidedByHelper?: string;
   expiresAt: string;
   needsConsent: boolean;
 };

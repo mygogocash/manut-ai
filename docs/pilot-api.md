@@ -89,10 +89,17 @@ type ApprovalView = {
   replyText: string;         // exactly what will be sent
   state: "proposed" | "approved" | "rejected" | "expired" | "dispatching" | "confirmed" | "failed" | "unknown";
   decidedAt?: string;
+  decidedByHelper?: string;  // the name the owner gave the helper who approved or declined it, when a helper did
   expiresAt: string;
   needsConsent: boolean;
 };
 ```
+
+`decidedByHelper` comes from approval-core's settled decision: only when the server recorded the role `helper` from
+the deciding session is a name looked up, in the shop's people record, which keeps the names of removed helpers too.
+The owner's own decisions (this link, the shop's session, a linked account) carry no name, and a name that cannot be
+read is left out, so the page then says only when the reply was answered. `decidedAt` falls back to the time
+approval-core settled the request, so a reply a helper declined has one too.
 
 ### `GET /v1/pilot/deletions/{token}`
 

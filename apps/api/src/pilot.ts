@@ -109,6 +109,10 @@ export type ApprovalView = {
   replyText: string;
   state: ViewState;
   decidedAt?: string;
+  /// The name the owner gave the helper who approved or declined this reply, when a helper did (docs/people.md). The
+  /// owner's own decisions, from this link, the shop's session or a linked account, carry no name: this is the owner's
+  /// page.
+  decidedByHelper?: string;
   expiresAt: string;
   needsConsent: boolean;
 };
@@ -185,6 +189,49 @@ async function readAction(env: PilotEnv, tenant: string, taskId: string, actionI
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`action_read_${response.status}`);
   return (await response.json()) as ActionProposalJSON;
+}
+
+type SettledBy = { decidedBy: string; role: string; decidedAt: number };
+
+/// Who settled a reply's request, and when, as approval-core recorded it (a reply's request shares its action's id).
+/// Null while it is open, when it ran out with nobody deciding, or when it cannot be read: the page then says only when
+/// the reply was answered, as it did before helpers could decide, so this read never stops the page from loading.
+async function settledBy(env: PilotEnv, claim: ApprovalClaim): Promise<SettledBy | null> {
+  try {
+    const response = await env.TASK.get(env.TASK.idFromName(claim.taskId)).fetch(
+      new Request(`https://task/requests/${encodeURIComponent(claim.actionId)}`, { headers: { "x-tenant": claim.tenant } }),
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const record = ((await response.json()) as { record?: ApprovalRecord }).record;
+    if (record?.status !== "decided") return null;
+    const { decidedBy, role, decidedAt } = record.decision;
+    return typeof decidedBy === "string" && typeof role === "string" && typeof decidedAt === "number"
+      ? { decidedBy, role, decidedAt }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/// The name the owner gave a helper, from the shop's people record (people-store.ts), which keeps the names of removed
+/// helpers too, so what a helper decided stays theirs after they leave. Read directly rather than through people.ts,
+/// which imports this module. Undefined when there is no such name or the record cannot be read.
+async function helperName(env: PilotEnv, tenant: string, helperId: string): Promise<string | undefined> {
+  try {
+    const response = await tenantCall(env, tenant, `/people?tenant=${encodeURIComponent(tenant)}`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    const names = ((await response.json()) as { names?: Record<string, unknown> }).names;
+    const name = names && Object.hasOwn(names, helperId) ? names[helperId] : undefined;
+    return typeof name === "string" && name ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function shopConsent(env: PilotEnv, tenant: string): Promise<boolean> {
@@ -385,10 +432,11 @@ async function approvalRoute(
 /// reply record is gone, which the link reports as invalid: the tenant was
 /// deleted, or the link names something this backend never proposed.
 async function loadView(env: PilotEnv, claim: ApprovalClaim): Promise<{ view: ApprovalView; action: ActionProposalJSON } | null> {
-  const [action, contextResponse, consent] = await Promise.all([
+  const [action, contextResponse, consent, settled] = await Promise.all([
     readAction(env, claim.tenant, claim.taskId, claim.actionId),
     tenantCall(env, claim.tenant, `/pilot/context?tenant=${encodeURIComponent(claim.tenant)}&actionId=${encodeURIComponent(claim.actionId)}`),
     shopConsent(env, claim.tenant),
+    settledBy(env, claim),
   ]);
   if (!action || !contextResponse.ok) return null;
   const context = (await contextResponse.json()) as {
@@ -397,7 +445,12 @@ async function loadView(env: PilotEnv, claim: ApprovalClaim): Promise<{ view: Ap
     message: InboundMessage | null;
   };
   if (!context.shop || !context.reply || context.reply.taskId !== claim.taskId) return null;
-  const decidedAt = context.reply.decidedAt ?? action.approval?.at;
+  // A reply decided from a session has no time on the pilot's reply record, and a declined one none on its action, so
+  // the settled request's time is the last word.
+  const decidedAt = context.reply.decidedAt ?? action.approval?.at
+    ?? (settled ? new Date(settled.decidedAt).toISOString() : undefined);
+  // approval-core's role is the server's, taken from the session that decided, so a name is shown only for a helper.
+  const decidedByHelper = settled?.role === "helper" ? await helperName(env, claim.tenant, settled.decidedBy) : undefined;
   const view: ApprovalView = {
     shopName: context.shop.name,
     memberName: MEMBER_NAME,
@@ -409,6 +462,7 @@ async function loadView(env: PilotEnv, claim: ApprovalClaim): Promise<{ view: Ap
     replyText: lineReplyText(action.payload) ?? "",
     state: viewState(action, Date.now()),
     ...(decidedAt ? { decidedAt } : {}),
+    ...(decidedByHelper ? { decidedByHelper } : {}),
     expiresAt: new Date(claim.expiresAtMs).toISOString(),
     needsConsent: !consent,
   };

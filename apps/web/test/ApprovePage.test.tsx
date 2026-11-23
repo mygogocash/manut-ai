@@ -171,6 +171,67 @@ describe("the owner's page", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
+  it("names the helper who answered first, instead of a second Approve button", async () => {
+    const decided = sampleView({ state: "confirmed", decidedAt: "2026-11-23T12:42:00Z", decidedByHelper: "Mint" });
+    const decide = vi.fn(() => Promise.reject(new ApiError(409, "already_decided", decided)));
+    renderWithApi(<ApprovePage token={TOKEN} />, stubApi({ getApproval: () => Promise.resolve(sampleView()), decide }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toBe("Mint approved this at 19:42, so your answer was not used. Nothing was sent twice.");
+    expect(screen.getByText("Approved by Mint at 19:42.")).toBeTruthy();
+    expect(screen.queryByText("Answered at 19:42.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  it("says which helper approved, while the reply is sending and once it is sent", async () => {
+    let reads = 0;
+    const getApproval = vi.fn(() =>
+      Promise.resolve(
+        sampleView({ state: reads++ === 0 ? "dispatching" : "confirmed", decidedAt: "2026-11-23T12:42:00Z", decidedByHelper: "Mint" }),
+      ),
+    );
+    renderWithApi(<ApprovePage token={TOKEN} pollMs={1} />, stubApi({ getApproval }));
+    expect(await screen.findByText("Approved. Sending the reply to Khun Ploy.")).toBeTruthy();
+    expect(screen.getByText("Approved by Mint at 19:42.")).toBeTruthy();
+    expect(await screen.findByText("Approved. Nam sent the reply to Khun Ploy.")).toBeTruthy();
+    expect(screen.getByText("Approved by Mint at 19:42.")).toBeTruthy();
+  });
+
+  it("says which helper said no, without telling the owner it was their answer", async () => {
+    renderWithApi(
+      <ApprovePage token={TOKEN} />,
+      stubApi({
+        getApproval: () =>
+          Promise.resolve(sampleView({ state: "rejected", decidedAt: "2026-11-23T12:42:00Z", decidedByHelper: "Beam" })),
+      }),
+    );
+    expect(await screen.findByText("Beam said no. Nothing was sent to Khun Ploy.")).toBeTruthy();
+    expect(screen.getByText("Declined by Beam at 19:42.")).toBeTruthy();
+    expect(screen.queryByText("You said no. Nothing was sent to Khun Ploy.")).toBeNull();
+    expect(screen.queryByText("Nam can see your answer.")).toBeNull();
+  });
+
+  it("says which helper approved a reply LINE did not accept", async () => {
+    renderWithApi(
+      <ApprovePage token={TOKEN} />,
+      stubApi({ getApproval: () => Promise.resolve(sampleView({ state: "failed", decidedByHelper: "Mint" })) }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Mint approved, but LINE did not accept the reply. Nothing was sent to Khun Ploy.");
+  });
+
+  it("reads an empty helper name as the owner's own answer", async () => {
+    renderWithApi(
+      <ApprovePage token={TOKEN} />,
+      stubApi({
+        getApproval: () => Promise.resolve(sampleView({ state: "rejected", decidedAt: "2026-11-23T12:42:00Z", decidedByHelper: " " })),
+      }),
+    );
+    expect(await screen.findByText("You said no. Nothing was sent to Khun Ploy.")).toBeTruthy();
+    expect(screen.getByText("Answered at 19:42.")).toBeTruthy();
+  });
+
   it("opens straight to the outcome when the request was answered before", async () => {
     renderWithApi(
       <ApprovePage token={TOKEN} />,

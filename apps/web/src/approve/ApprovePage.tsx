@@ -181,7 +181,7 @@ export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs
         {alreadyAnswered && view.state !== "proposed" && (
           <div className="banner info" role="status">
             <span className="grow">
-              {s.alreadyAnswered(view.decidedAt ? formatClock(view.decidedAt, s.locale) : null)}
+              {alreadyAnsweredText(s, view)}
               {approvedStates.has(view.state) ? ` ${s.nothingSentTwice}` : ""}
             </span>
           </div>
@@ -234,6 +234,24 @@ export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs
 }
 
 const approvedStates = new Set<ApprovalState>(["approved", "dispatching", "confirmed", "failed", "unknown"]);
+
+/// The helper who decided, when one did. Anything but a name (an empty string, a stray value) reads as the owner's own
+/// decision, which is what the page said before helpers could decide.
+function helperOf(view: ApprovalView): string | null {
+  return typeof view.decidedByHelper === "string" && view.decidedByHelper.trim() ? view.decidedByHelper : null;
+}
+
+function clockOf(s: OwnerStrings, view: ApprovalView): string | null {
+  return view.decidedAt ? formatClock(view.decidedAt, s.locale) : null;
+}
+
+/// The banner over an outcome the owner's own press did not decide: who did, when known, and when.
+function alreadyAnsweredText(s: OwnerStrings, view: ApprovalView): string {
+  const helper = helperOf(view);
+  return helper
+    ? s.alreadyAnsweredBy(helper, approvedStates.has(view.state), clockOf(s, view))
+    : s.alreadyAnswered(clockOf(s, view));
+}
 
 function phaseOf(err: unknown): Phase {
   if (err instanceof ApiError && err.status === 404) return "invalid";
@@ -302,11 +320,22 @@ function StateCard({
 }) {
   const customer = view.customerName;
   const reply = <ReplyQuote label={s.replyLabel(view.memberName)} text={view.replyText} />;
-  const answeredAt = view.decidedAt ? (
+  const helper = helperOf(view);
+  const clock = clockOf(s, view);
+  // Who answered and when. A helper's decision always says so, on every outcome, since the owner did not make it; the
+  // owner's own answer keeps the plain time it showed before, on the outcomes that showed one.
+  const byHelper = helper ? (
     <p className="hint" style={{ margin: 0 }}>
-      {s.answeredAt(formatClock(view.decidedAt, s.locale))}
+      {approvedStates.has(view.state) ? s.approvedBy(helper, clock) : s.declinedBy(helper, clock)}
     </p>
   ) : null;
+  const answeredAt =
+    byHelper ??
+    (clock ? (
+      <p className="hint" style={{ margin: 0 }}>
+        {s.answeredAt(clock)}
+      </p>
+    ) : null);
 
   switch (view.state) {
     case "proposed":
@@ -371,6 +400,7 @@ function StateCard({
           <Asker s={s} view={view} face="do" tag={<span className="tag run">{s.sendingTag}</span>} />
           <p className="big">{s.sendingTitle(customer)}</p>
           {reply}
+          {byHelper}
           <p className="hint" style={{ margin: 0 }}>
             {s.sendingHint}
           </p>
@@ -399,10 +429,12 @@ function StateCard({
       return (
         <article className="box pop" style={CARD}>
           <Asker s={s} view={view} face="idle" tag={<span className="tag">{s.declinedTag}</span>} />
-          <p style={{ margin: 0 }}>{s.declinedTitle(customer)}</p>
-          <p className="hint" style={{ margin: 0 }}>
-            {s.declinedHint(view.memberName)}
-          </p>
+          <p style={{ margin: 0 }}>{helper ? s.helperDeclinedTitle(helper, customer) : s.declinedTitle(customer)}</p>
+          {!helper && (
+            <p className="hint" style={{ margin: 0 }}>
+              {s.declinedHint(view.memberName)}
+            </p>
+          )}
           {answeredAt}
         </article>
       );
@@ -418,7 +450,7 @@ function StateCard({
         <article className="box" style={CARD}>
           <Asker s={s} view={view} face="stuck" tag={<span className="tag err">{s.failedTag}</span>} />
           <div className="banner err" role="alert">
-            <span className="grow">{s.failedTitle(customer)}</span>
+            <span className="grow">{helper ? s.helperFailedTitle(helper, customer) : s.failedTitle(customer)}</span>
           </div>
           {reply}
           <p className="hint" style={{ margin: 0 }}>
@@ -434,6 +466,7 @@ function StateCard({
             <span className="grow">{s.unknownTitle}</span>
           </div>
           {reply}
+          {byHelper}
         </article>
       );
   }

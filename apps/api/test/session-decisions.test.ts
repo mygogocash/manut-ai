@@ -3,6 +3,7 @@ import { cancelAttempt, startAttempt, workerPort, type JobFlags } from "../src/j
 import { tenantCall } from "../src/tenant-data";
 import { adminFetch, tenantSession } from "./authenticated-fixtures";
 import {
+  admin,
   asSession,
   auditEntries,
   bindings,
@@ -200,6 +201,71 @@ describe("approval-core's refusals", () => {
     const refund = await plantRequest(shop.tenant, await shopTask(shop.tenant), "money");
     expect(await decide(owner, refund, { optionId: "approve-always", seenRevision: 1 })).toMatchObject({ status: 400,
       body: { error: "not_offered" } });
+  });
+});
+
+describe("the owner's link page after a helper decided", () => {
+  type View = { state: string; decidedAt?: string; decidedByHelper?: string };
+  const view = async (reply: Awaited<ReturnType<typeof proposeReply>>) => (await linkView(reply)) as View;
+
+  it("names the helper who approved, and when, also to an owner who pressed Approve too late", async () => {
+    const shop = await setupShop();
+    const reply = await proposeReply(shop, "Your parcel left this morning.");
+    await ownerConsents(reply);
+    const helper = await joinHelper(shop, "Mint");
+    expect((await decide(helper.headers, reply.actionId, APPROVE)).status).toBe(200);
+    const seen = await view(reply);
+    expect(seen).toMatchObject({ state: "confirmed", decidedByHelper: "Mint" });
+    expect(Number.isNaN(Date.parse(seen.decidedAt ?? ""))).toBe(false);
+    expect(await linkPost(reply, "decision", { approve: true })).toMatchObject({ status: 409,
+      body: { error: "already_decided", view: { state: "confirmed", decidedByHelper: "Mint" } } });
+    expect(line.pushes()).toBe(1);
+  });
+
+  it("names the helper who declined, with the time the decline was settled", async () => {
+    const shop = await setupShop();
+    const reply = await proposeReply(shop, "We are out of blue ones.");
+    await ownerConsents(reply);
+    const helper = await joinHelper(shop, "Beam");
+    expect((await decide(helper.headers, reply.actionId, DECLINE)).status).toBe(200);
+    const seen = await view(reply);
+    expect(seen).toMatchObject({ state: "rejected", decidedByHelper: "Beam" });
+    expect(Number.isNaN(Date.parse(seen.decidedAt ?? ""))).toBe(false);
+    expect(line.pushes()).toBe(0);
+  });
+
+  it("keeps the name after the helper is removed, since what they decided stays theirs", async () => {
+    const shop = await setupShop();
+    const reply = await proposeReply(shop, "See you on Friday.");
+    await ownerConsents(reply);
+    const helper = await joinHelper(shop, "Mint");
+    expect((await decide(helper.headers, reply.actionId, APPROVE)).status).toBe(200);
+    expect((await admin("POST", "/v1/admin/people/remove", { tenant: shop.tenant, helperId: helper.id })).status).toBe(200);
+    expect(await view(reply)).toMatchObject({ state: "confirmed", decidedByHelper: "Mint" });
+  });
+
+  it("names nobody when the owner decided, on the link or from the shop's own session", async () => {
+    const shop = await setupShop();
+    await joinHelper(shop, "Mint");
+    const byLink = await proposeReply(shop, "Thank you.");
+    await ownerConsents(byLink);
+    expect((await linkPost(byLink, "decision", { approve: true })).status).toBe(200);
+    expect((await view(byLink)).decidedByHelper).toBeUndefined();
+    const bySession = await proposeReply(shop, "Thank you again.");
+    expect((await decide(await tenantSession(shop.tenant), bySession.actionId, DECLINE)).status).toBe(200);
+    const seen = await view(bySession);
+    expect(seen.state).toBe("rejected");
+    expect(seen.decidedByHelper).toBeUndefined();
+  });
+
+  it("names nobody while the reply waits", async () => {
+    const shop = await setupShop();
+    await joinHelper(shop, "Mint");
+    const reply = await proposeReply(shop, "Still checking the stock.");
+    const seen = await view(reply);
+    expect(seen.state).toBe("proposed");
+    expect(seen.decidedByHelper).toBeUndefined();
+    expect(seen.decidedAt).toBeUndefined();
   });
 });
 

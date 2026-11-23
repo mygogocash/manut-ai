@@ -56,6 +56,14 @@ export type OwnerStrings = {
   alreadyAnswered: (clock: string | null) => string;
   nothingSentTwice: string;
 
+  /// When one of the owner's helpers decided (docs/people.md): the canvas's "Approved by Mint at 19:42." under the
+  /// outcome, and the outcome's own sentence with the helper in it instead of "You".
+  approvedBy: (helper: string, clock: string | null) => string;
+  declinedBy: (helper: string, clock: string | null) => string;
+  helperDeclinedTitle: (helper: string, customer: string) => string;
+  helperFailedTitle: (helper: string, customer: string) => string;
+  alreadyAnsweredBy: (helper: string, approved: boolean, clock: string | null) => string;
+
   linkExpiredTitle: string;
   linkExpiredBody: string;
   linkInvalidTitle: string;
@@ -130,6 +138,14 @@ export const en: OwnerStrings = {
       ? `This request was already answered at ${clock}, so your answer was not used.`
       : "This request was already answered, so your answer was not used.",
   nothingSentTwice: "Nothing was sent twice.",
+
+  approvedBy: (helper, clock) => (clock ? `Approved by ${helper} at ${clock}.` : `Approved by ${helper}.`),
+  declinedBy: (helper, clock) => (clock ? `Declined by ${helper} at ${clock}.` : `Declined by ${helper}.`),
+  helperDeclinedTitle: (helper, customer) => `${helper} said no. Nothing was sent to ${customer}.`,
+  helperFailedTitle: (helper, customer) =>
+    `${helper} approved, but LINE did not accept the reply. Nothing was sent to ${customer}.`,
+  alreadyAnsweredBy: (helper, approved, clock) =>
+    `${helper} ${approved ? "approved" : "declined"} this${clock ? ` at ${clock}` : ""}, so your answer was not used.`,
 
   linkExpiredTitle: "This link has expired",
   linkExpiredBody: "Links work for 24 hours, and this one has run out. Nothing was sent from it.",
