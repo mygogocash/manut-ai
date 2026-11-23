@@ -1,0 +1,15 @@
+{
+  "name": "@manut/promptpay",
+  "private": true,
+  "type": "module",
+  "description": "PromptPay QR payloads (EMVCo) for manual payments during the pilot.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

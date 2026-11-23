@@ -1,0 +1,9 @@
+{
+  "name": "@manut/ui-kit",
+  "private": true,
+  "description": "Design tokens and component classes lifted from the Manut AI design canvas (app.css, tokens.json).",
+  "exports": {
+    "./app.css": "./app.css",
+    "./tokens.json": "./tokens.json"
+  }
+}
