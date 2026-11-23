@@ -92,7 +92,7 @@ describe("signing in", () => {
       expect.objectContaining({ bearer: null, body: { provider: "apple", identityToken: IDENTITY, nonce: NONCE, deviceId: "device-1" } }),
     ]);
     expect(kept(vault)).toEqual({
-      v: 1,
+      v: 2,
       origin: ORIGIN,
       tenant: "apple:owner-1",
       deviceId: "device-1",
@@ -100,6 +100,8 @@ describe("signing in", () => {
       refreshToken: "refresh-1",
       accessExpiresAt: c.now() + 3600_000,
       signedInAt: c.now(),
+      // a new sign-in holds no shop session yet
+      shops: {},
     });
     // the csrf token is for company-console writes, which this read-only runtime never makes: it is not kept
     expect(vault.value).not.toContain("csrf");
@@ -465,5 +467,183 @@ describe("telling what was read with a session that it is over", () => {
     rejecting.api.on("DELETE", "/v1/auth/session", { status: 200, json: {} });
     expect((await rejecting.session.signOut()).revoked).toBe(true);
     expect(rejecting.vault.value).toBeNull();
+  });
+});
+
+describe("the shop sessions kept with the sign-in (docs/several-shops.md)", () => {
+  /** Plainly fake shop tokens: a real one is `mos1.` or `mhs1.`, the shop in base64url, and 64 hex digits. */
+  const OWNER_TOKEN = "mos1.fake-shop-a.not-a-real-secret";
+  const HELPER_TOKEN = "mhs1.fake-shop-b.not-a-real-secret";
+  const held = (now: number) => ({
+    "pilot:shop-a": { role: "owner" as const, accessToken: OWNER_TOKEN, expiresAt: now + 30 * 86_400_000 },
+    "pilot:shop-b": { role: "helper" as const, accessToken: HELPER_TOKEN, expiresAt: now + 30 * 86_400_000 },
+  });
+  const withShops = (now: number) => stored(now, { v: 2, shops: held(now) });
+
+  it("reads today's value, which keeps none, as a sign-in with no shop session, and writes nothing for it", async () => {
+    const { session, vault } = setup(stored(clock().now()));
+    const before = vault.value;
+    await session.load();
+    expect(session.state.kind).toBe("signed_in");
+    expect(session.heldShops()).toEqual([]);
+    expect(vault.value).toBe(before);
+  });
+
+  it("reads each shop session the value keeps, and leaves out one that is not whole rather than signing out", async () => {
+    const now = clock().now();
+    const broken = { ...held(now), "pilot:shop-c": { role: "boss", accessToken: "x", expiresAt: 1 }, "pilot:shop-d": { role: "owner", accessToken: 5, expiresAt: 1 } };
+    const { session } = setup(stored(now, { v: 2, shops: broken as never }));
+    await session.load();
+    expect(session.state.kind).toBe("signed_in");
+    expect(session.heldShops()).toEqual(["pilot:shop-a", "pilot:shop-b"]);
+    expect(session.shopSession("pilot:shop-b")).toEqual(held(now)["pilot:shop-b"]);
+    expect(session.shopSession("pilot:shop-c")).toBeNull();
+  });
+
+  it("keeps a shop session in the one keychain item, beside the sign-in, and drops it again", async () => {
+    const now = clock().now();
+    const { session, vault } = setup(stored(now));
+    await session.load();
+    expect(await session.keepShopSession("pilot:shop-a", held(now)["pilot:shop-a"], session.signInChain)).toBe(true);
+    expect(kept(vault)).toEqual({ ...stored(now), v: 2, shops: { "pilot:shop-a": held(now)["pilot:shop-a"] } });
+    await session.dropShopSessions(["pilot:shop-a", "pilot:not-held"]);
+    expect(kept(vault)).toEqual({ ...stored(now), v: 2, shops: {} });
+  });
+
+  it("writes the item one change at a time, and a refresh keeps the shop session kept while it was on its way", async () => {
+    const now = clock().now();
+    const { session, vault, api, c } = setup(stored(now));
+    // A keychain that takes a moment per write, and notes how many writes ran at once.
+    let running = 0;
+    let most = 0;
+    const write = vault.write.bind(vault);
+    vault.write = async (v: string) => {
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((r) => setTimeout(r, 5));
+      await write(v);
+      running -= 1;
+    };
+    let answer!: () => void;
+    const held_ = new Promise<void>((r) => (answer = r));
+    api.on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) }).on("GET", "/v1/schedules", { status: 200, json: {} });
+    const fetch = api.fetch;
+    // the refresh's answer waits until the shop session has been kept
+    (session as unknown as { fetch: typeof fetch }).fetch = async (url, init) => {
+      if (url.endsWith("/v1/auth/refresh")) await held_;
+      return fetch(url, init);
+    };
+    await session.load();
+    c.pass(3600_000);
+    const read = session.read("/v1/schedules");
+    await session.keepShopSession("pilot:shop-a", held(now)["pilot:shop-a"], session.signInChain);
+    answer();
+    expect((await read).kind).toBe("ok");
+    await session.keepShopSession("pilot:shop-b", held(now)["pilot:shop-b"], session.signInChain);
+    expect(most).toBe(1);
+    expect(kept(vault)).toMatchObject({ accessToken: "access-2", refreshToken: "refresh-2", shops: held(now) });
+  });
+
+  it("does not keep a shop session opened under a sign-in that ended meanwhile: it is ended on the API instead", async () => {
+    const now = clock().now();
+    const { session, vault, api } = setup(stored(now));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: {} }).on("POST", "/v1/shops/session/end", { status: 200, json: { ended: {} } });
+    await session.load();
+    const chain = session.signInChain;
+    await session.signOut();
+    expect(await session.keepShopSession("pilot:shop-a", held(now)["pilot:shop-a"], chain)).toBe(false);
+    await Promise.resolve();
+    expect(vault.value).toBeNull();
+    expect(api.to("POST", "/v1/shops/session/end")).toEqual([expect.objectContaining({ bearer: OWNER_TOKEN, body: {} })]);
+  });
+
+  it("signing out ends every shop session with itself as the bearer and exactly {}, then forgets them all", async () => {
+    const now = clock().now();
+    const { session, vault, api } = setup(withShops(now));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: { revoked: true } }).on("POST", "/v1/shops/session/end", { status: 200, json: { ended: {} } });
+    expect(await session.signOut()).toEqual({ revoked: true });
+    expect(api.calls.map((r) => [r.method, r.path, r.bearer, r.body])).toEqual([
+      ["DELETE", "/v1/auth/session", "access-1", undefined],
+      ["POST", "/v1/shops/session/end", OWNER_TOKEN, {}],
+      ["POST", "/v1/shops/session/end", HELPER_TOKEN, {}],
+    ]);
+    expect(vault.value).toBeNull();
+    expect(session.heldShops()).toEqual([]);
+    expect(session.shopSession("pilot:shop-a")).toBeNull();
+    for (const call of api.calls) expect(call.url, call.url).not.toMatch(/mos1|mhs1|access-/);
+  });
+
+  it("a sign-out that cannot reach the API still clears this computer, and says the API was not told", async () => {
+    const now = clock().now();
+    for (const [del, end] of [["offline", "offline"], [{ status: 200, json: {} }, "offline"], [{ status: 200, json: {} }, { status: 503, json: { error: "people_unavailable" } }]] as const) {
+      const { session, vault, api } = setup(withShops(now));
+      api.on("DELETE", "/v1/auth/session", del).on("POST", "/v1/shops/session/end", end);
+      expect(await session.signOut()).toEqual({ revoked: false });
+      expect(vault.value).toBeNull();
+      expect(session.heldShops()).toEqual([]);
+    }
+    // A session the API already ended (a removal, an unlinking) is over there: it counts as told.
+    const { session, api } = setup(withShops(now));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: {} }).on("POST", "/v1/shops/session/end", { status: 401, json: { error: "removed", removedAt: "2026-11-22T10:00:00.000Z" } });
+    expect(await session.signOut()).toEqual({ revoked: true });
+  });
+
+  it("ends the shop sessions too when the API ends the sign-in, and before a new sign-in", async () => {
+    const now = clock().now();
+    const ended = setup(withShops(now));
+    ended.api
+      .on("GET", "/v1/schedules", { status: 401, json: {} })
+      .on("POST", "/v1/auth/refresh", { status: 401, json: { error: "session_expired" } })
+      .on("POST", "/v1/shops/session/end", { status: 200, json: {} });
+    expect(await ended.session.read("/v1/schedules")).toEqual({ kind: "signed_out" });
+    await Promise.resolve();
+    expect(ended.api.to("POST", "/v1/shops/session/end").map((r) => r.bearer)).toEqual([OWNER_TOKEN, HELPER_TOKEN]);
+    expect(ended.vault.value).toBeNull();
+
+    const again = setup(withShops(now));
+    again.api
+      .on("DELETE", "/v1/auth/session", { status: 200, json: {} })
+      .on("POST", "/v1/shops/session/end", { status: 200, json: {} })
+      .on("POST", "/v1/auth/exchange", { status: 200, json: tokens(2, "apple:owner-2") });
+    await again.session.load();
+    await again.session.signIn(IDENTITY, NONCE);
+    expect(again.api.calls.map((r) => [r.method, r.path, r.bearer])).toEqual([
+      ["DELETE", "/v1/auth/session", "access-1"],
+      ["POST", "/v1/shops/session/end", OWNER_TOKEN],
+      ["POST", "/v1/shops/session/end", HELPER_TOKEN],
+      ["POST", "/v1/auth/exchange", null],
+    ]);
+    expect(kept(again.vault)).toMatchObject({ accessToken: "access-2", shops: {} });
+  });
+
+  it("ends another API's shop sessions on that API before a sign-in here", async () => {
+    const other = "https://staging.manut.xyz";
+    const { session, api } = setup(stored(clock().now(), { origin: other, accessToken: "access-other", v: 2, shops: held(clock().now()) }));
+    api.on("DELETE", "/v1/auth/session", { status: 200, json: {} }).on("POST", "/v1/shops/session/end", { status: 200, json: {} }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(1) });
+    await session.load();
+    expect(session.heldShops()).toEqual([]);
+    await session.signIn(IDENTITY, NONCE);
+    expect(api.calls.map((r) => [r.method, r.url, r.bearer])).toEqual([
+      ["DELETE", `${other}/v1/auth/session`, "access-other"],
+      ["POST", `${other}/v1/shops/session/end`, OWNER_TOKEN],
+      ["POST", `${other}/v1/shops/session/end`, HELPER_TOKEN],
+      ["POST", `${ORIGIN}/v1/auth/exchange`, null],
+    ]);
+  });
+
+  it("sends a shop session's token only as the bearer, to its own origin, and reads its 401 as the API said it", async () => {
+    const { session, api } = setup(withShops(clock().now()));
+    api.on("GET", "/v1/approvals", { status: 401, json: { error: "unlinked", unlinkedAt: "2026-11-22T10:00:00.000Z" } });
+    await session.load();
+    expect(await session.sendAs(OWNER_TOKEN, "GET", "/v1/approvals?state=open")).toEqual({
+      kind: "refused",
+      status: 401,
+      code: "unlinked",
+      json: { error: "unlinked", unlinkedAt: "2026-11-22T10:00:00.000Z" },
+    });
+    expect(api.calls).toEqual([expect.objectContaining({ url: `${ORIGIN}/v1/approvals?state=open`, bearer: OWNER_TOKEN })]);
+    // nothing about the sign-in moved: a shop session's 401 is not the sign-in's
+    expect(session.state.kind).toBe("signed_in");
+    expect(api.to("POST", "/v1/auth/refresh")).toEqual([]);
   });
 });
