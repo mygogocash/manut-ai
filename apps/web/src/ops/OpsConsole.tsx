@@ -1,18 +1,21 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useApiSetup } from "../api";
 import { BrandMark, StoreIcon, useColorScheme } from "../ui/marks";
+import { DeletionNotices } from "./DeletionNotices";
 import { MessagesTab } from "./MessagesTab";
 import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorKey";
 import { PaymentsTab } from "./PaymentsTab";
+import { ShopDataTab } from "./ShopDataTab";
 import { useLoad } from "./useLoad";
-import { errorText, isAuthError } from "./words";
+import { useShopDeletion } from "./useShopDeletion";
+import { errorText, isAuthError, shopDataWords } from "./words";
 
 /// The operator console for the concierge pilot, desktop first, in the canvas's side-menu layout: shops in
-/// the side menu, the chosen shop's messages, replies and payments in the main column.
+/// the side menu, the chosen shop's messages, replies, payments and data in the main column.
 
 export const REFRESH_MS = 15000;
 
-type Tab = "messages" | "payments";
+type Tab = "messages" | "payments" | "data";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -22,7 +25,13 @@ export function OpsConsole() {
   const [tab, setTab] = useState<Tab>("messages");
 
   const shops = useLoad(hasKey ? () => api.listShops() : null, `shops:${hasKey}`);
-  const shop = shops.data?.find((s) => s.tenant === tenant) ?? null;
+  // After a deletion the operator lands on the next shop's messages, never on its delete button.
+  const deletion = useShopDeletion(api, { onAnswered: shops.reload, onDeleted: () => setTab("messages") });
+  const shopList = useMemo(
+    () => shops.data?.filter((s) => !deletion.gone.has(s.tenant)) ?? null,
+    [shops.data, deletion.gone],
+  );
+  const shop = shopList?.find((s) => s.tenant === tenant) ?? null;
   const messages = useLoad(shop ? () => api.listMessages(shop.tenant) : null, `messages:${shop?.tenant ?? ""}`);
   const actions = useLoad(shop ? () => api.listActions(shop.tenant) : null, `actions:${shop?.tenant ?? ""}`);
   const { reload: reloadMessages } = messages;
@@ -33,9 +42,9 @@ export function OpsConsole() {
   }, []);
 
   useEffect(() => {
-    const first = shops.data?.[0];
-    if (first && !shops.data?.some((s) => s.tenant === tenant)) setTenant(first.tenant);
-  }, [shops.data, tenant]);
+    const first = shopList?.[0];
+    if (first && !shopList?.some((s) => s.tenant === tenant)) setTenant(first.tenant);
+  }, [shopList, tenant]);
 
   // Owners answer from their phones, so the lists refresh themselves while the console is open.
   useEffect(() => {
@@ -76,16 +85,19 @@ export function OpsConsole() {
             <div className="mut" style={{ padding: "12px 10px 4px", fontSize: 12 }} id="shops-label">
               Shops
             </div>
-            {shops.data ? (
+            {shopList ? (
               <ul aria-labelledby="shops-label" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {shops.data.map((s) => (
+                {shopList.map((s) => (
                   <li key={s.tenant}>
                     <button
                       type="button"
                       className="nav"
                       style={{ width: "100%" }}
                       aria-current={s.tenant === tenant ? "page" : undefined}
-                      onClick={() => setTenant(s.tenant)}
+                      onClick={() => {
+                        setTenant(s.tenant);
+                        deletion.dismissFinished();
+                      }}
                     >
                       <StoreIcon />
                       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -161,6 +173,17 @@ export function OpsConsole() {
                 >
                   PromptPay
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-data"
+                  className="tab"
+                  aria-selected={tab === "data"}
+                  aria-controls="panel-data"
+                  onClick={() => setTab("data")}
+                >
+                  {shopDataWords.tab}
+                </button>
               </div>
               <div className="acts">
                 <button type="button" className="btn ghost" onClick={refresh}>
@@ -168,6 +191,7 @@ export function OpsConsole() {
                 </button>
               </div>
             </div>
+            <DeletionNotices deletion={deletion} />
             {authFailed && (
               <div style={{ padding: "12px 16px 0" }}>
                 <div className="banner err" role="alert">
@@ -187,7 +211,7 @@ export function OpsConsole() {
                   </button>
                 </div>
               </div>
-            ) : shops.data && shops.data.length === 0 ? (
+            ) : shopList && shopList.length === 0 ? (
               <div className="empty">
                 <span className="ico">
                   <StoreIcon />
@@ -207,8 +231,14 @@ export function OpsConsole() {
                     reloadActions();
                   }}
                 />
-              ) : (
+              ) : tab === "payments" ? (
                 <PaymentsTab key={shop.tenant} shop={shop} />
+              ) : (
+                <ShopDataTab
+                  key={shop.tenant}
+                  shop={shop}
+                  onDelete={(name) => deletion.run(shop.tenant, name)}
+                />
               )
             ) : null}
           </>

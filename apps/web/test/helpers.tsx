@@ -1,5 +1,6 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { onTestFinished, vi } from "vitest";
 import { ApiProvider, type ApiMode, type ApprovalView, type PilotApi } from "../src/api";
 
 /// A PilotApi whose every method fails loudly unless the test gives it one, so a test can never pass by
@@ -43,6 +44,49 @@ export function sampleView(overrides: Partial<ApprovalView> = {}): ApprovalView 
 
 export function renderWithApi(ui: ReactElement, api: PilotApi, mode: ApiMode = "live") {
   return render(<ApiProvider value={{ api, mode }}>{ui}</ApiProvider>);
+}
+
+export type CapturedDownload = { name: string; href: string; attached: boolean };
+
+/// Records every file the page hands to the browser. jsdom has no object URLs and does not follow links, so
+/// this stands in for both: each Blob is kept, and a click on a link records its file name instead of
+/// navigating. Everything is put back when the test ends.
+export function captureDownloads() {
+  const blobs: Blob[] = [];
+  const revoked: string[] = [];
+  const downloads: CapturedDownload[] = [];
+  const saved = {
+    create: Object.getOwnPropertyDescriptor(URL, "createObjectURL"),
+    revoke: Object.getOwnPropertyDescriptor(URL, "revokeObjectURL"),
+  };
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    writable: true,
+    value: (blob: Blob) => {
+      blobs.push(blob);
+      return `blob:https://web.test/download-${blobs.length}`;
+    },
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    writable: true,
+    value: (url: string) => {
+      revoked.push(url);
+    },
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ name: this.download, href: this.href, attached: this.isConnected });
+  });
+  onTestFinished(() => {
+    for (const [key, descriptor] of [
+      ["createObjectURL", saved.create],
+      ["revokeObjectURL", saved.revoke],
+    ] as const) {
+      if (descriptor) Object.defineProperty(URL, key, descriptor);
+      else delete (URL as unknown as Record<string, unknown>)[key];
+    }
+  });
+  return { blobs, revoked, downloads };
 }
 
 export function deferred<T>() {
