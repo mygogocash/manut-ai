@@ -64,6 +64,28 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial (vault, schedules, the console). PromptPay billing: owner, parked for later (23 Nov); the payload writer and reader and the slip rules exist as packages. The rules for routines (`@manut/routine-rules`) and three shop templates (`@manut/shop-templates`) are built as packages; the routines page and applying a template are not yet |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial (the desktop fork's terminals and coding-agent sessions; approval-core's helper role; the rules for invites, passing on, cover and removal are `@manut/people-rules`, not yet wired) |
 
+## December engineering (the owner's go, 23 Nov 2026)
+
+Everything here can be finished in December without the owner. LINE and payments stay parked; real sign-in,
+real models, Thai copy and production wait for the owner. One helper per line, at most four at a time on this
+Mac; each starts when a slot frees and what it waits on has merged.
+
+| Order | Work | Waits on | Model |
+| --- | --- | --- | --- |
+| running | The desktop's Customize page (memory and routines) | | Sonnet |
+| running | The owner's helpers, and deciding approvals from a session | | Opus |
+| running | Browser control, first slice: vault sign-ins and outposts | | Opus |
+| running | The Playwright revival | | Haiku |
+| 1 | Console: the workers' drafts and handovers, and a shops overview (the admin panel) | | Sonnet |
+| 2 | Applying a shop template when a shop is created | | Sonnet |
+| 3 | Routines running on schedule (the schedule object for daily and weekly, a timer for the rest), each run a worker's draft | Customize | Opus |
+| 4 | Console: the People page | the helpers' API | Sonnet |
+| 5 | The desktop answering approvals through the session decide route (tested with test sign-in) | the helpers' API | Opus |
+| 6 | macOS notifications on `@manut/notify-rules` | notify-rules, Customize | Sonnet |
+| 7 | Several shops in one view (designed on the helpers' identity model) | the helpers' API | Opus |
+| 8 | The outpost's browser on this Mac, the first step of computer control | browser control | Opus |
+| 9 | Desktop leftovers: a home for the old chat-list actions; richer Team, Needs you and History pages | Customize | Sonnet |
+
 ## Queue for cloud routines
 
 Take the first task below that has no `cloud/<task-id>` branch on the remote yet. One task per run. Every task
