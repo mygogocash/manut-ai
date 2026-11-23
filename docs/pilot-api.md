@@ -147,6 +147,7 @@ type DeletionView = {
 | `POST /v1/admin/memory/confirm` | `{ tenant, id }` | `Fact`: "It's true" on a waiting fact |
 | `POST /v1/admin/memory/correct` | `{ tenant, id, text }` | `Fact`: the new words, confirmed |
 | `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
+| `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -552,6 +553,17 @@ tests. The store keeps only the fields of a source's own kind, and refuses with 
 reference over 256 characters, a count or number of days that is not a whole number, and a document date outside 0 to
 8,640,000,000,000,000 milliseconds, so one shop's record stays small.
 
+**What a worker reads** is also a function, not a route:
+
+```ts
+usableFacts(env, tenant): Promise<{ ok: true; facts: Fact[] } | { ok: false; error: "invalid_request" | "memory_unavailable" }>
+```
+
+It answers only the facts a worker may use, as the package's `usable` decides: confirmed ones, oldest first. A fact
+still waiting for the owner is never handed out, so it can never reach a model. A stored fact that is not whole is left
+out, and a shop's object that cannot be read is `memory_unavailable`, never an empty memory. Nam, Pim and Ton read it
+for every job ("Workers", below).
+
 **The console** has a Memory page in the side menu, beside Audit, laid out as the design canvas's "Customize: memory
 and routines" board, newest fact first in each group:
 
@@ -568,6 +580,89 @@ The operator relays the owner's word, so the page says to correct or forget a fa
 runs at a time, and each refusal above is said in the board's words. The practice-mode fake keeps the same state with
 `@manut/shop-memory`'s own rules: it starts Baan Mali with five facts the team learned and two a customer said, which
 wait, and it replaces a practice world saved before memory existed.
+
+## Workers
+
+Nam (sales chat), Pim (content) and Ton (books) are workers on the job flow (`apps/api/src/workers.ts`; how they run
+is `docs/phase-0-spikes.md`, section 4). An operator starts one member's job for a shop, and the result is a draft on
+the job's own task for the owner to read. No worker sends, posts, pays or refunds, and none asks for an external write.
+
+### `POST /v1/admin/workers/run`
+
+Under the admin gate, as an exact `ADMIN_METHODS` entry. The body is `{ tenant, member, job }`:
+
+- `member`: `nam`, `pim` or `ton`.
+- `job`, one of:
+  - `{ kind: "reply", messageId }`: a reply to a customer's message the shop holds (`GET /v1/admin/pilot/messages`).
+  - `{ kind: "post", topic }`: a post about the topic, 1 to 500 characters once trimmed.
+  - `{ kind: "daily_summary" }`: yesterday's sales in Bangkok, from the order payments the shop has recorded
+    (`POST /v1/admin/pilot/payments`), each counted as a LINE sale at the time it was confirmed.
+
+A reply is Nam's job, a post Pim's and a summary Ton's. A job asked of another member is passed to the member whose job
+it is, and the answer says who did it.
+
+```ts
+type WorkerRun = {
+  taskId: string;                      // the job's own task: in the shop's export, gone with the shop's deletion
+  member: "nam" | "pim" | "ton";       // who did the job
+  passedFrom?: "nam" | "pim" | "ton";  // who passed it on, when it was not theirs
+  outcome: "done" | "failed";
+  reason?: string;                     // why it failed, as a code (below)
+  draft?: Draft;                       // when done
+};
+
+type Draft = {
+  attemptId: string;                   // the attempt that wrote it: one draft per attempt
+  member: string;                      // "nam", "pim" or "ton"
+  job: string;                         // "reply", "post" or "daily_summary"
+  text: string;                        // the words, for the owner to read
+  about?: { messageId?: string; date?: string };  // the message a reply answers; the day a summary covers
+  send?: { answer: "draft_only" | "ask"; kind: "reply" };  // what sending a reply would take (below)
+  at: string;
+};
+```
+
+A refusal answers `{ "error": code }`. The 400s, 403s and 404s come before anything is created; a 503 can leave the
+job's task behind with no attempt on it, which holds nothing.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `tenant_required` | No valid tenant |
+| 400 | `unknown_member` | `member` is not `nam`, `pim` or `ton` |
+| 400 | `invalid_job` | `job` is missing, of another kind, has a field its kind does not, or its topic or message id is blank or too long |
+| 400 | `invalid_request`, `invalid_json` | The body is not a JSON object |
+| 403 | `feature_disabled` with `feature: "officeCloud"` | The cloud-work kill switch is off |
+| 403 | `consent_required` | The owner has not consented to cloud work |
+| 404 | `shop_not_found` | The tenant is not a pilot shop |
+| 404 | `message_not_found` | The shop holds no message with that id (customer messages age out after 7 days) |
+| 413 | `body_too_large` | The body is over 16 KB |
+| 503 | `shop_unavailable`, `message_unavailable`, `task_unavailable`, `meter_unavailable` | An object could not be read or written |
+
+A job that started answers 200, also when it failed, because its task and the audit log record it. `reason` is then
+`not_connected` (the LINE connection the customer wrote to is gone), `budget` (the shop's model cap is spent),
+`not_configured` (no model key yet), `provider_error`, `memory_unavailable`, `payments_unavailable`,
+`vault_unavailable`, `empty_draft`, or a code of the job flow's own.
+
+**Rules**
+
+- **Gates.** `officeCloud` and the owner's consent, read before anything is created. A draft is not an external write,
+  so `officeExternalWrites` is not read.
+- **Permissions.** `@manut/member-grants`' `decide` answers before the member does anything. A reply goes out through
+  the connection the customer wrote to, which starts in practice mode for three days: the answer is `draft_only` then,
+  and `ask` after. Either way the reply is only drafted and nothing is asked. To send it, an operator proposes the
+  draft's text for its `messageId` through `POST /v1/admin/pilot/replies`, and the owner approves it on the link as for
+  any reply.
+- **Memory.** Each job reads the facts the team may use (`usableFacts`, above), never a waiting one. A customer's words
+  reach the model only as the customer's message, never as instructions.
+- **Cost.** One model call per job, through the model gateway and against the shop's cap (`claude-haiku-5-5`). Ton with
+  no sales for the day drafts "No sales were recorded on 2026-11-22." and calls no model. Ton reads the newest 500
+  payments, as the console lists them.
+- **The task.** The job's task is a draft in the cloud location. Its event log holds what each attempt reported
+  (`turnStarted`, `spend`, `turnCompleted`, and a `handoffNote` `{ from, to, job }` when a job was passed on), and the
+  draft is kept beside it, one per attempt. The draft's words are on the task only.
+- **Audit.** Metadata only: `attempt.started` for each attempt (by the operator's Access identity, or by the system
+  for the member a job was passed to), and `attempt.ended` with its outcome and reason. No entry holds a customer's
+  words, a draft or a secret.
 
 ## One origin
 

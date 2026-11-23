@@ -24,8 +24,14 @@ import { beginDispatchAction, finishDispatchAction, type FetchImpl } from "./bro
 import { callModel, type ModelGatewayEnv } from "./model-gateway";
 import type { UsageState } from "./model-meter";
 import { bangkokMonth, effectiveCap, floorSatang, gatewaySettings, MILLISATANG_PER_SATANG } from "./model-price";
-import type { ChatRequest, ChatUsage } from "./model-provider";
-import { JOB_REQUEST_OPTIONS, type ActionProposalJSON, type AttemptJSON, type TaskDocJSON } from "./task-object";
+import type { ChatRequest, ChatUsage, ModelProvider } from "./model-provider";
+import {
+  JOB_REQUEST_OPTIONS,
+  type ActionProposalJSON,
+  type AttemptJSON,
+  type DraftJSON,
+  type TaskDocJSON,
+} from "./task-object";
 import { credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
 
 export type JobFlowEnv = TenantDataEnv & ModelGatewayEnv;
@@ -37,6 +43,10 @@ export type JobOptions = {
   flags: JobFlags;
   /// The provider's fetch, for the broker's one dispatch. Tests hand in a stub; production uses the global fetch.
   fetchImpl?: FetchImpl;
+  /// The model provider the gateway calls, for tests that read what a worker sent: still through the gateway, so the
+  /// call is priced, held against the shop's cap and settled like any other. Production leaves it unset and the
+  /// gateway takes the provider from the environment.
+  provider?: ModelProvider;
 };
 
 /// What a worker is given: one attempt at one task.
@@ -68,6 +78,10 @@ export type ProposedAction = { operationType: string; targetResourceId: string; 
 
 export type AskAnswer = { requestId: string; kind: ApprovalKind; revision: number; expiresAt: string };
 
+/// What a worker wrote for the owner to read, as it hands it to `draft`. The task object keeps it with the attempt
+/// that wrote it and the time (task-object.ts, `DraftJSON`).
+export type NewDraft = Omit<DraftJSON, "attemptId" | "at">;
+
 /// How a request a worker asked stands: approval-core's standing, which way it was decided once it was, and where
 /// the action stands with the broker.
 export type RequestOutcome = {
@@ -86,6 +100,8 @@ export interface WorkerPort {
     costSatang: number }>>;
   ask(action: ProposedAction): Promise<PortAnswer<AskAnswer>>;
   outcome(requestId: string): Promise<PortAnswer<RequestOutcome>>;
+  draft(draft: NewDraft): Promise<PortAnswer<DraftJSON>>;
+  waitForOwner(): Promise<PortAnswer<{ outcome: "awaiting_owner" }>>;
   finish(outcome: "done" | "failed", reason?: string): Promise<PortAnswer<{ outcome: "done" | "failed" }>>;
 }
 
@@ -136,8 +152,9 @@ async function consented(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Pr
 
 /// Whether work for the shop may go on now: the switches and the owner's consent, read again at every step as the
 /// session routes read them (index.ts, `consentGate`). Withdrawing consent stops new and continuing work; a worker
-/// refused here stops reporting, and its lease lapses. `writes` adds the external-writes switch.
-async function workGate(env: Pick<TenantDataEnv, "TENANT">, tenant: string, flags: JobFlags, writes: boolean):
+/// refused here stops reporting, and its lease lapses. `writes` adds the external-writes switch. Exported for the
+/// workers' runner (workers.ts), which reads it before it creates anything for a job.
+export async function workGate(env: Pick<TenantDataEnv, "TENANT">, tenant: string, flags: JobFlags, writes: boolean):
   Promise<Refused | null> {
   const current = await flags();
   if (!current.officeCloud) return { ok: false, status: 403, error: "feature_disabled", feature: "officeCloud" };
@@ -164,10 +181,11 @@ async function remainingSatang(env: JobFlowEnv, tenant: string, nowMs: number): 
 }
 
 /// Gives a worker one attempt at a task. Refused while the switches or consent forbid work; nothing is claimed
-/// unless the task and the meter can both be read, so no attempt starts that could not be told its cap.
+/// unless the task and the meter can both be read, so no attempt starts that could not be told its cap. The log names
+/// `startedBy` as the one who started it: an operator through the console, or Manut AI's system (the default).
 export async function startAttempt(
   env: JobFlowEnv,
-  input: { tenant: string; taskId: string; executorId: string; maxActiveSeconds?: number },
+  input: { tenant: string; taskId: string; executorId: string; maxActiveSeconds?: number; startedBy?: AuditActor },
   options: JobOptions,
 ): Promise<{ ok: true; job: Job } | Refused> {
   const { tenant, taskId } = input;
@@ -186,7 +204,7 @@ export async function startAttempt(
   } });
   if (!claimed.ok) return { ok: false, status: claimed.status, error: await errorOf(claimed, "attempt_unavailable") };
   const attempt = (await claimed.json()) as AttemptJSON;
-  await appendAudit(env, tenant, { actor: { kind: "system" }, action: "attempt.started",
+  await appendAudit(env, tenant, { actor: input.startedBy ?? { kind: "system" }, action: "attempt.started",
     subject: { taskId, attemptId: attempt.id }, outcome: "ok" });
   return { ok: true, job: {
     tenant,
@@ -226,7 +244,7 @@ async function endAndRecord(
   tenant: string,
   taskId: string,
   attemptId: string,
-  end: { fence?: string; outcome: "done" | "failed" | "cancelled"; reason?: string },
+  end: { fence?: string; outcome: "done" | "failed" | "cancelled" | "awaiting_owner"; reason?: string },
   actor: AuditActor,
 ): Promise<Ended> {
   const response = await taskCall(env, tenant, taskId, `/attempts/${enc(attemptId)}/end`, { method: "POST", body: end,
@@ -310,7 +328,7 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
       if (refused) return refused;
       const live = await heartbeat();
       if (!live.ok) return live;
-      const result = await callModel(env, job.tenant, request);
+      const result = await callModel(env, job.tenant, request, options.provider ? { provider: options.provider } : {});
       if (result.ok) {
         return { ok: true, value: { text: result.text, stopReason: result.stopReason, usage: result.usage,
           costSatang: result.costSatang } };
@@ -370,6 +388,29 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
       if (stored.action.state === "approved") await dispatchApproved(env, job.tenant, job.taskId, requestId, options);
       const action = (await readAction(env, job.tenant, job.taskId, requestId)) ?? stored.action;
       return { ok: true, value: outcomeOf(stored, action) };
+    },
+
+    /// Keeps what the worker wrote on the task for the owner to read, one draft per attempt. A draft sends nothing and
+    /// asks nothing: anything that would leave the app still needs `ask` and the owner's decision.
+    async draft(draft) {
+      const refused = await gate();
+      if (refused) return refused;
+      const response = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/draft`, { method: "POST",
+        body: { fence: job.fence, draft } });
+      if (!response.ok) return portRefusal(response);
+      return { ok: true, value: (await response.json()) as DraftJSON };
+    },
+
+    /// Stops the worker until the owner answers what it asked. The attempt ends as `awaiting_owner`, so neither its
+    /// lease nor its 20-minute deadline can cut the question off: the request stays open until its own expiry, and
+    /// an owner who answers in an hour or a day is still heard. The worker can do nothing more in this attempt; the
+    /// control plane gives it a new one to read the outcome and carry on. Refused (`nothing_waiting`) while nothing the
+    /// attempt asked waits for a decision.
+    async waitForOwner() {
+      const ended = await endAndRecord(env, job.tenant, job.taskId, job.attemptId,
+        { fence: job.fence, outcome: "awaiting_owner" }, worker);
+      if (!ended.ok) return portRefusal(ended.response);
+      return { ok: true, value: { outcome: "awaiting_owner" } };
     },
 
     async finish(outcome, reason) {

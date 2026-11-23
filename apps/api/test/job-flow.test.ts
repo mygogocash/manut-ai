@@ -15,8 +15,9 @@ import {
   workerPort,
   type Job,
   type JobFlags,
+  type NewDraft,
 } from "../src/job-flow";
-import type { ActionProposalJSON, AttemptJSON, TaskEventJSON } from "../src/task-object";
+import type { ActionProposalJSON, AttemptJSON, DraftJSON, TaskEventJSON } from "../src/task-object";
 import { tenantCall } from "../src/tenant-data";
 import { FUTURE_EVENT, STAND_IN_MODEL, StandInWorker, type Script } from "./stand-in-worker";
 
@@ -101,7 +102,7 @@ async function taskExport(s: Shop) {
   const response = await task(s).fetch(new Request("https://task/export", { headers: { "x-tenant": s.tenant } }));
   expect(response.status).toBe(200);
   return (await response.json()) as { events: TaskEventJSON[]; actions: ActionProposalJSON[]; attempts: AttemptJSON[];
-    requests: ApprovalRecord[] };
+    requests: ApprovalRecord[]; drafts: DraftJSON[] };
 }
 
 async function request(s: Shop, requestId: string) {
@@ -415,6 +416,135 @@ describe("the job flow's gates", () => {
       expect(await port.report(events)).toEqual({ ok: false, error: "invalid_request" });
     }
     expect((await taskExport(s)).events.filter((event) => event.kind === "agent")).toEqual([]);
+  });
+});
+
+describe("a worker's draft", () => {
+  const DRAFT: NewDraft = { member: "nam", job: "reply", text: "Thank you! Your parcel ships tomorrow.",
+    about: { messageId: "msg-0000001-000-0a1b2c3d" }, send: { answer: "draft_only", kind: "reply" } };
+
+  it("is kept on the task for the owner to read, one per attempt, and asks for nothing", async () => {
+    const s = await shop();
+    const j = await job(s);
+    const port = workerPort(flowEnv, j, { flags: on });
+    const kept = { ...DRAFT, attemptId: j.attemptId, at: expect.any(String) };
+    expect(await port.draft(DRAFT)).toEqual({ ok: true, value: kept });
+    // A second draft in the same attempt is refused, so a retried write never leaves two.
+    expect(await port.draft({ ...DRAFT, text: "Another try." })).toEqual({ ok: false, error: "draft_exists" });
+
+    const exported = await taskExport(s);
+    expect(exported.drafts).toEqual([kept]);
+    // A draft is not an action: nothing is proposed, nothing waits for anyone.
+    expect(exported.actions).toEqual([]);
+    expect(exported.requests).toEqual([]);
+    const listed = await task(s).fetch(new Request("https://task/drafts", { headers: { "x-tenant": s.tenant } }));
+    expect(await listed.json()).toEqual({ drafts: [kept] });
+    // Another shop cannot read it.
+    const foreign = await task(s).fetch(new Request("https://task/drafts", { headers: { "x-tenant": "job:another" } }));
+    expect(foreign.status).toBe(404);
+  });
+
+  it("is refused once the attempt has ended, and when it is not a draft the task can keep", async () => {
+    const s = await shop();
+    const j = await job(s);
+    const port = workerPort(flowEnv, j, { flags: on });
+    for (const draft of [
+      { ...DRAFT, text: "" },
+      { ...DRAFT, text: 7 },
+      { ...DRAFT, member: "Nam Sales" },
+      { ...DRAFT, job: "" },
+      { ...DRAFT, text: "x".repeat(17 * 1024) },
+      { ...DRAFT, about: { messageId: "has a space" } },
+      { ...DRAFT, send: { answer: "allowed", kind: "reply" } },
+      { ...DRAFT, extra: "a field the task does not know" },
+    ]) {
+      expect(await port.draft(draft as never)).toEqual({ ok: false, error: "invalid_request" });
+    }
+    expect(await port.finish("done")).toEqual({ ok: true, value: { outcome: "done" } });
+    expect(await port.draft(DRAFT)).toEqual({ ok: false, error: "stale_attempt", ended: true });
+    expect((await taskExport(s)).drafts).toEqual([]);
+  });
+});
+
+describe("an attempt waiting for the owner", () => {
+  it("ends as awaiting_owner and keeps its request open past the attempt's deadline, until the owner decides", async () => {
+    const s = await shop();
+    const linear = linearStub();
+    const j = await job(s);
+    const port = workerPort(flowEnv, j, { flags: on, fetchImpl: linear.fetchImpl });
+    const worker = new StandInWorker(port, SCRIPT);
+    await worker.start();
+    const requestId = worker.requestId!;
+
+    // The worker stops until the owner answers: its attempt ends, and its question stays with the owner.
+    expect(await port.waitForOwner()).toEqual({ ok: true, value: { outcome: "awaiting_owner" } });
+    expect((await taskExport(s)).attempts).toEqual([expect.objectContaining({ id: j.attemptId, status: "done",
+      outcome: "awaiting_owner" })]);
+    // An attempt that waits does nothing more.
+    expect(await port.report([{ type: "turnStarted" }])).toEqual({ ok: false, error: "stale_attempt", ended: true });
+
+    // Half an hour later, well past the attempt's 20-minute deadline, nothing has cut the question off.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 30 * 60 * 1000);
+    expect(await endSilentAttempts(flowEnv, s.tenant, s.taskId)).toEqual({ ended: [] });
+    expect((await request(s, requestId)).standing).toEqual({ state: "open", reason: "waiting" });
+
+    // The owner approves, and the write is sent once.
+    const decided = await decideRequest(flowEnv, owner(s, requestId), { flags: on, fetchImpl: linear.fetchImpl });
+    expect(decided).toMatchObject({ ok: true, result: { ok: true }, action: "confirmed" });
+    expect(linear.calls).toHaveLength(1);
+
+    // The control plane gives the worker a new attempt to carry on, and it finds its write done.
+    const k = await job(s);
+    const resumed = new StandInWorker(workerPort(flowEnv, k, { flags: on, fetchImpl: linear.fetchImpl }), SCRIPT);
+    resumed.requestId = requestId;
+    expect(await resumed.resume()).toEqual({ finished: "done", outcome: "filed" });
+    expect(linear.calls).toHaveLength(1);
+
+    expect((await audit(s)).filter((entry) => ["attempt.ended", "approval.superseded"].includes(entry.action)))
+      .toEqual([
+        { actor: { kind: "worker", attemptId: j.attemptId }, action: "attempt.ended",
+          subject: { taskId: s.taskId, attemptId: j.attemptId }, outcome: "awaiting_owner" },
+        { actor: { kind: "worker", attemptId: k.attemptId }, action: "attempt.ended",
+          subject: { taskId: s.taskId, attemptId: k.attemptId }, outcome: "done" },
+      ]);
+  });
+
+  it("still lets the request expire at its own time", async () => {
+    const s = await shop();
+    const linear = linearStub();
+    const port = workerPort(flowEnv, await job(s), { flags: on, fetchImpl: linear.fetchImpl });
+    const worker = new StandInWorker(port, SCRIPT);
+    await worker.start();
+    expect((await port.waitForOwner()).ok).toBe(true);
+    // A day and a minute later, the owner's 24 hours to answer are up.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 24 * 60 * 60 * 1000 + 60 * 1000);
+    expect((await request(s, worker.requestId!)).standing).toMatchObject({ state: "expired" });
+    expect(await decideRequest(flowEnv, owner(s, worker.requestId!), { flags: on, fetchImpl: linear.fetchImpl }))
+      .toMatchObject({ ok: true, result: { ok: false, refused: "expired" } });
+    expect(linear.calls).toHaveLength(0);
+  });
+
+  it("is superseded by a newer attempt, since the newest claim holds the task", async () => {
+    const s = await shop();
+    const linear = linearStub();
+    const port = workerPort(flowEnv, await job(s), { flags: on, fetchImpl: linear.fetchImpl });
+    const worker = new StandInWorker(port, SCRIPT);
+    await worker.start();
+    expect((await port.waitForOwner()).ok).toBe(true);
+    // An attempt started before the owner answered: the question it would act on is no longer anyone's.
+    await job(s);
+    expect((await request(s, worker.requestId!)).standing).toEqual({ state: "superseded", reason: "attempt_ended" });
+    expect(await decideRequest(flowEnv, owner(s, worker.requestId!), { flags: on, fetchImpl: linear.fetchImpl }))
+      .toMatchObject({ ok: true, result: { ok: false, refused: "superseded", reason: "attempt_ended" } });
+    expect(linear.calls).toHaveLength(0);
+  });
+
+  it("is refused while nothing the attempt asked waits for the owner", async () => {
+    const s = await shop();
+    const port = workerPort(flowEnv, await job(s), { flags: on });
+    expect(await port.waitForOwner()).toEqual({ ok: false, error: "nothing_waiting" });
+    // The attempt runs on as before.
+    expect((await port.report([{ type: "turnStarted" }])).ok).toBe(true);
   });
 });
 
