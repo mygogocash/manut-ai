@@ -4,11 +4,14 @@
 import type { Bot } from "../lib/protocol";
 import { chatTarget, type Ask, type Chat } from "../state/store";
 
-export type MemberStatus = "needs" | "offline" | "working" | "stuck" | "idle";
+export type MemberStatus = "paused" | "needs" | "offline" | "working" | "stuck" | "idle";
 
-/** Needs you wins over everything, because it is the one status that waits on the person. A member who cannot be
- *  reached is not working, whatever its last turn says. A turn the person stopped is not a failure to finish. */
-export function memberStatus(bot: Pick<Bot, "status" | "running">, chat: Pick<Chat, "turn" | "lastTurn"> | undefined, asks: number): MemberStatus {
+/** Paused wins over everything, as on the canvas's pause board: a member Pause everyone holds does nothing, even when an ask
+ *  of theirs waits (it keeps waiting, and Needs you still lists it). Then Needs you, because it is the one status that waits
+ *  on the person. A member who cannot be reached is not working, whatever its last turn says. A turn the person stopped is
+ *  not a failure to finish. */
+export function memberStatus(bot: Pick<Bot, "status" | "running" | "paused">, chat: Pick<Chat, "turn" | "lastTurn"> | undefined, asks: number): MemberStatus {
+  if (bot.paused) return "paused";
   if (asks > 0) return "needs";
   if (bot.status === "offline") return "offline";
   if (bot.running || chat?.turn) return "working";

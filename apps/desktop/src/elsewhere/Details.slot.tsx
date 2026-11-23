@@ -25,6 +25,7 @@ import {
 } from "./PanelTabs";
 import { useNow } from "./useNow";
 import { RunsTab } from "../runs/RunsTab";
+import { MemberWork } from "../pages/RecentWork";
 import { markTabPicked } from "../chat/parts/PanelButton";
 import "./elsewhere.css";
 import { t as tr } from "../i18n";
@@ -250,6 +251,8 @@ function DetailsTab({ bot, open, head }: { bot: Bot; open: boolean; head: JSXChi
             ))}
           </ul>
         )}
+        {/* The member's page on the canvas lists their recent work; each job opens its own page. */}
+        <MemberWork bot={bot.name} />
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ import { BrandMark } from "../sidebar/menuIcons";
 import { SessionFace } from "../sessions/SessionFace";
 import { Avatar } from "../ui";
 import { MenuPageFrame } from "./MenuPage";
+import { RecentWorkList, recentRows, useJobs, type RecentRow } from "./RecentWork";
 import {
   askLines,
   askRoute,
@@ -96,6 +97,9 @@ export interface HomeViewProps {
   automations?: { count: number; open: () => void };
   /** the shop's name as the first-run setup took it; "" or absent until then */
   shop?: string;
+  /** the newest jobs the runtime has, each opening its page; the part is not drawn without any */
+  recent?: RecentRow[];
+  onSeeHistory?: () => void;
 }
 
 /** The canvas's send arrow, routines calendar and settled tick, on its 16-unit grid (menuPages.css gives `.ic`). */
@@ -308,6 +312,20 @@ export function HomeView(p: HomeViewProps) {
             </p>
           )}
         </section>
+
+        {p.recent && p.recent.length > 0 && (
+          <section className="wide part" aria-labelledby="home-recent-h" data-testid="home-recent">
+            <div className="band">
+              <h2 id="home-recent-h">{t("home.recent")}</h2>
+              {p.onSeeHistory && (
+                <button type="button" className="lk" onClick={p.onSeeHistory} data-testid="home-see-history">
+                  {t("home.seeHistory")}
+                </button>
+              )}
+            </div>
+            <RecentWorkList rows={p.recent} />
+          </section>
+        )}
       </div>
     </MenuPageFrame>
   );
@@ -384,6 +402,7 @@ export function HomePage() {
   // Ages and working times move on while something waits or works.
   const now = useNow(asks.length > 0 || listed.some((b) => b.running || !!s.chats[b.name]?.turn), 5_000);
   const route = askRoute(mode, home, kit);
+  const jobs = useJobs();
 
   const submit = async () => {
     const words = text.trim();
@@ -441,6 +460,8 @@ export function HomePage() {
       onSeeTeam={() => s.openPage("team")}
       automations={can("automations") ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
       shop={s.ui.shop.shop}
+      recent={recentRows(jobs, { nameOf: (b) => s.bots.find((x) => x.name === b)?.display_name ?? b, nowMs: now, open: (id) => s.openJob(id) })}
+      onSeeHistory={() => s.openPage("history")}
     />
   );
 }
