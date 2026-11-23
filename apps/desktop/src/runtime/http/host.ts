@@ -77,6 +77,10 @@ const notFound = () => new OpError("not_found", t("rt.notFound"));
 const notYet = (): never => {
   throw new OpError("not_yet", t("rt.notYet"));
 };
+/** A read the API cannot serve yet. It is not `notYet`'s words, which say that Connected only reads. */
+const notYetShow = (): never => {
+  throw new OpError("not_yet", t("rt.notYetShow"));
+};
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
 
 /** The signature of what a schedule shows, so a read that changed none of them stays quiet. */
@@ -474,6 +478,13 @@ export class HttpHost {
       "accounts.remove": notYet,
       "accounts.label": notYet,
       "accounts.discard": notYet,
+      // Mission Control: the API keeps no job trace or activity log a session can read, and has no way to stop a team.
+      "jobs.list": notYetShow,
+      "jobs.get": notYetShow,
+      "activity.list": notYetShow,
+      "team.state": notYetShow,
+      "team.pause": notYet,
+      "team.resume": notYet,
     };
   })();
 }

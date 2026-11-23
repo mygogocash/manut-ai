@@ -6,6 +6,7 @@
 // and changes only who answers: the in-process runtime (`src/runtime/mock`) today, a real backend later. An op group
 // a runtime does not have is declared in its `RuntimeCapabilities`, not removed from here.
 
+import type { MissionOps } from "../runtime/mission";
 import type { AgentRunSummary, CliAgent, CliAgentStatus, NodePr, RunDetail } from "./runs";
 
 export type BotStatus = "online" | "offline" | "starting";
@@ -19,6 +20,9 @@ export interface Bot {
   description: string;
   status: BotStatus;
   running: boolean;
+  /** Pause everyone stopped this member and nothing new starts for it until Resume everyone (`team.pause`); absent
+   *  or false for a member at work. The app reads the list again on `bots.update`. */
+  paused?: boolean;
   /** Changes whenever the bot's own picture changes; null = no picture, the built-in face is used. */
   avatar_rev?: number | null;
   /** A bot on another computer, reached over SSH (its name is `<peer>:<profile>`); absent for this computer's bots. */
@@ -314,8 +318,9 @@ export interface FolderResumeResult extends FolderOpenResult {
 
 /** op name -> { params, result }. `bot` is always the profile name. `session` (optional) names a folder chat
  *  the bridge created with `folder.open`; without it an op acts on the bot's main chat. `id` is the frame's
- *  own request id, so no op takes a param named `id` (accounts use `account`). */
-export interface OpMap {
+ *  own request id, so no op takes a param named `id` (accounts use `account`). Mission Control's ops (jobs, the activity
+ *  log, Pause everyone) are declared in `src/runtime/mission.ts` and joined here. */
+export interface OpMap extends MissionOps {
   hello: { params: Record<string, never>; result: HelloResult };
   "bots.list": { params: Record<string, never>; result: { bots: Bot[] } };
   "chat.open": { params: { bot: string; existing_only?: boolean }; result: ChatOpenResult };

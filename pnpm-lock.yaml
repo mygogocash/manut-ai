@@ -180,6 +180,9 @@ importers:
       '@manut/approval-core':
         specifier: workspace:*
         version: link:../../packages/approval-core
+      '@manut/shop-memory':
+        specifier: workspace:*
+        version: link:../../packages/shop-memory
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 1.6.0
@@ -287,6 +290,9 @@ importers:
       '@manut/promptpay':
         specifier: workspace:*
         version: link:../../packages/promptpay
+      '@manut/shop-memory':
+        specifier: workspace:*
+        version: link:../../packages/shop-memory
       '@manut/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit

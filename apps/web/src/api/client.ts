@@ -7,7 +7,9 @@ import {
   type CreatedShop,
   type DeletedShop,
   type DeletionView,
+  type Fact,
   type InboundMessage,
+  type Memory,
   type NewLineConnection,
   type NewPayment,
   type NewReply,
@@ -194,6 +196,18 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         },
         admin: true,
       }),
+
+    // What the team knows about a shop. A change sends the tenant and exactly what its route takes, and answers the
+    // fact (Forget answers the id of the one it removed); a refusal is an ApiError with the API's code.
+    getMemory: (tenant) => request<Memory>({ method: "GET", path: "/v1/admin/memory", query: { tenant }, admin: true }),
+    rememberFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/remember", body: input, admin: true }),
+    confirmFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/confirm", body: input, admin: true }),
+    correctFact: (input) =>
+      request<Fact>({ method: "POST", path: "/v1/admin/memory/correct", body: input, admin: true }),
+    forgetFact: (input) =>
+      request<{ id: string }>({ method: "POST", path: "/v1/admin/memory/forget", body: input, admin: true }),
   };
 }
 

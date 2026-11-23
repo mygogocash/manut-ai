@@ -142,6 +142,11 @@ type DeletionView = {
 | `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
 | `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
 | `GET /v1/admin/audit` | `?tenant=&before=&limit=` | `AuditPage`: one page of the shop's audit log, newest first ("Audit log", below) |
+| `GET /v1/admin/memory` | `?tenant=` | `Memory`: every fact the team holds for the shop, waiting ones included, and how many texts it was told to forget ("Memory", below) |
+| `POST /v1/admin/memory/remember` | `{ tenant, text }` | `Fact`: the owner's own fact, confirmed at once |
+| `POST /v1/admin/memory/confirm` | `{ tenant, id }` | `Fact`: "It's true" on a waiting fact |
+| `POST /v1/admin/memory/correct` | `{ tenant, id, text }` | `Fact`: the new words, confirmed |
+| `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -217,11 +222,12 @@ type SubscriptionPayment = {
 // attention items and `pilot: { shop, messages, replies, payments, subscriptionPayments, displayNames }`, where
 // `shop` carries `trialStartedAt` once the trial has started and `displayNames` is the LINE display names cached
 // for the shop's customers, `{ lineUserId, displayName }[]`. `audit: { entries, missed }` is the shop's audit log,
-// oldest first ("Audit log", below). `deletedAt` is there once the shop was deleted.
+// oldest first ("Audit log", below). `memory: { facts, forgottenCount }` is what the team knows about the shop
+// ("Memory", below). `deletedAt` is there once the shop was deleted.
 // Saved whole.
 // If any part cannot be read, the answer is 500 `{ "error": "export_incomplete", "failed": [...] }` naming
-// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "audit", "schedules",
-// "tombstone"),
+// the parts ("index", a task id, "connections", "consent", "attention", "pilot", "model", "audit", "memory",
+// "schedules", "tombstone"),
 // never a 200 that quietly leaves them out. A deleted shop with nothing left answers 404 `tenant_deleted`.
 type ShopExport = { tenant: string; exportedAt: string; deletedAt?: string; [part: string]: unknown };
 
@@ -257,8 +263,9 @@ type DeletedShop = {
   400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
-  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent
-  and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
+  every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent,
+  what the team knows about the shop and the shop's registry row. The owner's approval links answer `link_invalid`
+  afterwards and the webhook
   answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
@@ -389,7 +396,7 @@ type AuditActor =
   | { kind: "system" };                          // the control plane or the broker, on its own
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
-  "connectionId" | "previousConnectionId" | "confirmationId", string>>;
+  "connectionId" | "previousConnectionId" | "confirmationId" | "factId", string>>;
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -414,6 +421,8 @@ What is written, and by whom:
 | `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId` | `ok` |
 | `approval.decided` | owner or helper, with the id they decided as | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
+| `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator | `factId` | `ok` |
+| `memory.proposed` | a worker (by its attempt) or the system, as the caller of `proposeFact` says | `factId` | `ok`, or `awaiting_owner` for a customer's words, which wait for the owner |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply's approval-core request writes no `approval.*`
@@ -425,7 +434,7 @@ entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
   words, a draft's text, a note or a secret therefore cannot be written into it, even by mistake.
 - **It never blocks or fails the action it records.** When the record an entry describes lives in the shop's
   TenantObject (the shop, its LINE pointer, a reply's record and its decision time, both kinds of payment, consent,
-  the model cap), the entry goes into the same storage write, so the two exist together or not at all; an entry that
+  the model cap, what the team knows), the entry goes into the same storage write, so the two exist together or not at all; an entry that
   cannot be kept as given (a malformed actor) is replaced in that write by a raised miss count, and the action goes
   ahead. When the record lives in another object (a deletion's in AuthObject, a dispatch's and the job flow's in task
   objects), the entry is appended after the action has succeeded, best effort: the action's own record is the
@@ -437,6 +446,128 @@ entry: a reply's proposal and the owner's decision keep their `reply.*` entries.
   shop's other records; entries written while the deletion runs, the owner's yes among them, go with it.
 - **The console** shows one shop's log at a time on its Audit page, newest first, with "Show older entries" for the
   next page. The practice-mode fake keeps the same log for its sample shops, by the same rules.
+
+## Memory
+
+What Buddy's team knows about each shop: facts, where each came from, and the owner's say over them. The rules are
+the pure functions of `packages/shop-memory` (`@manut/shop-memory`); `apps/api/src/memory-store.ts` stores their
+state, one record per shop in the shop's TenantObject (the facts, the fingerprints of the texts the owner had the team
+forget, and the counter for the next id), and `apps/api/src/memory.ts` has the routes. The owner has no account in the
+pilot, so an operator relays the owner's word through the console's Memory page: the owner's own fact, "It's true" on
+a waiting fact, Correct and Forget. A worker never does these: it proposes what it learned (below).
+
+All five routes are under the admin gate, each an exact `ADMIN_METHODS` entry (the shop travels in the query or the
+body). A shop is any valid tenant, as in the audit and model routes; a shop that was deleted is not looked up first.
+
+```ts
+type Memory = {
+  tenant: string;
+  facts: Fact[];            // every fact, waiting ones included, oldest first: the order they were made
+  forgottenCount: number;   // how many texts the team was told to forget; the fingerprints are never sent
+};
+
+type Fact = {
+  id: string;               // "f1", "f2", ...: counted per shop and never reused, not even after Forget
+  text: string;             // trimmed, 1 to 280 characters (counted by characters, Thai included)
+  status: "confirmed" | "waiting";   // a waiting fact is not used until the owner confirms it
+  createdAt: number;        // epoch milliseconds, as the package keeps them: not the ISO strings used elsewhere here
+  updatedAt: number;
+  correctedAt?: number;     // set once the owner corrected it
+  source: FactSource;       // "Where it came from"
+};
+
+type FactSource =
+  | { kind: "owner" }                                    // the owner said it
+  | { kind: "document"; name: string; date: number }     // "From your price list, 3 November"
+  | { kind: "edits"; count: number }                     // "Learned from 12 of your edits"
+  | { kind: "orders"; days: number }                     // "From the last 90 days of orders"
+  | { kind: "connection"; name: string; detail: string } // "From your cost sheet in Google Sheets"
+  | { kind: "customer"; chat: string };                  // something a customer said, by chat reference
+```
+
+**What each route does**
+
+- `GET /v1/admin/memory?tenant=` answers `Memory`. 400 `tenant_required` for a missing or invalid tenant.
+- `POST /v1/admin/memory/remember` `{ tenant, text }` adds the owner's own fact, confirmed at once, with source
+  `{ kind: "owner" }`. Words that match a waiting fact confirm that fact instead of adding a second. It also lifts an
+  earlier Forget of the same words.
+- `POST /v1/admin/memory/confirm` `{ tenant, id }` is "It's true": a waiting fact becomes confirmed. Confirming a
+  confirmed fact changes nothing and answers the same fact.
+- `POST /v1/admin/memory/correct` `{ tenant, id, text }` gives the fact new words, confirmed, with `correctedAt` set.
+  The fact keeps its source and its `createdAt`. A correction to the words of a forgotten text lifts that Forget.
+- `POST /v1/admin/memory/forget` `{ tenant, id }` removes the fact and keeps only a fingerprint of its words (FNV-1a
+  64-bit of the compared form), so the team does not learn them again. The answer is `{ id }`: the words are not sent
+  back, and neither they nor the fingerprint reach the export, the audit log or any answer.
+
+Each answers the fact on success (`Fact`, status 200; Forget answers `{ id }`), or the package's refusal as
+`{ "error": reason }`:
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 400 | `invalid_text` | The words are missing, not text, blank or over 280 characters |
+| 400 | `invalid_source` | A proposal's source cannot be kept (never from an operator route) |
+| 400 | `invalid_request` | The body is not an object, or `id` is missing, not text or over 64 characters |
+| 400 | `tenant_required`, `invalid_json` | No valid tenant; a body that is not JSON |
+| 404 | `not_found` | The shop has no fact with that id |
+| 409 | `already_known` | The shop holds the same words (see below) |
+| 409 | `forgotten` | A proposal for words the owner had the team forget (never from an operator route) |
+| 409 | `full` | The shop already holds 200 facts. Forget one to make room |
+| 413 | `body_too_large` | The body is over 16 KB |
+| 503 | `memory_unavailable` | The shop's object could not be reached or did not answer as it should |
+
+**Rules**
+
+- **Same words.** Words are compared after Unicode NFC, trimming, collapsing spaces and lower case, so
+  `Closed on  Mondays ` and `closed on mondays` are the same, and Thai text compares the same way.
+- **A customer's words wait.** `proposeFact` makes a fact from a customer's chat `waiting`: it is not used until the
+  owner confirms it with "It's true" or corrects it. Facts from the owner's own data (`owner`, `document`, `edits`,
+  `orders`, `connection`) are confirmed at once. The same words proposed again from the owner's own data confirm a
+  waiting fact; a customer repeating them does not.
+- **Forget is kept as a fingerprint.** A proposal for forgotten words is refused `forgotten`, in any form. Only the
+  owner saying them again (`remember`, or a correction to them) lifts it.
+- **At most 200 facts per shop.** Forget makes room.
+- **One transaction per change.** The state is read, one rule applied, and the new state and its audit entry written in
+  one storage transaction of the shop's object, so two operators' clicks on one shop are decided one after the other
+  and neither is lost. Two clicks on the same words give one 200 and one 409 `already_known`. The object's memory paths
+  are the Worker's alone (its `x-memory` header, like `x-model` and `x-audit`).
+- **Audit.** Every change writes an entry that names the actor, the action and the fact's id, never its words
+  ("Audit log", above). The operator routes record the operator's Access identity (none for a service token). A refusal
+  changes nothing and writes nothing, and neither does a confirm of a fact already confirmed.
+- **Export and deletion.** The tenant export carries `memory: { facts, forgottenCount }`, as the package's
+  `exportFacts` gives it: every fact, waiting ones included, and only the number of fingerprints. The tenant deletion
+  wipes the shop's memory, the fingerprints included.
+
+**A worker's proposal** is a function, not a route (no operator can make one, and no worker can confirm one):
+
+```ts
+proposeFact(env, tenant, text, source, options?: { actor?: AuditActor; now?: () => number }):
+  Promise<{ ok: true; fact: Fact } | { ok: false; reason: Refusal | "invalid_request" | "unavailable" }>
+```
+
+It never throws, so the job that calls it never fails for the memory. `reason` is one of the package's refusals,
+`invalid_request` for a tenant that is not one or a proposal too large to send (over 32 KB), or `unavailable` when the
+shop's object cannot be reached or does not answer as it should. `actor` is who the audit entry names:
+`{ kind: "worker", attemptId }` when the job flow gives it, and the system otherwise. `now` is the caller's clock, for
+tests. The store keeps only the fields of a source's own kind, and refuses with `invalid_source` a name, detail or chat
+reference over 256 characters, a count or number of days that is not a whole number, and a document date outside 0 to
+8,640,000,000,000,000 milliseconds, so one shop's record stays small.
+
+**The console** has a Memory page in the side menu, beside Audit, laid out as the design canvas's "Customize: memory
+and routines" board, newest fact first in each group:
+
+- "What your team knows", with "Where it came from" on its band and, on each fact, where it came from (`source`) and
+  Correct and Forget. Correct opens the words in place and sends `correct`; Forget asks once more in the row, because
+  the words are gone once it is answered.
+- "Waiting for your OK: not used until you confirm", shown only while something waits: each customer's fact tinted
+  and tagged "Not confirmed", with "It's true" (`confirm`) and Forget. It has no Correct: correct a fact once the team
+  knows it.
+- "Tell Buddy something to remember", a box with a "Remember" button that sends `remember`, and a count of the 280
+  characters it takes.
+
+The operator relays the owner's word, so the page says to correct or forget a fact only when the owner asks. One change
+runs at a time, and each refusal above is said in the board's words. The practice-mode fake keeps the same state with
+`@manut/shop-memory`'s own rules: it starts Baan Mali with five facts the team learned and two a customer said, which
+wait, and it replaces a practice world saved before memory existed.
 
 ## One origin
 

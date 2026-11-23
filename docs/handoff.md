@@ -120,6 +120,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   question); a payment before day 15 counts as paid.
 - **First run:** who writes the Thai copy; whether the Team screen gets the practice-mode switch that step 3's
   canvas text promises.
+- **Mission Control's words:** a native speaker's check of the new Korean, Japanese and Chinese strings; the
+  activity log's "Kept for 12 months, then deleted for good" is a policy promise the API must keep before any
+  shop sees it.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's

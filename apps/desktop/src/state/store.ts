@@ -4,6 +4,7 @@ import { SESSIONS_ENTRY } from "../sessions/entry";
 import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
 import { createRuntime, type RuntimeAdapter } from "../runtime";
+import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
 import { createNoteGate, noteFor, sessionNote, sessionRings, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
 import { promptText } from "../chat/parts/attachFiles";
@@ -391,14 +392,18 @@ export interface Ui {
   theme: Theme;
   look: Look;
   /** "session" = a terminal session (listed on the Code page) fills the main column; `session` names it.
-   *  "automations" and "plugins" are entries of the Customize page; the menu's own pages are `MenuPage`. */
-  view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks" | MenuPage;
+   *  "automations" and "plugins" are entries of the Customize page; "job" is one job's page (`job` names it) and
+   *  "activity" the shop's activity log, both opened from History, Home or a member's page and returning to where they
+   *  were opened from; the menu's own pages are `MenuPage`. */
+  view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks" | "job" | "activity" | MenuPage;
   /** Where a page's back arrow (and Settings' ×) returns: the chat, the session or the menu page it was opened from. */
   back: "chat" | "session" | MenuPage;
   /** Bumped by the menu's Search button (and ⌘K): the History page's search box takes the focus on each new value. */
   findSeq: number;
   /** Automations: the job the detail panel shows (`<bot>:<id>`); Plugins: the bot whose plugins the page shows. */
   automation: string | null;
+  /** The job view: the job it shows (a `jobs.list` id). */
+  job: string | null;
   pluginsBot: string | null;
   /** The UI language (Settings › General › Language), saved as `manut.lang`. */
   lang: Lang;
@@ -667,6 +672,7 @@ export function initialState(): AppState {
       session: null,
       thread: null,
       automation: null,
+      job: null,
       pluginsBot: null,
       lang: readLang(),
       shop,
@@ -981,6 +987,9 @@ export type Action =
   | { type: "ui.automations"; job?: string | null }
   | { type: "ui.plugins"; bot?: string | null }
   | { type: "ui.tasks" }
+  /** One job's page, or the activity log, each returning to where it was opened from. */
+  | { type: "ui.job"; job: string }
+  | { type: "ui.activity" }
   /** A page of the side menu fills the main column; `find` also asks History's search box for the focus. */
   | { type: "ui.page"; page: MenuPage; find?: boolean }
   | { type: "ui.lang"; lang: Lang }
@@ -1549,6 +1558,10 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, view: "plugins", back: backOf(state.ui), ...(a.bot ? { pluginsBot: a.bot } : {}) } };
     case "ui.tasks":
       return { ...state, ui: { ...state.ui, view: "tasks", back: backOf(state.ui) } };
+    case "ui.job":
+      return { ...state, ui: { ...state.ui, view: "job", back: backOf(state.ui), job: a.job } };
+    case "ui.activity":
+      return { ...state, ui: { ...state.ui, view: "activity", back: backOf(state.ui) } };
     case "ui.page":
       // A menu page is a place of its own, not a page in front of one, so it keeps no way back: the shortcuts that
       // leave a page for the chat (⌘., ⌘⇧G) call closeSettings, and from here that must land on the chat.
@@ -1968,6 +1981,19 @@ export interface Actions {
   openTasks(): void;
   /** Open one of the side menu's pages; `find` (the menu's Search button, ⌘K) also focuses History's search box. */
   openPage(page: MenuPage, opts?: { find?: boolean }): void;
+  /** Open one job's page (`jobs.list`'s id), and the shop's activity log. Each returns to where it was opened from. */
+  openJob(job: string): void;
+  openActivity(): void;
+  /** Mission Control's reads and Pause everyone, straight from the runtime (never cached in the store: a page keeps its
+   *  own copy). They reject with the runtime's own error, which is "not yet" on the connected runtime. */
+  missionJobs(): Promise<{ jobs: JobRow[] }>;
+  missionJob(job: string): Promise<Job>;
+  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number }>;
+  teamState(): Promise<TeamState>;
+  /** Stops every member but the lead at the next safe point; unsends nothing. The members' rows learn of it through
+   *  `bots.update`. */
+  teamPause(): Promise<TeamState>;
+  teamResume(): Promise<TeamState>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
   /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
@@ -2829,6 +2855,14 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     },
     openTasks: () => dispatch({ type: "ui.tasks" }),
     openPage: (page, opts) => dispatch({ type: "ui.page", page, find: opts?.find }),
+    openJob: (job) => dispatch({ type: "ui.job", job }),
+    openActivity: () => dispatch({ type: "ui.activity" }),
+    missionJobs: () => bridge.request("jobs.list", {}),
+    missionJob: (job) => bridge.request("jobs.get", { job }),
+    missionActivity: () => bridge.request("activity.list", {}),
+    teamState: () => bridge.request("team.state", {}),
+    teamPause: () => bridge.request("team.pause", {}),
+    teamResume: () => bridge.request("team.resume", {}),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
       try {
