@@ -32,7 +32,7 @@ Week 2, brought forward:
 - [ ] `apps/desktop`, next pass: the canvas side menu and screens, a real runtime adapter against `apps/api`, approvals through `packages/approval-core`, and a triage of the 156 Playwright specs (some still expect removed screens)
 - [x] `packages/agent-events`: the agent event contract ported from GoSpark (213 tests)
 - [x] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta
-- [ ] Dry run with two test shops (needs a dev deploy and the owner's Cloudflare token)
+- [ ] Dry run with two test shops: dev is deployed at https://dev.manut.xyz; waits for a test LINE Official Account
 
 ## Queue for cloud routines
 

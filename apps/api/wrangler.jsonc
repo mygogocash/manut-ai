@@ -58,7 +58,12 @@
       "routes": [{"pattern": "dev.manut.xyz", "custom_domain": true}],
       "vars": {
         "WEB_ORIGIN": "https://dev.manut.xyz",
-        "PUBLIC_API_ORIGIN": "https://dev.manut.xyz"
+        "PUBLIC_API_ORIGIN": "https://dev.manut.xyz",
+        // The audience of the Access application "Manut AI dev console"
+        // (dev.manut.xyz/ops and dev.manut.xyz/v1/admin, allowing only the
+        // owner's email). An audience tag identifies the application and is
+        // not a secret.
+        "ADMIN_ACCESS_AUD": "a7a8f9a7030979190c2a1dc2f2a5f518ae5530f9450dc8ad3f7dcaa1aa4a7cdf"
       },
       "durable_objects": {
         "bindings": [

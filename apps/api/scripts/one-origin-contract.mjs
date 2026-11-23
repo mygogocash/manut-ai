@@ -42,6 +42,8 @@ for (const env of [undefined, "dev", "staging", "prod"]) {
     const host = typeof route === "string" ? route : route.pattern;
     assert.equal(api.vars?.WEB_ORIGIN, `https://${host}`, `${where}: WEB_ORIGIN must be the front door's host`);
     assert.equal(api.vars?.PUBLIC_API_ORIGIN, `https://${host}`, `${where}: PUBLIC_API_ORIGIN must be the front door's host`);
+    // A host without an Access audience would deny every operator route: the admin gate needs both credentials.
+    assert.match(String(api.vars?.ADMIN_ACCESS_AUD ?? ""), /^[0-9a-f]{64}$/, `${where}: ADMIN_ACCESS_AUD must be the Access application's audience`);
   }
   checked++;
 }

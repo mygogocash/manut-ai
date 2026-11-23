@@ -38,7 +38,7 @@ deploys anything.
 
 ## Deploying
 
-Nothing is deployed yet; dev will serve on `https://dev.manut.xyz`. `apps/api` deploys two Workers per environment: the pages Worker
+Dev is deployed at `https://dev.manut.xyz` (staging and production are not). `apps/api` deploys two Workers per environment: the pages Worker
 (`wrangler deploy -c wrangler.web.jsonc --env dev`, which builds the web app first) and then the API Worker
 (`wrangler deploy --env dev`), the front door that hands every non-API path to the pages
 (`docs/pilot-api.md`, "One origin"). Before the first deploy: create the Wrangler secrets (`CLOUD_API_KEY`,
