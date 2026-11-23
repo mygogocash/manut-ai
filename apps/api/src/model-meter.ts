@@ -28,6 +28,7 @@
 /// header, the same defence in depth as `x-pilot` and `x-wipe`. Every key embeds
 /// the URI-encoded tenant, like the object's other keys.
 
+import { auditPutSync } from "./audit-log";
 import { readJsonBody } from "./body";
 import { ceilSatang, effectiveCap, isMonth, MAX_CAP_SATANG, MILLISATANG_PER_SATANG, bangkokMonth } from "./model-price";
 import { sortableId } from "./pilot-store";
@@ -307,18 +308,25 @@ function release(storage: DurableObjectStorage, tenant: string, body: Record<str
 }
 
 /// Sets the shop's cap override, or clears it with null. Takes effect at the
-/// next reservation; calls already holding budget keep it.
+/// next reservation; calls already holding budget keep it. The operator who
+/// set it is written to the shop's audit log in the same transaction, so the
+/// cap and its entry commit together (audit-log.ts).
 function setCap(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>): Response {
   const { capSatang, setBy } = body;
   const valid = capSatang === null || (typeof capSatang === "number" && Number.isSafeInteger(capSatang) && capSatang >= 0 && capSatang <= MAX_CAP_SATANG);
   if (!valid || (setBy !== null && !bounded(setBy))) return json({ error: "invalid_request" }, 400);
   const capOverride = storage.transactionSync((): CapOverride | null => {
+    const actor = { kind: "operator" as const, email: setBy };
     if (capSatang === null) {
       storage.kv.delete(keys.cap(tenant));
+      auditPutSync(storage.kv, tenant, { actor, action: "model.cap_cleared", subject: {}, outcome: "ok" },
+        "model.cap_cleared");
       return null;
     }
     const override: CapOverride = { capSatang, setAt: new Date().toISOString(), setBy };
     storage.kv.put(keys.cap(tenant), override);
+    auditPutSync(storage.kv, tenant, { actor, action: "model.cap_set", subject: {}, outcome: "ok",
+      amountSatang: capSatang }, "model.cap_set");
     return override;
   });
   return json({ capOverride });
