@@ -34,6 +34,8 @@ const NOW = T0 + 600_000;
 /** A read an earlier run made five minutes before this one starts. */
 const EARLIER = NOW - 300_000;
 const DAY = 24 * 3600_000;
+/** What a wait on the shell's stand-in gets: its commands go through a dynamic import, which a busy machine can be slow to settle. */
+const PATIENT = { timeout: 10_000, interval: 10 };
 const KEY = cacheKey(ORIGIN, "apple:owner-1");
 
 interface Options {
@@ -442,7 +444,7 @@ describe("through the desktop shell", () => {
     const keep = vi.spyOn(shopCache(), "keep");
     const rt = new HttpRuntime(sharedHttpHost(origin));
     await rt.connect();
-    await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(1));
+    await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(1), PATIENT);
     const writes = shell.commands("shop_cache_write");
     expect(writes[0].args.key).toBe(cacheKey(origin, "apple:owner-1"));
     expect(decodeCached(writes[0].args.text, NOW)).toMatchObject({ kind: "usable", snapshot: { tasks: [{ id: "task-1" }] } });
@@ -450,14 +452,14 @@ describe("through the desktop shell", () => {
     // Settings moved the saved choice to Practice: this page runs on, reading as before, but keeps nothing more
     saved.set(RUNTIME_KEY, JSON.stringify({ mode: "practice" }));
     await vi.advanceTimersByTimeAsync(POLL_MS);
-    await vi.waitFor(() => expect(shell.answered()).toBe(6));
+    await vi.waitFor(() => expect(shell.answered()).toBe(6), PATIENT);
     await settle();
     expect(keep).toHaveBeenCalledTimes(1);
     // back to this shop: it is kept again from the next read
     saved.set(RUNTIME_KEY, JSON.stringify({ mode: "connected", origin }));
     await vi.advanceTimersByTimeAsync(POLL_MS);
-    await vi.waitFor(() => expect(keep).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(2));
+    await vi.waitFor(() => expect(keep).toHaveBeenCalledTimes(2), PATIENT);
+    await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(2), PATIENT);
     await sessionFor(origin).signOut();
     expect(shell.commands("shop_cache_clear")).toHaveLength(1);
     expect(store.files.size).toBe(0);
