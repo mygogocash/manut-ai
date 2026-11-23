@@ -1,4 +1,5 @@
 import { adminFetch } from "./authenticated-fixtures";
+import { sourceWorker } from "./source-worker";
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { AuditEntry } from "../src/audit-log";
@@ -45,7 +46,7 @@ async function list(tenant: string) {
 }
 
 function heartbeat(tenant: string, outpostId: unknown, credential?: string) {
-  return SELF.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: {
+  return sourceWorker.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: {
     "content-type": "application/json", ...(credential !== undefined ? { authorization: `Bearer ${credential}` } : {}),
   }, body: JSON.stringify({ tenant, outpostId }) });
 }

@@ -69,14 +69,27 @@ export async function vaultAdminRoute(
   return json({ error: "not_found" }, 404);
 }
 
+/// The outposts' own routes, each a method and a path. The Worker's ingress gate (index.ts) limits exactly these, per
+/// source address, before anything else reads the request: each takes a bearer credential, so each answer is a guess
+/// someone could repeat.
+const OUTPOST_ROUTES: ReadonlySet<string> = new Set([
+  "POST /v1/outposts/heartbeat",
+  "POST /v1/outposts/redeem",
+]);
+
+/// Whether a request is for one of the outposts' own routes.
+export function isOutpostRoute(method: string, pathname: string): boolean {
+  return OUTPOST_ROUTES.has(`${method} ${pathname}`);
+}
+
 /// `/v1/outposts/*`, the outposts' own routes. Answers null for any other path, and for a method or path under it that
 /// is not a route, so those answer the Worker's final not_found like any path that does not exist.
 export async function outpostRoute(request: Request, url: URL, env: RedeemEnv, flags: JobFlags):
   Promise<Response | null> {
   const route = `${request.method} ${url.pathname}`;
+  if (!OUTPOST_ROUTES.has(route)) return null;
   if (route === "POST /v1/outposts/heartbeat") return outpostHeartbeat(request, env);
-  if (route === "POST /v1/outposts/redeem") return redeemGrant(request, env, flags);
-  return null;
+  return redeemGrant(request, env, flags);
 }
 
 /// `POST /v1/outposts/redeem` with `{ tenant, outpostId, grantId }`: the outpost is about to type a sign-in for a

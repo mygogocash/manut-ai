@@ -1,4 +1,5 @@
 import { adminFetch, tenantSession, trustedTaskPut } from "./authenticated-fixtures";
+import { sourceWorker } from "./source-worker";
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditEntry } from "../src/audit-log";
@@ -83,13 +84,13 @@ class StubOutpost {
   constructor(readonly tenant: string, readonly id: string, readonly credential: string) {}
 
   beat() {
-    return SELF.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: this.headers(this.credential),
+    return sourceWorker.fetch(`${API}/v1/outposts/heartbeat`, { method: "POST", headers: this.headers(this.credential),
       body: JSON.stringify({ tenant: this.tenant, outpostId: this.id }) });
   }
 
   redeem(grantId: string, as: { tenant?: string; outpostId?: string; credential?: string | null } = {}) {
     const credential = as.credential === undefined ? this.credential : as.credential;
-    return SELF.fetch(`${API}/v1/outposts/redeem`, { method: "POST", headers: this.headers(credential),
+    return sourceWorker.fetch(`${API}/v1/outposts/redeem`, { method: "POST", headers: this.headers(credential),
       body: JSON.stringify({ tenant: as.tenant ?? this.tenant, outpostId: as.outpostId ?? this.id, grantId }) });
   }
 
