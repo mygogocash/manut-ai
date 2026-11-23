@@ -355,3 +355,28 @@ Done when: the request's shape, RAW, the A1 quoting, the amounts' JSON text, an 
 looks like a formula staying plain text are tested.
 
 Done on pilot/week-1, 23 Nov 2026: `packages/sheets-rows` with `appendRequest`, `quoteSheetName` and `bahtNumber` (9 tests), checked against the Sheets API reference, built in the lead session.
+
+### notify-rules
+`packages/notify-rules` (`@manut/notify-rules`). What the app may show outside its window, from the design canvas
+board "States: outside the app" (`~/Developer/gospark-main/manut-ai-artifacts/app-screens/project/StatesOutside.dc.html`
+on the owner's Mac; its rules are quoted here). Pure functions: showing a notification is not part of this task.
+No function throws: a refusal is a result value.
+
+- Events: a request waiting for the owner (its approval-core kind: `message`, `reply`, `money`, `public_post`,
+  `payment_confirmation` or `command`, the member who asks, and a one-line summary), a live page that stopped
+  working, a sign-in from a new device, and a job that waited while the Mac slept.
+- `notificationFor(event, settings, now)` answers whether to show it, whether it makes a sound, its title and body,
+  and its buttons. "A message request can be approved from the notification": a `message` or `reply` request gets
+  "Approve" and "Look first". "Money never from a notification": every other kind gets "Look first" and "Later",
+  never "Approve". The title names the member ("Nam needs you") and the body is the summary.
+- Details hidden: on the lock screen, or with the setting "Hide details" on, "no names, amounts or customers are
+  shown": the title is "Manut AI" and the body says how many requests need the owner ("1 request needs you.").
+- Quiet hours (a start and an end time, which may cross midnight, in the owner's time zone; default 22:00 to
+  08:00, Asia/Bangkok): "Nothing makes a sound. Requests wait in Updates." Only "A live page that stops working and
+  a sign-in from a new device still alert you", with sound.
+- A job that waited while the Mac slept is shown once after waking, and only if something had to wait.
+- `badgeCount(requests)`: "The number on the Dock icon is the number of requests waiting, and nothing else."
+- A request kind this build does not know is treated as owner-only: no "Approve" button.
+
+Done when: each event kind, the Approve rule for every approval kind, hidden details on the lock screen and by the
+setting, quiet hours across midnight with both exceptions, the badge, and an unknown kind are tested.
