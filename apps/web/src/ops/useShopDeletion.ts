@@ -27,6 +27,23 @@ export type ShopDeletion = {
 /// from the practice-mode fake.
 const GONE_CODES = new Set(["shop_not_found", "unknown_tenant"]);
 
+/// What a deletion that did not answer with its result means for the shop's data.
+/// - `gone`: the shop no longer exists, which is what was asked for.
+/// - `partial`: the API stopped part way (wipe_incomplete). Some data is deleted and some is still stored.
+/// - `refused`: nothing was deleted, because the API turned it down with a 4xx, or because the client never
+///   sent it for want of an operator key.
+/// - `unclear`: anything else. With no answer, a server error, or a success whose body could not be read,
+///   nobody can say how much was deleted.
+export type DeleteErrorKind = "gone" | "partial" | "refused" | "unclear";
+
+export function classifyDeleteError(error: unknown): DeleteErrorKind {
+  if (!(error instanceof ApiError)) return "unclear";
+  if (error.status === 404 && GONE_CODES.has(error.code)) return "gone";
+  if (isWipeIncomplete(error)) return "partial";
+  if ((error.status >= 400 && error.status < 500) || error.code === "operator_key_missing") return "refused";
+  return "unclear";
+}
+
 export function useShopDeletion(
   api: PilotApi,
   events: { onAnswered: () => void; onDeleted: () => void },
@@ -47,22 +64,21 @@ export function useShopDeletion(
       finish(tenant, name, await api.deleteShop({ tenant, confirmName: name }));
       return null;
     } catch (error) {
+      const kind = classifyDeleteError(error);
       // A shop that no longer exists is what the operator asked for. On a retry it means an earlier attempt
       // finished after all, even though its answer was lost.
-      if (error instanceof ApiError && error.status === 404 && GONE_CODES.has(error.code)) {
+      if (kind === "gone") {
         finish(tenant, name, null);
         return null;
       }
-      const partial = isWipeIncomplete(error);
-      // No answer, or a server error, leaves it unknown how much was deleted.
-      const unclear = !(error instanceof ApiError) || error.status === 0 || error.status >= 500;
-      if (!partial && !unclear && !retry) return error;
+      if (kind === "refused" && !retry) return error;
       setUnfinished((list) => {
         const previous = list.find((entry) => entry.tenant === tenant);
         const entry: UnfinishedDeletion = {
           tenant,
           name,
-          partial: partial || (previous?.partial ?? false),
+          // Once part of a shop is known to be deleted, a later unclear answer does not make that less so.
+          partial: kind === "partial" || (previous?.partial ?? false),
           tries: (previous?.tries ?? 0) + 1,
           error,
         };
