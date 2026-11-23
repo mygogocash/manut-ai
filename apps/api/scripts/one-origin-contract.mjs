@@ -45,6 +45,10 @@ for (const env of [undefined, "dev", "staging", "prod"]) {
     // A host without an Access audience would deny every operator route: the admin gate needs both credentials.
     assert.match(String(api.vars?.ADMIN_ACCESS_AUD ?? ""), /^[0-9a-f]{64}$/, `${where}: ADMIN_ACCESS_AUD must be the Access application's audience`);
   }
+  // The owners' morning brief on LINE (src/owner-line.ts): 08:00 in Bangkok and the 08:30 retry, in every environment.
+  // The flag, not the trigger, keeps it silent until the owner turns it on.
+  assert.deepEqual(api.triggers?.crons, ["0 1 * * *", "30 1 * * *"], `${where}: the morning brief's cron triggers`);
+  assert.equal(api.vars?.OWNER_LINE, undefined, `${where}: owner messages on LINE stay off until the owner says so`);
   checked++;
 }
 // The owner's choice of host for dev (docs/decisions.md): the API Worker owns dev.manut.xyz as its custom domain.

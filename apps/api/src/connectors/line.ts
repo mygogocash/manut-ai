@@ -20,6 +20,16 @@ export const LINE_PUSH_OPERATION = "line.message.push";
 /// ("POST https://api.line.me/v2/bot/message/push").
 export const LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
+/// https://developers.line.biz/en/reference/messaging-api/#send-reply-message
+/// ("POST https://api.line.me/v2/bot/message/reply"). Only Manut AI's own
+/// account answers through it (owner-line.ts): a shop's customers are always
+/// answered by an approved push.
+export const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
+
+/// https://developers.line.biz/en/reference/messaging-api/#send-push-message
+/// and #send-reply-message: "messages ... Max: 5".
+const LINE_MESSAGES_MAX = 5;
+
 /// https://developers.line.biz/en/reference/messaging-api/#get-profile
 /// ("GET https://api.line.me/v2/bot/profile/{userId}").
 const LINE_PROFILE_URL = "https://api.line.me/v2/bot/profile/";
@@ -147,17 +157,39 @@ export type LineTextEvent = {
 /// other kind are skipped: the pilot answers one customer at a time, in
 /// text. Reply tokens, quote tokens and read tokens are never kept.
 export function lineTextEvents(payload: unknown, botUserId: string): LineTextEvent[] {
+  return userTextEvents(payload, botUserId).map(({ webhookEventId, lineUserId, text }) => ({ webhookEventId, lineUserId, text }));
+}
+
+/// A text from a user that is answered straight away, with the event's reply
+/// token, or null when the event carries none a reply could use.
+export type LineTextEventWithReply = LineTextEvent & { replyToken: string | null };
+
+/// The same text messages as `lineTextEvents`, each with its reply token. Only
+/// Manut AI's own account reads these (owner-line.ts), to answer an owner's link
+/// code at once: a reply token "must be used within one minute after receiving
+/// the webhook" (https://developers.line.biz/en/reference/messaging-api/#send-reply-message),
+/// so it is used in the delivery's own request and never stored.
+export function lineTextEventsWithReply(payload: unknown, botUserId: string): LineTextEventWithReply[] {
+  return userTextEvents(payload, botUserId);
+}
+
+/// LINE documents the reply token only as a string. A bound keeps a malformed
+/// event from carrying anything large back to LINE.
+const REPLY_TOKEN_MAX = 256;
+
+function userTextEvents(payload: unknown, botUserId: string): LineTextEventWithReply[] {
   if (!isRecord(payload) || payload.destination !== botUserId || !Array.isArray(payload.events)) return [];
-  const events: LineTextEvent[] = [];
+  const events: LineTextEventWithReply[] = [];
   for (const event of payload.events) {
     if (!isRecord(event) || event.type !== "message") continue;
-    const { message, source, webhookEventId } = event;
+    const { message, source, webhookEventId, replyToken } = event;
     if (!isRecord(message) || message.type !== "text") continue;
     if (typeof message.text !== "string" || message.text.length === 0) continue;
     if (!isRecord(source) || source.type !== "user") continue;
     if (typeof source.userId !== "string" || !LINE_USER_ID.test(source.userId)) continue;
     if (typeof webhookEventId !== "string" || !WEBHOOK_EVENT_ID.test(webhookEventId)) continue;
-    events.push({ webhookEventId, lineUserId: source.userId, text: message.text });
+    const usable = typeof replyToken === "string" && replyToken.length > 0 && replyToken.length <= REPLY_TOKEN_MAX;
+    events.push({ webhookEventId, lineUserId: source.userId, text: message.text, replyToken: usable ? replyToken : null });
   }
   return events;
 }
@@ -264,7 +296,33 @@ export async function pushLineMessage(
   channelAccessToken: string,
   input: { to: string; text: string; retryKey: string },
 ): Promise<LinePushOutcome> {
-  if (!LINE_USER_ID.test(input.to) || !LINE_RETRY_KEY.test(input.retryKey) || lineReplyText({ text: input.text }) === null) {
+  if (lineReplyText({ text: input.text }) === null) return { outcome: "failed", reason: "invalid_payload" };
+  return pushLineMessages(fetchImpl, channelAccessToken, {
+    to: input.to,
+    messages: [{ type: "text", text: input.text }],
+    retryKey: input.retryKey,
+  });
+}
+
+/// A list LINE could take: one to five message objects, each naming its type.
+/// What each object holds is the caller's to build from LINE's reference
+/// (owner-line-messages.ts builds the Flex Messages); this only refuses a list
+/// LINE would refuse whole, before any traffic.
+function sendableMessages(messages: unknown): messages is Record<string, unknown>[] {
+  return Array.isArray(messages) && messages.length >= 1 && messages.length <= LINE_MESSAGES_MAX &&
+    messages.every((message) => isRecord(message) && typeof message.type === "string" && message.type.length > 0);
+}
+
+/// Pushes up to five message objects to one user, with `retryKey` as LINE's
+/// retry key, and classifies LINE's answer exactly as `pushLineMessage` does
+/// (it is the same call): accepted or already accepted under this key is
+/// confirmed, another 4xx failed, anything doubtful unknown.
+export async function pushLineMessages(
+  fetchImpl: FetchImpl,
+  channelAccessToken: string,
+  input: { to: string; messages: Record<string, unknown>[]; retryKey: string },
+): Promise<LinePushOutcome> {
+  if (!LINE_USER_ID.test(input.to) || !LINE_RETRY_KEY.test(input.retryKey) || !sendableMessages(input.messages)) {
     return { outcome: "failed", reason: "invalid_payload" };
   }
   let response: Response;
@@ -276,7 +334,7 @@ export async function pushLineMessage(
         "content-type": "application/json",
         "x-line-retry-key": input.retryKey,
       },
-      body: JSON.stringify({ to: input.to, messages: [{ type: "text", text: input.text }] }),
+      body: JSON.stringify({ to: input.to, messages: input.messages }),
       signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
     });
   } catch {
@@ -307,6 +365,53 @@ export async function pushLineMessage(
     return { outcome: "failed", reason: `provider_${response.status}` };
   }
   return { outcome: "unknown", reason: `provider_${response.status}` };
+}
+
+/// Answers one webhook event through its reply token. LINE takes no retry key
+/// on a reply (https://developers.line.biz/en/reference/messaging-api/#retry-api-request
+/// names push, multicast, narrowcast and broadcast only) and a token works once,
+/// so an answer is never retried: it is a courtesy, and its outcome is only
+/// reported. "The messages aren't sent if an error is returned"
+/// (https://developers.line.biz/en/reference/messaging-api/#send-reply-message),
+/// so any answer but a 2xx means the user saw nothing.
+export async function replyLineMessages(
+  fetchImpl: FetchImpl,
+  channelAccessToken: string,
+  input: { replyToken: string; messages: Record<string, unknown>[] },
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!input.replyToken || input.replyToken.length > REPLY_TOKEN_MAX || !sendableMessages(input.messages)) {
+    return { ok: false, reason: "invalid_payload" };
+  }
+  try {
+    const response = await fetchImpl(LINE_REPLY_URL, {
+      method: "POST",
+      headers: { authorization: `Bearer ${channelAccessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ replyToken: input.replyToken, messages: input.messages }),
+      signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return response.ok ? { ok: true } : { ok: false, reason: `provider_${response.status}` };
+  } catch {
+    return { ok: false, reason: "provider_unreachable" };
+  }
+}
+
+/// A retry key for one purpose, the same every time it is asked for: a SHA-256
+/// of the purpose's parts, shaped as the UUID LINE asks for ("Arbitrarily
+/// generated UUID in hexadecimal notation"), marked version 8 (RFC 9562's
+/// custom UUID) with the RFC variant. A push sent again for the same purpose,
+/// by a retried cron run or by an operator, carries the same key, so LINE
+/// answers 409 instead of showing it twice. Each purpose has its own parts, so
+/// an owner's card never shares a key with the customer's reply it is about,
+/// whose key is the action id itself. The parts are JSON-encoded, so no two
+/// lists of parts give the same text.
+export async function lineRetryKey(...parts: string[]): Promise<string> {
+  const text = `manut-ai/line-retry-key/v1.${JSON.stringify(parts)}`;
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))).slice(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /// The customer's LINE display name, or null whenever it cannot be had: the

@@ -81,6 +81,12 @@ export type PilotEnv = TenantDataEnv & {
 
 type Flags = () => Promise<Pick<FeatureFlags, "officeCloud" | "officeExternalWrites" | "officeInbound">>;
 
+/// What other modules hear from the pilot's routes, after the route has its answer. Owner messages on LINE
+/// (owner-line.ts) listen for a proposed reply to send its owner a card; the pilot itself knows nothing of them.
+export type PilotEvents = {
+  replyProposed?: (tenant: string, actionId: string) => void;
+};
+
 const MAX_BODY_BYTES = 256 * 1024;
 /// The pilot's single AI team member, as the owner's page presents it.
 const MEMBER_NAME = "Nam";
@@ -156,7 +162,7 @@ function bounded(value: unknown, max = 256): value is string {
 
 /// A configured origin, normalized, or null when unset or not a URL. Routes
 /// that need one refuse up front rather than hand out a broken link.
-function originOf(value: string | undefined): string | null {
+export function originOf(value: string | undefined): string | null {
   if (!value) return null;
   try {
     const parsed = new URL(value);
@@ -169,12 +175,12 @@ function originOf(value: string | undefined): string | null {
 /// A proposal still waiting for its decision past its own deadline has
 /// expired, whether or not anything has touched it since: the task object
 /// marks expiry lazily, when a decision or dispatch finds it.
-function viewState(action: ActionProposalJSON, nowMs: number): ViewState {
+export function viewState(action: ActionProposalJSON, nowMs: number): ViewState {
   if (action.state === "proposed" && Date.parse(action.expiresAt) <= nowMs) return "expired";
   return action.state;
 }
 
-async function readAction(env: PilotEnv, tenant: string, taskId: string, actionId: string): Promise<ActionProposalJSON | null> {
+export async function readAction(env: PilotEnv, tenant: string, taskId: string, actionId: string): Promise<ActionProposalJSON | null> {
   const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(
     new Request(`https://task/actions/${encodeURIComponent(actionId)}`, { headers: { "x-tenant": tenant } }),
   );
@@ -190,7 +196,7 @@ async function shopConsent(env: PilotEnv, tenant: string): Promise<boolean> {
   return record?.cloudWork === true;
 }
 
-async function readShop(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
+export async function readShop(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
   const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
   if (!response.ok) return null;
   return ((await response.json()) as { shop: PilotShopRecord }).shop;
@@ -212,6 +218,7 @@ export async function pilotRoute(
   env: PilotEnv,
   ctx: ExecutionContext,
   flags: Flags,
+  events: PilotEvents = {},
 ): Promise<Response | null> {
   const line = url.pathname.match(/^\/v1\/inbound\/line\/([^/]+)$/);
   if (line && request.method === "POST") return receiveLineWebhook(request, env, ctx, line[1] ?? "", flags);
@@ -219,7 +226,7 @@ export async function pilotRoute(
   if (approval) return approvalRoute(request, env, ctx, approval[1] ?? "", approval[2], flags);
   const deletion = url.pathname.match(/^\/v1\/pilot\/deletions\/([^/]+)(?:\/(decision))?$/);
   if (deletion) return deletionLinkRoute(request, env, deletion[1] ?? "", deletion[2]);
-  if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags, ctx);
+  if (url.pathname.startsWith("/v1/admin/pilot/")) return operatorRoute(request, url, env, flags, ctx, events);
   return null;
 }
 
@@ -654,7 +661,8 @@ async function decideDeletionByLink(request: Request, env: PilotEnv, claim: Dele
 // an exact ADMIN_METHODS entry, all checked before this runs)
 // ---------------------------------------------------------------------------
 
-async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: Flags, ctx: ExecutionContext): Promise<Response> {
+async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: Flags, ctx: ExecutionContext,
+  events: PilotEvents): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
   if (request.method === "GET") {
     if (route === "GET /v1/admin/pilot/shops") return listShops(env);
@@ -684,7 +692,15 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   const shop = await readShop(env, body.tenant);
   if (!shop) return noShop(env, body.tenant);
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body);
-  if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags);
+  if (route === "POST /v1/admin/pilot/replies") {
+    const proposed = await proposeReply(env, shop, body, flags);
+    // Told only once the reply is proposed and its answer built, so a listener can never delay or fail it.
+    if (proposed.ok && events.replyProposed) {
+      const { actionId } = (await proposed.clone().json()) as { actionId: string };
+      events.replyProposed(shop.tenant, actionId);
+    }
+    return proposed;
+  }
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body);
   if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body);
   if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body, ctx);
@@ -694,7 +710,7 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
 /// A tenant with no shop record: deleted, saying when and by whom, or never a
 /// shop at all. A shop whose wipe finished but whose record could not be
 /// completed is known by the tombstone the wipe writes last.
-async function noShop(env: PilotEnv, tenant: string): Promise<Response> {
+export async function noShop(env: PilotEnv, tenant: string): Promise<Response> {
   const deletion = (await readDeletionState(env, tenant))?.deletion ?? null;
   const deletedAt = deletion ? await deletionFinishedAt(env, tenant, deletion).catch(() => null) : null;
   if (deletion && deletedAt) {
@@ -784,7 +800,7 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
 /// exists: from then on it holds what its customers and its owner gave it, so
 /// deleting it needs the owner's own yes. Null when consent cannot be read,
 /// because a deletion never guesses that a shop is not live.
-async function isLive(env: PilotEnv, shop: PilotShopRecord): Promise<boolean | null> {
+export async function isLive(env: PilotEnv, shop: PilotShopRecord): Promise<boolean | null> {
   if (shop.lineConnectionId) return true;
   const response = await tenantCall(env, shop.tenant, `/consent?tenant=${encodeURIComponent(shop.tenant)}`);
   if (!response.ok) return null;
@@ -893,6 +909,8 @@ async function listShops(env: PilotEnv): Promise<Response> {
         ...(shop.lineConnectionId ? { lineConnectionId: shop.lineConnectionId } : {}),
         consent,
         ...(deletion ? { deletion } : {}),
+        // Whether the owner is linked on LINE (owner-line.ts), never who they are there.
+        ...(shop.ownerLinkedAt ? { ownerLinkedAt: shop.ownerLinkedAt } : {}),
       };
     }),
   ).catch(() => null);
@@ -1151,6 +1169,8 @@ async function listActions(env: PilotEnv, tenant: string): Promise<Response> {
         ...(decidedAt ? { decidedAt } : {}),
         ...(action.dispatch?.at ? { dispatchedAt: action.dispatch.at } : {}),
         approvalUrl: webOrigin && token ? `${webOrigin}/approve/${token}` : "",
+        // The owner's card about this reply on LINE, once one was tried (owner-line.ts).
+        ...(reply.ownerCard ? { ownerCard: reply.ownerCard } : {}),
       };
     }),
   ).catch(() => null);

@@ -32,6 +32,7 @@ import {
 import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
+import type { OwnerCard } from "./owner-line-store";
 import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
@@ -60,6 +61,11 @@ export type PilotShopRecord = {
   /// that first points the shop at LINE, and never moved by a later one. A shop connected before this field
   /// existed has none, and the gate reads its first connection's time from the vault.
   trialStartedAt?: string;
+  /// The owner's LINE user id on Manut AI's own LINE account, once the owner sent a link code there, and when
+  /// (owner-line-store.ts). Approval cards and the morning brief go to it. It is the shop's data: exported with the
+  /// shop and deleted with it, and never shown to operators.
+  ownerLineUserId?: string;
+  ownerLinkedAt?: string;
 };
 
 export type InboundMessage = {
@@ -87,6 +93,8 @@ export type PilotReplyRecord = {
   /// When the owner's link decided it. The task object stamps approvals but
   /// not rejections, so the link route records both here.
   decidedAt?: string;
+  /// The card about this reply sent to the owner on LINE, once one was tried (owner-line-store.ts).
+  ownerCard?: OwnerCard;
 };
 
 export type Payment = {
@@ -138,7 +146,13 @@ const keys = {
   payment: (tenant: string, id: string) => `pilot-pay:${enc(tenant)}:${id}`,
   subscriptions: (tenant: string) => `pilot-sub:${enc(tenant)}:`,
   subscription: (tenant: string, id: string) => `pilot-sub:${enc(tenant)}:${id}`,
+  /// The owner's morning briefs on LINE, one per Bangkok date (owner-line-store.ts).
+  briefs: (tenant: string) => `pilot-brief:${enc(tenant)}:`,
+  brief: (tenant: string, date: string) => `pilot-brief:${enc(tenant)}:${date}`,
 };
+
+/// The key layout, for owner-line-store.ts, which keeps the owner's link, cards and briefs in these same records.
+export { keys as pilotKeys };
 
 /// The last clock and sequence an id was issued with, in this isolate.
 let lastIssued = { ms: 0, seq: -1 };
@@ -516,6 +530,7 @@ async function exportPilot(storage: DurableObjectStorage, tenant: string) {
     replies: await values<PilotReplyRecord>(storage, keys.replies(tenant)),
     payments: await values<Payment>(storage, keys.payments(tenant)),
     subscriptionPayments: await values<SubscriptionPayment>(storage, keys.subscriptions(tenant)),
+    briefs: await values<unknown>(storage, keys.briefs(tenant)),
     displayNames: [...names].map(([key, record]) => ({
       lineUserId: key.slice(keys.names(tenant).length),
       displayName: record.displayName,
@@ -557,7 +572,7 @@ async function pruneMessages(storage: DurableObjectStorage, tenant: string, body
 export async function wipePilotTenant(storage: DurableObjectStorage, tenant: string): Promise<void> {
   const doomed: string[] = [keys.shop(tenant)];
   for (const prefix of [keys.messages(tenant), keys.events(tenant), keys.names(tenant), keys.replies(tenant),
-    keys.payments(tenant), keys.subscriptions(tenant)]) {
+    keys.payments(tenant), keys.subscriptions(tenant), keys.briefs(tenant)]) {
     doomed.push(...(await storage.list({ prefix })).keys());
   }
   await deleteAll(storage, doomed);

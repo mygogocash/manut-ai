@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
+import { forgetOwnerLinkCode, ownerLineAuthRoute } from "./owner-line-store";
 import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
 
 type AuthEnv = {
@@ -132,6 +133,11 @@ export class AuthObject extends DurableObject {
     if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
       return pilotDeletionRoute(this.ctx.storage, request);
     }
+    // Owner messages on LINE (owner-line-store.ts): Manut AI's own account, link codes and wrong guesses, kept here
+    // because a code arrives naming no shop.
+    if (url.pathname.startsWith("/owner-line/")) {
+      return ownerLineAuthRoute(this.ctx.storage, request);
+    }
     if (url.pathname === "/flags") {
       if (request.method === "GET") {
         const flags = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
@@ -145,7 +151,8 @@ export class AuthObject extends DurableObject {
           return Response.json({ error: "invalid_json" }, { status: 400 });
         }
         const next = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
-        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"]) {
+        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing",
+          "ownerLine"]) {
           if (body[key] === undefined) continue;
           if (typeof body[key] !== "boolean") {
             return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -523,6 +530,8 @@ export class AuthObject extends DurableObject {
     // A pilot shop's registry row goes too, so a deleted shop leaves the
     // operator console's list.
     await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`, pilotRegistryKey(body.tenant)]);
+    // A pilot shop's live link code goes too, so no code outlives the shop it would link.
+    await forgetOwnerLinkCode(this.ctx.storage, body.tenant);
     // Inbound routes name the tenant, so they go too. The index is keyed by
     // provider account, not tenant, so this scans it; it holds one row per
     // connected workspace and stays small.

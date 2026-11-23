@@ -3,9 +3,13 @@ import { checkApprovalToken, mintApprovalToken } from "../src/approval-link";
 import {
   isValidLinePushProposal,
   lineReplyText,
+  lineRetryKey,
   lineTextEvents,
+  lineTextEventsWithReply,
   openLineCredentials,
   pushLineMessage,
+  pushLineMessages,
+  replyLineMessages,
   sealableLineCredentials,
   verifyLineSignature,
 } from "../src/connectors/line";
@@ -177,6 +181,110 @@ describe("LINE push", () => {
       expect(await push(fetchImpl, input)).toEqual({ outcome: "failed", reason: "invalid_payload" });
     }
     expect(seen).toHaveLength(0);
+  });
+});
+
+// Manut AI's own LINE account (owner-line.ts) sends Flex Messages and answers a link code through the reply token.
+// The same push rules apply to any message objects; a reply has no retry key, because LINE takes none on reply.
+describe("LINE messages beyond one text", () => {
+  type Seen = { url: string; init: RequestInit };
+  function stub(answer: () => Response | Promise<Response>) {
+    const seen: Seen[] = [];
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      seen.push({ url, init: init ?? {} });
+      return answer();
+    };
+    return { seen, fetchImpl };
+  }
+  const flex = { type: "flex", altText: "A card", contents: { type: "bubble" } };
+
+  it("pushes any message objects with the retry key, classified as a text push is", async () => {
+    const accepted = stub(() => Response.json({ sentMessages: [{ id: "461230966842064897" }] },
+      { headers: { "x-line-request-id": "req-1" } }));
+    expect(await pushLineMessages(accepted.fetchImpl, "manut-token", { to: CUSTOMER, messages: [flex], retryKey: RETRY_KEY }))
+      .toMatchObject({ outcome: "confirmed", receipt: { providerOperationId: "461230966842064897", alreadyAccepted: false } });
+    expect(accepted.seen[0]!.url).toBe("https://api.line.me/v2/bot/message/push");
+    expect(new Headers(accepted.seen[0]!.init.headers).get("x-line-retry-key")).toBe(RETRY_KEY);
+    expect(JSON.parse(String(accepted.seen[0]!.init.body))).toEqual({ to: CUSTOMER, messages: [flex] });
+
+    const repeated = stub(() => Response.json({ message: "The retry key is already accepted" },
+      { status: 409, headers: { "x-line-accepted-request-id": "req-1" } }));
+    expect(await pushLineMessages(repeated.fetchImpl, "manut-token", { to: CUSTOMER, messages: [flex], retryKey: RETRY_KEY }))
+      .toMatchObject({ outcome: "confirmed", receipt: { alreadyAccepted: true, acceptedRequestId: "req-1" } });
+    const refused = stub(() => Response.json({ message: "You have reached your monthly limit." }, { status: 429 }));
+    expect(await pushLineMessages(refused.fetchImpl, "manut-token", { to: CUSTOMER, messages: [flex], retryKey: RETRY_KEY }))
+      .toEqual({ outcome: "failed", reason: "provider_429" });
+    const lost = stub(() => { throw new Error("socket hang up"); });
+    expect(await pushLineMessages(lost.fetchImpl, "manut-token", { to: CUSTOMER, messages: [flex], retryKey: RETRY_KEY }))
+      .toEqual({ outcome: "unknown", reason: "provider_unreachable" });
+  });
+
+  it("refuses no messages, more than five, or a message without a type, without calling LINE", async () => {
+    const { seen, fetchImpl } = stub(() => Response.json({}));
+    for (const messages of [[], [flex, flex, flex, flex, flex, flex], [{ altText: "no type" }], ["text"]]) {
+      expect(await pushLineMessages(fetchImpl, "manut-token", { to: CUSTOMER, messages: messages as Record<string, unknown>[],
+        retryKey: RETRY_KEY })).toEqual({ outcome: "failed", reason: "invalid_payload" });
+    }
+    expect(seen).toHaveLength(0);
+  });
+
+  it("answers through the reply token, with no retry key, and reports a refusal without throwing", async () => {
+    const answered = stub(() => Response.json({ sentMessages: [{ id: "1" }] }));
+    const text = { type: "text", text: "Linked." };
+    expect(await replyLineMessages(answered.fetchImpl, "manut-token", { replyToken: "nHuyWiB7yP5Zw52FIkcQobQuGDXCTA",
+      messages: [text] })).toEqual({ ok: true });
+    expect(answered.seen[0]!.url).toBe("https://api.line.me/v2/bot/message/reply");
+    const headers = new Headers(answered.seen[0]!.init.headers);
+    expect(headers.get("authorization")).toBe("Bearer manut-token");
+    expect(headers.has("x-line-retry-key")).toBe(false);
+    expect(JSON.parse(String(answered.seen[0]!.init.body))).toEqual({ replyToken: "nHuyWiB7yP5Zw52FIkcQobQuGDXCTA",
+      messages: [text] });
+
+    const used = stub(() => Response.json({ message: "Invalid reply token" }, { status: 400 }));
+    expect(await replyLineMessages(used.fetchImpl, "manut-token", { replyToken: "used", messages: [text] }))
+      .toEqual({ ok: false, reason: "provider_400" });
+    const lost = stub(() => { throw new Error("timeout"); });
+    expect(await replyLineMessages(lost.fetchImpl, "manut-token", { replyToken: "t", messages: [text] }))
+      .toEqual({ ok: false, reason: "provider_unreachable" });
+    const nothing = stub(() => Response.json({}));
+    expect(await replyLineMessages(nothing.fetchImpl, "manut-token", { replyToken: "", messages: [text] }))
+      .toEqual({ ok: false, reason: "invalid_payload" });
+    expect(nothing.seen).toHaveLength(0);
+  });
+
+  it("derives one retry key per purpose: a UUID LINE accepts, the same every time, different per purpose", async () => {
+    const card = await lineRetryKey("owner-card", "pilot:shop", RETRY_KEY);
+    expect(card).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(await lineRetryKey("owner-card", "pilot:shop", RETRY_KEY)).toBe(card);
+    // Never the action's own key, which the shop's channel already uses for the customer's reply.
+    expect(card).not.toBe(RETRY_KEY);
+    expect(await lineRetryKey("owner-card", "pilot:other", RETRY_KEY)).not.toBe(card);
+    expect(await lineRetryKey("owner-brief", "pilot:shop", "2026-11-24")).not.toBe(card);
+    // Parts are kept apart, so moving a separator never gives another purpose's key.
+    expect(await lineRetryKey("a:b", "c")).not.toBe(await lineRetryKey("a", "b:c"));
+  });
+});
+
+describe("text events answered at once", () => {
+  it("keeps each text's reply token, for an answer sent straight away and never stored", () => {
+    const event = (id: string, replyToken?: unknown) => ({
+      type: "message",
+      source: { type: "user", userId: CUSTOMER },
+      webhookEventId: id,
+      ...(replyToken === undefined ? {} : { replyToken }),
+      message: { type: "text", id: "1", text: "1234 5678" },
+    });
+    expect(lineTextEventsWithReply({ destination: BOT, events: [event("01A", "token-1"), event("01B"),
+      event("01C", 42)] }, BOT)).toEqual([
+      { webhookEventId: "01A", lineUserId: CUSTOMER, text: "1234 5678", replyToken: "token-1" },
+      { webhookEventId: "01B", lineUserId: CUSTOMER, text: "1234 5678", replyToken: null },
+      { webhookEventId: "01C", lineUserId: CUSTOMER, text: "1234 5678", replyToken: null },
+    ]);
+    // The shop's customers' reply tokens are still never kept.
+    expect(lineTextEvents({ destination: BOT, events: [event("01A", "token-1")] }, BOT)).toEqual([
+      { webhookEventId: "01A", lineUserId: CUSTOMER, text: "1234 5678" },
+    ]);
+    expect(lineTextEventsWithReply({ destination: `U${"a".repeat(32)}`, events: [event("01A", "t")] }, BOT)).toEqual([]);
   });
 });
 

@@ -52,12 +52,23 @@
   "observability": {
     "enabled": true
   },
+  // The owners' morning brief on LINE (src/owner-line.ts, docs/pilot-api.md):
+  // cron runs in UTC, so 01:00 is 08:00 in Bangkok (UTC+7 all year), and the
+  // 01:30 run retries what the first could not finish. Neither sends a shop's
+  // brief twice. It sends nothing while the ownerLine flag is off (OWNER_LINE
+  // is unset in every environment). Each environment repeats it below, so no
+  // environment depends on what it inherits.
+  "triggers": {
+    "crons": ["0 1 * * *", "30 1 * * *"]
+  },
   // Separate objects per environment from the first deploy: retrofitting
   // environments after production objects hold data is the expensive version.
   "env": {
     "dev": {
       "name": "manut-api-dev",
       "services": [{"binding": "WEB", "service": "manut-web-dev"}],
+      // The owners' morning brief: 08:00 and 08:30 in Bangkok (see "triggers" above).
+      "triggers": {"crons": ["0 1 * * *", "30 1 * * *"]},
       // The owner's manut.xyz zone on Cloudflare (docs/decisions.md). The API
       // Worker owns the whole host as its custom domain and hands every page
       // to the pages Worker, so the links it mints point here too.
@@ -150,6 +161,8 @@
     "staging": {
       "name": "manut-api-staging",
       "services": [{"binding": "WEB", "service": "manut-web-staging"}],
+      // The owners' morning brief: 08:00 and 08:30 in Bangkok (see "triggers" above).
+      "triggers": {"crons": ["0 1 * * *", "30 1 * * *"]},
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},
@@ -229,6 +242,8 @@
     "prod": {
       "name": "manut-api-prod",
       "services": [{"binding": "WEB", "service": "manut-web-prod"}],
+      // The owners' morning brief: 08:00 and 08:30 in Bangkok (see "triggers" above).
+      "triggers": {"crons": ["0 1 * * *", "30 1 * * *"]},
       "durable_objects": {
         "bindings": [
           {"name": "TASK", "class_name": "TaskObject"},

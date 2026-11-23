@@ -9,6 +9,7 @@ import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
 import { modelAdminRoute } from "./model-gateway";
+import { ownerCardOnProposal, ownerLineRoute, OWNER_LINE_WEBHOOK, pruneOwnerLine, runMorningBriefs } from "./owner-line";
 import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
@@ -52,6 +53,9 @@ export interface Env {
   OFFICE_EXTERNAL_WRITES?: string;
   OFFICE_INBOUND?: string;
   OFFICE_SHARING?: string;
+  /// Owner messages on LINE (owner-line.ts): unset in every environment, so
+  /// nothing reaches an owner until the owner of Manut AI turns it on.
+  OWNER_LINE?: string;
   /// Linear webhook signing secret (`wrangler secret put
   /// LINEAR_WEBHOOK_SECRET`). Never in config; without it every delivery is
   /// refused as unsigned.
@@ -109,6 +113,8 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
   else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
+  // Manut AI's own LINE webhook (owner-line.ts) shares the shops' limit: LINE delivers both.
+  else if (request.method === "POST" && pathname === OWNER_LINE_WEBHOOK) binding = env.LINE_INBOUND_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
   // owner's two kinds of link share one limit, so probing both doubles nothing.
   else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {
@@ -193,6 +199,11 @@ const ADMIN_METHODS = new Set([
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
+  // Owner messages on LINE (owner-line.ts): Manut AI's account, an owner's
+  // link code, unlinking, and retrying an owner's card.
+  "GET /v1/admin/pilot/owner-line", "POST /v1/admin/pilot/owner-line/account",
+  "POST /v1/admin/pilot/owner-line/link-codes", "POST /v1/admin/pilot/owner-line/unlink",
+  "POST /v1/admin/pilot/owner-line/cards",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -227,9 +238,15 @@ export type FeatureFlags = {
   /// owner opens Release 4 under D-R4-live-gate, so nobody can be scoped,
   /// invited or shown shared work before then.
   officeSharing: boolean;
+  /// Owner messages on LINE (owner-line.ts): Manut AI's webhook, link codes,
+  /// approval cards and the morning brief. Off until the owner gives the go
+  /// and Manut AI's LINE Official Account exists; while off, the webhook
+  /// answers 404 and nothing is sent.
+  ownerLine: boolean;
 };
 
-const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"] as const;
+const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing",
+  "ownerLine"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -238,6 +255,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     officeExternalWrites: env.OFFICE_EXTERNAL_WRITES === "1",
     officeInbound: env.OFFICE_INBOUND === "1",
     officeSharing: env.OFFICE_SHARING === "1",
+    ownerLine: env.OWNER_LINE === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -255,6 +273,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
         typeof dynamic.officeInbound === "boolean" ? dynamic.officeInbound : defaults.officeInbound,
       officeSharing:
         typeof dynamic.officeSharing === "boolean" ? dynamic.officeSharing : defaults.officeSharing,
+      ownerLine: typeof dynamic.ownerLine === "boolean" ? dynamic.ownerLine : defaults.ownerLine,
     };
   } catch {
     return defaults;
@@ -591,11 +610,20 @@ export default {
       }
     }
 
+    // Owner messages on LINE (owner-line.ts): Manut AI's own webhook and its
+    // operator routes. They sit under the pilot's admin path, so they are
+    // answered first; the ingress limit and the admin gate already ran above.
+    const flags = () => featureFlags(env);
+    const owner = await ownerLineRoute(request, url, env, ctx, flags);
+    if (owner) return owner;
+
     // Manut AI pilot (pilot.ts): the LINE webhook, the owner's signed
     // approval link, and the operator console. Its ingress limits and the
     // admin gate already ran above; flags are read only by routes that need
-    // them.
-    const pilot = await pilotRoute(request, url, env, ctx, () => featureFlags(env));
+    // them. A proposed reply's card to its owner goes out after the answer.
+    const pilot = await pilotRoute(request, url, env, ctx, flags, {
+      replyProposed: (tenant, actionId) => ctx.waitUntil(ownerCardOnProposal(env, flags, tenant, actionId)),
+    });
     if (pilot) return pilot;
 
     // The model gateway's operator routes (model-gateway.ts). The admin gate
@@ -2117,5 +2145,17 @@ export default {
     }
 
     return json({ error: "not_found" }, 404);
+  },
+
+  /// The Worker's cron triggers (wrangler.jsonc): the owners' morning brief
+  /// on LINE at 08:00 Bangkok time, and a second run at 08:30 that retries
+  /// what the first could not finish (owner-line.ts). A shop's brief is
+  /// claimed for its date before it is sent and carries a retry key made from
+  /// the shop and the date, so neither run, nor the platform running one
+  /// again, sends it twice. With `ownerLine` off it sends nothing; expired
+  /// codes and closed guess windows are dropped either way.
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await pruneOwnerLine(env, Date.now());
+    await runMorningBriefs(env, () => featureFlags(env), controller.scheduledTime);
   },
 };

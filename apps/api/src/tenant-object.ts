@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
 import { modelTenantRoute, wipeModelTenant } from "./model-meter";
+import { ownerLineTenantRoute } from "./owner-line-store";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -45,6 +46,11 @@ export class TenantObject extends DurableObject {
     }
     if (request.method === "POST" && url.pathname === "/tenant-wipe") {
       return this.tenantWipe(request);
+    }
+    // Owner messages on LINE for this shop (owner-line-store.ts): the owner's link, cards and morning briefs, kept in
+    // the pilot records below.
+    if (url.pathname.startsWith("/pilot-owner/")) {
+      return ownerLineTenantRoute(this.ctx.storage, request, url);
     }
     // Manut AI pilot records for this tenant (pilot-store.ts).
     if (url.pathname.startsWith("/pilot/")) {
