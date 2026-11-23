@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { onTestFinished, vi } from "vitest";
-import { ApiProvider, type ApiMode, type ApprovalView, type PilotApi } from "../src/api";
+import { ApiProvider, type ApiMode, type ApprovalView, type DeletionView, type PilotApi } from "../src/api";
 
 /// A PilotApi whose every method fails loudly unless the test gives it one, so a test can never pass by
 /// reaching a route it did not mean to.
@@ -22,6 +22,18 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     listPayments: missing("listPayments"),
     exportShop: missing("exportShop"),
     deleteShop: missing("deleteShop"),
+    getDeletion: missing("getDeletion"),
+    decideDeletion: missing("decideDeletion"),
+    ...overrides,
+  };
+}
+
+export function sampleDeletionView(overrides: Partial<DeletionView> = {}): DeletionView {
+  return {
+    shopName: "Baan Mali",
+    goes: { messages: 7, replies: 6, payments: 2, lineConnected: true },
+    state: "awaiting_owner",
+    expiresAt: new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString(),
     ...overrides,
   };
 }

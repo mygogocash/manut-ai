@@ -1,13 +1,36 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { useApi, type Shop } from "../api";
+import { isLiveShop, useApi, type DeletionRequest, type Shop } from "../api";
+import { CopyButton } from "./CopyButton";
 import { downloadText, exportFileName } from "./download";
 import { confirmsShopName } from "./useShopDeletion";
-import { deleteAfterText, deleteRefusalText, deleteWhatText, errorText, shopDataWords as W } from "./words";
+import {
+  deleteAfterText,
+  deleteRefusalText,
+  deleteWhatText,
+  deletionLinkHelp,
+  deletionRequestText,
+  errorText,
+  shopDataWords as W,
+} from "./words";
 
 /// The selected shop's data, exported or deleted at the shop's request. Laid out like "Privacy and data" on
 /// the canvas's Settings board: the export and a `btn danger` side by side, then a dialog in the page that
 /// says what goes and ends in `btn danger solid`, the last step of something that can't be undone.
-export function ShopDataTab({ shop, onDelete }: { shop: Shop; onDelete: (name: string) => Promise<unknown> }) {
+///
+/// A live shop's deletion waits for its owner's yes (`request`): the tab then shows the link to send the owner,
+/// as the messages tab shows an approval link, and afterwards what the owner answered.
+export function ShopDataTab({
+  shop,
+  request,
+  onDelete,
+  onFinish,
+}: {
+  shop: Shop;
+  request: DeletionRequest | null;
+  onDelete: (name: string) => Promise<unknown>;
+  /// Sends the deletion the owner already said yes to again, which finishes a wipe that stopped part way.
+  onFinish: () => Promise<unknown>;
+}) {
   const api = useApi();
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
@@ -99,6 +122,7 @@ export function ShopDataTab({ shop, onDelete }: { shop: Shop; onDelete: (name: s
               <span className="grow">{W.exported(exported, shop.ownerName)}</span>
             </div>
           )}
+          {request && <DeletionRequestPanel shop={shop} request={request} onFinish={onFinish} />}
           {deleting && (
             <DeleteShopForm
               shop={shop}
@@ -131,6 +155,9 @@ function DeleteShopForm({
   const [refusal, setRefusal] = useState<unknown>(null);
   // What was typed is sent as it is: the API decides, and this only keeps the button shut until it can agree.
   const matches = confirmsShopName(typed, shop.name);
+  // A live shop is not deleted by this form: it asks the owner, who answers through the link it returns. The API
+  // decides which happens, so this only picks the words.
+  const live = isLiveShop(shop);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -169,6 +196,7 @@ function DeleteShopForm({
       <h3 id="delete-title">{W.deleteTitle(shop.name)}</h3>
       <p style={{ margin: 0 }}>{deleteWhatText(shop)}</p>
       <p style={{ margin: 0 }}>{deleteAfterText(shop)}</p>
+      {live && <p style={{ margin: 0 }}>{W.ownerStep(shop.name, shop.ownerName)}</p>}
       <p style={{ margin: 0 }}>{W.undone}</p>
       <div className="field">
         <label htmlFor="delete-name">
@@ -203,12 +231,81 @@ function DeleteShopForm({
           disabled={!matches || busy}
           aria-busy={busy ? true : undefined}
         >
-          {busy ? W.deleting : W.deleteForGood}
+          {busy ? (live ? W.asking : W.deleting) : live ? W.askOwner(shop.ownerName) : W.deleteForGood}
         </button>
         <button type="button" className="btn dark" disabled={busy} onClick={onClose}>
           {W.keep}
         </button>
       </div>
     </form>
+  );
+}
+
+/// The shop's latest deletion request. While it waits, the link to send the owner, in the same box the messages tab
+/// uses for an approval link. Once answered, what the owner said; and when they said yes but the wipe stopped part
+/// way, the one thing to do: send the request again, which finishes it.
+function DeletionRequestPanel({
+  shop,
+  request,
+  onFinish,
+}: {
+  shop: Shop;
+  request: DeletionRequest;
+  onFinish: () => Promise<unknown>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function finish() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onFinish();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (request.state === "awaiting_owner") {
+    return (
+      <div className="box rise" role="status" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontWeight: 500 }}>{W.linkTitle(shop.ownerName)}</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            className="input mono"
+            readOnly
+            value={request.confirmUrl}
+            aria-label={W.linkLabel}
+            onFocus={(event) => event.currentTarget.select()}
+            style={{ flex: "1 1 220px", fontSize: 12.5 }}
+          />
+          <CopyButton text={request.confirmUrl} what="deletion link" />
+        </div>
+        <p className="help" style={{ margin: 0 }}>
+          {deletionLinkHelp(shop.ownerName, request.expiresAt)}
+        </p>
+      </div>
+    );
+  }
+  if (request.state === "deleting") {
+    return (
+      <div className="banner err" role="alert">
+        <span className="grow">{deletionRequestText(request, shop)}</span>
+        <button
+          type="button"
+          className="btn danger solid"
+          disabled={busy}
+          aria-busy={busy ? true : undefined}
+          onClick={() => void finish()}
+        >
+          {busy ? W.deleting : W.finish}
+        </button>
+      </div>
+    );
+  }
+  if (request.state === "deleted") return null;
+  return (
+    <div className={request.state === "declined" ? "banner info" : "banner warn"}>
+      <span className="grow">{deletionRequestText(request, shop)}</span>
+    </div>
   );
 }

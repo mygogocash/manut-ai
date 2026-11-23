@@ -1,10 +1,11 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from "react";
 
-/// Three pages need no router package: the path is read from `location`, `navigate` pushes history, and
+/// Four pages need no router package: the path is read from `location`, `navigate` pushes history, and
 /// back and forward arrive as `popstate`.
 
 export type Route =
   | { name: "approve"; token: string }
+  | { name: "delete"; token: string }
   | { name: "ops" }
   | { name: "home" }
   | { name: "notFound" };
@@ -13,10 +14,11 @@ export function matchRoute(pathname: string): Route {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return { name: "home" };
   if (path === "/ops") return { name: "ops" };
-  const approve = /^\/approve\/([^/]+)$/.exec(path);
-  if (approve?.[1]) {
+  // The owner's two kinds of link: one reply to approve, or one deletion of the shop's data to confirm.
+  const linked = /^\/(approve|delete)\/([^/]+)$/.exec(path);
+  if (linked?.[1] && linked[2]) {
     try {
-      return { name: "approve", token: decodeURIComponent(approve[1]) };
+      return { name: linked[1] === "approve" ? "approve" : "delete", token: decodeURIComponent(linked[2]) };
     } catch {
       return { name: "notFound" };
     }

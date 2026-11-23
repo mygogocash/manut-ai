@@ -3,9 +3,10 @@ import { ApiError } from "../src/api";
 import { classifyDeleteError, confirmsShopName } from "../src/ops/useShopDeletion";
 
 describe("what a failed deletion's answer means", () => {
-  it("reads a shop the API has deleted as gone, as the API and the practice fake say it", () => {
+  it("reads a shop the API has deleted as gone, as the API and the practice fake both say it", () => {
     expect(classifyDeleteError(new ApiError(404, "tenant_deleted"))).toBe("gone");
-    expect(classifyDeleteError(new ApiError(404, "unknown_tenant"))).toBe("gone");
+    expect(classifyDeleteError(new ApiError(404, "tenant_deleted", undefined,
+      { deletedAt: "2026-11-23T03:00:00Z", deletedBy: null }))).toBe("gone");
   });
 
   it("reads a wipe that stopped part way as partial", () => {

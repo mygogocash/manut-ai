@@ -10,8 +10,10 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - **Operator**: a Manut AI staff member running the concierge pilot. Reads customer messages, drafts replies,
   sends the owner an approval link, confirms PromptPay slips. Uses `/v1/admin/pilot/*`.
 - **Owner**: the shop owner. Has no account in week 1. Approves or declines one reply through a signed,
-  single-use link: `/v1/pilot/approvals/{token}`.
-- **Shop**: one tenant in the backend. `tenant` is its id.
+  single-use link: `/v1/pilot/approvals/{token}`. Confirms or refuses the deletion of a live shop's data the same
+  way: `/v1/pilot/deletions/{token}`.
+- **Shop**: one tenant in the backend. `tenant` is its id. A shop is **live** once its owner has given consent
+  (`cloudWork`) or a LINE connection exists.
 
 ## Security rules (unchanged from the lifted backend)
 
@@ -22,6 +24,14 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
 - The approval link is a capability: an HMAC-SHA256 over the tenant, task id, action id and expiry with the
   Wrangler secret `APPROVAL_LINK_SECRET`, base64url, verified in constant time. It names exactly one action and
   expires after 24 hours. It can never approve anything else.
+- The deletion link is the same kind of capability: an HMAC-SHA256 with the same secret over the tenant, one owner
+  confirmation's id and its expiry. It names exactly one confirmation and expires after 24 hours, with it. Each
+  kind of link is signed under its own domain tag (`manut-ai/pilot-approval/v1.`, `manut-ai/pilot-deletion/v1.`),
+  so a reply link can never delete a shop and a deletion link can never approve a reply or record consent.
+- Deleting a live shop's data needs its owner's yes through the deletion link (owner's decision, 23 Nov 2026). The
+  confirmation runs through `packages/approval-core`: an owner-only kind (`command`), opened and decided by its
+  transitions in one AuthObject storage transaction each, so it settles once however many answers arrive, and
+  the decision is stored before any data is wiped. A shop that never went live is deleted by the operator alone.
 - Approving an external write still needs the shop's consent (`cloudWork`), recorded from the owner through
   the link (`/consent` below), never by an operator.
 - A decision settles once. The task object already refuses a second decision; the link routes keep that.
@@ -70,6 +80,39 @@ type ApprovalView = {
 };
 ```
 
+### `GET /v1/pilot/deletions/{token}`
+
+Returns `DeletionView`: the owner's confirmation of deleting one shop's data. Errors: 404
+`{ "error": "link_invalid" }` (not a deletion link this backend signed, or a confirmation it does not hold), 410
+`{ "error": "link_expired" }`. A confirmation and its record outlive the deleted shop, so the link keeps saying
+what happened until it expires.
+
+### `POST /v1/pilot/deletions/{token}/decision`
+
+Body `{ "approve": true }` or `{ "approve": false }`, else 400 `invalid_request`. Approving settles the decision,
+then runs the tenant deletion and completes the deletion record, and answers the view as `deleted`; if the wipe
+stops part way the decision still stands, the view answers `deleting`, and the operator's same deletion request
+finishes it. Declining deletes nothing and answers `declined`. A second decision answers 409
+`{ "error": "already_decided", "view": DeletionView }`. A confirmation past its expiry answers 410 `link_expired`,
+a bad link 404 `link_invalid`. Nothing in the request chooses who decides: whoever holds the link is the owner.
+
+```ts
+type DeletionView = {
+  shopName: string;
+  // Counted afresh while the shop's data is there; once it is deleted, what the shop held when the operator asked.
+  goes: { messages: number; replies: number; payments: number; lineConnected: boolean };
+  state: "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
+  expiresAt: string;
+  decidedAt?: string;
+};
+```
+
+- `awaiting_owner`: open; nothing is deleted.
+- `deleting`: the owner said yes and the wipe has not finished: it is running, or it stopped part way.
+- `deleted`: the wipe finished.
+- `declined`: the owner kept the data; nothing was deleted.
+- `expired`: nobody answered in 24 hours; nothing was deleted.
+
 ## Operator routes (all under the admin gate)
 
 | Method and path | Body or query | Answer |
@@ -83,14 +126,33 @@ type ApprovalView = {
 | `POST /v1/admin/pilot/payments` | `{ tenant, orderRef, amountSatang, promptPayId, slipNote? }` | `Payment` |
 | `GET /v1/admin/pilot/payments` | `?tenant=` | `{ payments: Payment[] }`, newest first |
 | `GET /v1/admin/pilot/export` | `?tenant=` | `ShopExport`: everything stored for the shop, LINE secrets never included |
-| `POST /v1/admin/pilot/deletions` | `{ tenant, confirmName }` | `DeletedShop`; 409 `{ "error": "name_mismatch" }`, deleting nothing, unless `confirmName` is the shop's exact name |
+| `POST /v1/admin/pilot/deletions` | `{ tenant, confirmName }` | A shop that never went live: `DeletedShop`. A live shop: 202 `AwaitingOwner`, deleting nothing. Either way 409 `{ "error": "name_mismatch" }`, deleting nothing, unless `confirmName` is the shop's exact name |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
-`${WEB_ORIGIN}/approve/{token}`. Both origins are Worker vars.
+`${WEB_ORIGIN}/approve/{token}`; `confirmUrl` is `${WEB_ORIGIN}/delete/{token}`. Both origins are Worker vars.
 
 ```ts
-type Shop = { tenant: string; name: string; ownerName: string; lineConnectionId?: string; consent: boolean };
+type Shop = {
+  tenant: string;
+  name: string;
+  ownerName: string;
+  lineConnectionId?: string;
+  consent: boolean;
+  deletion?: DeletionRequest;   // the shop's latest deletion put to its owner, if any
+};
+
+// A shop's latest owner confirmation. The link is re-minted on each read, same expiry.
+type DeletionRequest = {
+  state: DeletionView["state"];
+  confirmUrl: string;           // "" when WEB_ORIGIN or APPROVAL_LINK_SECRET is not set
+  expiresAt: string;
+  decidedAt?: string;
+};
+
+// The answer (202) to deleting a live shop: the link to send its owner. Asking again while the confirmation
+// waits answers the same link and expiry.
+type AwaitingOwner = { status: "awaiting_owner"; confirmUrl: string; expiresAt: string };
 
 type InboundMessage = {
   id: string;
@@ -152,22 +214,37 @@ type DeletedShop = {
   5xx, a timeout or a network error settles `unknown` and is never retried automatically.
 - **Retention.** Customer messages, duplicate markers and cached display names are removed after 7 days by the
   operator prune. Shops, reply records and payments stay until the shop is deleted.
-- **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute).
-- **CORS.** The approval routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator routes do
-  not answer CORS and need none: the pages and the API share one origin (below).
+- **Rate limits.** `LINE_INBOUND_LIMITER` (300 a minute) and `PILOT_APPROVAL_LIMITER` (120 a minute), which
+  counts the approval and deletion routes together, any method, per source address.
+- **CORS.** The approval and deletion routes answer CORS for `WEB_ORIGIN` only and are never cached. The operator
+  routes do not answer CORS and need none: the pages and the API share one origin (below).
 - **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body,
   400 `tenant_required` without a valid tenant, 404 `shop_not_found` for a tenant that was never a pilot shop.
 - **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
   every reply, the sealed LINE secrets and the webhook route, messages, payments, consent and the shop's
-  registry row. The owner's links answer `link_invalid` afterwards and the webhook answers 404.
+  registry row. The owner's approval links answer `link_invalid` afterwards and the webhook answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
-  - A record of the deletion is written before the wipe starts and outlives the shop: who asked (the operator's
-    Access identity, or `null` for a service token), when, and what was removed. A deletion that cannot be
-    recorded does not start: 503 `audit_unavailable`.
+  - **A live shop also needs its owner's yes.** The operator's request deletes nothing: it records who asked
+    and opens one owner confirmation, in one write, and answers 202 `AwaitingOwner`. Sent again while that
+    confirmation waits, it answers the same link and expiry. After a no or an expiry it opens a new
+    confirmation with a new link; a confirmation that expired unanswered is withdrawn as the new one opens, so a
+    shop never has two that could be decided. The old links keep answering with what became of them. The
+    confirmation names one shop, so it also settles which of two same-named shops is meant.
+  - **A shop that never went live** is deleted by the operator's request at once, as before (200 `DeletedShop`).
+  - Once the owner has said yes, the operator's same request finishes a wipe that stopped part way, without
+    asking the owner again: 200 `DeletedShop`, or 500 `wipe_incomplete` while something still fails.
+  - A record of the deletion outlives the shop: who asked (`deletedBy`: the operator's Access identity, or
+    `null` for a service token), when, the owner confirmation for a live shop, and once the wipe finished, when
+    and what was removed. It is written before anything is wiped, and for a live shop before any link is handed
+    out; a request that cannot be recorded does nothing: 503 `audit_unavailable`. A shop whose consent cannot
+    be read is never guessed to be not live: 503 `consent_unavailable`.
+  - Without `WEB_ORIGIN` or `APPROVAL_LINK_SECRET`, asking a live shop's owner answers 503 `not_configured`
+    with the `setting`, deleting nothing.
   - Afterwards every operator route naming the shop answers 404 `{ "error": "tenant_deleted", "deletedAt",
-    "deletedBy" }`.
+    "deletedBy" }`. If the wipe finished but completing its record did not, `deletedAt` is the tenant's
+    tombstone, which the wipe writes last.
   - A partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request
     again finishes it.
 
@@ -181,17 +258,18 @@ covers the console and the operator routes. They are two Workers, both deployed 
   runs a Worker with assets behind an internal router that does not pass `ctx.access`, and the admin gate needs
   it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
 - **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
-  matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`, `/ops`).
+  matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`,
+  `/delete/{token}`, `/ops`).
   `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
   call the API that served them and a deploy never ships a missing or stale web app.
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
-  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval pages also
+  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval and deletion pages also
   `Cache-Control: no-store`. They never apply to the API's answers.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
-  `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*` and `/v1/pilot/*`, LINE's `/v1/inbound/*` and
-  `/v1/health` stay public.
+  `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
+  `/v1/inbound/*` and `/v1/health` stay public.
 - **Deploying:** the pages Worker of an environment first (`wrangler deploy -c wrangler.web.jsonc --env dev`),
   then its API Worker (`wrangler deploy --env dev`). Only the API Worker gets the host's route.
 - **Locally:** `pnpm --filter @manut/api dev` runs both Workers on one origin.

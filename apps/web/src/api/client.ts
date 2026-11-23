@@ -1,9 +1,11 @@
 import {
   ApiError,
   type ApprovalView,
+  type AwaitingOwner,
   type CreatedLineConnection,
   type CreatedShop,
   type DeletedShop,
+  type DeletionView,
   type InboundMessage,
   type NewLineConnection,
   type NewPayment,
@@ -82,6 +84,7 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
   }
 
   const approval = (token: string) => `/v1/pilot/approvals/${encodeURIComponent(token)}`;
+  const deletion = (token: string) => `/v1/pilot/deletions/${encodeURIComponent(token)}`;
 
   return {
     deliverLineWebhook: (connectionId, rawBody, signature) =>
@@ -143,11 +146,24 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       ).payments,
     exportShop: (tenant) =>
       request<ShopExport>({ method: "GET", path: "/v1/admin/pilot/export", query: { tenant }, admin: true }),
+    // A shop that never went live answers 200 with what was deleted; a live one answers 202 with the link for its
+    // owner. Both are successes, and the caller tells them apart (`isAwaitingOwner`).
     deleteShop: (input: ShopDeletion) =>
-      request<DeletedShop>({ method: "POST", path: "/v1/admin/pilot/deletions", body: input, admin: true }),
+      request<DeletedShop | AwaitingOwner>({
+        method: "POST",
+        path: "/v1/admin/pilot/deletions",
+        body: input,
+        admin: true,
+      }),
+
+    getDeletion: (token) => request<DeletionView>({ method: "GET", path: deletion(token) }),
+    decideDeletion: (token, approve) =>
+      request<DeletionView>({ method: "POST", path: `${deletion(token)}/decision`, body: { approve } }),
   };
 }
 
+/// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
+/// wipe left, and when and by whom a deleted shop was deleted. Fields of the wrong type are dropped, not guessed.
 async function errorOf(response: Response): Promise<ApiError> {
   let parsed: unknown;
   try {
@@ -158,11 +174,26 @@ async function errorOf(response: Response): Promise<ApiError> {
   const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   const code = typeof record.error === "string" && record.error ? record.error : `http_${response.status}`;
   const view = isApprovalView(record.view) ? record.view : undefined;
-  return new ApiError(response.status, code, view);
+  const failed = Array.isArray(record.failed) && record.failed.every((part) => typeof part === "string")
+    ? (record.failed as string[])
+    : undefined;
+  return new ApiError(response.status, code, view, {
+    ...(isDeletionView(record.view) ? { deletionView: record.view } : {}),
+    ...(failed ? { failed } : {}),
+    ...(typeof record.deletedAt === "string" ? { deletedAt: record.deletedAt } : {}),
+    ...(typeof record.deletedBy === "string" || record.deletedBy === null ? { deletedBy: record.deletedBy } : {}),
+  });
 }
 
 function isApprovalView(value: unknown): value is ApprovalView {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return typeof v.state === "string" && typeof v.replyText === "string" && typeof v.shopName === "string";
+}
+
+function isDeletionView(value: unknown): value is DeletionView {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.state === "string" && typeof v.shopName === "string" && typeof v.goes === "object" &&
+    v.goes !== null;
 }
