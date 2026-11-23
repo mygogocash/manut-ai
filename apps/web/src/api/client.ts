@@ -3,6 +3,7 @@ import {
   type ApprovalView,
   type CreatedLineConnection,
   type CreatedShop,
+  type DeletedShop,
   type InboundMessage,
   type NewLineConnection,
   type NewPayment,
@@ -13,6 +14,8 @@ import {
   type ProposedReply,
   type ReplyAction,
   type Shop,
+  type ShopDeletion,
+  type ShopExport,
 } from "./types";
 
 export type HttpApiOptions = {
@@ -138,6 +141,10 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
           admin: true,
         })
       ).payments,
+    exportShop: (tenant) =>
+      request<ShopExport>({ method: "GET", path: "/v1/admin/pilot/export", query: { tenant }, admin: true }),
+    deleteShop: (input: ShopDeletion) =>
+      request<DeletedShop>({ method: "POST", path: "/v1/admin/pilot/deletions", body: input, admin: true }),
   };
 }
 

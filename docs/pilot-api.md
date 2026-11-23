@@ -82,6 +82,8 @@ type ApprovalView = {
 | `GET /v1/admin/pilot/actions` | `?tenant=` | `{ actions: ReplyAction[] }`, newest first |
 | `POST /v1/admin/pilot/payments` | `{ tenant, orderRef, amountSatang, promptPayId, slipNote? }` | `Payment` |
 | `GET /v1/admin/pilot/payments` | `?tenant=` | `{ payments: Payment[] }`, newest first |
+| `GET /v1/admin/pilot/export` | `?tenant=` | `ShopExport`: everything stored for the shop, LINE secrets never included |
+| `POST /v1/admin/pilot/deletions` | `{ tenant, confirmName }` | `DeletedShop`; 409 `{ "error": "name_mismatch" }`, deleting nothing, unless `confirmName` is the shop's exact name |
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -120,6 +122,19 @@ type Payment = {
   promptPayId: string;
   slipNote?: string;
   confirmedAt: string;      // the operator confirms the slip against the shop's bank app
+};
+
+// The backend's tenant export: tasks with their histories, LINE connection metadata, schedules, consent,
+// attention items and `pilot: { shop, messages, replies, payments }`. Saved whole.
+type ShopExport = { tenant: string; exportedAt: string; [part: string]: unknown };
+
+type DeletedShop = {
+  tasksWiped: number;
+  connectionsWiped: number;
+  schedulesWiped: number;
+  occurrencesWiped: number;
+  sessionsWiped: number;
+  deletedAt: string;
 };
 ```
 
@@ -160,8 +175,13 @@ type Payment = {
 - `pnpm --filter @manut/api test` checks the routing, the headers and the admin gate on a local Worker
   (`scripts/one-origin-contract.mjs`, `scripts/admin-access-contract.mjs`).
 - **Other answers.** 503 when storage is unavailable or configuration is missing, 413 for an oversized body.
-
-Not built yet: an operator route to export or delete one shop's pilot data (the functions exist and are tested).
+- **Export and deletion.** At a shop's request an operator exports or deletes everything stored for it,
+  through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
+  every reply, the sealed LINE secrets and the webhook route, messages, payments, consent and the shop's
+  registry row, and leaves a tombstone with the time. The owner's links answer `link_invalid` afterwards and
+  the webhook answers 404. It cannot be undone, so the operator sends the shop's exact name with its id. A
+  partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request again
+  finishes it.
 
 ## The send itself
 

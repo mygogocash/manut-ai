@@ -19,6 +19,8 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     listActions: missing("listActions"),
     recordPayment: missing("recordPayment"),
     listPayments: missing("listPayments"),
+    exportShop: missing("exportShop"),
+    deleteShop: missing("deleteShop"),
     ...overrides,
   };
 }

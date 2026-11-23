@@ -88,6 +88,23 @@ export type NewPayment = {
   slipNote?: string;
 };
 
+/// Everything stored for one shop, as the backend's tenant export answers it. Only the fields every export
+/// has are named; the rest is kept exactly as the backend sent it, so a saved export is complete.
+export type ShopExport = { tenant: string; exportedAt: string } & Record<string, unknown>;
+
+/// `confirmName` must be the shop's exact name: a deletion cannot be undone, so an id pasted for the wrong
+/// shop must delete nothing.
+export type ShopDeletion = { tenant: string; confirmName: string };
+
+export type DeletedShop = {
+  tasksWiped: number;
+  connectionsWiped: number;
+  schedulesWiped: number;
+  occurrencesWiped: number;
+  sessionsWiped: number;
+  deletedAt: string;
+};
+
 /// The reply text the broker accepts: 1 to 5,000 characters.
 export const REPLY_MAX_LENGTH = 5000;
 
@@ -115,6 +132,9 @@ export interface PilotApi {
   listActions(tenant: string): Promise<ReplyAction[]>;
   recordPayment(input: NewPayment): Promise<Payment>;
   listPayments(tenant: string): Promise<Payment[]>;
+  exportShop(tenant: string): Promise<ShopExport>;
+  /// Rejects with 409 `name_mismatch`, deleting nothing, unless `confirmName` is the shop's exact name.
+  deleteShop(input: ShopDeletion): Promise<DeletedShop>;
 }
 
 /// An answer other than success. `status` is 0 when the request never got an answer. `code` is the
