@@ -192,6 +192,13 @@ export async function ownerConsents(reply: Reply): Promise<void> {
   expect((await linkPost(reply, "consent", { cloudWork: true })).status).toBe(200);
 }
 
+/// The shop's consent to cloud work, recorded in its object as the owner's link records it, for tests with no reply.
+/// Approving anything needs it, and the switches and consent are read before approval-core is asked.
+export async function shopConsents(tenant: string): Promise<void> {
+  expect((await tenantCall(bindings, tenant, "/consent", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tenant, cloudWork: true }) })).status).toBe(200);
+}
+
 export function taskStub(taskId: string) {
   return bindings.TASK.get(bindings.TASK.idFromName(taskId));
 }

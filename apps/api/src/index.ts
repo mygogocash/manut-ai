@@ -1,5 +1,5 @@
 import { auditAdminRoute } from "./audit-log";
-import { listApprovals } from "./approvals";
+import { approvalsRoute } from "./approvals";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
@@ -12,6 +12,7 @@ import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
 import { memoryAdminRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
+import { peopleRoute } from "./people";
 import { pilotRoute } from "./pilot";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
@@ -206,6 +207,10 @@ const ADMIN_METHODS = new Set([
   // Nam, Pim and Ton (workers.ts): start one member's job for a shop. Every result is a draft; the runner calls the
   // model through the gateway, never the route. The tenant travels in the body.
   "POST /v1/admin/workers/run",
+  // The people around a shop (people.ts), on the owner's word: read them, invite a helper (a link to copy; nothing is
+  // sent), revoke an invite, remove a helper, and set or clear cover. The tenant travels in the query or the body.
+  "GET /v1/admin/people", "POST /v1/admin/people/invites", "POST /v1/admin/people/invites/revoke",
+  "POST /v1/admin/people/remove", "POST /v1/admin/people/away", "POST /v1/admin/people/away/clear",
 ]);
 
 /// Only platform-authenticated Access context is trusted, never a JWT header
@@ -631,6 +636,11 @@ export default {
     const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
     if (workers) return workers;
 
+    // The people around a shop (people.ts): the operator's routes, under the admin gate above, and a helper's own
+    // joining and opening the shop on another device, which need a signed-in session.
+    const people = await peopleRoute(request, url, env, ctx);
+    if (people) return people;
+
     // Capability flags and kill switches. Operator only: sessions never
     // reach this, so a compromised device cannot re-enable cloud work.
     if (url.pathname === "/v1/admin/flags") {
@@ -997,16 +1007,13 @@ export default {
       }
     }
 
-    // Approvals for a session (approvals.ts): the tenant's approval-core
-    // records and where each stands, as approval-core's wire JSON. Reading
-    // only, so, like reading a task, it needs neither a switch nor consent.
-    if (url.pathname === "/v1/approvals") {
-      const context = await contextOf(request, env);
-      if (!context) return json({ error: "unauthorized" }, 401);
-      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-      if (!context.tenant) return json({ error: "tenant_required" }, 400);
-      return listApprovals(env, context.tenant, url);
-    }
+    // Approvals for a session (approvals.ts): the shop's approval-core records
+    // as approval-core's wire JSON, read like a task with neither a switch nor
+    // consent; a decision on one, with the switches and consent of the owner's
+    // link; and a helper passing one on. The shop's own session is its owner and
+    // a helper session a helper (people.ts); the role never comes from a body.
+    const approvals = await approvalsRoute(request, url, env, () => featureFlags(env));
+    if (approvals) return approvals;
 
     // Exact-action approvals. Proposals and decisions pass through to the
     // task's ledger; dispatch runs the broker, which re-verifies everything

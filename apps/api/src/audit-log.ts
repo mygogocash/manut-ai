@@ -58,6 +58,16 @@ export const AUDIT_ACTIONS = [
   "memory.confirmed",
   "memory.corrected",
   "memory.forgotten",
+  // The people around the shop (people-store.ts): the owner's changes through the console, and what a helper did. Each
+  // names an invite, a helper or a request by its id, never a name, a note or an identity's value.
+  "invite.created",
+  "invite.revoked",
+  "helper.joined",
+  "helper.session_opened",
+  "helper.removed",
+  "away.set",
+  "away.cleared",
+  "request.passed_on",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -89,6 +99,8 @@ export const AUDIT_SUBJECT_KEYS = [
   "previousConnectionId",
   "confirmationId",
   "factId",
+  "inviteId",
+  "helperId",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 

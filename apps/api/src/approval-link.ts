@@ -1,18 +1,22 @@
 /// The owner's links (docs/pilot-api.md, "Security rules"). The owner has no
 /// account in the pilot, so a link itself is the credential: a capability
 /// naming exactly one thing the owner may decide, with an expiry, signed with
-/// the Wrangler secret `APPROVAL_LINK_SECRET`. There are two kinds:
+/// the Wrangler secret `APPROVAL_LINK_SECRET`. There are three kinds:
 ///
 /// - an approval link names one reply: one action on one task of one shop;
-/// - a deletion link names one owner confirmation of deleting one shop's data.
+/// - a deletion link names one owner confirmation of deleting one shop's data;
+/// - an invite link names one invite the owner made for a helper (people.ts).
+///   It decides nothing by itself: joining also needs a signed-in session
+///   whose verified identity is the one the invite was made for.
 ///
 /// Token form: `<payload>.<mac>`, both base64url without padding. The payload
 /// is a JSON array whose first element is its version, 1; the MAC is
 /// HMAC-SHA256 under the secret over the kind's domain tag plus the payload
 /// text. Each kind has its own tag, so a MAC this backend minted for one kind
-/// can never pass as the other, whatever its payload says: a reply link can
-/// never delete a shop and a deletion link can never approve a reply. The
-/// payloads also differ in length, which is a second, independent refusal.
+/// can never pass as another, whatever its payload says: a reply link can
+/// never delete a shop, a deletion link can never approve a reply, and neither
+/// can join a shop. The reply link's payload also differs in length from the
+/// other two, which is a second, independent refusal.
 /// Nothing in the payload is read until the MAC verifies, the comparison is
 /// `crypto.subtle.verify` (constant time), and a token is refused unless both
 /// halves are in their one canonical encoding, so one link has exactly one
@@ -24,6 +28,7 @@
 
 const APPROVAL_DOMAIN = "manut-ai/pilot-approval/v1.";
 const DELETION_DOMAIN = "manut-ai/pilot-deletion/v1.";
+const INVITE_DOMAIN = "manut-ai/pilot-invite/v1.";
 /// A secret shorter than this is treated as unset. HMAC accepts any length,
 /// but a short secret is a guessable one, and a guessed secret approves
 /// anything.
@@ -51,6 +56,12 @@ export type ApprovalClaim = {
 export type DeletionClaim = {
   tenant: string;
   confirmationId: string;
+  expiresAtMs: number;
+};
+
+export type InviteClaim = {
+  tenant: string;
+  inviteId: string;
   expiresAtMs: number;
 };
 
@@ -167,6 +178,28 @@ export async function mintDeletionToken(secret: string | undefined, claim: Delet
     throw new Error("deletion_claim_invalid");
   }
   return sign(secret, DELETION_DOMAIN, [1, claim.tenant, claim.confirmationId, claim.expiresAtMs]);
+}
+
+/// Mints the link for one invite. The invite's expiry is its 7 days (`@manut/people-rules`), and minting is
+/// deterministic, so the console's people list shows the same link again while the invite waits.
+export async function mintInviteToken(secret: string | undefined, claim: InviteClaim): Promise<string> {
+  if (!usableSecret(secret)) throw new Error("approval_link_secret_unset");
+  if (!bounded(claim.tenant) || !bounded(claim.inviteId) || !validExpiry(claim.expiresAtMs)) {
+    throw new Error("invite_claim_invalid");
+  }
+  return sign(secret, INVITE_DOMAIN, [1, claim.tenant, claim.inviteId, claim.expiresAtMs]);
+}
+
+/// What an invite token this secret signed names, or null for anything else. Unlike the owner's links it answers a
+/// genuine token past its expiry too: whether an invite still works is `@manut/people-rules`' answer from the invite the
+/// shop holds, whose expiry is the token's, so a revoked, used and expired invite are told apart in the order those
+/// rules check them, and every one of them shows nothing about the shop.
+export async function openInviteToken(secret: string | undefined, token: string): Promise<InviteClaim | null> {
+  const fields = await open(secret, INVITE_DOMAIN, token);
+  if (!fields || fields.length !== 4) return null;
+  const [, tenant, inviteId, expiresAtMs] = fields;
+  if (!bounded(tenant) || !bounded(inviteId) || !validExpiry(expiresAtMs)) return null;
+  return { tenant, inviteId, expiresAtMs };
 }
 
 /// Verifies a deletion token, with the same answers as `checkApprovalToken`.
