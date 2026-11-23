@@ -147,11 +147,15 @@ export interface DoneHere {
   id: string;
 }
 
-/** The asks approved from Home that the store now shows settled, read from the chats they were asked in. One that is
- *  gone, one that was not taken after all and anything that is not an approval are left out. */
+/** The asks approved from Home that the store now shows settled, read from the chats they were asked in, each once. One
+ *  that is gone, one that was not taken after all and anything that is not an approval are left out. */
 export function settledAsks(chats: Readonly<Record<string, Pick<Chat, "items">>>, done: readonly DoneHere[]): Ask[] {
   const out: Ask[] = [];
+  const seen = new Set<string>();
   for (const { bot, id } of done) {
+    const key = `${bot}\n${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const it = chats[bot]?.items.find((i) => i.id === id);
     if (it?.kind === "approval" && it.resolved) out.push({ bot, item: it, ts: it.ts });
   }

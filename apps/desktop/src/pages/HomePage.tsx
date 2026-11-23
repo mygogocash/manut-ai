@@ -370,6 +370,7 @@ export function HomePage() {
   const [done, setDone] = useState<DoneHere[]>([]);
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
   const input = useRef<HTMLInputElement>(null);
+  const inFlight = useRef(new Set<string>());
   const asks = selectAsks(s);
   // Ages and working times move on while something waits or works.
   const now = useNow(asks.length > 0 || listed.some((b) => b.running || !!s.chats[b.name]?.turn), 5_000);
@@ -393,9 +394,13 @@ export function HomePage() {
 
   const approve = async (a: Ask) => {
     const key = askKey(a);
+    // One answer per ask: a second press while the first is on its way does nothing, as on the card.
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
     setRowStates((cur) => ({ ...cur, [key]: { busy: true, error: null } }));
     // The card's own Allow once, through the card's own path: there is one way an approval is settled.
     const error = await settleApproval(getStore(), a.bot, a.item, "once");
+    inFlight.current.delete(key);
     setRowStates((cur) => ({ ...cur, [key]: { busy: false, error } }));
     if (!error) setDone((cur) => [...cur, { bot: a.bot, id: a.item.id }]);
   };
@@ -406,10 +411,9 @@ export function HomePage() {
       modes={modes}
       text={text}
       canSend={!!route && !!text.trim() && !sending}
-      onMode={(m) => {
-        setPicked(m);
-        input.current?.focus();
-      }}
+      // The focus stays on the mode just pressed, so a keyboard can move on through the modes; a suggestion, which
+      // puts words in the box, takes the focus there instead.
+      onMode={setPicked}
       onText={(words) => {
         setText(words);
         setSendError(null);

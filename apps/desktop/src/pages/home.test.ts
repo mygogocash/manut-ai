@@ -195,6 +195,11 @@ describe("the asks approved from Home", () => {
     expect(settledAsks(chats([done]), [{ bot: "nam", id: "a1" }])).toEqual([{ bot: "nam", item: done, ts: done.ts }]);
   });
 
+  it("name an ask once, however often it was recorded", () => {
+    const done = approval({ id: "a1", resolved: "once" });
+    expect(settledAsks(chats([done]), [{ bot: "nam", id: "a1" }, { bot: "nam", id: "a1" }])).toHaveLength(1);
+  });
+
   it("leave out one that was not taken, one that is gone, and a question", () => {
     const list = [approval({ id: "a1" }), clarify({ id: "c1", answer: "Facebook" })];
     expect(settledAsks(chats(list), [{ bot: "nam", id: "a1" }, { bot: "nam", id: "gone" }, { bot: "pim", id: "a1" }, { bot: "nam", id: "c1" }])).toEqual([]);
