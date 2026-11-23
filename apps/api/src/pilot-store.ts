@@ -61,6 +61,9 @@ export type PilotShopRecord = {
   /// that first points the shop at LINE, and never moved by a later one. A shop connected before this field
   /// existed has none, and the gate reads its first connection's time from the vault.
   trialStartedAt?: string;
+  /// The shop template it was made from (`@manut/shop-templates`), when it was: its team, routines and first-week
+  /// questions are the routines' records (routine-store.ts).
+  template?: string;
 };
 
 export type InboundMessage = {
