@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, type DeletedShop, type Shop } from "../src/api";
-import { deletedText, deleteRefusalText, deleteWhatText, unfinishedText } from "../src/ops/words";
+import { ApiError, type DeletedShop, type PilotGate, type Shop } from "../src/api";
+import { deletedText, deleteRefusalText, deleteWhatText, gateWords, subscriptionErrorText, unfinishedText } from "../src/ops/words";
 
 const RESULT: DeletedShop = {
   tasksWiped: 1,
@@ -80,5 +80,37 @@ describe("the words for deleting a shop", () => {
     ).toBe(
       "Deleting Baan Mali still did not finish after 2 tries. Part of its data is deleted and the rest is still stored. The API could not record the deletion, so it did not start. It is safe to try again. Run it again to finish the job.",
     );
+  });
+});
+
+describe("the Pilot gate's words", () => {
+  /// A cohort of `counted` shops, each share meeting its line or not.
+  function gate(paidMet: boolean, activeMet: boolean, counted = 2): PilotGate {
+    return {
+      asOf: "2026-12-22T03:00:00.000Z",
+      rules: { trialDays: 14, priceSatang: 49900, activeWindowDays: 7 },
+      shops: [],
+      cohort: {
+        counted,
+        paid: { count: paidMet ? counted : 0, percent: paidMet ? 100 : 0, thresholdPercent: 25, met: paidMet },
+        active: { count: activeMet ? counted : 0, percent: activeMet ? 100 : 0, thresholdPercent: 50, met: activeMet },
+        status: paidMet && activeMet ? "on_track" : "below_line",
+      },
+    };
+  }
+
+  it("names the share that is under its line", () => {
+    expect(gateWords.statusText(gate(true, true))).toBe("Both shares are at or above their lines, counting 2 shops.");
+    expect(gateWords.statusText(gate(false, true))).toBe("Paying shops are under 25%, counting 2 shops.");
+    expect(gateWords.statusText(gate(true, false))).toBe("Shops active on day 14 are under 50%, counting 2 shops.");
+    expect(gateWords.statusText(gate(false, false, 1))).toBe(
+      "Paying shops are under 25% and shops active on day 14 under 50%, counting 1 shop.");
+  });
+
+  it("tells a slip recorded twice apart from the API's other refusals", () => {
+    expect(subscriptionErrorText(new ApiError(409, "slip_already_recorded"), "Baan Mali")).toBe(
+      "This slip is already recorded for Baan Mali. Nothing was recorded again.");
+    expect(subscriptionErrorText(new ApiError(400, "invalid_request"), "Baan Mali")).toBe(
+      "The API did not accept this (invalid_request).");
   });
 });
