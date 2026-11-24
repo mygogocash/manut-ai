@@ -58,6 +58,9 @@ impl Until<'_> {
 pub trait Browser: Send + Sync {
     /// Goes to `url`, the guard on `origins` from now on, and waits until the page has loaded.
     fn open(&self, url: &str, origins: &[String], until: &Until) -> Result<(), Failure>;
+    /// Leaves the page for an empty one (`about:blank`) and waits until it is there, so that the next `open` loads its
+    /// page anew: never the page as it was left, and never a reload, which would send a form that page came from again.
+    fn blank(&self, until: &Until) -> Result<(), Failure>;
     /// The address of the page that is open, or None when no page is.
     fn address(&self) -> Option<String>;
     /// Whether the page is still loading.
@@ -102,7 +105,8 @@ pub struct Pace {
     pub open: Duration,
     pub read: Duration,
     pub sign_in: Duration,
-    /// A write: loading its page, typing, pressing once and the site's answer.
+    /// A write: loading its page, typing, pressing once and the site's answer, with loading the page again to read it
+    /// back when the site kept its form and said nothing.
     pub submit: Duration,
     /// How long a write waits, once its page has loaded, for the form and every field to be on it: a page that draws
     /// its form with its own script after it loads, as most sellers' centres do, has none at first.
@@ -114,17 +118,22 @@ pub struct Pace {
     pub poll: Duration,
     /// How long the site's answer to a sign-in or a write must stay the same before it is taken as its answer.
     pub settled: Duration,
+    /// How long a site must keep a write's form, every value as typed and nothing said, before the outpost loads the
+    /// page again to read what it saved: longer than an answer's `settled`, so a page that is still saving, or about to
+    /// empty its form or move, is given the time to.
+    pub kept: Duration,
 }
 
 pub const PACE: Pace = Pace {
     open: Duration::from_secs(30),
     read: Duration::from_secs(15),
     sign_in: Duration::from_secs(40),
-    submit: Duration::from_secs(45),
+    submit: Duration::from_secs(60),
     appear: Duration::from_secs(10),
     press: Duration::from_secs(10),
     poll: Duration::from_millis(400),
     settled: Duration::from_secs(3),
+    kept: Duration::from_secs(6),
 };
 
 /// Whether something can be seen: an input a person could type into, or a button they could press.
@@ -402,8 +411,10 @@ return JSON.stringify({ r: "pressed", a });"#;
 /// or every field given words is gone or emptied (a list back on its empty choice too; a check box or radio button is
 /// given no words), as a chat empties its box once it has sent, or a form clears itself once taken. `refused` when the
 /// page is where it was with the form, every value still as typed, and a field marked as wrong (or a form the browser
-/// refuses): the site kept the form with an error. Otherwise `pending`: still loading, or a site that keeps what was typed
-/// and says nothing. `away` off the step's origins `o`.
+/// refuses): the site kept the form with an error. `kept` when it is where it was with the form, every value as typed and
+/// nothing marked wrong: a settings page that saved and kept its form, or a site that has not answered yet, which only a
+/// fresh look at the page can tell apart (`SAVED`). Otherwise `pending`: still loading, or between answers. `away` off
+/// the step's origins `o`.
 pub const SENT: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
 if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
@@ -417,8 +428,28 @@ if (given.length > 0 && given.every(([s]) => { const el = find(s); return el ===
   return JSON.stringify({ s: "sent" });
 }
 const fields = pairs.map(([s, value]) => [find(s), value]);
-if (fields.every(([el, value]) => holds(el, value)) && (fields.some(([el]) => flagged(el)) || blocks(find(f)))) return JSON.stringify({ s: "refused" });
+if (fields.every(([el, value]) => holds(el, value))) {
+  return JSON.stringify({ s: fields.some(([el]) => flagged(el)) || blocks(find(f)) ? "refused" : "kept" });
+}
 return JSON.stringify({ s: "pending" });"#;
+
+/// `submit`, for a site that kept the form as typed and said nothing: the approved page loaded anew, read back. `saved`
+/// when every field of `v` is on it and holds exactly its approved value, and at least one of those values is one a form
+/// not yet filled in would not show (some text, a ticked box, a chosen button or item): the site keeps what was approved.
+/// `blank` when every field holds its value but each is one an empty form shows too, which proves nothing. `other` when
+/// a field is missing or holds anything else (a page still drawing its form, or one that did not keep the change).
+/// `pending` while loading; `away` off the step's origins `o`. It never types or presses anything.
+pub const SAVED: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
+if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
+VISIBLE
+FIND
+FIELDS
+const pairs = JSON.parse(v);
+const fields = pairs.map(([s, value]) => [find(s), value]);
+if (!fields.every(([el, value]) => holds(el, value))) return JSON.stringify({ s: "other" });
+const shows = ([el, value]) => toggle(el) ? value !== "" && value !== "unchecked" : wanted(el, value) !== "";
+return JSON.stringify({ s: fields.some(shows) ? "saved" : "blank" });"#;
 
 /// The scripts as they are run: `VISIBLE`, `FIND` and `FIELDS` written into each one that uses them. None of the three
 /// holds another's name, so the order they are written in changes nothing.
@@ -655,7 +686,7 @@ fn submit(step: &OutpostStep, origins: &[String], browser: &dyn Browser, watch: 
     let v = typed.map_err(|failure| if watch.any() { Failure::NavigationRefused } else { failure })?;
     let args = |extra: Option<&str>| write_args(origins, form, &v, extra);
     let at = press(browser, watch, &args, until, pace)?;
-    let answer = sent(browser, watch, &args, &at, until, pace);
+    let answer = sent(browser, watch, &args, &at, url, origins, until, pace);
     if watch.any() {
         return Err(Failure::OriginNotAllowed);
     }
@@ -719,18 +750,20 @@ fn press(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Ve
     }
 }
 
-/// Waits for the site's answer to a write: the same answer seen for `pace.settled` while nothing loads, as for a sign-in.
-/// A navigation the guard refused since the press ends the wait at once: the write is then not known, whatever the page
-/// goes on to show.
-fn sent(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, at: &str,
-    until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
+/// Looks at the page until one of its answers has held: `script` answering the same (its `s`) for as long as `hold` says
+/// that answer must hold, while nothing loads. An answer `hold` gives no time to decides nothing, and the step's time
+/// running out ends the wait as it ended (`timed_out`, or a browser error when the outpost stopped). The guard refusing
+/// a navigation at least as weighty as `stops` ends it at once (`origin_not_allowed`).
+fn answered(browser: &dyn Browser, watch: &Watch, stops: Blocked, script: &'static str,
+    args: &dyn Fn() -> Vec<(&'static str, Zeroizing<String>)>, until: &Until, pace: &Pace, hold: &dyn Fn(&str) -> Option<Duration>)
+    -> Result<String, Failure> {
     let mut seen: Option<(String, Instant)> = None;
     loop {
         if until.over() {
             return Err(until.failure());
         }
         std::thread::sleep(pace.poll);
-        if watch.any() {
+        if watch.now() >= stops {
             return Err(Failure::OriginNotAllowed);
         }
         if browser.loading() {
@@ -738,7 +771,7 @@ fn sent(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec
             continue;
         }
         // A page between two loads cannot be read; it is looked at again.
-        let Some(state) = browser.call(SENT, args(Some(at)), until).ok().and_then(|s| serde_json::from_str::<CheckWire>(&s).ok()) else {
+        let Some(state) = browser.call(script, args(), until).ok().and_then(|s| serde_json::from_str::<CheckWire>(&s).ok()) else {
             seen = None;
             continue;
         };
@@ -750,15 +783,58 @@ fn sent(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec
                 now
             }
         };
-        if now.duration_since(since) < pace.settled {
-            continue;
+        if hold(&state.s).is_some_and(|hold| now.duration_since(since) >= hold) {
+            return Ok(state.s);
         }
-        match state.s.as_str() {
-            "sent" => return Ok(None),
-            "refused" => return Err(Failure::SubmitRefused),
-            "away" => return Err(Failure::OriginNotAllowed),
-            _ => {}
-        }
+    }
+}
+
+/// Waits for the site's answer to a write: the same answer seen for `pace.settled` while nothing loads, as for a sign-in.
+/// A navigation the guard refused since the press ends the wait at once: the write is then not known, whatever the page
+/// goes on to show. A site that kept the form as typed and said nothing for `pace.kept` is looked at again, fresh
+/// (`saved`): the only way to tell a settings page that saved and kept its form from one that never answered.
+fn sent(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, at: &str,
+    url: &str, origins: &[String], until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
+    let answer = answered(browser, watch, Blocked::Frame, SENT, &|| args(Some(at)), until, pace, &|answer| match answer {
+        "sent" | "refused" | "away" => Some(pace.settled),
+        "kept" => Some(pace.kept),
+        _ => None,
+    })?;
+    match answer.as_str() {
+        "sent" => Ok(None),
+        "refused" => Err(Failure::SubmitRefused),
+        "away" => Err(Failure::OriginNotAllowed),
+        _ => saved(browser, watch, &|| args(None), url, origins, until, pace),
+    }
+}
+
+/// How a write that kept its form ends: the approved page loaded anew, after an empty one, so it is neither the page as
+/// it was left nor a reload (which would send the form again), and read back. Every field holding exactly its approved
+/// value, at least one of them one a form not yet filled in would not show, for `pace.settled`, is `done`: the site keeps
+/// what was approved. Anything else by the end of the step's time is not known (`timed_out`), never a failure: the form
+/// was pressed, so nobody can say that nothing was sent. Nothing is typed or pressed again.
+fn saved(browser: &dyn Browser, watch: &Watch, args: &dyn Fn() -> Vec<(&'static str, Zeroizing<String>)>, url: &str,
+    origins: &[String], until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
+    browser.blank(until).map_err(after_press)?;
+    browser.open(url, origins, until).map_err(after_press)?;
+    browser.keep_on(origins);
+    let answer = answered(browser, watch, Blocked::Frame, SAVED, args, until, pace, &|answer| match answer {
+        "saved" | "away" => Some(pace.settled),
+        _ => None,
+    })?;
+    match answer.as_str() {
+        "saved" => Ok(None),
+        _ => Err(Failure::OriginNotAllowed),
+    }
+}
+
+/// A failure once a write was pressed, as it is reported: never with a code that says nothing was submitted, since the
+/// press may have sent it. The page not loading again to be read back, say, is a browser error, which settles not known.
+fn after_press(failure: Failure) -> Failure {
+    match failure {
+        Failure::PageUnavailable | Failure::SelectorNotFound | Failure::SignInRefused | Failure::GrantRefused | Failure::SubmitRefused
+        | Failure::NotRun | Failure::NavigationRefused => Failure::BrowserError,
+        other => other,
     }
 }
 
@@ -855,6 +931,8 @@ pub mod fake {
             "press"
         } else if body == SENT {
             "sent"
+        } else if body == SAVED {
+            "saved"
         } else {
             "other"
         }
@@ -900,6 +978,11 @@ pub mod fake {
             refuse(&self.blocked, blocked);
             answer
         }
+        fn blank(&self, _until: &Until) -> Result<(), Failure> {
+            self.opened.lock().unwrap().push("about:blank".into());
+            *self.page.lock().unwrap() = Some("about:blank".into());
+            Ok(())
+        }
         fn address(&self) -> Option<String> {
             self.page.lock().unwrap().clone()
         }
@@ -942,6 +1025,7 @@ mod tests {
         press: Duration::from_millis(40),
         poll: Duration::from_millis(1),
         settled: Duration::from_millis(5),
+        kept: Duration::from_millis(10),
     };
 
     /// QUICK, with waits long enough that a test which counts on looking again more than once still does on a machine
@@ -1310,6 +1394,84 @@ mod tests {
         assert_eq!(calls[2].1["a"], PAGE);
     }
 
+    /// The approved page of a settings form: the values go in, the press is made, the site then answers `after` in turn
+    /// (the last one again after that), and the page loaded again answers `saved`.
+    fn settings_page(after: Vec<&'static str>, saved: &'static str) -> FakeBrowser {
+        let after = Mutex::new(after);
+        FakeBrowser::at(None, Box::new(move |name, _| match name {
+            "set" => json_answer(json!({ "r": "set" })),
+            "press" => json_answer(json!({ "r": "pressed", "a": PAGE })),
+            "sent" => {
+                let mut left = after.lock().unwrap();
+                let answer = if left.len() > 1 { left.remove(0) } else { left[0] };
+                json_answer(json!({ "s": answer }))
+            }
+            "saved" => json_answer(json!({ "s": saved })),
+            _ => unreachable!("{name}"),
+        }))
+    }
+
+    /// What loading the page again does the second time it is loaded; the first load is the approved page, as it was.
+    fn reopen(browser: &mut FakeBrowser, again: (Option<&'static str>, Blocked, Result<(), Failure>)) {
+        let loads = AtomicUsize::new(0);
+        browser.on_open = Box::new(move |url| match loads.fetch_add(1, Ordering::SeqCst) {
+            0 => (Some(url.to_owned()), Blocked::Nothing, Ok(())),
+            _ => (again.0.map(str::to_owned), again.1, again.2),
+        });
+    }
+
+    #[test]
+    fn a_settings_page_that_keeps_its_form_is_loaded_again_and_read_back() {
+        let api = vault(&[]);
+        // Kept as typed with nothing said: the page is loaded anew, after an empty page (never reloaded, which would send
+        // the form again), and what the site keeps is read back. Pressed once, all the same.
+        let browser = settings_page(vec!["kept"], "saved");
+        assert_eq!(run(&write(), &browser, &api), Outcome::Done(None));
+        assert_eq!(*browser.opened.lock().unwrap(), [PAGE.to_string(), "about:blank".into(), PAGE.into()]);
+        let names = browser.names();
+        assert_eq!(names.iter().filter(|n| **n == "press").count(), 1);
+        assert_eq!(names.iter().filter(|n| **n == "set").count(), 1);
+        assert!(names.contains(&"saved"));
+        // The read-back is told the step's origins and the values, as arguments only.
+        let calls = browser.calls.lock().unwrap();
+        let (_, args) = calls.iter().find(|(name, _)| *name == "saved").unwrap();
+        assert_eq!(args["o"], format!(r#"["{SHOP}"]"#));
+        assert!(args["v"].contains("Known-ค่า"));
+        assert!(!script(SAVED).contains("Known"));
+        drop(calls);
+        // What it reads back is not what was approved (a page that did not keep the change, or one still drawing its
+        // form), or proves nothing (every value one an empty form shows too): not known, never failed, since the form was
+        // pressed.
+        for answer in ["other", "blank", "pending"] {
+            assert_eq!(run(&write(), &settings_page(vec!["kept"], answer), &api), Outcome::Failed(Failure::TimedOut), "{answer}");
+        }
+        assert_eq!(run(&write(), &settings_page(vec!["kept"], "away"), &api), Outcome::Failed(Failure::OriginNotAllowed));
+        // A page that will not load again is not known either, never `page_unavailable`, which says nothing was sent.
+        let mut gone = settings_page(vec!["kept"], "saved");
+        reopen(&mut gone, (None, Blocked::Nothing, Err(Failure::PageUnavailable)));
+        assert_eq!(run(&write(), &gone, &api), Outcome::Failed(Failure::BrowserError));
+        // A frame from elsewhere the guard refused as it loaded again: not known.
+        let mut framed = settings_page(vec!["kept"], "saved");
+        reopen(&mut framed, (Some(PAGE), Blocked::Frame, Ok(())));
+        assert_eq!(run(&write(), &framed, &api), Outcome::Failed(Failure::OriginNotAllowed));
+        // A site that answers before it has kept the form long enough (a box emptied a moment later) is taken at its
+        // answer, with no second load; so is one that kept the form with a field marked wrong.
+        let slow = Pace { kept: Duration::from_secs(5), ..PATIENT };
+        let answering = settings_page(vec!["kept", "kept", "sent"], "saved");
+        assert_eq!(run_step(&write(), &answering, &api, &AtomicBool::new(false), &slow), Outcome::Done(None));
+        assert_eq!(*answering.opened.lock().unwrap(), [PAGE.to_string()]);
+        let refusing = settings_page(vec!["kept", "refused"], "saved");
+        assert_eq!(run_step(&write(), &refusing, &api, &AtomicBool::new(false), &slow), Outcome::Failed(Failure::SubmitRefused));
+        assert_eq!(*refusing.opened.lock().unwrap(), [PAGE.to_string()]);
+        // Every code a write can end with once pressed is one the API reads as not known, or done.
+        for failure in [Failure::PageUnavailable, Failure::SelectorNotFound, Failure::SubmitRefused, Failure::NotRun, Failure::NavigationRefused] {
+            assert_eq!(after_press(failure), Failure::BrowserError, "{failure:?}");
+        }
+        for failure in [Failure::TimedOut, Failure::BrowserError, Failure::OriginNotAllowed] {
+            assert_eq!(after_press(failure), failure);
+        }
+    }
+
     #[test]
     fn says_how_the_site_answered_a_write_and_never_guesses() {
         let api = vault(&[]);
@@ -1580,7 +1742,7 @@ mod tests {
     #[test]
     fn the_scripts_check_the_origin_first_and_type_through_arguments_only() {
         for (body, names) in [(READ, &["o", "s", "m"][..]), (FORM, &["o"][..]), (TYPE, &["o", "u", "p"][..]), (CHECK, &["o", "a"][..]),
-            (SET, &["o", "f", "v"][..]), (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..])] {
+            (SET, &["o", "f", "v"][..]), (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..]), (SAVED, &["o", "v"][..])] {
             let script = script(body);
             assert!(script.starts_with("const origins = JSON.parse(o);\nif (!origins.includes(location.origin)) return"), "{script}");
             assert!(!script.contains("VISIBLE") && !script.contains("FIELDS") && !script.contains("FIND"));

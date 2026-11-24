@@ -26,6 +26,7 @@ const READ = script("READ");
 const SET = script("SET");
 const PRESS = script("PRESS");
 const SENT = script("SENT");
+const SAVED = script("SAVED");
 
 const ORIGIN = "https://shop.test";
 const o = JSON.stringify([ORIGIN]);
@@ -171,6 +172,38 @@ const value = (p: Page, selector: string) => p.$eval(selector, (el) => (el as HT
 const READ_BACK = `${raw("VISIBLE")}\n${raw("FIND")}\n${raw("FIELDS")}\nreturn JSON.stringify(read(find(s)));`;
 const readBack = async (p: Page, s: string) => (await run(p, READ_BACK, { s })) as unknown as string;
 
+/**
+ * A shop's settings as a site keeps them: a page that saves through its own script and keeps its form, showing "Saved"
+ * and nothing else, drawn by the server (`/kept`) or by the page's own script a moment after it loads (`/drawn`). `takes`
+ * says whether the site keeps what it is sent.
+ */
+async function serveSettings(p: Page, takes: boolean): Promise<{ hours: string; sunday: boolean }> {
+  const stored = { hours: "08:00-17:00", sunday: false };
+  const form = (s: typeof stored) => `<form id="hours-form"><input name="hours" value="${s.hours}">`
+    + `<input type="checkbox" name="sunday"${s.sunday ? " checked" : ""}><button type="submit">Save</button></form>`;
+  const save = `<p id="toast" hidden>Saved</p><script>
+    document.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = e.target;
+      fetch("/api/hours", { method: "POST", body: JSON.stringify({ hours: f.hours.value, sunday: f.sunday.checked }) })
+        .then(() => { document.getElementById("toast").hidden = false; });
+    });
+  </script>`;
+  await p.route(`${ORIGIN}/api/hours`, async (route) => {
+    if (route.request().method() === "POST" && takes) Object.assign(stored, JSON.parse(route.request().postData() ?? "{}"));
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stored) });
+  });
+  await p.route(`${ORIGIN}/kept`, (route) => route.fulfill({ contentType: "text/html; charset=utf-8", body: html(form(stored) + save) }));
+  await p.route(`${ORIGIN}/drawn`, (route) => route.fulfill({ contentType: "text/html; charset=utf-8", body: html(`<main></main>${save}<script>
+    setTimeout(() => fetch("/api/hours").then((r) => r.json()).then((s) => {
+      document.querySelector("main").innerHTML = '<form id="hours-form"><input name="hours"><input type="checkbox" name="sunday"><button type="submit">Save</button></form>';
+      document.querySelector("[name=hours]").value = s.hours;
+      document.querySelector("[name=sunday]").checked = s.sunday;
+    }), 400);
+  </script>`) }));
+  return stored;
+}
+
 /** A property of an element inside the open shadow root of the page's `shop-hours`. */
 const inside = (p: Page, selector: string, key: "value" | "checked" | "innerText") =>
   p.evaluate(([s, k]) => (document.querySelector("shop-hours")!.shadowRoot!.querySelector(s) as unknown as Record<string, unknown>)[k],
@@ -256,7 +289,8 @@ export function writeScriptCases(): void {
     const order = v([["textarea[name=note]", "Leave at the door"], ["#reason", "damaged"]]);
     await run(p, SET, { o, f: "form#order", v: order });
     const cleared = await run(p, PRESS, { o, f: "form#order", v: order });
-    expect((await run(p, SENT, { o, a: cleared.a, f: "form#order", v: order })).s).toBe("pending");
+    // At first the form is kept as typed, which decides nothing until it has held for the outpost's `kept` time.
+    expect((await run(p, SENT, { o, a: cleared.a, f: "form#order", v: order })).s).toBe("kept");
     await expect.poll(async () => (await run(p, SENT, { o, a: cleared.a, f: "form#order", v: order })).s).toBe("sent");
 
     await p.goto(`${ORIGIN}/settings`);
@@ -353,6 +387,52 @@ export function writeScriptCases(): void {
     // not have, so the answer is read from the box alone when it is the only one written to.
     const box = v([["#box", reply]]);
     await expect.poll(async () => (await run(p, SENT, { o, a: pressed.a, f: "form#post", v: box })).s).toBe("sent");
+  });
+
+  test("a settings page that keeps its form says kept, and loaded anew shows whether it saved", async ({ page: p }) => {
+    await serve(p);
+    const stored = await serveSettings(p, true);
+    const pairs = v([["input[name=hours]", "09:00-18:00"], ["input[name=sunday]", "checked"]]);
+    await p.goto(`${ORIGIN}/kept`);
+    expect(await run(p, SET, { o, f: "#hours-form button", v: pairs })).toEqual({ r: "set" });
+    const pressed = await run(p, PRESS, { o, f: "#hours-form button", v: pairs });
+    expect(pressed.r).toBe("pressed");
+    // The site saved and kept its form, every value as typed, saying "Saved" in words only a person can read: kept.
+    await expect.poll(() => p.evaluate(() => document.getElementById("toast")!.hidden)).toBe(false);
+    expect((await run(p, SENT, { o, a: pressed.a, f: "#hours-form button", v: pairs })).s).toBe("kept");
+    expect(stored).toEqual({ hours: "09:00-18:00", sunday: true });
+    // Loaded anew after an empty page, as the outpost loads it, the page shows what the site keeps: saved.
+    await p.goto("about:blank");
+    await p.goto(`${ORIGIN}/kept`);
+    expect(await run(p, SAVED, { o, v: pairs })).toEqual({ s: "saved" });
+    // The same page drawn by its own script: other until the form is drawn, then saved.
+    await p.goto(`${ORIGIN}/drawn`);
+    expect(await run(p, SAVED, { o, v: pairs })).toEqual({ s: "other" });
+    await expect.poll(async () => (await run(p, SAVED, { o, v: pairs })).s).toBe("saved");
+    // Values a form not yet filled in shows too (no text, an unticked box) prove nothing, whatever the site kept.
+    expect(await run(p, SAVED, { o, v: v([["input[name=hours]", "09:00-18:00"], ["input[name=sunday]", "unchecked"]]) }))
+      .toEqual({ s: "other" });
+    stored.sunday = false;
+    stored.hours = "";
+    await p.goto(`${ORIGIN}/kept`);
+    expect(await run(p, SAVED, { o, v: v([["input[name=hours]", ""], ["input[name=sunday]", "unchecked"]]) })).toEqual({ s: "blank" });
+    expect((await run(p, SAVED, { o: JSON.stringify(["https://elsewhere.test"]), v: pairs })).s).toBe("away");
+  });
+
+  test("a settings page that does not keep the change reads back as other, never saved", async ({ page: p }) => {
+    await serve(p);
+    await serveSettings(p, false);
+    const pairs = v([["input[name=hours]", "09:00-18:00"]]);
+    await p.goto(`${ORIGIN}/kept`);
+    expect(await run(p, SET, { o, f: "#hours-form button", v: pairs })).toEqual({ r: "set" });
+    const pressed = await run(p, PRESS, { o, f: "#hours-form button", v: pairs });
+    await expect.poll(() => p.evaluate(() => document.getElementById("toast")!.hidden)).toBe(false);
+    // The page alone cannot tell this from a site that saved: it kept the form, as typed, and said "Saved".
+    expect((await run(p, SENT, { o, a: pressed.a, f: "#hours-form button", v: pairs })).s).toBe("kept");
+    await p.goto("about:blank");
+    await p.goto(`${ORIGIN}/kept`);
+    expect(await run(p, SAVED, { o, v: pairs })).toEqual({ s: "other" });
+    expect(await value(p, "input[name=hours]")).toBe("08:00-17:00");
   });
 
   test("reads an editor's text as a person reads it, whatever the editor draws it with", async ({ page: p }) => {

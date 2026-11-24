@@ -484,7 +484,7 @@ The owner removing a sign-in and changing its account or addresses, and the oper
   walks both there: a new address waiting for the password, an address taken away without it, and a removal kept, then
   made.
 
-The outpost ready for real sites' pages, this Mac (24 Nov 2026; December item 49, "Next slices" items 1 and 4). Nothing
+The outpost ready for real sites' pages, this Mac (24 and 25 Nov 2026; December item 49, "Next slices" items 1 and 4). Nothing
 here has met a real site yet: every script runs against test pages in WebKit and Chromium, and the Rust around them
 against the fake browser. What the owner's first supervised write should check is below, under "Next slices".
 
@@ -528,6 +528,17 @@ against the fake browser. What the owner's first supervised write should check i
 - **Tested in two engines** (`apps/desktop/e2e/outpost-scripts.ts`): a web component's form and a closed one, check boxes
   and radio buttons a page hears clicked once, a box the page unticks again (not pressed), a chat editor that sends on
   Return and is not sent while typed into, and an editor's text read back from the ways editors draw it.
+- **A settings page that keeps its form** (`sent` and `saved` in `step.rs`, `SAVED`). After the press, a page that keeps
+  the form with every value as typed and nothing marked wrong answers `kept`, which decides nothing at first: a chat that
+  empties its box, or a form that moves or clears itself, does so within a moment, and its own answer is taken. Kept for
+  6 seconds, the outpost loads the approved page anew, after an empty page (never a reload, which could send the form
+  again, and never the same address again, which may only jump within the page), and reads every field back. Every one
+  holding exactly its approved value, with at least one of them a value an empty form would not show (some text, a
+  ticked box, a chosen button or item), for 3 seconds, is `done`: the site keeps what was approved. Anything else by the
+  end of the step's time is not known (`timed_out`); a page that will not load again is a browser error, also not
+  known, since after the press no code may say that nothing was sent. Nothing is typed or pressed again. The outcome
+  words stay as they were: done, failed and nothing sent, or not known. A write's time grows from 45 to 60 seconds for
+  it.
 
 ## Choices made so far
 
@@ -626,7 +637,8 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   session, unless the owner pressed Stop.
 - A heartbeat every 30 seconds on its own thread; steps asked for every 3 seconds (what the ingress limit is sized
   for), at once again after an ask that brought five; asks spaced out to a minute while the API cannot be reached.
-  Budgets: open 30 seconds, read 15, sign-in 40, a write 45. A report that got no answer is sent again, the same, at
+  Budgets: open 30 seconds, read 15, sign-in 40, a write 45 (60 since the read-back of a kept form, below). A report
+  that got no answer is sent again, the same, at
   most three times; a step held when the outpost stops is reported `not_run` if it had not begun (`browser_error` until
   the write steps), and `browser_error` if it was running.
 - The window is visible, without taking focus, and incognito. The navigation hook cannot tell a page's frames from the
@@ -655,7 +667,8 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
 - What goes is exactly what was approved: a page that changes a value once it is typed (formatting an amount, say) is not
   pressed. A text area's line break is compared as the one character it keeps.
 - `done` and `submit_refused` are taken only from what the page shows, held for 3 seconds; a site that keeps the form
-  and says nothing (a settings page) ends `timed_out`, and its write settles as not known.
+  and says nothing (a settings page) ends `timed_out`, and its write settles as not known. (Replaced on 25 Nov 2026: such a
+  page is loaded anew and read back, below.)
 - Not run covers a step the outpost did nothing for: a kind it does not know, a step missing what its kind needs (no
   origin it may be on included), a step held but not begun when it stops (before, `browser_error`), and a write it
   stopped under before typing.
@@ -724,7 +737,7 @@ Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
   the tab's own state only. An account typed with a paste's spaces at its ends is sent trimmed, unless it then matches the
   account the vault keeps, which is sent exactly as kept.
 
-The outpost ready for real sites' pages (24 Nov 2026), each in `docs/decisions.md`:
+The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/decisions.md`:
 
 - The page is told from its frames by WKWebView's navigation action, through a navigation delegate of the outpost's own
   in front of wry's, on macOS. Anything judged without it counts as the page's.
@@ -738,15 +751,18 @@ The outpost ready for real sites' pages (24 Nov 2026), each in `docs/decisions.m
 - An editor's text is compared as a person reads it; a value that does not read back, or a field marked wrong, is looked
   at again for up to 10 seconds before the press is refused.
 - A write waits up to 10 seconds for its form and fields to be drawn.
+- A settings page that keeps its form as typed and says nothing for 6 seconds is loaded anew, after an empty page, and
+  read back: every value as approved, one of them one an empty form would not show, for 3 seconds, is done; anything
+  else is not known. A write has 60 seconds.
 
 ## Next slices
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
    site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), fields
-   inside frames, switches drawn as `role="switch"` or `role="checkbox"` rather than as check boxes (not reached yet: a
-   write naming one is `selector_not_found`), and a way to know a settings page took a change when it keeps the form.
-   (Built 24 Nov 2026: telling a page's frames from the page in the navigation hook; fields in a page's open shadow DOM;
-   check boxes, radio buttons and editors that are not form fields; above.)
+   inside frames, and switches drawn as `role="switch"` or `role="checkbox"` rather than as check boxes (not reached
+   yet: a write naming one is `selector_not_found`). (Built 24 Nov 2026: telling a page's frames from the page in the
+   navigation hook; fields in a page's open shadow DOM; check boxes, radio buttons and editors that are not form
+   fields; knowing a settings page took a change when it keeps the form; above.)
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").

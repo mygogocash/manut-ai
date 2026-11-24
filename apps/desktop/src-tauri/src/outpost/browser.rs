@@ -141,6 +141,26 @@ impl Browser for WebviewBrowser {
         }
     }
 
+    fn blank(&self, until: &Until) -> Result<(), Failure> {
+        let window = self.window().ok_or(Failure::BrowserError)?;
+        let empty = Url::parse("about:blank").map_err(|_| Failure::BrowserError)?;
+        window.navigate(empty).map_err(|_| Failure::BrowserError)?;
+        loop {
+            if until.over() {
+                return Err(until.failure());
+            }
+            std::thread::sleep(POLL);
+            // The owner closed the window under the step.
+            let window = self.window().ok_or(Failure::BrowserError)?;
+            if loading(&window).unwrap_or(true) {
+                continue;
+            }
+            if window.url().is_ok_and(|url| url.as_str() == "about:blank") {
+                return Ok(());
+            }
+        }
+    }
+
     fn address(&self) -> Option<String> {
         self.window()?.url().ok().map(|url| url.to_string())
     }

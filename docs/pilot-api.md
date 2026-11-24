@@ -1285,7 +1285,9 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
 
 This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
 nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the
-page shows, or `not_run` for a step it did nothing for.
+page shows, or `not_run` for a step it did nothing for. A site that keeps the form as typed and says nothing (a settings
+page) is loaded anew and read back: `done` only when it shows every approved value; otherwise a code that settles not
+known. No new code or field: the outcomes are the ones above.
 
 A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
 id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
