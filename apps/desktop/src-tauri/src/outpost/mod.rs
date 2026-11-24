@@ -710,7 +710,7 @@ mod tests {
         });
         let http = HttpApi::new(&api.origin, "pilot:shop-1", "op-1", &credential);
         let browser = FakeBrowser::at(Some(&format!("{ACCOUNTS}/seller/login")), Box::new(|name, _| match name {
-            "form" => Ok(format!(r#"{{"f":true,"a":"{ACCOUNTS}/seller/login"}}"#)),
+            "form" => Ok(format!(r#"{{"f":"password","a":"{ACCOUNTS}/seller/login"}}"#)),
             "type" => Ok(r#"{"r":"typed"}"#.into()),
             "check" => Ok(r#"{"s":"in"}"#.into()),
             _ => Ok(r#"{"t":""}"#.into()),

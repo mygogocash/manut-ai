@@ -1292,17 +1292,23 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
   outpost stopped there), `page_unavailable`, `selector_not_found`, `sign_in_refused` (the site refused the saved
   password), `grant_refused` (the redeem was refused), `submit_refused` (a write step's site refused what was submitted
   and kept the form), `not_run` (the outpost did not do what the step asks: a kind it does not know, a step missing what
-  its kind needs, or a stop before the step began or, for a write, before anything was typed), `timed_out`,
-  `browser_error`; and no text.
+  its kind needs, or a stop before the step began or, for a write, before anything was typed), `navigation_refused` (a
+  write step, before it pressed anything: the page or one of its frames tried to go off the step's origins, and the
+  outpost refused it and stopped), `sign_in_interrupted` (a sign-in step: the site asked for more than the saved
+  sign-in, such as a check that you are a person or a code, and the outpost stopped; the sign-in is not broken),
+  `timed_out`, `browser_error`; and no text.
 
 This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
 nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the
-page shows, or `not_run` for a step it did nothing for.
+page shows, or `not_run` for a step it did nothing for. A site that keeps the form as typed and says nothing (a settings
+page) is loaded anew and read back: `done` only when it shows every approved value; otherwise a code that settles not
+known. No new code or field: the outcomes are the ones above.
 
 A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
 id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
-`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`, `not_run`) is `failed`, and any other is
-`unknown`, since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
+`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`, `not_run`, `navigation_refused`) is
+`failed`, and any other is `unknown`, since the site may have taken it (`origin_not_allowed` on a write step means the
+page or a frame went elsewhere once it was pressed). The write stands as the outpost said even when its outcome can no longer land in the
 attempt (the step then reads refused, as below). A write step brings back no text.
 
 The outcome lands in the attempt's events as two agent events, a tool call in the agent event contract:
