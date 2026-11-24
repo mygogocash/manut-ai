@@ -99,6 +99,8 @@ export const AUDIT_ACTIONS = [
   "outpost.registered",
   "outpost.removed",
   "outpost.credential_rotated",
+  // The owner renaming an outpost from Customize › Connections. Its subject is the outpost's id: never the name typed.
+  "outpost.renamed",
   // The step channel: a worker's browser step queued for an outpost, handed out to it, and how it went. Each names the
   // step and what it is bound to by id, never its page, what it read, or anything typed.
   "browser_step.queued",
