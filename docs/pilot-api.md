@@ -1647,6 +1647,32 @@ characters, as Apple's.
   Apple key stands in for Apple's. The dev deploy check refuses any config that sets a `TEST_` var
   (`.github/scripts/check-dev-deploys.mjs`).
 
+## Sessions
+
+Every sign-in's session, Apple's and email's alike, lives in the one global auth object (`apps/api/src/auth-object.ts`,
+`session-index.ts`), so it is kept small and never read whole (`docs/decisions.md`, 24 Nov 2026, item 42):
+
+- **Each tenant's sessions are found by its own rows.** Every grant chain, an access record and its refresh grant, has
+  one row under its tenant, `tenant-session:<tenant>:<refresh hash>` with the access record's hash and the wipe
+  generation it was minted at. The row is written and deleted in the same transaction as the chain's own records: minted
+  with them, moved on by each refresh, and gone when the chain is signed out, ends at a check, is wiped or is swept. A
+  tenant's wipe (`DELETE /v1/tenant/data`, a shop's deletion) lists only its own rows and ends every chain older than the
+  wipe, with both of its records; a sign-in just after the wipe stays. It reads no one else's session.
+- **Ended sessions are swept.** The auth object's alarm, which already deletes used Apple tokens and old email code
+  records, also sweeps sessions: each run reads at most 256 session records from where the last run stopped and deletes
+  the access records past their hour, and the grants past their 30 days or their chain's 90 together with their access
+  record and their row. A grant refreshed just before its chain's 90 days waits until its last access record's hour is
+  over. A pass part way through runs again ten seconds on; a finished pass starts the next an hour later while sessions
+  are left, and none is set when none are. Every sign-in and refresh makes sure an alarm is due by the time its access
+  record ends.
+- **Sessions made before the rows.** The sweep's first full pass gives every live grant made before the rows existed the
+  row it would have been minted with, a page at a time, and then marks the index filled. Until it has, a wipe also looks
+  for its tenant's records the old way, a page at a time, so no old session outlives its tenant's deletion.
+- **The shop indexes are read a page at a time** (`shops-store.ts`): a shop's deletion takes it out of every person's
+  rows and every maker's made shops 128 rows at a time, and a make looks for itself on the journal of makes the same way.
+  A person's own deletion reads neither index: a person's tenant (`apple:` or `email:`) never names a shop, which the
+  Worker always makes as `pilot:<uuid>`.
+
 ## Helpers
 
 The owner's helpers (`docs/people.md`): an invite for one LINE account or email, once, for 7 days; joining as that

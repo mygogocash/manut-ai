@@ -39,7 +39,8 @@ Three things, each kept where that kind of thing already lives.
    "which companies am I in" (`auth-object.ts`). It is never the authority: every use reads each shop's record again,
    so a row the shop no longer holds (an unlinked owner, a removed helper, a deleted shop, or a row planted by mistake)
    lists nothing and opens nothing. A shop's deletion removes the rows that name it, as the lifted wipe removes the
-   inbound routes that name a tenant.
+   inbound routes that name a tenant, reading the index 128 rows at a time; a person's own deletion does not read it at
+   all, since a person's tenant never names a shop (`docs/pilot-api.md`, "Sessions").
 
 Tenancy is not weakened:
 

@@ -61,6 +61,9 @@ export const SHOPS_MADE_LIMIT = 3;
 export const MADE_RESERVATION_MS = 10 * 60 * 1000;
 
 const MAX_BODY_BYTES = 16 * 1024;
+/// Rows a scan of a whole index reads at a time (every person's rows, the journal of makes), so no scan ever holds all of
+/// them at once: the storage API loads everything a `list` names into memory.
+export const SCAN_PAGE = 128;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 /// The longest name a shop or its owner may have here: the operator's route allows 200 (pilot.ts), the person's own 80.
 const MAX_NAME = 200;
@@ -132,15 +135,28 @@ function makeOf(body: Record<string, unknown>):
   return { tenant, name, ownerName, template, subject: subject ?? null };
 }
 
+/// Hands `visit` the rows under `prefix`, `SCAN_PAGE` at a time in key order. A page is read whole before `visit` sees it,
+/// so `visit` may change the rows it was handed, and the next page starts after the last key of this one.
+function eachPage<T>(kv: SyncKvStorage, prefix: string, visit: (page: [string, T][]) => void): void {
+  for (let after: string | undefined; ;) {
+    const page = [...kv.list<T>({ prefix, limit: SCAN_PAGE, ...(after === undefined ? {} : { startAfter: after }) })];
+    if (page.length > 0) visit(page);
+    if (page.length < SCAN_PAGE) return;
+    after = page[page.length - 1]![0];
+  }
+}
+
 /// The earliest make on the journal that is for the very shop `make` asks for: the same names, template and asker. There
-/// is at most one, since a make that finds one never writes another.
+/// is at most one, since a make that finds one never writes another. The journal is read a page at a time.
 function heldMake(kv: SyncKvStorage, make: { name: string; ownerName: string; template: string | null; subject: string | null }):
   MakingRow | undefined {
   let held: MakingRow | undefined;
-  for (const [, row] of kv.list<MakingRow>({ prefix: MAKING_PREFIX })) {
-    if (row.by !== make.subject || row.name !== make.name || row.ownerName !== make.ownerName || row.template !== make.template) continue;
-    if (!held || row.at < held.at) held = row;
-  }
+  eachPage<MakingRow>(kv, MAKING_PREFIX, (page) => {
+    for (const [, row] of page) {
+      if (row.by !== make.subject || row.name !== make.name || row.ownerName !== make.ownerName || row.template !== make.template) continue;
+      if (!held || row.at < held.at) held = row;
+    }
+  });
   return held;
 }
 
@@ -276,28 +292,38 @@ export async function shopsAuthRoute(storage: DurableObjectStorage, request: Req
   return json(answer.body, answer.status);
 }
 
-/// Part of AuthObject's tenant wipe. A deleted shop leaves every person's index, as the lifted wipe takes out the
-/// inbound routes that name a tenant. A person who deletes their own data loses the link code they were waiting to
-/// send, but keeps their rows: those point at their shops' records, which their own data's deletion does not reach,
-/// and leaving a shop is unlinking or removal (docs/several-shops.md).
-export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): void {
-  storage.transactionSync(() => {
-    const kv = storage.kv;
-    // Read every row first and write after, so no write lands under a list that is still being read.
-    const indexes = [...kv.list<IdentityShopRow[]>({ prefix: ROWS_PREFIX })];
-    for (const [key, rows] of indexes) {
-      const kept = rows.filter((row) => row.shop !== tenant);
+/// Whether `tenant` is a person's own: a sign-in's, Apple's (`apple:<sub>`, auth.ts) or an email code's (`email:<hash>`,
+/// email-code.ts). The Worker makes every shop `pilot:<uuid>` (pilot.ts `newShopTenant`), so no person's tenant names a shop.
+function isPersonTenant(tenant: string): boolean {
+  return tenant.startsWith("apple:") || tenant.startsWith("email:");
+}
+
+/// Takes `shop` out of every row list under `prefix`, a page at a time, deleting a list it empties.
+function dropShopRows<T extends { shop: string }>(kv: SyncKvStorage, prefix: string, shop: string): void {
+  eachPage<T[]>(kv, prefix, (page) => {
+    for (const [key, rows] of page) {
+      const kept = rows.filter((row) => row.shop !== shop);
       if (kept.length === rows.length) continue;
       if (kept.length === 0) kv.delete(key);
       else kv.put(key, kept);
     }
-    // A deleted shop its owner made stops counting against their limit: its row goes with it.
-    const made = [...kv.list<MadeShopRow[]>({ prefix: MADE_PREFIX })];
-    for (const [key, rows] of made) {
-      const kept = rows.filter((row) => row.shop !== tenant);
-      if (kept.length === rows.length) continue;
-      if (kept.length === 0) kv.delete(key);
-      else kv.put(key, kept);
+  });
+}
+
+/// Part of AuthObject's tenant wipe. A deleted shop leaves every person's index, as the lifted wipe takes out the
+/// inbound routes that name a tenant. A person who deletes their own data loses the link code they were waiting to
+/// send, but keeps their rows: those point at their shops' records, which their own data's deletion does not reach,
+/// and leaving a shop is unlinking or removal (docs/several-shops.md).
+///
+/// Only a shop's deletion reads the indexes, a page at a time: a person's tenant names no shop, so their deletion, which
+/// any signed-in person can ask for, reads nobody's rows at all.
+export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): void {
+  storage.transactionSync(() => {
+    const kv = storage.kv;
+    if (!isPersonTenant(tenant)) {
+      dropShopRows<IdentityShopRow>(kv, ROWS_PREFIX, tenant);
+      // A deleted shop its owner made stops counting against their limit: its row goes with it.
+      dropShopRows<MadeShopRow>(kv, MADE_PREFIX, tenant);
     }
     // A shop that is deleted is no longer being made, whatever stopped: its row on the journal goes with it.
     kv.delete(pilotMakingKey(tenant));
