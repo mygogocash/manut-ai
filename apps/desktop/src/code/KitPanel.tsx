@@ -5,7 +5,7 @@
 // The project is a folder the Code page lists (a session's or an added one). `KitPanelView` takes everything it shows
 // as props and uses no hooks, so a test can draw it; `KitPanel` reads the stores.
 import "./kit.css";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { KIT_LEVELS, type KitLevel } from "@manut/member-grants";
 import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
@@ -16,6 +16,8 @@ import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { LanesView, openLane, useLaneRows, type LaneRow } from "./Lanes";
+import { MainMoved } from "./MainMoved";
+import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
 /** A session of this project whose changes hold a key. */
@@ -42,6 +44,8 @@ export interface KitPanelProps {
   onDropRule: (rule: Rule) => void;
   onDropFolder: (folder: string) => void;
   onOpenSession: (id: string) => void;
+  /** What the project's own state adds under the keys: a preview on a sample, the main branch moving (KitPanel fills it). */
+  children?: ReactNode;
 }
 
 /** A folder as the developer reads it: `~` for the home folder. */
@@ -90,6 +94,8 @@ export function KitPanelView(p: KitPanelProps) {
           </button>
         </div>
       ))}
+
+      {p.children}
 
       {project.blocked.length > 0 && (
         <>
@@ -193,7 +199,10 @@ export function KitPanel() {
         onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
         onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
         onOpenSession={(id) => getStore().actions.openSession(id)}
-      />
+      >
+        <PreviewSample root={root} />
+        <MainMoved root={root} />
+      </KitPanelView>
       {/* what keeps running (src/running/) for the project the panel shows, right under it */}
       <RunningPanel project={root} />
     </>
