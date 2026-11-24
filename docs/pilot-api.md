@@ -145,7 +145,7 @@ type DeletionView = {
 
 | Method and path | Body or query | Answer |
 | --- | --- | --- |
-| `POST /v1/admin/pilot/shops` | `{ name, ownerName, template? }` | `{ tenant, name, ownerName, template? }`. 400 `{ "error": "unknown_template" }`, making no shop, for a template that is not one ("Shop templates", below) |
+| `POST /v1/admin/pilot/shops` | `{ name, ownerName, template? }` | `{ tenant, name, ownerName, template? }`. 400 `{ "error": "unknown_template" }`, making no shop, for a template that is not one ("Shop templates", below). 503 `{ "error": "shop_unavailable" }` when the shop could not be made whole and listed: nothing is listed, and the same request, with the same names and template, finishes that very shop instead of making another ("A make that stops part way", below) |
 | `GET /v1/admin/pilot/shops` | none | `{ shops: Shop[] }` |
 | `POST /v1/admin/pilot/line-connections` | `{ tenant, channelId, botUserId, channelSecret, channelAccessToken }` | `{ connectionId, webhookUrl }` |
 | `GET /v1/admin/pilot/messages` | `?tenant=` | `{ messages: InboundMessage[] }`, newest first |
@@ -1964,9 +1964,11 @@ Applying one:
   the rest;
 - keeps its first-week questions, `q1` onwards, for Buddy to ask the owner.
 
-All of it is one write to the shop's object, after the clocks and before the shop is listed: a shop whose setup could
-not be written answers 503 `shop_unavailable` and is never listed, and asking again makes a whole one. The log has
-`template.applied` (naming the template by id) and one `routine.created` for each routine.
+All of it is in the one write to the shop's object that makes the shop (`pilot-store.ts`), after the clocks and before the
+shop is listed, so the shop's object holds the shop with its setup or nothing of it. A shop whose setup could not be
+written answers 503 `shop_unavailable` and is never listed, and asking again finishes it ("A make that stops part way",
+below). The log has `shop.created`, then `template.applied` (naming the template by id) and one `routine.created` for each
+routine.
 
 **`GET /v1/admin/questions?tenant=`** answers `{ tenant, template, questions: Question[] }`: the template the shop was
 made from (null for none), and each question with its answer as the team now knows it.
@@ -2088,11 +2090,11 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 | 400 | `{ error: "invalid_name" }`, `{ error: "invalid_owner_name" }` | The shop's name, or the person's own, is empty, longer than 80 characters once its outer spaces are off, or holds a control character (a helper's name's rule, `keptName` in `people-store.ts`) |
 | 400 | `{ error: "unknown_template" }` | `template` is not one of the three, or `null` |
 | 409 | `{ error: "too_many_shops", limit: 3 }` | The account has made 3 shops that still exist |
-| 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again makes a whole new shop |
+| 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again with the same name, owner name and template finishes that very shop, never a second one ("A make that stops part way", below) |
 
 - **The same shop the operator's route makes.** Both go through `writeNewShop` in `pilot.ts`: the shop's record with
-  `shop.created` in one write, then the template applied the one way ("Shop templates", above: its members, its routines
-  each paused, its first-week questions, `template.applied` and one `routine.created` each).
+  `shop.created` and the template's setup ("Shop templates", above: its members, its routines each paused, its
+  first-week questions, `template.applied` and one `routine.created` each) in one write.
 - **Owned from the first write.** For a shop its owner makes, that first write to the shop's object also links the person's
   account as its owner (`owner.account` on the People answer, `{ id, subject, linkedAt }` in the export) and opens this
   device's owner session, with `shop.made_by_owner`, `owner.linked` and `owner.session_opened`. Every entry of the making,
@@ -2102,12 +2104,66 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
   console's list (the pilot registry) and in the person's index as theirs, so `GET /v1/shops` and `GET
   /v1/admin/pilot/shops` list it together or not at all. A shop whose setup or listing could not be written is never listed,
   and its session's token, which only the answer would carry, is never sent.
-- **At most 3 made shops per account.** A slot is reserved in AuthObject before anything is made, in one transaction, so
-  requests racing for the last slot cannot pass it. A shop that was deleted no longer counts, and a reservation whose make
-  failed is given back, or stops counting after 10 minutes. Shops an operator linked to the account never count: the limit
-  is on making, not owning.
+- **At most 3 made shops per account.** A slot is reserved in AuthObject before anything is made, in the same transaction
+  that puts the make on the journal, so requests racing for the last slot cannot pass it. A shop that was deleted no longer
+  counts, and a reservation whose make failed is given back at once, and taken again by the request that finishes that
+  make, or stops counting after 10 minutes if nobody asks again. Shops an operator linked to the account never count: the
+  limit is on making, not owning.
 - **The pilot gate** lists a self-serve shop and leaves it out of the cohort unless an operator adds it ("The pilot gate",
   above).
+
+### A make that stops part way
+
+A shop is made by `POST /v1/admin/pilot/shops` and by `POST /v1/shops/new`, both through `writeNewShop` in `pilot.ts`, and a
+make writes to more than one object. It cannot be one write, so it is made to be finished instead, as a deletion is
+("Export and deletion", above): a deletion that stops part way keeps the shop on the console's list until the same request
+finishes it, and a make that stops part way keeps the shop **off** the list until the same request finishes it. In order,
+and each step safe to run again:
+
+1. **Begin.** AuthObject puts the make on its *journal of makes* (`pilot-making:<tenant>`, `{ tenant, name, ownerName,
+   template, by, at }`, where `by` is the person making their own shop, or null for an operator) before anything of the shop
+   is written. For a person's own make the same transaction takes one of their slots (409 `too_many_shops`, writing
+   nothing). If the same shop is already on the journal, an earlier try stopped part way and this one finishes it: the
+   answer is that shop's tenant, not a new one. The same shop is the same name, owner name and template, from the same
+   person, or from an operator. Another name, owner name or template, or another person, is another shop, and leaves this
+   one where it is. Two asks at once for the same shop find each other the same way, and make one.
+2. **Look.** The shop's own object says whether the shop is already there; if an earlier try wrote it, it is left as it is,
+   with nothing set up again.
+3. **Clocks**, for a shop made from a template.
+4. **The shop's own write**: the shop's record, its people record when its owner makes it, its template's setup, and an
+   audit entry for each, in one storage write (`createShop` in `pilot-store.ts`). The shop's object holds the shop whole or
+   nothing of it, and its log (`shop.created`, then `shop.made_by_owner`, `owner.linked` and `owner.session_opened` for an
+   owner's own, then `template.applied` and a `routine.created` each) never says more than was written, and says each
+   thing once however many tries it took. A shop already there answers 409 `already_exists` and changes nothing.
+5. **A session of its own**, for a person's own make that found the shop already written: that try's first owner session has
+   a token only its answer would have carried, which went nowhere, so this try opens another, as `POST /v1/shops/session`
+   does, for the account the first linked. It leaves the person's index to the next step, so the console and the person's own
+   list still agree.
+6. **List.** The registry row, and the make leaves the journal in that same write (`POST /pilot-shops`); for a person's own
+   shop it is `POST /shops-made/finish`, which also puts the shop in the person's index and marks the slot done. Asking
+   again answers the same and moves the shop nowhere on the list. It is asked twice if the first try fails, because only the
+   answer may have been lost, and the shop is whole.
+
+What a stop leaves, and what asking again does:
+
+| Stopped at | Left | Asking again |
+| --- | --- | --- |
+| Begin | Nothing. If only the answer was lost, the journal row, and for a person's own make a slot that the make gives back at once | Finishes that shop, on the slot it takes again |
+| Look, clocks, or the shop's own write | The journal row, nothing of the shop, and at most clocks for routines that never came to be, which remove themselves at their first instant. If only the answer to the write was lost, the shop whole | Writes the shop, or finds it written, and lists it |
+| Opening a session (a person's own make) | The shop whole, the journal row, the slot given back | Opens a session and lists it |
+| List | The shop whole in its own object, not listed, and the journal row | Lists it |
+
+So a stop never leaves a half-made shop: a shop's object has the shop with its setup, or none; no stop lists a shop that
+cannot be opened, in the console's Shops overview or in the person's own list; and the log says a shop was made only when
+its record is there, once. A person's slot is given back by the failure and taken again by the retry, or lapses after 10
+minutes (`MADE_RESERVATION_MS`), so no slot is lost; a retry that finds the account at its limit with other shops is refused
+409 and changes nothing.
+
+Not built: a make that nobody asks for again is not cleared by itself. Its journal row, and its shop if it got so far, wait.
+The shop is on no list, so nobody is shown it, and for a shop its owner makes the token of its first session was never
+sent. It holds nothing a customer or an owner gave it. Deleting the shop with `POST /v1/admin/pilot/deletions`, by its id
+(on the journal) and exact name, as for any shop that never went live, clears it and takes its row off the journal, and so
+does the wipe of any tenant.
 
 ### What an owner session reaches
 

@@ -196,11 +196,11 @@ export class AuthObject extends DurableObject {
     if (url.pathname === "/pilot-deletions" || url.pathname.startsWith("/pilot-deletions/")) {
       return pilotDeletionRoute(this.ctx.storage, request);
     }
-    // Several shops (shops-store.ts): which shops each signed-in person is in, owners' one-use link codes, and the shops each
-    // person made themselves (self-serve.ts).
+    // Several shops (shops-store.ts): which shops each signed-in person is in, owners' one-use link codes, the shops each
+    // person made themselves (self-serve.ts), and the journal of makes that have begun and are not yet listed.
     if (url.pathname === "/identity-shops" || url.pathname.startsWith("/identity-shops/") ||
         url.pathname === "/owner-codes" || url.pathname.startsWith("/owner-codes/") ||
-        url.pathname.startsWith("/shops-made/")) {
+        url.pathname.startsWith("/shops-made/") || url.pathname.startsWith("/pilot-making/")) {
       return shopsAuthRoute(this.ctx.storage, request, url);
     }
     if (url.pathname === "/flags") {

@@ -144,12 +144,19 @@ write. No operator makes it, and no link code links it.
 - **The same shop.** It is made by the operator's own code (`writeNewShop` in `pilot.ts`), template and all, so it is a
   pilot shop like any other: its own tenant, its records in its own objects, its export and its deletion unchanged.
 - **Owned from the first write.** The write that makes the shop's record also writes its people record with the person's
-  account linked as its owner and this device's first owner session, so the shop never exists without its owner. The
-  model above holds: the shop's record is the authority, and the person's index row, written last, only finds it.
-- **Its log.** That write holds `shop.created`, `shop.made_by_owner`, `owner.linked` and `owner.session_opened`, each by
-  the owner's linked account, named by its id, never its subject or an email.
+  account linked as its owner and this device's first owner session, and the template's setup, so the shop never exists
+  without its owner or half set up. The model above holds: the shop's record is the authority, and the person's index row,
+  written last, only finds it.
+- **Its log.** That write holds `shop.created`, `shop.made_by_owner`, `owner.linked` and `owner.session_opened`, then
+  `template.applied` and a `routine.created` for each routine, each by the owner's linked account, named by its id, never its
+  subject or an email.
 - **Listed together.** The console's list and the person's own list get the shop in one AuthObject transaction, last, so
   the operator never sees a shop its owner cannot, nor the other way round.
+- **A make that stops part way.** It is on AuthObject's journal of makes from the transaction that takes its slot, before
+  anything of the shop is written, and is never listed until whole. Asking again with the same name, owner name and template
+  finishes that very shop, on a slot it takes again, and gives this device an owner session of its own, since the first
+  one's token never reached anyone; it never makes a second shop, and never loses a slot. `docs/pilot-api.md`, "A make that
+  stops part way", has each step and what a stop at it leaves.
 - **Its limits.** While sign-ups are open, every try counts against a per-address rate limit. An account may have made 3
   shops that still exist, decided in AuthObject before anything is made; shops an operator linked to it never count.
 - **Where it shows.** The console's Shops overview marks it "Made by its owner", and the pilot gate lists it without counting it

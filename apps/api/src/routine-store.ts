@@ -139,6 +139,38 @@ function readState(kv: SyncKvStorage, tenant: string): RoutineState {
   return kv.get<RoutineState>(keys.state(tenant)) ?? emptyState();
 }
 
+/// The key a shop's routines, team and questions are kept under, for pilot-store.ts to put in the same write as a new
+/// shop's own record.
+export const routineStateKey = keys.state;
+
+/// A shop template's setup as the Worker sends it: the template's id, the members it turns on, its routines as built, and
+/// its first-week questions.
+export type TemplateSetup = { template: string; members: WorkerMember[]; routines: StoredRoutine[]; questions: Question[] };
+
+/// The setup `body` names, or null when it is not one. Checked again here rather than trusted, by the template route and by
+/// the write that makes a shop with its setup (pilot-store.ts), so both refuse the same things.
+export function templateSetupOf(body: Record<string, unknown>): TemplateSetup | null {
+  const { template, members, routines, questions } = body;
+  if (typeof template !== "string" || !SHORT_ID.test(template)) return null;
+  if (!Array.isArray(members) || !members.every(isMember) || new Set(members).size !== members.length) return null;
+  if (!Array.isArray(routines) || !routines.every(isStoredRoutine)) return null;
+  if (!Array.isArray(questions) || questions.length > 10 || !questions.every((question) => isRecord(question) &&
+    typeof question.id === "string" && SHORT_ID.test(question.id) && typeof question.text === "string" &&
+    question.text.trim().length > 0 && question.text.length <= 500 && Object.keys(question).length === 2)) {
+    return null;
+  }
+  return { template, members: [...members], routines: [...routines],
+    questions: questions.map((question) => ({ id: question.id as string, text: question.text as string })) };
+}
+
+/// What a new shop starts with when it is made from a template: the setup and nothing else. Null when the setup holds more
+/// routines than a shop keeps.
+export function newShopState(setup: TemplateSetup): RoutineState | null {
+  if (setup.routines.length > MAX_ROUTINES) return null;
+  return { team: { ...emptyState().team, members: [...setup.members] }, routines: [...setup.routines],
+    questions: setup.questions };
+}
+
 /// Whether a member is on: every worker is on until a shop template says which are.
 export function memberOn(team: Team, member: WorkerMember): boolean {
   return team.members === null || team.members.includes(member);
@@ -282,32 +314,23 @@ const WRITES: Readonly<Record<string, Write>> = {
 
   /// `{ template, members, routines, questions }`: a shop template's setup, once per shop. The members it turns on,
   /// its routines (each paused) and its first-week questions, in one write with one entry for the template and one
-  /// for each routine.
+  /// for each routine. A new shop's setup does not come this way: it is in the write that makes the shop (pilot-store.ts).
   "POST /routines/template": (kv, tenant, body, actor) => {
-    const { template, members, routines, questions } = body;
-    if (typeof template !== "string" || !SHORT_ID.test(template)) return refuse(400, "invalid_request");
-    if (!Array.isArray(members) || !members.every(isMember) || new Set(members).size !== members.length) {
-      return refuse(400, "invalid_request");
-    }
-    if (!Array.isArray(routines) || !routines.every(isStoredRoutine)) return refuse(400, "invalid_request");
-    if (!Array.isArray(questions) || questions.length > 10 || !questions.every((question) => isRecord(question) &&
-      typeof question.id === "string" && SHORT_ID.test(question.id) && typeof question.text === "string" &&
-      question.text.trim().length > 0 && question.text.length <= 500 && Object.keys(question).length === 2)) {
-      return refuse(400, "invalid_request");
-    }
+    const setup = templateSetupOf(body);
+    if (!setup) return refuse(400, "invalid_request");
     const state = readState(kv, tenant);
     if (state.questions.length > 0 || state.routines.some((routine) => routine.template !== undefined)) {
       return refuse(409, "template_applied");
     }
-    if (state.routines.length + routines.length > MAX_ROUTINES) return refuse(409, "full");
+    if (state.routines.length + setup.routines.length > MAX_ROUTINES) return refuse(409, "full");
     const next: RoutineState = {
-      team: { ...state.team, members: [...members] },
-      routines: [...state.routines, ...routines],
-      questions: questions.map((question) => ({ id: question.id as string, text: question.text as string })),
+      team: { ...state.team, members: [...setup.members] },
+      routines: [...state.routines, ...setup.routines],
+      questions: setup.questions,
     };
     kv.put(keys.state(tenant), next);
-    audit(kv, tenant, actor, { action: "template.applied", subject: { templateId: template }, outcome: "ok" });
-    for (const routine of routines) {
+    audit(kv, tenant, actor, { action: "template.applied", subject: { templateId: setup.template }, outcome: "ok" });
+    for (const routine of setup.routines) {
       audit(kv, tenant, actor, { action: "routine.created", subject: { routineId: routine.id }, outcome: "ok" });
     }
     return ok(next);

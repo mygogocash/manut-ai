@@ -16,6 +16,13 @@
 ///   reserved before its shop is made, so how many shops one account may make is decided here, in one transaction,
 ///   however many requests race; it is `done` once the shop is on the console's list and in the person's index, which the
 ///   same transaction writes, so the two never disagree about a shop its owner made.
+/// - `pilot-making:<tenant>`: the journal of makes, one row per shop that is being made, from before anything of the shop
+///   is written until the write that lists it: `{ tenant, name, ownerName, template, by, at }`, where `by` is the person
+///   who is making it themselves, or null for an operator's make. It is how a make that stopped part way is found again.
+///   Asking for the same shop again (the same name, owner name and template, by the same person or by an operator) finds
+///   the row and finishes that shop, never a second one, and the write that lists the shop takes its row off. Making a
+///   shop is the mirror of deleting one (tenant-data.ts): a deletion keeps the shop on the list until it is finished, and
+///   a make keeps it off the list until it is finished, and the same request finishes either.
 ///
 /// Every change runs inside `transactionSync` with the synchronous KV API, as people-store.ts's do, so two changes to
 /// one person's rows or to one code are decided one after the other. Writes need the Worker's `x-admin` header, like
@@ -23,7 +30,7 @@
 
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
-import { pilotRegistryKey } from "./pilot-store";
+import { listShop, MAKING_PREFIX, pilotMakingKey, pilotRegistryKey, TEMPLATE_ID } from "./pilot-store";
 import { authCall, type TenantDataEnv } from "./tenant-data";
 
 export type ShopRole = "owner" | "helper";
@@ -33,6 +40,11 @@ export type IdentityShopRow = { shop: string; role: ShopRole; ref: string; at: n
 
 /// One shop a person made themselves: reserved at `at`, and `done` once it is listed and indexed.
 export type MadeShopRow = { shop: string; at: number; done: boolean };
+
+/// One shop that is being made, as it was asked for, and who asked: `by` is the person who makes it themselves, null for an
+/// operator. `at` is when it was first asked for.
+export type MakingRow = { tenant: string; name: string; ownerName: string; template: string | null; by: string | null;
+  at: number };
 
 /// How long a link code works (docs/several-shops.md): long enough to send it in a chat, short enough that an old
 /// message is no use to anyone.
@@ -45,10 +57,13 @@ export const SHOPS_MADE_LIMIT = 3;
 
 /// How long a reserved row counts before its shop is listed. Making a shop takes seconds; a row still not done after this
 /// is a make that failed part way, and stops counting, so a failure never takes one of the person's shops for good.
+/// Asking again for the same shop reserves it again (`begin`), so a make finished later still has its slot.
 export const MADE_RESERVATION_MS = 10 * 60 * 1000;
 
 const MAX_BODY_BYTES = 16 * 1024;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+/// The longest name a shop or its owner may have here: the operator's route allows 200 (pilot.ts), the person's own 80.
+const MAX_NAME = 200;
 /// The longest link id a row keeps: people.ts and shops.ts mint `helper-` and `owner-` and a UUID.
 const MAX_REF = 256;
 
@@ -105,6 +120,30 @@ function rowOf(body: Record<string, unknown>): { subject: string; shop: string; 
   return { subject, shop, role, ref };
 }
 
+/// The shop a make asks for, or null when it is not one: the tenant the Worker would give it, the names and the template
+/// as they were asked for, and, for a person making their own shop, who they are.
+function makeOf(body: Record<string, unknown>):
+  { tenant: string; name: string; ownerName: string; template: string | null; subject: string | null } | null {
+  const { tenant, name, ownerName, template, subject } = body;
+  const named = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= MAX_NAME;
+  if (!isValidTenant(tenant) || !named(name) || !named(ownerName)) return null;
+  if (template !== null && !(typeof template === "string" && TEMPLATE_ID.test(template))) return null;
+  if (subject !== undefined && subject !== null && !isValidTenant(subject)) return null;
+  return { tenant, name, ownerName, template, subject: subject ?? null };
+}
+
+/// The earliest make on the journal that is for the very shop `make` asks for: the same names, template and asker. There
+/// is at most one, since a make that finds one never writes another.
+function heldMake(kv: SyncKvStorage, make: { name: string; ownerName: string; template: string | null; subject: string | null }):
+  MakingRow | undefined {
+  let held: MakingRow | undefined;
+  for (const [, row] of kv.list<MakingRow>({ prefix: MAKING_PREFIX })) {
+    if (row.by !== make.subject || row.name !== make.name || row.ownerName !== make.ownerName || row.template !== make.template) continue;
+    if (!held || row.at < held.at) held = row;
+  }
+  return held;
+}
+
 const WRITES: Readonly<Record<string, Write>> = {
   /// `{ subject, shop, role, ref }`: the person is in `shop` as `role`, through the link `ref`. Replaces their row for
   /// that shop and role, so writing it again only refreshes it.
@@ -115,30 +154,46 @@ const WRITES: Readonly<Record<string, Write>> = {
     return { status: 200, body: { indexed: true } };
   },
 
-  /// `{ subject, shop }`: reserves one of the person's made shops for `shop`, before anything of it is made, or refuses
-  /// with 409 `too_many_shops` while `SHOPS_MADE_LIMIT` of theirs still count. Rows that no longer count are dropped.
-  "POST /shops-made/reserve": (kv, body, nowMs) => {
-    const { subject, shop } = body;
-    if (!isValidTenant(subject) || !isValidTenant(shop)) return refused(400, "invalid_request");
-    const counting = countingMade(kv, kv.get<MadeShopRow[]>(keys.made(subject)) ?? [], nowMs);
-    if (counting.length >= SHOPS_MADE_LIMIT) return refused(409, "too_many_shops");
-    kv.put(keys.made(subject), [...counting.filter((row) => row.shop !== shop), { shop, at: nowMs, done: false }]);
-    return { status: 200, body: { reserved: true } };
+  /// `{ tenant, name, ownerName, template, subject? }`: a make begins, before anything of the shop is written. If the same
+  /// shop is already on the journal (the same names, template and asker: an earlier try that stopped part way), that is
+  /// the shop to make, and this one finishes it; if not, `tenant` is, and its row goes on the journal. Answers the tenant
+  /// to make, and whether it was one already on its way.
+  ///
+  /// For a person making their own shop (`subject`) the same transaction reserves one of their made shops for it, or
+  /// refuses with 409 `too_many_shops` while `SHOPS_MADE_LIMIT` of their others still count, and writes nothing. A shop
+  /// already on its way counts as itself, so finishing it never asks for a second slot. Rows that no longer count are dropped.
+  "POST /pilot-making/begin": (kv, body, nowMs) => {
+    const make = makeOf(body);
+    if (!make) return refused(400, "invalid_request");
+    const held = heldMake(kv, make);
+    const tenant = held?.tenant ?? make.tenant;
+    if (make.subject !== null) {
+      const others = countingMade(kv, kv.get<MadeShopRow[]>(keys.made(make.subject)) ?? [], nowMs)
+        .filter((row) => row.shop !== tenant);
+      if (others.length >= SHOPS_MADE_LIMIT) return refused(409, "too_many_shops");
+      kv.put(keys.made(make.subject), [...others, { shop: tenant, at: nowMs, done: false }]);
+    }
+    if (!held) {
+      kv.put(pilotMakingKey(tenant), { tenant, name: make.name, ownerName: make.ownerName, template: make.template,
+        by: make.subject, at: nowMs } satisfies MakingRow);
+    }
+    return { status: 200, body: { tenant, resumed: held !== undefined } };
   },
 
-  /// `{ subject, shop, ref }`: the shop the person reserved is made. In one transaction it goes on the console's list (the
-  /// pilot registry's row, as `/pilot-shops` writes it), into the person's index as theirs through the owner link `ref`,
-  /// and its row is done. A shop with no reservation still on its way is refused, 409 `not_reserved`, and nothing is
-  /// written: a make that outlived its reservation is not let past the limit.
+  /// `{ subject, shop, ref }`: the shop the person made is whole. In one transaction it goes on the console's list (the
+  /// pilot registry's row, as `/pilot-shops` writes it) and its make leaves the journal, into the person's index as theirs
+  /// through the owner link `ref`, and its row is done. A shop with no reservation still on its way is refused, 409
+  /// `not_reserved`, and nothing is written: a make that outlived its reservation is not let past the limit. A shop already
+  /// done answers the same again, so a make may ask twice when the answer to the first was lost.
   "POST /shops-made/finish": (kv, body, nowMs) => {
     const row = rowOf({ ...body, role: "owner" });
     if (!row) return refused(400, "invalid_request");
     const rows = kv.get<MadeShopRow[]>(keys.made(row.subject)) ?? [];
-    const reserved = rows.find((one) => one.shop === row.shop && !one.done && nowMs - one.at < MADE_RESERVATION_MS);
+    const reserved = rows.find((one) => one.shop === row.shop && (one.done || nowMs - one.at < MADE_RESERVATION_MS));
     if (!reserved) return refused(409, "not_reserved");
-    kv.put(pilotRegistryKey(row.shop), { tenant: row.shop, createdAt: new Date(nowMs).toISOString() });
+    listShop(kv, row.shop, nowMs);
     putRow(kv, row, nowMs);
-    kv.put(keys.made(row.subject), rows.map((one) => (one === reserved ? { ...one, done: true } : one)));
+    if (!reserved.done) kv.put(keys.made(row.subject), rows.map((one) => (one === reserved ? { ...one, done: true } : one)));
     return { status: 200, body: { listed: true } };
   },
 
@@ -196,11 +251,13 @@ const WRITES: Readonly<Record<string, Write>> = {
   },
 };
 
-/// `/identity-shops`, `/owner-codes` and `/shops-made` on AuthObject:
+/// `/identity-shops`, `/owner-codes`, `/pilot-making` and `/shops-made` on AuthObject:
 /// - `GET /identity-shops?subject=`: the person's rows;
 /// - `POST /identity-shops`, `POST /identity-shops/remove`: add or take out one row;
 /// - `POST /owner-codes`, `POST /owner-codes/redeem`: keep a new code, or use one;
-/// - `POST /shops-made/reserve`, `/finish`, `/release`: a shop the person makes themselves, before, after, or failed.
+/// - `POST /pilot-making/begin`: a make begins (an operator's or a person's own), or finds the one that stopped part way;
+/// - `POST /shops-made/finish`, `/release`: a shop the person made themselves is whole and listed, or its make failed.
+///   An operator's make ends with the registry's own `POST /pilot-shops` (pilot-store.ts).
 export async function shopsAuthRoute(storage: DurableObjectStorage, request: Request, url: URL): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
   if (route === "GET /identity-shops") {
@@ -242,6 +299,8 @@ export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): 
       if (kept.length === 0) kv.delete(key);
       else kv.put(key, kept);
     }
+    // A shop that is deleted is no longer being made, whatever stopped: its row on the journal goes with it.
+    kv.delete(pilotMakingKey(tenant));
     const code = kv.get<string>(keys.codeOf(tenant));
     if (code !== undefined) {
       kv.delete(keys.code(code));
@@ -315,21 +374,37 @@ export async function keepOwnerCode(env: Pick<TenantDataEnv, "AUTH">, subject: s
   }
 }
 
-/// Reserves one of `subject`'s made shops for `shop`: `reserved`, `too_many` at the limit, or `failed` when AuthObject
-/// cannot be reached.
-export async function reserveMadeShop(env: Pick<TenantDataEnv, "AUTH">, subject: string, shop: string):
-  Promise<"reserved" | "too_many" | "failed"> {
+/// Begins a make (`POST /pilot-making/begin`), and for a person making their own shop (`make.subject`) reserves one of
+/// their made shops for it. Answers the tenant to make: `make.tenant`, unless the same shop is already on its way, and then
+/// that one's. `too_many` at the limit of a person's made shops, or null when AuthObject cannot be reached, in which case
+/// nothing is known to have begun: if only the answer was lost, the make is on the journal and asking again finds it.
+export async function beginMake(env: Pick<TenantDataEnv, "AUTH">, make: { tenant: string; name: string; ownerName: string;
+  template: string | null; subject?: string }): Promise<{ tenant: string } | "too_many" | null> {
   try {
-    const response = await authWrite(env, "/shops-made/reserve", { subject, shop });
-    await response.body?.cancel();
-    if (response.ok) return "reserved";
-    return response.status === 409 ? "too_many" : "failed";
+    const response = await authWrite(env, "/pilot-making/begin", make);
+    if (response.status === 409) {
+      await response.body?.cancel();
+      return "too_many";
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const { tenant } = (await response.json()) as { tenant?: unknown };
+    return typeof tenant === "string" ? { tenant } : null;
   } catch {
-    return "failed";
+    return null;
   }
 }
 
-/// Lists the shop its owner made and puts it in their index, in one write. Answers whether it was written.
+/// Asks again, once, when a call that is safe to repeat did not succeed: the work may have been done and only its answer
+/// lost on the way back, and asking the last step of a make again is cheaper than answering the person with a failure for a
+/// shop that is made.
+export async function twice(call: () => Promise<boolean>): Promise<boolean> {
+  return (await call()) || (await call());
+}
+
+/// Lists the shop its owner made and puts it in their index, in one write. Answers whether it was written. Safe to repeat.
 export async function finishMadeShop(env: Pick<TenantDataEnv, "AUTH">, subject: string, shop: string, ref: string):
   Promise<boolean> {
   try {

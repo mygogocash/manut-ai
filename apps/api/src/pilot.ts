@@ -67,7 +67,8 @@ import {
   type SubscriptionPayment,
 } from "./pilot-store";
 import type { ShopTemplate } from "@manut/shop-templates";
-import { applyTemplate, checkedTemplate } from "./routine-setup";
+import { checkedTemplate, newShopSetup } from "./routine-setup";
+import { beginMake, twice } from "./shops-store";
 import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
@@ -1016,17 +1017,33 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
   const asked = body.template ?? null;
   const template = asked === null ? null : checkedTemplate(asked);
   if (asked !== null && !template) return json({ error: "unknown_template" }, 400);
-  const tenant = newShopTenant();
+  // The make goes on AuthObject's journal before anything of the shop is written. If this same shop (the same names and
+  // template) is already there, an earlier try stopped part way, and this one finishes that shop: asking again never makes
+  // a second one.
+  const begun = await beginMake(env, { tenant: newShopTenant(), name, ownerName, template: template?.id ?? null });
+  if (begun === null || begun === "too_many") return json({ error: "shop_unavailable" }, 503);
+  const { tenant } = begun;
   if (!(await writeNewShop(env, tenant, { name, ownerName, template }, actor))) {
     return json({ error: "shop_unavailable" }, 503);
   }
-  const registered = await authCall(env, "/pilot-shops", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-admin": "1" },
-    body: JSON.stringify({ tenant }),
-  });
-  if (!registered.ok) return json({ error: "shop_unavailable" }, 503);
+  // Listed last, and asked twice if need be: the answer to the first may only have been lost, and the shop is whole.
+  if (!(await twice(() => listNewShop(env, tenant)))) return json({ error: "shop_unavailable" }, 503);
   return json({ tenant, name, ownerName, ...(template ? { template: template.id } : {}) });
+}
+
+/// Puts a whole new shop on the console's list and ends its make (AuthObject's `POST /pilot-shops`). Safe to repeat.
+async function listNewShop(env: PilotEnv, tenant: string): Promise<boolean> {
+  try {
+    const response = await authCall(env, "/pilot-shops", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-admin": "1" },
+      body: JSON.stringify({ tenant }),
+    });
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /// A new pilot shop's tenant. See `createShop`.
@@ -1039,27 +1056,36 @@ export function newShopTenant(): string {
 export type NewShopOwner = { accountId: string; subject: string; sessionId: string; tokenHash: string; expiresAt: number };
 
 /// Writes a new shop's own records, as the operator's route and the owner's own both make one: the shop with its
-/// `shop.created` entry in one write (and, for a shop its owner makes, `owner`'s link and first session with their entries
-/// in that same write, pilot-store.ts), then the template's setup, applied the one way (routine-setup.ts). Answers whether
-/// all of it was written. It does not list the shop: each caller does that last, so a shop whose setup could not be
-/// written is never listed, and asking again makes a whole one.
+/// `shop.created` entry, the template's setup with its entries (routine-setup.ts, the one way it is applied) and, for a
+/// shop its owner makes, `owner`'s link and first session with their entries, all in one write to the shop's object
+/// (pilot-store.ts), so that object holds the shop whole or nothing of it. Its clocks are written before it, and a clock a
+/// stopped try left is for a routine that never came to be (routine-setup.ts).
+///
+/// Answers `created` when it wrote the shop, `existing` when the shop was already there because an earlier try of this
+/// same make wrote it and then stopped (its answer lost, or a later step failing), which it leaves as it is, so the shop's
+/// log never says it was made twice; or null when the shop could not be written, and then nothing of it is. It does not
+/// list the shop: each caller does that last, so a shop that stopped part way is never listed, and asking again finishes it.
 export async function writeNewShop(env: PilotEnv, tenant: string,
   shop: { name: string; ownerName: string; template: ShopTemplate | null }, actor: AuditActor, owner?: NewShopOwner):
-  Promise<boolean> {
+  Promise<"created" | "existing" | null> {
+  const present = await shopRecord(env, tenant).catch(() => undefined);
+  if (present === undefined) return null;
+  if (present) return "existing";
+  const setup = shop.template ? await newShopSetup(env, tenant, shop.template) : null;
+  if (shop.template && !setup) return null;
   const created = await pilotWrite(env, tenant, "/pilot/shop", {
     name: shop.name,
     ownerName: shop.ownerName,
     taskId: `pilot-task-${crypto.randomUUID()}`,
     ...(shop.template ? { template: shop.template.id } : {}),
+    ...(setup ? { setup } : {}),
     ...(owner ? { owner } : {}),
     actor,
   }).catch(() => null);
-  if (!created?.ok) {
-    await created?.body?.cancel();
-    return false;
-  }
-  await created.body?.cancel();
-  return !shop.template || (await applyTemplate(env, tenant, shop.template, actor));
+  await created?.body?.cancel();
+  // Another try of the same make wrote it in the meantime: the shop is there all the same.
+  if (created?.status === 409) return "existing";
+  return created?.ok ? "created" : null;
 }
 
 /// Every pilot shop, with its latest deletion request when it has one, so the
