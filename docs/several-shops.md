@@ -159,7 +159,13 @@ write. No operator makes it, and no link code links it.
   one's token never reached anyone; it never makes a second shop, and never loses a slot. `docs/pilot-api.md`, "A make that
   stops part way", has each step and what a stop at it leaves.
 - **Its limits.** While sign-ups are open, every try counts against a per-address rate limit. An account may have made 3
-  shops that still exist, decided in AuthObject before anything is made; shops an operator linked to it never count.
+  shops that still exist, decided in AuthObject before anything is made; shops an operator linked to it never count. And
+  since one mailbox can have as many accounts as it likes, at most 20 shops are begun in a Bangkok day, all accounts
+  together, in the same transaction: past that the answer is `sign_ups_full` until the next day.
+- **Its team waits for Manut AI.** Until an operator counts the shop in (the console's Count it), its team makes no model
+  call and runs no routine, each refused or skipped with `not_counted_in`, so nothing such a shop asks for is sent to a
+  model or spent on the owner's key (`apps/api/src/shop-waits.ts`). The API's answer says so (`teamWaits`), and so does
+  the person's list of shops until it is counted in.
 - **Where it shows.** The console's Shops overview marks it "Made by its owner", and the pilot gate lists it without counting it
   in the cohort unless an operator adds it.
 - **Off.** Until the var `SELF_SERVE_SHOPS` is `"on"`, which no environment sets, the route answers `sign_ups_closed` and
@@ -172,7 +178,9 @@ write. No operator makes it, and no link code links it.
   the API answers with the sign-in (the keychain item), reads the shop with the person's others and shows it, so it is in the
   switcher by the time the answer arrives; the app then opens it, as choosing it in the switcher does. While the API
   answers `sign_ups_closed` the page says so plainly: "Making your own shop isn't open yet. For now, Manut AI sets each shop
-  up with its owner." Practice offers the same form whenever it runs and makes the shop in memory, with nothing sent, up to
+  up with its owner." Once a shop is made, the page says why its team waits: "Your team starts work once someone at Manut
+  AI has checked your new shop: until then nothing runs and no AI is used." A day whose sign-ups are full says "Manut AI
+  has opened as many new shops today as it can. Try again tomorrow." Practice offers the same form whenever it runs and makes the shop in memory, with nothing sent, up to
   3 of them, listed after the person's own shop. The first run does not offer it: it does not sign in at all.
 
 ## How the desktop shows them

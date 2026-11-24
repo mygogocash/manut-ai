@@ -74,6 +74,16 @@ describe("making a shop on the connected runtime", () => {
       "/v1/routines", "/v1/tenant/export"]));
   });
 
+  it("says that the shop's team waits for Manut AI when the API's answer does", async () => {
+    const answer: FakeAnswer = { status: 201, json: { shop: { id: MADE_ID, name: "Khao Hom", ownerName: "Dao", template: "food" },
+      role: "owner", account: { id: "owner-account-9" }, session: { accessToken: MADE_TOKEN, expiresAt: iso(NOW + 30 * 86_400_000) },
+      teamWaits: "not_counted_in" } };
+    const { rt } = setup({ answer });
+    await rt.connect();
+    expect(await make(rt, { name: "Khao Hom", ownerName: "Dao", template: "food" })).toEqual({
+      shop: { id: MADE_ID, name: "Khao Hom", owner: "Dao", role: "owner" }, teamWaits: true });
+  });
+
   it("makes a shop of none of the kinds as no template", async () => {
     const { api, rt } = setup();
     await rt.connect();
@@ -88,6 +98,8 @@ describe("making a shop on the connected runtime", () => {
       [{ status: 400, json: { error: "invalid_name" } }, { code: "invalid_name", message: t("make.fail.invalid_name") }],
       [{ status: 400, json: { error: "unknown_template" } }, { code: "unknown_template", message: t("make.fail.unknown_template") }],
       [{ status: 429, json: { error: "rate_limited" } }, { code: "rate_limited", message: t("make.fail.rate_limited") }],
+      // The day's sign-ups being full is a 429 too, with its own code and words.
+      [{ status: 429, json: { error: "sign_ups_full", retryAfter: 3600 } }, { code: "sign_ups_full", message: t("make.fail.sign_ups_full") }],
       [{ status: 400, json: { error: "invalid_request" } }, { code: "unavailable", message: t("make.fail.unavailable") }],
       [{ status: 503, json: { error: "shop_unavailable" } }, { code: "unavailable", message: t("rt.unavailable") }],
       ["offline", { code: "offline", message: t("rt.offline") }],

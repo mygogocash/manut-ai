@@ -96,6 +96,8 @@ export type ModelCallResult =
       neededSatang: number;
     }
   | { ok: false; status: 503; error: "not_configured"; setting: string }
+  /// A shop its owner made, which no operator has counted in yet (shop-waits.ts): nothing is held or sent.
+  | { ok: false; status: 403; error: "not_counted_in" }
   | { ok: false; status: 503; error: "meter_unavailable" }
   | { ok: false; status: 502 | 503; error: "provider_error"; retryable: boolean; callId: string };
 
@@ -216,6 +218,12 @@ export async function callModel(
       heldSatang: ceilSatang(refusal.heldMillisatang),
       neededSatang: ceilSatang(worst),
     };
+  }
+  if (reserved.status === 403) {
+    // The meter's own refusal names why; any other 403 is the meter failing, not the shop waiting.
+    const refusal = (await reserved.json().catch(() => null)) as { error?: unknown } | null;
+    return refusal?.error === "not_counted_in" ? { ok: false, status: 403, error: "not_counted_in" }
+      : { ok: false, status: 503, error: "meter_unavailable" };
   }
   if (!reserved.ok) {
     await reserved.body?.cancel();

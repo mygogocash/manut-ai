@@ -13,8 +13,9 @@
 /// the time the alarm arrived. The claim reads the routine, the team and the earlier runs and writes the run in one
 /// synchronous transaction, so two alarms for the same instant, or a clock saved again, can never both start a job.
 /// The claim also decides what a run that will not start says: `skipped` while the routine or the team is paused or the
-/// member is not on the team, or when a switch or the owner's consent refused it, and `missed` when its alarm came past
-/// the grace. Each such run is written down with its audit entry in the same transaction.
+/// member is not on the team, while a shop its owner made waits for an operator to count it in (`not_counted_in`,
+/// shop-waits.ts), or when a switch or the owner's consent refused it, and `missed` when its alarm came past the grace.
+/// Each such run is written down with its audit entry in the same transaction.
 ///
 /// What is never stored in the log. Every audit entry names a routine, a template, a question or a fact by its id; a
 /// routine's name, a question and an answer stay in their records (audit-log.ts). An answer's words are not even kept
@@ -30,6 +31,7 @@ import { actorOr, auditPutSync, type AuditActor, type AuditRecord } from "./audi
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { rememberWithin } from "./memory-store";
+import { NOT_COUNTED_IN, teamWaits } from "./shop-waits";
 import type { WorkerMember } from "./workers";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -89,8 +91,8 @@ export type RoutineRun = {
   instant: string;
   /// `running` from the claim until the job ends; then how it ended.
   status: RunStatus;
-  /// Why, as a code: `routine_paused`, `team_paused`, `member_off`, `consent_required`, `nothing_to_answer`, or the
-  /// job's own reason for failing.
+  /// Why, as a code: `routine_paused`, `team_paused`, `member_off`, `not_counted_in`, `consent_required`,
+  /// `nothing_to_answer`, or the job's own reason for failing.
   reason?: string;
   member: WorkerMember;
   /// The job's task, for a run that started one.
@@ -351,9 +353,10 @@ const WRITES: Readonly<Record<string, Write>> = {
     const existing = kv.get<RoutineRun>(key);
     if (existing) return ok({ outcome: "recorded", run: existing } satisfies ClaimAnswer);
     // Why the run will not start, in the order a person would ask: was it on, was everyone on, is its member on the
-    // team, did it come in time, and did the switches and the owner allow it.
+    // team, has an operator counted in a shop its owner made (shop-waits.ts), did it come in time, and did the switches
+    // and the owner allow it.
     const held = routine.paused ? "routine_paused" : state.team.paused ? "team_paused" :
-      !memberOn(state.team, routine.member) ? "member_off" : null;
+      !memberOn(state.team, routine.member) ? "member_off" : teamWaits(kv, tenant) ? NOT_COUNTED_IN : null;
     const status: RunStatus = held ? "skipped" : late ? "missed" : gate ? "skipped" : "running";
     const reason = held ?? (late ? null : gate);
     const run: RoutineRun = { routineId, instant: iso(instant), status, ...(reason ? { reason } : {}),

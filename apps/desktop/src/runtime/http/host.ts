@@ -125,7 +125,8 @@ const notYetShow = (): never => {
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
 /** The API's refusals of a shop of one's own that the page has words for; any other is the API not making it. */
-const MAKE_REFUSALS: ReadonlySet<string> = new Set(["sign_ups_closed", "invalid_name", "invalid_owner_name", "unknown_template", "too_many_shops"]);
+const MAKE_REFUSALS: ReadonlySet<string> = new Set(["sign_ups_closed", "invalid_name", "invalid_owner_name", "unknown_template", "too_many_shops",
+  "sign_ups_full"]);
 /** What a shop the person helps at answers about its team: it is its owner's to see and change. */
 const ownerOnly = (shop: ShopRow) => new OpError("owner_only", t("rt.ownerOnly", { owner: shop.owner, shop: shop.name }));
 
@@ -675,10 +676,11 @@ export class HttpHost {
     if (made.kind === "made") {
       this.viewing = made.shop.id;
       await this.refresh().catch(() => undefined);
-      return { shop: made.shop };
+      return { shop: made.shop, ...(made.teamWaits ? { teamWaits: true as const } : {}) };
     }
     if (made.kind !== "refused") throw new OpError(made.kind, t(FAILURE_TEXT[made.kind]));
-    const code: MakeShopRefusal = made.status === 429 ? "rate_limited" : MAKE_REFUSALS.has(made.code) ? (made.code as MakeShopRefusal) : "unavailable";
+    // The day's sign-ups being full is a 429 of its own, said in its own words; any other 429 is this address's limit.
+    const code: MakeShopRefusal = MAKE_REFUSALS.has(made.code) ? (made.code as MakeShopRefusal) : made.status === 429 ? "rate_limited" : "unavailable";
     throw new OpError(code, t(`make.fail.${code}` as Key, { limit: MADE_SHOPS_LIMIT }));
   }
 

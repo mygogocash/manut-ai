@@ -23,6 +23,8 @@
 ///   the row and finishes that shop, never a second one, and the write that lists the shop takes its row off. Making a
 ///   shop is the mirror of deleting one (tenant-data.ts): a deletion keeps the shop on the list until it is finished, and
 ///   a make keeps it off the list until it is finished, and the same request finishes either.
+/// - `self-serve-makes-today`: `{ day, count }`, how many shops people began to make themselves on that Bangkok day, all
+///   accounts together, which `SELF_SERVE_MAKES_PER_DAY` caps.
 ///
 /// Every change runs inside `transactionSync` with the synchronous KV API, as people-store.ts's do, so two changes to
 /// one person's rows or to one code are decided one after the other. Writes need the Worker's `x-admin` header, like
@@ -54,6 +56,19 @@ export const OWNER_CODE_TTL_MS = 15 * 60 * 1000;
 /// second shop and a try that went wrong, and few enough that one sign-in cannot fill the console. A shop that was deleted
 /// no longer counts. Shops an operator made and linked to the account never count: this limits making, not owning.
 export const SHOPS_MADE_LIMIT = 3;
+
+/// How many shops people may begin to make themselves in one Bangkok day, all accounts together (docs/decisions.md, 24 Nov
+/// 2026). `SHOPS_MADE_LIMIT` counts per account, and one mailbox can have as many accounts as it likes, so this is what
+/// bounds what sign-ups add to the console, the pilot gate and the backend in a day, whoever asks. Decided in the same
+/// transaction as the make's slot (`POST /pilot-making/begin`), so racing makes cannot pass it. A make already on its way
+/// was counted when it began, and an operator's make never counts.
+export const SELF_SERVE_MAKES_PER_DAY = 20;
+
+/// The day's count of self-serve makes: one key, which the first make of a new Bangkok day starts again from zero.
+type MakesToday = { day: number; count: number };
+export const MAKES_TODAY_KEY = "self-serve-makes-today";
+const DAY_MS = 24 * 3600 * 1000;
+const BANGKOK_OFFSET_MS = 7 * 3600 * 1000;
 
 /// How long a reserved row counts before its shop is listed. Making a shop takes seconds; a row still not done after this
 /// is a make that failed part way, and stops counting, so a failure never takes one of the person's shops for good.
@@ -178,6 +193,8 @@ const WRITES: Readonly<Record<string, Write>> = {
   /// For a person making their own shop (`subject`) the same transaction reserves one of their made shops for it, or
   /// refuses with 409 `too_many_shops` while `SHOPS_MADE_LIMIT` of their others still count, and writes nothing. A shop
   /// already on its way counts as itself, so finishing it never asks for a second slot. Rows that no longer count are dropped.
+  /// A new one also counts against the day's sign-ups, all accounts together: past `SELF_SERVE_MAKES_PER_DAY` it is
+  /// refused with 429 `sign_ups_full` and `retryAfter`, the whole seconds until the next Bangkok day, and writes nothing.
   "POST /pilot-making/begin": (kv, body, nowMs) => {
     const make = makeOf(body);
     if (!make) return refused(400, "invalid_request");
@@ -187,6 +204,16 @@ const WRITES: Readonly<Record<string, Write>> = {
       const others = countingMade(kv, kv.get<MadeShopRow[]>(keys.made(make.subject)) ?? [], nowMs)
         .filter((row) => row.shop !== tenant);
       if (others.length >= SHOPS_MADE_LIMIT) return refused(409, "too_many_shops");
+      if (!held) {
+        const day = Math.floor((nowMs + BANGKOK_OFFSET_MS) / DAY_MS);
+        const today = kv.get<MakesToday>(MAKES_TODAY_KEY);
+        const count = today?.day === day ? today.count : 0;
+        if (count >= SELF_SERVE_MAKES_PER_DAY) {
+          const retryAfter = Math.ceil(((day + 1) * DAY_MS - BANGKOK_OFFSET_MS - nowMs) / 1000);
+          return { status: 429, body: { error: "sign_ups_full", retryAfter } };
+        }
+        kv.put(MAKES_TODAY_KEY, { day, count: count + 1 } satisfies MakesToday);
+      }
       kv.put(keys.made(make.subject), [...others, { shop: tenant, at: nowMs, done: false }]);
     }
     if (!held) {
@@ -402,15 +429,20 @@ export async function keepOwnerCode(env: Pick<TenantDataEnv, "AUTH">, subject: s
 
 /// Begins a make (`POST /pilot-making/begin`), and for a person making their own shop (`make.subject`) reserves one of
 /// their made shops for it. Answers the tenant to make: `make.tenant`, unless the same shop is already on its way, and then
-/// that one's. `too_many` at the limit of a person's made shops, or null when AuthObject cannot be reached, in which case
-/// nothing is known to have begun: if only the answer was lost, the make is on the journal and asking again finds it.
+/// that one's. `too_many` at the limit of a person's made shops, `{ full }` with the seconds until the next Bangkok day
+/// when the day's sign-ups are full, or null when AuthObject cannot be reached, in which case nothing is known to have
+/// begun: if only the answer was lost, the make is on the journal and asking again finds it.
 export async function beginMake(env: Pick<TenantDataEnv, "AUTH">, make: { tenant: string; name: string; ownerName: string;
-  template: string | null; subject?: string }): Promise<{ tenant: string } | "too_many" | null> {
+  template: string | null; subject?: string }): Promise<{ tenant: string } | "too_many" | { full: number } | null> {
   try {
     const response = await authWrite(env, "/pilot-making/begin", make);
     if (response.status === 409) {
       await response.body?.cancel();
       return "too_many";
+    }
+    if (response.status === 429) {
+      const { retryAfter } = (await response.json()) as { retryAfter?: unknown };
+      return { full: typeof retryAfter === "number" && Number.isSafeInteger(retryAfter) && retryAfter > 0 ? retryAfter : 1 };
     }
     if (!response.ok) {
       await response.body?.cancel();

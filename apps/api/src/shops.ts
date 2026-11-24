@@ -44,6 +44,7 @@ import { operatorIdentity } from "./pilot";
 import type { PilotShopRecord } from "./pilot-store";
 import { newShopRoute, type SelfServeEnv } from "./self-serve";
 import { sessionOpenRefusal } from "./session-limits";
+import { NOT_COUNTED_IN, waitsForOperator } from "./shop-waits";
 import {
   indexShop,
   keepOwnerCode,
@@ -154,8 +155,9 @@ async function listShops(env: PeopleEnv, person: SignedInPerson): Promise<Respon
   const standings = await Promise.all(tenants.map((tenant) => standingAt(env, person, tenant)));
   const shops = standings.filter((standing) => standing !== null).sort((a, b) =>
     ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || compare(a.shop.name, b.shop.name) || compare(a.shop.tenant, b.shop.tenant));
+  // A shop its owner made says while its team waits for an operator to count it in, and why (shop-waits.ts).
   return json({ shops: shops.map(({ shop, role }) => ({ id: shop.tenant, name: shop.name, ownerName: shop.ownerName,
-    role })) });
+    role, ...(waitsForOperator(shop) ? { teamWaits: NOT_COUNTED_IN } : {}) })) });
 }
 
 function compare(a: string, b: string): number {

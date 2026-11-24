@@ -1992,7 +1992,8 @@ A refusal answers `{ "error": code }`, and nothing is kept:
   `missed` and does not run it. Only the latest instant is considered: older ones are not caught up, and a new clock
   never opens with old misses.
 - **Skipped, and why.** A run does not start, and says so as `skipped` with a reason, while the routine is paused
-  (`routine_paused`), everyone is paused (`team_paused`), its member is not on the team (`member_off`), routines or cloud
+  (`routine_paused`), everyone is paused (`team_paused`), its member is not on the team (`member_off`), its shop is one its
+  owner made that no operator has counted in yet (`not_counted_in`, "Making a shop of your own"), routines or cloud
   work are off by the environment's default with no switch set (`routines_off`, `cloud_off`), or the owner has not
   consented to cloud work (`consent_required`). A template's routines start paused, so they record `skipped` at each
   time they would have run until the owner turns them on.
@@ -2161,7 +2162,7 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 
 | Status | Body | When |
 | --- | --- | --- |
-| 201 | `{ shop: { id, name, ownerName, template }, role: "owner", account: { id }, session: ShopSession }` | The shop is made, listed and the person's: `account.id` is what their decisions name, and `session` is this device's owner session, as `POST /v1/shops/session` answers an owner. `template` is the id, or `null` |
+| 201 | `{ shop: { id, name, ownerName, template }, role: "owner", account: { id }, session: ShopSession, teamWaits: "not_counted_in" }` | The shop is made, listed and the person's: `account.id` is what their decisions name, and `session` is this device's owner session, as `POST /v1/shops/session` answers an owner. `template` is the id, or `null`. `teamWaits` says the shop's team waits until an operator counts it in, below |
 | 403 | `{ error: "sign_ups_closed" }` | Sign-ups are not open, above |
 | 401 | `{ error: "unauthorized" }` | No signed-in session: none, the operator key, a shop session (`mos1.`) or a helper's (`mhs1.`). Making a shop takes the person's own sign-in |
 | 405 | `{ error: "method_not_allowed" }` | Anything but `POST`, after the session is checked |
@@ -2170,6 +2171,7 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 | 400 | `{ error: "invalid_name" }`, `{ error: "invalid_owner_name" }` | The shop's name, or the person's own, is empty, longer than 80 characters once its outer spaces are off, or holds a control character (a helper's name's rule, `keptName` in `people-store.ts`) |
 | 400 | `{ error: "unknown_template" }` | `template` is not one of the three, or `null` |
 | 409 | `{ error: "too_many_shops", limit: 3 }` | The account has made 3 shops that still exist |
+| 429 | `{ error: "sign_ups_full", retryAfter }`, with `retry-after` | 20 shops were begun today, all accounts together; `retryAfter` is the whole seconds until the next Bangkok day, below |
 | 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again with the same name, owner name and template finishes that very shop, never a second one ("A make that stops part way", below) |
 
 - **The same shop the operator's route makes.** Both go through `writeNewShop` in `pilot.ts`: the shop's record with
@@ -2189,6 +2191,20 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
   counts, and a reservation whose make failed is given back at once, and taken again by the request that finishes that
   make, or stops counting after 10 minutes if nobody asks again. Shops an operator linked to the account never count: the
   limit is on making, not owning.
+- **At most 20 made in a day, all accounts together.** One mailbox can have as many accounts as it likes (`me+1@`,
+  `me+2@`, a catch-all domain), so the per-account limit alone bounds nothing. The same AuthObject transaction that takes
+  a make's slot counts it against the Bangkok day's makes (`SELF_SERVE_MAKES_PER_DAY` in `shops-store.ts`, under
+  `self-serve-makes-today`) and refuses a new one past 20 with 429 `sign_ups_full`, after the account's own limit and
+  before anything is written. A make already on its way, finished by asking again, was counted when it began; a make that
+  fails still counts, since the cap bounds what can be asked for in a day; an operator's make never counts. The first make
+  of a new Bangkok day counts from zero.
+- **Its team waits until an operator counts it in** (`apps/api/src/shop-waits.ts`). Until an operator adds the shop to
+  the pilot gate's cohort (the console's Count it, `POST /v1/admin/pilot/gate/cohort` with `counted: true`, which sets
+  `addedToCohortAt`), the model gateway refuses its every call with 403 `not_counted_in` before anything is held or sent
+  (`docs/model-gateway.md`), so a worker's job ends failed with that reason, and its routines' runs are `skipped` with
+  `not_counted_in` (Routines, "Skipped, and why"). Nothing such a shop asks for reaches a model: not a routine's topic, not
+  the shop's name, not what the team knows. The answer says so with `teamWaits: "not_counted_in"`, and so does each such
+  shop in `GET /v1/shops`, until it is counted in. Leaving it out again holds its team again.
 - **The pilot gate** lists a self-serve shop and leaves it out of the cohort unless an operator adds it ("The pilot gate",
   above).
 

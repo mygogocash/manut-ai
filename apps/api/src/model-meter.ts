@@ -32,6 +32,7 @@ import { auditPutSync } from "./audit-log";
 import { readJsonBody } from "./body";
 import { ceilSatang, effectiveCap, isMonth, MAX_CAP_SATANG, MILLISATANG_PER_SATANG, bangkokMonth } from "./model-price";
 import { sortableId } from "./pilot-store";
+import { NOT_COUNTED_IN, teamWaits } from "./shop-waits";
 
 const MAX_BODY_BYTES = 16 * 1024;
 /// Records the usage read returns, newest first. Export always reads them all.
@@ -227,6 +228,9 @@ function reserve(storage: DurableObjectStorage, tenant: string, body: Record<str
   }
   const answer = storage.transactionSync(() => {
     const kv = storage.kv;
+    // A shop its owner made spends nothing until an operator counts it in (shop-waits.ts), whatever its cap: refused
+    // before anything is held, and not counted as a refusal at the cap.
+    if (teamWaits(kv, tenant)) return { status: 403, body: { error: NOT_COUNTED_IN } };
     closeExpired(kv, tenant, nowMs);
     const month = bangkokMonth(nowMs);
     const { capSatang } = effectiveCap(kv.get<CapOverride>(keys.cap(tenant)), defaultCapSatang);

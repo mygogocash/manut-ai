@@ -31,7 +31,7 @@ export interface NewShop {
 
 /** What the page needs from a runtime: make the shop, or throw its refusal (`{ code, message }`). */
 export interface ShopMaker {
-  make(shop: NewShop): Promise<{ shop: ShopRow }>;
+  make(shop: NewShop): Promise<{ shop: ShopRow; teamWaits?: true }>;
 }
 
 /** What the line under the form says: the last answer, as data, so the words are the screen's and the rules are tested
@@ -53,9 +53,11 @@ export interface MakeShopState {
   notice: MakeNotice | null;
   /** the shop, once made: the form is then done, and says so */
   made: ShopRow | null;
+  /** the made shop's team waits until Manut AI counts the shop in, as the runtime said: the page says so, and why */
+  waits: boolean;
 }
 
-export const MAKE_START: MakeShopState = { name: "", ownerName: "", kind: null, busy: false, notice: null, made: null };
+export const MAKE_START: MakeShopState = { name: "", ownerName: "", kind: null, busy: false, notice: null, made: null, waits: false };
 
 /** The shop to ask for, or what is still missing, the first missing field first, as the form reads top to bottom. */
 export function shopToMake(s: Pick<MakeShopState, "name" | "ownerName" | "kind">): NewShop | { missing: "name" | "ownerName" | "kind" } {
@@ -102,8 +104,8 @@ export class MakeShopFlow {
     if ("missing" in asked) return void this.set({ notice: { kind: "missing", field: asked.missing } });
     this.set({ busy: true, notice: null });
     try {
-      const { shop } = await this.maker.make(asked);
-      this.set({ busy: false, made: shop, notice: null });
+      const { shop, teamWaits } = await this.maker.make(asked);
+      this.set({ busy: false, made: shop, waits: teamWaits === true, notice: null });
       this.onMade(shop);
     } catch (e) {
       const code = isBridgeError(e) ? e.code : "internal";

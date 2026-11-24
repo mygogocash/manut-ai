@@ -1022,7 +1022,8 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
   // template) is already there, an earlier try stopped part way, and this one finishes that shop: asking again never makes
   // a second one.
   const begun = await beginMake(env, { tenant: newShopTenant(), name, ownerName, template: template?.id ?? null });
-  if (begun === null || begun === "too_many") return json({ error: "shop_unavailable" }, 503);
+  // An operator's make never meets a person's limits; an answer that names one is AuthObject going wrong.
+  if (begun === null || begun === "too_many" || "full" in begun) return json({ error: "shop_unavailable" }, 503);
   const { tenant } = begun;
   if (!(await writeNewShop(env, tenant, { name, ownerName, template }, actor))) {
     return json({ error: "shop_unavailable" }, 503);

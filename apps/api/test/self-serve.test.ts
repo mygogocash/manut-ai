@@ -1,6 +1,6 @@
 import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { templates } from "@manut/shop-templates";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { testOutbox } from "../src/email-sender";
 import worker, { type Env } from "../src/index";
 import type { PeopleRecord } from "../src/people-store";
@@ -14,6 +14,7 @@ import {
   bindings,
   call,
   failingWhere,
+  forgetTodaysMakes,
   joinHelper,
   setupShop,
   signIn,
@@ -92,6 +93,10 @@ async function stored(tenant: string): Promise<{ shop: PilotShopRecord | undefin
   }));
 }
 
+// This file makes more shops than a day's sign-ups allow (shops-store.ts, `SELF_SERVE_MAKES_PER_DAY`), so each test starts
+// with the day's count cleared; the cap itself is tested in self-serve-waits.test.ts.
+beforeEach(forgetTodaysMakes);
+
 describe("making a shop of one's own, while sign-ups are closed", () => {
   it("answers sign_ups_closed to everyone, whatever they send, and reads nothing", async () => {
     const person = await signIn();
@@ -139,7 +144,8 @@ describe("making a shop of one's own", () => {
 
     const tenant = made.body.shop.id;
     // Their own list has it, as theirs, and the console lists it, marked as made by its owner.
-    expect(await listed(person)).toEqual([{ id: tenant, name, ownerName: "Dao", role: "owner" }]);
+    // Its team waits until an operator counts it in, and the list says so.
+    expect(await listed(person)).toEqual([{ id: tenant, name, ownerName: "Dao", role: "owner", teamWaits: "not_counted_in" }]);
     const row = (await consoleShops()).find((shop) => shop.tenant === tenant);
     expect(row).toMatchObject({ tenant, name, ownerName: "Dao", selfServe: true, consent: false });
     expect(row?.template).toBe(id ?? undefined);
@@ -169,7 +175,8 @@ describe("making a shop of one's own", () => {
     expect(person.tenant).toMatch(/^email:/);
     const made = await make(person, shopBody("Khao Hom", "food"));
     expect(made.status).toBe(201);
-    expect(await listed(person)).toEqual([{ id: made.body.shop.id, name: "Khao Hom", ownerName: "Dao", role: "owner" }]);
+    expect(await listed(person)).toEqual([{ id: made.body.shop.id, name: "Khao Hom", ownerName: "Dao", role: "owner",
+      teamWaits: "not_counted_in" }]);
   });
 
   it("links the owner in the very write that makes the shop, with its first session and every entry", async () => {
