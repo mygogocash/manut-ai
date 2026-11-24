@@ -271,6 +271,14 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
   says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same
   way, without waiting.
+- **This Mac's outpost** (`outpost.ts`; `docs/browser-control.md`, "This Mac for the shop the switcher shows"). Register
+  this Mac goes with the owner session of the shop the switcher shows, through the host's owner link
+  (`HttpHost.ownerLink`, `ShopSessions.writeVia`) and the shell's own command, or with the sign-in while the person is in
+  no shops; a shop they help at is refused here with nothing sent. `followSignIn` hears the sign-in and the shop sessions
+  held (`ApiSession.onShops`, which also fires as a sign-out lets the sign-in go) and tells the shell every tenant the
+  person acts for as owner (`outpost_signed_in` with `tenants`): the signed-in tenant and each shop whose owner session is
+  held and has not ended. The shell runs the outpost while the shop its keychain item is for is among them. Calls go one
+  at a time, the latest, never twice the same, and the follower looks again when the first of those sessions ends.
 
 ## A shop the person owns
 
@@ -350,6 +358,10 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
 - **What the tab is shown.** Each sign-in without its account or its sites' addresses, and each outpost, times in
   seconds; an entry this build cannot read is left out. The page keeps none of it in the store or the kept read: the tab
   asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
+- **This Mac's own record.** The shell's view of this Mac for the shop shown (`outpost_status`) carries the id its outpost
+  has on the shop's list, only when this Mac is that shop's outpost, and never its credential. The tab folds that record
+  into this Mac's row (its name, Rename and Remove) and leaves it out of the shop's list; with no id, or an id the list
+  does not have, every outpost is listed.
 
 ## Signing in
 
@@ -428,7 +440,8 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
   item without asking and asks the person before any other program reads it. Ad-hoc signed development builds change
   signature on each build, so macOS may ask once after a rebuild. A second item beside it (account `outpost`) holds this
   Mac's outpost and its credential (`docs/browser-control.md`); only the shell reads it, and no command gives it to the
-  page.
+  page. The page does not even learn which shop it is for: it tells the shell which shops it acts for as owner, and the
+  shell decides (Several shops, above). It learns only the outpost's id, for the shop it asks about.
 - In memory, in the page's one `ApiSession` per origin, while the app runs.
 - Never in localStorage (which holds only `manut.runtime`), a log, an address, or a command line. A session is never
   sent to any origin but its own.

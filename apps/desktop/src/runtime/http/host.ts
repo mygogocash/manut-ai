@@ -796,8 +796,9 @@ export class HttpHost {
 
   /** What the Connections ops need of this host (connections.ts): the shop the switcher shows, the person's role at each
    *  shop, each shop's own session (or the sign-in while they are in no shops), and the host's word on a shop the
-   *  person's place in ended. Nothing the ops send is kept here. */
-  private ownerLink(): OwnerLink {
+   *  person's place in ended. Nothing the ops send is kept here. Registering this Mac as an outpost uses it too
+   *  (outpost.ts), so it goes with the session of the shop the page shows, as a change to the vault does. */
+  ownerLink(): OwnerLink {
     return {
       live: () => {
         if (this.cache.kind === "showing") throw new OpError("offline", t("rt.offline"));
@@ -816,6 +817,8 @@ export class HttpHost {
       inShops: () => !!this.snapshot?.shops,
       read: (shop, path) => (shop === null ? this.session.read(path) : this.shopSessions.read(shop, path)),
       write: (shop, path, body) => (shop === null ? this.session.write(path, body) : this.shopSessions.write(shop, path, body)),
+      writeVia: (shop, path, body, through) =>
+        shop === null ? this.session.writeVia(path, body, through) : this.shopSessions.writeVia(shop, path, body, through),
       writeOnce: async (shop, path, body) => {
         if (shop === null) return this.session.writeOnce(path, body);
         // The shop's session as it is held now, which the read just before opened or renewed (connections.ts). It is sent

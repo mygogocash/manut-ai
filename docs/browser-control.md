@@ -262,7 +262,8 @@ The outpost in the desktop shell, this Mac (24 Nov 2026):
   The page sends it through its session (refreshed as every request is), but through the shell's own command, which
   keeps the credential in the login keychain (account `outpost`, beside the session's item) and gives the page only the
   shop and the outpost's name. No command returns the credential to the page.
-- **The loop, in Rust** (`src-tauri/src/outpost/run.rs`), while the app is open and someone is signed in to that shop:
+- **The loop, in Rust** (`src-tauri/src/outpost/run.rs`), while the app is open and someone who owns that shop is here
+  (signed in to it, or holding its owner session: "This Mac for the shop the switcher shows", below):
   a heartbeat every 30 seconds on a thread of its own, steps asked for every 3 seconds, each run in the outpost's
   browser and each outcome reported once. Every call goes from the shell with the outpost's credential. It stops at
   sign-out, at the owner's Stop (kept in the keychain item, so it stays stopped) and when the app quits; a step it still
@@ -356,6 +357,39 @@ The owner's Connections, on the desktop (24 Nov 2026):
 - **Practice** (`src/runtime/mock/vault.ts`): the canvas's two sign-ins, one of them refused, and two outposts, for the
   person's own shop; Ran Pa Noi, the sample shop they help at, refuses as a helper's session does.
 
+This Mac for the shop the switcher shows (24 Nov 2026). A pilot shop is a tenant the operator made, which no sign-in
+carries; its owner reaches it only through an owner session (`docs/several-shops.md`). So before this, such a shop could
+never have this Mac as its outpost.
+
+- **Registering through the shop shown** (`registerThisMac` in `src/runtime/http/outpost.ts`): Register this Mac goes with
+  the session of the shop the switcher shows, that shop's own owner session (`mos1.`), through the host's owner link as a
+  change to the shop's vault goes; while the person is in no shops it goes with the sign-in, as before. It still goes
+  through the shell's own command (`ShopSessions.writeVia`, as `ApiSession.writeVia` does for the sign-in), so the
+  credential never reaches the page. A shop the person helps at is refused `owner_only` with nothing sent, and its
+  Outposts box says only the owner can use this Mac as its outpost. A person in shops never registers this Mac for their
+  own signed-in tenant. A registration that finds their place in the shop ended says so as a read that found it would.
+  The API needed no change; `apps/api/test/outpost-register.test.ts` walks this path for a pilot shop.
+- **Running for the shop it is registered for** (`followSignIn` there, `Following` in `src-tauri/src/outpost/mod.rs`): the
+  page tells the shell every tenant the person acts for as owner, the one the sign-in is for and each shop whose owner
+  session it holds and that has not ended, each time that changes. The shell, which alone reads the keychain item, runs
+  the outpost while the item's tenant is among them and stops it when it no longer is: at sign-out (as the sign-in is let
+  go, before the API is waited on), when the API ends the session, when an unlinking or a shop gone from the list drops
+  the shop's session, and when the session's 30 days end with nothing opening it again. The page never learns which
+  tenant the item is for. A helper's session never counts. What the page tells goes one call at a time, always the
+  latest, never the same twice, since the shell's commands run side by side.
+- **Which outpost is this Mac**: the shell's `View` gives the page the outpost's id, only for the shop this Mac is the
+  outpost of, and never its credential; for any other shop it says `elsewhere` when this Mac is another shop's outpost
+  ("This Mac works for another shop. Register it here and it works for this shop instead."). Customize › Connections folds
+  this Mac's record into this Mac's row: its name on the shop's list, with Rename and Remove, which ask in that row and
+  say what they did there. The shop's list leaves it out ("No other outposts yet." when it was the only one). Until the
+  shell says which it is, the list shows every outpost, as before.
+- **The credential**: a test (`nothing_the_page_can_be_given_holds_the_credential`) holds every answer a page's command can
+  carry, each view, a registration's answer and a refusal, to no credential. A refusal passes on its code and, for a place
+  in a shop that ended, when it ended, and nothing else.
+- **Unlinking** an owner's account leaves the outposts they registered with the shop, as signing out does: this Mac stops
+  running the shop's outpost once no owner session of the shop is held, and the operator, or the shop's next owner,
+  removes the record.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -448,7 +482,8 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
 - Registering takes the owner's session only, `this_mac` only, and is not behind the outposts' ingress limit (it
   needs a session, and a shop holds 20 outposts).
 - One keychain item, so a Mac is one outpost at a time. Signing out keeps it (the outpost is the shop's machine) and
-  stops the loop; it runs again only for a sign-in to that same shop, unless the owner pressed Stop.
+  stops the loop; it runs again only while someone who owns that same shop is here, signed in to it or holding its owner
+  session, unless the owner pressed Stop.
 - A heartbeat every 30 seconds on its own thread; steps asked for every 3 seconds (what the ingress limit is sized
   for), at once again after an ask that brought five; asks spaced out to a minute while the API cannot be reached.
   Budgets: open 30 seconds, read 15, sign-in 40, a write 45. A report that got no answer is sent again, the same, at
@@ -492,7 +527,26 @@ The owner's Connections (24 Nov 2026), each in `docs/decisions.md`:
 - A rename changes the name only, with registration's rule for a name, and is logged by id, never by the name typed.
 - The new password crosses once: a read first with the same session, then one send with no second try after a 401.
 - This Mac's row stays the shell's, and the list below shows every outpost of the shop, this Mac's own record included:
-  the shell gives the page no outpost id, and a guess by name could rename or remove the wrong machine.
+  the shell gives the page no outpost id, and a guess by name could rename or remove the wrong machine. (Replaced the
+  same day, below: the shell gives the id, and this Mac's record is folded into its row.)
+
+This Mac for the shop the switcher shows (24 Nov 2026), each in `docs/decisions.md`:
+
+- Register goes with the owner session of the shop the switcher shows, or the sign-in while the person is in no shops;
+  a helper's shop is refused with nothing sent, and a person in shops never registers for their own signed-in tenant.
+- The page tells the shell every tenant it acts for as owner and never learns which one the keychain item is for; the
+  shell decides, and leaves a loop the new list still allows running.
+- An owner session counts as live while held and before its end, looked at again at its end and at least once a day; a
+  held session is not asked of the API before the outpost starts at launch, since the host's first read drops one that
+  no longer works.
+- What the page tells the shell goes one call at a time, the latest, never twice; a sign-out stops the outpost before
+  the API is waited on.
+- The `View` gives the outpost's id for the shop this Mac serves, and says `elsewhere` for any other shop, since
+  registering there would move this Mac from the one it serves.
+- This Mac's record is folded into its row, with Rename and Remove; the list leaves it out.
+- A helper's shop shows no button, and the outpost never runs for a helper's session.
+- Unlinking leaves the outpost with the shop; the API does not change.
+- A register refusal passes on its code, and when a place in a shop ended, nothing else.
 
 ## Next slices
 
@@ -524,17 +578,17 @@ The owner's Connections (24 Nov 2026), each in `docs/decisions.md`:
    state already says.
 3. **The rest of Customize › Connections on the desktop** (built 24 Nov 2026: the shop's sign-ins with Change, the
    shop's outposts with Rename and Remove, and the owner's routes for them, above). Left of it: adding a sign-in from the
-   app (the canvas's "Add a sign-in": its sites and its members need a form), changing a sign-in's members, the canvas's
-   left pane (the shop's channels and the AI models), folding this Mac's own record into this Mac's row once the shell
-   gives the page its outpost's id, and this Mac's outpost following the shop the switcher shows (below).
+   app (the canvas's "Add a sign-in": its sites and its members need a form), changing a sign-in's members, and the
+   canvas's left pane (the shop's channels and the AI models). (Built 24 Nov 2026: this Mac's own record folded into its
+   row, and this Mac's outpost for the shop the switcher shows, above.)
 4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
    rotation, `POST /v1/admin/vault/reseal`, `docs/pilot-api.md`);
    changing a sign-in's members; (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
    as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
    page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
-   (the username first), the outpost on Windows and Linux (no keychain support there yet), and the shop sessions of the several-shops switcher (the outpost follows
-   the session the page holds, which is the shop's own signed-in session today).
+   (the username first), and the outpost on Windows and Linux (no keychain support there yet). (Built 24 Nov 2026: the
+   shop sessions of the several-shops switcher, which the outpost now follows, above.)
 
 ## Sources
 

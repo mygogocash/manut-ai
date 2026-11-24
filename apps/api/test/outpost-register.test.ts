@@ -92,6 +92,60 @@ describe("this Mac registering itself through the owner's session", () => {
     expect(JSON.stringify(entries)).not.toContain(credential);
   });
 
+  it("registers a pilot shop's outpost through the owner session the desktop opens for the shop it shows", async () => {
+    // A pilot shop is a tenant the operator made (`pilot:`), which no sign-in carries: its owner reaches it only through
+    // an owner session (docs/several-shops.md). The desktop lists the person's shops with the sign-in, opens the shop with
+    // exactly `{ shop }`, and registers with that session, so the outpost is the shop's and not the person's own tenant's.
+    const shop = await setupShop();
+    expect(shop.tenant).toMatch(/^pilot:/);
+    const person = await signIn();
+    const fon = await ownerOf(shop, person);
+    const listed = await asSession<{ shops: { id: string; role: string }[] }>(person.headers, "GET", "/v1/shops");
+    expect(listed.body.shops).toEqual([expect.objectContaining({ id: shop.tenant, role: "owner" })]);
+    expect(fon.headers.authorization).toMatch(/^Bearer mos1\./);
+
+    const response = await register(fon.headers);
+    expect(response.status).toBe(200);
+    const { tenant, outpost, credential } = (await response.json()) as Registered;
+    expect(tenant).toBe(shop.tenant);
+    expect(credential).toMatch(CREDENTIAL);
+
+    // The owner's Connections, read with the same session, list it by the id the desktop's shell keeps, which is how the
+    // page tells this Mac's own record from the shop's other outposts.
+    const owners = await asSession<{ tenant: string; outposts: Outpost[] }>(fon.headers, "GET", "/v1/vault/outposts");
+    expect(owners.status).toBe(200);
+    expect(owners.body).toEqual({ tenant: shop.tenant, outposts: [outpost] });
+    // Nothing was registered to the person's own tenant, and their own session's Connections list none.
+    expect(await outposts(person.tenant)).toEqual([]);
+    const own = await asSession<{ tenant: string; outposts: Outpost[] }>(person.headers, "GET", "/v1/vault/outposts");
+    expect(own.body).toEqual({ tenant: person.tenant, outposts: [] });
+
+    // The credential beats for the pilot shop only: the same outpost named under the person's own tenant is refused.
+    expect((await heartbeat(shop.tenant, outpost.id, credential)).status).toBe(200);
+    const elsewhere = await heartbeat(person.tenant, outpost.id, credential);
+    expect(elsewhere.status).toBe(401);
+
+    // The shop's log names the owner's linked account; the person's own tenant's log has nothing of it.
+    expect((await auditEntries(shop.tenant)).filter((entry) => entry.action === "outpost.registered"))
+      .toEqual([expect.objectContaining({ actor: { kind: "owner", id: fon.accountId }, subject: { outpostId: outpost.id } })]);
+    expect((await auditEntries(person.tenant)).some((entry) => entry.action.startsWith("outpost."))).toBe(false);
+  });
+
+  it("leaves a pilot shop's outpost with the shop when the operator unlinks its owner's account", async () => {
+    // The outpost is the shop's machine, not the person's session: unlinking ends the person's owner sessions, so the
+    // desktop no longer runs it for that shop (it runs only while a live owner session of the shop is held), but the
+    // record and its credential stay until the operator, or the shop's next owner, removes it.
+    const shop = await setupShop();
+    const fon = await ownerOf(shop, await signIn());
+    const { outpost, credential } = (await (await register(fon.headers)).json()) as Registered;
+    expect((await admin("POST", "/v1/admin/shops/owner/unlink", { tenant: shop.tenant })).status).toBe(200);
+
+    const read = await asSession<{ error: string }>(fon.headers, "GET", "/v1/vault/outposts");
+    expect([read.status, read.body.error]).toEqual([401, "unlinked"]);
+    expect((await outposts(shop.tenant)).map((o) => o.id)).toEqual([outpost.id]);
+    expect((await heartbeat(shop.tenant, outpost.id, credential)).status).toBe(200);
+  });
+
   it("registers with the shop's own signed-in session, logged as the shop's own session", async () => {
     const tenant = `apple:outpost-owner-${crypto.randomUUID()}`;
     const response = await register(await tenantSession(tenant, false));
