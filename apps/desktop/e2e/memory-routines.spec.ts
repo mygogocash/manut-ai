@@ -305,7 +305,10 @@ async function stubShell(page: Page, shops: "one" | "several" = "one") {
           // everything below is the owner's: a helper's session is told so
           if (at.role !== "owner") return reply(403, { error: "owner_only" });
           const shop = world[at.shop];
-          if (key === "GET /v1/tenant/export") return reply(200, { tenant: at.shop, exportedAt: iso(now), tasks: [], schedules: [], attention: [] });
+          // an owner's session reads the task list, its schedules and its attention items (src/runtime/http/shops.ts), not the export
+          if (key === "GET /v1/tasks") return reply(200, { tasks: [] });
+          if (key === "GET /v1/schedules") return reply(200, { schedules: [] });
+          if (key === "GET /v1/inbound/attention") return reply(200, { items: [] });
           if (key === "GET /v1/routines") return reply(200, { tenant: at.shop, team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: shop.routines });
           if (key === "GET /v1/memory") return reply(200, { tenant: at.shop, facts: shop.facts, forgottenCount: 0 });
           if (key === "POST /v1/memory/remember") {

@@ -123,8 +123,9 @@ test.describe("connected to an API that has not opened sign-ups", () => {
               return answer(200, { shops: [] });
             case "/v1/approvals":
               return answer(200, { state: "open", approvals: [] });
-            case "/v1/tenant/export":
-              return answer(200, { tenant: "apple:dao", exportedAt: new Date(now).toISOString(), tasks: [], schedules: [], attention: [] });
+            // the signed-in tenant's tasks are read from the task list (src/runtime/http/shop.ts), not the export
+            case "/v1/tasks":
+              return answer(200, { tasks: [] });
             case "/v1/schedules":
               return answer(200, { schedules: [] });
             case "/v1/inbound/attention":
