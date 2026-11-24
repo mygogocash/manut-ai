@@ -4,8 +4,8 @@
 ///
 /// The owner's say is "It's true" on a waiting fact, Correct, Forget, and "Tell Buddy something to remember"
 /// (docs/pilot-api.md, "Memory"). The owner says it from their own shop session once the operator has linked their
-/// account (docs/several-shops.md, slice 4), and until then the operator relays it through the console. Both make each
-/// change through the same operation of the shop's object. A worker never does these. It proposes what it learned, and
+/// account (docs/several-shops.md, slice 4), and the operator relays it through the console whenever the owner asks
+/// them to, linked or not. Both make each change through the same operation of the shop's object. A worker never does these. It proposes what it learned, and
 /// what a customer said waits for the owner. So `proposeFact` is a function the job flow calls, and no route leads to it.
 
 import { emptyState, usable, type Fact, type FactSource, type Refusal } from "@manut/shop-memory";

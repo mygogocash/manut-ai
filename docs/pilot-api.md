@@ -497,9 +497,9 @@ What Buddy's team knows about each shop: facts, where each came from, and the ow
 the pure functions of `packages/shop-memory` (`@manut/shop-memory`); `apps/api/src/memory-store.ts` stores their
 state, one record per shop in the shop's TenantObject (the facts, the fingerprints of the texts the owner had the team
 forget, and the counter for the next id), and `apps/api/src/memory.ts` has the routes. The owner says their word from
-their own shop session once the operator has linked their account ("The owner's own routes", below); until then an
-operator relays it through the console's Memory page: the owner's own fact, "It's true" on a waiting fact, Correct and
-Forget. A worker never does these: it proposes what it learned (below).
+their own shop session once the operator has linked their account ("The owner's own routes", below), and an operator
+relays it through the console's Memory page whenever the owner asks, linked or not: the owner's own fact, "It's true"
+on a waiting fact, Correct and Forget. A worker never does these: it proposes what it learned (below).
 
 The operator's five routes are under the admin gate, each an exact `ADMIN_METHODS` entry (the shop travels in the query
 or the body). A shop is any valid tenant, as in the audit and model routes; a shop that was deleted is not looked up

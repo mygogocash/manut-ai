@@ -3,7 +3,8 @@
 /// in the shop's TenantObject. This file has four parts:
 ///
 /// - The operator routes, under the admin gate as exact `ADMIN_METHODS` entries: the operator invites, removes and sets
-///   cover on the owner's word, for an owner who has no account linked yet.
+///   cover on the owner's word, whether or not the owner has an account linked (an owner without one, or one who lost
+///   their phone, still asks the operator).
 /// - The owner's own routes for the same changes, from their shop session (docs/several-shops.md, slice 4). Both kinds
 ///   of route make each change through the same operation of the shop's record, so there is one way to make it.
 /// - A helper's own two routes, which need a signed-in session of the lifted auth: joining through an invite, and opening
@@ -153,7 +154,8 @@ function tokenShop(pattern: RegExp, token: string): string | null {
   return shop !== null && isValidTenant(shop) ? shop : null;
 }
 
-/// Who is calling the shop's approval routes. The role comes from the credential alone:
+/// Who is calling a shop's session routes: its approvals, and for its owner its routines, memory, consent, export and
+/// people. The role comes from the credential alone:
 /// - an owner session is the `owner` of the shop it names, while that shop's record holds it under the account linked
 ///   now, unended and unexpired (docs/several-shops.md); the decision names that account (`accountId`);
 /// - a helper session is a `helper` of the shop it names, while that shop's record holds it, unended and unexpired;
@@ -289,10 +291,11 @@ function awayView(state: PeopleState, names: Record<string, string>, nowMs: numb
     inForce: coverAt(state, nowMs) !== null };
 }
 
-/// `GET /v1/admin/people`: the owner, with the account the operator linked and how many devices have it open, every
-/// helper with how many devices they have open, every invite (a pending one with its link to copy), the cover, the notes
-/// helpers passed on, and the helpers who were removed, by name, so what they did can still be read with their name.
-/// The owner's account is shown by its link's id, never by the subject it signs in as.
+/// `GET /v1/admin/people` for the operator and `GET /v1/people` for the owner's session: the owner, with the account the
+/// operator linked and how many devices have it open, every helper with how many devices they have open, every invite (a
+/// pending one with its link to copy), the cover, the notes helpers passed on, and the helpers who were removed, by
+/// name, so what they did can still be read with their name. The owner's account is shown by its link's id, never by
+/// the subject it signs in as.
 async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleView) {
   const { state, names, devices, ownerAccount } = view;
   const nowMs = Date.now();
@@ -461,9 +464,9 @@ async function ownerRoute(request: Request, url: URL, env: PeopleEnv, change: Ch
   }
 }
 
-/// `POST /v1/admin/people/invites` with `{ tenant, name, identity }`: an invite for one LINE account (`{ kind: "line",
-/// id }`) or one email (`{ kind: "email", address }`), for 7 days, once, and its link for the operator to copy. Nothing
-/// is sent.
+/// `POST /v1/admin/people/invites` with `{ tenant, name, identity }`, or the owner's `POST /v1/people/invites` with
+/// `{ name, identity }`: an invite for one LINE account (`{ kind: "line", id }`) or one email (`{ kind: "email",
+/// address }`), for 7 days, once, and its link for whoever asked to copy and send. Nothing is sent.
 async function createInvite(env: PeopleEnv, shop: PilotShopRecord, body: Record<string, unknown>, actor: AuditActor):
   Promise<Response> {
   const name = keptName(body.name);

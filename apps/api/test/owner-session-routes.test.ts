@@ -339,6 +339,13 @@ describe("the shop's consent to cloud work, from the owner's session", () => {
     expect(await asSession(person.headers, "PUT", "/v1/consent/cloud", { enabled: true })).toMatchObject({ status: 200,
       body: { cloudWork: true } });
     expect(await consentOf(person.tenant)).toMatchObject({ cloudWork: true });
+    // It is the lifted route itself, untouched: it still takes a field it never read, which a shop session's is refused.
+    const shopOwner = await linkedOwner(shop);
+    expect(await asSession(person.headers, "PUT", "/v1/consent/cloud", { enabled: false, note: "lifted" }))
+      .toMatchObject({ status: 200, body: { cloudWork: false } });
+    expect(await asSession(shopOwner.headers, "PUT", "/v1/consent/cloud", { enabled: false, note: "lifted" })).toEqual({
+      status: 400, body: { error: "invalid_request" } });
+    expect(await consentOf(shop.tenant)).toMatchObject({ cloudWork: true });
   });
 });
 

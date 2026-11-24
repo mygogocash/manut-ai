@@ -41,10 +41,10 @@ decided one after the other. A refusal writes nothing.
 
 People exist for pilot shops today: the routes need the shop's record, which gives the shop's name for the invite and
 its answers. The owner manages helpers from their own shop session once the operator has linked their account
-(`docs/several-shops.md`, slice 4): `GET /v1/people`, and inviting, revoking, removing and cover under it. Until then the
-operator console does the same on the owner's word, as it does for memory. Both make each change through the same
-operation of the shop's record, so there is one way to make it, and the log says who: the owner's linked account by its
-id, or the operator's Access identity.
+(`docs/several-shops.md`, slice 4): `GET /v1/people`, and inviting, revoking, removing and cover under it. The operator
+console does the same on the owner's word, for an owner with no account linked or one who asks, as it does for memory.
+Both make each change through the same operation of the shop's record, so there is one way to make it, and the log says
+who: the owner's linked account by its id, or the operator's Access identity.
 
 ## Who is deciding: the role comes from the session
 

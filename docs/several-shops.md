@@ -92,7 +92,10 @@ From slice 4, the same owner session also reaches, each for its own shop only:
 Consent and the export keep the lifted routes' own paths, so an app reads them the same way whichever session it holds;
 only a token shaped as a shop session is answered differently there. Every change names the linked account by its id
 in the shop's audit log, never its subject, an email or a name. Bodies are exact, and a shop, a tenant or a role named
-in a body or a query is refused rather than read. Nothing here sends anything to a customer, posts, pays or deletes.
+in a body or a query is refused rather than read. Nothing here sends anything to a customer, posts or pays, and none of
+it deletes the shop's data: the only things that go are what the owner asks to go, one fact's words when they say
+Forget, and a helper's sessions when they remove the helper. The operator keeps every one of these routes, to relay the
+owner's word, linked or not.
 
 Why a session per shop, rather than one session naming a shop in each request: the shop is fixed when the session is
 made, from the person's verified link, so no later request can point it at another shop; unlinking or removal ends

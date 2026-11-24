@@ -44,8 +44,8 @@ const MAX_FIELD = 256;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SYSTEM: AuditActor = { kind: "system" };
 
-/// The shop's owner in the rules' state. In the pilot the owner has no account: whoever holds the shop's own session or
-/// its owner's link is the owner (docs/people.md, "Who is deciding").
+/// The shop's owner in the rules' state, one id whatever they act through: the shop's own session, its owner's link, or
+/// an owner session of the account the operator linked (`ownerAccount` below; docs/people.md, "Who is deciding").
 export const OWNER_ID = "owner";
 
 /// One helper session: whose it is, which of their sessions in the rules' state, when it runs out, and when it was
