@@ -20,11 +20,13 @@
 // settles each request once with the role the session carries (`answer`; never a second way round, CLAUDE.md). The
 // answer names the option by what it does and the revision the card showed, nothing else; the card is marked answered
 // only when the API says so; and after any answer the shop is read again, so the card closes in the API's words
-// ("Already decided by Mint at 19:42"). The owner's other everyday writes are the team's: pausing and resuming one of its
-// routines, and Pause everyone, each through apps/api's own routines routes with the viewed shop's own owner session
-// (`change`). None of them sends, posts, pays or deletes anything. Every other write answers `not_yet`, Buddy's chat
-// included, which would need a model. While only a kept read is shown every write answers `offline` instead (an ask
-// from it: "Connect to answer this"), and none is queued.
+// ("Already decided by Mint at 19:42"). The owner's other everyday writes are the team's: making, pausing, resuming and removing
+// one of its routines, and Pause everyone, each through apps/api's own routines routes with the owner session of the shop the
+// change names (`change`; the shop its list was read for, never the one viewed by then). What the team knows has its own ops,
+// with the same session and rules (memory.ts). None of them sends, posts or pays, the only deletions are the owner's own (a
+// routine, a fact), which the page asks about once more first, and a request still settles only through the decide route. Every
+// other write answers `not_yet`, Buddy's chat included, which would need a model. While only a kept read is shown every write
+// answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
 //
 // Several shops (docs/several-shops.md). Each read starts with the person's shops (`GET /v1/shops`, with the sign-in).
 // When they are in none, the signed-in tenant is read as above, as before shops. When they are in some, each shop is read
