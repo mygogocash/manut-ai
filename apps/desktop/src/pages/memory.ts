@@ -25,8 +25,8 @@ export function withoutFact(facts: readonly MemoryFact[], id: string): MemoryFac
 }
 
 /** "3 November", or "3 November 2025" when it is not this year. English writes the day first, as the canvas does and as the
- *  shop's own country does. */
-function dayText(sec: number, nowMs: number): string {
+ *  shop's own country does. Connections says its days the same way (connections.ts). */
+export function dayText(sec: number, nowMs: number): string {
   const at = new Date(sec * 1000);
   const thisYear = at.getFullYear() === new Date(nowMs).getFullYear();
   return at.toLocaleDateString(lang() === "en" ? "en-GB" : locale(), { day: "numeric", month: "long", ...(thisYear ? {} : { year: "numeric" }) });

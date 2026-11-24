@@ -70,6 +70,7 @@ const API_AUDIT_ACTIONS = [
   "outpost.registered",
   "outpost.removed",
   "outpost.credential_rotated",
+  "outpost.renamed",
   "browser_step.queued",
   "browser_step.fetched",
   "browser_step.reported",

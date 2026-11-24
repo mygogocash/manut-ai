@@ -863,7 +863,8 @@ They share one ingress limit per source address (`OUTPOST_LIMITER`, 300 a minute
 the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Retry-After: 60`, and without a working
 limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`. One route under `/v1/outposts/` is the
 owner's instead: the desktop registering this Mac (`POST /v1/outposts/register`), which takes the owner's session and
-no outpost's credential.
+no outpost's credential. The owner's Connections take the owner's session too, under `/v1/vault/` ("The owner's vault
+and outposts", below): the shop's sign-ins and outposts, a new password, and renaming or removing an outpost.
 
 ```ts
 type SignIn = {
@@ -1032,6 +1033,43 @@ ingress limit: it needs a session, and a shop holds 20 outposts at most.
 | 400 | `invalid_name` | Blank once trimmed, over 80 characters, or holding a control character |
 | 409 | `too_many_outposts` | The shop already has 20 |
 | 503 | `people_unavailable` | The shop's record could not be read to check a shop session |
+
+### The owner's vault and outposts
+
+The desktop's Customize › Connections reads and changes the shop's vault with the owner's own session
+(`ownerVaultRoute` in `apps/api/src/browser-control.ts`; `docs/browser-control.md`, "The owner's Connections"). Each
+route takes, as `Authorization: Bearer`, an owner session of the shop's linked account (`mos1.`) or the shop's own
+signed-in session, and the shop is the session's: no route reads one from a body or a query.
+
+| Method and path | Body | Answer |
+| --- | --- | --- |
+| `GET /v1/vault/sign-ins` | none | `{ tenant, signIns: SignIn[] }`, as the operator's list answers it for the shop |
+| `POST /v1/vault/sign-ins/password` | `{ signInId, password }` | `{ signIn: SignIn }`, with the new password sealed; a broken sign-in is `working` again |
+| `GET /v1/vault/outposts` | none | `{ tenant, outposts: Outpost[] }`, as the operator's list answers it for the shop |
+| `POST /v1/vault/outposts/rename` | `{ outpostId, name }` | `{ outpost: Outpost }` with the name trimmed; nothing else about it changes |
+| `POST /v1/vault/outposts/remove` | `{ outpostId }` | `{ removed: true, outpostId, stepsRefused, grantsRefused }`, as the operator's removal answers |
+
+- **Who and in what order.** Who is asking comes first (401 `unauthorized` for no session, the operator's key or an
+  outpost's credential; 401 `unlinked` with `unlinkedAt`, or `removed`; 503 `people_unavailable` when the session cannot
+  be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`), then the
+  query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and the body. So a caller with no session learns
+  nothing about a route, not even its method.
+- **Exact.** A body is exactly the keys above, each a string. Anything more, a `tenant`, a `shop` or a `role` above all,
+  or a value of another type answers 400 `invalid_request`; a body that is not JSON, 400 `invalid_json`.
+- **Through the vault's own operations.** A new password goes through the vault's `/sign-ins/password`, the operator's,
+  and is sealed the same way; a removal is the operator's removal, so the outpost's credential stops working at once and
+  its waiting steps and grants are refused in the same step; a rename is the vault's `/outposts/rename`, with the name
+  rule registration uses. The vault's own refusals pass through: 400 `invalid_password` (not text of 1 to 1,024
+  characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or holding a control character), 404
+  `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found` (also another shop's, or one
+  already removed), 503 `vault_not_configured` and `vault_unavailable`.
+- **The password** goes from the body straight into the vault. It is never kept, logged or answered: the answer is the
+  sign-in's public view, which says only when its password was set.
+- **The log.** `signin.password_replaced`, `outpost.renamed` and `outpost.removed`, by `{ kind: "owner", id }` (the linked
+  account's id, or `owner-session` for the shop's own session), with the record's id only, never a password or the name
+  typed. A refusal writes nothing, as the operator's do not.
+- Like the registration, none of these is behind the outposts' ingress limit: each needs a session first. The owner adds
+  no sign-in and registers no cloud outpost here; an operator does.
 
 ### `POST /v1/outposts/heartbeat`
 
@@ -1835,7 +1873,7 @@ One signed-in person can own some pilot shops and help at others (`docs/several-
 record decides who may act for it and as what; each person's index of their shops, in AuthObject, only finds them. To act
 for a shop, a person asks for a **shop session** for it with their signed-in session, and uses that shop session on the
 approval routes ("Approvals for a session", "Deciding from a session") and, as its owner, on the shop's routines, memory,
-consent, export and people ("What an owner session reaches", below). No route takes a shop or a role from a request
+consent, export, people and vault ("What an owner session reaches", below). No route takes a shop or a role from a request
 where the session decides it.
 
 ### A person's own routes
@@ -1874,9 +1912,11 @@ type ShopSession = {
 
 An owner session is accepted by `GET /v1/approvals` and `POST /v1/approvals/{requestId}/decision`, by the team's
 routines (`/v1/routines`, `/v1/team/*`, "Routines", above), by what the team knows (`/v1/memory`, "Memory", above), by the
-shop's consent and export ("What an owner session reaches", below) and by the shop's people (`/v1/people`, "Helpers",
-above), for its own shop only, as the owner: those routes take who is calling from one place (`callerOf`), and the
-owner's rule is that the routines, the memory, the consent, the export and the people are theirs. Decisions and changes
+shop's consent and export ("What an owner session reaches", below), by the shop's people (`/v1/people`, "Helpers",
+above) and by the shop's vault and outposts (`/v1/vault/*`, "The owner's vault and outposts", above, and
+`POST /v1/outposts/register`), for its own shop only, as the owner: those routes take who is calling from one place
+(`callerOf`), and the owner's rule is that the routines, the memory, the consent, the export, the people and the vault
+are theirs. Decisions and changes
 name the linked account's id. `POST /v1/approvals/{requestId}/pass-on` answers it 403 `not_a_helper`, as it answers the
 shop's own session. Every other session route answers it 401, so it never acts as the shop: not the tasks, deletion,
 connections or schedules. The shop keeps only its SHA-256. Unlinking the owner's account ends every owner session of that shop at once, and from then

@@ -1245,3 +1245,25 @@ describe("the shops overview's words", () => {
     expect(shopsWords.columns.activeUnknown).toBe("Active");
   });
 });
+
+// The owner's own Connections (docs/browser-control.md, "The owner's Connections"): from the desktop, the owner types a new
+// password into the vault, renames an outpost or removes one. The log names the owner and the record by id only.
+describe("the audit log's words for the owner's Connections", () => {
+  const owner = { kind: "owner" as const, id: "owner-1" };
+  const shopSession = { kind: "owner" as const, id: "owner-session" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>) => auditSentence(entry(overrides), "Fon");
+
+  it("says what the owner's password, rename and removal did, by the owner, and never by a raw name", () => {
+    expect(said({ actor: owner, action: "signin.password_replaced", subject: { signInId: "s1" } }))
+      .toBe("Fon (linked account owner-1) replaced a site sign-in's password.");
+    expect(said({ actor: owner, action: "outpost.renamed", subject: { outpostId: "o1" } }))
+      .toBe("Fon (linked account owner-1) renamed an outpost.");
+    expect(said({ actor: shopSession, action: "outpost.removed", subject: { outpostId: "o1" } }))
+      .toBe("Fon (the shop's own session) removed an outpost.");
+    const sentence = said({ actor: owner, action: "outpost.renamed" });
+    expect(sentence).not.toContain("outpost.renamed");
+    expect(sentence).not.toMatch(/\bdid\b/);
+  });
+});

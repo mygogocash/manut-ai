@@ -1617,6 +1617,9 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     const { log } = await everything();
     expect(has(log, "outpost.registered", by("owner", "owner-fon"))).toBe(true);
     expect(has(log, "outpost.registered", by("operator"))).toBe(true);
+    // The owner's own Connections: a rename from the linked account, and a removal from the shop's own session.
+    expect(has(log, "outpost.renamed", by("owner", "owner-fon"))).toBe(true);
+    expect(has(log, "outpost.removed", by("owner", "owner-session"))).toBe(true);
     expect(has(log, "signin.created", by("operator"))).toBe(true);
     expect(has(log, "vault.resealed", (entry) => by("operator")(entry) && Object.keys(entry.subject).length === 0)).toBe(true);
   });
@@ -1634,7 +1637,8 @@ describe("the fake's sample audit log, for what the API added this week", () => 
       "outpost browser_step.reported failed sign_in_refused",
     ]);
     expect(has(log, "signin.broken", by("worker"))).toBe(true);
-    expect(has(log, "signin.password_replaced", by("operator"))).toBe(true);
+    // The owner typed the new password herself, from her own Connections.
+    expect(has(log, "signin.password_replaced", by("owner", "owner-fon"))).toBe(true);
   });
 
   it("tells each browser write's story in order, from the ask to how it settled, each ending its own way", async () => {

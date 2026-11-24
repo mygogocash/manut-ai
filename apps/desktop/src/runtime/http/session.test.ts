@@ -647,3 +647,38 @@ describe("the shop sessions kept with the sign-in (docs/several-shops.md)", () =
     expect(api.to("POST", "/v1/auth/refresh")).toEqual([]);
   });
 });
+
+describe("a write whose body crosses once (the owner's new password for a site)", () => {
+  const PATH = "/v1/vault/sign-ins/password";
+  const BODY = { signInId: "signin-1", password: "made-up-pw-31c9" };
+
+  it("refreshes a token near its end first, as every request does, then sends the body once", async () => {
+    const start = clock().now();
+    const { session, api, c } = setup(stored(start));
+    api.on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) }).on("POST", PATH, { status: 200, json: { signIn: { id: "signin-1" } } });
+    c.pass(3600_000 - REFRESH_EARLY_MS + 1);
+    expect(await session.writeOnce(PATH, BODY)).toEqual({ kind: "ok", status: 200, json: { signIn: { id: "signin-1" } } });
+    expect(api.calls.map((r) => [r.method, r.path, r.bearer, r.body])).toEqual([
+      ["POST", "/v1/auth/refresh", null, { refreshToken: "refresh-1", deviceId: "device-1" }],
+      ["POST", PATH, "access-2", BODY],
+    ]);
+    noTokenInUrls(api);
+  });
+
+  it("does not send it again after a 401, though the API refused the first before reading it", async () => {
+    const { session, api } = setup(stored(clock().now()));
+    api.on("POST", PATH, { status: 401, json: { error: "unauthorized" } }).on("POST", "/v1/auth/refresh", { status: 200, json: tokens(2) });
+    expect(await session.writeOnce(PATH, BODY)).toEqual({ kind: "refused", status: 401, code: "unauthorized", json: { error: "unauthorized" } });
+    expect(api.calls.map((r) => [r.path, r.body])).toEqual([[PATH, BODY]]);
+    // The session is not taken for ended on that alone: the next request refreshes, or signs out, as usual.
+    expect(session.state.kind).toBe("signed_in");
+  });
+
+  it("ends the session at once for a removed helper, as every request does, without a second send", async () => {
+    const { session, api } = setup(stored(clock().now()));
+    api.on("POST", PATH, { status: 401, json: { error: "removed", removedAt: "2026-11-22T14:05:00.000Z" } });
+    expect((await session.writeOnce(PATH, BODY)).kind).toBe("refused");
+    expect(api.to("POST", PATH)).toHaveLength(1);
+    expect(session.state).toEqual({ kind: "signed_out", ended: "expired" });
+  });
+});

@@ -6,6 +6,7 @@
 // and changes only who answers: the in-process runtime (`src/runtime/mock`) today, a real backend later. An op group
 // a runtime does not have is declared in its `RuntimeCapabilities`, not removed from here.
 
+import type { ConnectionOps } from "../runtime/connections";
 import type { MemoryOps } from "../runtime/memory";
 import type { MissionOps } from "../runtime/mission";
 import type { RoutineOps } from "../runtime/routines";
@@ -361,8 +362,9 @@ export interface FolderResumeResult extends FolderOpenResult {
  *  the bridge created with `folder.open`; without it an op acts on the bot's main chat. `id` is the frame's
  *  own request id, so no op takes a param named `id` (accounts use `account`). Mission Control's ops (jobs, the activity
  *  log, Pause everyone) are declared in `src/runtime/mission.ts` and joined here, and so are the Customize page's (what the
- *  team knows, in `src/runtime/memory.ts`, and its routines, in `src/runtime/routines.ts`). */
-export interface OpMap extends MissionOps, MemoryOps, RoutineOps {
+ *  team knows, in `src/runtime/memory.ts`, its routines, in `src/runtime/routines.ts`, and its Connections tab, the shop's
+ *  vault and outposts, in `src/runtime/connections.ts`). */
+export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps {
   hello: { params: Record<string, never>; result: HelloResult };
   "bots.list": { params: Record<string, never>; result: { bots: Bot[] } };
   "chat.open": { params: { bot: string; existing_only?: boolean }; result: ChatOpenResult };

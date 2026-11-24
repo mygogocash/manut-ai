@@ -1702,8 +1702,9 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     said(6 * day, fon, "owner.session_ended", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
   ];
 
-  // Browser control: the vault's sign-in, an operator's cloud outpost, Fon registering her own Mac, the vault sealed again after a
-  // key rotation, and one sign-in's story: the site refused the saved password, the worker said so, an operator typed a new one.
+  // Browser control: the vault's sign-in, an operator's cloud outpost, Fon registering her own Mac and then renaming it, an old Mac
+  // removed, the vault sealed again after a key rotation, and one sign-in's story: the site refused the saved password, the worker
+  // said so, and Fon typed a new one.
   const signIn = SAMPLE_SIGN_IN;
   const grant = { taskId: "task_signin", attemptId: sampleUuid(7), signInId: signIn, grantId: "grant_1" };
   const signInStep = { stepId: "step_signin", outpostId: SAMPLE_MAC_OUTPOST, ...grant };
@@ -1711,6 +1712,11 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     said(9 * day - 10, named, "signin.created", { signInId: signIn }),
     said(9 * day - 20, named, "outpost.registered", { outpostId: SAMPLE_CLOUD_OUTPOST }),
     said(2 * day - 40, fon, "outpost.registered", { outpostId: SAMPLE_MAC_OUTPOST }),
+    // From Customize > Connections, Fon renamed her Mac's outpost; the log keeps its id, never the name she typed. An old Mac the
+    // shop's own session registered eight days ago was removed from there yesterday.
+    said(2 * day - 45, fon, "outpost.renamed", { outpostId: SAMPLE_MAC_OUTPOST }),
+    said(8 * day, ownSession, "outpost.registered", { outpostId: SAMPLE_OLD_OUTPOST }),
+    said(day + 50, ownSession, "outpost.removed", { outpostId: SAMPLE_OLD_OUTPOST }),
     said(day + 40, named, "vault.resealed", {}),
     said(1100, worker(7), "signin.requested", { ...grant, outpostId: SAMPLE_MAC_OUTPOST }),
     said(1099.5, worker(7), "browser_step.queued", signInStep),
@@ -1718,7 +1724,8 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     said(1098.8, mac, "signin.redeemed", { ...grant, outpostId: SAMPLE_MAC_OUTPOST }),
     said(1098.5, mac, "browser_step.reported", signInStep, "failed", "sign_in_refused"),
     said(1098, worker(7), "signin.broken", { taskId: grant.taskId, attemptId: grant.attemptId, signInId: signIn }),
-    said(1050, named, "signin.password_replaced", { signInId: signIn }),
+    // Fon typed the new password herself, from Customize > Connections.
+    said(1050, fon, "signin.password_replaced", { signInId: signIn }),
   ];
 
   // Browser writes (docs/pilot-api.md, "Submitting through a browser"), each told as the API writes it: the worker's ask, the
@@ -1771,6 +1778,8 @@ const sampleUuid = (n: number) => `${(0x6f9d1f00 + n).toString(16)}-9a7e-4a53-9a
 /// The outposts of Baan Mali's sample vault: Fon's own Mac, registered from her desktop app, and a cloud outpost an operator made.
 const SAMPLE_MAC_OUTPOST = "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b";
 const SAMPLE_CLOUD_OUTPOST = "c0a1d2e3-7a81-4b92-9c03-1d2e3f4a5b6c";
+/// An older Mac of Fon's, registered from the shop's own session and since removed.
+const SAMPLE_OLD_OUTPOST = "d3e4f5a6-8b92-4c03-8d14-2e3f4a5b6c7d";
 /// The one site sign-in in the sample vault, whose members' forms the sample writes submit.
 const SAMPLE_SIGN_IN = "5d0e7c3a-2b41-4f6e-9a1d-7e8f9a0b1c2d";
 

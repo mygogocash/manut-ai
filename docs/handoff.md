@@ -90,6 +90,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's API was redeployed on 24 Nov at 08:39 from `601192a`, with re-sealing the vault (API `d7d4e7f2`);
   smoke-tested: the route is behind Access. To rotate the vault's key, follow `docs/pilot-api.md`, "Re-sealing the
   vault after a key rotation": keep `CRED_KEY_PREVIOUS` until every shop answers `remaining` 0.
+- Dev was redeployed on 24 Nov at 09:53 from `87891ce`, with the owner's vault and outposts routes (pages `704d2f11`,
+  API `3c019e17`); smoke-tested: `/v1/vault/sign-ins` and `/v1/vault/outposts` answer 401 without a session.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -99,8 +101,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    were sent on again at 09:35 in their own threads (`t3_thread_send`, as for item 9), once a new helper (item 25)
    showed the limit no longer held. They run, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
-     Opus);
+   - item 19, this Mac's outpost following the shop sessions, registered and run for the shop the switcher shows
+     (`feat/outpost-shop-sessions`, Opus; a Rust build, after item 25's);
    - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
      jobs from the API, routines' pause and Pause everyone (`feat/connected-whole-shop`, Opus);
    - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet);
@@ -112,7 +114,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    (the outpost's step channel), 23 (re-sealing the vault after a key rotation, `POST /v1/admin/vault/reseal`, and a
    worker's list of its sign-ins), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
+   9 (desktop leftovers), 21 (Customize › Connections for the owner: sign-ins with Change, outposts with Rename and
+   Remove), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
    project blocked, keys in changes; `docs/code-editor.md`), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
@@ -120,8 +123,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - item 19 (the outpost following the shop sessions), after 21, which changes the same outpost code; the cloud
-     outpost after that (it may cost money).
+   - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
    - items 25 to 29, the code editor's states left for later that need no owner (`docs/code-editor.md`), as slots
      free; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash

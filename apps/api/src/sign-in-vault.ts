@@ -21,6 +21,7 @@
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
 /// - `POST /outposts/remove` `{ outpostId }`: removes it, refusing every grant still waiting for it.
+/// - `POST /outposts/rename` `{ outpostId, name }`: a new name for it, and nothing else changed.
 /// - `POST /outposts/credential` `{ outpostId, credentialHash }`: a new credential's digest in place of the old one.
 /// - `POST /sign-in-grants` `{ signInId, outpostId, member, taskId, attemptId }`: a grant, for a member named on a
 ///   working sign-in, to an online outpost, for 60 seconds.
@@ -355,6 +356,8 @@ export async function signInVaultRoute(
       return outpostHeartbeat(storage, tenant, body);
     case "POST /outposts/remove":
       return removeOutpost(storage, tenant, body);
+    case "POST /outposts/rename":
+      return renameOutpost(storage, tenant, body);
     case "POST /outposts/credential":
       return rotateCredential(storage, tenant, body);
     case "POST /sign-in-grants":
@@ -528,10 +531,17 @@ export async function wipeSignInVault(storage: DurableObjectStorage):
     stepsWiped: steps.length };
 }
 
+/// An outpost's name as people write it, trimmed: one to 80 characters, Thai counted the same as English. The same rule
+/// at registration and at a rename, so a name one takes the other takes too.
+function outpostNameOf(value: unknown): string | null {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name.length > 0 && [...name].length <= MAX_NAME && !CONTROL.test(name) ? name : null;
+}
+
 async function registerOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
   Promise<Response> {
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (name.length === 0 || [...name].length > MAX_NAME || CONTROL.test(name)) return json({ error: "invalid_name" }, 400);
+  const name = outpostNameOf(body.name);
+  if (name === null) return json({ error: "invalid_name" }, 400);
   const kind = OUTPOST_KINDS.find((known) => known === body.kind);
   if (!kind) return json({ error: "invalid_kind" }, 400);
   if (typeof body.credentialHash !== "string" || !DIGEST.test(body.credentialHash)) {
@@ -590,6 +600,21 @@ async function removeOutpost(storage: DurableObjectStorage, tenant: string, body
   await storage.delete(keys.outpost(outpost.id));
   return json({ removed: true, outpostId: outpost.id, stepsRefused: Object.keys(steps).length,
     grantsRefused: Object.keys(grants).length });
+}
+
+/// A new name, so the owner can tell their machines apart: every Mac registers itself as "This Mac", which says the
+/// wrong thing on any other Mac. Only the name changes. The credential, the last heartbeat, and every grant and step
+/// waiting for the outpost stay as they were, so renaming never stops its work. The read and the write wait only on this
+/// object's own storage, so a heartbeat cannot land between them and be undone.
+async function renameOutpost(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const name = outpostNameOf(body.name);
+  if (name === null) return json({ error: "invalid_name" }, 400);
+  const outpost = await outpostOf(storage, tenant, body.outpostId);
+  if (!outpost) return json(OUTPOST_NOT_FOUND, 404);
+  const renamed: OutpostRecord = { ...outpost, name };
+  await storage.put(keys.outpost(outpost.id), renamed);
+  return json({ outpost: outpostView(renamed, Date.now()) });
 }
 
 /// A new credential's digest in place of the old one, so the old credential stops working at once. The outpost reads
