@@ -716,6 +716,11 @@ Under the admin gate, as an exact `ADMIN_METHODS` entry. The body is `{ tenant, 
 A reply is Nam's job, a post Pim's and a summary Ton's. A job asked of another member is passed to the member whose job
 it is, and the answer says who did it.
 
+While the shop's team is paused (Pause everyone), nothing new starts: 409 `team_paused`. A member the shop's template
+did not turn on takes no job: 409 `member_off`. These are the same rules, with the same reasons, as a routine's run
+that will not start, so "Starts nothing new" holds whoever starts the job. A team that cannot be read answers 503
+`unavailable`, and nothing starts.
+
 ```ts
 type WorkerRun = {
   taskId: string;                      // the job's own task: in the shop's export, gone with the shop's deletion
