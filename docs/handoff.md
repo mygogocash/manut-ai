@@ -87,15 +87,16 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - the desktop's switcher, combined Needs you and per-shop offline cache (`docs/several-shops.md`, slice 2,
-     `feat/desktop-shop-switcher`, Opus);
    - item 13, an owner's shop session on the shop's memory, consent and export, and the owner managing helpers
      (`feat/owner-session-routes`, Opus, API);
    - item 16, a shop whose deletion stopped stays listed and can be finished (`fix/deletion-stays-listed`, Opus);
    - item 18, the code editor's states for developers: a gap list, then the states that need no owner
-     (`feat/code-editor-states`, Opus).
+     (`feat/code-editor-states`, Opus);
+   - item 12, the desktop showing a browser write word for word, then its outpost submitting it
+     (`feat/outpost-submits`, Opus; a Rust build in the shared target folder).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
-   notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, 8a
+   notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
+   desktop's switcher with one Needs you across the shops (several shops, slice 2), 8a
    (the outpost's step channel), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
    9 (desktop leftovers), 11 (the Playwright follow-up, #17: every spec runs, in six
@@ -105,10 +106,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 15 (a helper's new device, after 13); item 17 (an installable web app) waits for owners' sign-in, as there is
      no owner home page yet;
-   - item 12, the desktop running an approved submit step, after the switcher (both change the approvals cards). It
-     must first make the desktop's cards and
-     notifications show a write's whole text, and offer Approve on a notification only when all of it shows: a
-     `send_reply` write is a `reply`, which a helper and a notification may approve. The cloud outpost after that.
+   - item 19, the outpost following the shop sessions, after 12; the cloud outpost after that.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
