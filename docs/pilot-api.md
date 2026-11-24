@@ -1379,13 +1379,15 @@ covers the console and the operator routes. They are two Workers, both deployed 
   it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
 - **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
   matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`,
-  `/delete/{token}`, `/join/{token}`, `/ops`).
+  `/delete/{token}`, `/join/{token}`, `/ops`). The owner's web app has a page of its own at `/app/`, with its manifest,
+  icons and service worker (`docs/web-app.md`).
   `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
   call the API that served them and a deploy never ships a missing or stale web app.
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
   `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
-  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
+  `Cache-Control: no-store`, since each carries a token in its path. Everything under `/app/` gets a policy of its own
+  that runs only this origin's scripts (`src/app-policy.ts`). They never apply to the API's answers.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's

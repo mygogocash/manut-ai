@@ -11,6 +11,8 @@
 /// Every request runs this script first (`run_worker_first`), so the headers below are set here, in code the
 /// tests run, rather than through a `_headers` file whose reach depends on how a request arrived.
 
+import { APP_POLICY } from "./app-policy";
+
 export type PagesEnv = { ASSETS: Fetcher };
 
 /// No page may be framed, so no other site can trick an owner into pressing Approve; the token in an approval
@@ -27,10 +29,13 @@ const PAGE_HEADERS: Record<string, string> = {
 /// opens carries the invite's token in its path, so no browser or proxy keeps any of them.
 const NEVER_STORED = /^\/(approve|delete|join)\//;
 
+const APP_PAGES = /^\/app(\/|$)/;
+
 export function withPageHeaders(response: Response, pathname: string): Response {
   const answer = new Response(response.body, response);
   for (const [name, value] of Object.entries(PAGE_HEADERS)) answer.headers.set(name, value);
   if (NEVER_STORED.test(pathname)) answer.headers.set("cache-control", "no-store");
+  if (APP_PAGES.test(pathname)) answer.headers.set("content-security-policy", APP_POLICY);
   return answer;
 }
 
