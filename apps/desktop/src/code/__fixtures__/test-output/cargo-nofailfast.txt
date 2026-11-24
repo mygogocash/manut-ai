@@ -1,0 +1,40 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (/work/shop/target/debug/build/shop/7e5ed53f4448eba3/out/shop-7e5ed53f4448eba3)
+
+running 3 tests
+test tests::handles_a_refund ... ignored
+test tests::builds_the_payload ... ok
+test tests::locks_the_amount_into_the_qr ... FAILED
+
+failures:
+
+---- tests::locks_the_amount_into_the_qr stdout ----
+
+thread 'tests::locks_the_amount_into_the_qr' (49458767) panicked at src/lib.rs:13:41:
+assertion `left == right` failed
+  left: "59.00"
+ right: "590.00"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::locks_the_amount_into_the_qr
+
+test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+     Running tests/checkout.rs (/work/shop/target/debug/build/shop/4eb414e69d66cbde/out/checkout-4eb414e69d66cbde)
+
+running 1 test
+test adds_the_items_up ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shop
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 1 target failed:
+    `--lib`
