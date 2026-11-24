@@ -693,7 +693,8 @@ describe("browser steps", () => {
     const mac = await outpost(s.tenant);
     await queued(await attempt(s, "nam"), { kind: "read", outpostId: mac.id });
     expect(await stepRecords(s.tenant)).toHaveLength(1);
-    const deleted = await SELF.fetch(`${API}/v1/tenant/data`, { method: "DELETE", headers: await tenantSession(s.tenant) });
+    const deleted = await sourceWorker.fetch(`${API}/v1/tenant/data`, { method: "DELETE",
+      headers: await tenantSession(s.tenant) });
     expect(deleted.status).toBe(200);
     expect(await stepRecords(s.tenant)).toEqual([]);
   });

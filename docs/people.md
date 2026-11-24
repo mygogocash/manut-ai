@@ -202,6 +202,10 @@ routes.
   sign-ins of a helper the owner removed are not listed.
 - **A device is a session.** The backend cannot tell two devices from one device that signed in twice, so signing in
   again (after signing out, or after the 30 days) is a new device here, as it is in `devices` of the people list.
+- **Ten at a time, and twenty a minute.** A helper keeps at most 10 sessions open: an eleventh ends their oldest, as
+  signing out of that device would. And one person opens at most 20 shop sessions a minute, so a helper signing in over
+  and over can neither grow the shop's record nor flood the owner with new devices (`docs/pilot-api.md`, "Opening a shop
+  session").
 - **A join counts.** Accepting an invite is the helper's first device, so the owner hears of it as of any other.
 - **Not in the export.** The sign-ins are not part of the shop's export. The audit log, which the export carries, already
   has each one as `helper.joined` or `helper.session_opened`, with the time.

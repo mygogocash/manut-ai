@@ -268,6 +268,10 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 - A person's index has no cap on its rows. An operator's link, an invite an operator made, and a shop the person made
   themselves add one each, and the last is capped at 3 made shops that still exist ("A shop its owner makes"), so what a
   person does alone grows it by 3 rows at most.
+- A shop's people record keeps at most 10 open sessions for each helper and 10 for the owner's account: opening one more
+  ends the oldest, as signing out of that device would. And one person opens at most 20 shop sessions a minute, on
+  `POST /v1/shops/session` and `POST /v1/people/session` together, whatever address they come from (`docs/pilot-api.md`,
+  "Opening a shop session"). Someone who uses more than 10 devices at once signs one of them in again now and then.
 
 ## Known limits of the desktop slice
 

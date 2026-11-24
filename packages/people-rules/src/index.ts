@@ -129,16 +129,30 @@ export function acceptInvite(
   return { answer: "joined", shop: state.shop, state: next, helper };
 }
 
+/// The most sessions one helper has open at once, one for each device they use. Opening one more ends their oldest, so a
+/// helper who signs in over and over never grows the shop's record, and the owner hears of each new device without being
+/// flooded by them.
+export const MAX_HELPER_SESSIONS = 10;
+
 export type SessionResult =
-  | { readonly ok: true; readonly state: PeopleState }
+  | { readonly ok: true; readonly state: PeopleState; readonly ended: readonly string[] }
   | { readonly ok: false; readonly refused: "not_a_helper" };
 
-/// A joined helper signs in again on another device: the new session is recorded so removal can end it.
+/// A joined helper signs in again on another device: the new session is recorded so removal can end it. Past
+/// `MAX_HELPER_SESSIONS`, their oldest sessions end, as if they had signed out of those devices, and `ended` names them so
+/// the caller can end each one. A session already open is recorded once, and ends nothing.
 export function addSession(state: PeopleState, helperId: string, sessionId: string): SessionResult {
-  if (!state.helpers.some((h) => h.id === helperId)) return { ok: false, refused: "not_a_helper" };
+  const helper = state.helpers.find((h) => h.id === helperId);
+  if (!helper) return { ok: false, refused: "not_a_helper" };
+  if (helper.sessions.includes(sessionId)) return { ok: true, state, ended: [] };
+  // The list is in the order the sessions were opened, so the oldest are first.
+  const opened = [...helper.sessions, sessionId];
+  const ended = opened.slice(0, Math.max(0, opened.length - MAX_HELPER_SESSIONS));
+  const sessions = opened.slice(ended.length);
   return {
     ok: true,
-    state: { ...state, helpers: state.helpers.map((h) => (h.id === helperId && !h.sessions.includes(sessionId) ? { ...h, sessions: [...h.sessions, sessionId] } : h)) },
+    state: { ...state, helpers: state.helpers.map((h) => (h.id === helperId ? { ...h, sessions } : h)) },
+    ended,
   };
 }
 

@@ -113,6 +113,22 @@
         "limit": 10,
         "period": 60
       }
+    },
+    {
+      "name": "TENANT_DELETE_LIMITER",
+      "namespace_id": "2026100445",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "SHOP_SESSION_LIMITER",
+      "namespace_id": "2026100449",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
     }
   ],
   "durable_objects": {

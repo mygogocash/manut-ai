@@ -43,6 +43,7 @@ import type { OwnerAccount } from "./people-store";
 import { operatorIdentity } from "./pilot";
 import type { PilotShopRecord } from "./pilot-store";
 import { newShopRoute, type SelfServeEnv } from "./self-serve";
+import { sessionOpenRefusal } from "./session-limits";
 import {
   indexShop,
   keepOwnerCode,
@@ -164,8 +165,11 @@ function compare(a: string, b: string): number {
 /// `POST /v1/shops/session` with exactly `{ shop }`: a shop session for one shop the person is in, as the role the
 /// shop's record gives them. The owner's session if their account is the one linked, else a helper's if they are one;
 /// a shop they are in neither way answers 404, as a shop that does not exist does. A body with any other field, a role
-/// above all, is refused.
+/// above all, is refused. Every try counts against the person's own limit on opening sessions before the body or the shop
+/// is read (session-limits.ts), so the web app's `POST /v1/web/shops`, which opens its sessions here, counts too.
 async function openShop(request: Request, env: PeopleEnv, person: SignedInPerson): Promise<Response> {
+  const limited = await sessionOpenRefusal(env, person.tenant);
+  if (limited) return limited;
   const body = await exactBody(request, ["shop"]);
   if (body instanceof Response) return body;
   if (!isValidTenant(body.shop)) return json({ error: "invalid_request" }, 400);

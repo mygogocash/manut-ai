@@ -1691,6 +1691,27 @@ Every sign-in's session, Apple's and email's alike, lives in the one global auth
   rows and every maker's made shops 128 rows at a time, and a make looks for itself on the journal of makes the same way.
   A person's own deletion reads neither index: a person's tenant (`apple:` or `email:`) never names a shop, which the
   Worker always makes as `pilot:<uuid>`.
+- **A person's own deletion is limited per address.** `DELETE /v1/tenant/data` counts every try against
+  `TENANT_DELETE_LIMITER`, 10 a minute per source address, in the ingress gate before the session is read: 429
+  `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding. Per address, not per person:
+  the deletion ends every session of the person, so each try needs a sign-in of its own, and only an address is shared by
+  tries from many accounts.
+
+### Opening a shop session
+
+`POST /v1/shops/session` and `POST /v1/people/session` (below), and through the first the web app's `POST /v1/web/shops`,
+each write a session into a shop's one people record, and a helper's is a new device the owner is told of. So:
+
+- **Every try counts per person.** Once the signed-in person is known, and before the body or the shop is read, each try
+  counts against `SHOP_SESSION_LIMITER`, 20 a minute per person (the sign-in's verified subject), one bucket for both
+  routes whatever address the person comes from (`apps/api/src/session-limits.ts`): 429 `rate_limited` with
+  `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding. A shop the web app cannot open a session for is
+  listed with `ready: false`, as before.
+- **Ten sessions at a time.** A helper keeps at most 10 helper sessions open (`MAX_HELPER_SESSIONS` in
+  `@manut/people-rules`), and the owner's linked account at most 10 owner sessions (`MAX_OWNER_SESSIONS`,
+  `people-store.ts`). Opening one more ends the oldest, as signing out of that device would: it leaves the shop's record,
+  and its token is answered 401 from then on, so that device opens the shop again with the sign-in. The audit log keeps
+  the opening's entry; the session that ended has none of its own.
 
 ## Helpers
 
@@ -1830,7 +1851,8 @@ Only `joined` and `wrong_account` name the shop.
 
 **`POST /v1/people/session`** with `{ shop }` (the shop's id from `joined`) and a signed-in session: a helper opens the
 shop on another device, as the identity they joined with. 200 `{ shop, helper, session: HelperSession }`; anyone else,
-for any shop or none, 403 `not_a_helper`.
+for any shop or none, 403 `not_a_helper`. Every try counts against the person's own limit on opening sessions, and an
+eleventh open session ends the helper's oldest ("Opening a shop session", above).
 
 ```ts
 type HelperSession = {
@@ -2083,7 +2105,8 @@ type Shops = { shops: { id: string; name: string; ownerName: string; role: "owne
 
 **`POST /v1/shops/session`** with exactly `{ shop }`: a shop session for one shop. The shop's record decides the role:
 the owner's session while the person's account is the one linked to the shop, else a helper's while a current helper has
-the identity they signed in with.
+the identity they signed in with. Every try counts against the person's own limit (429 `rate_limited`), and an eleventh
+open session ends the oldest ("Opening a shop session", in "Sessions" above).
 
 | Status | Body | When |
 | --- | --- | --- |
