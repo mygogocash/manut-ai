@@ -5,7 +5,7 @@
 // The project is a folder the Code page lists (a session's or an added one). `KitPanelView` takes everything it shows
 // as props and uses no hooks, so a test can draw it; `KitPanel` reads the stores.
 import "./kit.css";
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { KIT_LEVELS, type KitLevel } from "@manut/member-grants";
 import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
@@ -14,8 +14,9 @@ import { getStore } from "../state/store";
 import { useNow } from "../elsewhere/useNow";
 import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
+import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
-import { LanesView, openLane, useLaneRows, type LaneRow } from "./Lanes";
+import { LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
 import { MainMoved } from "./MainMoved";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
@@ -38,6 +39,9 @@ export interface KitPanelProps {
   /** The time now (ms), for the time each working lane's turn has run. */
   now?: number;
   onOpenLane?: (id: string) => void;
+  /** The lane whose Bring it back is open, the link on its line that opens it, and what a lane's row shows under its line
+   *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
+  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below">;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
@@ -57,7 +61,7 @@ export function KitPanelView(p: KitPanelProps) {
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
-      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} />
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} {...p.laneBack} />
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
         {p.projects.length > 1 ? (
@@ -164,6 +168,16 @@ export function codeProjects(cwds: readonly string[], added: readonly string[]):
   return [...new Set([...groups, ...added.map(pathKey)])].filter(Boolean);
 }
 
+/** What a lane's row shows under its line: Bring it back's panel, while the person has it open and the lane can still bring its
+ *  files back. */
+function LaneBelow({ row, backOpen, onCloseBack }: { row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
+  // a lane that can no longer bring its files back (a turn began, or they were brought back) shuts its panel for good
+  useEffect(() => {
+    if (backOpen && !row.canBringBack) onCloseBack();
+  }, [backOpen, row.canBringBack, onCloseBack]);
+  return backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null;
+}
+
 export function KitPanel() {
   const ss = useSessions();
   const prefs = useFolderPrefs();
@@ -176,6 +190,9 @@ export function KitPanel() {
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
   const lanes = useLaneRows(root);
+  // the lane whose Bring it back panel is open: one at a time
+  const [backFor, setBackFor] = useState<string | null>(null);
+  const closeBack = useCallback(() => setBackFor(null), []);
   // the time a turn has run moves while one does
   const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
   if (!root) return null;
@@ -193,6 +210,11 @@ export function KitPanel() {
         lanes={lanes}
         now={now}
         onOpenLane={openLane}
+        laneBack={{
+          backOpen: backFor,
+          onBack: (id) => setBackFor((now) => (now === id ? null : id)),
+          below: (row) => <LaneBelow row={row} backOpen={backFor === row.id} onCloseBack={closeBack} />,
+        }}
         onProject={setPicked}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
         onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}

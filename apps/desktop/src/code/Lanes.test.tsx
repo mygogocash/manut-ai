@@ -193,3 +193,71 @@ describe("the Lanes band", () => {
     expect(out).toContain("Kit 询问：Which year should customers see: 2026 or 2569?");
   });
 });
+
+describe("Bring it back on a lane's row", () => {
+  /** A lane a Rewind took back to a named message, whose files the shell still keeps. */
+  const rewound = feed([...tests(true, PASS14), { event: "rewound", id: "m-1", text: "PromptPay QR at checkout" }]);
+  const row = (over: Partial<LaneRowInput> = {}) => laneRowOf(input({ lane: rewound, canBringBack: true, ...over }), (ms) => `at ${ms}`);
+  const under = (r: LaneRow) => createElement("p", { "data-testid": "under" }, `under ${r.id}`);
+  const view = (rows: LaneRow[], over: Partial<Parameters<typeof LanesView>[0]> = {}) => ({ rows, now: 100_000, onOpen: vi.fn(), ...over });
+
+  it("is offered on a lane a Rewind put the files back for, while the shell keeps them", () => {
+    expect(row()).toMatchObject({ status: "reverted", canBringBack: true });
+    expect(row().line).toEqual({ key: "lane.line.revertedFiles", vars: { time: "at 1002" } });
+  });
+
+  it("is not offered once the shell keeps nothing, after the agent's own rewind (which left the files), or on a lane that is not reverted", () => {
+    expect(row({ canBringBack: false }).canBringBack).toBe(false);
+    expect(row({ canBringBack: undefined }).canBringBack).toBe(false);
+    expect(row({ lane: feed([...tests(true, PASS14), { event: "rewound" }]) })).toMatchObject({ status: "reverted", canBringBack: false });
+    expect(laneRowOf(input({ lane: feed(tests(true, PASS14)), canBringBack: true })).canBringBack).toBe(false);
+    // a turn that is running replaces Reverted, so nothing is offered then either
+    expect(row({ turn: { status: "Reading the code", startedAt: 1 } })).toMatchObject({ status: "working", canBringBack: false });
+  });
+
+  it("reads by its tests after the files came back, and says the chat did not", () => {
+    const back = feed([...tests(true, PASS14), { event: "rewound", id: "m-1" }, { event: "files.back" }]);
+    const r = laneRowOf(input({ lane: back, canBringBack: false }), (ms) => `at ${ms}`);
+    expect(r.status).toBe("not_run");
+    expect(r.line).toEqual({ key: "lane.line.broughtBack", vars: { time: "at 1003" } });
+    expect(r.canBringBack).toBe(false);
+    expect(html([r])).toContain("You brought the files back at");
+    expect(html([r])).toContain("The chat stays where the rewind left it.");
+    expect(html([r])).not.toContain("Bring it back");
+  });
+
+  it("draws Bring it back at the end of the Reverted line, and opens or shuts the panel from it", () => {
+    const onBack = vi.fn();
+    const link = (open: string | null) => drawn(LanesView(view([row()], { onBack, backOpen: open }))).filter((e) => e.props["data-testid"] === "lane-back");
+    expect(link(null)).toHaveLength(1);
+    expect(link(null)[0].props["aria-expanded"]).toBe(false);
+    expect(link("s1")[0].props["aria-expanded"]).toBe(true);
+    (link(null)[0].props.onClick as () => void)();
+    expect(onBack).toHaveBeenCalledWith("s1");
+    const out = renderToString(createElement(LanesView, view([row()])));
+    expect(out).toContain("You rewound this turn at at 1002. The files are back as they were.");
+    expect(out).toContain("Bring it back");
+  });
+
+  it("draws no link for a lane that cannot bring its files back", () => {
+    const rows = [row({ canBringBack: false }), laneRowOf(input({ lane: feed(tests(true, PASS14)) }))];
+    expect(drawn(LanesView(view(rows))).filter((e) => e.props["data-testid"] === "lane-back")).toHaveLength(0);
+    expect(renderToString(createElement(LanesView, view(rows)))).not.toContain("Bring it back");
+  });
+
+  it("draws what the page puts under each row, under that row", () => {
+    const other = laneRowOf(input({ rec: { id: "s2", agent: "claude", cwd: "/x", status: "running", promptTitle: "Thai date format", lane: { name: "kit/thai-date-format", base: "main" } }, live: { branch: "kit/thai-date-format" } }));
+    const els = drawn(LanesView(view([row(), other], { below: under })));
+    expect(els.filter((e) => e.props["data-testid"] === "under").map((e) => e.props.children)).toEqual(["under s1", "under s2"]);
+  });
+
+  it("says its words in Korean, Japanese and Chinese", () => {
+    for (const [lang, words] of [["ko", "되살리기"], ["ja", "復元する"], ["zh", "找回"]] as const) {
+      setLang(lang);
+      expect(renderToString(createElement(LanesView, view([row()]))), lang).toContain(words);
+    }
+    setLang("zh");
+    const back = laneRowOf(input({ lane: feed([...tests(true, PASS14), { event: "rewound", id: "m-1" }, { event: "files.back" }]) }), (ms) => `at ${ms}`);
+    expect(html([back])).toContain("聊天仍停留在回退后的位置。");
+  });
+});
