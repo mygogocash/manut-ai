@@ -57,6 +57,8 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `bots.info` | counts from the read |
 | every other read the screens make | empty (`elsewhere.list`, `plugins.list`, `runs.*`, …), or `not_found` for one thing asked by name |
 | `approval.respond` | the person's answer, through the decide route (Answering approvals, below) |
+| `connections.list` | the shop's site sign-ins and outposts, `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts`, for Customize › Connections (below) |
+| `connections.password`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins/password`, `/v1/vault/outposts/rename` or `/remove` (below) |
 | every other write (`chat.send`, `automations.pause`, …) | refused with `not_yet` and a translated "Not yet: Connected mode reads and answers approvals for now." Nothing is sent to the API. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
@@ -264,6 +266,23 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
   says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same
   way, without waiting.
+
+## Customize › Connections
+
+The shop's vault and outposts, for its owner (`src/runtime/http/connections.ts`; the routes are `docs/pilot-api.md`, "The
+owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner's Connections").
+
+- **Which session.** `connections.list` reads the shop the switcher shows, with that shop's own session, or the signed-in
+  tenant with the sign-in while the person is in no shops. Each change names the shop its row was read for (`shop`,
+  null for the signed-in tenant) and goes with that shop's session. A shop the person helps at is refused `owner_only`
+  here with nothing sent, and nothing is sent while only a kept read is shown (`offline`).
+- **The password** crosses once: the same session reads the sign-ins first, so it is one that works and the shop still
+  has the sign-in (`sign_in_not_found` otherwise, with nothing sent), then one send with no second try after a 401
+  (`ApiSession.writeOnce`, or the shop's session as it is held), which answers `not_saved` and asks the owner to type it
+  again. A password the vault would not take (empty, over 1,024 characters) is refused here first.
+- **What the tab is shown.** Each sign-in without its account or its sites' addresses, and each outpost, times in
+  seconds; an entry this build cannot read is left out. The page keeps none of it in the store or the kept read: the tab
+  asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
 
 ## Signing in
 
