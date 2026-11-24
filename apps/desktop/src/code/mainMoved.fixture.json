@@ -1,0 +1,15 @@
+{
+  "branch": "kit/promptpay-qr",
+  "base": "main",
+  "tip": "b3c5d7e9f1a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0",
+  "fork": "a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f3a5b7",
+  "ours": ["src/checkout.tsx", "src/promptpay.ts", "tests/checkout.test.ts"],
+  "theirs": ["README.md", "src/checkout.tsx"],
+  "both": [
+    {
+      "path": "src/checkout.tsx",
+      "theirs": "diff --git a/src/checkout.tsx b/src/checkout.tsx\n--- a/src/checkout.tsx\n+++ b/src/checkout.tsx\n@@ -1,2 +1,2 @@\n-const total = 1;\n+const total = 1 + shipping;\n",
+      "ours": "diff --git a/src/checkout.tsx b/src/checkout.tsx\n--- a/src/checkout.tsx\n+++ b/src/checkout.tsx\n@@ -1,2 +1,2 @@\n-const total = 1;\n+const total = qr(1);\n"
+    }
+  ]
+}

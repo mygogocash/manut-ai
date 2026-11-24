@@ -14,6 +14,7 @@ mod fg;
 mod folder_open;
 mod gh_me;
 mod git_branch;
+mod git_moved;
 mod past_chats;
 mod platform;
 mod outpost;
@@ -674,6 +675,16 @@ async fn session_branch(cwd: String) -> Result<String, String> {
     Ok(git_branch::branch(std::path::Path::new(&cwd)))
 }
 
+/// The main branch moving while Kit worked, for the Code page's lane (src/code/moved.ts): the folder's branch, the branch it
+/// started from, and the files each side changed since. Runs the person's own `git`, read-only (git_moved.rs); null when
+/// there is nothing to say. `show` are the paths whose two diffs are wanted.
+#[tauri::command]
+async fn session_main_moved(cwd: String, base: Option<String>, show: Option<Vec<String>>) -> Result<Option<git_moved::MainMoved>, String> {
+    tauri::async_runtime::spawn_blocking(move || git_moved::main_moved(std::path::Path::new(&cwd), base.as_deref(), &show.unwrap_or_default()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Remove session `session`'s saved files (it was closed).
 #[tauri::command]
 async fn session_files_remove(session: String) -> Result<(), String> {
@@ -1063,6 +1074,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         term_share_prune,
         term_share_take,
         session_branch,
+        session_main_moved,
         chat_close_all,
         session_reveal,
         session_open_terminal,
