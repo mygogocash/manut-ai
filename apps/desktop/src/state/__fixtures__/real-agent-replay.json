@@ -148,6 +148,8 @@
         }
       },
       {
+        "command": "mkdir -p d1",
+        "declined": true,
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -182,10 +184,12 @@
         }
       },
       {
+        "command": "mkdir -p d2",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "(Bash completed with no output)",
         "tool_id": "toolu_01KEoLDizWi3KX4EjChZfdCM"
       },
       {
@@ -216,10 +220,12 @@
         }
       },
       {
+        "command": "mkdir -p d3",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "(Bash completed with no output)",
         "tool_id": "toolu_01B9E4gY7ynGvFJWweh1yJzf"
       },
       {
@@ -229,10 +235,12 @@
         "tool_id": "toolu_017sccq98YdbYaENzbhbguqv"
       },
       {
+        "command": "mkdir -p d4",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "(Bash completed with no output)",
         "tool_id": "toolu_017sccq98YdbYaENzbhbguqv"
       },
       {
@@ -480,10 +488,12 @@
         "tool_id": "toolu_014dHZEUUDr7kJAoSJeDV9R9"
       },
       {
+        "command": "sleep 25; echo finished",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": false,
+        "output": "<tool_use_error>Blocked: sleep 25 followed by: echo finished. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.</tool_use_error>",
         "tool_id": "toolu_014dHZEUUDr7kJAoSJeDV9R9"
       },
       {
@@ -497,10 +507,12 @@
         "event": "session.info"
       },
       {
+        "command": "sleep 25; echo finished",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "Command running in background with ID: bkt0wjjli. Output is being written to: /private/tmp/claude-501/-Users-khope-sionic-ai--hermes-profiles-kami-cache-scratch-sessions-qa-work-claude/cc1528d7-7f0b-4bc2-b2fc-ec1e178e4f57/tasks/bkt0wjjli.output. You will be notified when it completes. To check interim output, use Read on that file path.",
         "tool_id": "toolu_01S3Zisz6bNmbbNzvbQNR9sQ"
       },
       {
@@ -724,10 +736,12 @@
         }
       },
       {
+        "command": "definitely-not-a-command-xyz --flag; echo \"exit=$?\"",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "(eval):1: command not found: definitely-not-a-command-xyz\nexit=127",
         "tool_id": "toolu_01Qx26NFejnG3STuY9X7Gdm9"
       },
       {
@@ -961,6 +975,8 @@
         }
       },
       {
+        "command": "python3 -c \"import time; time.sleep(30); print('finished')\"",
+        "declined": true,
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -2106,10 +2122,12 @@
         "tool_id": "toolu_01NZoigmQBaPqhgfL1NytZHL"
       },
       {
+        "command": "cd \"/w/proj\" && python3 -c \"import calc; print(calc.add(2,3), calc.sub(5,2), calc.mul(4,3), repr(calc.add.__doc__))\"",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "5 3 12 'Return the sum of a and b.'",
         "tool_id": "toolu_01NZoigmQBaPqhgfL1NytZHL"
       },
       {
@@ -2903,10 +2921,12 @@
         }
       },
       {
+        "command": "python3 -c \"import time; time.sleep(30); print('finished again')\"",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": false,
+        "output": "Exit code 137",
         "tool_id": "toolu_016BwKwoPjmXksxMHiprfpAS"
       },
       {
@@ -3203,10 +3223,12 @@
         "tool_id": "toolu_0189DPFxsiNhvpaMvBxYZkQV"
       },
       {
+        "command": "sleep 25",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": false,
+        "output": "<tool_use_error>Blocked: standalone sleep 25. To wait for a condition, use Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.</tool_use_error>",
         "tool_id": "toolu_0189DPFxsiNhvpaMvBxYZkQV"
       },
       {
@@ -3558,10 +3580,12 @@
         "event": "session.info"
       },
       {
+        "command": "sleep 45; echo late > y.txt",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "Command running in background with ID: be81yjkbr. Output is being written to: /tmp/claude/-w-proj/d8b680ad-0288-4cce-ae83-b658c006b59c/tasks/be81yjkbr.output. You will be notified when it completes. To check interim output, use Read on that file path.",
         "tool_id": "toolu_017ziwU5LiHWrEb3vmsmrbqu"
       },
       {
@@ -3853,6 +3877,8 @@
         }
       },
       {
+        "command": "mkdir -p d1",
+        "declined": true,
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -3883,6 +3909,7 @@
         }
       },
       {
+        "command": "mkdir -p d2",
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -3913,6 +3940,7 @@
         }
       },
       {
+        "command": "mkdir -p d3",
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -3943,6 +3971,7 @@
         }
       },
       {
+        "command": "mkdir -p d4",
         "event": "tool.end",
         "ms": 0,
         "name": "",
@@ -4449,10 +4478,12 @@
         }
       },
       {
+        "command": "definitely-not-a-command-xyz --flag",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": false,
+        "output": "zsh:1: command not found: definitely-not-a-command-xyz\n",
         "tool_id": "exec-057fbf1e-ff57-41e8-ae76-f1da73b6b568"
       },
       {
@@ -7848,10 +7879,12 @@
         "tool_id": "toolu_01PKUmj2w7zBnDLEvHYMB2sh"
       },
       {
+        "command": "sleep 8",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "(Bash completed with no output)",
         "tool_id": "toolu_01PKUmj2w7zBnDLEvHYMB2sh"
       },
       {
@@ -10400,10 +10433,12 @@
         "text": "2 + 2 = 4.\n"
       },
       {
+        "command": "sleep 12; echo slow",
         "event": "tool.end",
         "ms": 11927,
         "name": "",
         "ok": true,
+        "output": "slow\n",
         "tool_id": "exec-cf413606-2ef5-4618-9589-d1258f15f63d"
       },
       {
@@ -10486,10 +10521,12 @@
         "outcome": "done"
       },
       {
+        "command": "sleep 40; echo late",
         "event": "tool.end",
         "ms": 39887,
         "name": "",
         "ok": true,
+        "output": "late\n",
         "tool_id": "exec-54fee470-b15c-41fa-bca7-76d78c82fc5c"
       }
     ],
@@ -10557,10 +10594,12 @@
         "tool_id": "toolu_01DKZ22PApLbSz3snmDqoTky"
       },
       {
+        "command": "ls -la /w/proj; cat /w/proj/calc.py; echo ---; cat /w/proj/README.md",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "total 16\ndrwxr-xr-x@    4 person@example.com  wheel    128 Nov 13 10:14 .\ndrwxrwxrwt  1012 root             wheel  32384 Nov 13 10:15 ..\n-rw-r--r--@    1 person@example.com  wheel     27 Nov 13 10:14 README.md\n-rw-r--r--@    1 person@example.com  wheel     66 Nov 13 10:14 calc.py\ndef add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n---\n# calc\n\nTiny math helpers.",
         "tool_id": "toolu_01DKZ22PApLbSz3snmDqoTky"
       },
       {
@@ -10757,10 +10796,12 @@
         "tool_id": "toolu_01H8BY57a8daGwFcWGkiANbX"
       },
       {
+        "command": "ls -la && echo '--- calc.py' && cat calc.py 2>/dev/null; echo '--- README.md' && cat README.md 2>/dev/null",
         "event": "tool.end",
         "ms": 0,
         "name": "",
         "ok": true,
+        "output": "total 16\ndrwxr-xr-x@    4 person@example.com  wheel    128 Nov 13 10:24 .\ndrwxrwxrwt  1010 root             wheel  32320 Nov 13 10:24 ..\n-rw-r--r--@    1 person@example.com  wheel     27 Nov 13 10:24 README.md\n-rw-r--r--@    1 person@example.com  wheel     66 Nov 13 10:24 calc.py\n--- calc.py\ndef add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n--- README.md\n# calc\n\nTiny math helpers.",
         "tool_id": "toolu_01H8BY57a8daGwFcWGkiANbX"
       },
       {

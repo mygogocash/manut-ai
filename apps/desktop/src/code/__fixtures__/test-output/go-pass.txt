@@ -1,0 +1,3 @@
+ok  	example.com/shop/checkout	0.003s
+ok  	example.com/shop/promptpay	(cached)
+?   	example.com/shop/cmd/shop	[no test files]

@@ -1,0 +1,24 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+rootdir: /work/shop
+plugins: anyio-4.12.1
+collected 5 items
+
+test_checkout.py ..                                                      [ 40%]
+test_promptpay.py .Fs                                                    [100%]
+
+=================================== FAILURES ===================================
+______________________ test_locks_the_amount_into_the_qr _______________________
+
+    def test_locks_the_amount_into_the_qr():
+>       assert qr("590") == "590.00"
+E       AssertionError: assert '59.00' == '590.00'
+E         
+E         - 590.00
+E         ?   -
+E         + 59.00
+
+test_promptpay.py:10: AssertionError
+=========================== short test summary info ============================
+FAILED test_promptpay.py::test_locks_the_amount_into_the_qr - AssertionError:...
+==================== 1 failed, 3 passed, 1 skipped in 0.02s ====================

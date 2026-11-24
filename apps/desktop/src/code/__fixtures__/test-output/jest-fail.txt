@@ -1,0 +1,23 @@
+PASS tests/checkout.test.ts
+FAIL tests/promptpay.test.ts
+  ● promptpay › locks the amount into the QR
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "590.00"
+    Received: "59.00"
+
+      4 |   it("builds the payload", () => { expect(qr("100")).toBe("100"); });
+      5 |   it("locks the amount into the QR", () => {
+    > 6 |     expect(qr("590")).toBe("590.00");
+        |                       ^
+      7 |   });
+      8 | });
+
+      at Object.<anonymous> (tests/promptpay.test.ts:6:23)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       1 failed, 1 skipped, 12 passed, 14 total
+Snapshots:   0 total
+Time:        2.341 s
+Ran all test suites.

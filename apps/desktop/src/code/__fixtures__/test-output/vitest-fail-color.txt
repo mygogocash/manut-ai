@@ -1,0 +1,34 @@
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/work/shop[39m
+
+ [32m✓[39m tests/checkout.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 1[2mms[22m[39m
+ [31m❯[39m tests/promptpay.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m1 skipped[39m[2m)[22m[32m 4[2mms[22m[39m
+   [32m✓[39m promptpay[2m > [22mbuilds the payload[32m 0[2mms[22m[39m
+[31m   [31m×[31m promptpay[2m > [22mlocks the amount into the QR[39m[32m 3[2mms[22m[39m
+[31m     → expected '59.00' to be '590.00' // Object.is equality[39m
+   [2m[90m↓[39m[22m promptpay[2m > [22mhandles a refund
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/promptpay.test.ts[2m > [22mpromptpay[2m > [22mlocks the amount into the QR
+[31m[1mAssertionError[22m: expected '59.00' to be '590.00' // Object.is equality[39m
+
+Expected: [32m"59[7m0[27m.00"[39m
+Received: [31m"59.00"[39m
+
+[36m [2m❯[22m tests/promptpay.test.ts:[2m4:64[22m[39m
+    [90m  2| [39m[34mdescribe[39m([32m"promptpay"[39m[33m,[39m () [33m=>[39m {
+    [90m  3| [39m  [34mit[39m([32m"builds the payload"[39m[33m,[39m () [33m=>[39m { [34mexpect[39m([34mqr[39m([32m"100"[39m))[33m.[39m[34mtoBe[39m([32m"100"[39m)[33m;[39m })[33m;[39m
+    [90m  4| [39m  it("locks the amount into the QR", () => { expect(qr("590")).toBe("5…
+    [90m   | [39m                                                               [31m^[39m
+    [90m  5| [39m  it[33m.[39m[34mskip[39m([32m"handles a refund"[39m[33m,[39m () [33m=>[39m { [34mexpect[39m([34m1[39m)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m })[33m;[39m
+    [90m  6| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (5)[39m
+[2m   Start at [22m 10:29:06
+[2m   Duration [22m 304ms[2m (transform 96ms, setup 0ms, collect 88ms, tests 5ms, environment 0ms, prepare 83ms)[22m
+

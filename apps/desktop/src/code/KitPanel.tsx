@@ -11,8 +11,10 @@ import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
 import { useSessions } from "../sessions/sessions";
 import { getStore } from "../state/store";
+import { useNow } from "../elsewhere/useNow";
 import { ruleText, type Rule } from "./command";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
+import { LanesView, openLane, useLaneRows, type LaneRow } from "./Lanes";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
 /** A session of this project whose changes hold a key. */
@@ -28,6 +30,11 @@ export interface KitPanelProps {
   project: KitProject;
   keys: KeyNote[];
   home: string | null;
+  /** The project's lanes (Lanes.tsx): none draws no Lanes band. */
+  lanes?: LaneRow[];
+  /** The time now (ms), for the time each working lane's turn has run. */
+  now?: number;
+  onOpenLane?: (id: string) => void;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
@@ -44,6 +51,8 @@ export function KitPanelView(p: KitPanelProps) {
   const name = projectName(root);
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
+      {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} />
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
         {p.projects.length > 1 ? (
@@ -159,6 +168,9 @@ export function KitPanel() {
   const [picked, setPicked] = useState<string | null>(null);
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
+  const lanes = useLaneRows(root);
+  // the time a turn has run moves while one does
+  const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
   if (!root) return null;
   const keys: KeyNote[] = sessionsWithKeys()
     .map((k) => ({ session: k.chat.slice("agent:".length), files: k.files }))
@@ -170,6 +182,9 @@ export function KitPanel() {
       project={project}
       keys={keys}
       home={ss.home}
+      lanes={lanes}
+      now={now}
+      onOpenLane={openLane}
       onProject={setPicked}
       onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
       onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}

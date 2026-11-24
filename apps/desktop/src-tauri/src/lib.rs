@@ -14,6 +14,7 @@ mod fg;
 mod folder_open;
 mod gh_me;
 mod git_branch;
+mod lane;
 mod past_chats;
 mod platform;
 mod outpost;
@@ -674,6 +675,15 @@ async fn session_branch(cwd: String) -> Result<String, String> {
     Ok(git_branch::branch(std::path::Path::new(&cwd)))
 }
 
+/// A lane's branch (src/code/laneBranch.ts): the first of `names` that no branch has, made from the branch `cwd` is on and
+/// switched to. The files stay as they are and nothing is pushed or merged. The page sends only names of the form
+/// `kit/<words>`; a refusal is a short code (`not_a_repository`, `no_commit`, `busy`, `taken`, `bad_name`, `git_missing`)
+/// or git's own last line.
+#[tauri::command]
+async fn lane_branch(cwd: String, names: Vec<String>) -> Result<lane::Made, String> {
+    tauri::async_runtime::spawn_blocking(move || lane::make(std::path::Path::new(&cwd), &names)).await.map_err(|e| e.to_string())?
+}
+
 /// Remove session `session`'s saved files (it was closed).
 #[tauri::command]
 async fn session_files_remove(session: String) -> Result<(), String> {
@@ -1063,6 +1073,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         term_share_prune,
         term_share_take,
         session_branch,
+        lane_branch,
         chat_close_all,
         session_reveal,
         session_open_terminal,

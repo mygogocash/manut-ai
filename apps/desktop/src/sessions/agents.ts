@@ -1,6 +1,7 @@
 import { pickTitle, type TitleSource } from "./titles";
 import { t } from "../i18n";
 import { harness, harnessByName } from "../harness/registry";
+import type { LaneBranch } from "../code/laneBranch";
 
 // The agent programs a session can run, and the pure helpers the sidebar and the session views share.
 // Two kinds, both decided by the shell (it refuses anything else):
@@ -362,6 +363,10 @@ export interface SessionRec {
   /** A Shell row: the shell it runs, an id from the shell's `shells_available` list (none: the login shell). Kept
    *  across restarts, so it comes back as the same shell. */
   shell?: string;
+  /** A chat session's lane: the branch of its own that Kit made when the session started (src/code/laneBranch.ts), or
+   *  the branch it shares with a lane already working in the folder. None: it made none (no repository, or the shell
+   *  could not). Of this run only; a restart does not bring it back. */
+  lane?: LaneBranch;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */

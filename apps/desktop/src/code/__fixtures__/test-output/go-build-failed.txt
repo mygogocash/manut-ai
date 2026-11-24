@@ -1,0 +1,4 @@
+# example.com/shop/promptpay [example.com/shop/promptpay.test]
+./promptpay_test.go:9:15: undefined: qr
+FAIL	example.com/shop/promptpay [build failed]
+FAIL
