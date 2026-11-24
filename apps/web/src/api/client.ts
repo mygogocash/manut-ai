@@ -19,6 +19,7 @@ import {
   type JoinAnswer,
   type LinkedOwner,
   type Memory,
+  type ModelAlerts,
   type ModelCap,
   type ModelUsage,
   type NewLineConnection,
@@ -316,6 +317,8 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         body: { tenant: input.tenant, capSatang: input.capSatang },
         admin: true,
       }),
+    // No query: the list is always the API's own current Bangkok month, across all shops.
+    getModelAlerts: () => request<ModelAlerts>({ method: "GET", path: "/v1/admin/model/alerts", admin: true }),
 
     // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
     listWorkerJobs: (tenant, query = {}) =>

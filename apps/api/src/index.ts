@@ -311,7 +311,8 @@ const ADMIN_METHODS = new Set([
   "POST /v1/admin/pilot/gate/cohort",
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
-  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
+  // The shops near or at their caps this month, across all shops, name none.
+  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap", "GET /v1/admin/model/alerts",
   // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
   "GET /v1/admin/audit",
   // What the team knows about the shop (memory.ts): read it, and the owner's say over each fact as an operator relays
@@ -330,11 +331,12 @@ const ADMIN_METHODS = new Set([
   // code travel in the body.
   "POST /v1/admin/shops/owner", "POST /v1/admin/shops/owner/unlink",
   // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
-  // add one, replace a password, remove one, seal the shop's vault again after a key rotation (vault-reseal.ts);
-  // register an outpost, list them. The tenant and the ids travel in the query or the body.
+  // add one, replace a password, choose who may use one (on the owner's word, through the vault operation the owner's own
+  // route uses), remove one, seal the shop's vault again after a key rotation (vault-reseal.ts); register an outpost, list
+  // them. The tenant and the ids travel in the query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
-  "POST /v1/admin/vault/sign-ins/remove", "POST /v1/admin/vault/reseal", "GET /v1/admin/outposts",
-  "POST /v1/admin/outposts",
+  "POST /v1/admin/vault/sign-ins/members", "POST /v1/admin/vault/sign-ins/remove", "POST /v1/admin/vault/reseal",
+  "GET /v1/admin/outposts", "POST /v1/admin/outposts",
   // Remove an outpost, refusing what waits for it, or replace its credential, the new one shown once. The tenant and the
   // outpost's id travel in the body.
   "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
@@ -812,8 +814,8 @@ export default {
     // This Mac registering itself as an outpost through the desktop, with the owner's session (browser-control.ts).
     const ownerOutpost = await ownerOutpostRoute(request, url, env);
     if (ownerOutpost) return ownerOutpost;
-    // The owner's Connections: the shop's sign-ins and outposts, a sign-in added, a new password, who may use a sign-in, and
-    // renaming or removing an outpost, with the owner's session (browser-control.ts).
+    // The owner's Connections: the shop's sign-ins and outposts, a sign-in added, changed or removed, a new password, who may
+    // use a sign-in, and renaming or removing an outpost, with the owner's session (browser-control.ts).
     const ownerVault = await ownerVaultRoute(request, url, env);
     if (ownerVault) return ownerVault;
     // Google Sheets for Ton's books (google-connect.ts): the owner's own routes from their session, and Google's callback,

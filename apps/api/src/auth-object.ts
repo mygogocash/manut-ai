@@ -8,8 +8,9 @@ import {
   RESEND_SECONDS, sendCode, sixDigitCode, tryCode, type EmailSignInEnv,
 } from "./email-code";
 import { deliver } from "./email-sender";
+import { modelAlertsRoute } from "./model-alerts";
 import { timingSafeEqual } from "./people";
-import { pilotDeletionRoute, pilotRegistryRoute } from "./pilot-store";
+import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
 import { sessionIndexKey, sweepSessions, wipeGeneration, wipeTenantSessions, type SessionIndexRow } from "./session-index";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 import { testWorker } from "./test-origin";
@@ -189,6 +190,12 @@ export class AuthObject extends DurableObject {
     // The Manut AI pilot's shop registry (pilot-store.ts).
     if (url.pathname === "/pilot-shops") {
       return pilotRegistryRoute(this.ctx.storage, request);
+    }
+    // Alerts near the cap (model-alerts.ts): the listed shops whose model spend reached 80% or 100% of their cap, kept
+    // beside the registry, which says in the same transaction whether a shop is listed.
+    if (url.pathname === "/model-alerts") {
+      return modelAlertsRoute(this.ctx.storage, request, url,
+        (kv, tenant) => kv.get(pilotRegistryKey(tenant)) !== undefined);
     }
     // Pilot shop deletions and the owners' confirmations of them, kept here so
     // both outlive the shop's own objects.

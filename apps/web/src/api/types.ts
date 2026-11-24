@@ -467,6 +467,19 @@ export type ModelHold = { callId: string; model: string; worstMillisatang: numbe
 /// Calls by how they ended, and `refused`: calls stopped at the cap, which never reached a provider.
 export type ModelCounts = { ok: number; failed: number; unreadable: number; abandoned: number; refused: number };
 
+/// A threshold a month's charged spend reached, as the API noted it (docs/model-gateway.md, "Alerts near the cap"):
+/// `percent` is 80 (near the cap) or 100 (at it), `at` when it was noted, `capSatang` the cap it was measured against, and
+/// the spend that reached it, rounded up and exact. Held reservations do not count. A raised cap takes off a threshold the
+/// spend is back under, and the API notes it again when the spend reaches the new cap's.
+export type ModelCrossing = { percent: number; at: string; capSatang: number; spentSatang: number; spentMillisatang: number };
+
+/// One shop on the list of shops near or at their caps: the highest threshold its month has reached, and each crossing.
+export type ModelAlertShop = { tenant: string; percent: number; crossings: ModelCrossing[] };
+
+/// `GET /v1/admin/model/alerts`: this Bangkok month's shops at their caps, then those near them, the latest to cross first
+/// within each, across all shops, read from one record. `truncated` is true when the month had more than one read lists.
+export type ModelAlerts = { month: string; shops: ModelAlertShop[]; truncated: boolean };
+
 /// `GET /v1/admin/model/usage`: a shop's spend, cap and calls for one Bangkok month. Spend and holds are rounded up and
 /// `remainingSatang` down, so the page never shows a shop more room than it has. `calls` lists the month's newest 200
 /// records, newest first. The contract always sends `calls` and `holds`; they are optional here so a page never breaks
@@ -485,6 +498,8 @@ export type ModelUsage = {
   remainingSatang: number;
   counts: ModelCounts;
   tokens: { input: number; output: number };
+  /// The thresholds the month's charged spend has reached, lowest first. Optional, as `calls` is, for an older answer.
+  crossings?: ModelCrossing[];
   calls?: ModelCall[];
   holds?: ModelHold[];
 };
@@ -669,6 +684,9 @@ export interface PilotApi {
   /// `invalid_request` for a cap that is missing, not whole or out of range, 503 `not_configured` naming the setting,
   /// and 503 `meter_unavailable`, which does not say whether the cap was written.
   setModelCap(input: NewModelCap): Promise<ModelCap>;
+  /// `GET /v1/admin/model/alerts`: the shops whose model spend has reached 80% or 100% of their cap this Bangkok month,
+  /// across all shops, from one read that asks no shop's own meter. Rejects with 503 `alerts_unavailable`.
+  getModelAlerts(): Promise<ModelAlerts>;
 
   /// `GET /v1/admin/workers/drafts`: one page of what Nam, Pim and Ton did for a shop, newest first, drafts and handovers
   /// included. It only reads: a draft in it has not been sent. Rejects with 400 `tenant_required`, 400 `invalid_request` for a

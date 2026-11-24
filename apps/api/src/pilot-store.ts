@@ -37,6 +37,7 @@ import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { actorOr, auditPut, type AuditActor, type AuditRecord } from "./audit-log";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
+import { forgetModelAlerts } from "./model-alerts";
 import { ownerMadeRecord } from "./people-store";
 import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
@@ -716,8 +717,8 @@ export function listShop(kv: SyncKvStorage, tenant: string, nowMs: number): void
 /// - `GET ?tenant=`: whether that one is still listed;
 /// - `POST`: list one and end its make (`listShop`), with the Worker's `x-admin` header, like the other global index
 ///   writes. It answers the same again, so a make may ask twice;
-/// - `DELETE ?tenant=`: take one off, with the Worker's `x-wipe` header, as the tenant deletion's last step
-///   (tenant-data.ts).
+/// - `DELETE ?tenant=`: take one off, with its alert near the cap (model-alerts.ts), with the Worker's `x-wipe` header,
+///   as the tenant deletion's last step (tenant-data.ts).
 export async function pilotRegistryRoute(storage: DurableObjectStorage, request: Request): Promise<Response> {
   const tenant = new URL(request.url).searchParams.get("tenant");
   if (request.method === "GET") {
@@ -734,8 +735,13 @@ export async function pilotRegistryRoute(storage: DurableObjectStorage, request:
   if (request.method === "DELETE") {
     if (request.headers.get("x-wipe") !== "1") return json({ error: "forbidden" }, 403);
     if (!bounded(tenant)) return json({ error: "invalid_request" }, 400);
-    // The one row that names this tenant, and nothing else: no prefix scan, so no other shop's row can go with it.
-    await storage.delete(pilotRegistryKey(tenant));
+    // The one row that names this tenant and its alert near the cap (model-alerts.ts), and nothing else: no prefix
+    // scan, so no other shop's row can go with them. One transaction, so a crossing the shop sent late finds it off the
+    // list and is not kept.
+    storage.transactionSync(() => {
+      storage.kv.delete(pilotRegistryKey(tenant));
+      forgetModelAlerts(storage.kv, tenant);
+    });
     return json({ removed: true });
   }
   if (request.method !== "POST") return json({ error: "not_found" }, 404);

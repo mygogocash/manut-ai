@@ -1,12 +1,23 @@
 // Customize › Connections on the connected runtime (connections.ts), through the real host and session over a fake API:
 // the vault read with the session of the shop the switcher shows (or the sign-in while the person is in no shops), a
 // shop the person helps at refused with nothing sent, the owner's new password sent once to the password route and
-// found nowhere else, a change sent to the shop its row was read for, and nothing sent while only a kept read is shown.
+// found nowhere else, a change of a sign-in's account or addresses checked against what the vault lists before anything
+// carrying a password goes, a change sent to the shop its row was read for, and nothing sent while only a kept read is
+// shown.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError, BridgeEvent } from "../../lib/protocol";
 import { ShopCache } from "./cache";
-import { MEMBERS_PATH, OUTPOSTS_PATH, PASSWORD_PATH, REMOVE_PATH, RENAME_PATH, SIGN_INS_PATH } from "./connections";
+import {
+  CHANGE_PATH,
+  MEMBERS_PATH,
+  OUTPOSTS_PATH,
+  PASSWORD_PATH,
+  REMOVE_PATH,
+  REMOVE_SIGN_IN_PATH,
+  RENAME_PATH,
+  SIGN_INS_PATH,
+} from "./connections";
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { ApiSession } from "./session";
@@ -128,6 +139,25 @@ function serveVault(api: FakeApi, served: ServedShops | null) {
         signIn.members = members;
         return { status: 200, json: { signIn } };
       }),
+    )
+    // The vault takes what the runtime let through and answers the public view, as apps/api does: a password typed again
+    // mends a broken sign-in and is never answered.
+    .on("POST", CHANGE_PATH, (req) =>
+      at(req, (tenant) => {
+        const { signInId, origins, username, password } = req.body as { signInId: string; origins: string[]; username: string; password: string | null };
+        const signIn = vaults[tenant].signIns.find((s) => s.id === signInId);
+        if (!signIn) return { status: 404, json: { error: "sign_in_not_found" } };
+        Object.assign(signIn, { origins, username }, password !== null ? { state: "working", brokenAt: null, brokenBy: null, passwordSetAt: iso(NOW) } : {});
+        return { status: 200, json: { signIn } };
+      }),
+    )
+    .on("POST", REMOVE_SIGN_IN_PATH, (req) =>
+      at(req, (tenant) => {
+        const { signInId } = req.body as { signInId: string };
+        if (!vaults[tenant].signIns.some((s) => s.id === signInId)) return { status: 404, json: { error: "sign_in_not_found" } };
+        vaults[tenant].signIns = vaults[tenant].signIns.filter((s) => s.id !== signInId);
+        return { status: 200, json: { removed: true, signInId } };
+      }),
     );
   return vaults;
 }
@@ -153,6 +183,9 @@ const refusal = (p: Promise<unknown>) => p.then(() => null, (e: BridgeError) => 
 const OWNER_A = shopToken(SHOP_A.id, "owner");
 /** A new sign-in as Add a sign-in sends it. */
 const NEW_SIGN_IN = { site: "Carrier portal", origins: ["https://track.carrier.example"], username: "baan.mali", password: PASSWORD, members: ["nam", "ton"] };
+/** A change Change sends for a listed sign-in (each lists `https://seller.shopee.co.th` for `baan.mali@example.com`): a new
+ *  address and the password typed again. */
+const MOVED = { origins: ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"], username: "baan.mali@example.com", password: PASSWORD };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
@@ -170,8 +203,9 @@ describe("reading the shop's vault and outposts", () => {
     expect(await ask("connections.list", {})).toEqual({
       shop: null,
       signIns: [
-        { id: "signin-1", site: "Shopee Seller Centre", members: ["nam", "ton"], state: "broken", passwordSetAt: (T0 - 86_400_000) / 1000,
-          brokenAt: (T0 + 60_000) / 1000, brokenBy: "nam", lastUsedAt: T0 / 1000, lastUsedBy: "ton", createdAt: (T0 - 86_400_000) / 1000 },
+        { id: "signin-1", site: "Shopee Seller Centre", username: "baan.mali@example.com", origins: ["https://seller.shopee.co.th"],
+          members: ["nam", "ton"], state: "broken", passwordSetAt: (T0 - 86_400_000) / 1000, brokenAt: (T0 + 60_000) / 1000, brokenBy: "nam",
+          lastUsedAt: T0 / 1000, lastUsedBy: "ton", createdAt: (T0 - 86_400_000) / 1000 },
       ],
       outposts: [{ id: "outpost-1", name: "This Mac", kind: "this_mac", online: true, lastSeenAt: (NOW - 10_000) / 1000, createdAt: T0 / 1000 }],
     });
@@ -184,17 +218,21 @@ describe("reading the shop's vault and outposts", () => {
     const { api, ask } = await setup({ shops: false });
     const noShop = { status: 404, json: { error: "not_found" } };
     for (const path of [SIGN_INS_PATH, OUTPOSTS_PATH]) api.on("GET", path, noShop);
-    for (const path of [SIGN_INS_PATH, PASSWORD_PATH, MEMBERS_PATH, RENAME_PATH, REMOVE_PATH]) api.on("POST", path, noShop);
+    for (const path of [SIGN_INS_PATH, PASSWORD_PATH, MEMBERS_PATH, CHANGE_PATH, REMOVE_SIGN_IN_PATH, RENAME_PATH, REMOVE_PATH]) api.on("POST", path, noShop);
     const said = { code: "no_shop", message: t("conn.err.noShop") };
     expect(await refusal(ask("connections.list", {}))).toEqual(said);
     expect(await refusal(ask("connections.add", { shop: null, ...NEW_SIGN_IN }))).toEqual(said);
     expect(await refusal(ask("connections.password", { shop: null, signIn: "signin-1", password: PASSWORD }))).toEqual(said);
     expect(await refusal(ask("connections.members", { shop: null, signIn: "signin-1", members: ["kit"] }))).toEqual(said);
+    expect(await refusal(ask("connections.change", { shop: null, signIn: "signin-1", ...MOVED }))).toEqual(said);
+    expect(await refusal(ask("connections.removeSignIn", { shop: null, signIn: "signin-1" }))).toEqual(said);
     expect(await refusal(ask("connections.rename", { shop: null, outpost: "outpost-1", name: "Counter Mac" }))).toEqual(said);
     expect(await refusal(ask("connections.remove", { shop: null, outpost: "outpost-1" }))).toEqual(said);
-    // A password goes only after a read of the sign-ins that works, so neither a new one nor a changed one was sent.
+    // A password goes only after a read of the sign-ins that works, so neither a new one, a changed one nor one typed again
+    // with a new address was sent.
     expect(api.to("POST", SIGN_INS_PATH)).toEqual([]);
     expect(api.to("POST", PASSWORD_PATH)).toEqual([]);
+    expect(api.to("POST", CHANGE_PATH)).toEqual([]);
     expect(JSON.stringify(api.calls)).not.toContain(PASSWORD);
     // A shop session's 404 is still the shop's own answer, not "no shop".
     const inShops = await setup({ shops: true });
@@ -221,7 +259,9 @@ describe("reading the shop's vault and outposts", () => {
 
   it("leaves out an entry this build cannot read, rather than guessing at it", async () => {
     const { ask, vaults } = await setup({ shops: false });
-    vaults[SIGNED_IN].signIns.push(signInJson({ id: "signin-2", state: "paused" }), { id: "signin-3" });
+    vaults[SIGNED_IN].signIns.push(signInJson({ id: "signin-2", state: "paused" }), { id: "signin-3" },
+      signInJson({ id: "signin-4", username: undefined }), signInJson({ id: "signin-5", origins: ["http://seller.shopee.co.th"] }),
+      signInJson({ id: "signin-6", origins: [] }));
     vaults[SIGNED_IN].outposts.push(outpostJson({ id: "outpost-2", kind: "phone" }));
     const listed = await ask("connections.list", {});
     expect(listed.signIns.map((s) => s.id)).toEqual(["signin-1"]);
@@ -299,6 +339,8 @@ describe("the owner's new password", () => {
       ["connections.add", { shop: null, ...NEW_SIGN_IN }],
       ["connections.password", { shop: null, signIn: "signin-1", password: PASSWORD }],
       ["connections.members", { shop: null, signIn: "signin-1", members: ["kit"] }],
+      ["connections.change", { shop: null, signIn: "signin-1", ...MOVED }],
+      ["connections.removeSignIn", { shop: null, signIn: "signin-1" }],
       ["connections.rename", { shop: null, outpost: "outpost-1", name: "Counter Mac" }],
       ["connections.remove", { shop: null, outpost: "outpost-1" }],
     ] as const) {
@@ -425,6 +467,105 @@ describe("who may use a sign-in", () => {
     expect((await refusal(ask("connections.members", { shop: SHOP_B.id, signIn: "signin-b", members: ["kit"] })))?.code).toBe("owner_only");
     expect(api.to("POST", MEMBERS_PATH)).toEqual([]);
     expect(await refusal(ask("connections.members", { shop: SHOP_A.id, signIn: "signin-gone", members: ["kit"] }))).toEqual({
+      code: "sign_in_not_found",
+      message: t("conn.err.signInGone"),
+    });
+  });
+});
+
+describe("changing a sign-in's account or addresses", () => {
+  it("sends exactly the four fields once, with the shop's own session, after a read, and the password is found nowhere else", async () => {
+    const { api, ask, disk, events, host } = await setup({ shops: true });
+    const { signIn } = await ask("connections.change", { shop: SHOP_A.id, signIn: "signin-a", ...MOVED });
+    // Typed again, the password mends the broken sign-in, as a new password does; the answer holds none.
+    expect(signIn).toMatchObject({ id: "signin-a", origins: MOVED.origins, username: MOVED.username, state: "working", passwordSetAt: NOW / 1000 });
+    const sent = api.to("POST", CHANGE_PATH);
+    expect(sent.map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, { signInId: "signin-a", ...MOVED }]]);
+    // Before it went, the same session read the sign-ins: one that works, for a sign-in the shop has, at the addresses checked.
+    expect(api.calls.filter((c) => c.path.startsWith("/v1/vault/")).map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${SIGN_INS_PATH}`, `POST ${CHANGE_PATH}`]);
+    for (const call of api.calls.filter((c) => c !== sent[0])) expect(JSON.stringify(call)).not.toContain(PASSWORD);
+    expect(JSON.stringify([...disk.files.values()])).not.toContain(PASSWORD);
+    expect(JSON.stringify(events)).not.toContain(PASSWORD);
+    expect(JSON.stringify(host)).not.toContain(PASSWORD);
+    expect(JSON.stringify(signIn)).not.toContain(PASSWORD);
+  });
+
+  it("takes addresses away with no password at all, and leaves whether the sign-in works as it was", async () => {
+    const { api, ask, vaults } = await setup({ shops: false });
+    vaults[SIGNED_IN].signIns[0]!.origins = ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"];
+    const { signIn } = await ask("connections.change", { shop: null, signIn: "signin-1", origins: ["https://accounts.shopee.co.th"],
+      username: "baan.mali@example.com", password: null });
+    expect(signIn).toMatchObject({ origins: ["https://accounts.shopee.co.th"], state: "broken" });
+    expect(api.to("POST", CHANGE_PATH).map((c) => [c.bearer, c.body])).toEqual([["access-1", { signInId: "signin-1",
+      origins: ["https://accounts.shopee.co.th"], username: "baan.mali@example.com", password: null }]]);
+  });
+
+  it("is never sent twice when it carries a password: a 401 asks the owner to type it again, with no second try", async () => {
+    for (const shops of [true, false]) {
+      const { api, ask } = await setup({ shops });
+      api.on("POST", CHANGE_PATH, { status: 401, json: { error: "unauthorized" } });
+      const out = await refusal(ask("connections.change", { shop: shops ? SHOP_A.id : null, signIn: shops ? "signin-a" : "signin-1", ...MOVED }));
+      expect(out).toEqual({ code: "not_saved", message: t("conn.err.again") });
+      expect(api.to("POST", CHANGE_PATH), `in shops: ${shops}`).toHaveLength(1);
+      expect(out?.message).not.toContain(PASSWORD);
+    }
+  });
+
+  it("refuses with nothing sent a change the vault would refuse: a new address or account with no password, no change, a bad value", async () => {
+    const { api, ask, vaults } = await setup({ shops: true });
+    const change = (over: Record<string, unknown>, shop: string | null = SHOP_A.id) =>
+      refusal((ask as (op: string, p: unknown) => Promise<unknown>)("connections.change", { shop, signIn: "signin-a", ...MOVED, ...over }));
+    for (const [over, code, words] of [
+      // Checked against what the read lists for it: https://seller.shopee.co.th, for baan.mali@example.com.
+      [{ password: null }, "password_required", t("conn.err.passwordAgain")],
+      [{ password: null, origins: ["https://seller-centre.attacker.example"] }, "password_required", t("conn.err.passwordAgain")],
+      [{ password: null, origins: ["https://seller.shopee.co.th"], username: "orders@baanmali.example" }, "password_required", t("conn.err.passwordAgain")],
+      [{ password: null, origins: ["https://seller.shopee.co.th"] }, "no_change", t("conn.err.noChange")],
+      [{ origins: ["https://seller.shopee.co.th"] }, "no_change", t("conn.err.noChange")],
+      // Each value by the rules adding uses, before anything is read.
+      [{ origins: [] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ origins: ["http://seller.shopee.co.th"] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ username: "" }, "invalid_username", t("conn.err.username", { max: 256 })],
+      [{ password: "" }, "invalid_password", t("conn.err.password", { max: 1024 })],
+      [{ password: "x".repeat(1025) }, "invalid_password", t("conn.err.password", { max: 1024 })],
+    ] as const) {
+      expect(await change(over), JSON.stringify(over)).toEqual({ code, message: words });
+    }
+    expect((await change({}, SHOP_B.id))?.code).toBe("owner_only");
+    expect((await change({}, "pilot:elsewhere"))?.code).toBe("not_found");
+    expect((await change({}, null))?.code).toBe("not_found");
+    // A sign-in the shop no longer lists is not changed: the read says so, and the password stays here.
+    vaults[SHOP_A.id].signIns = [];
+    expect(await change({})).toEqual({ code: "sign_in_not_found", message: t("conn.err.signInGone") });
+    expect(api.to("POST", CHANGE_PATH)).toEqual([]);
+    for (const call of api.calls) expect(JSON.stringify(call)).not.toContain(PASSWORD);
+  });
+
+  it("says the API's own refusals in words", async () => {
+    const { api, ask } = await setup({ shops: false });
+    api.on("POST", CHANGE_PATH, { status: 400, json: { error: "password_required" } }, { status: 400, json: { error: "no_change" } },
+      { status: 404, json: { error: "sign_in_not_found" } });
+    const change = () => refusal(ask("connections.change", { shop: null, signIn: "signin-1", ...MOVED }));
+    expect(await change()).toEqual({ code: "password_required", message: t("conn.err.passwordAgain") });
+    expect(await change()).toEqual({ code: "no_change", message: t("conn.err.noChange") });
+    expect(await change()).toEqual({ code: "sign_in_not_found", message: t("conn.err.signInGone") });
+  });
+});
+
+describe("removing a sign-in", () => {
+  it("sends exactly the sign-in to the shop its row was read for, even after the switcher moved", async () => {
+    const { api, ask, vaults } = await setup({ shops: true });
+    await ask("shops.switch", { shop: SHOP_B.id });
+    expect(await ask("connections.removeSignIn", { shop: SHOP_A.id, signIn: "signin-a" })).toEqual({ signIn: "signin-a" });
+    expect(api.to("POST", REMOVE_SIGN_IN_PATH).map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, { signInId: "signin-a" }]]);
+    expect(vaults[SHOP_A.id].signIns).toEqual([]);
+  });
+
+  it("refuses a shop the person helps at with nothing sent, and says a sign-in already gone in words", async () => {
+    const { api, ask } = await setup({ shops: true });
+    expect((await refusal(ask("connections.removeSignIn", { shop: SHOP_B.id, signIn: "signin-b" })))?.code).toBe("owner_only");
+    expect(api.to("POST", REMOVE_SIGN_IN_PATH)).toEqual([]);
+    expect(await refusal(ask("connections.removeSignIn", { shop: SHOP_A.id, signIn: "signin-gone" }))).toEqual({
       code: "sign_in_not_found",
       message: t("conn.err.signInGone"),
     });

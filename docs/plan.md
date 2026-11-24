@@ -31,7 +31,7 @@ Week 1, the pilot slice:
 Week 2, brought forward:
 
 - [x] `apps/desktop`: fork of Oh My Hermes with the Hermes bridge removed (1,358 unit tests, `cargo check` passes)
-- [ ] `apps/desktop`, next pass: the canvas side menu and screens, a real runtime adapter against `apps/api`, approvals through `packages/approval-core`, and a triage of the 156 Playwright specs (some still expect removed screens)
+- [x] `apps/desktop`, next pass: the canvas side menu and screens, a real runtime adapter against `apps/api`, approvals through `packages/approval-core`, and a triage of the 156 Playwright specs (some still expect removed screens). Done by 24 Nov: the side menu and its pages (Phase 3 below), the connected runtime (`docs/runtime-adapter.md`), answering approvals through the session decide route and approval-core (December item 5), and the Playwright revival and its follow-up (pull requests #15 and #17, December item 11), which run every spec in CI
 - [x] `packages/agent-events`: the agent event contract ported from GoSpark (213 tests)
 - [x] `docs/connectors.md`: what to apply for with LINE, Shopee, Lazada and Meta
 - [ ] Dry run with two test shops: dev is deployed at https://dev.manut.xyz; waits for a test LINE Official Account
@@ -56,14 +56,14 @@ run, `docs/cloud-routine.md`) takes one queued package per run, from 22:00 Bangk
 | 1 Pilot | The gate's numbers: 14 free days, paid ฿499, active on day 14, per shop | built: `GET /v1/admin/pilot/gate` and the console's Pilot gate page; the gate itself waits for real shops |
 | 1 Pilot | Audit log an operator can read | built: one log per shop, metadata only (`GET /v1/admin/audit`), and the console's Audit page |
 | 2 Control plane | Tenancy and sign-in, the approval core, saved sessions | built, with real sign-in off until the owner turns it on: `packages/approval-core` decides every send (replies, deletions and workers' requests), and sessions read approvals as its wire records; one person can own several shops and help at others, with a session per shop whose shop and role come from the shop's own record (`docs/several-shops.md`); sign-in by a code sent by email is built and off (item 31, the API; item 33, the desktop's screen; the web's comes with the join page, item 10). Turning a real sign-in on is the owner's: a yes to codes by email with the Workers Paid plan and a sending domain, or an Apple developer team for Sign in with Apple, or LINE Login, which is parked |
-| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`), with the console's Model spend page; no model is called until the owner adds an Anthropic key and settles the rate and the cap |
+| 2 Control plane | The model gateway with spending caps, and cost per shop | built (`docs/model-gateway.md`), with the console's Model spend page, which lists the shops near or at their caps (item 43), and a sweep that charges an abandoned call on a timer; no model is called until the owner adds an Anthropic key and settles the rate and the cap |
 | 2 Control plane | Memory; the job queue; the audit log | built: the job flow, the audit log, and what the team knows (stored per shop, with the console's Memory page); workers read memory when they are built in Phase 4 |
 | 2 Control plane | Gate: the whole job flow end to end with a stand-in worker | built as a test (`apps/api/test/job-flow.test.ts`) |
 | 3 Desktop MVP | Mission Control and the session view | built: Home, the side menu and pages, the job view, the activity log and Pause everyone, in Practice and Connected (a shop the person owns is read whole with its owner session: the team, jobs, the activity log, routines; Buddy's chat waits for a model) |
 | 3 Desktop MVP | Three-step onboarding; offline cache; a real runtime adapter to `apps/api` | built: the three-step first run; a connected runtime (Settings › Developer) that signs in with Apple or a code sent by email, reads the shop and answers its approvals through the session decide route; the offline cache; Settings › People for the owner (item 32). Real use waits for a sign-in the owner turns on |
 | 4 Workers | Three agents (sales chat, content, light bookkeeping), permissions, memory in sessions | built with a stand-in model: Nam, Pim and Ton draft through the job flow with member-grants' permissions and confirmed facts (`apps/api/src/workers.ts`); real models need the owner's key, and sending stays behind the approvals (LINE is parked) |
 | 4 Workers | Connections: LINE OA, Shopee, Lazada, FlowAccount, Google Sheets | partial: LINE built; Google Sheets for Ton's books is built and stays off until the owner's Google Cloud OAuth client exists (item 34: the `drive.file` scope only, so no Google review, the request from `@manut/sheets-rows`, each month's append asked first); FlowAccount's Open API is by application, with a paid Pro Business plan per shop; Shopee chat is closed, and Lazada and Meta need applications (`docs/connectors.md`) |
-| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: routines run on the schedule object (each run waits for the owner's switches); browser control and the vault are built (site sign-ins and outposts, the step channel with its limit, removal and credential rotation, writes asked first and run once, this Mac as the outpost of the shop the switcher shows); the three shop templates, applied when a shop is made; the admin panel is the console (gate, audit, memory, model spend, people, shops). The web client: the owner's approval and deletion pages, checked at phone sizes in CI (item 35), the join page (item 10) and the installable web app at `/app/` (item 17, `docs/web-app.md`) are built; the web app signs in once email sign-in is on. The gate's self-serve onboarding is built and stays off until the owner opens sign-ups (item 36). Every switch the owner turns is listed in `docs/turning-on.md`. Parked by the owner: PromptPay billing and the LINE client |
+| 5 Launch | Web and LINE clients, routines, browser control, the vault, PromptPay billing, two shop templates, the admin panel | partial: routines run on the schedule object (each run waits for the owner's switches); browser control and the vault are built (site sign-ins and outposts, which the owner adds, changes and removes from the app, items 40 and 45, the step channel with its limit, removal and credential rotation, writes asked first and run once, this Mac as the outpost of the shop the switcher shows); the three shop templates, applied when a shop is made; the admin panel is the console (gate, audit, memory, model spend, people, shops). The web client: the owner's approval and deletion pages, checked at phone sizes in CI (item 35), the join page (item 10) and the installable web app at `/app/` (item 17, `docs/web-app.md`) are built; the web app signs in once email sign-in is on. The gate's self-serve onboarding is built and stays off until the owner opens sign-ups (item 36). Every switch the owner turns is listed in `docs/turning-on.md`. Parked by the owner: PromptPay billing and the LINE client |
 | 6 Expand | Phone apps, computer control, several shops in one view, more roles and businesses, the full code editor | partial: several shops in one view is built (`docs/several-shops.md`: the API, the console's owner link, the desktop's switcher with one Needs you across the shops); more roles are built (the owner's helpers, deciding by role, Settings › People) and three kinds of shop as templates; computer control is built as far as the desktop outpost's browser (open, read, sign in, and writes asked first and run once, item 12), and the first real write on a real site waits for the owner's go-ahead; the code editor's states for developers are built (items 18, 25, 26, 27, 28, 29, 39: Kit's dial and command asks, lanes on their own branches with Checked or Tests failed, a preview with sample values, main moving, what keeps running with Stop, Rewind with Bring it back), and Kit's dial for a session in its own terminal (item 30) waits for the owner's call on chats and terminals; phone apps wait, as the roadmap says, until the desktop product is complete, and the installable web app (item 17) covers the owner's pages on a phone until then |
 
 ## December engineering (the owner's go, 23 Nov 2026)
@@ -116,9 +116,10 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 40. The owner adds a sign-in and changes who may use it, from the app: two owner routes under `/v1/vault/` through the vault's own operation, and Customize › Connections' Add a sign-in and members, the password crossing once and kept nowhere | | Opus |
 | done | 41. The security review's front-door findings: JSON POSTs refuse any other content type, ingress limits keyed by an address's /64, a global and a per-source cap on code emails, `email:` sessions refused on the lifted routes and routines and outposts checked to be shops, and the test keys honoured only on a `.test` origin | | Opus |
 | done | 42. The security review's session and self-serve findings: a global daily cap on self-serve makes and no model spending or routines for a self-serve shop until an operator counts it in; expired sessions swept, a wipe reading only its own tenant's sessions, paged shop-index scans and a limit on `DELETE /v1/tenant/data`; the web app's shop cookies needing the sign-in; a cap on helper sessions; script policies on every page | | Opus |
-| running | 43. The model gateway's alerts and sweep (`docs/model-gateway.md`, "Not built yet"): an abandoned reservation charged on a timer by the shop's own alarm, settling once whichever finds it first, and a shop crossing 80% and 100% of its month's cap noted once a month, in the audit log and the usage answer, with the console's Model spend page listing the shops near or at their caps | | Opus |
-| next | 44. A list of a session's own tasks (`GET /v1/tasks`, with state, paged) so the connected desktop stops reading a shop's whole export every minute, every screen keeping what it shows (`docs/runtime-adapter.md`, "Next slices" 3) | 43 or 45 finishing | Opus |
-| running | 45. The rest of the owner's sign-ins from the app (`docs/browser-control.md`, "Next slices" 3 and 4): removing a sign-in, changing its account or its addresses without ever letting a password be typed somewhere new by someone who does not know it, and the operator's route to change who may use one | | Opus |
+| done | 43. The model gateway's alerts and sweep (`docs/model-gateway.md`, "Not built yet"): an abandoned reservation charged on a timer by the shop's own alarm, settling once whichever finds it first, and a shop crossing 80% and 100% of its month's cap noted once a month, in the audit log and the usage answer, with the console's Model spend page listing the shops near or at their caps | | Opus |
+| running | 44. A list of a session's own tasks (`GET /v1/tasks`, with state, paged) so the connected desktop stops reading a shop's whole export every minute, every screen keeping what it shows (`docs/runtime-adapter.md`, "Next slices" 3) | | Opus |
+| done | 45. The rest of the owner's sign-ins from the app (`docs/browser-control.md`, "Next slices" 3 and 4): removing a sign-in, changing its account or its addresses without ever letting a password be typed somewhere new by someone who does not know it, and the operator's route to change who may use one | | Opus |
+| running | 46. The connected desktop's owner writes for memory and routines: remembering, confirming, correcting and forgetting a fact, and making and removing a team routine, through the API's existing owner routes (`/v1/memory/*`, `/v1/routines`), refused with nothing sent for a helper's shop or while offline | | Sonnet |
 | done | 32. The desktop's Settings › People for the owner (the canvas's People board): the helpers, invites with Copy link and Cancel, Remove with its confirmation, and away dates, through the owner routes the API has; the new-device alert's "remove access" opens it | | Sonnet |
 | done | 23. Browser control's smaller gaps: re-sealing after a vault key rotation, for sign-ins and connections alike (`POST /v1/admin/vault/reseal`), and a worker's list of the sign-ins its member may use (`port.signIns()`) | | Opus (coordinator) |
 | done | 21. Customize › Connections for the owner (`docs/browser-control.md`, "Next slices"): the shop's sign-ins, with "Change" typing a new password into the vault from the app, and the owner renaming or removing an outpost, through owner routes a helper's session cannot reach | | Opus |
@@ -446,3 +447,34 @@ setting, quiet hours across midnight with both exceptions, the badge, and an unk
 Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).
 Wired into the desktop on 24 Nov 2026 (December item 6, merged into `pilot/week-1`): every notification and the Dock badge
 go through it, with a `notice` event added for news that asks nothing (24 tests).
+
+### env-example
+`packages/env-example` (`@manut/env-example`). Reads a project's `.env.example`, given as text, into the variables
+the code editor's preview needs (`docs/code-editor.md`, "Left for later": the preview runs with sample values,
+and should read what a project needs from its `.env.example` as well as from Kit's changes).
+
+- `readEnvExample(text)` answers each variable in file order:
+  - `name`;
+  - `sample`, the value written there, or empty;
+  - `comment`, the comment lines just above it, joined;
+  - `secret`.
+- `secret` is true when the name looks like one:
+  - it ends in `_KEY`, `_SECRET`, `_TOKEN` or `_PASSWORD`;
+  - or it contains `PRIVATE`;
+  - or the sample looks like a real key (`sk-`, `ghp_`, `xoxb-`, a long run of base64).
+- The forms a line may take:
+  - `NAME=value` and `export NAME=value`;
+  - a value in single quotes (kept as written);
+  - a value in double quotes, where `\n` and `\"` are read;
+  - an unquoted value, where a ` #` starts a comment;
+  - blank lines and lines that are only a comment.
+
+  A name is `[A-Za-z_][A-Za-z0-9_]*`.
+- Any other line is listed in `skipped` with its line number, never thrown. A name written twice keeps the later
+  value and is listed in `repeated`.
+- `sampleEnv(vars)` gives an object for the preview: every secret gets a plainly fake value (`sample-` and the
+  name in lower case), and every other variable its written sample.
+- It never reads a file or the process's environment: text in, values out.
+
+Done when: each line form above and each secret rule is tested, with Thai text in a comment and a value, CRLF line
+endings, a repeated name, an empty file and a file of only comments.

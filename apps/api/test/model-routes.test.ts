@@ -69,6 +69,7 @@ describe("the model operator routes behind the admin gate", () => {
   const routes = [
     ["GET", "/v1/admin/model/usage"],
     ["PUT", "/v1/admin/model/cap"],
+    ["GET", "/v1/admin/model/alerts"],
   ] as const;
 
   /// A request whose body counts how often it is read, so a test can show the gate answered first.
@@ -126,6 +127,8 @@ describe("the model operator routes behind the admin gate", () => {
       ["DELETE", "/v1/admin/model/cap"],
       ["GET", "/v1/admin/model/usage/extra"],
       ["POST", "/v1/admin/model/calls"],
+      ["POST", "/v1/admin/model/alerts"],
+      ["GET", "/v1/admin/model/alerts/pilot:x"],
     ] as const) {
       expect(await send(method, path, { audience: bindings.ADMIN_ACCESS_AUD! }).status).toBe(404);
     }
@@ -150,6 +153,7 @@ describe("reading a shop's month", () => {
       remainingSatang: 20_000,
       counts: { ok: 0, failed: 0, unreadable: 0, abandoned: 0, refused: 0 },
       tokens: { input: 0, output: 0 },
+      crossings: [],
       calls: [],
       holds: [],
     });

@@ -329,10 +329,30 @@ describe("the API client", () => {
       code: "not_configured", setting: "MODEL_SATANG_PER_USD" });
   });
 
+  it("reads the shops near or at their caps this month with no query, the API's own month deciding", async () => {
+    const alerts = {
+      month: "2026-11",
+      shops: [{ tenant: "pilot:1", percent: 100, crossings: [
+        { percent: 80, at: "2026-11-20T03:00:00.000Z", capSatang: 10000, spentSatang: 8000, spentMillisatang: 8_000_000 },
+        { percent: 100, at: "2026-11-21T03:00:00.000Z", capSatang: 10000, spentSatang: 10000, spentMillisatang: 10_000_000 },
+      ] }],
+      truncated: false,
+    };
+    const { api, calls } = harness("op-key-123", () => json(alerts));
+    expect(await api.getModelAlerts()).toEqual(alerts);
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET https://api.example.test/v1/admin/model/alerts"]);
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer op-key-123");
+    expect(calls[0]?.body).toBeUndefined();
+
+    const { api: failing } = harness("op-key-123", () => json({ error: "alerts_unavailable" }, 503));
+    await expect(failing.getModelAlerts()).rejects.toMatchObject({ status: 503, code: "alerts_unavailable" });
+  });
+
   it("refuses the model routes with no key and sends nothing", async () => {
     const { api, fetch } = harness(null);
     await expect(api.getModelUsage("t1")).rejects.toMatchObject({ code: "operator_key_missing" });
     await expect(api.setModelCap({ tenant: "t1", capSatang: null })).rejects.toMatchObject({ code: "operator_key_missing" });
+    await expect(api.getModelAlerts()).rejects.toMatchObject({ code: "operator_key_missing" });
     expect(fetch).not.toHaveBeenCalled();
   });
 

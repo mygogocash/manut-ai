@@ -27,10 +27,12 @@ describe("Practice's vault and outposts", () => {
     const listed = await rt.request("connections.list", {});
     expect(listed.shop).toBe(OWN_SHOP);
     expect(listed.signIns).toEqual([
-      { id: "practice-signin-shopee", site: "Shopee Seller Centre", members: ["nam", "ton"], state: "working", passwordSetAt: T0 - 20 * 86_400,
-        brokenAt: null, brokenBy: null, lastUsedAt: T0 - 40 * 60, lastUsedBy: "nam", createdAt: T0 - 20 * 86_400 },
-      { id: "practice-signin-carrier", site: "Carrier portal", members: ["nam"], state: "broken", passwordSetAt: T0 - 12 * 86_400,
-        brokenAt: T0 - 25 * 60, brokenBy: "nam", lastUsedAt: T0 - 26 * 3600, lastUsedBy: "nam", createdAt: T0 - 12 * 86_400 },
+      { id: "practice-signin-shopee", site: "Shopee Seller Centre", username: "baan.mali@example.com",
+        origins: ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"], members: ["nam", "ton"], state: "working",
+        passwordSetAt: T0 - 20 * 86_400, brokenAt: null, brokenBy: null, lastUsedAt: T0 - 40 * 60, lastUsedBy: "nam", createdAt: T0 - 20 * 86_400 },
+      { id: "practice-signin-carrier", site: "Carrier portal", username: "baanmali", origins: ["https://track.carrier.example"], members: ["nam"],
+        state: "broken", passwordSetAt: T0 - 12 * 86_400, brokenAt: T0 - 25 * 60, brokenBy: "nam", lastUsedAt: T0 - 26 * 3600, lastUsedBy: "nam",
+        createdAt: T0 - 12 * 86_400 },
     ]);
     expect(listed.outposts.map((o) => [o.name, o.kind, o.online])).toEqual([
       ["Front desk Mac", "this_mac", true],
@@ -93,8 +95,8 @@ describe("Practice adding a sign-in and choosing who may use one", () => {
   it("adds a sign-in by the vault's rules, working and never used, and keeps the password nowhere", async () => {
     const { rt, host } = await open();
     const { signIn } = await rt.request("connections.add", { shop: OWN_SHOP, ...NEW_SIGN_IN });
-    expect(signIn).toEqual({ id: "practice-signin-added-1", site: "Carrier portal", members: ["nam", "ton"], state: "working", passwordSetAt: T0,
-      brokenAt: null, brokenBy: null, lastUsedAt: null, lastUsedBy: null, createdAt: T0 });
+    expect(signIn).toEqual({ id: "practice-signin-added-1", site: "Carrier portal", username: "baan.mali", origins: ["https://track.carrier.example"],
+      members: ["nam", "ton"], state: "working", passwordSetAt: T0, brokenAt: null, brokenBy: null, lastUsedAt: null, lastUsedBy: null, createdAt: T0 });
     expect((await rt.request("connections.list", {})).signIns.map((s) => s.id)).toEqual(["practice-signin-shopee", "practice-signin-carrier", "practice-signin-added-1"]);
     expect(JSON.stringify(host)).not.toContain(PASSWORD);
     expect(JSON.stringify(await rt.request("connections.list", {}))).not.toContain(PASSWORD);
@@ -135,5 +137,64 @@ describe("Practice adding a sign-in and choosing who may use one", () => {
     expect(await refusal(rt.request("connections.add", { shop: HELPED_SHOP, ...NEW_SIGN_IN }))).toBe("owner_only");
     expect(await refusal(rt.request("connections.members", { shop: HELPED_SHOP, signIn: "practice-signin-shopee", members: ["kit"] }))).toBe("owner_only");
     expect((await rt.request("connections.list", {})).signIns.map((s) => s.members)).toEqual([["nam", "ton"], ["nam"]]);
+  });
+});
+
+describe("Practice changing a sign-in's account or addresses, and removing one", () => {
+  const SHOPEE = { id: "practice-signin-shopee", origins: ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"], username: "baan.mali@example.com" };
+  const change = (rt: MockRuntime, over: Record<string, unknown>) =>
+    rt.request("connections.change", { shop: OWN_SHOP, signIn: SHOPEE.id, origins: SHOPEE.origins, username: SHOPEE.username, password: null, ...over });
+
+  it("refuses, without the password typed again, a change that could send it somewhere new, as the vault does", async () => {
+    const { rt } = await open();
+    for (const over of [
+      { origins: [...SHOPEE.origins, "https://seller-centre.attacker.example"] },
+      { origins: ["https://seller-centre.attacker.example"] },
+      { username: "orders@baanmali.example" },
+      { origins: [SHOPEE.origins[0]], username: "orders@baanmali.example" },
+    ]) {
+      expect(await refusal(change(rt, over)), JSON.stringify(over)).toBe("password_required");
+    }
+    // The same account at the same addresses is no change, in any order, with a password or without.
+    expect(await refusal(change(rt, { origins: [...SHOPEE.origins].reverse() }))).toBe("no_change");
+    expect(await refusal(change(rt, { password: PASSWORD }))).toBe("no_change");
+    // Each value by the rules adding uses, and a sign-in the vault does not have.
+    for (const [over, code] of [
+      [{ origins: [] }, "invalid_origins"],
+      [{ origins: ["http://seller.shopee.co.th"] }, "invalid_origins"],
+      [{ username: "  " }, "invalid_username"],
+      [{ password: "", origins: ["https://seller-centre.attacker.example"] }, "invalid_password"],
+      [{ signIn: "nowhere", password: PASSWORD, origins: ["https://seller-centre.attacker.example"] }, "sign_in_not_found"],
+    ] as const) {
+      expect(await refusal(change(rt, over)), JSON.stringify(over)).toBe(code);
+    }
+    expect((await rt.request("connections.list", {})).signIns[0]).toMatchObject({ origins: SHOPEE.origins, username: SHOPEE.username });
+  });
+
+  it("takes a new account and addresses with the password typed again, mending a refused sign-in, and keeps the password nowhere", async () => {
+    const { rt, host } = await open();
+    const before = (await rt.request("connections.list", {})).signIns[1]!;
+    const { signIn } = await rt.request("connections.change", { shop: OWN_SHOP, signIn: "practice-signin-carrier",
+      origins: ["https://portal.carrier.example"], username: "baan.mali", password: PASSWORD });
+    expect(signIn).toEqual({ ...before, origins: ["https://portal.carrier.example"], username: "baan.mali", state: "working", passwordSetAt: T0,
+      brokenAt: null, brokenBy: null });
+    expect(JSON.stringify(host)).not.toContain(PASSWORD);
+    expect(JSON.stringify(await rt.request("connections.list", {}))).not.toContain(PASSWORD);
+  });
+
+  it("takes addresses away without the password, keeping whether it works and when its password was set", async () => {
+    const { rt } = await open();
+    const before = (await rt.request("connections.list", {})).signIns[0]!;
+    const { signIn } = await change(rt, { origins: [SHOPEE.origins[1]] });
+    expect(signIn).toEqual({ ...before, origins: [SHOPEE.origins[1]] });
+  });
+
+  it("removes a sign-in once, and refuses both at Ran Pa Noi, where the person helps", async () => {
+    const { rt } = await open();
+    expect(await refusal(rt.request("connections.removeSignIn", { shop: HELPED_SHOP, signIn: "practice-signin-shopee" }))).toBe("owner_only");
+    expect(await refusal(change(rt, { shop: HELPED_SHOP, origins: [SHOPEE.origins[0]] }))).toBe("owner_only");
+    expect(await rt.request("connections.removeSignIn", { shop: OWN_SHOP, signIn: "practice-signin-carrier" })).toEqual({ signIn: "practice-signin-carrier" });
+    expect((await rt.request("connections.list", {})).signIns.map((s) => s.id)).toEqual(["practice-signin-shopee"]);
+    expect(await refusal(rt.request("connections.removeSignIn", { shop: OWN_SHOP, signIn: "practice-signin-carrier" }))).toBe("sign_in_not_found");
   });
 });

@@ -825,6 +825,19 @@ describe("the audit log's words for the owner's people and for browser control",
       .toBe("Outpost b4c8d1e2 asked for a sign-in to type into a site.");
   });
 
+  it("says the owner removing a sign-in, changing where it is used, and the operator choosing who may use one", () => {
+    const fon = { kind: "owner" as const, id: "owner-1" };
+    expect(said({ actor: fon, action: "signin.removed", subject: { signInId: "s1" } }))
+      .toBe("Fon (linked account owner-1) removed a site sign-in from the vault.");
+    // A change that could send the password somewhere new is made only with the password typed again, and the words say so.
+    expect(said({ actor: fon, action: "signin.changed", subject: { signInId: "s1" } }))
+      .toBe("Fon (linked account owner-1) changed a site sign-in's account or addresses, and typed its password again.");
+    expect(said({ actor: { kind: "owner", id: "owner-session" }, action: "signin.narrowed", subject: { signInId: "s1" } }))
+      .toBe("Fon (the shop's own session) took addresses away from a site sign-in, keeping its password.");
+    expect(said({ actor: op, action: "signin.members_changed", subject: { signInId: "s1" } }))
+      .toBe("ops@manut.test changed who may use a site sign-in.");
+  });
+
   it("has words for every new action: none is shown by its raw name or as an action it does not know", () => {
     const actors = { op, helper, worker, outpost };
     const actions: [string, keyof typeof actors][] = [

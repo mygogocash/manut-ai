@@ -1,9 +1,10 @@
 // Customize › Connections for the shop's owner, kept apart from the page so it can be tested without one: how a vault
-// sign-in and an outpost are said, how the in-place questions move (Add a sign-in, Change, Who uses it, Rename, Remove), and
+// sign-in and an outpost are said, how the in-place questions move (Add a sign-in, Change, Who uses it, Remove, Rename), and
 // how a change reaches the runtime. The design canvas's boards are "Customize: connections" (Connections.dc.html) and
 // "States: customize" (StatesCustomize.dc.html). The rules are the API's: the runtime applies them
 // (src/runtime/connections.ts), and nothing here decides who may see or change what. What the page checks as the owner types
-// (an address that is not https, a name too long) is the vault's own rule, said early so the owner can fix it before Add.
+// (an address that is not https, a name too long, a new address with no password typed again) is the vault's own rule, said
+// early so the owner can fix it before Add or Save.
 //
 // The typed password is the one thing here that must not stay. It lives in the open Change question's draft, or Add a
 // sign-in's, only while the owner types; it leaves the page's state the moment Save or Add is pressed (`begin`), goes once
@@ -20,12 +21,18 @@ import {
   MAX_SITE,
   MAX_USERNAME,
   newSignInRefusal,
+  onlyTakesAway,
+  passwordOk,
+  samePlace,
   SIGN_IN_MEMBERS,
+  signInChangeRefusal,
   siteOf,
   usernameOk,
   type NewSignIn,
   type ShopConnections,
   type ShopOutpost,
+  type SignInChange,
+  type SignInPlace,
   type VaultSignIn,
 } from "../runtime/connections";
 import { unavailable, type Load } from "./load";
@@ -80,12 +87,27 @@ export interface AddDraft {
 /** Add a sign-in as it opens: every field empty, one address field, and nobody ticked, so the owner says who. */
 export const addStart = (): AddDraft => ({ site: "", addresses: [""], username: "", password: "", members: [] });
 
-/** The one question open in the tab: a new sign-in, a new password for a sign-in, who may use one, a new name for an
- *  outpost, or whether to remove one. Nothing is changed until the owner answers it. */
+/** Change as the owner types into it: the account's name and the addresses, which start as the vault has them, and the
+ *  password, empty until the owner types one. The password lives here only while they type: it leaves the page's state the
+ *  moment Save is pressed (`begin`). */
+export interface ChangeDraft {
+  username: string;
+  /** each address field as typed, one to five of them */
+  addresses: string[];
+  password: string;
+}
+
+/** Change as it opens: the sign-in's account and addresses as they are, and no password typed. */
+export const changeStart = (s: SignInPlace): ChangeDraft => ({ username: s.username, addresses: [...s.origins], password: "" });
+
+/** The one question open in the tab: a new sign-in, a change to a sign-in (a new password, or its account or addresses),
+ *  who may use one, whether to remove one, a new name for an outpost, or whether to remove one. Nothing is changed until the
+ *  owner answers it. */
 export type ConnAsk =
   | { kind: "add"; draft: AddDraft }
-  | { kind: "password"; signIn: string; draft: string }
+  | { kind: "change"; signIn: string; draft: ChangeDraft }
   | { kind: "members"; signIn: string; members: string[] }
+  | { kind: "removeSignIn"; signIn: string }
   | { kind: "rename"; outpost: string; draft: string }
   | { kind: "remove"; outpost: string }
   | null;
@@ -107,13 +129,15 @@ export const CONN_START: ConnUi = { ask: null, busy: false, at: null, error: nul
 
 export type ConnAction =
   | { type: "add" }
-  | { type: "addField"; field: "site" | "username" | "password"; text: string }
+  /** a field of the form open, Add a sign-in's or Change's: Change has no site's name */
+  | { type: "field"; field: "site" | "username" | "password"; text: string }
   | { type: "address"; index: number; text: string }
   | { type: "addressMore" }
   | { type: "addressLess"; index: number }
-  | { type: "change"; signIn: string }
+  | { type: "change"; signIn: string; username: string; origins: string[] }
   | { type: "who"; signIn: string; members: string[] }
   | { type: "member"; member: string }
+  | { type: "removeSignIn"; signIn: string }
   | { type: "rename"; outpost: string; name: string; at?: "this_mac" }
   | { type: "remove"; outpost: string; at?: "this_mac" }
   | { type: "draft"; text: string }
@@ -135,6 +159,18 @@ function withDraft(s: ConnUi, change: (d: AddDraft) => AddDraft): ConnUi {
   return !s.busy && s.ask?.kind === "add" ? { ...s, ask: { kind: "add", draft: change(s.ask.draft) } } : s;
 }
 
+/** What Add a sign-in and Change both hold: an account's name, the addresses and a password. */
+type FormFields = Pick<AddDraft, "username" | "addresses" | "password">;
+
+/** The open form's account, addresses or password changed by `change`, Add a sign-in's or Change's, whichever is open; or the
+ *  state as it was when neither is, or a change is on its way. */
+function withFields(s: ConnUi, change: (d: FormFields) => FormFields): ConnUi {
+  if (s.busy) return s;
+  if (s.ask?.kind === "add") return { ...s, ask: { kind: "add", draft: { ...s.ask.draft, ...change(s.ask.draft) } } };
+  if (s.ask?.kind === "change") return { ...s, ask: { ...s.ask, draft: { ...s.ask.draft, ...change(s.ask.draft) } } };
+  return s;
+}
+
 /** Moves the tab between asking, waiting on the runtime and done. One question at a time, and none while a change is on its
  *  way, so the owner cannot ask twice. A change's words show where its question was asked: the vault, the shop's list, or
  *  this Mac's own row. */
@@ -142,33 +178,36 @@ export function connReduce(s: ConnUi, a: ConnAction): ConnUi {
   switch (a.type) {
     case "add":
       return s.busy ? s : { ...s, ask: { kind: "add", draft: addStart() }, at: "vault", error: null, notice: null };
-    case "addField":
-      return withDraft(s, (d) => ({ ...d, [a.field]: a.text }));
+    case "field":
+      if (a.field === "site") return withDraft(s, (d) => ({ ...d, site: a.text }));
+      return withFields(s, (d) => (a.field === "username" ? { ...d, username: a.text } : { ...d, password: a.text }));
     case "address":
-      return withDraft(s, (d) => (a.index >= 0 && a.index < d.addresses.length ? { ...d, addresses: d.addresses.map((x, i) => (i === a.index ? a.text : x)) } : d));
+      return withFields(s, (d) => (a.index >= 0 && a.index < d.addresses.length ? { ...d, addresses: d.addresses.map((x, i) => (i === a.index ? a.text : x)) } : d));
     case "addressMore":
-      return withDraft(s, (d) => (d.addresses.length < MAX_ORIGINS ? { ...d, addresses: [...d.addresses, ""] } : d));
+      return withFields(s, (d) => (d.addresses.length < MAX_ORIGINS ? { ...d, addresses: [...d.addresses, ""] } : d));
     case "addressLess":
-      return withDraft(s, (d) => (d.addresses.length > 1 ? { ...d, addresses: d.addresses.filter((_, i) => i !== a.index) } : d));
+      return withFields(s, (d) => (d.addresses.length > 1 ? { ...d, addresses: d.addresses.filter((_, i) => i !== a.index) } : d));
     case "change":
-      return s.busy ? s : { ...s, ask: { kind: "password", signIn: a.signIn, draft: "" }, at: "vault", error: null, notice: null };
+      return s.busy ? s : { ...s, ask: { kind: "change", signIn: a.signIn, draft: changeStart(a) }, at: "vault", error: null, notice: null };
     case "who":
       return s.busy ? s : { ...s, ask: { kind: "members", signIn: a.signIn, members: SIGN_IN_MEMBERS.filter((m) => a.members.includes(m)) }, at: "vault", error: null, notice: null };
     case "member":
       if (s.busy) return s;
       if (s.ask?.kind === "members") return { ...s, ask: { ...s.ask, members: toggled(s.ask.members, a.member) } };
       return withDraft(s, (d) => ({ ...d, members: toggled(d.members, a.member) }));
+    case "removeSignIn":
+      return s.busy ? s : { ...s, ask: { kind: "removeSignIn", signIn: a.signIn }, at: "vault", error: null, notice: null };
     case "rename":
       return s.busy ? s : { ...s, ask: { kind: "rename", outpost: a.outpost, draft: a.name }, at: a.at ?? "outposts", error: null, notice: null };
     case "remove":
       return s.busy ? s : { ...s, ask: { kind: "remove", outpost: a.outpost }, at: a.at ?? "outposts", error: null, notice: null };
     case "draft":
-      return !s.busy && (s.ask?.kind === "password" || s.ask?.kind === "rename") ? { ...s, ask: { ...s.ask, draft: a.text } } : s;
+      return !s.busy && s.ask?.kind === "rename" ? { ...s, ask: { ...s.ask, draft: a.text } } : s;
     case "cancel":
       return s.busy ? s : { ...s, ask: null, error: null };
     // The password leaves the page's state here, as it is sent: whatever comes back, nothing keeps it to send again. The
-    // rest of a new sign-in stays, so a refusal can be fixed without typing it all again. The words stay where the question
-    // was asked, which opening it set.
+    // rest of a new sign-in, or of a change, stays, so a refusal can be fixed without typing it all again. The words stay
+    // where the question was asked, which opening it set.
     case "begin":
       return { ...s, busy: true, at: s.ask === null ? null : s.at, error: null, notice: null, ask: withoutPassword(s.ask) };
     case "done":
@@ -184,7 +223,7 @@ export function connReduce(s: ConnUi, a: ConnAction): ConnUi {
 
 /** The open question with any typed password taken out of it. */
 function withoutPassword(ask: ConnAsk): ConnAsk {
-  if (ask?.kind === "password") return { ...ask, draft: "" };
+  if (ask?.kind === "change") return { ...ask, draft: { ...ask.draft, password: "" } };
   if (ask?.kind === "add") return { kind: "add", draft: { ...ask.draft, password: "" } };
   return ask;
 }
@@ -241,8 +280,8 @@ export function addressProblem(problem: Extract<AddressRead, { kind: "problem" }
 /** Whether the site's name says something the vault would not keep (too long, or a character no form takes), once anything
  *  is typed. An empty name is not a problem to point at: Add simply waits for one. */
 export const siteProblem = (draft: AddDraft): boolean => draft.site.trim() !== "" && siteOf(draft.site) === null;
-/** The same for the account's name. */
-export const usernameProblem = (draft: AddDraft): boolean => draft.username.trim() !== "" && !usernameOk(draft.username.trim());
+/** The same for the account's name, in Add a sign-in or Change. */
+export const usernameProblem = (draft: Pick<AddDraft, "username">): boolean => draft.username.trim() !== "" && !usernameOk(draft.username.trim());
 
 /** The new sign-in to send, once the vault would take it, or null while anything is missing or wrong: the site's name
  *  trimmed, the addresses' origins with empty fields left out, the account's name without the spaces a paste brings at its
@@ -253,6 +292,37 @@ export function addFields(draft: AddDraft): NewSignIn | null {
   const origins = reads.flatMap((r) => (r.kind === "origin" ? [r.origin] : []));
   const fields: NewSignIn = { site: draft.site.trim(), origins, username: draft.username.trim(), password: draft.password, members: [...draft.members] };
   return newSignInRefusal(fields) === null ? fields : null;
+}
+
+/** The account's name a change sends: what the owner typed, without the spaces a paste brings at its ends; or the name as
+ *  the vault keeps it when that is what the field still says, so a name kept with a space at an end is not taken for a
+ *  new account. */
+export function changedUsername(now: SignInPlace, draft: Pick<ChangeDraft, "username">): string {
+  const typed = draft.username.trim();
+  return typed === now.username.trim() ? now.username : typed;
+}
+
+/** Whether what Change holds could send the password somewhere new, a new or swapped address or another account, so Save
+ *  waits for the password typed again. Addresses only taken away need none. An address that cannot be kept yet is said under
+ *  its field, and counts here for what it would be once it can. */
+export function passwordNeeded(now: SignInPlace, draft: ChangeDraft): boolean {
+  const origins = readAddresses(draft.addresses).flatMap((r) => (r.kind === "origin" ? [r.origin] : []));
+  return !onlyTakesAway(now, { origins, username: changedUsername(now, draft) });
+}
+
+/** What Save in Change does once the vault would take it, or null while nothing new is there, or anything is missing or
+ *  wrong. With the account and addresses as they were, a password typed is a new password, as Change has always sent one;
+ *  anything else is a change of the account and addresses (`signInChangeRefusal`), carrying the password typed or, when it
+ *  only takes addresses away and none was typed, none. */
+export function changeTodo(now: VaultSignIn, draft: ChangeDraft): ConnDo | null {
+  const reads = readAddresses(draft.addresses);
+  if (reads.some((r) => r.kind === "problem")) return null;
+  const origins = reads.flatMap((r) => (r.kind === "origin" ? [r.origin] : []));
+  const username = changedUsername(now, draft);
+  const password = draft.password === "" ? null : draft.password;
+  if (samePlace(now, { origins, username })) return password !== null && passwordOk(password) ? { what: "password", signIn: now.id, password } : null;
+  const change: SignInChange = { origins, username, password };
+  return signInChangeRefusal(now, change) === null ? { what: "change", signIn: now.id, change } : null;
 }
 
 /** Who may use a sign-in is ready to save once at least one member is ticked and it differs from who may now. */
@@ -284,6 +354,8 @@ const REFUSALS = new Map<string, () => string>([
   ["invalid_members", () => t("conn.err.members")],
   ["too_many_sign_ins", () => t("conn.err.tooMany", { max: MAX_SIGN_INS })],
   ["vault_not_configured", () => t("conn.err.vaultKey")],
+  ["no_change", () => t("conn.err.noChange")],
+  ["password_required", () => t("conn.err.passwordAgain")],
   ["no_shop", () => t("conn.err.noShop")],
 ]);
 
@@ -291,11 +363,13 @@ export function refusalText(code: string, message: string): string {
   return REFUSALS.get(code)?.() ?? message;
 }
 
-/** The five changes, which the tab sends through its own client of the runtime. */
+/** The seven changes, which the tab sends through its own client of the runtime. */
 export interface ConnectionsCalls {
   add(shop: string | null, fields: NewSignIn): Promise<{ signIn: VaultSignIn }>;
   password(shop: string | null, signIn: string, password: string): Promise<{ signIn: VaultSignIn }>;
   members(shop: string | null, signIn: string, members: string[]): Promise<{ signIn: VaultSignIn }>;
+  change(shop: string | null, signIn: string, change: SignInChange): Promise<{ signIn: VaultSignIn }>;
+  removeSignIn(shop: string | null, signIn: string): Promise<{ signIn: string }>;
   rename(shop: string | null, outpost: string, name: string): Promise<{ outpost: ShopOutpost }>;
   remove(shop: string | null, outpost: string): Promise<{ outpost: string }>;
 }
@@ -304,11 +378,18 @@ export type ConnDo =
   | { what: "add"; fields: NewSignIn }
   | { what: "password"; signIn: string; password: string }
   | { what: "members"; signIn: string; members: string[] }
+  | { what: "change"; signIn: string; change: SignInChange }
+  | { what: "removeSignIn"; signIn: string }
   | { what: "rename"; outpost: string; name: string }
   | { what: "remove"; outpost: string };
 
 /** The password a change carries, if it carries one. */
-const passwordIn = (todo: ConnDo): string | null => (todo.what === "password" ? todo.password : todo.what === "add" ? todo.fields.password : null);
+function passwordIn(todo: ConnDo): string | null {
+  if (todo.what === "password") return todo.password;
+  if (todo.what === "add") return todo.fields.password;
+  if (todo.what === "change") return todo.change.password;
+  return null;
+}
 
 /** Asks the runtime to make the change, on the shop the lists were read for, and says what the lists are now and how the tab
  *  moves on. A row the runtime says is gone is dropped, since the owner is looking at a list that went out of date. */
@@ -333,6 +414,17 @@ export async function connectionsDo(calls: ConnectionsCalls, data: ShopConnectio
           action: { type: "done", notice: t("vault.whoSaved", { site: signIn.site, who: whoText(signIn.members) }) },
         };
       }
+      case "change": {
+        const { signIn } = await calls.change(data.shop, todo.signIn, todo.change);
+        // Typed again, the password now goes with the account and addresses shown; kept, it goes to fewer places than before.
+        const notice = todo.change.password !== null ? t("vault.changeSaved", { site: signIn.site }) : t("vault.narrowSaved", { site: signIn.site });
+        return { data: { ...data, signIns: data.signIns.map((s) => (s.id === signIn.id ? signIn : s)) }, action: { type: "done", notice } };
+      }
+      case "removeSignIn": {
+        const { signIn } = await calls.removeSignIn(data.shop, todo.signIn);
+        const site = data.signIns.find((s) => s.id === signIn)?.site ?? "";
+        return { data: { ...data, signIns: data.signIns.filter((s) => s.id !== signIn) }, action: { type: "done", notice: t("vault.removedNotice", { site }) } };
+      }
       case "rename": {
         const { outpost } = await calls.rename(data.shop, todo.outpost, todo.name);
         return { data: { ...data, outposts: data.outposts.map((o) => (o.id === outpost.id ? outpost : o)) }, action: { type: "done", notice: t("outposts.renamed", { name: outpost.name }) } };
@@ -350,7 +442,7 @@ export async function connectionsDo(calls: ConnectionsCalls, data: ShopConnectio
     // Whatever a runtime says, the tab never shows the password it was sent.
     const password = passwordIn(todo);
     if (password !== null && message.includes(password)) message = t("conn.err.failed");
-    if (code === "sign_in_not_found" && (todo.what === "password" || todo.what === "members")) {
+    if (code === "sign_in_not_found" && (todo.what === "password" || todo.what === "members" || todo.what === "change" || todo.what === "removeSignIn")) {
       return { data: { ...data, signIns: data.signIns.filter((s) => s.id !== todo.signIn) }, action: { type: "failed", message, close: true } };
     }
     if (code === "outpost_not_found" && (todo.what === "rename" || todo.what === "remove")) {

@@ -1123,6 +1123,15 @@ export class MockHost {
       const changed = this.vault.members(p.signIn, p.members);
       return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
     }),
+    "connections.change": (p) => this.atVault(p.shop, () => {
+      const { shop: _shop, signIn, ...fields } = p;
+      const changed = this.vault.change(signIn, fields, this.now());
+      return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
+    }),
+    "connections.removeSignIn": (p) => this.atVault(p.shop, () => {
+      const removed = this.vault.removeSignIn(p.signIn);
+      return removed.ok ? { ok: true, value: { signIn: removed.value } } : removed;
+    }),
     "connections.rename": (p) => this.atVault(p.shop, () => {
       const renamed = this.vault.rename(p.outpost, p.name);
       return renamed.ok ? { ok: true, value: { outpost: renamed.value } } : renamed;

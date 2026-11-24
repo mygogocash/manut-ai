@@ -182,6 +182,14 @@ type DeletionView = {
 | `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
 | `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
 | `GET /v1/admin/workers/drafts` | `?tenant=&before=&limit=` | `WorkerJobsPage`: one page of the shop's worker jobs, newest first, drafts and handovers included ("Workers' drafts", below) |
+| `GET /v1/admin/model/usage` | `?tenant=&month=` | A shop's model spend, cap, crossings of the cap and calls for one Bangkok month (`docs/model-gateway.md`, "Operator routes") |
+| `PUT /v1/admin/model/cap` | `{ tenant, capSatang }` | The shop's cap as it now stands; `capSatang: null` clears the override (`docs/model-gateway.md`) |
+| `GET /v1/admin/model/alerts` | none | This Bangkok month's shops at or near their caps, across all shops, from one read (`docs/model-gateway.md`, "Alerts near the cap") |
+
+The console's **Model spend** page opens with the shops near or at their caps this month, from `GET /v1/admin/model/alerts`:
+one request, never one per shop. Each row names the shop, says "At the cap" or "Near the cap" and when, and its Show
+button opens that shop's month below, which says which thresholds its spend reached. Refresh and a cap change read the
+list again.
 
 The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
 reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
@@ -487,7 +495,7 @@ type AuditEntry = {
   subject: AuditSubject;        // ids only
   outcome: string;              // one of the outcomes below
   reason?: string;              // a code: why an attempt ended, why a decision was refused
-  amountSatang?: number;        // the money it was about: a payment recorded, a cap set
+  amountSatang?: number;        // the money it was about: a payment recorded, a cap set, the cap a crossing reached
 };
 
 type AuditActor =
@@ -500,7 +508,7 @@ type AuditActor =
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
   "connectionId" | "previousConnectionId" | "confirmationId" | "factId" | "inviteId" | "helperId" | "signInId" |
-  "outpostId" | "stepId" | "grantId", string>>;
+  "outpostId" | "stepId" | "grantId" | "month", string>>;   // `month`: a Bangkok month of the model meter, YYYY-MM
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -516,6 +524,7 @@ What is written, and by whom:
 | `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |
 | `payment.recorded`, `subscription_payment.recorded` | operator | `paymentId`, with `amountSatang` | `ok` |
 | `model.cap_set`, `model.cap_cleared` | operator | none; a cap set carries `amountSatang` | `ok` |
+| `model.cap_near`, `model.cap_reached` | system, when a Bangkok month's charged model spend first reaches 80% of the shop's cap, and 100%, in the same write as the charge or cap change that got it there (`docs/model-gateway.md`, "Alerts near the cap") | `month`; carries the cap it was measured against as `amountSatang` | `ok` |
 | `deletion.requested` | operator | `confirmationId` for a live shop | `awaiting_owner` for a live shop; `ok` for one deleted at once, which the deletion then wipes with the rest |
 | `consent.given`, `consent.withdrawn` | owner: through a link or the lifted session (no id), or an owner session (the linked account's id) | none | `ok` |
 | `reply.decided` | owner | `taskId`, `actionId` | `approved` or `declined` |
@@ -538,8 +547,10 @@ What is written, and by whom:
 | `away.set`, `away.cleared` | operator, or the owner from a session | `helperId` (who covers, or covered) | `ok` |
 | `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
 | `signin.created`, `signin.password_replaced` | operator, or the owner from a session (the linked account's id; `owner-session` for the shop's own session) | `signInId` | `ok` |
-| `signin.removed` | operator | `signInId` | `ok` |
-| `signin.members_changed` | the owner from a session (as above), choosing who may use the sign-in | `signInId` | `ok` |
+| `signin.removed` | operator, or the owner from a session (as above) | `signInId` | `ok` |
+| `signin.members_changed` | the owner from a session (as above), or an operator on the owner's word, choosing who may use the sign-in | `signInId` | `ok` |
+| `signin.changed` | the owner from a session (as above), changing a sign-in's account or addresses with its password typed again | `signInId` | `ok` |
+| `signin.narrowed` | the owner from a session (as above), taking addresses away from a sign-in and keeping its password | `signInId` | `ok` |
 | `outpost.registered` | operator, or the owner from a session registering this Mac | `outpostId` | `ok` |
 | `outpost.renamed` | the owner from a session | `outpostId` | `ok` |
 | `signin.requested` | worker | `signInId`, `outpostId`, `taskId`, `attemptId`, and `grantId` when a grant was issued | `ok`, or `refused` with the vault's refusal as the `reason` |
@@ -935,8 +946,8 @@ the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Re
 limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`. One route under `/v1/outposts/` is the
 owner's instead: the desktop registering this Mac (`POST /v1/outposts/register`), which takes the owner's session and
 no outpost's credential. The owner's Connections take the owner's session too, under `/v1/vault/` ("The owner's vault
-and outposts", below): the shop's sign-ins and outposts, adding a sign-in, a new password, who may use a sign-in, and
-renaming or removing an outpost.
+and outposts", below): the shop's sign-ins and outposts, adding a sign-in, a new password, who may use a sign-in,
+changing its account or addresses, removing it, and renaming or removing an outpost.
 
 ```ts
 type SignIn = {
@@ -1029,11 +1040,21 @@ Buddy routes work and never signs in to a site.
 mends a broken sign-in: `state` is `working` again and `brokenAt` and `brokenBy` are null. 404 `sign_in_not_found`,
 400 `invalid_password`, 503 `vault_not_configured`.
 
+### `POST /v1/admin/vault/sign-ins/members`
+
+`{ tenant, signInId, members }` answers `{ signIn: SignIn }` with its new members, on the owner's word: who may use the
+sign-in from now on, and nothing else about it changes. It goes through the vault operation the owner's route uses
+(`POST /v1/vault/sign-ins/members`, below), so the two refuse the same way: 400 `tenant_required`; 400
+`invalid_members` (none, a repeat, or one who is not Nam, Pim, Ton or Kit); 404 `sign_in_not_found` (also one removed).
+A member taken off loses it at once. Writes `signin.members_changed` by the operator. An operator has no route to
+change a sign-in's account or addresses: it removes the sign-in and adds it again.
+
 ### `POST /v1/admin/vault/sign-ins/remove`
 
 `{ tenant, signInId }` answers `{ removed: true, signInId }`. The record stays as a tombstone with no username and no
-seal, as a revoked connection does, so a restored backup cannot bring the password back. A grant waiting for it is
-refused. 404 `sign_in_not_found`, also when it was already removed.
+seal, as a revoked connection does, so a restored backup cannot bring the password back. A grant issued for it is
+refused at its redeem, and none is issued after; the owner's removal is this one. 404 `sign_in_not_found`, also when it
+was already removed.
 
 ### `POST /v1/admin/vault/reseal`
 
@@ -1121,6 +1142,8 @@ signed-in session, and the shop is the session's: no route reads one from a body
 | `POST /v1/vault/sign-ins` | `{ site, origins, username, password, members }` | `{ signIn: SignIn }`, added to the shop's vault as the operator's route adds it, with the password sealed |
 | `POST /v1/vault/sign-ins/password` | `{ signInId, password }` | `{ signIn: SignIn }`, with the new password sealed; a broken sign-in is `working` again |
 | `POST /v1/vault/sign-ins/members` | `{ signInId, members }` | `{ signIn: SignIn }` with its new members; nothing else about it changes |
+| `POST /v1/vault/sign-ins/change` | `{ signInId, origins, username, password }`, `password` a string or null | `{ signIn: SignIn }` with its new account and addresses; with a password, that password sealed and a broken sign-in `working` again |
+| `POST /v1/vault/sign-ins/remove` | `{ signInId }` | `{ removed: true, signInId }`, as the operator's removal answers |
 | `GET /v1/vault/outposts` | none | `{ tenant, outposts: Outpost[] }`, as the operator's list answers it for the shop |
 | `POST /v1/vault/outposts/rename` | `{ outpostId, name }` | `{ outpost: Outpost }` with the name trimmed; nothing else about it changes |
 | `POST /v1/vault/outposts/remove` | `{ outpostId }` | `{ removed: true, outpostId, stepsRefused, grantsRefused }`, as the operator's removal answers |
@@ -1133,11 +1156,13 @@ signed-in session, and the shop is the session's: no route reads one from a body
   then is the tenant checked to be a pilot shop (24 Nov 2026): a person's own sign-in, whose tenant is none, answers 404
   `not_found` on every route, and nothing is kept for it (503 `vault_unavailable` when the shop's record cannot be read).
   The desktop reads that as `no_shop` ("No shop is linked to your account yet").
-- **Exact.** A body is exactly the keys above. An id, a new password and a name are strings. Anything more, a `tenant`,
-  a `shop` or a `role` above all, a key missing, or an id, password or name of another type answers 400
+- **Exact.** A body is exactly the keys above. An id, a new password and a name are strings, and a change's `password` a
+  string or null. Anything more, a `tenant`, a `shop` or a `role` above all, a key missing (a change's `password`
+  included: keeping the sealed one is said with null), or an id, password or name of another type answers 400
   `invalid_request`; a body that is not JSON, 400 `invalid_json`; over 16 KB, 413 `body_too_large`. Every other value
-  (a new sign-in's `site`, `origins`, `username`, `password` and `members`, and the `members` chosen) is the vault's to
-  check, as it is on the operator's route, so a value of the wrong kind gets that field's refusal.
+  (a new sign-in's `site`, `origins`, `username`, `password` and `members`, the `members` chosen, and a change's
+  `origins` and `username`) is the vault's to check, as it is on the operator's route, so a value of the wrong kind gets
+  that field's refusal.
 - **Through the vault's own operations.** A new sign-in goes through the vault's `/sign-ins`, the operator's, so it is
   checked, sealed under `CRED_KEY` and kept exactly as the operator's is, with the operator's refusals
   (`POST /v1/admin/vault/sign-ins` above: 400 `invalid_site`, `invalid_origins`, `invalid_username`, `invalid_password`,
@@ -1146,21 +1171,35 @@ signed-in session, and the shop is the session's: no route reads one from a body
   `/sign-ins/members`, whose members are checked as at creation (400 `invalid_members`: none, a repeat, or one who is not
   Nam, Pim, Ton or Kit) and which changes nothing else: not its password, whether it works, or when it was last used. A
   member taken off loses it at once: a grant not yet redeemed for them, and any new one, is refused `member_not_allowed`,
-  and no step of theirs goes to its origins. A removal is the operator's removal, so the outpost's credential stops
-  working at once and its waiting steps and grants are refused in the same step; a rename is the vault's
-  `/outposts/rename`, with the name rule registration uses. The vault's own refusals pass through: those above, 400
-  `invalid_password` (not text of 1 to 1,024 characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or
-  holding a control character), 404 `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found`
-  (also another shop's, or one already removed), 503 `vault_not_configured` and `vault_unavailable`.
-- **The password** goes from the body straight into the vault, a new sign-in's as a new password. It is never kept,
-  logged or answered: the answer is the sign-in's public view, which says only when its password was set.
-- **The log.** `signin.created`, `signin.password_replaced`, `signin.members_changed`, `outpost.renamed` and
+  and no step of theirs goes to its origins. A sign-in's removal is the operator's removal
+  (`POST /v1/admin/vault/sign-ins/remove` above), so a grant issued for it is refused at its redeem and none is issued
+  after. An outpost's removal is the operator's removal, so the outpost's credential stops working at once and its waiting
+  steps and grants are refused in the same step; a rename is the vault's `/outposts/rename`, with the name rule
+  registration uses. The vault's own refusals pass through: those above, 400 `invalid_password` (not text of 1 to 1,024
+  characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or holding a control character), 404
+  `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found` (also another shop's, or one already
+  removed), 503 `vault_not_configured` and `vault_unavailable`.
+- **Changing a sign-in's account or addresses** goes through the vault's `/sign-ins/change`, which checks `origins`,
+  `username` and a `password` with the rules adding uses (400 `invalid_origins`, `invalid_username`, `invalid_password`)
+  and seals a password as adding does (503 `vault_not_configured`). A stored password is typed only into the account and
+  the addresses it was given with, so adding or changing any address, or changing the account, needs `password` typed
+  again in the same body; only taking addresses away, at least one kept and the account the same, may go with `password`
+  null. Anything else is 400 `password_required`, and the same account at the same addresses (in any order) is 400
+  `no_change`, with or without a password: a new password alone is `/v1/vault/sign-ins/password`'s. A password typed again
+  mends a broken sign-in; taking addresses away leaves it as it was. Who may use it, and when it was last used, stay. A
+  redeem already past its read of the sign-in finishes with what it read: the password it answers always went with the
+  addresses it answers.
+- **The password** goes from the body straight into the vault, a new sign-in's as a new password or one typed again with a
+  change. It is never kept, logged or answered: the answer is the sign-in's public view, which says only when its password
+  was set.
+- **The log.** `signin.created`, `signin.password_replaced`, `signin.members_changed`, `signin.changed` (a change with the
+  password typed again), `signin.narrowed` (addresses only taken away), `signin.removed`, `outpost.renamed` and
   `outpost.removed`, by `{ kind: "owner", id }` (the linked account's id, or `owner-session` for the shop's own session),
-  with the record's id only: never a password, an account's name, who may use a sign-in, or the name typed. A refusal
-  writes nothing, as the operator's do not.
-- Like the registration, none of these is behind an ingress limit, the two added on 24 November included: each needs a
+  with the record's id only: never a password, an account's name, an address, who may use a sign-in, or the name typed. A
+  refusal writes nothing, as the operator's do not.
+- Like the registration, none of these is behind an ingress limit, those added on 24 November included: each needs a
   session first, and the vault bounds what a shop keeps (50 sign-ins, 20 outposts). The owner registers no cloud outpost
-  and removes no sign-in here; an operator does.
+  here; an operator does.
 
 ### `POST /v1/outposts/heartbeat`
 

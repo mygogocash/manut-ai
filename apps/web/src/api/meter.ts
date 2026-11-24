@@ -2,9 +2,11 @@ import { formatIsoDate } from "../format";
 import {
   ApiError,
   MODEL_CAP_MAX_SATANG,
+  type ModelAlerts,
   type ModelCall,
   type ModelCap,
   type ModelCapOverride,
+  type ModelCrossing,
   type ModelHold,
   type ModelUsage,
 } from "./types";
@@ -31,6 +33,8 @@ export type FakeModelGateway = {
 const MILLISATANG_PER_SATANG = 1000;
 /// The newest records one month's answer lists, as the API lists them.
 const LISTED_CALLS = 200;
+/// The thresholds the meter watches, in whole percent of a shop's cap, as the API's (model-alerts.ts).
+const CAP_THRESHOLDS = [80, 100] as const;
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export function isMonth(value: unknown): value is string {
@@ -135,9 +139,46 @@ export function usageOf(model: FakeModel, tenant: string, month: string, default
     remainingSatang: left > 0 ? floorSatang(left) : 0,
     counts,
     tokens: { input: sum(all.map((call) => call.inputTokens)), output: sum(all.map((call) => call.outputTokens)) },
+    crossings: crossingsOf(model, tenant, month, cap.capSatang),
     calls: all.slice(0, LISTED_CALLS),
     holds,
   };
+}
+
+/// The thresholds a month's charged spend has reached against `capSatang`, each as of the call that first took the
+/// spend there, compared in integers as the API compares them. Holds do not count, and a cap of zero notes nothing, as
+/// in the API. The practice meter keeps no history of caps, so it reads the month against the cap as it is now: a
+/// crossing the API would have noted at a cap change reads here as of the call that first passed the new threshold.
+export function crossingsOf(model: FakeModel, tenant: string, month: string, capSatang: number): ModelCrossing[] {
+  if (capSatang <= 0) return [];
+  const calls = model.calls
+    .filter((call) => call.tenant === tenant && monthOf(Date.parse(call.at)) === month)
+    .sort((a, b) => (a.at === b.at ? (a.id < b.id ? -1 : 1) : a.at < b.at ? -1 : 1));
+  const found: ModelCrossing[] = [];
+  let spent = 0;
+  for (const call of calls) {
+    spent += call.millisatang;
+    for (const percent of CAP_THRESHOLDS) {
+      if (found.some((crossing) => crossing.percent === percent)) continue;
+      if (spent * 100 < capSatang * MILLISATANG_PER_SATANG * percent) continue;
+      found.push({ percent, at: call.at, capSatang, spentSatang: ceilSatang(spent), spentMillisatang: spent });
+    }
+  }
+  return found;
+}
+
+/// `GET /v1/admin/model/alerts` as the API answers it: the month's shops at their caps, then those near them, the
+/// latest to cross first within each. Only shops on the console's list are listed, as only the registry's are in the API.
+export function alertsOf(model: FakeModel, tenants: string[], month: string, defaultCapSatang: number): ModelAlerts {
+  const latest = (crossings: ModelCrossing[]) => crossings.reduce((at, crossing) => (crossing.at > at ? crossing.at : at), "");
+  const shops = tenants
+    .map((tenant) => ({ tenant, crossings: crossingsOf(model, tenant, month, capOf(model, tenant, defaultCapSatang).capSatang) }))
+    .filter((shop) => shop.crossings.length > 0)
+    .map((shop) => ({ ...shop, percent: Math.max(...shop.crossings.map((crossing) => crossing.percent)) }))
+    .sort((a, b) => b.percent - a.percent || latest(b.crossings).localeCompare(latest(a.crossings)) ||
+      a.tenant.localeCompare(b.tenant))
+    .map(({ tenant, percent, crossings }) => ({ tenant, percent, crossings }));
+  return { month, shops, truncated: false };
 }
 
 /// Sets a shop's cap override, or clears it with null. It takes effect at the next read, as in the API, where it applies
