@@ -34,7 +34,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Working: the pill names the real step, with the time | Has (this branch): the lane's tag names the agent's own step ("Running tests" while a test run runs) with the time, and its line says Kit works on a separate branch and nothing is live | `code/Lanes.tsx`, `chat/activity/Activity.slot.tsx` |
 | Needs you: Kit asks a question, "Answer Kit" | Has: the agent's questions are cards, and Needs you lists them. The lane says "Kit asks: …" with Answer Kit (this branch) | `chat/cards/Cards.slot.tsx`, `pages/NeedsPage.tsx`, `code/Lanes.tsx` |
 | Checked, and Tests failed ("1 of 14 tests failed", the test and the wrong value) | Has (this branch): "14 tests passed" and "1 of 14 tests failed. Nothing is live.", with the failing tests named. The wrong value is in the terminal; the lane does not keep a test's output | `code/lane.ts`, `code/Lanes.tsx` |
-| Reverted, and Bring it back | Part: after Rewind the chat says "Rewound to before “Thai date format”. 3 files are back as they were.", and the lane says Reverted with the time and that the files are back; after the agent's own Edit, which takes back only the chat, the lane says the files stay as they are. Bring it back lacks | `sessions/rewind.ts` (`rewoundNote`), `code/lane.ts` |
+| Reverted, and Bring it back | Has (this branch): after Rewind the chat says "Rewound to before “Thai date format”. 3 files are back as they were.", and the lane says Reverted with the time, that the files are back, and Bring it back, while the shell still keeps the files from before the rewind (until the next turn starts). Bring it back opens a panel under the row: how many files go back, the files changed by hand since the rewind (kept unless unticked), and that the chat stays where the rewind left it. After it the lane reads by its tests again with "You brought the files back at 10:02. The chat stays where the rewind left it." After the agent's own Edit, which takes back only the chat, the lane says the files stay as they are and offers nothing. See [Bring it back](#bring-it-back-after-a-rewind) | `code/BringBack.tsx`, `code/lane.ts`, `code/Lanes.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs` |
 | Test output, passing and failing | Part: the terminal and the step show it; the lane reads its result and keeps none of it | `code/testRun.ts` |
 | Artifacts: Building, Private preview, Needs you, Live, Rolled back, Failed | Lacks: the Artifacts page is empty. Going live reaches customers (Owner) | `pages/ArtifactsPage.tsx` |
 
@@ -61,7 +61,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Open an existing project: from GitHub or a folder on this Mac; Kit reads it first and changes nothing | Part: a folder can be added and sessions start in it, and plan mode reads without changing. From GitHub lacks (Owner: a real GitHub account) | `sessions/folders.ts` |
-| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the Code page says "main changed while Kit worked. 1 file needs both changes." under Kit's dial, with the files. Show me both draws what main changed beside what Kit changed. Let Kit merge sends Kit the ask as a message (no running lane: a new session with the ask in its box); Kit's steps then ask through their own cards. Per project, not per lane row: lanes are not on the page yet | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/askKit.ts` |
+| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the note "main changed while Kit worked. 1 file needs both changes." sits on the row of each lane whose own base moved, with the files. Show me both draws what the lane's base changed beside what Kit changed. Let Kit merge sends Kit the ask as a message, to the lane of the row it was pressed on when that lane runs as a chat in the project, else to the project's newest chat (none running: a new session with the ask in its box); Kit's steps then ask through their own cards. A folder that no lane's row covers (a session with no branch of its own) keeps the note under Kit's dial, read for the project's default base. See [How the main branch moving is read](#how-the-main-branch-moving-is-read) | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/useMoved.ts`, `code/Lanes.tsx`, `code/askKit.ts` |
 | A check failed after the pull request: "Pull request 12: lint failed. Tests passed." | Part: Tasks reads a pull request's checks through `gh`; the lane does not show them (Owner: a real GitHub account to try it) | `tasks/TasksPage.tsx` |
 | Rewind: pick a turn; the files and the chat go back together | Has (this branch): see [Rewind to before a turn](#rewind-to-before-a-turn) | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs` |
 
@@ -122,7 +122,10 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/laneBranch.ts` and `src-tauri/src/lane.rs`: a lane's branch named from its work, planned, and
   made by the shell with `git checkout -b`.
 - `apps/desktop/src/code/lane.ts`, `laneStore.ts`: what a lane's events showed, the state the owner reads from it, and
-  the line under the row. `Lanes.tsx` draws the band in the Kit panel.
+  the line under the row. `Lanes.tsx` draws the band in the Kit panel, and gives each row a slot under its line (`below`)
+  that the Code page fills with Bring it back's panel and the main-moved note.
+- `apps/desktop/src/code/BringBack.tsx`: the panel under a Reverted lane's row (see [Bring it back](#bring-it-back-after-a-rewind)).
+  `BringBackView` takes everything it shows as props; `BringBack` reads the turn book and runs the call.
 - `src-tauri/src/agent_chat.rs`: a command's step hands on the end of what it printed with its `tool.end` (Claude Code
   and Codex), or says `declined` when the person said no and it never ran.
 - `apps/desktop/src-tauri/src/git_moved.rs`: the main branch moving, read with the person's own `git`: the folder's
@@ -130,8 +133,9 @@ The states whose rules are pure functions, with their tests, then the screens th
   repository in two places only: `lane.rs` makes a lane's branch, and `turn_files.rs` keeps Rewind's snapshots under
   refs of the app's own and puts a turn's files back.
 - `apps/desktop/src/code/moved.ts`: what that means. The files both sides changed, the shell's answer checked before it is
-  believed, one side's diff as the diff view draws it, and the ask Let Kit merge sends. `useMoved.ts` reads it again while
-  the page is open, `askKit.ts` sends the ask, `MainMoved.tsx` draws it.
+  believed (and, for a lane, that it is about the lane's own branch), one side's diff as the diff view draws it, and the ask
+  Let Kit merge sends. `useMoved.ts` reads it again while the page is open, for a lane's own base or the project's default,
+  `askKit.ts` sends the ask, `MainMoved.tsx` draws it, and `KitPanel.tsx` puts it on each lane's row.
 - `apps/desktop/src/code/preview.ts`: the secrets Kit's changed code reads, by name, and `previewEnv`, the one rule for
   what a preview runs with. `PreviewSample.tsx` draws the Sample row.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
@@ -171,11 +175,15 @@ session's events showed and what the app already knows:
 | Needs you | an ask of the lane waits | "Kit asks: …" and Answer Kit |
 | Working | a turn runs | Kit works on a separate branch. Nothing is live. The tag names the step and the time, or Running tests |
 | Failed | the session could not start, or ended in an error | its own words |
-| Reverted | the person took the last turn back and no turn has started since | when, and that the files stay as they are |
+| Reverted | the person took the last turn back and no turn has started since | when, and that the files stay as they are (the agent's own rewind), or are back as they were (Rewind, with Bring it back while the shell keeps the files from before it) |
 | Checked | the last test run passed, and no file changed after it | "14 tests passed." |
 | Tests failed | the last test run failed | "1 of 14 tests failed. Nothing is live." and the failing tests |
 | Not confirmed | the last test run could not be read | that the result could not be read, and that nothing is marked as passed |
 | Not run yet | no test ran, or a file changed after the last run | nothing, or that the code changed after the last run |
+
+A lane stops being Reverted when a turn starts, and when its files are brought back. After Bring it back it reads by its
+tests again, which the rewind cleared, so it says Not run yet, with "You brought the files back at 10:02. The chat stays
+where the rewind left it." until the next turn starts.
 
 A test run is a command step whose words run tests (`runsTests`: `pnpm test`, `vitest run`, `cd app && go test ./...`).
 The dial's own reading of a command is stricter, since it decides what Kit may do alone, and is not used for this. When
@@ -218,21 +226,31 @@ Kit's own `git commit` never meets it), a path is never a pathspec (`GIT_LITERAL
 page is checked before it reaches an argument. The shell answers with names and commit ids; a diff only when asked, for a
 path both sides changed, with keys masked as every CLI answer in `tasks.rs` is.
 
-- The lane is the branch the folder has checked out. The branch it started from is the one `origin/HEAD` points at, else
-  `main`, else `master` (a local branch before its copy from `origin`). The page may name one (`base`).
+- The lane is the branch the folder has checked out. The branch it started from is the one the page names (`base`), else the
+  one `origin/HEAD` points at, else `main`, else `master` (a local branch before its copy from `origin`). A lane records the
+  branch it was made from (`rec.lane.base`, from `startLane` in `sessions/sessions.ts`), and its note names that one.
 - Since the two parted, the lane's side is what its commits, the staging area and the work tree changed, with files git does
   not track yet; the other side is what the base changed. A rename counts as a delete and an add, so a file one side moved and
   the other edited needs both changes.
 - The note shows when at least one file needs both changes. A base that moved without touching the lane's files shows nothing:
   git merges that by itself.
-- Read when a project opens on the Code page, when the window is looked at again, and once a minute.
+- **On the lane's row.** Each lane whose own branch the folder has checked out (the row's branch is Kit's own or the one it
+  shares) reads git for its own `base`, and shows the note under its line. The shell answers for the checked-out branch only,
+  so an answer about another branch is not this lane's and shows nothing: a lane whose branch the folder has left (the row says
+  so) has no note. Two lanes that share one branch each read it and each show it.
+- **Under the dial.** A folder that no lane's row covers (a session with no branch of its own: not a repository, an older
+  shell, git refusing) keeps the note under Kit's dial for the project, read for the default base. It stands down while any
+  row covers the folder's branch, so the same files are never said twice.
+- Read when a project opens on the Code page, when the window is looked at again, and once a minute, for each note.
 
 Let Kit merge sends Kit a message, `mergeAsk`: merge the base into the branch, these files changed on both sides, fix any
-clash, run the tests, show the result as a diff, and push nothing until told. It goes to the project's newest session that
-runs as a chat (`send`), so every step Kit takes arrives as an ask card and is answered through `settleApproval` at the level
-the developer chose; `git merge` is a change that rewinding takes back, a push is a push. With no such session, a new session
-opens in the project with the ask in its box and nothing starts until the person presses Start (a session in its own terminal
-keeps its agent's prompts in the terminal, so the ask is never typed into one).
+clash, run the tests, show the result as a diff, and push nothing until told. From a row it goes to that row's lane when it
+runs as a chat in the project (`send`); a lane that ended, runs in its own terminal or is gone hands it to the project's newest
+session that runs as a chat. Every step Kit takes then arrives as an ask card and is answered through `settleApproval` at the
+level the developer chose; `git merge` is a change that rewinding takes back, a push is a push. With no such session, a new
+session opens in the project with the ask in its box and nothing starts until the person presses Start (a session in its own
+terminal keeps its agent's prompts in the terminal, so the ask is never typed into one). Show me both reads the same base the
+note was read for.
 
 ### How a preview with no secret is read
 
@@ -333,13 +351,57 @@ agents that can take their chat back to a chosen message.
   `code/command.ts`), the panel says rewinding does not take that back. When the branch has new commits since, it says
   the files go back and the commits stay.
 
+### Bring it back, after a rewind
+
+The canvas's StatesCode "Reverted": "You reverted this turn at 09:40. 3 files are back as they were. Bring it back". Rewind
+puts a coding session's files and chat back to before a turn; Bring it back puts the files back as they were just before that
+rewind.
+
+- **What is kept.** When the agent took its chat back too (the rewind is then *settled*), the shell keeps the folder's files as
+  they were just before the rewind (`back`) and as the rewind left them (`rest`, to tell what changed by hand since), in the same
+  store as the turns' snapshots: in a repository a tree under `refs/manut/snapshots/<session>/back`, else a copy in the app's data
+  folder, with the lists of files in `~/.manut/turn-snapshots/<session>/` either way. `turn_files_settle` answers `{ back }`, so the
+  page knows they are kept. A rewind the agent refused put the files back as they were itself, and keeps nothing.
+- **For how long.** Until the next turn starts: the shell drops them as it keeps that turn's files, and the page stops offering them
+  as any turn begins, the person's message or one the agent starts itself (that one leaves the shell's copy until the next
+  message, which only costs disk). Also until they are brought back, until another rewind goes through (its own files replace
+  them; a rewind the agent refuses leaves them alone), and until the session is closed, its agent starts again or the app starts,
+  when every snapshot goes.
+- **The panel** (`code/BringBack.tsx`, opened by Bring it back on the Reverted line). `turn_files_back_preview` says what would be
+  put back (the same `Preview` as Rewind's: each file as `changed`, `back` or `gone`), which of them changed by hand since the
+  rewind, files too big to keep now, and whether the branch has new commits since (the files go back, the commits stay). The files
+  changed by hand are listed and ticked: each stays as it is unless the person unticks it, as in Rewind. The count says only the
+  files that go back, since a ticked file stays, and with every file ticked there is nothing to press. Nothing is written until
+  Bring it back is pressed.
+- **The chat does not come back.** The panel says so every time, and so does the line the chat gets: "The chat stays where the
+  rewind left it." Claude Code's `rewind_conversation` cuts the conversation and Codex's `thread/revert` replaces the thread's
+  history with the part before the turn, and neither agent has a message that puts it back. Checked on 24 Nov 2026 in Claude Code
+  2.1.331 (every control request its binary handles, among them `rewind_conversation`, `rewind_files`, `fork_conversation` and
+  `launch_fork`) and in Codex 0.169.0 (the app-server schema from `codex app-server generate-json-schema --experimental`, among
+  its methods `thread/revert`, `thread/fork` and `thread/inject_items`). Claude Code's `restore_if_usage_limited` and
+  `restore_if_safeguards_refused` are options of a rewind that put its messages back on their own when the next turn is refused for
+  a usage limit or by the API's safeguards: not a way to ask for it afterwards. See Left for later for what was not tried.
+- **Putting the files back** (`turn_files_bring_back`). Every file changed since the rewind stays as it is unless the page names it
+  (`overwrite`: the files the person saw listed and unticked), so a file changed after the list was read, which they never saw, is
+  not lost. The files as they are now are kept first (`undo`), so a bring-back that stops part way puts them back at once and can
+  be tried again. It writes in the session's folder only, never through a link (a
+  folder that became a link is refused, with Rewind's own words), never moves a branch, and never touches the index, the stash or
+  HEAD. When it went through nothing is left to bring back, and the files as they are now are where the next turn starts from, so
+  what came back is not read as changed by hand.
+- **After it** the chat says how many files came back and that the chat did not ("3 files are back as they were just before the
+  rewind. The chat stays where the rewind left it."), and the lane reads by its tests again with its own line (see How a lane is
+  read), until the next turn starts.
+
 ## Left for later (no owner needed)
 
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
   commands the dial gives (Claude Code's `--permission-mode` and `--allowedTools`). That is Rust, and it widens the
   shell's fixed list of arguments, so it wants its own review.
-- Bring it back, after a rewind (StatesCode "Reverted"). The files from before a rewind are kept only until the agent
-  answers it.
+- Bringing the chat back with the files, after a rewind. Neither Claude Code nor Codex has a message for it (see Bring it back).
+  Two routes that are not messages were not tried, since each starts something new in the developer's own agent history and so
+  wants a decision: Claude Code's CLI has `--resume` with `--fork-session` (whether a resume brings back messages a rewind cut
+  was not checked), and Codex has `thread/fork`, which could keep a copy of the thread before each rewind and move the session
+  to it, at the cost of a thread more in the developer's own Codex history for every rewind.
 - Rewinding a turn sent before the app restarted, or before the agent started again: Claude Code and Codex take back only
   the messages their running process was sent, so those turns are not offered.
 - Rewind for a session in its own terminal, or with an agent other than Claude Code and Codex: the first sends no message
@@ -354,8 +416,10 @@ agents that can take their chat back to a chosen message.
 - Open pull request and Ask Kit to fix it on a lane, a tests view beside it, the effort word and New lane. A pull request
   needs a push, which asks; New lane waits on the owner's call on chats and terminals.
 - A lane after a restart: a chat session that comes back has no lane, since chat sessions are not listed after one.
-- The main-moved note on the lane's row: each lane now records the branch it was made from (its `base`), which
-  `session_main_moved` takes as `base`, so the note can sit on the lane's row instead of under the project's dial.
+- The main-moved note for a lane whose branch the folder has left: the shell reads only the branch the folder has checked out,
+  so such a lane shows no note, and the row says it works on another branch now. Reading a named branch is Rust
+  (`session_main_moved` would take a `branch` beside `base`). Two lanes that share one branch each read git once a minute for the
+  same answer; one read could serve both.
 - The main branch moving: the merge's result shown by the app as a diff after Kit merges (today Kit is asked to show it, and
   asked not to push), and a file both sides changed in the very same way is still counted as needing both changes.
 - What keeps running, inside an open session: the list is on the Code page, for the project Kit's panel shows, and an
