@@ -7,7 +7,7 @@
 // plan, a tool that is not a file tool, a path the shell cut short, a change that names no file) is left as it is:
 // its card asks the person, as every ask did before.
 import { kitDecide, type Connection, type KitAction, type KitDecision } from "@manut/member-grants";
-import { folderOf, insideProject, readCommand, ruleMatches, type Rule, type Say, type Where } from "./command";
+import { IN_GIT_DIR, folderOf, insideProject, readCommand, ruleMatches, type Rule, type Say, type Where } from "./command";
 import type { KitProject } from "./project";
 
 /** A developer's own project on this Mac is Kit's connection, there from the start and with no practice days: the
@@ -72,7 +72,7 @@ export function readAsk(ask: AskWords, where: Where): AskRead | null {
     const outside = outsideOf(paths, at, []);
     // git's own folder holds its settings and hooks, which can make a later read run a program: a change there asks
     // at every level
-    const gitOwn = paths.some((p) => /(^|[\\/])\.git([\\/]|$)/.test(p));
+    const gitOwn = paths.some((p) => IN_GIT_DIR.test(p));
     return { what: "edit", action: gitOwn ? "unknown" : "edit", outside, folder: outside.length ? folderOf(outside[0], at) : null, saves: false, rule: null, say: { key: "kit.say.edit", vars: { path: list } } };
   }
   if (READ.test(ask.title)) {

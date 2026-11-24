@@ -122,6 +122,8 @@ interface Simple {
   words: string[];
   /** Where its output or input goes: each target as written. */
   redirects: string[];
+  /** The targets it writes its output into. */
+  writes: string[];
   /** It reads the output of the command before it through a pipe. */
   piped: boolean;
 }
@@ -136,17 +138,22 @@ interface Lexed {
 function lex(line: string): Lexed {
   const cmds: Simple[] = [];
   let opaque = false;
-  let cur: Simple = { words: [], redirects: [], piped: false };
+  let cur: Simple = { words: [], redirects: [], writes: [], piped: false };
   let word = "";
   let inWord = false;
   let quote: "'" | '"' | null = null;
   let redirect = false;
+  /** The redirect being read writes (`>`, `>>`, `&>`), rather than reads (`<`). */
+  let writing = false;
 
   const endWord = () => {
     if (!inWord) return;
     if (redirect) {
       // `>&2`, `2>&1`: a copy of another stream, not a file
-      if (!/^&?[0-9-]$/.test(word)) cur.redirects.push(word);
+      if (!/^&?[0-9-]$/.test(word)) {
+        cur.redirects.push(word);
+        if (writing) cur.writes.push(word);
+      }
       redirect = false;
     } else cur.words.push(word);
     word = "";
@@ -156,7 +163,7 @@ function lex(line: string): Lexed {
     endWord();
     if (redirect) opaque = true; // a redirect with no target
     if (cur.words.length || cur.redirects.length) cmds.push(cur);
-    cur = { words: [], redirects: [], piped };
+    cur = { words: [], redirects: [], writes: [], piped };
   };
 
   for (let i = 0; i < line.length; i++) {
@@ -220,6 +227,7 @@ function lex(line: string): Lexed {
     if (c === "&" && next === ">") {
       endWord();
       redirect = true;
+      writing = true;
       i += line[i + 2] === ">" ? 2 : 1;
       continue;
     }
@@ -239,6 +247,7 @@ function lex(line: string): Lexed {
         word = "";
         inWord = false;
       } else endWord();
+      writing = c === ">";
       if (c === "<" && next === "<") {
         // a here-document's text follows on the next lines; a here-string's is a word, not a file
         if (line[i + 2] === "<") {
@@ -629,6 +638,10 @@ const SED_SAFE = new RegExp(
   String.raw`^(?:${SED_ADDR}(?:,${SED_ADDR})?!?)?\s*(?:[pdqQnNPDgGhHxl=]|s(.)(?:(?!\1)[^\\]|\\.)*\1(?:(?!\1)[^\\]|\\.)*\1[gpiImM0-9]*|y(.)(?:(?!\2)[^\\]|\\.)*\2(?:(?!\2)[^\\]|\\.)*\2)$`,
 );
 const sedSafe = (script: string) => script.split(/[;\n]/).every((c) => SED_SAFE.test(c.trim()) || c.trim() === "");
+/** sed's options that print, read and match differently and nothing more. */
+const SED_FLAGS = new Set(["-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended", "-s", "--separate", "-u", "--unbuffered", "-z", "--null-data", "--posix", "--sandbox", "--debug"]);
+/** A path in git's own folder, which holds its settings and hooks; a disk that ignores letter case finds `.GIT` there too. */
+export const IN_GIT_DIR = /(^|[\\/])\.git([\\/]|$)/i;
 const RUNTIMES = new Set(["node", "deno", "ts-node", "tsx", "ruby", "perl", "php", "java", "lua", "Rscript", "swift"]);
 
 /** Checks that only report, and tools that report unless told to fix. */
@@ -826,24 +839,57 @@ function classify(words: string[], where: Where): Verdict {
   if (name === "find") return find(words, where);
   if (RUNS_PROGRAM[name] && words.some((w) => RUNS_PROGRAM[name].some((o) => w === o || w.startsWith(`${o}=`)))) return unknownProgram(name);
   if (name === "sed") {
-    // a script from a file cannot be read in advance
-    if (has(words, "-f", "--file")) return unknownProgram(name);
-    const inPlace = words.some((w) => w === "-i" || w.startsWith("-i") || w === "--in-place" || w.startsWith("--in-place="));
-    // macOS's `sed -i ''`: the empty word is the backup's suffix, not the script
-    const suffix = words.includes("-i") && words[words.indexOf("-i") + 1] === "" ? words.indexOf("-i") + 1 : -1;
-    const ops = operands(words, 1, new Set(["-e", "--expression"])).filter((i) => i !== suffix);
-    const scripts = words.flatMap((w, i) => (["-e", "--expression"].includes(w) ? [i + 1] : []));
-    if (!scripts.length && ops.length) scripts.push(ops[0]);
-    if (!scripts.every((i) => sedSafe(words[i] ?? ""))) return unknownProgram(name);
-    const text = new Set([...scripts, ...(suffix >= 0 ? [suffix] : [])]);
+    // Its options are read from a short list. A script given any other way (`-e…` joined, `-ne`, a file) could hide a
+    // command that runs a program, so a sed with any other option is not read in advance.
+    const scripts: string[] = [];
+    const text = new Set<number>();
+    const ops: number[] = [];
+    let inPlace = false;
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i];
+      if (w === "--") {
+        for (let j = i + 1; j < words.length; j++) ops.push(j);
+        break;
+      }
+      if (w === "-e" || w === "--expression") {
+        scripts.push(words[i + 1] ?? "");
+        text.add(++i);
+      } else if (w.startsWith("--expression=")) {
+        scripts.push(w.slice("--expression=".length));
+        text.add(i);
+      } else if (w === "-i" || w === "--in-place") {
+        inPlace = true;
+        // macOS's `sed -i ''`: the empty word is the backup's suffix, not the script
+        if (w === "-i" && words[i + 1] === "") text.add(++i);
+      } else if (/^-i\.[A-Za-z0-9]+$/.test(w) || w.startsWith("--in-place=")) inPlace = true;
+      else if (SED_FLAGS.has(w)) continue;
+      else if (w.startsWith("-") && w !== "-") return unknownProgram(name);
+      else ops.push(i);
+    }
+    if (!scripts.length && ops.length) {
+      scripts.push(words[ops[0]]);
+      text.add(ops[0]);
+    }
+    if (!scripts.every(sedSafe)) return unknownProgram(name);
     return inPlace ? v("change", say("kit.say.change"), 1, { text }) : v("read", say("kit.say.read"), undefined, { text });
   }
   if (name === "awk" || name === "gawk") {
-    // a program from a file, or one that runs a command, pipes or writes, is not read in advance
-    if (has(words, "-f", "-i", "--include", "--file")) return unknownProgram(name);
-    const ops = operands(words, 1, new Set(["-F", "-v"]));
+    // Its options are read from a short list: a program from a file or a library (`-f`, `-i`, `-l`, `-e`, `--source`)
+    // is not read in advance, nor is one that runs a command, pipes, writes or includes another.
+    const ops: number[] = [];
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i];
+      if (w === "--") {
+        for (let j = i + 1; j < words.length; j++) ops.push(j);
+        break;
+      }
+      if (w === "-F" || w === "-v") i++;
+      else if (/^-[Fv]./.test(w)) continue;
+      else if (w.startsWith("-") && w !== "-") return unknownProgram(name);
+      else ops.push(i);
+    }
     const prog = ops.length ? words[ops[0]] : "";
-    if (/system\s*\(|getline|\|&|\bprintf?\b[^;}]*[>|]/.test(prog)) return unknownProgram(name);
+    if (/system\s*\(|getline|\|&|@include|@load|@namespace|\bprintf?\b[^;}]*[>|]/.test(prog)) return unknownProgram(name);
     return v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) });
   }
   if (name === "export") {
@@ -947,6 +993,8 @@ export function readCommand(line: string, where: Where): ReadCommand {
   const verdicts: Verdict[] = [];
   let saves = false;
   let wipes = false;
+  /** A step that changes something names a path in git's own folder. */
+  let gitOwn = false;
   for (const c of cmds) {
     let at = 0;
     while (at < c.words.length && ASSIGNMENT.test(c.words[at])) at++;
@@ -961,7 +1009,10 @@ export function readCommand(line: string, where: Where): ReadCommand {
       verdicts.push(v("unknown", say("kit.say.opaque")));
       continue;
     }
-    const verdict = classify(words, { ...where, cwd });
+    const read = classify(words, { ...where, cwd });
+    // writing the output into a file changes the project, whatever the program is
+    const writesFile = c.writes.some((w) => !NULL_DEVICES.has(w));
+    const verdict = writesFile && RANK[read.action] < RANK.change ? { ...read, action: "change" as const, say: say("kit.say.change"), head: undefined } : read;
     verdicts.push(verdict);
     if (verdict.saves) saves = true;
     // an allowed folder is for reading: a step that changes anything stays inside the project itself
@@ -984,6 +1035,9 @@ export function readCommand(line: string, where: Where): ReadCommand {
       else if (value && !URL_LIKE.test(value) && !SCP_LIKE.test(value)) check(value, pathLike(value));
     });
     for (const r of c.redirects) check(r, true);
+    // git's own folder holds its settings and hooks, which can make a later read run a program: a step that changes
+    // anything there is not one the dial lets go alone
+    if (!reads && [...words.filter((w, i) => i > 0 && !verdict.text?.has(i)), ...c.writes].some((w) => IN_GIT_DIR.test(w))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
       const to = verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
@@ -1006,6 +1060,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
     action = "unknown";
     s = say("kit.say.wipe");
   }
+  if (gitOwn && RANK[action] < RANK.unknown) action = "unknown";
 
   // A rule is kept only for one simple command that changes, installs, deletes or pushes, read in full, with no
   // variable set before it and no redirect, and naming nothing outside.

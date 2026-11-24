@@ -167,6 +167,36 @@ describe("what a step does", () => {
     expect(read("rm -rf .").say).toEqual({ key: "kit.say.wipe" });
   });
 
+  it("reads a sed or awk script in any of its forms, and asks for one it cannot read", () => {
+    for (const line of [
+      "sed --expression='1e rm -rf build' src/a.ts",
+      "sed -e's/a/b/w x' src/a.ts",
+      "sed -ne '1e x' src/a.ts",
+      "sed --file=script.sed src/a.ts",
+      "sed -fscript.sed src/a.ts",
+      "awk --source='BEGIN{system(\"x\")}' a.txt",
+      "awk -e 'BEGIN{}' a.txt",
+      "awk -l lib a.txt",
+      "awk --load=lib a.txt",
+      "awk '@include \"x.awk\"; { print }' a.txt",
+    ])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    for (const line of ["sed --expression='s/a/b/g' src/a.ts", "sed -E 's/(a)/b/' src/a.ts", "sed -e '1,5p' -n src/a.ts"]) expect([line, action(line)]).toEqual([line, "read"]);
+  });
+
+  it("asks for a command that writes into git's own folder, whatever its letter case", () => {
+    for (const line of ["echo x > .git/hooks/pre-commit", "cp hook.sh .GIT/hooks/pre-commit", "tee .git/config < c.txt", "rm -rf .git", "mv x .Git/HEAD", "ln -s ../x .git/hooks/post-merge"])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    expect(action("cat .git/config")).toBe("read");
+    expect(action("ls .git")).toBe("read");
+  });
+
+  it("calls a command that writes its output into a file a change", () => {
+    for (const line of ["echo gamma > c.txt", "echo hi >> notes.md", "pnpm test > out.txt", "git log &> log.txt", "printf x >| a.txt"]) expect([line, action(line)]).toEqual([line, "change"]);
+    for (const line of ["pnpm test 2>/dev/null", "cat < package.json", "pnpm test 2>&1", "ls > /dev/null"]) expect([line, action(line)]).not.toEqual([line, "change"]);
+    expect(read("echo gamma > c.txt").rule).toBeNull();
+  });
+
   it("says when a step saves or sends the change", () => {
     expect(read("git commit -m 'x'").saves).toBe(true);
     expect(read("git add -A && git commit -m 'x'").saves).toBe(true);

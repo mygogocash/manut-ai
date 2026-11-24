@@ -44,16 +44,16 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Kit asks to run a command: Allow once, Always allow in this project, No; "Adds 1 package to the project." | Part: the agent's own asks are cards with Deny, Allow once and Allow for session; nothing says what a command does, and nothing is kept for the project | `chat/cards/Cards.slot.tsx`, `sessions/host.ts` |
-| How much Kit does alone: Asks every time, Edits alone, Edits and safe commands, Everything in this project. "Going live always asks, at every level." | Part: the agent's own permission modes (Claude Code's default, plan and acceptEdits; Codex's read-only, ask and auto); no dial of Kit's | `agent_chat.rs` (`modes_for`) |
-| Outside the project: blocked and shown, with Allow this folder | Lacks: an agent that asks to read outside its folder gets a card that can allow it | |
+| Kit asks to run a command: Allow once, Always allow in this project, No; "Adds 1 package to the project." | Has (this branch): a coding session's ask says what the step does, and offers No, Allow once and Always allow in this project, which keeps a rule for the project | `code/command.ts`, `code/ask.ts`, `code/KitCardParts.tsx`, `chat/cards/Cards.slot.tsx` |
+| How much Kit does alone: Asks every time, Edits alone, Edits and safe commands, Everything in this project. "Going live always asks, at every level." | Has (this branch): the dial on the Code page, per project, and the asks it settles by itself | `packages/member-grants/src/kit.ts`, `code/KitPanel.tsx`, `code/kitAsks.ts` |
+| Outside the project: blocked and shown, with Allow this folder | Has (this branch): denied as it is asked, listed on the Code page, and Allow this folder lets Kit read there | `code/kitAsks.ts`, `code/KitPanel.tsx`, `code/project.ts` |
 
 ### Secrets
 
 | State | Desktop | Where |
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
-| A secret found in the code: moved out, never committed | Part: one masker hides token-like text on screen; nothing checks a change before it is saved | `lib/secrets.ts`, `lib/secrets.json` |
+| A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
 | No secret in the preview: a sample until the owner adds one | Lacks: there is no preview | |
 
 ### The project and its history
@@ -88,8 +88,50 @@ the trace with tokens and baht per call.
 
 ## Needs the owner
 
+- Whether Kit's lanes run as chats in the app, as the canvas's Code board draws them, or only in terminals, as decided
+  on 16 November. The dial's asks reach only the first.
+
 - Adding a project from GitHub, and a check that fails after a pull request: a real GitHub account.
 - Your plan at its limit, and using the AI budget for a job: money, and a real plan.
 - Signing in to Claude Code again: a real sign-in.
 - Kit's secrets in a vault: real secrets, and where they live (the shop's vault in the API, or this Mac's keychain).
 - An artifact going live: it reaches customers.
+
+## What this branch builds
+
+The states whose rules are pure functions, with their tests, then the screens that show them:
+
+- `packages/member-grants/src/kit.ts`: Kit's dial (`kitDecide`), on top of `decide`.
+- `apps/desktop/src/code/command.ts`: a command read before it runs: its kind of step, the paths outside the project,
+  the rule "Always allow" would keep, and what it does in words.
+- `apps/desktop/src/code/ask.ts`: a session's ask read by the words the shell writes on it, and decided by the dial.
+- `apps/desktop/src/code/project.ts`: each project's level, kept rules, folders Kit may read and stopped steps, on this
+  computer.
+- `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker.
+- `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
+- `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
+  Code page.
+- The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `commit` and
+  `deploy`, so each state can be seen in a browser; `e2e/kit-code.spec.ts` walks them.
+
+Kit's dial acts on the asks of a coding session that runs as a chat in the app, whose asks arrive as cards: the
+canvas's Code board draws Kit's lane that way ("Tell Kit what to change", Kit's note). Since 16 November the Code
+page's + menu starts agents in their own terminal only, where an agent's prompts stay inside the terminal, so the dial
+does not reach those sessions yet. The Code page shows the dial for every project either way.
+
+## Left for later (no owner needed)
+
+- The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
+  commands the dial gives (Claude Code's `--permission-mode` and `--allowedTools`). That is Rust, and it widens the
+  shell's fixed list of arguments, so it wants its own review.
+
+- Rewinding a turn, files and chat together: the agents' own rewind takes back the chat only. The shell needs to keep
+  the files as they were when a turn starts (a stash-like snapshot) and put them back; that is Rust.
+- Lanes on a branch of their own, and the lane's states (Checked, Tests failed, Reverted), with a test run's result
+  read from its output.
+- The main branch moving while Kit worked, with Let Kit merge and Show me both.
+- Something that keeps running: the commands still running, with their age, port and Stop.
+- A preview with sample values until the owner adds a real one.
+- The shell naming the tool and the path on an ask, so an ask is not read from its title's words.
+- Kit asking for a secret, kept in this Mac's keychain without Kit seeing it: a keychain item per project, written from
+  a password field and handed only to the commands that need it. That is Rust, and real secrets need the owner.

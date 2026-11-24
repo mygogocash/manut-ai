@@ -84,7 +84,7 @@ describe("deciding an ask by Kit's dial", () => {
   });
 
   it("asks before a change to git's own folder at every level", () => {
-    for (const title of ["Allow Edit to change .git/config?", "Allow Write to change .git/hooks/pre-commit?", `Allow Edit to change ${root}/.git/config?`])
+    for (const title of ["Allow Edit to change .git/config?", "Allow Write to change .git/hooks/pre-commit?", `Allow Edit to change ${root}/.git/config?`, "Allow Edit to change .GIT/config?", "Allow Write to change .Git/hooks/pre-push?"])
       expect([title, decide({ title, command: "" }, at("everything_in_project"))]).toEqual([title, { answer: "ask", kind: "command", mayAlwaysAllow: false }]);
     expect(decide({ title: "Allow Edit to change src/.gitignore?", command: "" }, at("edits_alone"))).toEqual({ answer: "alone" });
   });
