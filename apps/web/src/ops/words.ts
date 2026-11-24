@@ -729,6 +729,7 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   grant_refused: "There was no sign-in to type.",
   submit_refused: "The site refused what was submitted and kept the form.",
   not_run: "The outpost did not run the step, so nothing was submitted.",
+  navigation_refused: "The page or one of its frames tried to go to a site the step may not use before anything was pressed, so the outpost stopped and nothing was submitted.",
   timed_out: "The step took too long.",
   browser_error: "The browser stopped part way.",
   // Why a browser write was not asked for, not queued or not handed out: the ask's own checks, the step's, and the begin gate's
@@ -760,14 +761,16 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
 
 /// What a failed write step's report means for the form, in place of the general words. The API settles a write from the code
 /// (`NOTHING_SUBMITTED` in apps/api/src/browser-writes.ts): after these codes the outpost had typed and sent nothing, so the
-/// write failed; after any other it cannot be said that the site did not take it, so the write is not known. `submit_refused`
-/// and `not_run` are about writes already, and their general words say so.
+/// write failed; after any other it cannot be said that the site did not take it, so the write is not known. `submit_refused`,
+/// `not_run` and `navigation_refused` are about writes already, and their general words say so. Since the outpost tells
+/// the page's frames from the page, `origin_not_allowed` on a write means the page or a frame went elsewhere once it was
+/// pressed (before it, the outpost says `navigation_refused`).
 const WRITE_REPORT_REASONS: Readonly<Record<string, string>> = {
   page_unavailable: "The page did not load, so nothing was submitted.",
   selector_not_found: "A field or the form was not on the page, so nothing was submitted.",
   sign_in_refused: "The site refused the saved password, so nothing was submitted.",
   grant_refused: "There was no sign-in to type, so nothing was submitted.",
-  origin_not_allowed: "The browser went off the page's site. It is not known whether the site took the form.",
+  origin_not_allowed: "The page or one of its frames went off the page's site. It is not known whether the site took the form.",
   timed_out: "The step took too long. It is not known whether the site took the form.",
   browser_error: "The browser stopped part way. It is not known whether the site took the form.",
 };

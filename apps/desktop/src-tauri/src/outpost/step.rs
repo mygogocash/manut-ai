@@ -21,8 +21,9 @@
 //! wiped once WebKit has its own copy; and nothing is told what they were: not a report, not a note, not a log.
 
 use super::api::{Failure, OutpostApi, OutpostStep, Outcome, Redeemed, SubmitValue, MAX_READ_TEXT_BYTES};
-use super::origin;
+use super::origin::{self, Blocked};
 use serde::Deserialize;
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
@@ -66,8 +67,33 @@ pub trait Browser: Send + Sync {
     /// Runs `body` as an async function in the page's main frame, in a world of the outpost's own, with `args` as its
     /// string arguments, and answers the string it returned. The arguments are wiped once the page has them.
     fn call(&self, body: &'static str, args: Vec<(&'static str, Zeroizing<String>)>, until: &Until) -> Result<String, Failure>;
-    /// Whether the guard refused a navigation since this was last asked.
-    fn take_blocked(&self) -> bool;
+    /// What the guard refused since this was last asked: nothing, a frame of the page, or the page itself.
+    fn take_blocked(&self) -> Blocked;
+}
+
+/// What the guard refused while a step ran, taken from the browser as the step goes and kept, so that a check part way
+/// through and the check at its end see the same.
+pub struct Watch<'a> {
+    browser: &'a dyn Browser,
+    seen: Cell<Blocked>,
+}
+
+impl<'a> Watch<'a> {
+    pub fn new(browser: &'a dyn Browser) -> Self {
+        Watch { browser, seen: Cell::new(Blocked::Nothing) }
+    }
+
+    /// Everything refused since the step began, the page outweighing a frame.
+    pub fn now(&self) -> Blocked {
+        let seen = self.seen.get().max(self.browser.take_blocked());
+        self.seen.set(seen);
+        seen
+    }
+
+    /// Whether anything at all was refused since the step began.
+    pub fn any(&self) -> bool {
+        self.now() != Blocked::Nothing
+    }
 }
 
 /// How long each kind may take, and how often a wait looks again. Every budget is well inside a step's two minutes,
@@ -298,10 +324,15 @@ pub fn script(body: &'static str) -> String {
 /// The kinds this outpost runs. Any other is not run at all.
 pub const KINDS: [&str; 4] = ["open", "read", "sign_in", "submit"];
 
-/// Runs one step and answers how it went. A navigation the guard refused while it ran fails it whatever else
-/// happened (`origin_not_allowed`): the page went, or tried to go, off the step's origins. A step it cannot run (a kind
-/// it does not know, or one missing what its kind needs) is `not_run`, which the API reads as nothing submitted: before,
-/// such a step was a browser error, which settles a write as not known.
+/// Runs one step and answers how it went. A step it cannot run (a kind it does not know, or one missing what its kind
+/// needs) is `not_run`, which the API reads as nothing submitted: before, such a step was a browser error, which
+/// settles a write as not known.
+///
+/// What a navigation the guard refused means depends on whose it was. For `open`, `read` and `sign_in`, the page
+/// going, or trying to go, off the step's origins fails the step whatever else happened (`origin_not_allowed`); a frame
+/// of the page the guard refused does not, since the frame stays empty and what the step read or typed was the page's
+/// own (a site's sign-in page may well hold a frame of a widget from elsewhere). A write says for itself what either
+/// means, since that turns on whether it had pressed yet (`submit`).
 pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi, stop: &AtomicBool, pace: &Pace) -> Outcome {
     if !KINDS.contains(&step.kind.as_str()) {
         return Outcome::Failed(Failure::NotRun);
@@ -313,14 +344,15 @@ pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi,
     }
     // What the guard refused before this step began (between steps, say) is not this step's.
     browser.take_blocked();
+    let watch = Watch::new(browser);
     let now = Instant::now();
     let result = match step.kind.as_str() {
         "open" => open(step, &origins, browser, &Until { deadline: now + pace.open, stop }),
         "read" => read(step, &origins, browser, &Until { deadline: now + pace.read, stop }, pace),
         "sign_in" => sign_in(step, &origins, browser, api, &Until { deadline: now + pace.sign_in, stop }, pace),
-        _ => submit(step, &origins, browser, &Until { deadline: now + pace.submit, stop }, pace),
+        _ => submit(step, &origins, browser, &watch, &Until { deadline: now + pace.submit, stop }, pace),
     };
-    if browser.take_blocked() {
+    if step.kind != "submit" && watch.now() == Blocked::Page {
         return Outcome::Failed(Failure::OriginNotAllowed);
     }
     match result {
@@ -470,47 +502,69 @@ struct PressWire {
 /// button pressed once, and the site's answer must hold before it is taken: `done` when it took the write,
 /// `submit_refused` when it kept the form with an error. Anything still undecided at the end of the step's time is
 /// `timed_out`, never a guess either way: the API then settles the write as not known.
-fn submit(step: &OutpostStep, origins: &[String], browser: &dyn Browser, until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
+///
+/// A navigation the guard refused, of the page or of any of its frames, is read by when it happened. Before the press,
+/// it stops the write with nothing sent (`navigation_refused`, which the API settles as failed): what was approved was a
+/// form on that page alone, and a frame from elsewhere (a payment box, a check that you are a person) may be part of what
+/// the page would submit. After the press, it leaves it not known whether the site took the write (`origin_not_allowed`),
+/// since the site may have needed what was refused to finish it.
+fn submit(step: &OutpostStep, origins: &[String], browser: &dyn Browser, watch: &Watch, until: &Until, pace: &Pace)
+    -> Result<Option<String>, Failure> {
     let (Some(url), Some(form), Some(values)) = (step.url.as_deref(), step.form.as_deref(), step.values.as_deref()) else {
         return Err(Failure::NotRun);
     };
     if !origin::allowed(url, origins) {
         return Err(Failure::OriginNotAllowed);
     }
-    browser.open(url, origins, until).map_err(|failure| before_typing(failure, until))?;
-    // A page that went, or tried to go, off the step's origin on the way is not the page the owner approved.
-    if browser.take_blocked() {
+    // Everything up to the press. Whatever ends it, nothing was pressed, so a refusal seen by then is the reason given.
+    let typed = (|| {
+        browser.open(url, origins, until).map_err(|failure| before_typing(failure, until))?;
+        // A page that went, or tried to go, off the step's origin on the way, or a frame of it that did, is not the page
+        // the owner approved.
+        if watch.any() {
+            return Err(Failure::NavigationRefused);
+        }
+        browser.keep_on(origins);
+        // The values as the scripts take them, written once; each script is handed a copy, wiped once WebKit has it.
+        // Without them nothing may be typed or pressed: a form pressed with none would be a write nobody approved.
+        let v = values_json(values).ok_or(Failure::NotRun)?;
+        if until.over() {
+            return Err(before_typing(until.failure(), until));
+        }
+        let set: SetWire = serde_json::from_str(&browser.call(SET, write_args(origins, form, &v, None), until)?)
+            .map_err(|_| Failure::BrowserError)?;
+        match set.r.as_str() {
+            "set" => Ok(v),
+            "origin" => Err(Failure::OriginNotAllowed),
+            "form" | "field" | "moved" => Err(Failure::SelectorNotFound),
+            _ => Err(Failure::BrowserError),
+        }
+    })();
+    let v = typed.map_err(|failure| if watch.any() { Failure::NavigationRefused } else { failure })?;
+    let args = |extra: Option<&str>| write_args(origins, form, &v, extra);
+    let at = press(browser, watch, &args, until, pace)?;
+    let answer = sent(browser, watch, &args, &at, until, pace);
+    if watch.any() {
         return Err(Failure::OriginNotAllowed);
     }
-    browser.keep_on(origins);
-    // The values as the scripts take them, written once; each script is handed a copy, wiped once WebKit has it. Without
-    // them nothing may be typed or pressed: a form pressed with none would be a write nobody approved.
-    let v = values_json(values).ok_or(Failure::NotRun)?;
-    let args = |extra: Option<&str>| {
-        let mut args = vec![("o", Zeroizing::new(origins_json(origins))), ("f", Zeroizing::new(form.to_owned())),
-            ("v", Zeroizing::new(v.as_str().to_owned()))];
-        if let Some(at) = extra {
-            args.push(("a", Zeroizing::new(at.to_owned())));
-        }
-        args
-    };
-    if until.over() {
-        return Err(before_typing(until.failure(), until));
+    answer
+}
+
+/// The arguments of a write's scripts: the step's origins `o`, the form or button `f`, the values `v`, and for the
+/// site's answer the address `a` just before the press. Each is a copy, wiped once WebKit has its own.
+fn write_args(origins: &[String], form: &str, v: &str, at: Option<&str>) -> Vec<(&'static str, Zeroizing<String>)> {
+    let mut args = vec![("o", Zeroizing::new(origins_json(origins))), ("f", Zeroizing::new(form.to_owned())),
+        ("v", Zeroizing::new(v.to_owned()))];
+    if let Some(at) = at {
+        args.push(("a", Zeroizing::new(at.to_owned())));
     }
-    let set: SetWire = serde_json::from_str(&browser.call(SET, args(None), until)?).map_err(|_| Failure::BrowserError)?;
-    match set.r.as_str() {
-        "set" => {}
-        "origin" => return Err(Failure::OriginNotAllowed),
-        "form" | "field" | "moved" => return Err(Failure::SelectorNotFound),
-        _ => return Err(Failure::BrowserError),
-    }
-    let at = press(browser, &args, until, pace)?;
-    sent(browser, &args, &at, until, pace)
+    args
 }
 
 /// A failure found before anything was typed, as a write step reports it: nothing was submitted, so it is said with a
 /// code the API reads that way wherever one is true. A page that did not load, in time or at all, is `page_unavailable`;
-/// the outpost stopping is `not_run`; a page that went off the step's origin stays `origin_not_allowed`.
+/// the outpost stopping is `not_run`; a page that ended up off the step's origin with nothing refused on the way stays
+/// `origin_not_allowed`.
 fn before_typing(failure: Failure, until: &Until) -> Failure {
     if until.stopped() {
         return Failure::NotRun;
@@ -524,41 +578,48 @@ fn before_typing(failure: Failure, until: &Until) -> Failure {
 /// Presses once, and answers the address the page was at just before. A button the page has not turned on yet is asked
 /// for again until `pace.press` is over: one never turned on means the site would not take what was typed, so nothing
 /// was submitted. Only an answer that nothing was pressed is ever asked again; a press whose answer did not come back may
-/// have been made, so it fails the step, as not known, and is never made twice.
-fn press(browser: &dyn Browser, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, until: &Until, pace: &Pace)
-    -> Result<String, Failure> {
+/// have been made, so it fails the step, as not known, and is never made twice. Nothing is pressed once the guard has
+/// refused a navigation of the page or a frame since the page opened (`navigation_refused`).
+fn press(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, until: &Until,
+    pace: &Pace) -> Result<String, Failure> {
     let waited = Instant::now() + pace.press;
+    // Why nothing was pressed: a refusal seen by now outweighs what the page answered.
+    let unpressed = |failure: Failure| if watch.any() { Failure::NavigationRefused } else { failure };
     loop {
         // The page has a moment to take in what was typed, or to turn its button on.
         std::thread::sleep(pace.poll);
         if until.over() {
-            return Err(until.failure());
+            return Err(unpressed(until.failure()));
         }
-        // Nothing is pressed on a page that went, or tried to go, off the step's origin since it opened.
-        if browser.take_blocked() {
-            return Err(Failure::OriginNotAllowed);
+        if watch.any() {
+            return Err(Failure::NavigationRefused);
         }
         let wire: PressWire = serde_json::from_str(&browser.call(PRESS, args(None), until)?).map_err(|_| Failure::BrowserError)?;
         match (wire.r.as_str(), wire.a) {
             ("pressed", Some(at)) => return Ok(at),
             ("wait", _) if Instant::now() < waited => {}
-            ("wait", _) | ("changed", _) | ("flagged", _) => return Err(Failure::SubmitRefused),
-            ("gone", _) => return Err(Failure::SelectorNotFound),
-            ("origin", _) => return Err(Failure::OriginNotAllowed),
+            ("wait", _) | ("changed", _) | ("flagged", _) => return Err(unpressed(Failure::SubmitRefused)),
+            ("gone", _) => return Err(unpressed(Failure::SelectorNotFound)),
+            ("origin", _) => return Err(unpressed(Failure::OriginNotAllowed)),
             _ => return Err(Failure::BrowserError),
         }
     }
 }
 
 /// Waits for the site's answer to a write: the same answer seen for `pace.settled` while nothing loads, as for a sign-in.
-fn sent(browser: &dyn Browser, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, at: &str, until: &Until, pace: &Pace)
-    -> Result<Option<String>, Failure> {
+/// A navigation the guard refused since the press ends the wait at once: the write is then not known, whatever the page
+/// goes on to show.
+fn sent(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, at: &str,
+    until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
     let mut seen: Option<(String, Instant)> = None;
     loop {
         if until.over() {
             return Err(until.failure());
         }
         std::thread::sleep(pace.poll);
+        if watch.any() {
+            return Err(Failure::OriginNotAllowed);
+        }
         if browser.loading() {
             seen = None;
             continue;
@@ -655,10 +716,11 @@ pub mod fake {
     pub struct FakeBrowser {
         pub page: Arc<Mutex<Option<String>>>,
         pub answer: Answer,
-        /// What `open` does: the address it leaves the page at, whether the guard refused something on the way, and
-        /// what it answers.
-        pub on_open: Box<dyn Fn(&str) -> (Option<String>, bool, Result<(), Failure>) + Send + Sync>,
-        pub blocked: AtomicBool,
+        /// What `open` does: the address it leaves the page at, what the guard refused on the way, and what it answers.
+        pub on_open: Box<dyn Fn(&str) -> (Option<String>, Blocked, Result<(), Failure>) + Send + Sync>,
+        /// What the guard refused and nobody has asked about yet; a test's answer may add to it, as a page's own
+        /// scripts would while a script runs.
+        pub blocked: Arc<Mutex<Blocked>>,
         pub opened: Mutex<Vec<String>>,
         pub kept: Mutex<Vec<Vec<String>>>,
         /// Each script run, by name, with its arguments.
@@ -690,17 +752,30 @@ pub mod fake {
             FakeBrowser {
                 page: Arc::new(Mutex::new(page.map(str::to_owned))),
                 answer,
-                on_open: Box::new(|url| (Some(url.to_owned()), false, Ok(()))),
-                blocked: AtomicBool::new(false),
+                on_open: Box::new(|url| (Some(url.to_owned()), Blocked::Nothing, Ok(()))),
+                blocked: Arc::new(Mutex::new(Blocked::Nothing)),
                 opened: Mutex::new(Vec::new()),
                 kept: Mutex::new(Vec::new()),
                 calls: Mutex::new(Vec::new()),
             }
         }
 
+        /// A page whose answers may note what the guard refused while a script ran: `make` is handed the browser's own
+        /// record of it.
+        pub fn refusing(page: Option<&str>, make: impl FnOnce(Arc<Mutex<Blocked>>) -> Answer) -> Self {
+            let blocked = Arc::new(Mutex::new(Blocked::Nothing));
+            FakeBrowser { blocked: blocked.clone(), ..FakeBrowser::at(page, make(blocked)) }
+        }
+
         pub fn names(&self) -> Vec<&'static str> {
             self.calls.lock().unwrap().iter().map(|(n, _)| *n).collect()
         }
+    }
+
+    /// Notes that the guard refused `what`, as the hook does: the page outweighs a frame until someone asks.
+    pub fn refuse(blocked: &Mutex<Blocked>, what: Blocked) {
+        let mut held = blocked.lock().unwrap();
+        *held = (*held).max(what);
     }
 
     impl Browser for FakeBrowser {
@@ -709,9 +784,7 @@ pub mod fake {
             self.kept.lock().unwrap().push(origins.to_vec());
             let (page, blocked, answer) = (self.on_open)(url);
             *self.page.lock().unwrap() = page;
-            if blocked {
-                self.blocked.store(true, Ordering::SeqCst);
-            }
+            refuse(&self.blocked, blocked);
             answer
         }
         fn address(&self) -> Option<String> {
@@ -729,15 +802,15 @@ pub mod fake {
             self.calls.lock().unwrap().push((name(body), args));
             answer
         }
-        fn take_blocked(&self) -> bool {
-            self.blocked.swap(false, Ordering::SeqCst)
+        fn take_blocked(&self) -> Blocked {
+            std::mem::take(&mut *self.blocked.lock().unwrap())
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fake::FakeBrowser;
+    use super::fake::{refuse, FakeBrowser};
     use super::*;
     use crate::outpost::api::ApiError;
     use serde_json::json;
@@ -825,17 +898,49 @@ mod tests {
     fn a_page_that_goes_off_the_origins_on_the_way_fails_the_step() {
         let mut browser = FakeBrowser::at(None, Box::new(|_, _| unreachable!()));
         // The site redirected elsewhere: the guard refused it, and the page stayed where it was.
-        browser.on_open = Box::new(|_| (None, true, Err(Failure::PageUnavailable)));
+        browser.on_open = Box::new(|_| (None, Blocked::Page, Err(Failure::PageUnavailable)));
         let mut open = step("open", &[SHOP]);
         open.url = Some(format!("{SHOP}/"));
         assert_eq!(run(&open, &browser, &vault(&[])), Outcome::Failed(Failure::OriginNotAllowed));
         // A load that simply failed says so.
-        browser.on_open = Box::new(|_| (None, false, Err(Failure::PageUnavailable)));
+        browser.on_open = Box::new(|_| (None, Blocked::Nothing, Err(Failure::PageUnavailable)));
         assert_eq!(run(&open, &browser, &vault(&[])), Outcome::Failed(Failure::PageUnavailable));
         // Something refused between steps is not the next step's.
-        browser.on_open = Box::new(|url| (Some(url.into()), false, Ok(())));
-        browser.blocked.store(true, Ordering::SeqCst);
+        browser.on_open = Box::new(|url| (Some(url.into()), Blocked::Nothing, Ok(())));
+        *browser.blocked.lock().unwrap() = Blocked::Page;
         assert_eq!(run(&open, &browser, &vault(&[])), Outcome::Done(None));
+    }
+
+    #[test]
+    fn a_frame_the_guard_refused_stays_empty_and_fails_no_step_that_reads() {
+        let api = vault(&[ACCOUNTS]);
+        // The page loaded with a frame from elsewhere in it, which the guard kept out: the page is still the step's.
+        let mut browser = FakeBrowser::at(None, Box::new(|_, _| json_answer(serde_json::json!({ "t": "Shipped" }))));
+        browser.on_open = Box::new(|url| (Some(url.into()), Blocked::Frame, Ok(())));
+        let mut open = step("open", &[SHOP]);
+        open.url = Some(format!("{SHOP}/portal"));
+        assert_eq!(run(&open, &browser, &api), Outcome::Done(None));
+        // A frame refused while a read runs leaves what it read, the page's own text.
+        let reading = |what: Blocked| FakeBrowser::refusing(Some(&format!("{SHOP}/portal")), move |blocked| Box::new(move |_, _| {
+            refuse(&blocked, what);
+            json_answer(serde_json::json!({ "t": "Shipped" }))
+        }));
+        assert_eq!(run(&step("read", &[SHOP]), &reading(Blocked::Frame), &api), Outcome::Done(Some("Shipped".into())));
+        // A sign-in whose page holds a frame from elsewhere still signs in: the password went into the page's own form,
+        // which no frame from another origin can read.
+        let signing = FakeBrowser::refusing(Some(&format!("{ACCOUNTS}/seller/login")), |blocked| Box::new(move |name, _| match name {
+            "form" => json_answer(serde_json::json!({ "f": true, "a": format!("{ACCOUNTS}/seller/login") })),
+            "type" => json_answer(serde_json::json!({ "r": "typed" })),
+            _ => {
+                refuse(&blocked, Blocked::Frame);
+                json_answer(serde_json::json!({ "s": "in" }))
+            }
+        }));
+        assert_eq!(run(&sign_in_step(), &signing, &api), Outcome::Done(None));
+        // The page itself going elsewhere still fails each of them.
+        browser.on_open = Box::new(|url| (Some(url.into()), Blocked::Page, Ok(())));
+        assert_eq!(run(&open, &browser, &api), Outcome::Failed(Failure::OriginNotAllowed));
+        assert_eq!(run(&step("read", &[SHOP]), &reading(Blocked::Page), &api), Outcome::Failed(Failure::OriginNotAllowed));
     }
 
     #[test]
@@ -1155,6 +1260,67 @@ mod tests {
         assert_eq!(browser.names(), ["set", "press"]);
     }
 
+    /// The approved page, answering as `form_page` does, where the guard refuses `what` while the script `during` runs
+    /// (its `nth` run, counting from 0).
+    fn refusing_page(during: &'static str, nth: usize, what: Blocked, presses: Vec<&'static str>) -> FakeBrowser {
+        let presses = Mutex::new(presses);
+        let runs = AtomicUsize::new(0);
+        FakeBrowser::refusing(None, move |blocked| Box::new(move |name, _| {
+            if name == during && runs.fetch_add(1, Ordering::SeqCst) == nth {
+                refuse(&blocked, what);
+            }
+            match name {
+                "set" => json_answer(json!({ "r": "set" })),
+                "press" => {
+                    let mut left = presses.lock().unwrap();
+                    let r = if left.len() > 1 { left.remove(0) } else { left[0] };
+                    json_answer(if r == "pressed" { json!({ "r": r, "a": PAGE }) } else { json!({ "r": r }) })
+                }
+                "sent" => json_answer(json!({ "s": "sent" })),
+                _ => unreachable!("{name}"),
+            }
+        }))
+    }
+
+    #[test]
+    fn a_frame_from_elsewhere_before_the_press_stops_a_write_with_nothing_sent() {
+        let api = vault(&[]);
+        for what in [Blocked::Frame, Blocked::Page] {
+            // Refused while the values went in: nothing is pressed.
+            let typing = refusing_page("set", 0, what, vec!["pressed"]);
+            assert_eq!(run(&write(), &typing, &api), Outcome::Failed(Failure::NavigationRefused), "{what:?}");
+            assert_eq!(typing.names(), ["set"]);
+            // Refused while the page had not yet turned its button on: the next look presses nothing.
+            let waiting = refusing_page("press", 0, what, vec!["wait", "pressed"]);
+            assert_eq!(run(&write(), &waiting, &api), Outcome::Failed(Failure::NavigationRefused), "{what:?}");
+            assert_eq!(waiting.names(), ["set", "press"]);
+            // A press the page would not take, with a refusal on the way: still nothing sent, and the refusal is the
+            // reason given.
+            let kept = refusing_page("press", 0, what, vec!["changed"]);
+            assert_eq!(run(&write(), &kept, &api), Outcome::Failed(Failure::NavigationRefused), "{what:?}");
+        }
+        // The API reads the code as nothing submitted (`NOTHING_SUBMITTED` in apps/api/src/browser-writes.ts).
+        assert_eq!(Failure::NavigationRefused.code(), "navigation_refused");
+    }
+
+    #[test]
+    fn a_frame_from_elsewhere_after_the_press_leaves_the_write_not_known() {
+        let api = vault(&[]);
+        for what in [Blocked::Frame, Blocked::Page] {
+            // Refused as the press was made: whatever the page goes on to show, the site may have needed what was refused.
+            let pressing = refusing_page("press", 0, what, vec!["pressed"]);
+            assert_eq!(run(&write(), &pressing, &api), Outcome::Failed(Failure::OriginNotAllowed), "{what:?}");
+            assert_eq!(pressing.names(), ["set", "press"], "the wait ends at once");
+            // Refused while the site's answer was read.
+            let answering = refusing_page("sent", 0, what, vec!["pressed"]);
+            assert_eq!(run(&write(), &answering, &api), Outcome::Failed(Failure::OriginNotAllowed), "{what:?}");
+            // Refused after a press the page took, as its answer held (an answer is read at least twice, so its second
+            // reading is always made): not known, never done.
+            let late = refusing_page("sent", 1, what, vec!["pressed"]);
+            assert_eq!(run(&write(), &late, &api), Outcome::Failed(Failure::OriginNotAllowed), "{what:?}");
+        }
+    }
+
     #[test]
     fn types_nothing_off_the_approved_page() {
         let api = vault(&[]);
@@ -1164,11 +1330,16 @@ mod tests {
         away.url = Some("https://evil.example/portal/chat/2291".into());
         assert_eq!(run(&away, &browser, &api), Outcome::Failed(Failure::OriginNotAllowed));
         assert!(browser.opened.lock().unwrap().is_empty() && browser.calls.lock().unwrap().is_empty());
-        // The site sent the page elsewhere on the way: the guard refused it, and nothing is typed.
-        let mut redirected = form_page(vec!["pressed"], "sent");
-        redirected.on_open = Box::new(|url| (Some(url.to_owned()), true, Ok(())));
-        assert_eq!(run(&write(), &redirected, &api), Outcome::Failed(Failure::OriginNotAllowed));
-        assert!(redirected.calls.lock().unwrap().is_empty());
+        // The site sent the page elsewhere on the way, or a frame of it went for another site: the guard refused it, and
+        // nothing is typed, so nothing was submitted (before, the page's case was not known). A page that did not load
+        // because of it says the same.
+        for (blocked, opened) in [(Blocked::Page, Ok(())), (Blocked::Frame, Ok(())), (Blocked::Page, Err(Failure::PageUnavailable)),
+            (Blocked::Frame, Err(Failure::TimedOut))] {
+            let mut redirected = form_page(vec!["pressed"], "sent");
+            redirected.on_open = Box::new(move |url| (Some(url.to_owned()), blocked, opened));
+            assert_eq!(run(&write(), &redirected, &api), Outcome::Failed(Failure::NavigationRefused), "{blocked:?} {opened:?}");
+            assert!(redirected.calls.lock().unwrap().is_empty());
+        }
         // The script found the page off the origin when it came to type.
         let moved = FakeBrowser::at(None, Box::new(|name, _| match name {
             "set" => json_answer(json!({ "r": "origin" })),
@@ -1182,13 +1353,13 @@ mod tests {
         let api = vault(&[]);
         for failure in [Failure::PageUnavailable, Failure::TimedOut, Failure::BrowserError] {
             let mut browser = form_page(vec!["pressed"], "sent");
-            browser.on_open = Box::new(move |_| (None, false, Err(failure)));
+            browser.on_open = Box::new(move |_| (None, Blocked::Nothing, Err(failure)));
             assert_eq!(run(&write(), &browser, &api), Outcome::Failed(Failure::PageUnavailable), "{failure:?}");
             assert!(browser.calls.lock().unwrap().is_empty());
         }
         // The outpost stopping before anything was typed: not run.
         let mut stopped = form_page(vec!["pressed"], "sent");
-        stopped.on_open = Box::new(|_| (None, false, Err(Failure::BrowserError)));
+        stopped.on_open = Box::new(|_| (None, Blocked::Nothing, Err(Failure::BrowserError)));
         assert_eq!(run_step(&write(), &stopped, &vault(&[]), &AtomicBool::new(true), &QUICK), Outcome::Failed(Failure::NotRun));
         assert!(stopped.calls.lock().unwrap().is_empty());
         // Or once the page is open, before the values go in.

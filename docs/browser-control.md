@@ -205,7 +205,8 @@ with no password in either.
    be on for it, read from the sign-ins at that moment: a sign-in removed or broken since takes its origins with it. A
    step that may no longer run is refused for good, with the reason.
 3. **The outpost runs it** and stays on the step's origins: a page anywhere else stops the step
-   (`origin_not_allowed`).
+   (`origin_not_allowed`). A frame of the page from anywhere else is refused and stays empty; it stops a write step
+   (before the press with nothing sent, `navigation_refused`; after it, not known), and no step that only reads.
 4. **The outpost reports how it went**, once: `done` (with the text, for a read, at most 4 KB once written as JSON), or
    `failed` with a code from a fixed list. A second report, a late one, one for a step it was not handed, or one from
    another outpost is refused. The control plane reads the switches and consent again, then lands the outcome in the
@@ -483,6 +484,24 @@ The owner removing a sign-in and changing its account or addresses, and the oper
   walks both there: a new address waiting for the password, an address taken away without it, and a removal kept, then
   made.
 
+The outpost ready for real sites' pages, this Mac (24 Nov 2026; December item 49, "Next slices" items 1 and 4). Nothing
+here has met a real site yet: every script runs against test pages in WebKit and Chromium, and the Rust around them
+against the fake browser. What the owner's first supervised write should check is below, under "Next slices".
+
+- **The page told from its frames** (`browser.rs`, `origin.rs`). wry's navigation hook is told only an address, so on
+  macOS the outpost puts a navigation delegate of its own in front of wry's: it reads WKWebView's navigation action, whose
+  target frame says whether the main frame is navigating, asks the guard with that, cancels what the guard refuses, and
+  hands everything else to wry's delegate as it came (which then asks wry's hook too). It is kept on the webview itself
+  and holds wry's delegate weakly; should wry's be gone, nothing is let through. What WebKit asks before it is in place
+  (the window's very first load) is judged by wry's hook alone, which counts any refusal as the page's. Checked once in a
+  real WKWebView with a throwaway program: a frame from another origin refused as a frame, a same-origin frame loaded, a
+  redirect of the page refused as the page, the page still loaded and still reported to wry.
+- **What a refusal does** (`step.rs`). The page going off the step's origins fails every kind of step, as before. A frame
+  from elsewhere stays empty: `open`, `read` and `sign_in` go on, since what they read or type is the page's own. A write
+  stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`, new, which the
+  API settles as failed), and after it as not known (`origin_not_allowed`). Before, a refusal before the press was
+  `origin_not_allowed` too, and settled the write as not known though nothing had been pressed.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -584,7 +603,8 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   most three times; a step held when the outpost stops is reported `not_run` if it had not begun (`browser_error` until
   the write steps), and `browser_error` if it was running.
 - The window is visible, without taking focus, and incognito. The navigation hook cannot tell a page's frames from the
-  page, so any navigation it refuses during a step fails the step, a frame from another origin included.
+  page, so any navigation it refuses during a step fails the step, a frame from another origin included. (Replaced the
+  same day: on macOS the hook tells them apart, below.)
 - A sign-in submits the form it typed into. The site's answer must hold for 3 seconds: no password field left is done,
   the same address with the password fields emptied is `sign_in_refused`, anything else is `timed_out`, never a guessed
   refusal.
@@ -676,13 +696,21 @@ Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
   the tab's own state only. An account typed with a paste's spaces at its ends is sent trimmed, unless it then matches the
   account the vault keeps, which is sent exactly as kept.
 
+The outpost ready for real sites' pages (24 Nov 2026), each in `docs/decisions.md`:
+
+- The page is told from its frames by WKWebView's navigation action, through a navigation delegate of the outpost's own
+  in front of wry's, on macOS. Anything judged without it counts as the page's.
+- A frame from elsewhere that the guard refused fails no step that only reads; the page going elsewhere fails every step.
+- A write stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`), after
+  it as not known (`origin_not_allowed`).
+
 ## Next slices
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
-   site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), telling a
-   page's frames from the page in the navigation hook (a refused frame from another origin fails a write step, and after
-   the press it settles the write as not known), fields inside frames or a page's shadow DOM, check boxes, radio buttons
-   and editors that are not form fields, and a way to know a settings page took a change when it keeps the form.
+   site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), fields
+   inside frames or a page's shadow DOM, check boxes, radio buttons and editors that are not form fields, and a way to
+   know a settings page took a change when it keeps the form. (Built 24 Nov 2026: telling a page's frames from the page
+   in the navigation hook, above.)
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
@@ -715,10 +743,10 @@ Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
    (built 24 Nov 2026: changing a sign-in's members, by the owner from the app and by the operator, above);
    (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
-   as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
-   page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
-   (the username first), and the outpost on Windows and Linux (no keychain support there yet). (Built 24 Nov 2026: the
-   shop sessions of the several-shops switcher, which the outpost now follows, above.)
+   as data, never as instructions, when it reaches a model. From the desktop outpost: sign-in forms inside frames or
+   over two pages (the username first), and the outpost on Windows and Linux (no keychain support there yet). (Built
+   24 Nov 2026: the shop sessions of the several-shops switcher, which the outpost now follows, above; telling a page's
+   frames from the page in the navigation hook, above.)
 
 ## Sources
 

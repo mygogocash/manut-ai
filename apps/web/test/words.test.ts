@@ -55,6 +55,16 @@ import {
   subscriptionErrorText,
   unfinishedText,
 } from "../src/ops/words";
+// The vault's own list of how an outpost may say a step failed, read as text for the reason apiAuditLog.ts gives.
+import signInVaultSource from "../../api/src/sign-in-vault.ts?raw";
+
+/// The codes of the API's `STEP_FAILURES`, as its source writes them.
+function stepFailures(): string[] {
+  const start = signInVaultSource.indexOf("export const STEP_FAILURES = [");
+  const end = signInVaultSource.indexOf("] as const;", start);
+  if (start < 0 || end < 0) throw new Error("apps/api/src/sign-in-vault.ts no longer has STEP_FAILURES as a list: teach this test where it went");
+  return [...signInVaultSource.slice(start, end).matchAll(/"([a-z_]+)"/g)].map((match) => match[1]!);
+}
 
 const RESULT: DeletedShop = {
   tasksWiped: 1,
@@ -884,6 +894,8 @@ describe("the audit log's words for the owner's people and for browser control",
     // How an outpost may say a write step went, in words too.
     expect(auditReasonText("submit_refused")).toBe("The site refused what was submitted and kept the form.");
     expect(auditReasonText("not_run")).toBe("The outpost did not run the step, so nothing was submitted.");
+    expect(auditReasonText("navigation_refused")).toBe("The page or one of its frames tried to go to a site the step may not use "
+      + "before anything was pressed, so the outpost stopped and nothing was submitted.");
     // The reasons that already had words keep them.
     expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
     expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
@@ -918,6 +930,18 @@ describe("the audit log's words for the owner's people and for browser control",
       "step_not_fetched", "step_reported", "invalid_report", "page_unavailable", "selector_not_found", "grant_refused",
       "timed_out", "browser_error"]) {
       expect(auditReasonText(reason), reason).not.toContain(reason);
+    }
+  });
+
+  it("has words of its own for every code an outpost may report, read from the API's list", () => {
+    const codes = stepFailures();
+    expect(codes).toContain("navigation_refused");
+    expect(codes.length).toBeGreaterThanOrEqual(10);
+    for (const code of codes) {
+      const words = auditReasonText(code);
+      expect(words, code).not.toMatch(/^Reason:/);
+      expect(words, code).not.toContain(code);
+      expect(words.endsWith("."), code).toBe(true);
     }
   });
 });
@@ -1125,9 +1149,11 @@ describe("the audit log's words for a browser write, from the ask to how it sett
     const report = (outcome: string, reason: string) => entry({ actor: outpost, action: "browser_step.reported",
       subject: { ...write, stepId: "st1", outpostId: "o1" }, outcome, reason });
     const read = (reason: string) => auditReasonText(reason, report("failed", reason));
-    // The two codes that are about writes keep their words, which already say that nothing was submitted.
+    // The codes that are about writes keep their words, which already say that nothing was submitted.
     expect(read("submit_refused")).toBe("The site refused what was submitted and kept the form.");
     expect(read("not_run")).toBe("The outpost did not run the step, so nothing was submitted.");
+    expect(read("navigation_refused")).toBe(auditReasonText("navigation_refused"));
+    expect(read("navigation_refused")).toMatch(/nothing was submitted\.$/);
     // Every other code an outpost reports before it types anything says so for a form.
     expect(read("page_unavailable")).toBe("The page did not load, so nothing was submitted.");
     expect(read("selector_not_found")).toBe("A field or the form was not on the page, so nothing was submitted.");
@@ -1136,7 +1162,8 @@ describe("the audit log's words for a browser write, from the ask to how it sett
     // After these nobody can say the site did not take it.
     expect(read("timed_out")).toBe("The step took too long. It is not known whether the site took the form.");
     expect(read("browser_error")).toBe("The browser stopped part way. It is not known whether the site took the form.");
-    expect(read("origin_not_allowed")).toBe("The browser went off the page's site. It is not known whether the site took the form.");
+    expect(read("origin_not_allowed"))
+      .toBe("The page or one of its frames went off the page's site. It is not known whether the site took the form.");
     // A report the attempt could not take back leaves the write as the outpost said it went.
     for (const reason of ["attempt_ended", "consent_required", "feature_disabled", "task_unavailable"]) {
       expect(auditReasonText(reason, report("refused", reason)), reason)

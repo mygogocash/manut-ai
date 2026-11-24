@@ -42,11 +42,13 @@ libc = "0.2"
 security-framework = "3"
 # The outpost's browser reads its page through WKWebView's own callAsyncJavaScript, in a content world of its own,
 # through Tauri's with_webview (outpost/browser.rs). These are the crates wry already builds on, at the versions
-# Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026).
+# Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026),
+# and the navigation delegate whose navigation action says whether the page or one of its frames is navigating (the
+# features wry itself turns on, so nothing new is built).
 objc2 = "0.6"
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject"] }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject", "NSURL", "NSURLRequest"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKDownload"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Only api_link.rs's tests: they make a throwaway keychain and must take it off the search list again.

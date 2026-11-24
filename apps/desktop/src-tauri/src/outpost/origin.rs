@@ -2,14 +2,34 @@
 //! `location.origin`, which is how the vault keeps a sign-in's origins (docs/browser-control.md, "A vault sign-in").
 //!
 //! The guard is the webview's navigation hook. It allows a navigation only to one of the origins it holds, and
-//! remembers that it refused one, so the step that was running is reported failed (`origin_not_allowed`) rather than
-//! carrying on somewhere it was never meant to be. wry hands the hook every navigation, the page's own frames as well
-//! as the page, with nothing but the address, so a frame from anywhere else is refused too and fails the step the
-//! same way.
+//! remembers that it refused one, and whether it was the page's or one of its frames': the page going elsewhere fails
+//! the step that was running (`origin_not_allowed`) rather than letting it carry on somewhere it was never meant to be,
+//! while a frame it refused stays empty, so what a step reads or types is still the page's own (step.rs says what each
+//! kind of step does with each). wry's own hook is told nothing but the address, so on macOS the outpost's browser puts
+//! a hook of its own in front of wry's that reads WKWebView's navigation action, which says whether the navigation is
+//! for the main frame (browser.rs). Whatever is judged without that, by wry's hook alone, counts as the page's: a frame
+//! is never taken for less than it may be.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::Url;
+
+/// What a navigation is for: the page itself (its main frame, or a new window), or one of the page's frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Navigating {
+    Page,
+    Frame,
+}
+
+/// What the guard refused since it was last asked: nothing, only frames of the page, or the page itself, which outweighs
+/// any frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Blocked {
+    #[default]
+    Nothing,
+    Frame,
+    Page,
+}
 
 /// The origin of an https address as a browser writes it (scheme, host in lower case, a port other than 443), or
 /// None for anything else: another scheme, an account in the address, no host.
@@ -46,7 +66,8 @@ pub fn clean(origins: &[String]) -> Vec<String> {
 #[derive(Default)]
 pub struct Guard {
     origins: Mutex<Vec<String>>,
-    blocked: AtomicBool,
+    page: AtomicBool,
+    frame: AtomicBool,
 }
 
 impl Guard {
@@ -55,9 +76,16 @@ impl Guard {
         *self.origins.lock().unwrap_or_else(|e| e.into_inner()) = origins.to_vec();
     }
 
-    /// The hook: whether the browser may go to `url`. `about:blank` and `about:srcdoc` load nothing from anywhere (a
-    /// frame starts on them), so they are allowed; everything else must be an https address on one of the origins.
+    /// wry's hook, which is told only the address: whether the browser may go to `url`, any refusal counted as the
+    /// page's, since it cannot be told from a frame's here.
     pub fn decide(&self, url: &Url) -> bool {
+        self.decide_for(url, Navigating::Page)
+    }
+
+    /// Whether the browser may go to `url` for the page or one of its frames. `about:blank` and `about:srcdoc` load
+    /// nothing from anywhere (a frame starts on them), so they are allowed; everything else must be an https address on
+    /// one of the origins.
+    pub fn decide_for(&self, url: &Url, navigating: Navigating) -> bool {
         if url.scheme() == "about" && matches!(url.path(), "blank" | "srcdoc") {
             return true;
         }
@@ -65,14 +93,28 @@ impl Guard {
             self.origins.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|allowed| *allowed == origin)
         });
         if !allowed {
-            self.blocked.store(true, Ordering::SeqCst);
+            self.refuse(navigating);
         }
         allowed
     }
 
-    /// Whether the hook refused a navigation since this was last asked.
-    pub fn take_blocked(&self) -> bool {
-        self.blocked.swap(false, Ordering::SeqCst)
+    /// Notes a navigation refused for something that is not even an address the guard can read.
+    pub fn refuse(&self, navigating: Navigating) {
+        match navigating {
+            Navigating::Page => self.page.store(true, Ordering::SeqCst),
+            Navigating::Frame => self.frame.store(true, Ordering::SeqCst),
+        }
+    }
+
+    /// What the hook refused since this was last asked.
+    pub fn take_blocked(&self) -> Blocked {
+        let page = self.page.swap(false, Ordering::SeqCst);
+        let frame = self.frame.swap(false, Ordering::SeqCst);
+        match (page, frame) {
+            (true, _) => Blocked::Page,
+            (false, true) => Blocked::Frame,
+            (false, false) => Blocked::Nothing,
+        }
     }
 }
 
@@ -127,21 +169,51 @@ mod tests {
         let url = |u: &str| Url::parse(u).unwrap();
         // Before any step it holds no origin, so nothing is allowed but a blank frame.
         assert!(!guard.decide(&url("https://seller.shopee.co.th/")));
-        assert!(guard.take_blocked());
-        assert!(!guard.take_blocked(), "asking again finds nothing new");
+        assert_eq!(guard.take_blocked(), Blocked::Page);
+        assert_eq!(guard.take_blocked(), Blocked::Nothing, "asking again finds nothing new");
         guard.keep_on(&list(&["https://seller.shopee.co.th"]));
         assert!(guard.decide(&url("https://seller.shopee.co.th/portal")));
         assert!(guard.decide(&url("about:blank")));
         assert!(guard.decide(&url("about:srcdoc")));
-        assert!(!guard.take_blocked());
+        assert_eq!(guard.take_blocked(), Blocked::Nothing);
         for away in ["https://evil.example/", "http://seller.shopee.co.th/", "data:text/html,<p>x", "about:config",
             "blob:https://seller.shopee.co.th/1", "https://u:p@seller.shopee.co.th/", "file:///etc/hosts"] {
             assert!(!guard.decide(&url(away)), "{away}");
-            assert!(guard.take_blocked(), "{away}");
+            assert_eq!(guard.take_blocked(), Blocked::Page, "{away}");
         }
         // The next step's origins replace the last ones.
         guard.keep_on(&list(&["https://track.example"]));
         assert!(!guard.decide(&url("https://seller.shopee.co.th/portal")));
         assert!(guard.decide(&url("https://track.example/parcel/1")));
+    }
+
+    #[test]
+    fn the_guard_tells_a_refused_frame_from_the_page_and_the_page_outweighs_it() {
+        let guard = Guard::default();
+        let url = |u: &str| Url::parse(u).unwrap();
+        guard.keep_on(&list(&["https://seller.shopee.co.th"]));
+        // A frame on the step's origins loads, as the page would; one from anywhere else is refused, as the frame's.
+        assert!(guard.decide_for(&url("https://seller.shopee.co.th/widget"), Navigating::Frame));
+        assert!(guard.decide_for(&url("about:blank"), Navigating::Frame));
+        assert_eq!(guard.take_blocked(), Blocked::Nothing);
+        assert!(!guard.decide_for(&url("https://ads.example/frame"), Navigating::Frame));
+        assert_eq!(guard.take_blocked(), Blocked::Frame);
+        assert_eq!(guard.take_blocked(), Blocked::Nothing);
+        // The page refused as well as a frame, in either order, is the page.
+        assert!(!guard.decide_for(&url("https://ads.example/frame"), Navigating::Frame));
+        assert!(!guard.decide_for(&url("https://evil.example/"), Navigating::Page));
+        assert_eq!(guard.take_blocked(), Blocked::Page);
+        assert!(!guard.decide_for(&url("https://evil.example/"), Navigating::Page));
+        assert!(!guard.decide_for(&url("https://ads.example/frame"), Navigating::Frame));
+        assert_eq!(guard.take_blocked(), Blocked::Page);
+        // wry's own hook knows only the address: what it refuses counts as the page's, never as less.
+        assert!(!guard.decide(&url("https://ads.example/frame")));
+        assert_eq!(guard.take_blocked(), Blocked::Page);
+        // Something refused that was not even an address is noted for what it was for.
+        guard.refuse(Navigating::Frame);
+        assert_eq!(guard.take_blocked(), Blocked::Frame);
+        guard.refuse(Navigating::Page);
+        assert_eq!(guard.take_blocked(), Blocked::Page);
+        assert!(Blocked::Page > Blocked::Frame && Blocked::Frame > Blocked::Nothing);
     }
 }

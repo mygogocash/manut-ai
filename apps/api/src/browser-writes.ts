@@ -213,11 +213,12 @@ export function submitTitle(action: string | null, site: string | null): string 
 
 /// The failure codes an outpost reports only before it submits, so that nothing was submitted: the page did not load, a
 /// field or the form was not on it, there was nothing to sign in with, the site refused what was submitted and kept the
-/// form, or the outpost did not run the step at all (`not_run`: a kind it does not know, a step missing what its kind
-/// needs, or a stop before anything was typed). After any other failure (a timeout, a browser fault, a page that went
-/// off the step's origins) nobody can say the site did not take it.
+/// form, the outpost did not run the step at all (`not_run`: a kind it does not know, a step missing what its kind
+/// needs, or a stop before anything was typed), or the page or one of its frames tried to go off the step's origins
+/// before anything was pressed (`navigation_refused`). After any other failure (a timeout, a browser fault, a page or a
+/// frame that went off the step's origins once it was pressed) nobody can say the site did not take it.
 const NOTHING_SUBMITTED: ReadonlySet<string> = new Set(["page_unavailable", "selector_not_found", "sign_in_refused",
-  "grant_refused", "submit_refused", "not_run"]);
+  "grant_refused", "submit_refused", "not_run", "navigation_refused"]);
 
 /// How a write settles from its step's report, as the broker settles a provider's answer.
 export function submitSettlement(outcome: "done" | "failed", code: string | null): "confirmed" | "failed" | "unknown" {
