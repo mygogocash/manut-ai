@@ -1556,9 +1556,11 @@ shop it was given for. It only reads: deciding is the next section.
   lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
   (`request.createdAt`), then by id.
 - **`limit`**: 1 to 200, 50 when absent. It bounds `recent` only; `open` is never cut short.
-- **Scope.** The shop's own, as the tenant export reads it: every task in the shop's index, read with the shop's
-  tenant (the session's own, or the one a helper session names) and nothing else. So one shop never reads another's
-  approvals, even through a task id planted in its own index or an action planted in its own task. Fellow members' company tasks are not listed:
+- **Scope.** The shop's own, as the tenant export reads it: the tasks in the shop's index, read with the shop's
+  tenant (the session's own, or the one a helper session names) and nothing else. Which of them to read comes from the
+  shop's approval lookup ("How the shop's approvals are found", below). So one shop never reads another's
+  approvals, even through a task id planted in its own index, an action planted in its own task or an entry planted in
+  its own lookup. Fellow members' company tasks are not listed:
   reading those takes a verified company assertion, which this route does not make. Like reading a task, it needs no
   feature switch and no consent.
 - **A reply stored before replies had requests** and still waiting is listed as the request it would have opened:
@@ -1571,8 +1573,8 @@ Errors: 401 `unauthorized` without a session (the operator key is not a session)
 helper the owner removed, 401 `unlinked` with `unlinkedAt` for an owner session whose account the operator unlinked
 ("Several shops", below), 400 `invalid_state`, 400 `invalid_limit`, 400 `invalid_request` for a query naming `shop`,
 `tenant` or `role` (the session decides those, so they are refused rather than read), 405 `method_not_allowed` for
-anything but `GET`, and 503 `approvals_unavailable` when the shop's index, one of its tasks or its people cannot be read,
-never a partial list.
+anything but `GET`, and 503 `approvals_unavailable` when the shop's approval lookup, its index (read only while the
+lookup's backfill runs), one of its tasks or its people cannot be read, never a partial list.
 
 ```ts
 // WireRecord and WireStanding are approval-core's wire JSON (packages/approval-core/src/wire.ts).
@@ -1625,8 +1627,9 @@ request id is the one the listing above gives (`record.request.id`).
   not sent here: it is begun only as its write step is handed to an outpost, so `action` answers `approved`.
 - **Nothing settles an action without its request.** Only approval-core requests are found here; a plain proposal no
   request decides answers 404.
-- **Scope.** The shop's own requests, found through the shop's index and read with the shop's tenant, so one shop's
-  session or helper never decides another shop's request, even one planted in its own index.
+- **Scope.** The shop's own requests, found through one entry of the shop's approval lookup (or, while its backfill
+  runs, the shop's index) and read with the shop's tenant, so one shop's session or helper never decides another shop's
+  request, even one planted in its own index or its own lookup. Passing on finds the request the same way.
 - **The audit log** gets the job flow's `approval.decided` entry, naming `owner-session` or the helper's id. A reply
   decided here is not written to the pilot's reply record, so the pilot gate keeps counting the owner's link decisions.
 
@@ -1649,10 +1652,59 @@ Answers:
 | 409 | `{ error: "changed", result }` | The request moved on: `result.currentRevision` is the one to show |
 | 409 | `{ error: "superseded", result }` | `result.reason`: `attempt_ended`, `turn_ended` or `withdrawn` |
 | 410 | `{ error: "expired", result }` | Past the request's expiry: `result.expiredAt` |
-| 503 | `{ error: "approvals_unavailable" }` and others | The shop's index, a task or the shop's people could not be read |
+| 503 | `{ error: "approvals_unavailable" }` and others | The shop's approval lookup or index, a task or the shop's people could not be read |
 
 `result` is approval-core's `DecideResult` as the task object answered it. Every refusal of approval-core's also
 carries `action`, where the action stands, so a second decision can show what happened to it.
+
+## How the shop's approvals are found
+
+The two routes above, and a helper passing a request on, used to read every task in the shop's index, one after
+another, on every call. Their cost grew with every task the shop ever had, and the desktop asks once a minute. Each shop
+now keeps an approval lookup in its own TenantObject (`apps/api/src/approval-index.ts`) that says which task holds each
+of its approval-core requests, and which of them may still be open. The lookup only says where to look: every answer is
+still approval-core's record as the request's own task holds it, read with only the shop's tenant. The answers, their
+order and the order of refusals are the ones above, and the desktop and the web app read them unchanged.
+
+- **Written before a request opens.** The task object is the one place a request opens: a reply, a worker's ask, a
+  browser write and an append of Ton's books all open there. Before it opens one, it writes the request's entry into its
+  shop's lookup, as the create route writes a task into the index before making it. When the entry cannot be written,
+  nothing is opened and the asker gets 503 `approvals_unavailable` (the operator's `POST /v1/admin/pilot/replies` answers
+  it as it comes; a worker's `ask` is refused with it), so the shop can always find every request it has. The task object
+  opens the request only within a minute of writing its entry, and refuses after that.
+- **`state=open`** reads only the tasks the lookup says may hold an open request, and asks each only for those requests
+  (`GET /requests?id=…` on the task object, at most 100 to a call). What it finds settled leaves the open set for the
+  settled list, with when it was asked. An entry whose task does not hold its request (the request never opened) is
+  cleared, but only once ten minutes have passed since it was written: since a request opens within a minute of its
+  entry, no read ever clears the entry of a request still opening.
+- **`state=recent`** reads the open entries, since any of them may have been decided, expired or superseded since a read
+  last looked, and the newest `limit` settled entries, newest asked first. It reads more settled entries only while some
+  it read are gone from their tasks (the retention sweep removes old ones), and forgets those. So it reads what is open
+  and `limit` requests more, whatever the shop has kept.
+- **Deciding and passing on** read one entry and then the one task it names. Once the lookup is complete, a request it
+  does not lead to answers 404 `not_found`.
+- **Expiry and superseding** change a request's standing with nothing written anywhere. The lookup learns of them from
+  the next read of the request's own task, which moves the entry to the settled list. Both are final (approval-core
+  settles a request once, an expiry is a fixed time, and an attempt that stopped holding its task never holds it again),
+  so a request is read once more for `open` after it leaves it, and never again.
+- **Scope.** Readers see only entries whose task is in the shop's index, and each task is read with only the shop's
+  tenant. An entry planted in one shop's lookup never shows or decides another shop's request: a task outside the index
+  is never read, and a task of another shop answers as if it held nothing.
+- **Shops from before the lookup.** A shop that had tasks before the lookup existed is backfilled. Every approvals read
+  that finds its lookup not complete answers by walking the index as before, so no request is ever missing, and runs one
+  step of the backfill beside the walk. A step reads the next 25 tasks of the index from where the last one stopped and
+  enters every request in them. A task that cannot be read ends the step there: what the step read before it is
+  entered, and the next step starts with that task. A step writes everything it found at once, at its end, so a step cut
+  off before its end writes nothing and the next one does its work again. Once every task in the index is behind it, the
+  lookup is complete and reads use it. A shop whose first task is indexed after this change starts
+  complete.
+- **Deletion and export.** Deleting the shop's data wipes its lookup with its task index. The export leaves the lookup
+  out: it only says where the shop's requests are, and the requests are in the export's tasks.
+- **Cloudflare's limit on calls.** Each call one request makes to another object is a subrequest. The Workers Free plan
+  allows 50 per request (1,000 to Cloudflare's own services, objects among them) and the Paid plan 10,000 by default,
+  which a Worker may raise to 10 million (developers.cloudflare.com/workers/platform/limits/#subrequests). The walk made
+  one call per task the shop ever had. A read now makes a few calls to the shop's own object and one per task with
+  something to read.
 
 ## Signing in by email
 
