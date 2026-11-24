@@ -246,6 +246,89 @@ describe("the fake, deleting shops as the API does", () => {
   });
 });
 
+describe("the in-memory fake, for practising the owner's page on long words and a dead connection", () => {
+  let now = Date.parse("2026-11-23T03:00:00Z");
+  const fake = () => createFakeApi({ now: () => now, settleMs: 3000, webOrigin: "https://web.test" });
+  const thai = /[฀-๿]/;
+  // The longest stretch of a text with no space in it: the most a phone's line has to hold without a place to break.
+  const longestRun = (text: string) => Math.max(...text.split(/\s+/).map((word) => word.length));
+
+  it("answers a long Thai message and a long Thai reply, in a shop with a long Thai name", async () => {
+    const view = await fake().getApproval(DEMO_TOKENS.longThai);
+    expect(view).toMatchObject({ state: "proposed", needsConsent: true });
+    expect(view.shopName).toMatch(thai);
+    expect(view.shopName.length).toBeGreaterThan(40);
+    expect(view.customerName).toMatch(thai);
+    // A long message in two paragraphs, and a long reply to it.
+    expect(view.customerMessage).toMatch(thai);
+    expect(view.customerMessage.length).toBeGreaterThan(250);
+    expect(view.customerMessage).toContain("\n\n");
+    expect(view.replyText).toMatch(thai);
+    expect(view.replyText.length).toBeGreaterThan(250);
+  });
+
+  it("answers a long order id and a long link that have nowhere to break, and a customer name with no space", async () => {
+    const view = await fake().getApproval(DEMO_TOKENS.longLink);
+    expect(view).toMatchObject({ state: "proposed", needsConsent: true });
+    expect(longestRun(view.customerMessage)).toBeGreaterThan(60);
+    expect(longestRun(view.replyText)).toBeGreaterThan(60);
+    expect(view.replyText).toContain("https://");
+    expect(view.customerName).not.toMatch(/\s/);
+    expect(view.customerName.length).toBeGreaterThan(20);
+  });
+
+  it("keeps each practice shop to itself, and never shows them to the console", async () => {
+    const api = fake();
+    // Not in the console's lists, nor among Baan Mali's messages and replies.
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    expect((await api.listMessages("shop_baanmali")).map((message) => message.id)).not.toContain("demo_msg_long_thai");
+    expect((await api.listActions("shop_baanmali")).map((action) => action.actionId)).not.toContain("act_demo_long_thai");
+
+    // One shop's one-time permission is its own.
+    await api.giveConsent(DEMO_TOKENS.longThai);
+    expect((await api.getApproval(DEMO_TOKENS.longThai)).needsConsent).toBe(false);
+    expect((await api.getApproval(DEMO_TOKENS.longLink)).needsConsent).toBe(true);
+    expect((await api.getApproval(DEMO_TOKENS.waiting)).needsConsent).toBe(true);
+
+    // And a reply link works as any other: the owner answers, the send settles.
+    expect((await api.decide(DEMO_TOKENS.longThai, true)).state).toBe("dispatching");
+    now += 3000;
+    expect((await api.getApproval(DEMO_TOKENS.longThai)).state).toBe("confirmed");
+    expect((await api.getApproval(DEMO_TOKENS.longLink)).state).toBe("proposed");
+  });
+
+  it("cannot be read on the dead-connection links, the way a request that never arrives fails", async () => {
+    const api = fake();
+    const calls = [
+      () => api.getApproval(DEMO_TOKENS.offline),
+      () => api.giveConsent(DEMO_TOKENS.offline),
+      () => api.decide(DEMO_TOKENS.offline, true),
+      () => api.getDeletion(DEMO_DELETION_TOKENS.offline),
+      () => api.decideDeletion(DEMO_DELETION_TOKENS.offline, true),
+    ];
+    // The HTTP client throws status 0 with the code "network" for a fetch that rejects; the page treats it as "could not load".
+    for (const call of calls) await expect(call()).rejects.toMatchObject({ status: 0, code: "network" });
+  });
+
+  it("answers a deletion about a shop with a long Thai name and counts in the millions, and deletes nothing real", async () => {
+    const api = fake();
+    const view = await api.getDeletion(DEMO_DELETION_TOKENS.longName);
+    expect(view).toMatchObject({
+      state: "awaiting_owner",
+      goes: { messages: 1_234_567, replies: 98_765, payments: 4_321, lineConnected: true },
+    });
+    expect(view.shopName).toMatch(thai);
+    expect(view.shopName.length).toBeGreaterThan(50);
+    expect(await api.decideDeletion(DEMO_DELETION_TOKENS.longName, true)).toMatchObject({
+      state: "deleted",
+      goes: { messages: 1_234_567 },
+    });
+    // The other copy of the page and the console are as they were.
+    expect((await api.getDeletion(DEMO_DELETION_TOKENS.waiting)).state).toBe("awaiting_owner");
+    expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+  });
+});
+
 describe("the in-memory fake's LINE webhook", () => {
   it("stores a signed LINE message once and refuses a bad signature", async () => {
     const api = createFakeApi();
@@ -304,9 +387,10 @@ describe("the fake's pilot gate, measured as the API measures it", () => {
     expect(gate.asOf).toBe("2026-11-23T03:00:00.000Z");
     expect(gate.shops).toEqual([
       { tenant: "shop_baanmali", name: "Baan Mali", trialStartedAt: "2026-11-10T03:00:00.000Z", day: 14,
-        trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "yes", lastDecisionAt: "2026-11-22T22:18:00.000Z" },
+        trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "yes", lastDecisionAt: "2026-11-22T22:18:00.000Z",
+        inCohort: true },
       { tenant: "shop_sabaitea", name: "Sabai Tea", trialStartedAt: null, day: null, trialEnded: false, paid: false,
-        paidSatang: 0, activeOnDay14: "not_yet" },
+        paidSatang: 0, activeOnDay14: "not_yet", inCohort: true },
     ]);
     expect(gate.cohort).toEqual({ counted: 0, paid: { count: 0, percent: null, thresholdPercent: 25, met: false },
       active: { count: 0, percent: null, thresholdPercent: 50, met: false }, status: "not_enough_data" });
@@ -1719,10 +1803,36 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     const first = createFakeApi({ now: () => NOW, storage });
     await first.listShops();
     const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
-    expect(world.version).toBe(10);
+    expect(world.version).toBe(11);
     saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, version: 9, audit: [] }));
     const api = createFakeApi({ now: () => NOW, storage });
     const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
     expect(has(log, "vault.resealed")).toBe(true);
+  });
+
+  it("replaces a world saved before the practice shops for the owner's page, so its new demo links work", async () => {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    await createFakeApi({ now: () => NOW, storage }).listShops();
+    const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+    // The last world before them: version 10, which has no demoShops.
+    const { demoShops: _gone, ...before } = world;
+    saved.set("manut.pilot.fake.v1", JSON.stringify({ ...before, version: 10 }));
+    const api = createFakeApi({ now: () => NOW, storage });
+    expect(await api.getApproval(DEMO_TOKENS.longThai)).toMatchObject({ state: "proposed" });
+    expect(await api.getDeletion(DEMO_DELETION_TOKENS.longName)).toMatchObject({ state: "awaiting_owner" });
+  });
+});
+
+// An operator counting a shop its owner made in the pilot gate, in practice as on the API (docs/pilot-api.md, "The pilot gate").
+describe("the fake's pilot gate cohort", () => {
+  it("refuses a shop an operator made, which is always counted", async () => {
+    const api = createFakeApi({ now: () => Date.parse("2026-11-24T03:00:00Z") });
+    await expect(api.setGateCohort("shop_baanmali", true)).rejects.toMatchObject({ status: 409, code: "not_self_serve" });
+    await expect(api.setGateCohort("shop_nobody", true)).rejects.toMatchObject({ status: 404 });
   });
 });

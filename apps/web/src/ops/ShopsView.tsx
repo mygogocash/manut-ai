@@ -211,6 +211,14 @@ function ShopRow({ shop, gate, read, now, onOpen }: {
         <div className="mut" style={{ fontSize: 12, fontWeight: 400 }}>
           {shop.ownerName}
         </div>
+        {/* Where the shop came from: its owner made it in the app, so no operator spoke with them first. */}
+        {shop.selfServe ? (
+          <div style={{ fontWeight: 400, marginTop: 4 }}>
+            <span className="tag" title={shopsWords.selfServeHelp}>
+              {shopsWords.selfServe}
+            </span>
+          </div>
+        ) : null}
       </th>
       <td style={CELL}>{measured && rules ? <Trial shop={measured} trialDays={rules.trialDays} /> : unreadable}</td>
       <td style={{ ...CELL, whiteSpace: "nowrap" }}>

@@ -123,3 +123,44 @@ describe("switching shops under the app's store", () => {
     expect(shopAsks()).toHaveLength(3);
   });
 });
+
+// Make your shop in Practice (Settings › Developer, MakeShop.tsx): no network, the API's refusals, and the shop listed with
+// the person's others and shown, as the connected runtime shows one the API made.
+describe("making a shop in Practice", () => {
+  const make = (rt: MockRuntime, params: { name: string; ownerName: string; template: string | null }) =>
+    (rt.request as unknown as (op: string, p: unknown) => Promise<{ shop: { id: string } }>)("shops.make", params);
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: { code: string }) => e.code);
+
+  it("makes a shop of the person's own, lists it after their own and before Ran Pa Noi, and shows it", async () => {
+    const { rt, events } = await open();
+    const made = await make(rt, { name: "  Khao Hom ", ownerName: "Dao", template: "food" });
+    expect(made).toEqual({ shop: { id: "practice:made-1", name: "Khao Hom", owner: "Dao", role: "owner" } });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(events.some((e) => e.event === "shops.update")).toBe(true);
+    expect(await rt.request("shops.list", {})).toEqual({
+      shops: [
+        { id: OWN_SHOP, name: "", owner: "", role: "owner" },
+        { id: "practice:made-1", name: "Khao Hom", owner: "Dao", role: "owner" },
+        { id: HELPED_SHOP, name: "Ran Pa Noi", owner: "Noi", role: "helper" },
+      ],
+      current: "practice:made-1",
+      left: [],
+    });
+    // It is a shop like the others: the switcher moves away from it and back.
+    await rt.request("shops.switch", { shop: OWN_SHOP });
+    await rt.request("shops.switch", { shop: "practice:made-1" });
+    expect((await rt.request("shops.list", {})).current).toBe("practice:made-1");
+    // Its people and sign-ins are not pretended: Practice says so in words.
+    expect(await refusal(rt.request("people.list", {}))).toBe("not_yet");
+  });
+
+  it("refuses as the API would: a name it would not keep, a kind it does not have, a fourth shop", async () => {
+    const { rt } = await open();
+    expect(await refusal(make(rt, { name: " ", ownerName: "Dao", template: null }))).toBe("invalid_name");
+    expect(await refusal(make(rt, { name: "Khao Hom", ownerName: "x".repeat(81), template: null }))).toBe("invalid_owner_name");
+    expect(await refusal(make(rt, { name: "Khao Hom", ownerName: "Dao", template: "bakery" }))).toBe("unknown_template");
+    for (const name of ["One", "Two", "Three"]) expect((await make(rt, { name, ownerName: "Dao", template: null })).shop.id).toMatch(/^practice:made-/);
+    expect(await refusal(make(rt, { name: "Four", ownerName: "Dao", template: null }))).toBe("too_many_shops");
+    expect((await rt.request("shops.list", {})).shops).toHaveLength(5);
+  });
+});

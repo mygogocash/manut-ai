@@ -131,6 +131,22 @@ function decodeOpened(json: unknown): ShopSessionRecord | null {
 
 type Opened = { kind: "open"; held: ShopSessionRecord } | Exclude<ShopAnswer, { kind: "ok" } | { kind: "refused" }>;
 
+/** What making a shop of the person's own came to: the shop, theirs now, with its owner session held; the API's refusal,
+ *  with its code; or that the sign-in ended, the API could not be reached, or it could not make the shop. */
+export type Made =
+  | { kind: "made"; shop: ShopRow }
+  | { kind: "refused"; status: number; code: string }
+  | { kind: "signed_out" | "offline" | "unavailable" };
+
+/** The shop and the owner session of a `POST /v1/shops/new` answer, or null when it is not one. */
+function decodeMade(json: unknown): { shop: ShopRow; held: ShopSessionRecord } | null {
+  if (!isObj(json) || json.role !== "owner" || !isObj(json.shop)) return null;
+  const { id, name, ownerName } = json.shop;
+  const held = decodeOpened(json);
+  if (!text(id, 256) || typeof name !== "string" || typeof ownerName !== "string" || !held) return null;
+  return { shop: { id, name, owner: ownerName, role: "owner" }, held };
+}
+
 export class ShopSessions {
   /** A shop being opened, so two requests that find its session ended open it once. */
   private opening = new Map<string, Promise<Opened>>();
@@ -218,6 +234,25 @@ export class ShopSessions {
    *  answer holds (outpost.ts). Opening the shop still goes the usual way, since its answer is a session the page keeps. */
   writeVia(shop: string, path: string, body: unknown, through: FetchLike): Promise<ShopAnswer> {
     return this.request(shop, "POST", path, body, through);
+  }
+
+  /** Makes a shop of the person's own with the sign-in (`POST /v1/shops/new`, exactly `{ name, ownerName, template }`;
+   *  docs/pilot-api.md, "Making a shop of your own"), and keeps the owner session the API answers with the sign-in, as
+   *  opening a shop keeps one, so the shop is read with its own session from the first read. A request that got no answer is
+   *  never sent again from here: the API may have made the shop, and the next read of the person's shops says so. */
+  async make(input: { name: string; ownerName: string; template: string | null }): Promise<Made> {
+    // Taken before the request goes out, as for opening a shop: a sign-out while it is on its way means the session it
+    // brings back is ended there and not kept here. The shop is the person's all the same, and opens again with the sign-in.
+    const chain = this.session.signInChain;
+    const answer = await this.session.write("/v1/shops/new", { name: input.name, ownerName: input.ownerName, template: input.template });
+    if (answer.kind === "ok") {
+      const made = decodeMade(answer.json);
+      if (!made) return { kind: "unavailable" };
+      await this.session.keepShopSession(made.shop.id, made.held, chain);
+      return { kind: "made", shop: made.shop };
+    }
+    if (answer.kind === "refused") return { kind: "refused", status: answer.status, code: answer.code };
+    return { kind: answer.kind };
   }
 
   /** Forgets these shops' sessions here: they left the person's list. Nothing is sent: a shop the person was removed from

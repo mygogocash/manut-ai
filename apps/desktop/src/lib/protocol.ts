@@ -9,6 +9,7 @@
 import type { ConnectionOps } from "../runtime/connections";
 import type { MemoryOps } from "../runtime/memory";
 import type { MissionOps } from "../runtime/mission";
+import type { MakeShopOps } from "../runtime/makeShop";
 import type { PeopleOps } from "../runtime/people";
 import type { RoutineOps } from "../runtime/routines";
 import type { AgentRunSummary, CliAgent, CliAgentStatus, NodePr, RunDetail } from "./runs";
@@ -366,7 +367,7 @@ export interface FolderResumeResult extends FolderOpenResult {
  *  team knows, in `src/runtime/memory.ts`, its routines, in `src/runtime/routines.ts`, and its Connections tab, the shop's
  *  vault and outposts, in `src/runtime/connections.ts`; and Settings › People, the helpers around the shop, in
  *  `src/runtime/people.ts`). */
-export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps, PeopleOps {
+export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps, PeopleOps, MakeShopOps {
   hello: { params: Record<string, never>; result: HelloResult };
   "bots.list": { params: Record<string, never>; result: { bots: Bot[] } };
   "chat.open": { params: { bot: string; existing_only?: boolean }; result: ChatOpenResult };

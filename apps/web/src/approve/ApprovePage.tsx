@@ -3,7 +3,16 @@ import { ApiError, isSending, useApiSetup, type ApprovalState, type ApprovalView
 import { formatClock, langOf } from "../format";
 import { Face, type FaceState } from "../ui/Face";
 import { BrandMark, BrokenLinkIcon, CheckIcon, ClockIcon, CloudOffIcon, useColorScheme } from "../ui/marks";
-import { Loading, Notice, OWNER_CARD as CARD, OWNER_TOUCH as TOUCH, Pulse, whenText } from "../ui/owner";
+import {
+  Loading,
+  Notice,
+  OWNER_CARD as CARD,
+  OWNER_MAIN as MAIN,
+  OWNER_TAP as TAP,
+  OWNER_TOUCH as TOUCH,
+  Pulse,
+  whenText,
+} from "../ui/owner";
 import { ownerStrings, type OwnerStrings } from "./strings";
 
 /// The owner's page, opened from a link in LINE. It shows one request and takes one answer. Approving may
@@ -168,7 +177,7 @@ export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs
   else if (phase === "loadError")
     body = (
       <Notice icon={<CloudOffIcon />} title={s.loadErrorTitle} body={s.loadErrorBody}>
-        <button type="button" className="btn" onClick={() => setLoadAttempt((n) => n + 1)}>
+        <button type="button" className="btn" style={TAP} onClick={() => setLoadAttempt((n) => n + 1)}>
           {s.tryAgain}
         </button>
       </Notice>
@@ -207,7 +216,7 @@ export function ApprovePage({ token, pollMs = POLL_MS }: { token: string; pollMs
 
   return (
     <div className="r" data-t={scheme} style={{ minHeight: "100vh" }}>
-      <main className="col" style={{ maxWidth: 560, padding: "16px 16px 40px", gap: 16 }}>
+      <main className="col" style={MAIN}>
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BrandMark />
           <div style={{ minWidth: 0, lineHeight: 1.3 }}>

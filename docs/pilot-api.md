@@ -158,6 +158,7 @@ type DeletionView = {
 | `POST /v1/admin/pilot/subscription-payments` | `{ tenant, amountSatang, slipRef, slipNote? }` | `SubscriptionPayment`. 409 `{ "error": "slip_already_recorded" }`, recording nothing, for a slip already recorded for the shop |
 | `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
 | `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
+| `POST /v1/admin/pilot/gate/cohort` | `{ tenant, counted }` | `{ tenant, counted }`: a shop its owner made counted in the gate's cohort, or left out again (below). 409 `{ "error": "not_self_serve" }` for a shop an operator made, which is always counted; 400 `invalid_request` for a body that is not exactly that with a boolean `counted` |
 | `GET /v1/admin/audit` | `?tenant=&before=&limit=` | `AuditPage`: one page of the shop's audit log, newest first ("Audit log", below) |
 | `GET /v1/admin/memory` | `?tenant=` | `Memory`: every fact the team holds for the shop, waiting ones included, and how many texts it was told to forget ("Memory", below) |
 | `POST /v1/admin/memory/remember` | `{ tenant, text }` | `Fact`: the owner's own fact, confirmed at once |
@@ -172,7 +173,9 @@ reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the ro
 shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
 spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
 have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
-says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages.
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages. A shop its
+owner made in the app (`selfServe`, "Making a shop of your own", below) is marked "Made by its owner" under its name, so an
+operator sees where it came from; the Pilot gate page marks it the same way and says whether it is counted.
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is
@@ -185,6 +188,7 @@ type Shop = {
   ownerName: string;            // "" once a deletion has removed the shop's own record (below)
   lineConnectionId?: string;
   template?: string;            // the shop template it was made from, if any ("Shop templates", below)
+  selfServe?: true;             // made by its owner in the app, with no operator ("Making a shop of your own", below)
   consent: boolean;
   deletion?: DeletionRequest;   // the shop's latest deletion put to its owner, if any
   deleting?: Deleting;          // its deletion started and has not finished ("Export and deletion", below)
@@ -382,6 +386,14 @@ practice-mode fake in `apps/web` keeps the same rules.
   answer, fails the whole answer with 503 `{ "error": "gate_unavailable" }`: a shop is never left out of the
   cohort and a trial start is never guessed.
 - **Deleted shops** leave the registry, and with it the gate.
+- **Self-serve shops.** A shop its owner made in the app ("Making a shop of your own", below) is listed with `selfServe:
+  true` and `inCohort: false`, and left out of the cohort's counts, however it does, unless an operator adds it with
+  `POST /v1/admin/pilot/gate/cohort` and `{ tenant, counted: true }`, which they can take back with `counted: false`. The
+  pilot's cohort is the shops chosen for it and spoken with; a stranger who signs up on their own is another measure, which
+  the owner has not set, so an operator adds one only after speaking with its owner as the pilot's owners were. Each change
+  is one write to the shop's record (`addedToCohortAt`) with `cohort.added` or `cohort.removed` in its log, and asking for
+  what already holds writes nothing. Every shop an operator made is `inCohort: true`. The console's Pilot gate page offers
+  "Count it" and "Leave it out" on a self-serve shop's row.
 
 ```ts
 type PilotGate = {
@@ -409,6 +421,8 @@ type GateShop = {
   paidSatang: number;             // everything the shop has paid Manut AI
   activeOnDay14: "yes" | "no" | "not_yet";
   lastDecisionAt?: string;        // the owner's latest decision on a reply
+  selfServe?: true;               // made by its owner in the app, with no operator
+  inCohort: boolean;              // counted once day 14 has passed: false for a self-serve shop an operator has not added
 };
 ```
 
@@ -468,7 +482,9 @@ What is written, and by whom:
 
 | Action | Actor | Subject | Outcome |
 | --- | --- | --- | --- |
-| `shop.created` | operator | none | `ok` |
+| `shop.created` | operator; for a shop its owner made, the owner's linked account by its id | none | `ok` |
+| `cohort.added`, `cohort.removed` | operator | none | `ok` |
+| `shop.made_by_owner` | the owner's linked account, by its id, in the write that makes the shop, beside `owner.linked` and `owner.session_opened` by the same account ("Making a shop of your own") | `ownerAccountId` | `ok` |
 | `line.connected` | operator | `connectionId`, and `previousConnectionId` when it replaced one | `ok` |
 | `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |
 | `payment.recorded`, `subscription_payment.recorded` | operator | `paymentId`, with `amountSatang` | `ok` |
@@ -2042,6 +2058,56 @@ which writes `owner.session_ended`.
 account to their shop ("Operator routes", below). 200 `{ code, expiresAt }`: `code` is eight characters of Crockford's
 base 32, shown as `XXXX-XXXX`. It names only the account that asked for it, works once, for 15 minutes, and asking again
 replaces it. Only its SHA-256 is kept. A body with any field, an account above all, answers 400 `invalid_request`.
+
+### Making a shop of your own
+
+Built, and off until the owner opens sign-ups (`apps/api/src/self-serve.ts`; docs/several-shops.md, "A shop its owner
+makes"). A signed-in person makes their own shop, from one of the three shop templates or none, and is its owner from the
+first write, with no operator and no link code. It is the roadmap's Phase 5 gate, onboarding that converts without an
+operator. Who may sign up, the pilot's customers and any price are the owner's calls, and none of them is built in: a
+self-serve shop has no payment step, since billing is parked.
+
+**Off unless opened.** `POST /v1/shops/new` answers every request 403 `{ error: "sign_ups_closed" }`, whatever its method,
+credential or body, and reads nothing (not the session, not the rate limit), unless the var `SELF_SERVE_SHOPS` is exactly
+`"on"`. No environment sets it; the test configuration does. Opening sign-ups is the owner's call: the environment's block
+in `wrangler.jsonc` gets `"SELF_SERVE_SHOPS": "on"`.
+
+**`POST /v1/shops/new`** with exactly `{ name, ownerName, template }` and the person's own signed-in session (Apple's or
+email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While sign-ups are open, every try counts against
+`SELF_SERVE_SHOP_LIMITER` first, per source address, before anything is read (10 a minute; 429 `rate_limited` with
+`retry-after: 60`, or 503 `rate_limit_unavailable` without the binding).
+
+| Status | Body | When |
+| --- | --- | --- |
+| 201 | `{ shop: { id, name, ownerName, template }, role: "owner", account: { id }, session: ShopSession }` | The shop is made, listed and the person's: `account.id` is what their decisions name, and `session` is this device's owner session, as `POST /v1/shops/session` answers an owner. `template` is the id, or `null` |
+| 403 | `{ error: "sign_ups_closed" }` | Sign-ups are not open, above |
+| 401 | `{ error: "unauthorized" }` | No signed-in session: none, the operator key, a shop session (`mos1.`) or a helper's (`mhs1.`). Making a shop takes the person's own sign-in |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST`, after the session is checked |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly those three keys: an owner, a tenant, a role or anything else is refused, not dropped |
+| 400 | `{ error: "invalid_json" }` | The body is not JSON |
+| 400 | `{ error: "invalid_name" }`, `{ error: "invalid_owner_name" }` | The shop's name, or the person's own, is empty, longer than 80 characters once its outer spaces are off, or holds a control character (a helper's name's rule, `keptName` in `people-store.ts`) |
+| 400 | `{ error: "unknown_template" }` | `template` is not one of the three, or `null` |
+| 409 | `{ error: "too_many_shops", limit: 3 }` | The account has made 3 shops that still exist |
+| 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again makes a whole new shop |
+
+- **The same shop the operator's route makes.** Both go through `writeNewShop` in `pilot.ts`: the shop's record with
+  `shop.created` in one write, then the template applied the one way ("Shop templates", above: its members, its routines
+  each paused, its first-week questions, `template.applied` and one `routine.created` each).
+- **Owned from the first write.** For a shop its owner makes, that first write to the shop's object also links the person's
+  account as its owner (`owner.account` on the People answer, `{ id, subject, linkedAt }` in the export) and opens this
+  device's owner session, with `shop.made_by_owner`, `owner.linked` and `owner.session_opened`. Every entry of the making,
+  `shop.created` and the template's included, names the owner's linked account by its id (`owner-<uuid>`), never its subject
+  or an email. The shop is marked `selfServe: true` on its record and in the console's shop list.
+- **Listed last, in one write.** Once the shop and its setup are written, one AuthObject transaction puts it on the
+  console's list (the pilot registry) and in the person's index as theirs, so `GET /v1/shops` and `GET
+  /v1/admin/pilot/shops` list it together or not at all. A shop whose setup or listing could not be written is never listed,
+  and its session's token, which only the answer would carry, is never sent.
+- **At most 3 made shops per account.** A slot is reserved in AuthObject before anything is made, in one transaction, so
+  requests racing for the last slot cannot pass it. A shop that was deleted no longer counts, and a reservation whose make
+  failed is given back, or stops counting after 10 minutes. Shops an operator linked to the account never count: the limit
+  is on making, not owning.
+- **The pilot gate** lists a self-serve shop and leaves it out of the cohort unless an operator adds it ("The pilot gate",
+  above).
 
 ### What an owner session reaches
 

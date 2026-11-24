@@ -30,6 +30,7 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     recordSubscriptionPayment: missing("recordSubscriptionPayment"),
     listSubscriptionPayments: missing("listSubscriptionPayments"),
     getGate: missing("getGate"),
+    setGateCohort: missing("setGateCohort"),
     listAudit: missing("listAudit"),
     getMemory: missing("getMemory"),
     rememberFact: missing("rememberFact"),

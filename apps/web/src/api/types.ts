@@ -70,6 +70,8 @@ export type Shop = {
   lineConnectionId?: string;
   /// The shop template it was made from, when it was.
   template?: string;
+  /// Its owner made it in the app, signed in, with no operator (docs/pilot-api.md, "Making a shop of your own").
+  selfServe?: true;
   consent: boolean;
   deletion?: DeletionRequest;
   deleting?: Deleting;
@@ -144,6 +146,11 @@ export type GateShop = {
   paidSatang: number;
   activeOnDay14: ActiveOnDay14;
   lastDecisionAt?: string;
+  /// Its owner made it in the app, with no operator.
+  selfServe?: true;
+  /// Whether it is counted once its day 14 has passed: false for a shop its owner made that an operator has not added. An
+  /// API from before shops could be made that way leaves it out, which reads as counted.
+  inCohort?: boolean;
 };
 
 /// One of the gate's two shares: `percent` is rounded down, and null while no shop is counted. `met` compares the
@@ -600,6 +607,9 @@ export interface PilotApi {
   listSubscriptionPayments(tenant: string): Promise<SubscriptionPayment[]>;
   /// The Phase 1 gate: every shop's trial, payment and activity, and the cohort against the gate's two lines.
   getGate(): Promise<PilotGate>;
+  /// `POST /v1/admin/pilot/gate/cohort`: counts a shop its owner made in the gate's cohort, or leaves it out again. Rejects
+  /// with 409 `not_self_serve` for a shop an operator made, which is always counted.
+  setGateCohort(tenant: string, counted: boolean): Promise<{ tenant: string; counted: boolean }>;
 
   /// `GET /v1/admin/audit`: one page of a shop's audit log, newest first. Rejects with 400 `invalid_request` for a
   /// cursor that is not an entry's id or a size out of range.

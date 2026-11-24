@@ -29,6 +29,7 @@ pnpm install          # only esbuild and workerd may run install scripts (pnpm-w
 pnpm test             # every package's tests
 pnpm typecheck
 pnpm --filter @manut/web dev    # the web app against an in-memory fake of the API
+pnpm --filter @manut/web e2e    # the owner's pages in WebKit and Chromium at phone sizes (docs/phone-pass.md)
 pnpm --filter @manut/api dev    # both Workers on localhost:8787: the API and the web app on one origin
 ```
 

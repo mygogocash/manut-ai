@@ -19,12 +19,14 @@ function summarise(...args) {
   return execFileSync(process.execPath, [script, ...args], { env, encoding: "utf8" });
 }
 
-/** A report with the fields the script reads. `failed` is a list of [file, line, title]. */
+/** A report with the fields the script reads. `failed` is a list of [file, line, title, projects], where `projects` is
+ *  optional: the [projectName, status] pairs of a spec that ran in several Playwright projects. */
 function report({ shard, expected = 0, unexpected = 0, flaky = 0, skipped = 0, duration = 1000, failed = [], errors = [] } = {}) {
   const files = new Map();
-  for (const [file, line, title] of failed) {
+  for (const [file, line, title, projects] of failed) {
     if (!files.has(file)) files.set(file, { title: file, file, specs: [], suites: [] });
-    files.get(file).specs.push({ title, ok: false, file, line });
+    const tests = projects?.map(([projectName, status]) => ({ projectName, status }));
+    files.get(file).specs.push({ title, ok: false, file, line, ...(tests ? { tests } : {}) });
   }
   return {
     config: shard ? { shard: { current: shard[0], total: shard[1] } } : {},
@@ -111,5 +113,39 @@ describe("what is written for people to read", () => {
     mkdirSync(empty);
     assert.match(summarise(empty), /No usable report at/);
     assert.match(summarise(), /No report was given\./);
+  });
+});
+
+describe("a job that runs its specs in several projects", () => {
+  it("names the projects a failing test failed in, and only those", () => {
+    const projects = [["iPhone 17 (WebKit)", "expected"], ["Pixel 8 (Chromium)", "unexpected"], ["Android 360x740 (Chromium)", "unexpected"]];
+    const dir = run("projects", [report({ unexpected: 2, failed: [["owner-pages.spec.ts", 14, "light › approval page: a reply", projects]] })]);
+    const out = summarise("--title", "Web on phones", join(dir, "playwright-results-1.json"));
+    assert.match(out, /- owner-pages\.spec\.ts:14 › light › approval page: a reply \[Pixel 8 \(Chromium\), Android 360x740 \(Chromium\)\]\n/);
+    assert.doesNotMatch(out, /iPhone/);
+  });
+
+  it("adds no brackets for a test whose project has no name, as the desktop's report has none", () => {
+    const dir = run("unnamed", [report({ unexpected: 1, failed: [["a.spec.ts", 1, "one", [["", "unexpected"]]], ["b.spec.ts", 2, "two"]] })]);
+    const out = summarise(join(dir, "playwright-results-1.json"));
+    assert.match(out, /- a\.spec\.ts:1 › one\n- b\.spec\.ts:2 › two\n/);
+  });
+});
+
+describe("the note under the title", () => {
+  it("is the desktop's sentence unless one is given, and can be left out", () => {
+    const file = join(run("note", [report({ expected: 3 })]), "playwright-results-1.json");
+    assert.match(summarise(file), /^### Desktop Playwright\n\nThis job may fail without failing the run while the inherited specs are brought up to date\.\n\n\| Passed/);
+    assert.match(summarise("--note", "A failing test fails the run.", file), /^### Desktop Playwright\n\nA failing test fails the run\.\n\n\| Passed/);
+    const none = summarise("--title", "Web on phones", "--note", "", file);
+    assert.match(none, /^### Web on phones\n\n\| Passed/);
+    assert.doesNotMatch(none, /may fail/);
+  });
+
+  it("is escaped like every other word", () => {
+    const file = join(run("note-escape", [report({ expected: 1 })]), "playwright-results-1.json");
+    const out = summarise("--note", "<b>bold</b> & more", file);
+    assert.match(out, /&lt;b&gt;bold&lt;\/b&gt; &amp; more/);
+    assert.doesNotMatch(out, /<b>/);
   });
 });

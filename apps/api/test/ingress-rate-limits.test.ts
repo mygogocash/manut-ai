@@ -8,6 +8,7 @@ type LimitedEnv = Env & {
   AUTH_SESSION_LIMITER?: RateLimit;
   LINEAR_INBOUND_LIMITER?: RateLimit;
   OUTPOST_LIMITER?: RateLimit;
+  SELF_SERVE_SHOP_LIMITER?: RateLimit;
 };
 const bindings = env as unknown as LimitedEnv;
 const routes = [
@@ -24,6 +25,9 @@ const routes = [
   ["/v1/outposts/redeem", "POST", "OUTPOST_LIMITER"],
   ["/v1/outposts/steps", "POST", "OUTPOST_LIMITER"],
   ["/v1/outposts/steps/report", "POST", "OUTPOST_LIMITER"],
+  // Making a shop of one's own (self-serve.ts) wakes AUTH and makes a shop, so while sign-ups are open (the test config opens
+  // them) every try counts before anything is read.
+  ["/v1/shops/new", "POST", "SELF_SERVE_SHOP_LIMITER"],
 ] as const;
 
 function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
@@ -35,7 +39,7 @@ function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
   } } as RateLimit;
   const target: LimitedEnv = { ...bindings,
     AUTH_EXCHANGE_LIMITER: limiter, AUTH_CODE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
-    OUTPOST_LIMITER: limiter,
+    OUTPOST_LIMITER: limiter, SELF_SERVE_SHOP_LIMITER: limiter,
     AUTH: { idFromName: (name: string) => bindings.AUTH.idFromName(name),
       get: () => ({ fetch: async () => { calls++; return Response.json({ fixture: true }); } }),
     } as unknown as DurableObjectNamespace,
@@ -119,9 +123,22 @@ describe("public ingress rate limits", () => {
     expect(counter.keys).toEqual([]);
   });
 
+  it("counts nothing for making a shop while sign-ups are closed, and wakes nothing", async () => {
+    for (const closed of [undefined, "off", "1", "ON"]) {
+      const counter = fixture(async () => { throw new Error("must_not_limit"); });
+      const input = request("/v1/shops/new", "POST");
+      const response = await send(input.request, { ...counter.target, SELF_SERVE_SHOPS: closed } as unknown as LimitedEnv);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "sign_ups_closed" });
+      expect(counter.keys).toEqual([]);
+      expect(input.pulls()).toBe(0);
+      expect(counter.calls()).toBe(0);
+    }
+  });
+
   it.each([
     ["AUTH_EXCHANGE_LIMITER", 10], ["AUTH_CODE_LIMITER", 10], ["AUTH_SESSION_LIMITER", 60], ["LINEAR_INBOUND_LIMITER", 300],
-    ["OUTPOST_LIMITER", 300],
+    ["OUTPOST_LIMITER", 300], ["SELF_SERVE_SHOP_LIMITER", 10],
   ] as const)("uses the real workerd %s binding at its configured boundary", async (binding, limit) => {
     const actual = bindings[binding];
     expect(actual).toBeDefined();
@@ -129,7 +146,8 @@ describe("public ingress rate limits", () => {
     counter.target[binding] = actual!;
     const path = ({ AUTH_EXCHANGE_LIMITER: "/v1/auth/exchange", AUTH_CODE_LIMITER: "/v1/auth/email/code",
       AUTH_SESSION_LIMITER: "/v1/auth/refresh",
-      LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat" } as const)[binding];
+      LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat",
+      SELF_SERVE_SHOP_LIMITER: "/v1/shops/new" } as const)[binding];
     // Fills one address's real bucket to the limit and sends one more. The real limiter counts in 60-second windows,
     // so on a loaded machine the loop can cross into a new window and the extra request is rightly let through.
     // That is the window moving, not a missing limit, so the run is repeated once from a fresh address, which starts

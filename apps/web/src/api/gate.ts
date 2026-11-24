@@ -31,6 +31,9 @@ export type GateShopInput = {
   trialStartedAt: string | null;
   decisions: string[];
   subscriptionPayments: SubscriptionPayment[];
+  /// Its owner made it, with no operator, and whether an operator has added it to the cohort since.
+  selfServe?: boolean;
+  addedToCohort?: boolean;
 };
 
 function paidOf(payments: SubscriptionPayment[]): { paidAt?: string; paidSatang: number } {
@@ -76,12 +79,15 @@ export function gateShop(input: GateShopInput, nowMs: number): GateShop {
     paidSatang,
     activeOnDay14: day === null ? "not_yet" : activeOnDay14(startMs, day, decided.map((decision) => decision.ms)),
     ...(latest ? { lastDecisionAt: latest.at } : {}),
+    ...(input.selfServe ? { selfServe: true as const } : {}),
+    inCohort: !input.selfServe || input.addedToCohort === true,
   };
 }
 
 export function pilotGate(inputs: GateShopInput[], nowMs: number): PilotGate {
   const shops = inputs.map((input) => gateShop(input, nowMs));
-  const counted = shops.filter((shop) => shop.trialEnded);
+  // A shop its owner made is listed and left out of the counts until an operator adds it, as the API does.
+  const counted = shops.filter((shop) => shop.inCohort !== false && shop.trialEnded);
   const measure = (count: number, thresholdPercent: number): GateMeasure => ({
     count,
     percent: counted.length === 0 ? null : Math.floor((count * 100) / counted.length),

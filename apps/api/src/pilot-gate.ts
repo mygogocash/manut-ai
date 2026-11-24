@@ -52,6 +52,10 @@ export type GateShopInput = {
   trialStartedAt: string | null;
   decisions: string[];
   subscriptionPayments: SubscriptionPayment[];
+  /// The shop was made by its owner, with no operator (self-serve.ts). Absent or false for a shop an operator made.
+  selfServe?: boolean;
+  /// An operator added this self-serve shop to the cohort (docs/pilot-api.md, "The pilot gate").
+  addedToCohort?: boolean;
 };
 
 /// "not_yet" until day 14 has an answer: before day 14 always, and on day 14 until a decision in its window arrives
@@ -77,6 +81,11 @@ export type GateShop = {
   activeOnDay14: ActiveOnDay14;
   /// The owner's latest decision on a reply.
   lastDecisionAt?: string;
+  /// Made by its owner, with no operator (self-serve.ts).
+  selfServe?: true;
+  /// Whether the shop is counted once its day 14 has passed: every shop an operator made, and a self-serve shop only once
+  /// an operator has added it, since nobody has spoken with its owner the way the pilot's owners were chosen and spoken with.
+  inCohort: boolean;
 };
 
 /// One of the gate's two shares. `percent` is rounded down, so a share never shows a line it has not reached, and is
@@ -139,15 +148,18 @@ export function gateShop(input: GateShopInput, nowMs: number): GateShop {
     paidSatang,
     activeOnDay14: day === null ? "not_yet" : activeOnDay14(startMs, day, decided.map((decision) => decision.ms)),
     ...(latest ? { lastDecisionAt: latest.at } : {}),
+    ...(input.selfServe ? { selfServe: true as const } : {}),
+    inCohort: !input.selfServe || input.addedToCohort === true,
   };
 }
 
-/// Every shop's row, and the cohort: the shops whose day 14 has passed, how many of them paid and how many were
-/// active on day 14, each against its line. "not_enough_data" while no shop's day 14 has passed; "on_track" when both
+/// Every shop's row, and the cohort: the shops counted (`inCohort`) whose day 14 has passed, how many of them paid and how
+/// many were active on day 14, each against its line. "not_enough_data" while no shop's day 14 has passed; "on_track" when both
 /// shares meet their lines; "below_line" when either does not.
 export function pilotGate(inputs: GateShopInput[], nowMs: number): PilotGate {
   const shops = inputs.map((input) => gateShop(input, nowMs));
-  const counted = shops.filter((shop) => shop.trialEnded);
+  // A self-serve shop is listed with the others and left out of the counts until an operator adds it.
+  const counted = shops.filter((shop) => shop.inCohort && shop.trialEnded);
   const measure = (count: number, thresholdPercent: number): GateMeasure => ({
     count,
     percent: counted.length === 0 ? null : Math.floor((count * 100) / counted.length),

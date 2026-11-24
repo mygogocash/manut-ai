@@ -545,6 +545,26 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   },
 };
 
+/// The people record of a shop its owner made themselves (docs/several-shops.md, "A shop its owner makes"), and the key it
+/// goes under, for pilot-store.ts to put in the same write as the shop itself: the shop starts with its owner's account
+/// linked and that device's first owner session open, and with no helpers. `owner` is what the Worker sends, `{ accountId,
+/// subject, sessionId, tokenHash, expiresAt }`; null when it is not that, so a shop is never made half owned. The record is
+/// the one `link-owner` and `open-owner-session` would leave on a new shop, so every later change reads it as one of theirs.
+export function ownerMadeRecord(tenant: string, owner: unknown, nowMs: number):
+  { key: string; record: PeopleRecord; accountId: string } | null {
+  if (!isRecord(owner) || !isValidTenant(tenant) || !text(owner.accountId) || !isValidTenant(owner.subject)) return null;
+  const fields = sessionFields(owner);
+  if (!fields) return null;
+  const ownerAccount: OwnerAccount = { id: owner.accountId, subject: owner.subject, linkedAt: nowMs };
+  const session: OwnerSession = { sessionId: fields.sessionId, accountId: ownerAccount.id, expiresAt: fields.expiresAt };
+  return {
+    key: key(tenant),
+    record: { state: rules.emptyPeople(tenant, OWNER_ID), names: {}, sessions: {}, ownerAccount,
+      ownerSessions: { [fields.hash]: session } },
+    accountId: ownerAccount.id,
+  };
+}
+
 /// The facts about a request the rules read, as the Worker found them in the request's own task. Anything else is not
 /// a request's facts. The kind is left for the rules to check against approval-core's kinds.
 function requestFacts(value: unknown): RequestFacts | null {

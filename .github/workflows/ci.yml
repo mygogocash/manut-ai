@@ -62,6 +62,58 @@ jobs:
       - uses: ./.github/actions/setup-workspace
       - run: pnpm --filter @manut/web test
 
+  web-phones:
+    # The owner opens the approval page, and sometimes the deletion page, from a LINE message on a phone. This opens every
+    # demo state of both, in practice mode (no API, the in-memory fake), in WebKit on an iPhone 17 and a 375-wide iPhone SE
+    # and in Chromium on a Pixel 8 and a 360 by 740 Android, in light and dark and at 100%, 125% and 150% text, and checks
+    # that nothing scrolls sideways, is cut off or overlaps, and that every button is 44px tall and can be pressed
+    # (apps/web/e2e). Unlike the desktop's Playwright jobs it is a check: a state that does not fit a phone fails the run.
+    # docs/phone-pass.md says what it covers, and what only a real phone and LINE's own browser can.
+    name: Web on phones
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+      # Both engines, with the system libraries and fonts they need: Thai among them, which the long Thai messages use.
+      # It takes under a minute, but it downloads from Ubuntu's mirror: one run saw it crawl (an 8 MB package took 90
+      # seconds) and use up the job's whole 25 minutes. A limit of its own fails that fast, and the job can be run again.
+      - name: Install Chromium and WebKit
+        timeout-minutes: 10
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium webkit
+      # Playwright starts the vite dev server itself (apps/web/playwright.config.ts). --retries=1 lets one slow start
+      # through as "flaky" in the summary, and a state that really does not fit fails twice. --global-timeout ends the run
+      # after 20 minutes with its report still written.
+      - name: Run the specs
+        working-directory: apps/web
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/playwright-results-web-phones.json
+        run: pnpm exec playwright test --forbid-only --workers=2 --retries=1 --reporter=list,json --global-timeout=1200000
+      - name: Write the counts to the job summary
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/playwright-summary.mjs --title "Web on phones" --note "Every demo state of the owner's two pages on four phone sizes, in light and dark and at larger text. A failing test fails the run. docs/phone-pass.md says what this covers and what only a real phone can." "$RUNNER_TEMP/playwright-results-web-phones.json"
+      # The JSON report, alone so that it sits at the top of its artifact as the desktop's do.
+      - name: Keep the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-phones-results
+          path: ${{ runner.temp }}/playwright-results-web-phones.json
+          if-no-files-found: ignore
+          retention-days: 7
+      # The screenshot Playwright takes of each failing test, when there is one.
+      - name: Keep the screenshots of the failures
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-phones-failures
+          path: apps/web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   desktop:
     name: Desktop tests
     runs-on: ubuntu-latest

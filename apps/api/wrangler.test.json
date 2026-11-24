@@ -18,6 +18,7 @@
     "PUBLIC_API_ORIGIN": "https://api.manut.test",
     "APPROVAL_LINK_SECRET": "test-approval-link-secret-0123456789abcdef",
     "EMAIL_SIGN_IN": "on",
+    "SELF_SERVE_SHOPS": "on",
     "EMAIL_FROM_ADDRESS": "codes@manut.test",
     "EMAIL_FROM_NAME": "Manut AI",
     "TEST_EMAIL_OUTBOX": "on",
@@ -102,6 +103,14 @@
       "namespace_id": "2026100437",
       "simple": {
         "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "SELF_SERVE_SHOP_LIMITER",
+      "namespace_id": "2026100441",
+      "simple": {
+        "limit": 10,
         "period": 60
       }
     }
