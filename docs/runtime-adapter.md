@@ -410,7 +410,11 @@ trusts the backend's committed test key:
 3. In Settings › Developer choose Connected, save `http://localhost:8787`, paste the token and the raw nonce, sign in,
    and restart.
 
-The signed-in tenant is the identity's own (`apple:<subject>`), so it starts empty. A pilot shop is a tenant of its own
+The other way in is a code sent by email, which Settings › Developer takes too (`docs/sign-in-options.md`, "The desktop"):
+the API has it switched off in every environment, so the screen says it isn't on yet, and in Practice it runs on a
+pretend code. The session it makes is kept and refreshed as an Apple one is.
+
+The signed-in tenant is the identity's own (`apple:<subject>`, or `email:` and a hash of the address), so it starts empty. A pilot shop is a tenant of its own
 (`pilot:<uuid>`), and `apps/api/src/pilot.ts` says no session can ever carry such a tenant. So even signed in, the
 desktop cannot read a pilot shop's work until the API links an owner's identity to a shop (an API ask below).
 

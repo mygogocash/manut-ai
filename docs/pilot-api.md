@@ -1520,8 +1520,8 @@ carries `action`, where the action stands, so a second decision can show what ha
 
 Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an
 address and gives it back to `POST /v1/auth/exchange`, which signs them in with the lifted auth's own session, as Sign
-in with Apple does (`apps/api/src/email-code.ts`, `email-sender.ts`, `auth-object.ts`). The app's screens for it (the
-desktop's first run, the web pages) are not built.
+in with Apple does (`apps/api/src/email-code.ts`, `email-sender.ts`, `auth-object.ts`). The desktop's screen for it is
+Settings › Developer (`docs/sign-in-options.md`, "The desktop"); the web's pages are not built.
 
 **Off unless configured.** Both routes answer 400 `{ error: "email_not_configured" }`, as Apple's exchange answers
 `identity_not_configured` without a client id, unless all three hold: the var `EMAIL_SIGN_IN` is exactly `"on"`; a
