@@ -333,17 +333,17 @@ export class TurnBook {
     return this.queue(session, () => host.backPreview(session, turn));
   }
 
-  /** Put session `session`'s files back as they were just before its last rewind, every path in `keep` left as it is. The
-   *  chat stays where the rewind left it. Once it is done, nothing is left to bring back; when it fails, the files are as they
-   *  were and it can be tried again. */
-  bringBack(session: string, keep: string[]): Promise<TurnRestored> {
+  /** Put session `session`'s files back as they were just before its last rewind. Every file changed since the rewind stays as
+   *  it is unless it is in `overwrite` (the ones the person saw listed and unticked). The chat stays where the rewind left it.
+   *  Once it is done, nothing is left to bring back; when it fails, the files are as they were and it can be tried again. */
+  bringBack(session: string, overwrite: string[]): Promise<TurnRestored> {
     const host = this.deps.host;
     const turn = this.state.backs[session];
     if (!host || turn === undefined) return Promise.reject(new Error("why:no_snapshot"));
     return this.queue(session, async () => {
       // a turn that started while this waited has taken what was kept
       if (this.state.backs[session] !== turn) throw new Error("why:no_snapshot");
-      const done = await host.bringBack(session, turn, keep);
+      const done = await host.bringBack(session, turn, overwrite);
       this.setBack(session, null);
       return done;
     });

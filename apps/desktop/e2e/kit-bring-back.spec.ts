@@ -104,14 +104,17 @@ test("a file changed by hand since the rewind is listed and kept unless unticked
     await byHand(page, "mine.txt", "a note of mine\n");
     await row.getByTestId("lane-back").click();
     const panel = row.getByTestId("bring-back");
-    await expect(panel.getByTestId("bring-back-count")).toHaveText("2 files go back as they were just before the rewind.");
     await expect(panel.getByTestId("bring-back-hand")).toContainText("Changed by hand since the rewind. A ticked file stays as it is now.");
     const box = panel.getByTestId("bring-back-keep");
     await expect(box).toHaveCount(1);
     await expect(panel.getByTestId("bring-back-hand")).toContainText("mine.txt");
-    // ticked at first: it stays as it is unless the person says otherwise
+    // ticked at first: it stays as it is unless the person says otherwise, so only the turn's note goes back
     await expect(box).toBeChecked();
-    if (untick) await box.uncheck();
+    await expect(panel.getByTestId("bring-back-count")).toHaveText("1 file goes back as it was just before the rewind.");
+    if (untick) {
+      await box.uncheck();
+      await expect(panel.getByTestId("bring-back-count")).toHaveText("2 files go back as they were just before the rewind.");
+    }
     await panel.getByTestId("bring-back-go").click();
     await expect(row.getByTestId("bring-back")).toHaveCount(0);
     expect(await files(page), untick ? "unticked: the file goes with the rest" : "ticked: it stays").toEqual(untick ? ["README.md", "notes/turn-1.md", "notes/turn-2.md", "src/checkout.tsx"] : ["README.md", "mine.txt", "notes/turn-1.md", "notes/turn-2.md", "src/checkout.tsx"]);

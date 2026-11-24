@@ -2633,13 +2633,14 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (key) store().dispatch({ type: "system.note", bot: key, text: rewoundNote(title, done.changed), now: Date.now() });
       return done;
     },
-    /** Bring it back (the lane's Reverted state): put session `id`'s files back as they were just before its last rewind, every
-     *  file in `keep` left as it is. The chat stays where the rewind left it, since neither Claude Code nor Codex has a message
-     *  that brings a rewound chat back; the chat says what came back, and the lane reads by its tests again. Throws when the
-     *  files could not be put back (they are as they were) or are no longer kept. */
-    bringBack: async (id: string, keep: string[]) => {
+    /** Bring it back (the lane's Reverted state): put session `id`'s files back as they were just before its last rewind. Every
+     *  file changed since the rewind stays as it is unless it is in `overwrite` (the ones the person saw listed and unticked).
+     *  The chat stays where the rewind left it, since neither Claude Code nor Codex has a message that brings a rewound chat
+     *  back; the chat says what came back, and the lane reads by its tests again. Throws when the files could not be put back
+     *  (they are as they were) or are no longer kept. */
+    bringBack: async (id: string, overwrite: string[]) => {
       const key = keys.get(id);
-      const done = await turns.bringBack(id, keep);
+      const done = await turns.bringBack(id, overwrite);
       if (key) {
         store().dispatch({ type: "system.note", bot: key, text: broughtBackNote(done.changed), now: Date.now() });
         noteLaneEvent(key, { event: "files.back" });

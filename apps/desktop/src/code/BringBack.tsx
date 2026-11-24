@@ -38,11 +38,12 @@ function Details(p: BringBackProps) {
   if (p.loading) return <p className="rw-mut">{t("bb.reading")}</p>;
   const v = p.preview;
   if (!v) return null;
-  const n = v.back.length;
+  // a ticked file stays as it is now, so only the others go back
+  const n = v.back.filter((c) => !p.keep.includes(c.path)).length;
   return (
     <>
       <p className="rw-count" data-testid="bring-back-count">
-        {n === 0 ? t("bb.none") : n === 1 ? t("bb.files1") : t("bb.filesN", { n })}
+        {v.back.length === 0 ? t("bb.none") : n === 0 ? t("bb.allKept") : n === 1 ? t("bb.files1") : t("bb.filesN", { n })}
       </p>
       {v.hand.length > 0 && (
         <div className="rw-hand" data-testid="bring-back-hand">
@@ -66,9 +67,9 @@ function Details(p: BringBackProps) {
 }
 
 /** The panel, drawn from its props (no hooks). Nothing can be pressed until the files have been read, and there is nothing to
- *  press when no file differs from the files before the rewind. */
+ *  press when no file would go back: none differs from the files before the rewind, or each one that does is ticked to stay. */
 export function BringBackView(p: BringBackProps) {
-  const nothing = !!p.preview && p.preview.back.length === 0;
+  const nothing = !!p.preview && p.preview.back.every((c) => p.keep.includes(c.path));
   return (
     <div className="bb" role="group" aria-label={t("bb.title")} data-testid="bring-back">
       <Details {...p} />
@@ -127,7 +128,9 @@ export function BringBack({ id, onClose }: { id: string; onClose: () => void }) 
     setBusy(true);
     setError("");
     try {
-      await getSessions().bringBack(id, keep);
+      // a ticked file stays as it is: only the files the person saw listed and unticked are named to be put back over, and the
+      // shell keeps every other file changed since the rewind, so one changed after the list was read is not lost
+      await getSessions().bringBack(id, (preview?.hand ?? []).filter((path) => !keep.includes(path)));
       // the lane reads by its tests again, so its row has no panel to show
       onClose();
     } catch (e) {

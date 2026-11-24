@@ -59,9 +59,11 @@ export interface TurnFilesHost {
    *  which of them changed by hand since the rewind. Writes nothing. A refusal is `why:no_snapshot` when no such rewind is
    *  kept (the next turn started, or it was brought back already). */
   backPreview(session: string, turn: string): Promise<TurnPreview>;
-  /** Put the files back as they were just before the rewind to before `turn`, every path in `keep` left as it is. The chat
-   *  is not touched: neither Claude Code nor Codex has a message that brings a rewound chat back. */
-  bringBack(session: string, turn: string, keep: string[]): Promise<TurnRestored>;
+  /** Put the files back as they were just before the rewind to before `turn`. Every file changed since the rewind stays as it
+   *  is unless it is in `overwrite` (the ones the person saw listed and unticked), so a file changed after the list was read,
+   *  which they never saw, is not lost. The chat is not touched: neither Claude Code nor Codex has a message that brings a
+   *  rewound chat back. */
+  bringBack(session: string, turn: string, overwrite: string[]): Promise<TurnRestored>;
   /** Drop every snapshot of `session` (it was removed, or its agent started again). */
   forget(session: string): Promise<void>;
   /** Drop the snapshots of every session not in `keep` (the app started). */
@@ -80,7 +82,7 @@ export function tauriTurnFiles(invoke: () => Promise<Invoke>): TurnFilesHost {
     restore: (session, turn, keep) => call<TurnRestored>("turn_files_restore", { session, turn, keep }),
     settle: (session, turn, ok) => call<TurnSettled>("turn_files_settle", { session, turn, ok }),
     backPreview: (session, turn) => call<TurnPreview>("turn_files_back_preview", { session, turn }),
-    bringBack: (session, turn, keep) => call<TurnRestored>("turn_files_bring_back", { session, turn, keep }),
+    bringBack: (session, turn, overwrite) => call<TurnRestored>("turn_files_bring_back", { session, turn, overwrite }),
     forget: (session) => call<void>("turn_files_forget", { session }),
     prune: (keep) => call<void>("turn_files_prune", { keep }),
   };
@@ -227,10 +229,13 @@ export class MockTurnFiles implements TurnFilesHost {
     return { back: list, hand: list.map((c) => c.path).filter((p) => hand.has(p)), tooBig: 0, headMoved: false };
   }
 
-  async bringBack(session: string, turn: string, keep: string[]): Promise<TurnRestored> {
+  async bringBack(session: string, turn: string, overwrite: string[]): Promise<TurnRestored> {
     const { b, back } = this.kept(session, turn);
     const now = this.folder(b.cwd);
-    const changed = differ(back.files, now).filter((p) => !keep.includes(p));
+    // every file changed since the rewind stays as it is unless it is named: one changed after the list was read was never seen
+    const hand = new Set(differ(back.rest, now).filter((p) => !overwrite.includes(p)));
+    const all = differ(back.files, now);
+    const changed = all.filter((p) => !hand.has(p));
     for (const p of changed) {
       if (p in back.files) now[p] = back.files[p];
       else delete now[p];
@@ -238,7 +243,7 @@ export class MockTurnFiles implements TurnFilesHost {
     // the next turn starts from the files as they are now: what was put back is not read as changed by hand
     b.end = { n: b.end?.n ?? b.starts.at(-1)?.n ?? 0, files: { ...now } };
     b.back = undefined;
-    return { changed: changed.length, kept: keep.length, tooBig: 0 };
+    return { changed: changed.length, kept: all.length - changed.length, tooBig: 0 };
   }
 
   async forget(session: string): Promise<void> {

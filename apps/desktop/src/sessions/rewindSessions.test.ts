@@ -143,7 +143,8 @@ test("Bring it back puts the files back as they were just before the rewind, and
   const p = await t.ss.turns.backPreview(t.id);
   expect(p.back.map((c) => c.path)).toEqual(["mine.txt", "notes/turn-1.md", "notes/turn-2.md"]);
   expect(p.hand).toEqual(["mine.txt"]);
-  const done = await t.ss.bringBack(t.id, p.hand);
+  // the file changed by hand stays as it is unless it is named to be put back over
+  const done = await t.ss.bringBack(t.id, []);
   expect(done.changed).toBe(2);
   expect(t.folder()).toEqual({ ...before, "mine.txt": "mine\n" });
   // the chat is where the rewind left it: no message came back, and the agent was asked nothing

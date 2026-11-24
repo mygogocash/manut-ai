@@ -1287,16 +1287,18 @@ impl<'a> Book<'a> {
         Ok(Self::preview_of(&acts, &now, &diff(&rest, &now), too_big, &back))
     }
 
-    /// Put the files back as they were just before the rewind to before turn `turn`, every file in `keep` left as it is.
-    /// The files as they are now are kept first (`undo`), so a bring-back that fails part way puts them back at once and
-    /// can be tried again. When it went through nothing is left to bring back, and the files as they are now are where
-    /// the next turn starts from, so what was put back does not read as changed by hand. Writes in the session's folder
-    /// only, and never through a link (see [`inside`]); no branch, index, stash or HEAD changes.
-    pub fn bring_back(&self, session: &str, turn: &str, keep: &[String]) -> Result<Restored, String> {
+    /// Put the files back as they were just before the rewind to before turn `turn`. Every file changed since the rewind
+    /// (by hand: no turn has run since) stays as it is, unless it is named in `overwrite`: the files the person saw listed
+    /// ([`Book::back_preview`]) and unticked. So a file changed after the list was read, which the person never saw, is not
+    /// overwritten. The files as they are now are kept first (`undo`), so a bring-back that fails part way puts them back
+    /// at once and can be tried again. When it went through nothing is left to bring back, and the files as they are now
+    /// are where the next turn starts from, so what was put back does not read as changed by hand. Writes in the session's
+    /// folder only, and never through a link (see [`inside`]); no branch, index, stash or HEAD changes.
+    pub fn bring_back(&self, session: &str, turn: &str, overwrite: &[String]) -> Result<Restored, String> {
         let lock = session_lock(session);
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         let o = self.open(session)?.ok_or("why:no_snapshot")?;
-        let (back, _) = Self::kept_back(&o, turn)?;
+        let (back, rest) = Self::kept_back(&o, turn)?;
         let root = PathBuf::from(&o.meta.root);
         let cache = Self::cache(&o);
         let mut now = scan(&o.store, self.home, &root, cache.as_ref(), true, &self.limits)?;
@@ -1304,7 +1306,8 @@ impl<'a> Book<'a> {
         now.turn = turn.to_string();
         // no rewind waits while this runs (the page queues a session's calls), so `undo` is free to hold these
         self.save(&o, session, "undo", &now)?;
-        let keep: BTreeSet<String> = keep.iter().filter(|p| safe_rel(p)).cloned().collect();
+        let overwrite: BTreeSet<String> = overwrite.iter().filter(|p| safe_rel(p)).cloned().collect();
+        let keep: BTreeSet<String> = diff(&rest, &now).difference(&overwrite).cloned().collect();
         let (acts, too_big) = plan(&back, &now, &keep);
         if let Err(e) = apply(&o.store, self.home, &root, &acts, &folders_of(&back)) {
             // put back what was there: the files as they were over whatever the failed bring-back left
@@ -1315,7 +1318,9 @@ impl<'a> Book<'a> {
             self.drop_named(&o, session, &["undo".to_string()]);
             return Err(e);
         }
-        let kept = keep.iter().filter(|p| back.files.contains_key(*p) || now.files.contains_key(*p)).count();
+        // the files left as they are because they were changed by hand, of those that would have been put back
+        let (all, _) = plan(&back, &now, &BTreeSet::new());
+        let kept = all.iter().filter(|a| keep.contains(a.path())).count();
         // where the next turn starts from, as a rewind leaves it (`settle`); a read that fails only means a later turn
         // lists these files as changed by hand, which keeps them rather than losing them
         let end_n = Self::read_manifest(&Self::snap_file(&o, "end")).map(|e| e.n).or_else(|| Self::starts(&o).last().map(|s| s.n)).unwrap_or(0);
@@ -2034,9 +2039,12 @@ mod tests {
         assert!(p.head_moved);
         assert_eq!(p.back, vec![change("b.txt", "gone"), change("a.txt", "changed")]);
         assert_eq!(p.hand, ["b.txt"]);
-        b.bring_back("s22", "local-s1", &[]).unwrap();
+        // the person unticked it: it is put back over too, so the file the commit added leaves the work tree
+        b.bring_back("s22", "local-s1", &p.hand).unwrap();
         assert_eq!(read(r, "a.txt").as_deref(), Some("two\n"));
+        assert!(!r.join("b.txt").exists());
         assert_eq!(git(r, &["rev-parse", "HEAD"]), head, "the commit stays; only the files went back");
+        assert!(git(r, &["log", "--format=%s"]).contains("after the rewind"));
     }
 
     #[test]
@@ -2060,8 +2068,9 @@ mod tests {
             let p = b.back_preview(session, "local-s1").unwrap();
             assert_eq!(p.back, vec![change("new.txt", "gone"), change("a.txt", "changed"), change("b.txt", "changed")]);
             assert_eq!(p.hand, ["new.txt", "b.txt"], "listed, so the person can keep or untick them");
-            let keep: Vec<String> = if keep_theirs { p.hand.clone() } else { vec![] };
-            let done = b.bring_back(session, "local-s1", &keep).unwrap();
+            // ticked (kept) is the default: only the files the person unticked are named to be put back over
+            let overwrite: Vec<String> = if keep_theirs { vec![] } else { p.hand.clone() };
+            let done = b.bring_back(session, "local-s1", &overwrite).unwrap();
             let files = ["a.txt", "b.txt", "c.txt", "new.txt"].map(|f| read(r, f));
             let some = |x: &str| Some(x.to_string());
             if keep_theirs {
@@ -2071,6 +2080,34 @@ mod tests {
                 assert_eq!((done.changed, done.kept), (3, 0));
                 assert_eq!(files, [some("A"), some("B"), some("c"), None]);
             }
+        }
+    }
+
+    #[test]
+    fn a_file_changed_after_the_files_were_read_is_never_overwritten_unless_it_is_named() {
+        for (named, session, expect) in [(false, "s29", "typed after looking"), (true, "s30", "A")] {
+            let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+            let r = &proj.0;
+            put(r, "a.txt", "a");
+            put(r, "b.txt", "b");
+            let b = Book::with_limits(&home.0, SMALL);
+            b.take(session, r, "local-s1").unwrap();
+            put(r, "a.txt", "A"); // the agent
+            put(r, "b.txt", "B");
+            b.end(session).unwrap();
+            b.restore(session, "local-s1", &[]).unwrap();
+            b.settle(session, "local-s1", true).unwrap();
+            // the files are read: nothing was changed by hand yet, so nothing is listed
+            let p = b.back_preview(session, "local-s1").unwrap();
+            assert_eq!(p.back, vec![change("a.txt", "changed"), change("b.txt", "changed")]);
+            assert!(p.hand.is_empty());
+            // then the person edits a file the rewind put back: it was never in the list
+            put(r, "a.txt", "typed after looking");
+            let overwrite: Vec<String> = if named { vec!["a.txt".into()] } else { p.hand.clone() };
+            let done = b.bring_back(session, "local-s1", &overwrite).unwrap();
+            assert_eq!(read(r, "a.txt").as_deref(), Some(expect), "named: {named}");
+            assert_eq!(read(r, "b.txt").as_deref(), Some("B"), "the file nobody touched goes back");
+            assert_eq!((done.changed, done.kept), if named { (2, 0) } else { (1, 1) });
         }
     }
 
@@ -2134,32 +2171,48 @@ mod tests {
     #[test]
     fn bringing_it_back_never_writes_through_a_link_or_outside_the_folder() {
         use std::os::unix::fs::symlink;
+        /// A rewind that went through, and then the person turning the folder into a link that leads out of the project.
+        fn after_rewind<'a>(home: &'a Path, r: &Path, outside: &Path, session: &str) -> Book<'a> {
+            put(r, "sub/x.txt", "x");
+            put(r, "keep.txt", "k");
+            let b = Book::with_limits(home, SMALL);
+            b.take(session, r, "local-s1").unwrap();
+            put(r, "sub/x.txt", "x as the turn left it");
+            b.end(session).unwrap();
+            b.restore(session, "local-s1", &[]).unwrap();
+            b.settle(session, "local-s1", true).unwrap();
+            assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x"));
+            fs::remove_dir_all(r.join("sub")).unwrap();
+            symlink(outside, r.join("sub")).unwrap();
+            b
+        }
+
+        // nothing named to put back over: the link is the person's change, so it stays, and so does the file that is not in
+        // the folder any more; nothing is written through the link
         let (home, proj, outside) = (Temp::new("home"), Temp::new("plain"), Temp::new("outside"));
-        let r = &proj.0;
-        put(r, "sub/x.txt", "x");
-        put(r, "keep.txt", "k");
-        let b = Book::with_limits(&home.0, SMALL);
-        b.take("s27", r, "local-s1").unwrap();
-        put(r, "sub/x.txt", "x as the turn left it");
-        b.end("s27").unwrap();
-        b.restore("s27", "local-s1", &[]).unwrap();
-        b.settle("s27", "local-s1", true).unwrap();
-        assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x"));
-        // after the rewind the person turns the folder into a link that leads out of the project
-        fs::remove_dir_all(r.join("sub")).unwrap();
-        symlink(&outside.0, r.join("sub")).unwrap();
-        // kept as it is, the link would be written through to bring x.txt back: refused, and every file is as it was
-        let err = b.bring_back("s27", "local-s1", &["sub".into()]).unwrap_err();
-        assert!(err.contains("sub is a link"), "{err}");
-        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0, "nothing was written outside the project");
-        assert_eq!(fs::read_link(r.join("sub")).unwrap(), outside.0);
+        let (r, out) = (&proj.0, &outside.0);
+        let b = after_rewind(&home.0, r, out, "s27");
+        assert_eq!(b.bring_back("s27", "local-s1", &[]).unwrap(), Restored { changed: 0, kept: 2, too_big: 0 });
+        assert_eq!(fs::read_link(r.join("sub")).unwrap(), *out);
+        assert_eq!(fs::read_dir(out).unwrap().count(), 0, "nothing was written outside the project");
         assert_eq!(read(r, "keep.txt").as_deref(), Some("k"));
-        // what was kept stays, so it can be tried again: not kept, the link goes and the folder comes back in its place
-        assert!(b.back_preview("s27", "local-s1").is_ok());
-        b.bring_back("s27", "local-s1", &[]).unwrap();
+
+        // only the file named, with the link left in place: it would be written through the link, which is refused, and every
+        // file is as it was
+        let (home, proj, outside) = (Temp::new("home"), Temp::new("plain"), Temp::new("outside"));
+        let (r, out) = (&proj.0, &outside.0);
+        let b = after_rewind(&home.0, r, out, "s31");
+        let err = b.bring_back("s31", "local-s1", &["sub/x.txt".into()]).unwrap_err();
+        assert!(err.contains("sub is a link"), "{err}");
+        assert_eq!(fs::read_dir(out).unwrap().count(), 0, "nothing was written outside the project");
+        assert_eq!(fs::read_link(r.join("sub")).unwrap(), *out);
+        assert_eq!(read(r, "keep.txt").as_deref(), Some("k"));
+        // what was kept stays, so it can be tried again: with the link named too, it goes and the folder comes back in its place
+        assert!(b.back_preview("s31", "local-s1").is_ok());
+        b.bring_back("s31", "local-s1", &["sub".into(), "sub/x.txt".into()]).unwrap();
         assert!(fs::symlink_metadata(r.join("sub")).unwrap().is_dir());
         assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x as the turn left it"));
-        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(out).unwrap().count(), 0);
     }
 
     #[test]

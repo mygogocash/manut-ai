@@ -81,6 +81,8 @@ describe("what Bring it back says", () => {
     const p = props({ preview: preview({ hand: ["src/checkout.tsx", "notes.md"] }), keep: ["src/checkout.tsx"] });
     const out = html(p);
     expect(out).toContain("Changed by hand since the rewind. A ticked file stays as it is now.");
+    // a ticked file stays, so only the other two of the three go back
+    expect(out).toContain("2 files go back as they were just before the rewind.");
     expect(out).toContain("notes.md");
     const boxes = byId(p, "bring-back-keep");
     expect(boxes.map((b) => b.props.checked)).toEqual([true, false]);
@@ -91,6 +93,23 @@ describe("what Bring it back says", () => {
       ["notes.md", true],
       ["src/checkout.tsx", false],
     ]);
+  });
+
+  it("counts only the files that go back: each ticked one stays as it is now", () => {
+    const hand = ["src/checkout.tsx", "notes.md"];
+    expect(html(props({ preview: preview({ hand }), keep: [] }))).toContain("3 files go back as they were just before the rewind.");
+    expect(html(props({ preview: preview({ hand }), keep: hand }))).toContain("1 file goes back as it was just before the rewind.");
+  });
+
+  it("says when every file that would go back is ticked to stay, and offers nothing to press", () => {
+    const hand = ["a.ts", "b.ts"];
+    const p = props({ preview: preview({ back: [{ path: "a.ts", change: "changed" }, { path: "b.ts", change: "gone" }], hand }), keep: hand });
+    expect(html(p)).toContain("Every file that would go back is ticked to stay as it is now, so nothing would come back.");
+    expect(byId(p, "bring-back-go")[0].props.disabled).toBe(true);
+    // unticking one gives it something to put back
+    const some = props({ preview: p.preview, keep: ["a.ts"] });
+    expect(html(some)).toContain("1 file goes back as it was just before the rewind.");
+    expect(byId(some, "bring-back-go")[0].props.disabled).toBe(false);
   });
 
   it("lists no files changed by hand when there are none", () => {

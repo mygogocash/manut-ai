@@ -27,7 +27,7 @@ describe("the shell's commands", () => {
       ["turn_files_restore", { session: "s1", turn: "local-s1", keep: ["README.md"] }],
       ["turn_files_settle", { session: "s1", turn: "local-s1", ok: false }],
       ["turn_files_back_preview", { session: "s1", turn: "local-s1" }],
-      ["turn_files_bring_back", { session: "s1", turn: "local-s1", keep: ["README.md"] }],
+      ["turn_files_bring_back", { session: "s1", turn: "local-s1", overwrite: ["README.md"] }],
       ["turn_files_forget", { session: "s1" }],
       ["turn_files_prune", { keep: ["s1", "s2"] }],
     ]);
@@ -105,8 +105,8 @@ describe("the browser stand-in", () => {
     expect(p.hand).toEqual(["README.md", "mine.txt"]);
     // another turn's rewind has nothing kept
     await expect(t.backPreview("s1", "local-s2")).rejects.toThrow("why:no_snapshot");
-    // kept as the panel offers them: only the turn's note comes back
-    expect(await t.bringBack("s1", "local-s1", p.hand)).toEqual({ changed: 1, kept: 2, tooBig: 0 });
+    // ticked, as the panel offers them (nothing named to put back over): only the turn's note comes back
+    expect(await t.bringBack("s1", "local-s1", [])).toEqual({ changed: 1, kept: 2, tooBig: 0 });
     expect(folder()["notes/turn-1.md"]).toBe("What turn 1 did.\n");
     expect(folder()["README.md"]).toBe("# changed by hand\n");
     expect(folder()["mine.txt"]).toBe("mine\n");

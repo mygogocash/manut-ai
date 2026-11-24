@@ -100,7 +100,7 @@ describe("the words", () => {
     const stays = "The chat stays where the rewind left it.";
     expect(broughtBackNote(3)).toBe(`3 files are back as they were just before the rewind. ${stays}`);
     expect(broughtBackNote(1)).toBe(`1 file is back as it was just before the rewind. ${stays}`);
-    expect(broughtBackNote(0)).toBe(`The files were already as they were before the rewind. ${stays}`);
+    expect(broughtBackNote(0)).toBe(`No file came back. ${stays}`);
     expect(backWhyText(new Error("why:no_snapshot"))).toBe("The files from before the rewind are no longer kept.");
     expect(backWhyText(new Error("why:too_many"))).toMatch(/too many files/);
     expect(backWhyText(new Error("sub is a link, so nothing is written through it"))).toBe("sub is a link, so nothing is written through it");
@@ -135,9 +135,9 @@ function fakeHost(over: Partial<TurnFilesHost> = {}) {
       calls.push(`backPreview ${s} ${turn}`);
       return preview;
     },
-    bringBack: async (s, turn, keep) => {
-      calls.push(`bringBack ${s} ${turn} [${keep.join(",")}]`);
-      return { changed: 1, kept: keep.length, tooBig: 0 };
+    bringBack: async (s, turn, overwrite) => {
+      calls.push(`bringBack ${s} ${turn} [${overwrite.join(",")}]`);
+      return { changed: 1, kept: 0, tooBig: 0 };
     },
     forget: async (s) => void calls.push(`forget ${s}`),
     prune: async (keep) => void calls.push(`prune [${keep.join(",")}]`),
@@ -349,11 +349,11 @@ describe("Bring it back, in the turn book", () => {
     expect(old.book.backOf("s1")).toBeUndefined();
   });
 
-  it("puts the files back with the person's choices, asks the agent nothing, and leaves nothing to bring back", async () => {
+  it("puts the files back with the person's choices (the files to put back over), asks the agent nothing, and leaves nothing to bring back", async () => {
     const { book, calls, state } = await bookWith();
     await book.rewind("s1", "local-s2", []);
     state.asked.length = 0;
-    expect(await book.bringBack("s1", ["b.txt"])).toEqual({ changed: 1, kept: 1, tooBig: 0 });
+    expect(await book.bringBack("s1", ["b.txt"])).toEqual({ changed: 1, kept: 0, tooBig: 0 });
     expect(calls.at(-1)).toBe("bringBack s1 local-s2 [b.txt]");
     expect(state.asked, "the chat is not brought back: neither agent has a message for it").toEqual([]);
     expect(book.backOf("s1")).toBeUndefined();
