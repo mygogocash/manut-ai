@@ -167,9 +167,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
-     buttons, select menus and editors, settings pages that keep their form, and frames told from the page
-     (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
    - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
      Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -178,7 +175,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
+   Merged: 49 (the outpost on real-world forms: on macOS a hook of the outpost's own in front of wry's navigation
+   delegate tells a frame from the page, so a refused frame fails no read and stops a write before its press with
+   `navigation_refused`, nothing sent; fields in open shadow roots, check boxes, radio buttons and editors; every field
+   read back before the press; a settings page that keeps its form read back after a fresh load; a sign-in over two
+   pages, the password typed only on a page of the sign-in's own origins that asks for it, and `sign_in_interrupted`
+   when a site asks for more; local pages only, and the owner's trial checklist is in `docs/browser-control.md`),
+   50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
    with its own failure; remove a sign-in, change who may use it, remove an outpost and give it a new credential, each
    asked first in its row; the credential shown once and held only in the page's state; no password typed in the
    console; practice world version 12; no API change, so only the pages Worker is redeployed),
