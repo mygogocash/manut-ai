@@ -106,12 +106,14 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 31, sign-in by a code sent by email, built and off (`feat/email-code-sign-in`, Opus);
    - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet);
    - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus);
-   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet).
-   Next: item 33, the sign-in screens, once item 31 merges; then item 36, self-serve onboarding.
-   Merged: 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
+   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
+   - item 33, the desktop's sign-in by email code (`feat/desktop-email-sign-in`, Sonnet).
+   Next: item 10, the join page with the web's own sign-in (Opus); then item 36, self-serve onboarding.
+   Merged: 31 (sign-in by a code sent by email, built and off: both routes answer `email_not_configured` until
+   `EMAIL_SIGN_IN` is on, a sender is bound and `APPROVAL_LINK_SECRET` is set; the dev deploy check now refuses any `TEST_`
+   var), 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
    `refs/manut/snapshots` or an owner-only copy, and never writes through a link; a lane now says when the files went
    back), 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
    the app's own sessions, and Stop checks each process again by its start time before each signal), 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
