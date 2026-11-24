@@ -47,7 +47,7 @@ export interface Person {
   label: string;
 }
 
-type Log = { events: ActivityEvent[]; keptMonths: number };
+type Log = { events: ActivityEvent[]; keptMonths: number | null };
 
 export interface ActivityViewProps {
   load: Load<Log>;
@@ -91,6 +91,7 @@ const STATUS: Record<string, { word: Key; cls: string }> = {
   used: { word: "act.st.used", cls: "tag" },
   changed: { word: "act.st.changed", cls: "tag" },
   needs_you: { word: "act.st.needs", cls: "tag warn" },
+  drafted: { word: "act.st.drafted", cls: "tag" },
 };
 /** A status the app does not know is shown as the runtime wrote it, never dropped. */
 const statusTag = (status: string): { text: string; cls: string } => {
@@ -492,7 +493,8 @@ export function ActivityView(p: ActivityViewProps) {
               {t("act.clear")}
             </button>
           )}
-          <span className="mut kept">{t("act.kept", { n: log.keptMonths })}</span>
+          {/* A runtime that keeps no fixed span says null, and the page then claims none. */}
+          {log.keptMonths !== null && <span className="mut kept">{t("act.kept", { n: log.keptMonths })}</span>}
         </div>
       </div>
       {p.exporting.open && <ExportDialog log={log} p={p} />}

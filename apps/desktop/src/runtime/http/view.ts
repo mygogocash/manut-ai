@@ -1,15 +1,17 @@
 // How a read of a shop (shop.ts) shows through the app's protocol (src/lib/protocol.ts), so the existing screens show
 // it without a screen of their own:
 //
-// - The team is Buddy alone. The API has no team members yet; Buddy stands for the shop's whole team, as the product
-//   does, and works while any task is being worked on.
+// - The team of a shop the person owns is Buddy, who leads, and the members the shop has on (`GET /v1/routines`' team,
+//   in the roster's order: Nam, Pim, Ton). A member works while a job of theirs runs, and Pause everyone holds every
+//   member but Buddy. The signed-in tenant and a shop the person helps at show Buddy alone, standing for the team.
 // - Each task is one of Buddy's threads (History and Recent list them). Opening one shows Buddy's notes: what the
-//   task is for, each action it asked for and how that settled, and where the task stands now.
+//   task is for, each action it asked for and how that settled, the draft a member wrote for the owner, and where the
+//   task stands now. A task's member is the one whose run has it now (`memberOf`), as apps/api's jobs list reads it.
 // - Each approval-core request still waiting is an ask in Buddy's chat, naming the exact action, so it reaches Needs
 //   you and Home. Its id carries the revision shown (approvals.ts), and the runtime answers it through the decide route
 //   (host.ts). One this build cannot answer is asked all the same, with no answer offered: update the app.
 // - Inbound attention items are notes in Buddy's chat. They say what changed and where, never what it says.
-// - Each schedule is an automation of Buddy's.
+// - Each schedule is an automation of Buddy's, and each of the team's routines an automation of its member's.
 //
 // Words a person reads come from the dictionaries. A state, an action or an event kind this app does not know is shown
 // as the API wrote it rather than hidden.
@@ -18,13 +20,46 @@ import { t, type Key } from "../../i18n";
 import type { Automation, Bot, EventOf, Msg, Routine } from "../../lib/protocol";
 import type { ThreadOpenResult, ThreadRow } from "../../threads/types";
 import { answerable, askId, choicesOf, detailOf, isAsk, shopAskId, type ShopApproval } from "./approvals";
-import type { Attention, ShopAction, ShopPart, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+import { ROSTER_ORDER, type Attention, type ShopAction, type ShopAttempt, type ShopPart, type ShopSchedule, type ShopSnapshot, type ShopTask, type TeamRoutine } from "./shop";
 
-/** Buddy's profile name: the one member the connected runtime lists. */
+/** Buddy's profile name: the lead, whom the connected runtime always lists, and who stands for the team where the app
+ *  is not told who else is on it. */
 export const TEAM = "buddy";
 
 /** States in which someone on the team is working on the task (not waiting on the owner, a service or its turn). */
 const WORKING = new Set(["running", "verifying", "recovering"]);
+
+/** The members the API's team can have, by the name each goes by and what each does, in the onboarding's own words
+ *  (`@manut/member-grants`' roster past Buddy; apps/api workers.ts). A member this build does not know is listed by the
+ *  API's own name for it, with no words. */
+const MEMBERS: Readonly<Record<string, { name: string; role: Key }>> = {
+  nam: { name: "Nam", role: "onb.team.sales" },
+  pim: { name: "Pim", role: "onb.team.content" },
+  ton: { name: "Ton", role: "onb.team.books" },
+};
+
+/** The name a member goes by. */
+export const memberName = (bot: string): string => (bot === TEAM ? "Buddy" : (MEMBERS[bot]?.name ?? bot));
+
+/** The member a task is: the one whose run has it now, the newest claimed (a job passed on is the member it went to, once
+ *  they took it up), when that is one of the team; else Buddy, who leads the rest. */
+export function memberOf(task: ShopTask): string {
+  const executor = task.attempts.at(-1)?.executor ?? "";
+  return (ROSTER_ORDER as readonly string[]).includes(executor) ? executor : TEAM;
+}
+
+/** Whether a run can still act at `nowMs`: the API's own reading (workers.ts `endingOf`), where an attempt still marked
+ *  active whose deadline or report-by time has passed can no longer act, and the sweep will end it. */
+export function attemptLive(a: ShopAttempt, nowMs: number): boolean {
+  return a.status === "active" && (a.deadline === null || a.deadline > nowMs) && (a.leaseUntil === null || a.leaseUntil > nowMs);
+}
+
+/** Whether someone on the team is working on the task as of the read: its state says so, or its newest run can still act
+ *  (a member's job keeps its task a draft while its run works). */
+export function taskRunning(task: ShopTask, nowMs: number): boolean {
+  const last = task.attempts.at(-1);
+  return WORKING.has(task.state) || (!!last && attemptLive(last, nowMs));
+}
 
 const TASK_STATES = new Set([
   "draft",
@@ -67,28 +102,37 @@ function attentionText(item: Attention): string {
   return kind ? t(`rt.att.${kind}` as Key, { issue: item.issueId }) : t("rt.att.other", { event: item.eventType, issue: item.issueId });
 }
 
-const titleOf = (task: ShopTask) => task.title || t("rt.untitled");
-const working = (snapshot: ShopSnapshot) => snapshot.tasks.some((task) => WORKING.has(task.state));
+export const titleOf = (task: ShopTask) => task.title || t("rt.untitled");
+
+/** Whether `bot` is working as of the read: a task of theirs is. With no team to tell them apart, Buddy stands for every
+ *  task. */
+const working = (snapshot: ShopSnapshot, bot: string) =>
+  snapshot.tasks.some((task) => (!snapshot.team || memberOf(task) === bot) && taskRunning(task, snapshot.readAt));
 
 /** The tasks with a request still waiting for an answer. */
 const asking = (snapshot: ShopSnapshot) => new Set(snapshot.approvals.filter(isAsk).map((a) => a.taskId));
 
-/** The team: Buddy, online once the shop has been read, working while any task is. */
+/** The team: Buddy, online once the shop has been read and working while a task of his is; then, for a shop the person
+ *  owns, each member the shop has on, in the roster's order, working while a job of theirs runs and held while Pause
+ *  everyone is on. Buddy is never held: the lead keeps answering, so the owner can ask why. */
 export function team(snapshot: ShopSnapshot | null): Bot[] {
-  return [
-    {
-      name: TEAM,
-      display_name: "Buddy",
-      is_default: true,
-      description: "",
-      status: snapshot ? "online" : "offline",
-      running: snapshot ? working(snapshot) : false,
-      model: "",
-      provider: "",
-      avatar_rev: null,
-    },
-  ];
+  const bot = (name: string): Bot => ({
+    name,
+    display_name: memberName(name),
+    is_default: name === TEAM,
+    description: name === TEAM || !MEMBERS[name] ? "" : t(MEMBERS[name].role),
+    status: snapshot ? "online" : "offline",
+    running: snapshot ? working(snapshot, name) : false,
+    model: "",
+    provider: "",
+    avatar_rev: null,
+    ...(name !== TEAM && snapshot?.team?.paused ? { paused: true } : {}),
+  });
+  return [bot(TEAM), ...(snapshot?.team?.members.filter((m) => m !== TEAM) ?? []).map(bot)];
 }
+
+/** Whether the team lists `bot`: Buddy always, a member while the viewed shop has them on. */
+export const onTeam = (snapshot: ShopSnapshot | null, bot: unknown): boolean => typeof bot === "string" && team(snapshot).some((b) => b.name === bot);
 
 /** When a task was last touched: its document, or the newest of its actions when one is newer. */
 function lastOf(task: ShopTask, fallback: number): number {
@@ -107,7 +151,7 @@ export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
         cwd: "",
         started_at: sec(task.createdAt ?? last),
         last: sec(last),
-        running: WORKING.has(task.state),
+        running: taskRunning(task, snapshot.readAt),
         needs: needs.has(task.id),
         message_count: 2 + task.actions.length,
         preview: task.objective,
@@ -116,12 +160,14 @@ export function threadRows(snapshot: ShopSnapshot): ThreadRow[] {
     .sort((a, b) => b.last - a.last);
 }
 
-/** A task as Buddy's notes, oldest first: what it is for, each action it asked for and how that settled, and where it
- *  stands now. Nothing here runs, so the thread never shows a turn in progress. */
+/** A task as Buddy's notes, oldest first: what it is for, each action it asked for and how that settled, the draft a
+ *  member wrote on it for the owner to read (the newest; it says nothing was sent, since nothing on this path sends), and
+ *  where it stands now. Nothing here runs, so the thread never shows a turn in progress. */
 export function taskOpen(task: ShopTask, readAt = Date.now()): ThreadOpenResult {
   const last = lastOf(task, readAt);
   const first = task.createdAt ?? last;
   const actions = [...task.actions].sort((a, b) => (a.proposedAt ?? last) - (b.proposedAt ?? last));
+  const draft = task.draft;
   const messages: Msg[] = [
     { id: `${task.id}:task`, role: "assistant", text: t("rt.task", { title: titleOf(task), objective: task.objective }).trim(), ts: sec(first) },
     ...actions.map((a): Msg => ({
@@ -130,6 +176,7 @@ export function taskOpen(task: ShopTask, readAt = Date.now()): ThreadOpenResult 
       text: t("rt.taskAction", { action: actionText(a), state: actionStateText(a.state) }),
       ts: sec(a.proposedAt ?? last),
     })),
+    ...(draft ? [{ id: `${task.id}:draft`, role: "assistant" as const, text: t("rt.taskDraft", { who: memberName(draft.member || memberOf(task)), text: draft.text }), ts: sec(draft.at ?? last) }] : []),
     { id: `${task.id}:now`, role: "assistant", text: t("rt.taskNow", { state: stateText(task.state) }), ts: sec(last) },
   ];
   return { thread: task.id, session_id: task.id, title: titleOf(task), cwd: "", messages, running: false, model: "", provider: "", reasoning: "" };
@@ -247,23 +294,56 @@ function routineOf(s: ShopSchedule): Routine {
   return { id: s.id, name: s.name, schedule: cronOf(s), next_run_at: s.nextFire === null ? null : sec(s.nextFire), last_run_at: null, last_status: null, enabled: s.enabled };
 }
 
-/** A member's Schedule tab: every schedule is Buddy's. */
-export function routineRows(snapshot: ShopSnapshot): Routine[] {
-  return snapshot.schedules.map(routineOf);
+const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** A team routine's timing as cron when the Schedule tab can say that shape in the app's language (every day, weekdays,
+ *  one day a week, one day a month), else the API's own words for it ("On the last day of the month at 18:00"), which the
+ *  tab shows as written. `@manut/routine-rules` counts Sunday as 0, as cron does. */
+export function routineSchedule(r: TeamRoutine): string {
+  const trigger = r.trigger as { kind?: unknown; at?: unknown; weekdays?: unknown; day?: unknown } | null;
+  const time = typeof trigger?.at === "string" ? TIME.exec(trigger.at) : null;
+  if (!trigger || !time) return r.when;
+  const [h, m] = [Number(time[1]), Number(time[2])];
+  if (trigger.kind === "daily") return `${m} ${h} * * *`;
+  if (trigger.kind === "monthly" && Number.isInteger(trigger.day)) return `${m} ${h} ${trigger.day as number} * *`;
+  if (trigger.kind === "weekly" && Array.isArray(trigger.weekdays)) {
+    const days = [...new Set(trigger.weekdays.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort((a, b) => a - b);
+    if (days.length === 7) return `${m} ${h} * * *`;
+    if (days.join(",") === "1,2,3,4,5") return `${m} ${h} * * 1-5`;
+    if (days.length === 1) return `${m} ${h} * * ${days[0]}`;
+  }
+  return r.when;
 }
 
-/** The Automations page: every schedule, paused when it is switched off. */
+function teamRoutineOf(r: TeamRoutine): Routine {
+  return { id: r.id, name: r.name || t("rt.untitled"), schedule: routineSchedule(r), next_run_at: r.next === null ? null : sec(r.next), last_run_at: null, last_status: null, enabled: !r.paused };
+}
+
+/** A member's Schedule tab: Buddy's are the shop's schedules, and each member's are the team's routines that start their
+ *  jobs. */
+export function routineRows(snapshot: ShopSnapshot, bot: string = TEAM): Routine[] {
+  if (bot === TEAM) return snapshot.schedules.map(routineOf);
+  return (snapshot.routines ?? []).filter((r) => r.member === bot).map(teamRoutineOf);
+}
+
+const automation = (row: Routine, bot: string, prompt: string, createdAt: number | null): Automation => ({
+  ...row,
+  bot,
+  paused: !row.enabled,
+  prompt,
+  script: null,
+  deliver: "",
+  origin: null,
+  created_at: createdAt === null ? null : sec(createdAt),
+  last_error: null,
+  repeat: { times: null, completed: 0 },
+});
+
+/** The Automations page: every schedule, as Buddy's, and every routine of the team, as its member's; paused when it is
+ *  switched off. A routine has no prompt of its own: its name says what it does. */
 export function automationRows(snapshot: ShopSnapshot): Automation[] {
-  return snapshot.schedules.map((s) => ({
-    ...routineOf(s),
-    bot: TEAM,
-    paused: !s.enabled,
-    prompt: s.prompt,
-    script: null,
-    deliver: "",
-    origin: null,
-    created_at: s.createdAt === null ? null : sec(s.createdAt),
-    last_error: null,
-    repeat: { times: null, completed: 0 },
-  }));
+  return [
+    ...snapshot.schedules.map((s) => automation(routineOf(s), TEAM, s.prompt, s.createdAt)),
+    ...(snapshot.routines ?? []).map((r) => automation(teamRoutineOf(r), r.member, "", null)),
+  ];
 }

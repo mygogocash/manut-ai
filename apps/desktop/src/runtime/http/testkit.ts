@@ -439,14 +439,99 @@ export interface ServedShops {
   refused: Set<string>;
   /** how many times each shop was opened */
   opened: Record<string, number>;
+  /** each shop's work, by shop id, as an owner's session reads it (`GET /v1/tenant/export`, `GET /v1/routines`), and as the
+   *  owner's changes to the team leave it; a shop the person owns with none listed here has no tasks, no routines and
+   *  all three members on */
+  work: Record<string, ShopWorkJson>;
 }
+
+/** A shop's work as the fake API keeps it: the export's tasks, schedules and attention items, and the team's routines. */
+export interface ShopWorkJson {
+  tasks: unknown[];
+  schedules: unknown[];
+  attention: unknown[];
+  team: { paused: boolean; since: string | null; members: string[] };
+  routines: Record<string, unknown>[];
+}
+
+/** One of the team's routines as `GET /v1/routines` lists it (apps/api routine-setup.ts `routineView`): by default Ton's
+ *  morning brief, every day at 08:00, switched on. */
+export function routineJson(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "rt-0001-brief",
+    name: "Morning brief",
+    action: "brief",
+    trigger: { kind: "daily", at: "08:00" },
+    timeZone: "Asia/Bangkok",
+    asksFirst: false,
+    member: "ton",
+    when: "Every day at 08:00",
+    paused: false,
+    next: iso(T0 + 7 * 3600_000),
+    createdAt: iso(T0 - 86_400_000),
+    lastRun: null,
+    ...over,
+  };
+}
+
+/** A member's job as the task's export carries it (apps/api workers.ts): the task the runner made, the log with its claim
+ *  and what the run reported, the run itself and the draft it wrote. By default Nam's reply, done, at ฿0.38. */
+export function workerTaskJson(over: { id?: string; member?: string; job?: string; title?: string; claimedAt?: number; finishedAt?: number | null; outcome?: string | null; status?: string; reason?: string; draft?: string | null; costSatang?: number; tokens?: number; deadline?: number } = {}) {
+  const id = over.id ?? "worker-task-1";
+  const attemptId = `${id}-attempt`;
+  const member = over.member ?? "nam";
+  const claimedAt = over.claimedAt ?? T0 + 60_000;
+  const finishedAt = over.finishedAt === undefined ? claimedAt + 4_000 : over.finishedAt;
+  const status = over.status ?? (finishedAt === null ? "active" : "done");
+  return {
+    task: { id, title: over.title ?? "A reply to a customer", objective: "Draft a reply to a customer's message for the owner to read.", state: "draft", location: "cloud", funding: "cloudBYOK", criteria: [], updatedAt: iso(claimedAt), tenantId: SHOP_A.id },
+    events: [
+      { seq: 1, kind: "created", at: iso(claimedAt - 1_000), rev: 1, via: "put" },
+      { seq: 2, kind: "updated", at: iso(claimedAt), rev: 2, via: `attempt:claim:${attemptId}` },
+      { seq: 3, kind: "agent", at: iso(claimedAt + 1_000), rev: 2, attemptId, event: { type: "turnStarted" } },
+      { seq: 4, kind: "agent", at: iso(claimedAt + 3_000), rev: 2, attemptId, event: { type: "spend", tokens: over.tokens ?? 640, model: "claude-haiku-5-5", costSatang: over.costSatang ?? 38 } },
+    ],
+    eventFloor: 0,
+    actions: [],
+    attempts: [
+      {
+        id: attemptId,
+        executorId: member,
+        fence: "f",
+        leaseUntil: (claimedAt + 300_000) / 1000,
+        inputRevision: "r",
+        maxSteps: 40,
+        deadline: (over.deadline ?? claimedAt + 1_200_000) / 1000,
+        status,
+        ...(over.outcome === null || status === "active" ? {} : { outcome: over.outcome ?? "done" }),
+        ...(over.reason ? { reason: over.reason } : {}),
+        ...(finishedAt === null ? {} : { finishedAt: finishedAt / 1000 }),
+        steps: [],
+      },
+    ],
+    attemptsTruncated: false,
+    requests: [],
+    drafts: over.draft === null ? [] : [{ attemptId, member, job: over.job ?? "reply", text: over.draft ?? "Thank you! Your parcel left this morning.", at: iso(finishedAt ?? claimedAt) }],
+  };
+}
+
+/** What a shop the person owns holds when a test says nothing: no tasks, no routines, and the whole team on. */
+const emptyWork = (): ShopWorkJson => ({ tasks: [], schedules: [], attention: [], team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: [] });
 
 /** Serves the several-shops routes over `api`, as apps/api answers them: the list, opening a shop session (owned and
  *  helped shops alike, 404 for a shop not listed), each shop's `GET /v1/approvals` and its decision and pass-on routes by
  *  the shop session it is sent with, and ending a session. A request with any other bearer on those routes is the
  *  sign-in's: `GET /v1/approvals` then answers what `serveShop` would (the signed-in tenant's own). */
-export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<string, unknown[]> = {}, now: () => number = Date.now): ServedShops {
-  const served: ServedShops = { list, approvals, ended: {}, tokens: new Map(), refused: new Set(), opened: {} };
+export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<string, unknown[]> = {}, now: () => number = Date.now, work: Record<string, Partial<ShopWorkJson>> = {}): ServedShops {
+  const served: ServedShops = {
+    list,
+    approvals,
+    ended: {},
+    tokens: new Map(),
+    refused: new Set(),
+    opened: {},
+    work: Object.fromEntries(list.filter((s) => s.role === "owner").map((s) => [s.id, { ...emptyWork(), ...work[s.id] }])),
+  };
   /** The shop a shop-session request is for, or the 401 to answer; null when the bearer is not a shop session. */
   const shopOf = (req: Recorded): { shop: string; role: "owner" | "helper" } | FakeAnswer | null => {
     if (!req.bearer || !/^m[oh]s1\./.test(req.bearer)) return null;
@@ -483,5 +568,38 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     return { status: 200, json: { state: "open", approvals: served.approvals[at.shop] ?? [] } };
   };
   api.on("GET", "/v1/approvals", listing);
+  // An owner's session reads its shop's export and routines and changes its team, as apps/api answers them; a helper's is
+  // told they are the owner's (403 `owner_only`).
+  const ownerAt = (req: Recorded): { shop: string; work: ShopWorkJson } | FakeAnswer => {
+    const at = shopOf(req);
+    if (at === null) return { status: 401, json: { error: "unauthorized" } };
+    if (isAnswer(at)) return at;
+    if (at.role !== "owner") return { status: 403, json: { error: "owner_only" } };
+    return { shop: at.shop, work: (served.work[at.shop] ??= emptyWork()) };
+  };
+  const owned = (req: Recorded, answer: (shop: string, work: ShopWorkJson) => FakeAnswer): FakeAnswer => {
+    const at = ownerAt(req);
+    return isAnswer(at) ? at : answer(at.shop, at.work);
+  };
+  api
+    .on("GET", "/v1/tenant/export", (req) =>
+      // the sign-in's own tenant has nothing in these tests: a person in shops is never read as it
+      shopOf(req) === null ? { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(now()), tasks: [], schedules: [], attention: [] } }
+        : owned(req, (shop, w) => ({ status: 200, json: { tenant: shop, exportedAt: iso(now()), tasks: w.tasks, schedules: w.schedules, attention: w.attention } })),
+    )
+    .on("GET", "/v1/routines", (req) => owned(req, (shop, w) => ({ status: 200, json: { tenant: shop, team: w.team, routines: w.routines } })))
+    .on("POST", "/v1/team/pause", (req) => owned(req, (_shop, w) => ((w.team = { ...w.team, paused: true, since: w.team.since ?? iso(now()) }), { status: 200, json: { team: w.team } })))
+    .on("POST", "/v1/team/resume", (req) => owned(req, (_shop, w) => ((w.team = { ...w.team, paused: false, since: null }), { status: 200, json: { team: w.team } })));
+  for (const [path, paused] of [["/v1/routines/pause", true], ["/v1/routines/resume", false]] as const) {
+    api.on("POST", path, (req) =>
+      owned(req, (_shop, w) => {
+        const routine = w.routines.find((r) => r.id === (req.body as { routineId?: unknown })?.routineId);
+        if (!routine) return { status: 404, json: { error: "not_found" } };
+        routine.paused = paused;
+        if (paused) routine.next = null;
+        return { status: 200, json: { routine } };
+      }),
+    );
+  }
   return served;
 }

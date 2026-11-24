@@ -1,6 +1,7 @@
 // Recent work: the newest jobs as a short list that opens each job's page. Home lists the team's, and a member's panel lists
-// that member's own, which is the canvas's member page ("Recent work", Member.dc.html). Both read the runtime's jobs and
-// show nothing where the runtime has none to give (the connected runtime, for now), so neither is ever a made-up list.
+// that member's own, which is the canvas's member page ("Recent work", Member.dc.html). Both read the runtime's jobs (the
+// connected runtime's are the viewed shop's tasks) and show nothing where the runtime has none to give, so neither is ever a
+// made-up list.
 import { useEffect, useState } from "react";
 import "./mission.css";
 import { t } from "../i18n";

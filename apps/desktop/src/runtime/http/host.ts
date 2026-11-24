@@ -16,18 +16,22 @@
 // `resync`); the runtime also closes and opens once when the API answers again after a kept read stood in, so a read
 // after an outage replays nothing but which asks are over: the app's own re-read brings everything else back.
 //
-// The one write it makes is answering an ask (`approval.respond`), and only through the API's decide route, where
-// approval-core settles each request once with the role the session carries (`answer`; never a second way round,
-// CLAUDE.md). The answer names the option by what it does and the revision the card showed, nothing else; the card is
-// marked answered only when the API says so; and after any answer the shop is read again, so the card closes in the
-// API's words ("Already decided by Mint at 19:42"). Every other write answers `not_yet`. While only a kept read is
-// shown every write answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
+// Its main write is answering an ask (`approval.respond`), and only through the API's decide route, where approval-core
+// settles each request once with the role the session carries (`answer`; never a second way round, CLAUDE.md). The
+// answer names the option by what it does and the revision the card showed, nothing else; the card is marked answered
+// only when the API says so; and after any answer the shop is read again, so the card closes in the API's words
+// ("Already decided by Mint at 19:42"). The owner's other everyday writes are the team's: pausing and resuming one of its
+// routines, and Pause everyone, each through apps/api's own routines routes with the viewed shop's own owner session
+// (`change`). None of them sends, posts, pays or deletes anything. Every other write answers `not_yet`, Buddy's chat
+// included, which would need a model. While only a kept read is shown every write answers `offline` instead (an ask
+// from it: "Connect to answer this"), and none is queued.
 //
 // Several shops (docs/several-shops.md). Each read starts with the person's shops (`GET /v1/shops`, with the sign-in).
 // When they are in none, the signed-in tenant is read as above, as before shops. When they are in some, each shop is read
-// with its own shop session (shops.ts): what waits there, which is all a shop session may read. Every shop's asks are one
-// Needs you, each naming its shop and offering what the person's role there allows; the shop being viewed, which the
-// switcher in the account row chooses (`shops.switch`), is what every other page shows. An answer, or a helper passing a
+// with its own shop session (shops.ts): what waits there, and for a shop the person owns its tasks, schedules, attention
+// items, team and routines as well (a helper's shop shows its asks only). Every shop's asks are one Needs you, each
+// naming its shop and offering what the person's role there allows; the shop being viewed, which the switcher in the
+// account row chooses (`shops.switch`), is what every other page shows: its team, its jobs and its routines. An answer, or a helper passing a
 // request on, always goes with the session of the ask's own shop, which its id names, and never with the shop being
 // viewed. A shop the person's place in ended (removed, unlinked, gone from the list) is said so, its asks close in those
 // words, and its session and kept read are dropped at once.
@@ -49,12 +53,15 @@ import { decisionPath, outcomeOf, type Closing } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { connectionHandlers, type OwnerLink } from "./connections";
-import { shopRoutines } from "./customize";
+import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
+import type { TeamState } from "../mission";
+import type { RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
-import { readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot } from "./shop";
-import { departureOf, listShops, ShopSessions, type Departure, type Left } from "./shops";
-import { attentionRows, automationRows, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
+import { decodeTeam, decodeTeamRoutines, readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type TeamRoutine } from "./shop";
+import { departureOf, listShops, ShopSessions, type Departure, type Left, type ShopAnswer } from "./shops";
+import { attentionRows, automationRows, memberName, onTeam, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
+import { activityOf, jobOf, jobRows, teamStateOf } from "./work";
 
 /** A read of the shop while open, every minute. */
 export const POLL_MS = 60_000;
@@ -114,6 +121,8 @@ const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
+/** What a shop the person helps at answers about its team: it is its owner's to see and change. */
+const ownerOnly = (shop: ShopRow) => new OpError("owner_only", t("rt.ownerOnly", { owner: shop.owner, shop: shop.name }));
 
 /** A note passed on is 1 to 500 characters once trimmed, counted by character, as `@manut/people-rules` counts it
  *  (MAX_NOTE_LENGTH); the API checks it again. */
@@ -155,9 +164,19 @@ function leftHow(askRef: string, now: ShopSnapshot): Closing {
   return { reason: !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved" };
 }
 
-/** The signature of what a schedule shows, so a read that changed none of them stays quiet. */
+/** The signature of what a schedule and a team routine show, so a read that changed none of them stays quiet. */
 const scheduleSig = (s: ShopSnapshot) =>
-  JSON.stringify(s.schedules.map((x) => [x.id, x.name, x.revision, x.enabled, x.nextFire, x.hour, x.minute, x.weekdays]));
+  JSON.stringify([
+    s.schedules.map((x) => [x.id, x.name, x.revision, x.enabled, x.nextFire, x.hour, x.minute, x.weekdays]),
+    (s.routines ?? []).map((r) => [r.id, r.name, r.member, r.when, r.paused, r.next, r.asksFirst]),
+  ]);
+
+/** The signature of what the team shows: who is on it, and each one's status, work and pause. */
+const teamSig = (s: ShopSnapshot | null) => JSON.stringify(team(s).map((b) => [b.name, b.status, b.running, b.paused ?? false]));
+
+/** The writes the owner makes to the viewed shop's team (`change`): refused while only a kept read is shown, as every
+ *  write is. */
+const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.pause", "routine.resume", "automations.pause", "automations.resume"]);
 
 export class HttpHost {
   readonly session: ApiSession;
@@ -236,7 +255,7 @@ export class HttpHost {
     // Only a kept read answers while the API cannot be reached, so a write has nothing live to act on. It is refused, not
     // held to be sent later: an ask from the kept read needs the live record, and everything else the person says again.
     const asks = op === "approval.respond" || op === "approval.pass_on";
-    const writes = handler === notYet || asks;
+    const writes = handler === notYet || asks || TEAM_CHANGES.has(op);
     if (writes && this.cache.kind === "showing") throw new OpError("offline", t(asks ? "rt.connectToAnswer" : "rt.offline"));
     return handler(params);
   }
@@ -340,11 +359,24 @@ export class HttpHost {
     return readShop(this.session, this.now);
   }
 
-  /** A read of several shops, viewing the one the person chose while it is still theirs, else the first listed. A shop
-   *  session reads only what waits, so the viewed shop has no tasks, schedules or attention items to show. */
+  /** A read of several shops, viewing the one the person chose while it is still theirs, else the first listed. The pages
+   *  show the viewed shop's own read: for a shop the person owns its tasks, schedules, attention items, team and routines;
+   *  for one they help at, what waits there and nothing else. */
   private atShops(parts: ShopPart[], unreadable: unknown[], readAt: number): ShopSnapshot {
     const viewed = parts.find((p) => p.shop.id === this.viewing) ?? parts[0];
-    return { tasks: [], approvals: viewed.approvals, schedules: [], attention: [], attentionOff: true, unreadable, readAt, shops: parts, viewing: viewed.shop.id };
+    const work = viewed.work;
+    return {
+      tasks: work?.tasks ?? [],
+      approvals: viewed.approvals,
+      schedules: work?.schedules ?? [],
+      attention: work?.attention ?? [],
+      attentionOff: !work,
+      unreadable,
+      readAt,
+      shops: parts,
+      viewing: viewed.shop.id,
+      ...(work ? { team: work.team, routines: work.routines } : {}),
+    };
   }
 
   /** The person's place in these shops ended. Each is said so (the account row's notice, `shops.list`), its asks close in
@@ -654,7 +686,7 @@ export class HttpHost {
     const seen = new Set(attentionRows(was).map((m) => m.id));
     for (const row of attentionRows(now)) if (!seen.has(row.id)) this.emit({ event: "message", bot: TEAM, id: row.id, text: row.text });
     if (scheduleSig(was) !== scheduleSig(now)) this.emit({ event: "routines.update", bot: TEAM });
-    if (team(was)[0].running !== team(now)[0].running) this.emit({ event: "bots.update", bot: TEAM });
+    if (teamSig(was) !== teamSig(now)) this.emit({ event: "bots.update", bot: TEAM });
   }
 
   /** The latest read when it is fresh enough, else a new one. While the API cannot be reached the kept read answers at
@@ -675,6 +707,89 @@ export class HttpHost {
     setTimeout(() => {
       if (this.running) for (const ask of pendingAsks(snapshot)) this.emit(ask);
     }, 0);
+  }
+
+  // ---- the owner's changes to the team ---------------------------------------------------------------------------
+
+  /** The viewed shop, when the person owns it and its team was read: the one shop whose routines and team the owner's
+   *  writes change, always with its own session. Refused here, with nothing sent, for the signed-in tenant (the API knows
+   *  no team for it: not yet) and for a shop the person helps at (the team there is its owner's). */
+  private ownedTeam(): { shop: ShopRow; snapshot: ShopSnapshot } {
+    const snapshot = this.snapshot;
+    const part = snapshot?.viewing ? partOf(snapshot, snapshot.viewing) : undefined;
+    if (!snapshot || !part) return notYet();
+    if (part.shop.role !== "owner") throw ownerOnly(part.shop);
+    if (!part.work || !snapshot.team) return notYet();
+    return { shop: part.shop, snapshot };
+  }
+
+  /** Sends one change to the viewed shop's team, as exactly `body`, with that shop's own session, and reads the shop again
+   *  whatever came back, so every page shows what the API holds. The API's answer when it made the change; else the
+   *  refusal, in words. A change that got no answer is never sent again from here: the API may have it, and the read that
+   *  follows says. */
+  private async change(path: string, body: Record<string, unknown>): Promise<unknown> {
+    const { shop } = this.ownedTeam();
+    const answer = await this.shopSessions.write(shop.id, path, body);
+    void this.refresh().catch(() => undefined);
+    if (answer.kind === "ok") return answer.json;
+    throw this.changeRefused(shop, answer);
+  }
+
+  private changeRefused(shop: ShopRow, answer: Exclude<ShopAnswer, { kind: "ok" }>): OpError {
+    if (answer.kind === "left") {
+      this.depart([{ shop: shop.id, departure: answer.departure }]);
+      return new OpError(answer.departure.why, this.departedWords(shop.id) ?? t("rt.notFound"));
+    }
+    if (answer.kind === "signed_out") return new OpError("signed_out", t("rt.signedOut"));
+    if (answer.kind === "offline") return new OpError("offline", t("rt.offline"));
+    if (answer.kind === "unavailable") return new OpError("unavailable", t("rt.change.noReply"));
+    if (answer.status === 403 && answer.code === "owner_only") return ownerOnly(shop);
+    if (answer.status === 404) return new OpError("not_found", t("rt.notFound"));
+    return new OpError(answer.code || "refused", t("rt.change.refused"));
+  }
+
+  /** Pause everyone, or Resume everyone: `POST /v1/team/pause` or `/v1/team/resume` with exactly `{}`. apps/api's pause
+   *  holds the team's routines and nothing else, and its answer is the team as it now stands, shown at once. */
+  private async pauseTeam(paused: boolean): Promise<TeamState> {
+    const answered = decodeTeam(await this.change(paused ? "/v1/team/pause" : "/v1/team/resume", {}));
+    if (!answered) throw new OpError("unavailable", t("rt.change.noReply"));
+    this.showTeam((s) => ({ ...s, team: answered }));
+    const state = this.snapshot && teamStateOf(this.snapshot);
+    if (!state) throw new OpError("unavailable", t("rt.change.noReply"));
+    return state;
+  }
+
+  /** Pauses or resumes one of the viewed shop's routines: `POST /v1/routines/pause` or `/v1/routines/resume` with exactly
+   *  `{ routineId }`. Only a routine the read lists is sent. Its answer is the routine as it now stands, shown at once. */
+  private async switchRoutine(routineId: unknown, on: boolean): Promise<RoutineRow> {
+    const { snapshot } = this.ownedTeam();
+    if (typeof routineId !== "string" || !snapshot.routines?.some((r) => r.id === routineId)) throw notFound();
+    const json = (await this.change(on ? "/v1/routines/resume" : "/v1/routines/pause", { routineId })) as { routine?: unknown } | null;
+    const [routine] = decodeTeamRoutines({ routines: [json?.routine ?? null] }, []);
+    if (!routine || routine.id !== routineId) throw new OpError("unavailable", t("rt.change.noReply"));
+    this.showTeam((s) => ({ ...s, routines: s.routines.map((r) => (r.id === routine.id ? routine : r)) }));
+    return teamRoutineRow(routine);
+  }
+
+  /** The Automations page pausing or resuming a row: one of the team's routines goes the same way as from Customize. A
+   *  schedule of the shop's own is not the owner's to change from a session (the API answers it 401), so it is not yet. */
+  private async switchAutomation(p: { bot?: unknown; job?: unknown }, on: boolean): Promise<{ job: string }> {
+    const routine = this.snapshot?.routines?.find((r) => r.id === p.job && r.member === p.bot);
+    if (!routine) return notYet();
+    await this.switchRoutine(routine.id, on);
+    return { job: routine.id };
+  }
+
+  /** Shows the viewed shop's team and routines as the API just answered a change, until the read that follows replaces
+   *  them, and tells the screens what moved. */
+  private showTeam(edit: (w: { team: ShopTeam; routines: TeamRoutine[] }) => { team: ShopTeam; routines: TeamRoutine[] }): void {
+    const was = this.snapshot;
+    if (!was?.team || !was.viewing) return;
+    const next = edit({ team: was.team, routines: was.routines ?? [] });
+    const shops = was.shops?.map((p) => (p.shop.id === was.viewing && p.work ? { ...p, work: { ...p.work, ...next } } : p));
+    this.snapshot = { ...was, ...next, ...(shops ? { shops } : {}) };
+    if (teamSig(was) !== teamSig(this.snapshot)) this.emit({ event: "bots.update", bot: TEAM });
+    if (scheduleSig(was) !== scheduleSig(this.snapshot)) this.emit({ event: "routines.update", bot: TEAM });
   }
 
   // ---- Customize › Connections ----------------------------------------------------------------------------------
@@ -726,39 +841,45 @@ export class HttpHost {
   // ---- ops --------------------------------------------------------------------------------------------------------
 
   private readonly ops: Handlers = (() => {
-    // Buddy is the only member, so any other name is one this runtime does not have.
+    // The team the viewed shop's read lists: Buddy always, and for a shop the person owns its members. Any other name is
+    // one this runtime does not have.
     const member = (p: { bot?: unknown }) => {
-      if (p.bot !== TEAM) throw new OpError("unknown_bot", t("rt.notFound"));
+      if (!onTeam(this.snapshot, p.bot)) throw new OpError("unknown_bot", t("rt.notFound"));
     };
     return {
       hello: () => ({ bridge: "real", version: "manut-api/v1", hermes: { home: "" } }),
       "bots.list": () => ({ bots: team(this.snapshot) }),
+      // Buddy's chat holds the asks and the attention notes. The API keeps no chat with a member, so a member's is empty:
+      // their work shows as jobs, and their drafts in the task's notes.
       "chat.open": async (p) => {
         member(p);
         const snapshot = await this.current();
+        if (p.bot !== TEAM) return { session_id: `main-${String(p.bot)}`, messages: [], running: false, model: "", provider: "", reasoning: "" };
         this.replayAsks(snapshot);
         return { session_id: `main-${TEAM}`, messages: attentionRows(snapshot), running: false, model: "", provider: "", reasoning: "" };
       },
-      "thread.list": async (p) => (member(p), { threads: threadRows(await this.current()) }),
+      // Every task is one of Buddy's threads, as before members: History and Recent list each once.
+      "thread.list": async (p) => (member(p), { threads: p.bot === TEAM ? threadRows(await this.current()) : [] }),
       "thread.open": async (p) => {
         member(p);
         const snapshot = await this.current();
-        const task = snapshot.tasks.find((x) => x.id === p.thread);
+        const task = p.bot === TEAM ? snapshot.tasks.find((x) => x.id === p.thread) : undefined;
         if (!task) throw notFound();
         return taskOpen(task, snapshot.readAt);
       },
-      "routines.list": async (p) => (member(p), { routines: routineRows(await this.current()) }),
+      "routines.list": async (p) => (member(p), { routines: routineRows(await this.current(), p.bot) }),
       "automations.list": async () => ({ automations: automationRows(await this.current()) }),
       "bots.info": async (p) => {
         member(p);
         const snapshot = await this.current();
-        const rows = threadRows(snapshot);
+        // Buddy's are every task, as his threads are; a member's are their jobs.
+        const times = p.bot === TEAM ? threadRows(snapshot).map((r) => [r.started_at, r.last ?? r.started_at]) : jobRows(snapshot).filter((j) => j.bot === p.bot).map((j) => [j.at, j.at]);
         return {
           places: {},
-          first_active: rows.length ? Math.min(...rows.map((r) => r.started_at)) : null,
-          last_active: rows.length ? Math.max(...rows.map((r) => r.last ?? r.started_at)) : null,
+          first_active: times.length ? Math.min(...times.map(([first]) => first)) : null,
+          last_active: times.length ? Math.max(...times.map(([, last]) => last)) : null,
           skills: 0,
-          routines: snapshot.schedules.length,
+          routines: routineRows(snapshot, p.bot).length,
         };
       },
       // Buddy's readiness is the API's to say; until it can, the chat treats an unknown answer as ready.
@@ -767,7 +888,7 @@ export class HttpHost {
       "skills.list": (p) => (member(p), { skills: [] }),
       "commands.list": (p) => (member(p), { commands: [] }),
       "bots.avatar": (p) => (member(p), { rev: null, data: null }),
-      "bots.restart_scope": (p) => (member(p), { gateway: TEAM, bots: [{ name: TEAM, display_name: "Buddy" }] }),
+      "bots.restart_scope": (p) => (member(p), { gateway: p.bot, bots: [{ name: p.bot, display_name: memberName(p.bot) }] }),
       // What the API does not have is read as empty, so a screen that asks never waits on it.
       "elsewhere.list": (p) => (member(p), { sessions: [] }),
       "links.places": (p) => (member(p), { places: { slack: {}, discord: {} } }),
@@ -815,8 +936,8 @@ export class HttpHost {
       "bots.set_avatar": notYet,
       "bots.restart": notYet,
       "automations.add": notYet,
-      "automations.pause": notYet,
-      "automations.resume": notYet,
+      "automations.pause": (p) => this.switchAutomation(p, false),
+      "automations.resume": (p) => this.switchAutomation(p, true),
       "automations.remove": notYet,
       "plugins.inspect": notYet,
       "plugins.install": notYet,
@@ -832,13 +953,27 @@ export class HttpHost {
       "accounts.remove": notYet,
       "accounts.label": notYet,
       "accounts.discard": notYet,
-      // Mission Control: the API keeps no job trace or activity log a session can read, and has no way to stop a team.
-      "jobs.list": notYetShow,
-      "jobs.get": notYetShow,
-      "activity.list": notYetShow,
-      "team.state": notYetShow,
-      "team.pause": notYet,
-      "team.resume": notYet,
+      // Mission Control: the jobs and the activity log are the viewed shop's tasks, each member's runs and the actions they
+      // asked for (work.ts). The log has no fixed span: the tasks are kept until the shop deletes them. The team's state
+      // and Pause everyone are a shop the person owns; the signed-in tenant has no team the API knows, and a helper's
+      // shop's team is its owner's.
+      "jobs.list": async () => ({ jobs: jobRows(await this.current()) }),
+      "jobs.get": async (p) => {
+        const job = jobOf(await this.current(), String(p.job));
+        if (!job) throw notFound();
+        return job;
+      },
+      "activity.list": async () => ({ events: activityOf(await this.current()), keptMonths: null }),
+      "team.state": async () => {
+        const snapshot = await this.current();
+        const state = teamStateOf(snapshot);
+        if (state) return state;
+        const viewed = snapshot.viewing ? partOf(snapshot, snapshot.viewing) : undefined;
+        if (viewed && viewed.shop.role !== "owner") throw ownerOnly(viewed.shop);
+        return notYetShow();
+      },
+      "team.pause": () => this.pauseTeam(true),
+      "team.resume": () => this.pauseTeam(false),
       // What the team knows: the API serves a shop's memory to operators only (admin routes), so no session can read or
       // change it. Nothing the owner types is sent anywhere.
       "memory.list": notYetShow,
@@ -846,11 +981,12 @@ export class HttpHost {
       "memory.confirm": notYet,
       "memory.correct": notYet,
       "memory.forget": notYet,
-      // The team's routines are the shop's schedules, read as they are. Changing one is not built yet.
+      // The team's routines, then the shop's other schedules. The owner pauses and resumes a routine through the API's
+      // routines routes; making one waits for a later slice, and a schedule no session may change.
       "routine.list": async () => ({ routines: shopRoutines(await this.current()) }),
       "routine.create": notYet,
-      "routine.pause": notYet,
-      "routine.resume": notYet,
+      "routine.pause": async (p) => ({ routine: await this.switchRoutine(p.routine, false) }),
+      "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.routine, true) }),
       // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
       ...connectionHandlers(this.ownerLink()),
     };

@@ -74,6 +74,19 @@ describe("History's jobs", () => {
     expect(historyDays(store.getSnapshot(), "no such work", NOW, jobs)).toEqual([]);
   });
 
+  it("lists a thread that is also one of the jobs once, as the job (the connected runtime's tasks are both)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { store, jobs } = await demo();
+    const thread = await store.actions.startTaskThread("buddy", "A reply to a customer", "Draft it");
+    await vi.advanceTimersByTimeAsync(5_000);
+    const same: JobRow = { id: String(thread), title: "A reply to a customer", bot: "nam", stage: "drafted", at: BOOT + 60 };
+    const rows = historyDays(store.getSnapshot(), "", NOW, [...jobs, same]).flatMap((d) => d.rows);
+    expect(rows.filter((r) => r.title === "A reply to a customer").map((r) => [r.kind, r.who])).toEqual([["job", "Nam"]]);
+    // without the job, the thread is listed as before
+    expect(historyDays(store.getSnapshot(), "", NOW, jobs).flatMap((d) => d.rows).filter((r) => r.title === "A reply to a customer")).toHaveLength(1);
+  });
+
   it("opens the job's page from its row, to return to History", async () => {
     const { store, jobs } = await demo();
     store.actions.openPage("history");

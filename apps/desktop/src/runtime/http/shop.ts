@@ -10,12 +10,96 @@
 // - Schedules come from `GET /v1/schedules`, attention items from `GET /v1/inbound/attention`. With the API's inbound
 //   flag off, attention answers 403 `feature_disabled`, which reads as "no feed", not as a failure.
 //
+// A shop the person owns (docs/several-shops.md) is read with its own owner session, which the API answers 401 on the
+// schedules and attention routes: its export carries both, so they are read from the export (`decodeWork`), with the
+// team and its routines from `GET /v1/routines`. The team's routines run on clocks in the same schedule object, so a
+// schedule that is one of those clocks (it names its `routineId`) is left out of the schedules: the routine says it.
+//
 // Decoding never throws. A record keeps the API's whole object in `raw`, so a field this app does not know yet is
 // still there for a later slice; a state, an operation or an event kind it does not know is kept as written; and an
 // entry it cannot read at all (no id) goes to `unreadable` instead of vanishing.
 import type { ShopRow } from "../../lib/protocol";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { ApiSession, Answer } from "./session";
+
+/** One member's run of a task (an attempt, apps/api task-object.ts), as the task's export keeps it. */
+export interface ShopAttempt {
+  id: string;
+  /** who ran it, as the API names its executor: a member of the team (`nam`, `pim`, `ton`) for a worker's job */
+  executor: string;
+  /** `active` while it may still act, `done` once it ended whatever the outcome, as the API wrote it */
+  status: string;
+  /** how it ended: `done`, `failed`, `cancelled`, `awaiting_owner`, or "" when the API kept none */
+  outcome: string;
+  /** why it failed or was cancelled, as the API's code, or "" */
+  reason: string;
+  /** ms: when the task's log noted its claim, or null when the log no longer holds it */
+  claimedAt: number | null;
+  /** ms: when it ended, or null while it runs and for a record from before the API kept it */
+  finishedAt: number | null;
+  /** ms: the most it may run to, and when it must report again by; an active attempt past either can no longer act */
+  deadline: number | null;
+  leaseUntil: number | null;
+  /** the member it passed its job to, by the newest handoff note it reported, or null */
+  handedTo: string | null;
+  /** what its model calls cost in whole satang, added over its spend reports; null when none said a cost */
+  costSatang: number | null;
+  /** the tokens its spend reports counted, or null when none did */
+  tokens: number | null;
+  /** the model its last spend report named, or "" */
+  model: string;
+}
+
+/** What a member wrote on a task for the owner to read (a worker's draft): the newest, when there are several. */
+export interface ShopDraft {
+  member: string;
+  /** what it is for, as the API's code: `reply`, `post`, `daily_summary`, or another kept as written */
+  job: string;
+  text: string;
+  /** ms */
+  at: number | null;
+}
+
+/** The shop's team as `GET /v1/routines` says it: whether Pause everyone holds it, since when, and who is on. */
+export interface ShopTeam {
+  paused: boolean;
+  /** ms, when everyone was paused; null while nobody is */
+  since: number | null;
+  /** the members on, in the roster's order (`nam`, `pim`, `ton`), then any this build does not know, as written */
+  members: string[];
+}
+
+/** One of the team's routines as `GET /v1/routines` says it, the timing in the API's words (`@manut/routine-rules`). */
+export interface TeamRoutine {
+  id: string;
+  name: string;
+  /** `brief`, `draft`, `reply`, `send`, `pay`, `delete`, or another kept as written */
+  action: string;
+  /** whose job each run starts */
+  member: string;
+  when: string;
+  timeZone: string;
+  /** null when the API did not say */
+  asksFirst: boolean | null;
+  paused: boolean;
+  /** ms of its next run; null while it, the team or its member is off, or while it waits on an event */
+  next: number | null;
+  /** the trigger as the API sent it: a member's Schedule tab says a daily, weekly or monthly one in the app's language */
+  trigger: unknown;
+}
+
+/** What an owner's session reads of a shop beyond what waits there (docs/several-shops.md): its tasks, schedules and
+ *  attention items from its export, and its team and routines. */
+export interface ShopWork {
+  tasks: ShopTask[];
+  schedules: ShopSchedule[];
+  attention: Attention[];
+  team: ShopTeam;
+  routines: TeamRoutine[];
+}
+
+/** The members of the team in the order the app lists them (`@manut/member-grants`' roster, past Buddy, who leads). */
+export const ROSTER_ORDER = ["nam", "pim", "ton"] as const;
 
 export interface ShopAction {
   id: string;
@@ -29,6 +113,12 @@ export interface ShopAction {
   state: string;
   proposedAt: number | null;
   expiresAt: number | null;
+  /** ms, when it was approved, and who approved it as the API names them (`owner-link`, `owner-session`, an owner account's
+   *  `owner-…` id or a helper's id); null and "" before it was */
+  approvedAt: number | null;
+  approvedBy: string;
+  /** ms, when it was handed to its provider to send, or null */
+  dispatchedAt: number | null;
   raw: unknown;
 }
 
@@ -44,6 +134,10 @@ export interface ShopTask {
   /** how many entries its event log holds */
   events: number;
   actions: ShopAction[];
+  /** each member's run of it, in the order they were claimed; none for a task no member ran */
+  attempts: ShopAttempt[];
+  /** the newest draft a member wrote on it, or null */
+  draft: ShopDraft | null;
   raw: unknown;
 }
 
@@ -79,6 +173,9 @@ export interface Attention {
 export interface ShopPart {
   shop: ShopRow;
   approvals: ShopApproval[];
+  /** what the person's owner session reads there beyond the asks; absent for a shop they help at, which shows its asks
+   *  only (what a helper sees is the owner's call) */
+  work?: ShopWork;
 }
 
 export interface ShopSnapshot {
@@ -96,9 +193,13 @@ export interface ShopSnapshot {
   /** Several shops: every shop the person is in, the ones they own first, each with what waits there. Absent when they are
    *  in none: the read is then the signed-in tenant's own, as it was before shops. */
   shops?: ShopPart[];
-  /** The shop being viewed, one of `shops`: `approvals` are its own. Its tasks, schedules and attention items would be the
-   *  read's, but a shop session reads only approvals (the API answers it 401 on every other route), so those are empty. */
+  /** The shop being viewed, one of `shops`: `approvals` are its own, and so are the tasks, schedules and attention items
+   *  when the person owns it (its `work`). A shop they help at shows its asks only, so those are empty. */
   viewing?: string;
+  /** The viewed shop's team and routines, when the person owns it; absent for the signed-in tenant and a helper's shop,
+   *  whose team the app shows as Buddy alone. */
+  team?: ShopTeam;
+  routines?: TeamRoutine[];
 }
 
 export type ReadFailure = "signed_out" | "offline" | "unavailable";
@@ -133,11 +234,79 @@ function decodeAction(v: unknown, taskId: string, unreadable: unknown[]): ShopAc
     state: str(v.state),
     proposedAt: ms(v.proposedAt),
     expiresAt: ms(v.expiresAt),
+    approvedAt: isObj(v.approval) ? ms(v.approval.at) : null,
+    approvedBy: isObj(v.approval) ? str(v.approval.by) : "",
+    dispatchedAt: isObj(v.dispatch) ? ms(v.dispatch.at) : null,
     raw: v,
   };
 }
 
-/** One export entry (`{ task, events, actions, attempts, … }`) as a task. */
+/** Epoch seconds as ms, as an attempt's times are kept; null for anything else. */
+const secMs = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v * 1000 : null);
+/** Whole satang, never a float: anything else is no cost at all. */
+const satang = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null);
+
+/** A task's attempts, in the order the task's log noted their claims (an attempt is kept by a random id, so its claim is
+ *  the only order there is), each with what it reported: the newest handoff note it wrote and its spend reports. This is
+ *  how apps/api's own jobs list reads a job (workers.ts `jobOf`). An attempt with no id is kept in `unreadable`. */
+function decodeAttempts(v: Obj, events: unknown[], unreadable: unknown[]): ShopAttempt[] {
+  const claims = new Map<string, { seq: number; at: number | null }>();
+  for (const e of events) {
+    const claimed = isObj(e) ? /^attempt:claim:(.+)$/.exec(str(e.via))?.[1] : undefined;
+    if (isObj(e) && claimed) claims.set(claimed, { seq: typeof e.seq === "number" ? e.seq : Number.MAX_SAFE_INTEGER, at: ms(e.at) });
+  }
+  const reports = (attemptId: string) => events.filter((e): e is Obj => isObj(e) && e.kind === "agent" && e.attemptId === attemptId && isObj(e.event));
+  const attempts: (ShopAttempt & { seq: number })[] = [];
+  for (const a of list(v.attempts)) {
+    const attemptId = isObj(a) ? id(a.id) : null;
+    if (!isObj(a) || !attemptId) {
+      unreadable.push(a);
+      continue;
+    }
+    let handedTo: string | null = null;
+    let costSatang: number | null = null;
+    let tokens: number | null = null;
+    let model = "";
+    for (const r of reports(attemptId)) {
+      const event = r.event as Obj;
+      if (event.type === "handoffNote" && id(event.to)) handedTo = event.to as string;
+      if (event.type !== "spend") continue;
+      const cost = satang(event.costSatang);
+      if (cost !== null) costSatang = (costSatang ?? 0) + cost;
+      const used = satang(event.tokens);
+      if (used !== null) tokens = (tokens ?? 0) + used;
+      if (id(event.model)) model = event.model as string;
+    }
+    const claim = claims.get(attemptId);
+    attempts.push({
+      id: attemptId,
+      executor: str(a.executorId),
+      status: str(a.status),
+      outcome: str(a.outcome),
+      reason: str(a.reason),
+      claimedAt: claim?.at ?? null,
+      finishedAt: secMs(a.finishedAt),
+      deadline: secMs(a.deadline),
+      leaseUntil: secMs(a.leaseUntil),
+      handedTo,
+      costSatang,
+      tokens,
+      model,
+      seq: claim?.seq ?? Number.MAX_SAFE_INTEGER,
+    });
+  }
+  return attempts.sort((x, y) => x.seq - y.seq || (x.deadline ?? 0) - (y.deadline ?? 0)).map(({ seq: _seq, ...attempt }) => attempt);
+}
+
+/** The newest draft a member wrote on the task, or null. A draft with no words is none. */
+function decodeDraft(v: Obj): ShopDraft | null {
+  const drafts = list(v.drafts)
+    .filter((d): d is Obj => isObj(d) && typeof d.text === "string" && d.text.trim() !== "")
+    .map((d) => ({ member: str(d.member), job: str(d.job), text: d.text as string, at: ms(d.at) }));
+  return drafts.sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).at(-1) ?? null;
+}
+
+/** One export entry (`{ task, events, actions, attempts, drafts, … }`) as a task. */
 function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
   const doc = isObj(v) && isObj(v.task) ? v.task : null;
   const taskId = doc ? id(doc.id) : null;
@@ -158,7 +327,75 @@ function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
     actions: list(v.actions)
       .map((a) => decodeAction(a, taskId, unreadable))
       .filter((a): a is ShopAction => !!a),
+    attempts: decodeAttempts(v, events, unreadable),
+    draft: decodeDraft(v),
     raw: v,
+  };
+}
+
+/** The members on, in the roster's order, then any this build does not know, as the API wrote them. */
+function membersOf(v: unknown): string[] {
+  const named = [...new Set(list(v).filter((m): m is string => typeof m === "string" && m.length > 0))];
+  return [...ROSTER_ORDER.filter((m) => named.includes(m)), ...named.filter((m) => !(ROSTER_ORDER as readonly string[]).includes(m))];
+}
+
+/** `GET /v1/routines`' team, or null when the answer has none this build can read: a team it cannot read is never shown
+ *  as one that is at work. */
+export function decodeTeam(json: unknown): ShopTeam | null {
+  const team = isObj(json) && isObj(json.team) ? json.team : null;
+  if (!team || typeof team.paused !== "boolean") return null;
+  return { paused: team.paused, since: team.paused ? ms(team.since) : null, members: membersOf(team.members) };
+}
+
+/** `GET /v1/routines`' routines, in the order the API listed them (the order they were made). One with no id is kept in
+ *  `unreadable`. */
+export function decodeTeamRoutines(json: unknown, unreadable: unknown[]): TeamRoutine[] {
+  const routines: TeamRoutine[] = [];
+  for (const v of list(isObj(json) ? json.routines : null)) {
+    const routineId = isObj(v) ? id(v.id) : null;
+    if (!isObj(v) || !routineId) {
+      unreadable.push(v);
+      continue;
+    }
+    routines.push({
+      id: routineId,
+      name: str(v.name),
+      action: str(v.action),
+      member: str(v.member),
+      when: str(v.when),
+      timeZone: str(v.timeZone),
+      asksFirst: typeof v.asksFirst === "boolean" ? v.asksFirst : null,
+      paused: v.paused === true,
+      next: ms(v.next),
+      trigger: isObj(v.trigger) ? v.trigger : null,
+    });
+  }
+  return routines;
+}
+
+/** A schedule that is one of the team's routine clocks: the API's routine setup writes `routineId` on it. */
+const isRoutineClock = (v: unknown) => isObj(v) && id(v.routineId) !== null;
+
+/** What an owner's session read of a shop beyond its asks: the tasks, schedules and attention items of its export
+ *  (`GET /v1/tenant/export`) and the team and routines of `GET /v1/routines`. Null when the routines' answer holds no team
+ *  this build can read. A routine's clock is left out of the schedules, since the routine itself is listed. */
+export function decodeWork(exported: unknown, routines: unknown, unreadable: unknown[]): ShopWork | null {
+  const team = decodeTeam(routines);
+  if (!team) return null;
+  const body = isObj(exported) ? exported : {};
+  return {
+    tasks: list(body.tasks)
+      .map((v) => decodeTask(v, unreadable))
+      .filter((x): x is ShopTask => !!x),
+    schedules: list(body.schedules)
+      .filter((v) => !isRoutineClock(v))
+      .map((v) => decodeSchedule(v, unreadable))
+      .filter((x): x is ShopSchedule => !!x),
+    attention: list(body.attention)
+      .map((v) => decodeAttention(v, unreadable))
+      .filter((x): x is Attention => !!x),
+    team,
+    routines: decodeTeamRoutines(routines, unreadable),
   };
 }
 

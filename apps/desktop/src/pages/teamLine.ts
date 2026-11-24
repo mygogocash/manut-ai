@@ -25,7 +25,7 @@ export type TeamLine =
   | { kind: "idle"; last: number | null };
 
 /** The stages in which a job is over, one way or another. A job that is still open is not the member's last. */
-const FINISHED: ReadonlySet<JobStage> = new Set<JobStage>(["sent", "checked", "failed", "cancelled", "partly"]);
+const FINISHED: ReadonlySet<JobStage> = new Set<JobStage>(["sent", "checked", "failed", "cancelled", "partly", "drafted"]);
 
 /** The longest reason a line keeps. The row cuts what its width cannot show; this only keeps a long error short. */
 const REASON_MAX = 140;

@@ -66,11 +66,19 @@ function laneWho(s: AppState): LaneWho {
   return { home: homeBot(s.bots, members), kit: kitOf(members) };
 }
 
+/** The threads that are not also one of the runtime's jobs. The connected runtime lists each of a shop's tasks both as
+ *  Buddy's thread and as a job, by the same id; it is one piece of work, so History lists it once, as the job, which says
+ *  whose work it is and where it stands. Practice's threads and jobs never share an id. */
+const threadsNotJobs = (s: AppState, members: string[], jobs: readonly JobRow[]) => {
+  const ids = new Set(jobs.map((j) => j.id));
+  return historyEntries(s.threads, members).filter((e) => !ids.has(e.row.thread));
+};
+
 /** The kinds that have an entry, threads and jobs together: what the chips offer, however the list is filtered or searched. */
 export function historyLanes(s: AppState & Actions, jobs: readonly JobRow[] = []): HistoryLane[] {
   const who = laneWho(s);
   const members = selectSidebarBots(s).map((b) => b.name);
-  return lanesPresent([...historyEntries(s.threads, members).map((e) => threadLane(e.bot, who)), ...jobs.map((j) => jobLane(j.bot, who))]);
+  return lanesPresent([...threadsNotJobs(s, members, jobs).map((e) => threadLane(e.bot, who)), ...jobs.map((j) => jobLane(j.bot, who))]);
 }
 
 /** The days and rows for the threads in the store and the runtime's jobs that `query` finds (history.ts `matchWords`) and
@@ -82,7 +90,7 @@ export function historyDays(s: AppState & Actions, query: string, nowMs: number,
   const untitled = t("thread.untitled");
   const who = laneWho(s);
   const nameOf = (bot: string) => names.get(bot) ?? bot;
-  const threads = historyEntries(s.threads, members)
+  const threads = threadsNotJobs(s, members, jobs)
     .filter((e) => matchWords({ title: e.row.title, preview: e.row.preview, who: nameOf(e.bot) }, query, untitled))
     .map((e) => ({
       ts: e.ts,

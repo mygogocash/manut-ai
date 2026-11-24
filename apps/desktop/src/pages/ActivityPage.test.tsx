@@ -51,7 +51,7 @@ const WHO: Record<string, { name: string; role: string }> = {
   [OWNER]: { name: "You", role: "Fon, Baan Mali" },
 };
 
-type Ready = Load<{ events: ActivityEvent[]; keptMonths: number }>;
+type Ready = Load<{ events: ActivityEvent[]; keptMonths: number | null }>;
 
 function draw(over: Partial<ActivityViewProps> & { load: Ready }, filters: Partial<Filters> = {}, exporting: Partial<ExportState> = {}) {
   setLang("en");
@@ -338,5 +338,15 @@ describe("making the file", () => {
     const { events, words } = await ctx();
     expect(await saveCsv("x.csv", "a,b")).toBe("not_yet");
     expect(await downloadCsv(events, EXPORT_START, NOW, words)).toBe("not_yet");
+  });
+});
+
+describe("how long the log keeps an event", () => {
+  it("says the span the runtime keeps, and claims none when it keeps no fixed one (the connected runtime's tasks)", async () => {
+    const log = await demoLog();
+    expect(words(draw({ load: { kind: "ready", value: log } }))).toContain(`Kept for ${log.keptMonths} months, then deleted for good.`);
+    const html = draw({ load: { kind: "ready", value: { ...log, keptMonths: null } } });
+    expect(words(html)).not.toContain("Kept for");
+    expect(words(html)).not.toContain("deleted for good");
   });
 });
