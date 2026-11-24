@@ -70,9 +70,10 @@ import type { ShopTemplate } from "@manut/shop-templates";
 import { checkedTemplate, newShopSetup } from "./routine-setup";
 import { beginMake, twice } from "./shops-store";
 import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
+import type { GoogleEnv } from "./google";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
 
-export type PilotEnv = TenantDataEnv & {
+export type PilotEnv = TenantDataEnv & GoogleEnv & {
   /// Where the owner's approval page lives: `approvalUrl` is
   /// `${WEB_ORIGIN}/approve/{token}`, and only this origin may call the
   /// approval routes from a browser.

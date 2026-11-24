@@ -26,6 +26,7 @@ import {
   type WireStanding,
 } from "@manut/approval-core";
 import type { ApprovalChoice } from "../../lib/protocol";
+import { decodeBooksDetail, type BooksDetail } from "./books";
 
 /** What a request shows that this app puts into words. A LINE reply names all five (`replyRequest` in the API's
  *  task-object.ts); a worker's request names its operation and where it goes, and the words are in its action. */
@@ -37,6 +38,10 @@ export interface AskDetail {
   recipient?: string;
   /** exactly what would be sent */
   text?: string;
+  /** Ton's append of a month of the books to the owner's Google Sheet, read whole: the sheet, the month, how many rows, the totals
+   *  as the API words them and a month sent before (books.ts). Absent for any other request, and for an append this build cannot
+   *  read whole, which `view.ts` then shows as one that needs an update to answer. */
+  books?: BooksDetail;
 }
 
 /** A note a helper passed on to the owner with a request they may not decide (docs/people.md). */
@@ -73,11 +78,14 @@ const ms = (v: unknown): number | null => {
 
 const DETAIL_FIELDS = ["actionId", "operationType", "targetResourceId", "recipient", "text"] as const;
 
-/** The words a request shows, and nothing else; undefined when it shows none this app reads. */
+/** The words a request shows, and nothing else; undefined when it shows none this app reads. A books append's detail is kept as far
+ *  as its words use it (never its rows), in the API's own shape, so this reads it again from what was kept. */
 function narrowDetail(detail: unknown): AskDetail | undefined {
   if (!isObj(detail)) return undefined;
   const kept: AskDetail = {};
   for (const field of DETAIL_FIELDS) if (typeof detail[field] === "string") kept[field] = detail[field] as string;
+  const books = decodeBooksDetail(isObj(detail.books) ? detail.books : detail);
+  if (books) kept.books = books;
   return Object.keys(kept).length ? kept : undefined;
 }
 

@@ -278,6 +278,11 @@ type DeletedShop = {
   schedulesWiped: number;
   occurrencesWiped: number;
   sessionsWiped: number;
+  // Only for a shop that had a Google connection: how many were ended at Google before the vault forgot their tokens, and
+  // how many could not be. The shop's data is deleted either way; the second is for the owner to end in their Google
+  // account ("Google Sheets for Ton's books", below). The deletion's record keeps both with the other counts.
+  googleRevoked?: number;
+  googleNotRevoked?: number;
   deletedAt: string;
 };
 ```
@@ -337,6 +342,13 @@ type DeletedShop = {
     request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page
     says its deletion did not finish and offers the same button. The practice fake lists and finishes a deletion
     that did not finish by the same rules, though a practice wipe never stops part way.
+  - **Google.** A shop's Google connection is revoked at Google before its vault forgets the token, as `POST
+    /v1/google/disconnect` does it, in every deletion: the operator's of a shop that never went live, the owner's yes on
+    their link, and a person's own tenant. Google not answering, or the secret not opening, or Google not being set up on
+    this Worker, never stops the deletion: the answer counts the connection as `googleNotRevoked`. The vault is listed
+    first, and a vault that cannot be listed is not wiped (`connections` in `failed`), so no token is forgotten that was
+    not looked at. A run that stops after the vault was wiped carries the same counts on its `wipe_incomplete`, since the
+    run that finishes it has no connection left to revoke. No token is in any answer, record or log.
   - Every step answers again after its own wipe: the task index reads as empty once the shop's own object is wiped,
     and each wipe finds nothing more to remove. So the same request runs to the end after a stop at any step,
     including one after the tombstone, when only taking the shop off the list is left.
@@ -2361,8 +2373,18 @@ type GoogleStatus = {
     connectedAt: string;
     state: "working" | "broken";
     broken?: { at: string; reason: string; words: string };  // words the owner reads, e.g. "… Connect Google again."
-    sheet: null | { id: string; title: string; tab: string; url: string | null };  // the sheet Ton appends to
+    sheet: null | {                // the sheet Ton appends to
+      id: string; title: string; tab: string; url: string | null;
+      appended: AppendedMonth[];   // what was sent to it, newest first, at most 24: never the rows
+    };
   };
+};
+
+type AppendedMonth = {
+  month: string;                   // YYYY-MM
+  at: string;                      // when the send began
+  rows: number;                    // after the header row
+  outcome: "confirmed" | "unknown"; // unknown: Google's answer left it open whether the rows landed, or never came
 };
 ```
 
@@ -2421,16 +2443,40 @@ type GoogleStatus = {
    sheet is kept, as the connection's one granted resource under a new grant revision; an ask while another makes it is
    refused (`sheet_in_progress`). A sheet the connection already has is read first (its title as it is now, and that
    its `Books` tab is still there, else `sheet_tab_missing`); one that is gone for this account is made again.
-4. The task object stores the month's exact rows and the sheet as an immutable proposal (`google.sheets.append`) and
-   opens its approval-core request, of kind `command`, which only the owner may decide, expiring after a day.
+4. **A month sent before is said first, never asked for silently.** The sheet's record in the vault keeps what was
+   appended to it (below). When it holds an append of this month, the proposal carries `earlier`: how many times the
+   month was sent, and for the latest when (`at`), how many rows and how it ended (`confirmed`, or `unknown` for a send
+   Google left open, or one that never reported back). The request's `text` then begins with that: "Already sent: this
+   month went to the sheet on 2026-11-03 (41 rows) and Google confirmed it. Approving adds its rows a second time.", or
+   for an unknown one "Maybe already sent: … but Google did not say whether the rows arrived. Look in the sheet first:
+   approving adds its rows a second time, so they would be there twice if they had arrived." (`again` after more than
+   one). The ask is made all the same: the owner's yes is the choice to add the rows again, which an owner who deleted
+   them by hand, or who looked and found a lost send's rows missing, needs. `earlier` is part of the payload, so it is
+   hashed with the rows and shown with them. Only the record of the sheet the request names counts: a sheet made anew
+   because the old one was deleted holds none of the rows, so its first ask has no `earlier`.
+5. The task object stores the month's exact rows, `earlier` and the sheet as an immutable proposal (`google.sheets.append`)
+   and opens its approval-core request, of kind `command`, which only the owner may decide, expiring after a day.
 
 The owner decides it from their session (`POST /v1/approvals/{requestId}/decision`, "Deciding from a session"). An
 approval goes to the broker's one-use begin gate, as every write does, which sends it once: the live grant is checked
-(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, and the approved rows go to
-`spreadsheets.values.append` exactly as `@manut/sheets-rows` builds them, `valueInputOption=RAW` (no cell runs as a
-formula) and `insertDataOption=INSERT_ROWS`, after a header row. It settles `confirmed` on Google's success, `failed` only
-when Google refused it before applying it (400, 401, 403, 404, 429) or when it was never sent, and `unknown` for any
-other end (no answer, a timeout, a server error), which is never sent again. `google.appended` records how it settled.
+(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, the append is
+written into the sheet's record, and the approved rows go to `spreadsheets.values.append` exactly as `@manut/sheets-rows`
+builds them, `valueInputOption=RAW` (no cell runs as a formula) and `insertDataOption=INSERT_ROWS`, after a header row. It
+settles `confirmed` on Google's success, `failed` only when Google refused it before applying it (400, 401, 403, 404, 429)
+or when it was never sent, and `unknown` for any other end (no answer, a timeout, a server error), which is never sent
+again. `google.appended` records how it settled.
+
+**What the sheet's record keeps.** One entry for each append, with the sheet's binding in the vault and never the rows:
+`{ actionId, month, at, rows, outcome }`, oldest first, the newest 120. It is written as `sending` before the request leaves,
+so a send the Worker never finished (it stopped part way) still counts as sent, and is finished as `confirmed` or `unknown`
+when Google's answer is known; an append Google refused before applying it adds nothing, so its entry is taken out. The
+app and the next ask read `sending` as `unknown`. It goes with the sheet when the owner connects again, and a new sheet
+starts empty. Writing it is also the send's last check: the vault refuses the begin unless the month was sent exactly as
+often as the request said (`earlier.count`, or none), so two requests for one month that were both asked before either was
+sent cannot both write it, and a request that did tell of an earlier send goes through. The refused one settles `failed`
+with the reason `month_already_sent`, nothing reaches Google, and asked again it says what was sent. Other reasons a
+send settles `failed` before Google: `google_broken`, `sheet_changed`, `not_connected`, `already_begun` and
+`vault_unavailable`.
 
 ```ts
 // What an append's request names, in `record.request.detail`. Its id is the append's action id.
@@ -2448,6 +2494,11 @@ type BooksDetail = {
     beforeVat?: string; vat?: string;  // a VAT-registered shop's only
   };
   flags: number;                 // entries Ton flagged for the owner to check
+  earlier: null | {              // the month went to this sheet before (the text above says so first)
+    count: number;               // how many times, the latest included
+    at: string; rows: number;    // the latest: when it began and how many rows it carried
+    outcome: "confirmed" | "unknown";
+  };
   lines: { date: string; ref: string; kind: "sale" | "refund" | "expense"; channelOrCategory: string;
     amountSatang: number; beforeVatSatang: number | null; vatSatang: number | null }[];  // the exact rows
   text: string;                  // the control plane's sentence naming all of the above
@@ -2471,7 +2522,12 @@ An append's job ends `failed` with one of these, besides the job flow's own: `go
 `sheet_in_progress`, `sheet_not_made`, `sheet_tab_missing`. The owner's route answers 400 `invalid_month` before
 anything starts.
 
-**Not built yet.** The desktop's and the web's screens (Customize › Connections gets a Google row); the Google Picker,
-for the owner to choose an existing sheet; a monthly schedule for the append; refusing a month already appended (each
-request names its month, and the owner may approve the same month twice); and revoking the token at Google when the
-shop's data is deleted (deletion forgets it).
+**Deleting the shop** revokes the token at Google first, as disconnecting does ("Export and deletion", above).
+
+**The desktop** reads these routes from Customize › Connections, with the viewed shop's own owner session: the Google row (its
+status, Connect, Disconnect and Send a month's books) and, in Needs you, Ton's append with its whole text (`apps/desktop`:
+`src/pages/GooglePane.tsx`, `src/runtime/http/google.ts`, `books.ts`; `docs/decisions.md`). It reads the 503
+`google_not_configured` as Google being off, which needs the API's `error` code on a 5xx.
+
+**Not built yet.** The web's screens; the Google Picker, for the owner to choose an existing sheet; and a monthly schedule for
+the append.

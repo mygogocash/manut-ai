@@ -25,6 +25,7 @@ import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } from "./ConnectionsPane";
+import { GooglePane, useGoogle, type GoogleProps } from "./GooglePane";
 import { thisMacRecord } from "./connections";
 import { OutpostPane, useOutpost, type OutpostPaneProps } from "./OutpostPane";
 import { correctionReady, groupFacts, MEMORY_START, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
@@ -495,6 +496,7 @@ export function CustomizeView({
   onTab,
   connections,
   vault,
+  google,
 }: {
   memory: MemoryPaneProps;
   routines: RoutinesPaneProps;
@@ -506,6 +508,8 @@ export function CustomizeView({
   connections?: OutpostPaneProps;
   /** the Connections tab's vault and the shop's outposts, on a runtime that answers them */
   vault?: ConnectionsProps | null;
+  /** the Connections tab's Google Sheets row for the shop's owner, on a runtime that answers it */
+  google?: GoogleProps | null;
 } & CustomizeEntries): ReactNode {
   const tabs = onTab && (
     <div className="tabs" role="tablist" aria-label={t("menu.customize")}>
@@ -539,6 +543,7 @@ export function CustomizeView({
       {showConnections ? (
         <div className="brain conn" data-testid="connections">
           <div className="conncol">
+            {google && <GooglePane p={google} />}
             {vault && <VaultPane p={vault} />}
             <OutpostPane {...connections} fold={fold} />
             {vault && <ShopOutpostsPane p={vault} thisMac={fold?.record?.id ?? null} />}
@@ -559,6 +564,7 @@ export function CustomizePage() {
   const [tab, setTab] = useState<CustomizeTab>("memory");
   const outpost = useOutpost(s.shops.current, s.shops.list);
   const vault = useConnections(tab === "connections", s.shops.current);
+  const google = useGoogle(tab === "connections", s.shops.current, () => s.openPage("needs"));
   const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
   const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);
   const [memoryUi, memoryDispatch] = useReducer(memoryReduce, MEMORY_START);
@@ -626,6 +632,7 @@ export function CustomizePage() {
       onTab={setTab}
       connections={outpost}
       vault={vault}
+      google={google}
     />
   );
 }

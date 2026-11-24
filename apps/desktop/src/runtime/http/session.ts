@@ -122,8 +122,10 @@ export type Answer =
   | { kind: "refused"; status: number; code: string; json: unknown }
   | { kind: "signed_out" }
   | { kind: "offline" }
-  /** a 5xx, an answer that is not JSON, or a request the shell could not make */
-  | { kind: "unavailable"; status?: number };
+  /** a 5xx, an answer that is not JSON, or a request the shell could not make; `code` is the API's own `error` when a 5xx
+   *  carried one (Google's routes answer 503 `google_not_configured` while the owner's OAuth client does not exist), so a
+   *  caller that knows the code can tell that answer from an outage */
+  | { kind: "unavailable"; status?: number; code?: string };
 
 type Raw = { kind: "answer"; status: number; text: string } | { kind: "offline" } | { kind: "unavailable" };
 type Refreshed = "ok" | "signed_out" | "offline" | "unavailable";
@@ -759,10 +761,8 @@ function removed(res: Raw): boolean {
 function answerOf(res: Raw): Answer {
   if (res.kind !== "answer") return res.kind === "offline" ? { kind: "offline" } : { kind: "unavailable" };
   const json = parse(res.text);
+  const code = json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string" ? (json as { error: string }).error : "";
   if (res.status >= 200 && res.status < 300) return json === undefined ? { kind: "unavailable", status: res.status } : { kind: "ok", status: res.status, json };
-  if (res.status >= 400 && res.status < 500) {
-    const code = json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string" ? (json as { error: string }).error : "";
-    return { kind: "refused", status: res.status, code, json: json ?? null };
-  }
-  return { kind: "unavailable", status: res.status };
+  if (res.status >= 400 && res.status < 500) return { kind: "refused", status: res.status, code, json: json ?? null };
+  return { kind: "unavailable", status: res.status, ...(res.status >= 500 && code ? { code } : {}) };
 }

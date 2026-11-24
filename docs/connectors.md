@@ -128,7 +128,13 @@ Checked 24 Nov 2026 on Google's pages [G1, G2]. `@manut/sheets-rows` already bui
 Sheets for Ton's books"). The owner connects their Google account from their own session (OAuth for web server apps,
 with PKCE and a one-use state), the refresh token is sealed in the vault, and on first use Ton makes one spreadsheet,
 "Manut AI books: {shop}" with a `Books` tab, which the app can reach under `drive.file`. Each month's append is asked
-through approval-core, owner-only, naming the sheet, the month, the rows and their totals, and sent once on approval.
+through approval-core, owner-only, naming the sheet, the month, the rows and their totals, and sent once on approval. The
+sheet's record in the vault keeps what was appended to it (the month, when, how many rows and how it ended, never the
+rows), so a month already sent, or sent with no answer learnt, is asked for again only with that said first, and two
+requests for one month cannot both write it unannounced. Deleting a shop's data revokes its Google token at Google before the
+vault forgets it, and says when Google could not be reached. On the desktop, Customize › Connections has the owner's Google
+Sheets row (Connect opens Google's page in the system browser; Send a month's books asks Ton, who asks the owner in Needs you
+with the whole text), and says that Google Sheets isn't set up for Manut AI yet while the API answers `google_not_configured`.
 Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are Wrangler secrets every Google route answers
 `google_not_configured`; no environment sets them. The Picker (the owner choosing an existing sheet) comes later.
 

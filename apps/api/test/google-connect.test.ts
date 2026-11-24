@@ -370,7 +370,7 @@ describe("the vault's Google operations", () => {
       broken: { at: expect.any(String), reason: "invalid_grant",
         words: "Google no longer lets Manut AI into your sheet: the access was removed or ran out. Connect Google again." },
       sheet: { id: "sheet_1", title: "Manut AI books: Baan Mali", tab: "Books",
-        url: "https://docs.google.com/spreadsheets/d/sheet_1/edit" } });
+        url: "https://docs.google.com/spreadsheets/d/sheet_1/edit", appended: [] } });
     // Connecting again mends it, keeps the sheet, and makes the sheet the new connection's one resource.
     const mended = await connect(owner);
     expect((await status(owner)).connection).toMatchObject({ id: mended, state: "working", sheet: { id: "sheet_1" } });

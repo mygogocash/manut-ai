@@ -263,6 +263,12 @@ describe("authorised reads", () => {
       .on("GET", "/v1/f", { status: 404, text: "" });
     expect(await session.read("/v1/a")).toEqual({ kind: "offline" });
     expect(await session.read("/v1/b")).toEqual({ kind: "unavailable", status: 502 });
+    // A 5xx that carries the API's own code keeps it, so Google's 503 google_not_configured is no outage; one with no code, or
+    // a code that is not text, says none.
+    api.on("GET", "/v1/g", { status: 503, json: { error: "google_not_configured" } });
+    api.on("GET", "/v1/h", { status: 500, json: { error: 7 } });
+    expect(await session.read("/v1/g")).toEqual({ kind: "unavailable", status: 503, code: "google_not_configured" });
+    expect(await session.read("/v1/h")).toEqual({ kind: "unavailable", status: 500 });
     expect(await session.read("/v1/c")).toEqual({ kind: "refused", status: 403, code: "feature_disabled", json: { error: "feature_disabled", feature: "officeInbound" } });
     expect(await session.read("/v1/d")).toEqual({ kind: "unavailable", status: 200 });
     expect(await session.read("/v1/e")).toEqual({ kind: "unavailable" });
@@ -341,7 +347,7 @@ describe("authorised writes", () => {
     api.on("POST", PATH, "offline");
     expect(await session.write(PATH, BODY)).toEqual({ kind: "offline" });
     api.on("POST", PATH, { status: 503, json: { error: "approvals_unavailable" } });
-    expect(await session.write(PATH, BODY)).toEqual({ kind: "unavailable", status: 503 });
+    expect(await session.write(PATH, BODY)).toEqual({ kind: "unavailable", status: 503, code: "approvals_unavailable" });
     expect(api.to("POST", PATH)).toHaveLength(2);
   });
 
