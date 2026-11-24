@@ -103,6 +103,11 @@ const MAX_REPLAY_LIMIT = 1000;
 /// Most attempts a single export carries. Claims can grow without bound, so
 /// an unbounded read would let one hot task swell the whole export.
 const MAX_EXPORT_ATTEMPTS = 200;
+/// The most requests one read of named requests may name (`GET /requests?id=`), so the read stays bounded by what it
+/// asks for, however much the task holds.
+export const MAX_NAMED_REQUESTS = 100;
+/// The longest request id that read takes: every request shares its action's id, a UUID.
+const MAX_REQUEST_ID = 128;
 
 /// One execution of a task by one executor. The fencing token plus the lease
 /// decide who may publish: a stale or fenced-out executor's steps and finish
@@ -929,7 +934,7 @@ export class TaskObject extends DurableObject {
       if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
-    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request);
+    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request, url);
     const requestItem = url.pathname.match(/^\/requests\/([^/]+)(\/decision)?$/);
     if (requestItem) {
       const requestId = requestItem[1];
@@ -1373,7 +1378,16 @@ export class TaskObject extends DurableObject {
   /// its current revision and against the attempt holding the task, for a session's list of approvals (approvals.ts).
   /// It walks the actions, because every request shares its action's id and an old reply's request exists only as the
   /// one it would have opened. An action of another tenant is never listed, whatever task it sits in.
-  private async listRequests(request: Request): Promise<Response> {
+  ///
+  /// `GET /requests?id=…&id=…` answers only the requests named, at most `MAX_NAMED_REQUESTS`, each read by its own key,
+  /// so the read costs what it asks for and not what the task has held. A named request the task does not hold for the
+  /// caller is simply not answered.
+  private async listRequests(request: Request, url: URL): Promise<Response> {
+    const named = url.searchParams.has("id") ? [...new Set(url.searchParams.getAll("id"))] : null;
+    if (named !== null && (named.length > MAX_NAMED_REQUESTS ||
+        named.some((id) => id.length === 0 || id.length > MAX_REQUEST_ID))) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
     const doc = await this.load();
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
@@ -1381,7 +1395,9 @@ export class TaskObject extends DurableObject {
       const now = Date.now();
       const running = { attemptId: this.runningAttemptSync(kv, now / 1000) };
       const requests: { record: ApprovalRecord; standing: Standing }[] = [];
-      for (const [, action] of kv.list<ActionProposalJSON>({ prefix: "action:" })) {
+      const actions = named === null ? [...kv.list<ActionProposalJSON>({ prefix: "action:" })].map(([, action]) => action)
+        : named.flatMap((id) => kv.get<ActionProposalJSON>(`action:${id}`) ?? []);
+      for (const action of actions) {
         if (this.foreignAction(action, request)) continue;
         const record = this.decidingRecordSync(kv, action);
         if (record === undefined) continue;
