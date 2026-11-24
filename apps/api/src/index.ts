@@ -231,9 +231,29 @@ type RequestContext =
   /// Only protected admin connection provisioning constructs this context.
   | { tenant: null; operator: true };
 
+/// The person's sign-ins the lifted routes refuse: an address's hash (`email:`, email-code.ts), since anyone can sign in
+/// by email once it is on. A shop's tenant (`pilot:`) is never a sign-in's. Apple's (`apple:`, auth.ts) keeps the lifted
+/// routes for now: Apple sign-in is on in no environment and needs the owner's Apple team, and the lifted routes' own tests
+/// sign in with it. docs/turning-on.md says to add it here before Apple is turned on.
+const REFUSED_PERSON = /^email:/;
+
+/// Who may use a lifted route: every session, or every session but a person's own email sign-in.
+type People = "allowed" | "refused";
+
 /// Tenant routes accept only revocable device sessions. The operator key is
 /// explicitly refused here, so it cannot bypass tenant or company checks.
-async function contextOf(request: Request, env: Env): Promise<RequestContext | null> {
+///
+/// A person's own email sign-in is refused too, as a shop session already is
+/// (people.ts), on every lifted route but the three reads the desktop makes
+/// for a person in no shop: `GET /v1/tenant/export`, `GET /v1/schedules` and
+/// `GET /v1/inbound/attention` (`people: "allowed"`). These routes act for a
+/// tenant's own cloud tasks, schedules, connections, consent, data and
+/// companies, and a person's tenant is no shop: nothing of a shop's is ever
+/// there. Since anyone can sign in by email once it is on, they would
+/// otherwise give every stranger cloud tasks, schedules that fire, a stored
+/// Linear token read through this API, and the tenant wipe. A shop's owner
+/// and helpers act for it with shop sessions, which these routes refuse.
+async function contextOf(request: Request, env: Env, people: People = "refused"): Promise<RequestContext | null> {
   const header = request.headers.get("authorization") ?? "";
   const prefix = "Bearer ";
   if (!header.startsWith(prefix)) return null;
@@ -251,6 +271,7 @@ async function contextOf(request: Request, env: Env): Promise<RequestContext | n
   if (!verify.ok) return null;
   const result = (await verify.json()) as { ok?: boolean; tenant?: string };
   if (!result.ok || !result.tenant) return null;
+  if (people === "refused" && REFUSED_PERSON.test(result.tenant)) return null;
   return { tenant: result.tenant, operator: false };
 }
 
@@ -992,7 +1013,8 @@ export default {
     // own verified tenant. Gated like
     // the webhook: with officeInbound off there is nothing to read.
     if (url.pathname === "/v1/inbound/attention" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant has no feed, so it reads empty.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (!(await featureFlags(env)).officeInbound) {
         return json({ error: "feature_disabled", feature: "officeInbound" }, 403);
@@ -1045,7 +1067,8 @@ export default {
     // A shop session's export is answered above (shops.ts); no shop session
     // deletes here, which stays with the owner's confirmation link.
     if (url.pathname === "/v1/tenant/export" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant's export holds nothing of a shop's.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       const tenant = context.tenant ?? url.searchParams.get("tenant") ?? "";
       if (!tenant) return json({ error: "tenant_required" }, 400);
@@ -1101,7 +1124,8 @@ export default {
     // its own alarm, so one tenant's sweep never touches another's, and
     // occurrence claims stay singular per schedule.
     if (url.pathname === "/v1/schedules") {
-      const context = await contextOf(request, env);
+      // Listing is one of the desktop's reads for a person in no shop (contextOf); making a schedule is not theirs.
+      const context = await contextOf(request, env, request.method === "GET" ? "allowed" : "refused");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (request.method === "POST") {
         // Creating a schedule arms future cloud work, so both switches guard

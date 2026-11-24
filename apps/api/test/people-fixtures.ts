@@ -2,6 +2,7 @@ import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext
 import type { ApprovalKind, ApprovalRecord } from "@manut/approval-core";
 import { expect } from "vitest";
 import worker, { type Env } from "../src/index";
+import { testOutbox } from "../src/email-sender";
 import { JOB_REQUEST_OPTIONS, type ActionProposalJSON } from "../src/task-object";
 import { tenantCall } from "../src/tenant-data";
 import { adminFetch, trustedTaskPut } from "./authenticated-fixtures";
@@ -68,6 +69,23 @@ export async function signIn(email?: string): Promise<SignedIn> {
     body: JSON.stringify({ provider: "apple", identityToken, nonce: NONCE, deviceId }) });
   expect(response.status).toBe(200);
   const body = (await response.json()) as { tenant: string; accessToken: string; refreshToken: string };
+  return { ...body, deviceId, headers: { authorization: `Bearer ${body.accessToken}` } };
+}
+
+/// Someone signing in with a code sent by email through the real routes (email-code.ts), reading the code from the test
+/// outbox as a person reads it from the email. Each request comes from a source of its own. Its tenant is `email:`.
+export async function emailSignIn(email: string): Promise<SignedIn> {
+  const asked = await sourceWorker.fetch("https://api.manut.test/v1/auth/email/code", { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
+  expect(asked.status).toBe(200);
+  const sent = testOutbox().filter((one) => one.to === email.trim().toLowerCase());
+  const code = /sign-in code is (\d{6})\./.exec(sent.at(-1)?.text ?? "")?.[1];
+  const deviceId = `device-${crypto.randomUUID()}`;
+  const exchanged = await sourceWorker.fetch("https://api.manut.test/v1/auth/exchange", { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "email", email, code, deviceId }) });
+  expect(exchanged.status).toBe(200);
+  const body = (await exchanged.json()) as { tenant: string; accessToken: string; refreshToken: string };
+  expect(body.tenant).toMatch(/^email:[0-9a-f]{64}$/);
   return { ...body, deviceId, headers: { authorization: `Bearer ${body.accessToken}` } };
 }
 

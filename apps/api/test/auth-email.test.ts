@@ -26,6 +26,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The day's count of codes across every address lives in the one auth object every test of this file shares, and storage
+// carries from test to test within a file, so each test starts the day afresh: no test's codes count against another's.
+beforeEach(async () => {
+  await runInDurableObject(bindings.AUTH.get(bindings.AUTH.idFromName("auth")), (_instance, state) =>
+    state.storage.delete(CODE_DAY_KEY));
+});
+
 type Session = { accessToken: string; refreshToken: string; csrf: string; expiresIn: number; tenant: string };
 
 const address = (name = "mint") => `${name}-${crypto.randomUUID()}@baanmali.example`;
