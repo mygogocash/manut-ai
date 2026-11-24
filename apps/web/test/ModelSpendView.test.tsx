@@ -1,6 +1,15 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, type ModelCall, type ModelCap, type ModelUsage, type NewModelCap, type Shop } from "../src/api";
+import {
+  ApiError,
+  type ModelAlerts,
+  type ModelCall,
+  type ModelCap,
+  type ModelCrossing,
+  type ModelUsage,
+  type NewModelCap,
+  type Shop,
+} from "../src/api";
 import { createFakeApi } from "../src/api/fake";
 import { ModelSpendView } from "../src/ops/ModelSpendView";
 import { OpsConsole } from "../src/ops/OpsConsole";
@@ -48,20 +57,25 @@ type Options = {
   onForget?: () => void;
   shops?: Shop[] | null;
   tenant?: string | null;
+  /// The list of shops near or at their caps; no shop on it unless a test says otherwise.
+  alerts?: () => Promise<ModelAlerts>;
 };
+
+const NO_ALERTS: ModelAlerts = { month: "2026-11", shops: [], truncated: false };
 
 function renderPage(read: (tenant: string, month?: string) => Promise<ModelUsage>, options: Options = {}) {
   const getModelUsage = vi.fn(read);
   const setModelCap = vi.fn(options.set ?? (() => Promise.reject(new Error("unexpected call: setModelCap"))));
+  const getModelAlerts = vi.fn(options.alerts ?? (async () => NO_ALERTS));
   renderWithApi(
     <ModelSpendView
       shops={options.shops === undefined ? SHOPS : options.shops}
       tenant={options.tenant === undefined ? "t1" : options.tenant}
       onForget={options.onForget ?? (() => {})}
     />,
-    stubApi({ getModelUsage, setModelCap }),
+    stubApi({ getModelUsage, setModelCap, getModelAlerts }),
   );
-  return { getModelUsage, setModelCap };
+  return { getModelUsage, setModelCap, getModelAlerts };
 }
 
 const tile = (name: string) => screen.getByRole("region", { name });
@@ -330,6 +344,99 @@ describe("the Model spend page", () => {
   });
 });
 
+describe("the Model spend page's shops near or at their caps", () => {
+  /// Noted at 10:00 on 20 and 21 November, days this suite never runs on, so the page words the times the same every day.
+  const crossing = (percent: number, overrides: Partial<ModelCrossing> = {}): ModelCrossing => ({
+    percent, at: percent === 100 ? "2026-11-21T03:00:00.000Z" : "2026-11-20T03:00:00.000Z", capSatang: 10000,
+    spentSatang: percent === 100 ? 10000 : 8000, spentMillisatang: percent === 100 ? 10_000_000 : 8_000_000, ...overrides });
+  const LISTED: ModelAlerts = {
+    month: "2026-11",
+    shops: [
+      { tenant: "t2", percent: 100, crossings: [crossing(80), crossing(100)] },
+      { tenant: "t1", percent: 80, crossings: [crossing(80, { capSatang: 30000, spentSatang: 24001, spentMillisatang: 24_000_100 })] },
+      { tenant: "t9", percent: 80, crossings: [crossing(80)] },
+    ],
+    truncated: false,
+  };
+  const list = () => screen.findByRole("list", { name: "Near or at the cap this month" });
+
+  it("lists the shops at their caps, then those near them, each with what it reached last, from one read", async () => {
+    const { getModelAlerts } = renderPage(async () => usage(), { alerts: async () => LISTED });
+
+    const items = within(await list()).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Sabai TeaAt the capReached its ฿100 cap on 21 November at 10:00, with ฿100 spent.Show",
+      "Baan MaliNear the capReached 80% of its ฿300 cap on 20 November at 10:00, with ฿240.01 spent.Show",
+      // A shop the console's own list no longer has is named by its tenant id.
+      "t9Near the capReached 80% of its ฿100 cap on 20 November at 10:00, with ฿80 spent.Show",
+    ]);
+    expect(within(items[0]!).getByText("At the cap").className).toBe("tag err");
+    expect(within(items[1]!).getByText("Near the cap").className).toBe("tag warn");
+    // One read across all shops, whatever shop the page shows.
+    expect(getModelAlerts).toHaveBeenCalledTimes(1);
+    expect(getModelAlerts).toHaveBeenCalledWith();
+  });
+
+  it("shows a listed shop's month below when its Show is pressed, this month's", async () => {
+    const { getModelUsage } = renderPage(async (tenant, month) => usage({ tenant, month: month ?? "2026-11" }),
+      { alerts: async () => LISTED });
+    await screen.findByRole("region", { name: "November 2026" });
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-10" } });
+    await screen.findByRole("region", { name: "October 2026" });
+
+    fireEvent.click(within(await list()).getByRole("button", { name: "Show Sabai Tea's model spend" }));
+    await waitFor(() => expect(getModelUsage).toHaveBeenLastCalledWith("t2", undefined));
+    expect((screen.getByLabelText("Shop") as HTMLSelectElement).value).toBe("t2");
+    expect((screen.getByLabelText("Month") as HTMLSelectElement).value).toBe("");
+  });
+
+  it("says when no shop is near its cap", async () => {
+    renderPage(async () => usage());
+    expect(await screen.findByText("No shop's model spend has reached 80% of its cap this month.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Near or at the cap this month" })).toBeNull();
+  });
+
+  it("says when the list cannot be read, keeps the shop's month, and reads again from Try again and Refresh", async () => {
+    let answer: ModelAlerts | ApiError = new ApiError(503, "alerts_unavailable");
+    const { getModelAlerts } = renderPage(async () => usage(), { alerts: async () => {
+      if (answer instanceof ApiError) throw answer;
+      return answer;
+    } });
+
+    expect((await screen.findByRole("alert")).textContent).toContain("The API could not read which shops are near their caps. Try again.");
+    expect(await screen.findByRole("region", { name: "Spent" })).toBeTruthy();
+    answer = LISTED;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(within(await list()).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    answer = new ApiError(0, "network");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not reach the API.");
+    expect(getModelAlerts).toHaveBeenCalledTimes(3);
+  });
+
+  it("says when the month had more shops than one read lists", async () => {
+    renderPage(async () => usage(), { alerts: async () => ({ ...LISTED, truncated: true }) });
+    expect(await screen.findByText("Showing the first 3 shops: the API lists no more at once.")).toBeTruthy();
+  });
+
+  it("reads the list again after a cap is changed, which can put a shop on it or take it off", async () => {
+    const SET: ModelCap = { tenant: "t1", capSatang: 20000, capSource: "default", capOverride: null };
+    const { getModelAlerts } = renderPage(async () => usage(), { set: async () => SET });
+    await screen.findByRole("region", { name: "Spent" });
+    fireEvent.click(screen.getByRole("button", { name: "Use the default cap" }));
+    await screen.findByRole("status");
+    await waitFor(() => expect(getModelAlerts).toHaveBeenCalledTimes(2));
+  });
+
+  it("says in the shop's month which thresholds its spend reached, and when", async () => {
+    renderPage(async () => usage({ crossings: [crossing(80, { capSatang: 30000, spentSatang: 24001 })] }));
+    const month = await screen.findByRole("region", { name: "November 2026" });
+    expect(within(month).getByText("Reached 80% of its ฿300 cap on 20 November at 10:00, with ฿240.01 spent.")).toBeTruthy();
+  });
+});
+
 describe("the Model spend page's cap form", () => {
   /// Set at 10:00 on 18 November, a day this suite never runs on, so the page words the time the same way every day.
   const SET: ModelCap = { tenant: "t1", capSatang: 25050, capSource: "override",
@@ -582,6 +689,27 @@ describe("the Model spend page in the console", () => {
     await waitFor(() => expect(within(tile("Monthly cap")).getByText("The default. No operator has set one for this shop.")).toBeTruthy());
     expect(within(tile("Left")).getByText("฿13.41")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Use the default cap" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("puts a shop on the list when its cap is lowered under 80% of its spend, and the Audit page says it was noted", async () => {
+    openConsole();
+    fireEvent.click(await screen.findByRole("button", { name: "Model spend" }));
+    await screen.findByRole("region", { name: "Spent" });
+    // ฿186 of the ฿300 cap is 62%: no shop is near its cap.
+    expect(await screen.findByText("No shop's model spend has reached 80% of its cap this month.")).toBeTruthy();
+
+    // Back on the ฿200 default, ฿186 is 93%.
+    fireEvent.click(screen.getByRole("button", { name: "Use the default cap" }));
+    const list = await screen.findByRole("list", { name: "Near or at the cap this month" });
+    const [item] = within(list).getAllByRole("listitem");
+    expect(within(item!).getByText("Baan Mali")).toBeTruthy();
+    expect(within(item!).getByText("Near the cap")).toBeTruthy();
+    expect(within(item!).getByText(/^Reached 80% of its ฿200 cap .+, with ฿1[6-8]\d(\.\d\d)? spent\.$/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Audit" }));
+    const log = await screen.findByRole("list", { name: "Baan Mali's audit log" });
+    expect(within(log).getByText(
+      "Manut AI noted that the shop's model spend in November 2026 reached 80% of its monthly cap of ฿200.")).toBeTruthy();
   });
 
   it("names the setting when the practice API's gateway settings cannot be read", async () => {

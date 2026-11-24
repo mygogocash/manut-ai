@@ -1,9 +1,10 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { useApi, type ModelCall, type ModelUsage, type Shop } from "../api";
+import { useApi, type ModelAlerts, type ModelCall, type ModelUsage, type Shop } from "../api";
 import { formatStamp } from "../format";
 import { ModelCapForm } from "./ModelCapForm";
-import { useLoad } from "./useLoad";
+import { useLoad, type Loaded } from "./useLoad";
 import {
+  alertsErrorText,
   callOutcomeTag,
   isAuthError,
   modelErrorText,
@@ -15,12 +16,13 @@ import {
   spendLevel,
 } from "./words";
 
-/// The Model spend page: one shop's model spend for one Bangkok month against its monthly cap
+/// The Model spend page: first the shops near or at their caps this month, across all shops
+/// (`GET /v1/admin/model/alerts`), then one shop's model spend for one Bangkok month against its monthly cap
 /// (`GET /v1/admin/model/usage`, docs/model-gateway.md), and the form that sets or clears the cap. The shop is chosen on
-/// the page, starting from the one chosen in the side menu, and so is the month, which is the current one until another
-/// is picked. Every figure is what the API answered: spend rounded up and what is left rounded down, so the page never
-/// shows a shop more room than it has. Nothing here computes money; the only sum is the share of the cap used, which is
-/// integer arithmetic for the bar.
+/// the page, starting from the one chosen in the side menu or from the list's Show, and so is the month, which is the
+/// current one until another is picked. Every figure is what the API answered: spend rounded up and what is left rounded
+/// down, so the page never shows a shop more room than it has. Nothing here computes money; the only sum is the share of
+/// the cap used, which is integer arithmetic for the bar.
 
 /// The months the picker offers before this one.
 const EARLIER_MONTHS = 11;
@@ -39,6 +41,8 @@ export function ModelSpendView({ shops, tenant: chosen, onForget }: {
   const shop = shops?.find((s) => s.tenant === tenant) ?? null;
   const usage = useLoad(shop ? () => api.getModelUsage(shop.tenant, month ?? undefined) : null,
     `model:${shop?.tenant ?? ""}:${month ?? "now"}`);
+  // One read across all shops, whatever shop or month the page shows: the API keeps the list in one record.
+  const alerts = useLoad(() => api.getModelAlerts(), "model-alerts");
   const data = usage.data;
   // Remembered while rendering rather than in an effect, so the picker lists the earlier months with the first answer.
   if (month === null && data && data.month !== currentMonth) setCurrentMonth(data.month);
@@ -88,7 +92,10 @@ export function ModelSpendView({ shops, tenant: chosen, onForget }: {
           </>
         )}
         <div className="acts">
-          <button type="button" className="btn ghost" onClick={usage.reload}>
+          <button type="button" className="btn ghost" onClick={() => {
+            usage.reload();
+            alerts.reload();
+          }}>
             {modelSpendWords.refresh}
           </button>
         </div>
@@ -113,6 +120,10 @@ export function ModelSpendView({ shops, tenant: chosen, onForget }: {
         <p className="hint" style={{ margin: 0 }}>
           {modelSpendWords.intro}
         </p>
+        <NearCapList alerts={alerts} shops={shops} onShow={(chosenTenant) => {
+          setTenant(chosenTenant);
+          setMonth(null);
+        }} />
         {shops && shops.length === 0 ? (
           <p className="hint" style={{ margin: 0 }}>
             {modelSpendWords.noShops}
@@ -122,7 +133,11 @@ export function ModelSpendView({ shops, tenant: chosen, onForget }: {
         ) : data ? (
           <>
             <MonthPanel usage={data} current={month === null} />
-            <ModelCapForm key={shop.tenant} shop={shop} usage={data} onChanged={usage.reload} onForget={onForget} />
+            {/* A new cap can put a shop on the list above or take it off, so both are read again. */}
+            <ModelCapForm key={shop.tenant} shop={shop} usage={data} onChanged={() => {
+              usage.reload();
+              alerts.reload();
+            }} onForget={onForget} />
             <CallsTable shop={shop} usage={data} />
           </>
         ) : null}
@@ -131,8 +146,74 @@ export function ModelSpendView({ shops, tenant: chosen, onForget }: {
   );
 }
 
-/// The month's four figures and where they stand against the cap: a level tag, a bar of the share used, and the counts of
-/// calls made and refused.
+/// The shops whose model spend has reached 80% of their cap this month, or all of it, from the API's one list: each with
+/// its tag, the crossing it reached last, and a button that shows it below. A shop the console's own list does not have
+/// (deleted since it loaded) is named by its tenant id. Its failure says so here and leaves the rest of the page.
+function NearCapList({ alerts, shops, onShow }: {
+  alerts: Loaded<ModelAlerts>;
+  shops: Shop[] | null;
+  onShow: (tenant: string) => void;
+}) {
+  const now = Date.now();
+  const listed = alerts.data;
+  return (
+    <section aria-labelledby="model-alerts-title" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <h2 id="model-alerts-title" className="h2">
+        {modelSpendWords.alertsTitle}
+      </h2>
+      <p className="mut" style={{ margin: 0, fontSize: 13 }}>
+        {modelSpendWords.alertsHelp}
+      </p>
+      {alerts.error ? (
+        <div className="banner err" role="alert">
+          <span className="grow">{alertsErrorText(alerts.error)}</span>
+          <button type="button" className="btn" style={{ color: "var(--ink)" }} onClick={alerts.reload}>
+            {modelSpendWords.tryAgain}
+          </button>
+        </div>
+      ) : !listed ? (
+        <div className="skel" style={{ height: 48 }} aria-label={modelSpendWords.alertsLoading} />
+      ) : listed.shops.length === 0 ? (
+        <p className="hint" style={{ margin: 0 }}>
+          {modelSpendWords.alertsEmpty}
+        </p>
+      ) : (
+        <ul aria-label={modelSpendWords.alertsTitle} style={{ listStyle: "none", margin: 0, padding: 0, display: "flex",
+          flexDirection: "column", gap: 8 }}>
+          {listed.shops.map((alert) => {
+            const name = shops?.find((s) => s.tenant === alert.tenant)?.name ?? alert.tenant;
+            const tag = modelSpendWords.alertTag(alert.percent);
+            const last = alert.crossings[alert.crossings.length - 1];
+            return (
+              <li key={alert.tenant} className="box" style={{ padding: "10px 14px", display: "flex", flexWrap: "wrap",
+                alignItems: "center", gap: 10 }}>
+                <strong>{name}</strong>
+                <span className={tag.className}>{tag.label}</span>
+                {last && (
+                  <span className="mut grow" style={{ fontSize: 13 }}>
+                    {modelSpendWords.crossingText(last, now)}
+                  </span>
+                )}
+                <button type="button" className="btn ghost" aria-label={modelSpendWords.showLabel(name)}
+                  onClick={() => onShow(alert.tenant)}>
+                  {modelSpendWords.showButton}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {listed?.truncated && (
+        <p className="mut" style={{ margin: 0, fontSize: 13 }}>
+          {modelSpendWords.alertsTruncated(listed.shops.length)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/// The month's four figures and where they stand against the cap: a level tag, a bar of the share used, the thresholds
+/// its charged spend has reached, and the counts of calls made and refused.
 function MonthPanel({ usage, current }: { usage: ModelUsage; current: boolean }) {
   const level = spendLevel(usage);
   const tag = modelSpendWords.level[level];
@@ -163,6 +244,11 @@ function MonthPanel({ usage, current }: { usage: ModelUsage; current: boolean })
       <p className="hint" style={{ margin: 0 }}>
         {status}
       </p>
+      {(usage.crossings ?? []).map((crossing) => (
+        <p key={crossing.percent} className="mut" style={{ margin: 0, fontSize: 13 }}>
+          {modelSpendWords.crossingText(crossing)}
+        </p>
+      ))}
       {!current && (
         <p className="mut" style={{ margin: 0, fontSize: 13 }}>
           {modelSpendWords.pastNote}

@@ -16,6 +16,7 @@ import {
   type Identity,
   type ModelCap,
   type ModelCounts,
+  type ModelCrossing,
   type ModelUsage,
   type People,
   type PilotGate,
@@ -912,6 +913,13 @@ export function modelErrorText(error: unknown, action: "read" | "write"): string
   return errorText(error);
 }
 
+/// What went wrong with the list of shops near their caps: the API's own 503 `alerts_unavailable`, or the console's usual
+/// words for anything else, a refused key included.
+export function alertsErrorText(error: unknown): string {
+  return error instanceof ApiError && error.code === "alerts_unavailable" ? modelSpendWords.alertsUnavailable
+    : errorText(error);
+}
+
 export const modelSpendWords = {
   nav: "Model spend",
   title: "Model spend",
@@ -950,6 +958,25 @@ export const modelSpendWords = {
   /// The API keeps one cap per shop, not one per month, so an earlier month is read against the cap as it is now.
   pastNote:
     "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.",
+  /// A threshold the month's charged spend reached, as the API noted it: when, against which cap, and the spend then.
+  crossingText: (crossing: ModelCrossing, now: number = Date.now()) => {
+    const cap = moneyText(crossing.capSatang);
+    const reached = crossing.percent >= 100 ? `its ${cap} cap` : `${crossing.percent}% of its ${cap} cap`;
+    return `Reached ${reached}${whenAfter(crossing.at, now)}, with ${moneyText(crossing.spentSatang)} spent.`;
+  },
+
+  // The shops near or at their caps this month, across all shops (`GET /v1/admin/model/alerts`)
+  alertsTitle: "Near or at the cap this month",
+  alertsHelp:
+    "Every shop whose model spend this month has reached 80% of its cap, or all of it. Only what was charged counts: a call in progress counts once it is.",
+  alertsLoading: "Loading the shops near their caps",
+  alertsEmpty: "No shop's model spend has reached 80% of its cap this month.",
+  alertsUnavailable: "The API could not read which shops are near their caps. Try again.",
+  alertsTruncated: (shown: number) => `Showing the first ${countOf(shown, "shop", "shops")}: the API lists no more at once.`,
+  alertTag: (percent: number) =>
+    percent >= 100 ? { label: "At the cap", className: "tag err" } : { label: "Near the cap", className: "tag warn" },
+  showButton: "Show",
+  showLabel: (shop: string) => `Show ${shop}'s model spend`,
 
   // The four figures
   spentLabel: "Spent",
