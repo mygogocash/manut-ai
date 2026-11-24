@@ -761,3 +761,41 @@ describe("browser steps", () => {
     for (const text of [stored, JSON.stringify(await stepRecords(s.tenant))]) expect(text).not.toContain(PASSWORD);
   });
 });
+
+describe("a worker's list of the shop's sign-ins", () => {
+  it("names only the sign-ins its member may use, by site, and nothing of the account", async () => {
+    const s = await shop();
+    const shopee = await addSignIn(s.tenant, { members: ["nam", "ton"] });
+    await addSignIn(s.tenant, { members: ["ton"], site: "Lazada Seller Center",
+      origins: ["https://sellercenter.lazada.co.th"] });
+    const listed = await (await attempt(s, "nam")).signIns();
+    expect(listed).toEqual({ ok: true, value: { signIns: [{ signInId: shopee, site: SITE, origins: ORIGINS,
+      state: "working" }] } });
+    expect(JSON.stringify(listed)).not.toContain(USERNAME);
+    expect(JSON.stringify(listed)).not.toContain(PASSWORD);
+    expect(JSON.stringify(listed)).not.toContain("members");
+  });
+
+  it("lists every sign-in a member is named on, oldest first, a broken one as broken and a removed one not at all", async () => {
+    const s = await shop();
+    const shopee = await addSignIn(s.tenant, { members: ["ton"] });
+    const lazada = await addSignIn(s.tenant, { members: ["ton"], site: "Lazada Seller Center",
+      origins: ["https://sellercenter.lazada.co.th"] });
+    const removed = await addSignIn(s.tenant, { members: ["ton"], site: "Old shop" });
+    expect((await adminFetch(`${API}/v1/admin/vault/sign-ins/remove`, { method: "POST", headers: OPERATOR,
+      body: JSON.stringify({ tenant: s.tenant, signInId: removed }) })).status).toBe(200);
+    const port = await attempt(s, "ton");
+    expect((await port.signInBroken(lazada)).ok).toBe(true);
+    const listed = await port.signIns();
+    expect(listed.ok && listed.value.signIns.map(({ signInId, state }) => ({ signInId, state }))).toEqual([
+      { signInId: shopee, state: "working" }, { signInId: lazada, state: "broken" }]);
+  });
+
+  it("is refused, as every browser call is, while cloud work is off", async () => {
+    const s = await shop();
+    await addSignIn(s.tenant, { members: ["nam"] });
+    const off: JobFlags = async () => ({ officeCloud: false, officeExternalWrites: false });
+    const listed = await (await attempt(s, "nam", off)).signIns();
+    expect(listed.ok).toBe(false);
+  });
+});

@@ -1402,6 +1402,31 @@ export async function issueSignInGrant(env: VaultEnv, attempt: AttemptRef, signI
   return { ok: true, value: grant };
 }
 
+/// One of the shop's site sign-ins as a worker sees it (job-flow.ts, `signIns`): enough to choose one by its site and ask
+/// for a grant, and nothing a worker has no use for: never the account, nor who else may use it.
+export type WorkerSignIn = { signInId: string; site: string; origins: string[]; state: "working" | "broken" };
+
+/// The worker's list of sign-ins (job-flow.ts, `signIns`), once the port has read the switches and consent and the
+/// attempt's own heartbeat: the shop's live sign-ins this attempt's member is named on, oldest first. A broken one is
+/// listed as broken, since a grant for it is refused until the owner types a new password. Nothing is written to the
+/// audit log: a list changes nothing and reaches no site.
+export async function signInsFor(env: VaultEnv, attempt: AttemptRef):
+  Promise<{ ok: true; value: { signIns: WorkerSignIn[] } } | { ok: false; error: string }> {
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, attempt.tenant, "GET", "/sign-ins"));
+  } catch {
+    answer = null;
+  }
+  if (!answer || answer.status !== 200 || !Array.isArray(answer.body.signIns)) {
+    return { ok: false, error: "vault_unavailable" };
+  }
+  const signIns = (answer.body.signIns as unknown[]).filter((view): view is SignInView =>
+    isRecord(view) && Array.isArray(view.members) && view.members.includes(attempt.member))
+    .map((view) => ({ signInId: view.id, site: view.site, origins: [...view.origins], state: view.state }));
+  return { ok: true, value: { signIns } };
+}
+
 /// The worker's browser step (job-flow.ts, `browserStep`), once the port has read the switches and consent and the
 /// attempt's own heartbeat. Only the fields a step can have are passed on, with the attempt's own member, task and
 /// attempt. Writes `browser_step.queued`, queued or refused, under the attempt, with ids only: never the page, the

@@ -1147,7 +1147,7 @@ malformed report are not.
 
 ### The worker's side
 
-No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and the port has two steps for this.
+No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and these are its browser methods.
 
 - `signIn(signInId, outpostId)` answers `{ grantId, signInId, site, outpostId, expiresAt }`. The control plane reads
   the switches (`officeCloud`) and the owner's consent, then the attempt's own heartbeat, which also gives the member
@@ -1156,6 +1156,10 @@ No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), 
   `consent_required`, and the attempt's, with `ended`), `sign_in_not_found`, `member_not_allowed`, `sign_in_broken`,
   `outpost_not_found`, `outpost_asleep`, `vault_unavailable`. The model asks for a sign-in by its site's name only; it
   never sees a username, a password or a grant.
+- `signIns()` answers `{ signIns: [{ signInId, site, origins, state }] }`: the shop's live sign-ins this attempt's
+  member is named on, oldest first, `state` `working` or `broken`, after the same switches, consent and heartbeat as
+  `signIn`. It is how a worker finds a sign-in by its site's name before asking for a grant. Never the account, the
+  password or who else may use it, and nothing is written to the audit log: a list changes nothing.
 - `signInBroken(signInId)` answers `{ signInId, state: "broken" }`: the site refused the saved password, and no grant
   is issued for the sign-in until a new password is typed. Only a member named on it can report it
   (`member_not_allowed`). A second report keeps the first's time and member.

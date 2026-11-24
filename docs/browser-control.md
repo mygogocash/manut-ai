@@ -14,7 +14,7 @@ The design canvas says it in the owner's words:
 
 Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault object),
 `apps/api/src/browser-control.ts` (the operator, owner and outpost routes) and `apps/api/src/browser-writes.ts`
-(submitting: the write step, its table of kinds, and its hand-out and report). The worker's side is five methods on
+(submitting: the write step, its table of kinds, and its hand-out and report). The worker's side is six methods on
 the job flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
 `outpost-register.test.ts`, `sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes
 are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
@@ -469,7 +469,7 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
    cloud outpost's row, and an owner's route to remove or rename an outpost (today only an operator can remove one).
 4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
    rotation, `POST /v1/admin/vault/reseal`, `docs/pilot-api.md`);
-   changing a sign-in's members; listing to a worker, by site name, the sign-ins its member may use; a live row for a
+   changing a sign-in's members; (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
    as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
    page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
