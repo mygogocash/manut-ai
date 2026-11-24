@@ -1,9 +1,10 @@
-// Customize › Connections in Practice: the owner adding a sign-in to the vault and choosing who may use one
-// (src/pages/ConnectionsPane.tsx; docs/browser-control.md, "The owner's Connections"). Practice keeps the canvas's two sample
-// sign-ins for the person's own shop and changes them by the vault's rules (src/runtime/mock/vault.ts), so both can be walked
-// with no API: an address that is not https said plainly, a page's address kept as its site's part, the password gone from
-// the page once Add is pressed, and the members ticked. Practice is the app's own runtime, so the page asks for it
-// (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which has no vault.
+// Customize › Connections in Practice: the owner adding a sign-in to the vault, choosing who may use one, changing its account
+// or addresses and removing one (src/pages/ConnectionsPane.tsx; docs/browser-control.md, "The owner's Connections"). Practice
+// keeps the canvas's two sample sign-ins for the person's own shop and changes them by the vault's rules
+// (src/runtime/mock/vault.ts), so each can be walked with no API: an address that is not https said plainly, a page's address
+// kept as its site's part, the password gone from the page once Add or Save is pressed, the members ticked, a new address
+// saved only with the password typed again, and a removal asked first. Practice is the app's own runtime, so the page asks
+// for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which has no vault.
 import { expect, test, type Page } from "@playwright/test";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
@@ -146,4 +147,77 @@ test("at Ran Pa Noi, where the person helps, there is nothing to add or choose: 
   await expect(page.getByTestId("vault-unavailable")).toHaveText("Only the shop's owner sees and changes its sign-ins and outposts.");
   await expect(page.getByTestId("signin-add")).toHaveCount(0);
   await expect(page.getByTestId("signin-who")).toHaveCount(0);
+  await expect(page.getByTestId("signin-change")).toHaveCount(0);
+  await expect(page.getByTestId("signin-remove")).toHaveCount(0);
+});
+
+test("changes a sign-in's addresses: a new one waits for the password typed again, and taking one away needs none", async ({ page }) => {
+  await openConnections(page);
+  const shopee = row(page, "Shopee Seller Centre");
+  await shopee.getByTestId("signin-change").click();
+  const form = shopee.getByTestId("change-form");
+  await expect(form).toBeVisible();
+  // The password first, as "Needs a new password" asks; the account and the addresses as the vault has them.
+  await expect(form.getByTestId("password-input")).toBeFocused();
+  await expect(form.getByTestId("change-username")).toHaveValue("baan.mali@example.com");
+  const addresses = form.getByTestId("change-address");
+  await expect(addresses).toHaveCount(2);
+  await expect(addresses.nth(0)).toHaveValue("https://seller.shopee.co.th");
+  await expect(addresses.nth(1)).toHaveValue("https://accounts.shopee.co.th");
+  const save = form.getByTestId("change-save");
+  await expect(save).toBeDisabled();
+
+  // A new address needs the password typed again: Save waits, and the words under the password say why.
+  await form.getByTestId("change-address-more").click();
+  await addresses.nth(2).fill("https://seller-centre.shopee.co.th/portal/sale?type=toship");
+  await expect(form.getByTestId("change-address-kept")).toHaveText("Kept as https://seller-centre.shopee.co.th");
+  await expect(form.getByTestId("change-password-help")).toHaveText(
+    "A new account or a new address needs the password typed here too, so the vault never types the saved one somewhere new.",
+  );
+  await expect(save).toBeDisabled();
+  await form.getByTestId("password-input").fill(PASSWORD);
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.getByTestId("vault-notice")).toHaveText("Saved. The vault signs in to Shopee Seller Centre with this account and these addresses from now on.");
+  await expect(form).toHaveCount(0);
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  expect(await page.content()).not.toContain(PASSWORD);
+
+  // Taking an address away needs no password: the saved one goes to fewer places.
+  await shopee.getByTestId("signin-change").click();
+  await expect(addresses).toHaveCount(3);
+  await form.getByTestId("change-address-remove").nth(1).click();
+  await expect(addresses).toHaveCount(2);
+  await expect(form.getByTestId("change-password-help")).toHaveText("The vault keeps it sealed and types it in for your team. The AI never sees it.");
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.getByTestId("vault-notice")).toHaveText("Saved. The vault no longer types the password for Shopee Seller Centre at the addresses you took away.");
+  await shopee.getByTestId("signin-change").click();
+  await expect(addresses).toHaveCount(2);
+  await expect(addresses.nth(0)).toHaveValue("https://seller.shopee.co.th");
+  await expect(addresses.nth(1)).toHaveValue("https://seller-centre.shopee.co.th");
+  await form.getByTestId("change-cancel").click();
+  await expect(form).toHaveCount(0);
+});
+
+test("removes a sign-in only once its question is answered: the site and the account named, Keep keeps it", async ({ page }) => {
+  await openConnections(page);
+  const carrier = row(page, "Carrier portal");
+  await carrier.getByTestId("signin-remove").click();
+  await expect(carrier.getByTestId("signin-remove-question")).toHaveText(
+    "Remove the sign-in to Carrier portal as baanmali? Your team can no longer sign in there. This cannot be undone: to use it again, add it again with its password.",
+  );
+  // The safe answer holds the focus, and nothing else can be asked meanwhile.
+  await expect(carrier.getByTestId("signin-remove-keep")).toBeFocused();
+  await expect(page.getByTestId("signin-add")).toBeDisabled();
+  await carrier.getByTestId("signin-remove-keep").click();
+  await expect(carrier.getByTestId("signin-remove-question")).toHaveCount(0);
+  await expect(page.getByTestId("signin")).toHaveCount(2);
+
+  await carrier.getByTestId("signin-remove").click();
+  await carrier.getByTestId("signin-remove-yes").click();
+  await expect(page.getByTestId("vault-notice")).toHaveText("Removed Carrier portal. Your team can no longer sign in there.");
+  await expect(page.getByTestId("signin")).toHaveCount(1);
+  await expect(row(page, "Carrier portal")).toHaveCount(0);
+  await expect(page.getByTestId("signin-add")).toBeEnabled();
 });

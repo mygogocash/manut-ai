@@ -526,24 +526,35 @@
   gap: 12px;
   padding: 2px 0 6px;
 }
-.brain .add-signin .field > .help {
+/* The desktop's own: Change, grown to a sign-in's account and addresses as well as its password, is a column of short fields
+   as Add a sign-in is, with its address fields laid out the same way. */
+.brain .signin .ask.change-signin {
+  gap: 12px;
+  padding-bottom: 6px;
+}
+.brain .add-signin .field > .help,
+.brain .change-signin .field > .help {
   margin: 0;
 }
-.brain .add-signin .address {
+.brain .add-signin .address,
+.brain .change-signin .address {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.brain .add-signin .address-row {
+.brain .add-signin .address-row,
+.brain .change-signin .address-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.brain .add-signin .address-row .input {
+.brain .add-signin .address-row .input,
+.brain .change-signin .address-row .input {
   flex: 1 1 auto;
   min-width: 0;
 }
-.brain .add-signin .lk.more {
+.brain .add-signin .lk.more,
+.brain .change-signin .lk.more {
   align-self: flex-start;
 }
 .brain .help.err {

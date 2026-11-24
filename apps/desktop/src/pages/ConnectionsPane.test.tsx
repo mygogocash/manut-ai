@@ -1,7 +1,8 @@
 // Customize › Connections for the shop's owner (connections.ts, ConnectionsPane.tsx): the canvas's Vault box and every outpost
-// of the shop, drawn with react-dom/server in each state the boards draw, the in-place questions (Change, Rename, Remove), and
-// above all that the password the owner types leaves the page's state the moment Save is pressed and is shown nowhere. The
-// views use no hooks, so a test calls them as plain functions to read the handlers a string render leaves out.
+// of the shop, drawn with react-dom/server in each state the boards draw, the in-place questions (Change, Who uses it, Remove,
+// Rename), and above all that the password the owner types leaves the page's state the moment Save is pressed and is shown
+// nowhere, that Change never saves a new account or address without it, and that Remove asks first. The views use no hooks,
+// so a test calls them as plain functions to read the handlers a string render leaves out.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
@@ -12,6 +13,9 @@ import {
   addedLine,
   addFields,
   addStart,
+  changedUsername,
+  changeStart,
+  changeTodo,
   CONN_START,
   connectionsDo,
   connReduce,
@@ -19,12 +23,14 @@ import {
   membersReady,
   nameReady,
   outpostLine,
+  passwordNeeded,
   passwordReady,
   readAddress,
   readAddresses,
   signInLine,
   thisMacRecord,
   type AddDraft,
+  type ChangeDraft,
   type ConnAction,
   type ConnectionsCalls,
   type ConnUi,
@@ -45,6 +51,8 @@ const PASSWORD = "typed-pw-c0ffee-91";
 const signIn = (over: Partial<VaultSignIn> = {}): VaultSignIn => ({
   id: "signin-shopee",
   site: "Shopee Seller Centre",
+  username: "baan.mali@example.com",
+  origins: ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"],
   members: ["nam", "ton"],
   state: "working",
   passwordSetAt: at(3, 9, 0),
@@ -55,7 +63,10 @@ const signIn = (over: Partial<VaultSignIn> = {}): VaultSignIn => ({
   createdAt: at(3, 9, 0),
   ...over,
 });
-const carrier = signIn({ id: "signin-carrier", site: "Carrier portal", members: ["nam"], state: "broken", brokenAt: at(24, 9, 2), brokenBy: "nam" });
+const carrier = signIn({ id: "signin-carrier", site: "Carrier portal", username: "baanmali", origins: ["https://track.carrier.example"], members: ["nam"],
+  state: "broken", brokenAt: at(24, 9, 2), brokenBy: "nam" });
+/** Change opened on the carrier portal's row, as its Change button opens it. */
+const OPEN_CARRIER: ConnAction = { type: "change", signIn: "signin-carrier", username: "baanmali", origins: ["https://track.carrier.example"] };
 const mac: ShopOutpost = { id: "outpost-mac", name: "Front desk Mac", kind: "this_mac", online: true, lastSeenAt: at(24, 9, 59), createdAt: at(3, 9, 0) };
 const cloud: ShopOutpost = { id: "outpost-cloud", name: "Cloud outpost", kind: "cloud", online: false, lastSeenAt: null, createdAt: at(1, 8, 0) };
 const DATA: ShopConnections = { shop: "pilot:baan-mali", signIns: [signIn(), carrier], outposts: [mac, cloud] };
@@ -99,6 +110,8 @@ const noCalls: ConnectionsCalls = {
   add: () => Promise.reject(new Error("not this test's change")),
   password: () => Promise.reject(new Error("not this test's change")),
   members: () => Promise.reject(new Error("not this test's change")),
+  change: () => Promise.reject(new Error("not this test's change")),
+  removeSignIn: () => Promise.reject(new Error("not this test's change")),
   rename: () => Promise.reject(new Error("not this test's change")),
   remove: () => Promise.reject(new Error("not this test's change")),
 };
@@ -135,14 +148,20 @@ describe("the Vault box", () => {
     const html = vault(props());
     expect(words(html)).toBe(
       "Vault Passwords are hidden from AI Sign-ins your team may use. The vault types the password in. The AI never sees it. " +
-        "Shopee Seller Centre Used by Nam and Ton, last today 09:02 Added 3 November Working Change Who uses it " +
-        "Carrier portal The site refused the saved password today at 09:02. Added 3 November Needs a new password Change Who uses it " +
+        "Shopee Seller Centre Used by Nam and Ton, last today 09:02 Added 3 November Working Change Who uses it Remove " +
+        "Carrier portal The site refused the saved password today at 09:02. Added 3 November Needs a new password Change Who uses it Remove " +
         "Add a sign-in",
     );
     expect(byTestId(VaultPane({ p: props() }), "signin-who").map((e) => [e.props.className, e.props["aria-label"]])).toEqual([
       ["lk", "Who uses it: Shopee Seller Centre"],
       ["lk", "Who uses it: Carrier portal"],
     ]);
+    expect(byTestId(VaultPane({ p: props() }), "signin-remove").map((e) => [e.props.className, e.props["aria-label"]])).toEqual([
+      ["lk", "Remove: Shopee Seller Centre"],
+      ["lk", "Remove: Carrier portal"],
+    ]);
+    // The row shows the canvas's lines: the account and the addresses are for Change and Remove's question, not the row.
+    expect(words(html)).not.toContain("baan.mali@example.com");
     // The states board's two rows: working, with a quiet Change; refused, with a warning tag and a button.
     const [shopee, refused] = byTestId(VaultPane({ p: props() }), "signin-change");
     expect([shopee?.props.className, refused?.props.className]).toEqual(["lk", "btn"]);
@@ -168,23 +187,25 @@ describe("the Vault box", () => {
     expect(outposts(props({ state: LOADING }))).toBe("");
   });
 
-  it("opens a password field in the row on Change, which saves only what was typed and cancels on Escape", () => {
+  it("opens Change in the row with its password first, which saves only what was typed and cancels on Escape", () => {
     const dispatch = vi.fn();
     const change = byTestId(VaultPane({ p: props({ dispatch }) }), "signin-change")[1];
     (change?.props.onClick as () => void)();
-    expect(dispatch).toHaveBeenCalledWith({ type: "change", signIn: "signin-carrier" });
+    expect(dispatch).toHaveBeenCalledWith(OPEN_CARRIER);
 
     const onSave = vi.fn();
-    const empty = props({ ui: reduce({ type: "change", signIn: "signin-carrier" }), dispatch, onSave });
+    const empty = props({ ui: reduce(OPEN_CARRIER), dispatch, onSave });
     const field = byTestId(VaultPane({ p: empty }), "password-input")[0];
-    expect(field?.props).toMatchObject({ type: "password", value: "", autoComplete: "new-password", spellCheck: false, maxLength: 1024 });
-    expect(byTestId(VaultPane({ p: empty }), "password-save")[0]?.props.disabled).toBe(true);
-    expect(words(vault(empty))).toContain("New password for Carrier portal");
-    // Nothing else can be asked while the question is open.
-    expect(byTestId(VaultPane({ p: empty }), "signin-change").map((e) => e.props.disabled)).toEqual([true]);
+    expect(field?.props).toMatchObject({ type: "password", value: "", autoComplete: "new-password", spellCheck: false, maxLength: 1024, autoFocus: true });
+    expect(byTestId(VaultPane({ p: empty }), "change-save")[0]?.props.disabled).toBe(true);
+    expect(words(vault(empty))).toContain("Password for Carrier portal");
+    // Nothing else can be asked while the question is open: the other row's links wait, and this row's give way to it.
+    expect([...byTestId(VaultPane({ p: empty }), "signin-change"), ...byTestId(VaultPane({ p: empty }), "signin-remove")].map((e) => e.props.disabled))
+      .toEqual([true, true]);
 
-    const typed = props({ ui: reduce({ type: "change", signIn: "signin-carrier" }, { type: "draft", text: PASSWORD }), dispatch, onSave });
-    const form = byTestId(VaultPane({ p: typed }), "password-form")[0];
+    const typed = props({ ui: reduce(OPEN_CARRIER, { type: "field", field: "password", text: PASSWORD }), dispatch, onSave });
+    expect(byTestId(VaultPane({ p: typed }), "change-save")[0]?.props.disabled).toBe(false);
+    const form = byTestId(VaultPane({ p: typed }), "change-form")[0];
     (form?.props.onSubmit as (e: { preventDefault(): void }) => void)({ preventDefault() {} });
     expect(onSave).toHaveBeenCalledTimes(1);
     // The field's value is drawn as the browser keeps it for a password field: never as words on the page.
@@ -233,15 +254,17 @@ describe("the shop's outposts", () => {
 
 describe("the typed password", () => {
   it("leaves the page's state the moment Save is pressed, and is not put back when the send fails", () => {
-    const typing = reduce({ type: "change", signIn: "signin-carrier" }, { type: "draft", text: PASSWORD });
-    expect(typing.ask).toEqual({ kind: "password", signIn: "signin-carrier", draft: PASSWORD });
+    const typing = reduce(OPEN_CARRIER, { type: "field", field: "password", text: PASSWORD });
+    const opened = { username: "baanmali", addresses: ["https://track.carrier.example"] };
+    expect(typing.ask).toEqual({ kind: "change", signIn: "signin-carrier", draft: { ...opened, password: PASSWORD } });
     const sending = connReduce(typing, { type: "begin" });
-    expect(sending).toEqual({ ask: { kind: "password", signIn: "signin-carrier", draft: "" }, busy: true, at: "vault", error: null, notice: null });
+    expect(sending).toEqual({ ask: { kind: "change", signIn: "signin-carrier", draft: { ...opened, password: "" } }, busy: true, at: "vault", error: null,
+      notice: null });
     expect(JSON.stringify(sending)).not.toContain(PASSWORD);
     // Typing is refused while it is on its way, so nothing new collects in the field.
-    expect(connReduce(sending, { type: "draft", text: PASSWORD })).toBe(sending);
+    expect(connReduce(sending, { type: "field", field: "password", text: PASSWORD })).toBe(sending);
     const refused = connReduce(sending, { type: "failed", message: t("conn.err.again"), close: false });
-    expect(refused.ask).toEqual({ kind: "password", signIn: "signin-carrier", draft: "" });
+    expect(refused.ask).toEqual({ kind: "change", signIn: "signin-carrier", draft: { ...opened, password: "" } });
     expect(JSON.stringify(refused)).not.toContain(PASSWORD);
     const saved = connReduce(sending, { type: "done", notice: t("vault.saved") });
     expect(saved).toEqual({ ask: null, busy: false, at: "vault", error: null, notice: "Saved. The vault types the new password from now on." });
@@ -275,6 +298,8 @@ describe("the typed password", () => {
       add: () => Promise.reject({ code, message }),
       password: () => Promise.reject({ code, message }),
       members: () => Promise.reject({ code, message }),
+      change: () => Promise.reject({ code, message }),
+      removeSignIn: () => Promise.reject({ code, message }),
       rename: () => Promise.reject({ code, message }),
       remove: () => Promise.reject({ code, message }),
     });
@@ -327,7 +352,8 @@ describe("renaming and removing, step by step", () => {
 
   it("lets nothing new be asked while a change is on its way", () => {
     const busy = connReduce(reduce({ type: "remove", outpost: "outpost-cloud" }), { type: "begin" });
-    expect(connReduce(busy, { type: "change", signIn: "signin-shopee" })).toBe(busy);
+    expect(connReduce(busy, { type: "change", signIn: "signin-shopee", username: "baan.mali@example.com", origins: ["https://seller.shopee.co.th"] })).toBe(busy);
+    expect(connReduce(busy, { type: "removeSignIn", signIn: "signin-shopee" })).toBe(busy);
     expect(connReduce(busy, { type: "cancel" })).toBe(busy);
     expect(connReduce(busy, { type: "rename", outpost: "outpost-mac", name: "x" })).toBe(busy);
   });
@@ -513,7 +539,7 @@ describe("Add a sign-in", () => {
     for (const line of [
       "A site's name is 1 to 80 letters.",
       "Only addresses that start with https:// work.",
-      "Leave the account's name and password out of the address: type them below.",
+      "Leave the account's name and password out of the address: each has a field of its own.",
       "Paste the whole address from your browser, starting with https://.",
       "This address is already in the list.",
       "The account's name is 1 to 256 characters.",
@@ -579,9 +605,9 @@ describe("Add a sign-in", () => {
     (byTestId(box(), "add-address-more")[0]?.props.onClick as () => void)();
     (byTestId(box(), "member-pim")[0]?.props.onChange as () => void)();
     expect(dispatch.mock.calls.map(([a]) => a)).toEqual([
-      { type: "addField", field: "site", text: "Carrier" },
-      { type: "addField", field: "username", text: "fon" },
-      { type: "addField", field: "password", text: "pw" },
+      { type: "field", field: "site", text: "Carrier" },
+      { type: "field", field: "username", text: "fon" },
+      { type: "field", field: "password", text: "pw" },
       { type: "address", index: 1, text: "https://b.example" },
       { type: "addressLess", index: 0 },
       { type: "addressMore" },
@@ -599,10 +625,10 @@ describe("Add a sign-in", () => {
   it("keeps no password once Add is pressed: not in the page's state, the lists or its words, and not put back after a refusal", async () => {
     const typing = reduce(
       { type: "add" },
-      { type: "addField", field: "site", text: "Carrier portal" },
+      { type: "field", field: "site", text: "Carrier portal" },
       { type: "address", index: 0, text: "https://track.carrier.example" },
-      { type: "addField", field: "username", text: "baan.mali" },
-      { type: "addField", field: "password", text: PASSWORD },
+      { type: "field", field: "username", text: "baan.mali" },
+      { type: "field", field: "password", text: PASSWORD },
       { type: "member", member: "nam" },
     );
     expect(JSON.stringify(typing)).toContain(PASSWORD);
@@ -617,7 +643,7 @@ describe("Add a sign-in", () => {
       notice: null,
     });
     // Nothing collects in the form while it is on its way.
-    for (const a of [{ type: "addField", field: "password", text: PASSWORD }, { type: "member", member: "kit" }, { type: "addressMore" }, { type: "cancel" }] as ConnAction[]) {
+    for (const a of [{ type: "field", field: "password", text: PASSWORD }, { type: "member", member: "kit" }, { type: "addressMore" }, { type: "cancel" }] as ConnAction[]) {
       expect(connReduce(sending, a)).toBe(sending);
     }
     const refused = connReduce(sending, { type: "failed", message: t("conn.err.again"), close: false });
@@ -740,6 +766,218 @@ describe("Add a sign-in and Who uses it in every language", () => {
       });
       expect(drawn(asks[0]!)).toContain(t("vault.add.notHttps"));
       expect(drawn(asks[0]!)).not.toContain("Only addresses that start with https://");
+    }
+  });
+});
+
+// ---- Change, grown to a sign-in's account and addresses, and Remove -----------------------------------------------------
+
+const shopee = signIn();
+/** Change open on the Shopee row with `draft` typed into it. */
+const changing = (draft: Partial<ChangeDraft>, over: Partial<ConnectionsProps> = {}) =>
+  props({ ui: { ...CONN_START, ask: { kind: "change", signIn: "signin-shopee", draft: { ...changeStart(shopee), ...draft } }, at: "vault" }, ...over });
+/** A page's address on a host the sign-in was not given for. */
+const NEW_ADDRESS = "https://seller-centre.shopee.co.th/portal/sale?type=toship";
+
+describe("Change, with the sign-in's account and addresses", () => {
+  it("opens with the account and addresses as the vault has them, no password, and Save waiting for something new", () => {
+    const opened = reduce({ type: "change", signIn: "signin-shopee", username: shopee.username, origins: shopee.origins });
+    expect(opened.ask).toEqual({ kind: "change", signIn: "signin-shopee", draft: { username: "baan.mali@example.com", addresses: shopee.origins, password: "" } });
+    const box = VaultPane({ p: props({ ui: opened }) });
+    expect(byTestId(box, "change-username")[0]?.props).toMatchObject({ type: "text", value: "baan.mali@example.com", spellCheck: false });
+    expect(byTestId(box, "change-address").map((e) => e.props.value)).toEqual(shopee.origins);
+    expect(byTestId(box, "change-save")[0]?.props.disabled).toBe(true);
+    expect(changeTodo(shopee, changeStart(shopee))).toBeNull();
+    const said = words(vault(props({ ui: opened })));
+    for (const line of ["Password for Shopee Seller Centre", "The account's name on the site", "Its address", "Add another address of this site"]) {
+      expect(said).toContain(line);
+    }
+  });
+
+  it("waits for the password typed again before saving a new address or another account, and says so under it", () => {
+    for (const draft of [
+      { addresses: [...shopee.origins, NEW_ADDRESS] },
+      { addresses: [NEW_ADDRESS] },
+      { addresses: [shopee.origins[0]!, NEW_ADDRESS] },
+      { username: "orders@baanmali.example" },
+      { username: "orders@baanmali.example", addresses: [shopee.origins[0]!] },
+    ]) {
+      const p = changing(draft);
+      expect(byTestId(VaultPane({ p }), "change-save")[0]?.props.disabled, JSON.stringify(draft)).toBe(true);
+      expect(byTestId(VaultPane({ p }), "change-password-help")[0]?.props.className, JSON.stringify(draft)).toBe("help err");
+      expect(words(vault(p))).toContain("A new account or a new address needs the password typed here too");
+      expect(passwordNeeded(shopee, { ...changeStart(shopee), ...draft })).toBe(true);
+      expect(changeTodo(shopee, { ...changeStart(shopee), ...draft })).toBeNull();
+      // With the password typed again, it is a change of the account and addresses that carries it.
+      expect(changeTodo(shopee, { ...changeStart(shopee), ...draft, password: PASSWORD })).toMatchObject({ what: "change", signIn: "signin-shopee",
+        change: { password: PASSWORD } });
+      expect(byTestId(VaultPane({ p: changing({ ...draft, password: PASSWORD }) }), "change-save")[0]?.props.disabled).toBe(false);
+    }
+    expect(changeTodo(shopee, { ...changeStart(shopee), addresses: [NEW_ADDRESS], password: PASSWORD })).toEqual({ what: "change", signIn: "signin-shopee",
+      change: { origins: ["https://seller-centre.shopee.co.th"], username: "baan.mali@example.com", password: PASSWORD } });
+  });
+
+  it("takes addresses away with no password, keeping at least one", () => {
+    const narrowed = { ...changeStart(shopee), addresses: [shopee.origins[1]!] };
+    expect(passwordNeeded(shopee, narrowed)).toBe(false);
+    expect(changeTodo(shopee, narrowed)).toEqual({ what: "change", signIn: "signin-shopee",
+      change: { origins: [shopee.origins[1]], username: shopee.username, password: null } });
+    const p = changing({ addresses: [shopee.origins[1]!] });
+    expect(byTestId(VaultPane({ p }), "change-save")[0]?.props.disabled).toBe(false);
+    expect(byTestId(VaultPane({ p }), "change-password-help")[0]?.props.className).toBe("help");
+    // An emptied field is left out, and no address at all is no sign-in, with a password or without.
+    expect(changeTodo(shopee, { ...changeStart(shopee), addresses: ["", shopee.origins[0]!] })).toMatchObject({ change: { origins: [shopee.origins[0]], password: null } });
+    expect(changeTodo(shopee, { ...changeStart(shopee), addresses: [""] })).toBeNull();
+    expect(changeTodo(shopee, { ...changeStart(shopee), addresses: [""], password: PASSWORD })).toBeNull();
+  });
+
+  it("sends a new password alone as one, with the account and addresses as they were", () => {
+    expect(changeTodo(shopee, { ...changeStart(shopee), password: PASSWORD })).toEqual({ what: "password", signIn: "signin-shopee", password: PASSWORD });
+    // The same addresses in another order, or a paste's spaces at the account's ends, are no change to them.
+    expect(changeTodo(shopee, { addresses: [...shopee.origins].reverse(), username: ` ${shopee.username} `, password: PASSWORD }))
+      .toEqual({ what: "password", signIn: "signin-shopee", password: PASSWORD });
+    expect(changeTodo(shopee, { ...changeStart(shopee), password: "x".repeat(1025) })).toBeNull();
+  });
+
+  it("reads the account without a paste's spaces, and keeps one the vault holds with a space at an end", () => {
+    expect(changedUsername(shopee, { username: "  orders@baanmali.example " })).toBe("orders@baanmali.example");
+    const spaced = signIn({ username: "baan.mali " });
+    expect(changedUsername(spaced, { username: "baan.mali" })).toBe("baan.mali ");
+    expect(changeTodo(spaced, { ...changeStart(spaced), username: "baan.mali" })).toBeNull();
+  });
+
+  it("says under each field what the vault would not keep, and saves nothing while one is wrong", () => {
+    const p = changing({ username: "fon\u0007", addresses: ["http://seller.shopee.co.th", "https://fon:pw@seller.shopee.co.th", shopee.origins[0]!], password: PASSWORD });
+    const said = words(vault(p));
+    for (const line of ["The account's name is 1 to 256 characters.", "Only addresses that start with https:// work.",
+      "Leave the account's name and password out of the address: each has a field of its own."]) {
+      expect(said).toContain(line);
+    }
+    expect(said).not.toContain("fon:pw");
+    expect(byTestId(VaultPane({ p }), "change-save")[0]?.props.disabled).toBe(true);
+    expect(words(vault(changing({ addresses: [NEW_ADDRESS] })))).toContain("Kept as https://seller-centre.shopee.co.th");
+  });
+
+  it("changes its fields through the page's own actions, as Add a sign-in's change, and keeps no password once Save is pressed", () => {
+    const dispatch = vi.fn();
+    const box = () => VaultPane({ p: changing({}, { dispatch }) });
+    (byTestId(box(), "change-username")[0]?.props.onChange as Change)({ target: { value: "orders@baanmali.example" } });
+    (byTestId(box(), "password-input")[0]?.props.onChange as Change)({ target: { value: "pw" } });
+    (byTestId(box(), "change-address")[1]?.props.onChange as Change)({ target: { value: NEW_ADDRESS } });
+    (byTestId(box(), "change-address-remove")[0]?.props.onClick as () => void)();
+    (byTestId(box(), "change-address-more")[0]?.props.onClick as () => void)();
+    expect(dispatch.mock.calls.map(([a]) => a)).toEqual([
+      { type: "field", field: "username", text: "orders@baanmali.example" },
+      { type: "field", field: "password", text: "pw" },
+      { type: "address", index: 1, text: NEW_ADDRESS },
+      { type: "addressLess", index: 0 },
+      { type: "addressMore" },
+    ]);
+    let s = reduce({ type: "change", signIn: "signin-shopee", username: shopee.username, origins: shopee.origins });
+    for (const a of dispatch.mock.calls.map(([a]) => a as ConnAction)) s = connReduce(s, a);
+    // The site's name is Add a sign-in's alone.
+    s = connReduce(s, { type: "field", field: "site", text: "Lazada" });
+    expect(s.ask).toEqual({ kind: "change", signIn: "signin-shopee", draft: { username: "orders@baanmali.example", addresses: [NEW_ADDRESS, ""], password: "pw" } });
+    const sending = connReduce(connReduce(s, { type: "field", field: "password", text: PASSWORD }), { type: "begin" });
+    expect(JSON.stringify(sending)).not.toContain(PASSWORD);
+    expect(sending.ask).toEqual({ kind: "change", signIn: "signin-shopee", draft: { username: "orders@baanmali.example", addresses: [NEW_ADDRESS, ""], password: "" } });
+  });
+
+  it("sends the change once, to the shop its row was read for, and says what it did", async () => {
+    const sent: unknown[][] = [];
+    const moved = signIn({ origins: ["https://seller-centre.shopee.co.th"], passwordSetAt: NOW / 1000 });
+    const calls: ConnectionsCalls = {
+      ...noCalls,
+      change: async (...args) => {
+        sent.push(args);
+        return { signIn: moved };
+      },
+    };
+    const change = { origins: ["https://seller-centre.shopee.co.th"], username: shopee.username, password: PASSWORD };
+    const done = await connectionsDo(calls, DATA, { what: "change", signIn: "signin-shopee", change });
+    expect(sent).toEqual([["pilot:baan-mali", "signin-shopee", change]]);
+    expect(done.data.signIns[0]).toEqual(moved);
+    expect(done.action).toEqual({ type: "done", notice: "Saved. The vault signs in to Shopee Seller Centre with this account and these addresses from now on." });
+    expect(JSON.stringify(done)).not.toContain(PASSWORD);
+    const narrowed = await connectionsDo({ ...calls, change: async () => ({ signIn: shopee }) }, DATA,
+      { what: "change", signIn: "signin-shopee", change: { ...change, origins: [shopee.origins[0]!], password: null } });
+    expect(narrowed.action).toEqual({ type: "done", notice: "Saved. The vault no longer types the password for Shopee Seller Centre at the addresses you took away." });
+    // The vault's refusals, in the owner's words; a runtime that repeats the password gets it on no page; a sign-in gone is
+    // dropped.
+    const refusing = (code: string, message = "runtime words"): ConnectionsCalls => ({ ...noCalls, change: () => Promise.reject({ code, message }) });
+    const todo = { what: "change" as const, signIn: "signin-shopee", change };
+    expect((await connectionsDo(refusing("password_required"), DATA, todo)).action).toEqual({ type: "failed",
+      message: "Type the password again: a new account or a new address needs it, so the vault never types the saved one somewhere new.", close: false });
+    expect((await connectionsDo(refusing("no_change"), DATA, todo)).action).toEqual({ type: "failed",
+      message: "Nothing changed: that is the account and the addresses it has now.", close: false });
+    expect((await connectionsDo(refusing("refused", `kept ${PASSWORD}`), DATA, todo)).action).toEqual({ type: "failed", message: "That did not work. Try again.", close: false });
+    const gone = await connectionsDo(refusing("sign_in_not_found"), DATA, todo);
+    expect(gone).toEqual({ data: { ...DATA, signIns: [carrier] }, action: { type: "failed", message: "That sign-in is no longer in the vault.", close: true } });
+  });
+});
+
+describe("Removing a sign-in", () => {
+  it("asks first in the row, naming the site and the account, that the team can no longer sign in there and that it cannot be undone", () => {
+    const dispatch = vi.fn();
+    (byTestId(VaultPane({ p: props({ dispatch }) }), "signin-remove")[1]?.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenCalledWith({ type: "removeSignIn", signIn: "signin-carrier" });
+    const asking = reduce({ type: "removeSignIn", signIn: "signin-carrier" });
+    expect(asking).toEqual({ ...CONN_START, ask: { kind: "removeSignIn", signIn: "signin-carrier" }, at: "vault" });
+    const onRemove = vi.fn();
+    const p = props({ ui: asking, onRemove, dispatch });
+    expect(words(vault(p))).toContain(
+      "Carrier portal Remove the sign-in to Carrier portal as baanmali? Your team can no longer sign in there. " +
+        "This cannot be undone: to use it again, add it again with its password. Remove Keep",
+    );
+    const box = VaultPane({ p });
+    const [yes, keep] = [byTestId(box, "signin-remove-yes")[0], byTestId(box, "signin-remove-keep")[0]];
+    // The safe answer holds the focus, and the question's buttons are new elements, so it takes it as they appear.
+    expect(keep?.props.autoFocus).toBe(true);
+    expect([yes?.key, keep?.key]).toEqual(["remove-yes", "remove-keep"]);
+    // Nothing else can be asked meanwhile, and nothing is removed until the owner says so.
+    expect([...byTestId(box, "signin-change"), ...byTestId(box, "signin-who"), ...byTestId(box, "signin-remove"), ...byTestId(box, "signin-add")]
+      .map((e) => e.props.disabled)).toEqual([true, true, true, true]);
+    expect(onRemove).not.toHaveBeenCalled();
+    (keep?.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "cancel" });
+    (yes?.props.onClick as () => void)();
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes it from the shop its row was read for, says so, and drops a row already gone", async () => {
+    const sent: unknown[][] = [];
+    const calls: ConnectionsCalls = {
+      ...noCalls,
+      removeSignIn: async (...args) => {
+        sent.push(args);
+        return { signIn: "signin-carrier" };
+      },
+    };
+    const done = await connectionsDo(calls, DATA, { what: "removeSignIn", signIn: "signin-carrier" });
+    expect(sent).toEqual([["pilot:baan-mali", "signin-carrier"]]);
+    expect(done).toEqual({ data: { ...DATA, signIns: [shopee] }, action: { type: "done", notice: "Removed Carrier portal. Your team can no longer sign in there." } });
+    const refusing = (code: string): ConnectionsCalls => ({ ...noCalls, removeSignIn: () => Promise.reject({ code, message: "runtime words" }) });
+    const gone = await connectionsDo(refusing("sign_in_not_found"), DATA, { what: "removeSignIn", signIn: "signin-carrier" });
+    expect(gone).toEqual({ data: { ...DATA, signIns: [shopee] }, action: { type: "failed", message: "That sign-in is no longer in the vault.", close: true } });
+    const helper = await connectionsDo(refusing("owner_only"), DATA, { what: "removeSignIn", signIn: "signin-carrier" });
+    expect(helper).toEqual({ data: DATA, action: { type: "failed", message: "Only the shop's owner sees and changes its sign-ins and outposts.", close: false } });
+  });
+});
+
+describe("Change and Remove in every language", () => {
+  it("have their words in ko, ja and zh, never the English, and name the site and the account as they are", () => {
+    const drawn = (ui: ConnUi) => words(vault(props({ ui })));
+    const asks = [
+      { ...CONN_START, ask: { kind: "change" as const, signIn: "signin-shopee", draft: { ...changeStart(shopee), addresses: [NEW_ADDRESS] } }, at: "vault" as const },
+      reduce({ type: "removeSignIn", signIn: "signin-carrier" }),
+    ];
+    const english = asks.map(drawn);
+    for (const lang of LANGS.filter((l) => l !== "en")) {
+      setLang(lang);
+      asks.forEach((ui, i) => expect(drawn(ui), `${lang} ${i}`).not.toBe(english[i]));
+      expect(drawn(asks[0]!)).toContain(t("vault.change.again"));
+      expect(drawn(asks[1]!)).toContain(t("vault.removeAsk", { site: "Carrier portal", account: "baanmali" }));
+      expect(drawn(asks[1]!)).toMatch(/Carrier portal.*baanmali|baanmali.*Carrier portal/);
     }
   });
 });
