@@ -11,13 +11,15 @@ import { deliver } from "./email-sender";
 import { timingSafeEqual } from "./people";
 import { pilotDeletionRoute, pilotRegistryRoute } from "./pilot-store";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
+import { testWorker } from "./test-origin";
 
 type AuthEnv = EmailSignInEnv & {
   APPLE_CLIENT_ID?: string;
   APPLE_JWKS_URL?: string;
-  /// Test-only JWKS. Production never sets it, so the Apple endpoint is the
-  /// only key source there.
+  /// Test-only JWKS, honoured only on a test Worker (test-origin.ts), so the Apple endpoint is the only key source
+  /// anywhere real.
   TEST_JWKS_JSON?: string;
+  PUBLIC_API_ORIGIN?: string;
 };
 
 type SessionRec = {
@@ -246,7 +248,9 @@ export class AuthObject extends DurableObject {
     ) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
-    if (!this.authEnv.APPLE_CLIENT_ID && !this.authEnv.TEST_JWKS_JSON) {
+    // The test key's private half is committed, so it is honoured only on a test Worker (test-origin.ts).
+    const testKeys = testWorker(this.authEnv) ? this.authEnv.TEST_JWKS_JSON : undefined;
+    if (!this.authEnv.APPLE_CLIENT_ID && !testKeys) {
       return Response.json({ error: "identity_not_configured" }, { status: 400 });
     }
     let tenant: string;
@@ -255,7 +259,7 @@ export class AuthObject extends DurableObject {
     try {
       const identity = await verifyAppleToken(body.identityToken, body.nonce, {
         clientId: this.authEnv.APPLE_CLIENT_ID ?? "test-client",
-        jwksJson: this.authEnv.TEST_JWKS_JSON,
+        jwksJson: testKeys,
         jwksUrl: this.authEnv.APPLE_JWKS_URL,
       });
       tenant = identity.tenant;

@@ -1736,8 +1736,11 @@ owner's Apple team. `docs/turning-on.md` says to refuse it as an email sign-in i
   service refuses is logged as the service's error code alone (`E_RECIPIENT_SUPPRESSED` and the like), never its
   message, which may name the address.
 - The test configuration sends to an in-memory outbox instead (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`), as the test
-  Apple key stands in for Apple's. The dev deploy check refuses any config that sets a `TEST_` var
-  (`.github/scripts/check-dev-deploys.mjs`).
+  Apple key (`TEST_JWKS_JSON`) stands in for Apple's. Both work only on a test Worker, whose `PUBLIC_API_ORIGIN` is an
+  https origin under `.test` (24 Nov 2026; `apps/api/src/test-origin.ts`), so either set anywhere else, even as a secret
+  the deploy check cannot see, does nothing: the outbox is no sender, and the test key signs no one in. The dev deploy
+  check refuses a config that sets a `TEST_` var, or a `PUBLIC_API_ORIGIN` under `.test`, in any of its blocks: the top
+  level, dev, staging and production (`.github/scripts/check-dev-deploys.mjs`).
 
 ## Helpers
 

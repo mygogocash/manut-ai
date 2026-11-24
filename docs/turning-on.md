@@ -7,7 +7,9 @@ one place. Every route behind a switch answers plainly that it is not on (for ex
 
 Secrets go in with `wrangler secret put <NAME>` from `apps/api`, for one environment at a time (`--env dev`, and later
 staging and production). They never go in a file in the repository. Vars go in that environment's `vars` in
-`apps/api/wrangler.jsonc`. The dev deploy check refuses any config that sets a test-only var (`TEST_…`).
+`apps/api/wrangler.jsonc`. The dev deploy check refuses any config that sets a test-only var (`TEST_…`), or a
+`PUBLIC_API_ORIGIN` under `.test`, in any block, staging and production included; and the API honours the test-only
+settings only where `PUBLIC_API_ORIGIN` is under `.test`, so one set as a secret does nothing.
 
 ## Built, and off until the owner says
 

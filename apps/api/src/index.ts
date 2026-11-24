@@ -27,6 +27,7 @@ import { shopsRoute } from "./shops";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
+import { testWorker } from "./test-origin";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
 import { workersAdminRoute } from "./workers";
 import { webSessionRoute } from "./web-session";
@@ -58,7 +59,9 @@ export interface Env {
   CLOUD_API_KEY?: string;
   /// Expected protected admin Access application audience. Unset denies admin.
   ADMIN_ACCESS_AUD?: string;
-  /// Explicit local test key source; production leaves this unset.
+  /// TEST-ONLY: the test Apple key's public half. Only wrangler.test.json sets it, the deploy check refuses every config
+  /// with a `TEST_` var, and it is honoured only on a test Worker, whose PUBLIC_API_ORIGIN is under `.test`
+  /// (test-origin.ts): its private half is committed.
   TEST_JWKS_JSON?: string;
   /// Signing in by a code sent by email (email-code.ts; docs/pilot-api.md, "Signing in by email"). Built and off: both
   /// of its routes answer `email_not_configured` until EMAIL_SIGN_IN is exactly "on", a sender is bound and
@@ -70,7 +73,8 @@ export interface Env {
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
   /// TEST-ONLY: "on" sends codes to an in-memory outbox the workerd tests read (email-sender.ts). Only
-  /// wrangler.test.json sets it, and the dev deploy check refuses every config with a `TEST_` var.
+  /// wrangler.test.json sets it, the deploy check refuses every config with a `TEST_` var, and it is honoured only on a
+  /// test Worker (test-origin.ts).
   TEST_EMAIL_OUTBOX?: string;
   /// Capability defaults. New capabilities ship off; an environment opts in
   /// explicitly. Dynamic flags (below) override these without a redeploy.
@@ -695,7 +699,7 @@ export default {
       }
       if (url.pathname === "/v1/auth/exchange" && parsed.value.provider === "apple" &&
           typeof parsed.value.identityToken === "string" &&
-          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON))) {
+          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON) && testWorker(env))) {
         return json({ error: "invalid_identity" }, 401);
       }
       // Signing in by email (email-code.ts): a body that is not exactly the route's, and any request while email sign-in

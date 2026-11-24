@@ -344,7 +344,7 @@ describe("the address and the identity", () => {
 
 describe("off unless configured", () => {
   const on: EmailSignInEnv = { EMAIL_SIGN_IN: "on", APPROVAL_LINK_SECRET: SECRET, EMAIL_FROM_ADDRESS: "codes@manut.test",
-    TEST_EMAIL_OUTBOX: "on" };
+    TEST_EMAIL_OUTBOX: "on", PUBLIC_API_ORIGIN: "https://api.manut.test" };
 
   it("is on only with the switch, a sender and the secret", () => {
     expect(emailSignIn(on)).not.toBeNull();
@@ -353,6 +353,10 @@ describe("off unless configured", () => {
       { ...on, EMAIL_SIGN_IN: "true" }, { ...on, EMAIL_SIGN_IN: "ON" },
       { ...on, APPROVAL_LINK_SECRET: undefined }, { ...on, APPROVAL_LINK_SECRET: "short" },
       { ...on, TEST_EMAIL_OUTBOX: undefined }, { ...on, TEST_EMAIL_OUTBOX: "1" },
+      // The test outbox works only on a test Worker, whose public origin is under .test (test-origin.ts); with no binding
+      // beside it, a real environment that set it by mistake has no sender at all.
+      { ...on, PUBLIC_API_ORIGIN: undefined }, { ...on, PUBLIC_API_ORIGIN: "https://dev.manut.xyz" },
+      { ...on, PUBLIC_API_ORIGIN: "http://api.manut.test" }, { ...on, PUBLIC_API_ORIGIN: "https://api.manut.test.example" },
       { ...on, EMAIL_FROM_ADDRESS: undefined }, { ...on, EMAIL_FROM_ADDRESS: "codes" },
       { ...on, EMAIL_FROM_NAME: "Manut AI\nBcc: someone@example.com" }, { ...on, EMAIL_FROM_NAME: "  " },
     ]) {
@@ -385,15 +389,26 @@ describe("the sender port", () => {
     expect(senderFor({ EMAIL: email })).toBeNull();
   });
 
-  it("sends to the test outbox whenever the test switch is on, even beside a binding", async () => {
+  it("sends to the test outbox whenever the test switch is on in a test Worker, even beside a binding", async () => {
     const email = binding(async () => ({ messageId: "fixture-message" }));
     const before = testOutbox().length;
-    await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on" })!
-      .send(codeEmail("outbox@baanmali.example", "654321"));
+    await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on",
+      PUBLIC_API_ORIGIN: "https://api.manut.test" })!.send(codeEmail("outbox@baanmali.example", "654321"));
     expect(email.send).not.toHaveBeenCalled();
     expect(testOutbox().length).toBe(before + 1);
     expect(testOutbox().at(-1)).toMatchObject({ to: "outbox@baanmali.example",
       from: { email: "codes@manut.test", name: "Manut AI" } });
+  });
+
+  it("ignores the test switch anywhere but a test Worker, so a code set to go there is sent for real", async () => {
+    const email = binding(async () => ({ messageId: "fixture-message" }));
+    const before = testOutbox().length;
+    for (const origin of [undefined, "https://dev.manut.xyz", "http://api.manut.test", "https://api.manut.test:8443"]) {
+      await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on",
+        ...(origin === undefined ? {} : { PUBLIC_API_ORIGIN: origin }) })!.send(codeEmail("real@baanmali.example", "654321"));
+    }
+    expect(email.send).toHaveBeenCalledTimes(4);
+    expect(testOutbox().length).toBe(before);
   });
 
   it("keeps a refused send to itself: the log names the service's error code, never the address or the code", async () => {

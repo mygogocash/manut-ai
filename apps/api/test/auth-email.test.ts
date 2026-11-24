@@ -462,11 +462,14 @@ describe("off unless configured", () => {
     { EMAIL_SIGN_IN: undefined }, { EMAIL_SIGN_IN: "off" }, { EMAIL_SIGN_IN: "1" },
     { TEST_EMAIL_OUTBOX: undefined }, { EMAIL_FROM_ADDRESS: undefined }, { APPROVAL_LINK_SECRET: undefined },
   ];
+  /// Off as well: the test outbox is no sender anywhere but a test Worker (test-origin.ts), and the test config binds no
+  /// other. There the test Apple key signs no one in either (test-keys.test.ts).
+  const OFF_REAL: Record<string, unknown>[] = [{ PUBLIC_API_ORIGIN: undefined }, { PUBLIC_API_ORIGIN: "https://dev.manut.xyz" }];
 
   it("answers both routes email_not_configured, and wakes nothing, until it is on with a sender and the secret",
     async () => {
       const outbox = testOutbox().length;
-      for (const changes of OFF) {
+      for (const changes of [...OFF, ...OFF_REAL]) {
         const target = counting(envWith(changes));
         for (const [path, body] of [["/v1/auth/email/code", { email: address() }],
           ["/v1/auth/exchange", { provider: "email", email: address(), code: "123456", deviceId: "device-off" }]] as const) {
@@ -478,6 +481,7 @@ describe("off unless configured", () => {
         expect(await (await send(target.env, "/v1/auth/email/code", { address: "x" })).json())
           .toEqual({ error: "invalid_request" });
         expect(target.calls()).toBe(0);
+        if (OFF_REAL.includes(changes)) continue;
         const apple = await send(target.env, "/v1/auth/exchange", { provider: "apple",
           identityToken: await appleIdentity({}), nonce: APPLE_NONCE, deviceId: "device-off" });
         expect(await apple.json()).toEqual({ fixture: true });
@@ -488,7 +492,7 @@ describe("off unless configured", () => {
 
   it("is off in the auth object too, which checks for itself and keeps nothing", async () => {
     const stub = bindings.AUTH.get(bindings.AUTH.idFromName(`email-off-${crypto.randomUUID()}`));
-    for (const changes of OFF) {
+    for (const changes of [...OFF, ...OFF_REAL]) {
       const answers = await runInDurableObject(stub, async (_instance, state) => {
         const object = new AuthObject(state, envWith(changes));
         const ask = await object.fetch(new Request("https://auth/email-code", { method: "POST",
