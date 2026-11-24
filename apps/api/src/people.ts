@@ -1,14 +1,17 @@
 /// The people around a shop, from the Worker's side (docs/people.md; docs/pilot-api.md, "Helpers"). The rules are
 /// `@manut/people-rules`'; the shop's record, its one transaction per change and its audit entry are people-store.ts's,
-/// in the shop's TenantObject. This file has three parts:
+/// in the shop's TenantObject. This file has four parts:
 ///
-/// - The operator routes, under the admin gate as exact `ADMIN_METHODS` entries. In the pilot the owner has no account,
-///   so the operator invites, removes and sets cover on the owner's word, as the console already does for memory.
+/// - The operator routes, under the admin gate as exact `ADMIN_METHODS` entries: the operator invites, removes and sets
+///   cover on the owner's word, whether or not the owner has an account linked (an owner without one, or one who lost
+///   their phone, still asks the operator).
+/// - The owner's own routes for the same changes, from their shop session (docs/several-shops.md, slice 4). Both kinds
+///   of route make each change through the same operation of the shop's record, so there is one way to make it.
 /// - A helper's own two routes, which need a signed-in session of the lifted auth: joining through an invite, and opening
 ///   the shop on another device. Each gives that device a helper session for the one shop.
-/// - `callerOf`, who is calling the shop's approval routes (approvals.ts): the shop's own session is its owner, a helper
-///   session is a helper of the shop it names, and an owner session is the owner of the shop it names. The role is never
-///   read from a request.
+/// - `callerOf`, who is calling a shop's session routes (approvals.ts, routines.ts, memory.ts, shops.ts and the owner's
+///   routes here): the shop's own session is its owner, a helper session is a helper of the shop it names, and an owner
+///   session is the owner of the shop it names. The role is never read from a request.
 ///
 /// A helper session is a bearer token, `mhs1.<shop, base64url>.<64 hex characters>`. The shop's record keeps only its
 /// SHA-256. The lifted AuthObject has no record of it, so every lifted session route answers 401 to it: a helper can
@@ -151,7 +154,8 @@ function tokenShop(pattern: RegExp, token: string): string | null {
   return shop !== null && isValidTenant(shop) ? shop : null;
 }
 
-/// Who is calling the shop's approval routes. The role comes from the credential alone:
+/// Who is calling a shop's session routes: its approvals, and for its owner its routines, memory, consent, export and
+/// people. The role comes from the credential alone:
 /// - an owner session is the `owner` of the shop it names, while that shop's record holds it under the account linked
 ///   now, unended and unexpired (docs/several-shops.md); the decision names that account (`accountId`);
 /// - a helper session is a `helper` of the shop it names, while that shop's record holds it, unended and unexpired;
@@ -159,6 +163,31 @@ function tokenShop(pattern: RegExp, token: string): string | null {
 export type Caller =
   | { role: "owner"; shop: string; accountId?: string }
   | { role: "helper"; shop: string; helperId: string; name: string };
+
+/// Who a decision or a change names when the shop's own session makes it, as `owner-link` names the owner's link
+/// (pilot.ts). An owner session names the account linked to the shop instead (docs/several-shops.md).
+export const OWNER_SESSION = "owner-session";
+
+/// Who the shop's audit log names for a change its owner makes from a session: the linked account by its id for an
+/// owner session, and `owner-session` for the shop's own session, as their decisions name them (approvals.ts). Never
+/// the account's subject, an email or a name.
+export function ownerActor(caller: Extract<Caller, { role: "owner" }>): AuditActor {
+  return { kind: "owner", id: caller.accountId ?? OWNER_SESSION };
+}
+
+/// Whether a bearer token has the shape of a shop session, an owner's (`mos1.`) or a helper's (`mhs1.`). The shape only
+/// says which check to make: a session works only while its shop's record holds its hash (`callerOf`).
+export function isShopSession(token: string): boolean {
+  return tokenShop(OWNER_TOKEN, token) !== null || tokenShop(HELPER_TOKEN, token) !== null;
+}
+
+/// What only the session decides. A request that names any of these in its query is refused rather than read, so a
+/// client's claim never even looks as if it were read.
+export const SESSION_DECIDES = ["shop", "tenant", "role"] as const;
+
+export function queryNamesSession(url: URL): boolean {
+  return SESSION_DECIDES.some((name) => url.searchParams.has(name));
+}
 
 /// The caller, or the refusal to send: 401 `unauthorized` for no session, 401 `removed` with the time for a session
 /// whose helper the owner removed, and 401 `unlinked` with the time for an owner session whose account the operator
@@ -262,10 +291,11 @@ function awayView(state: PeopleState, names: Record<string, string>, nowMs: numb
     inForce: coverAt(state, nowMs) !== null };
 }
 
-/// `GET /v1/admin/people`: the owner, with the account the operator linked and how many devices have it open, every
-/// helper with how many devices they have open, every invite (a pending one with its link to copy), the cover, the notes
-/// helpers passed on, and the helpers who were removed, by name, so what they did can still be read with their name.
-/// The owner's account is shown by its link's id, never by the subject it signs in as.
+/// `GET /v1/admin/people` for the operator and `GET /v1/people` for the owner's session: the owner, with the account the
+/// operator linked and how many devices have it open, every helper with how many devices they have open, every invite (a
+/// pending one with its link to copy), the cover, the notes helpers passed on, and the helpers who were removed, by
+/// name, so what they did can still be read with their name. The owner's account is shown by its link's id, never by
+/// the subject it signs in as.
 async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleView) {
   const { state, names, devices, ownerAccount } = view;
   const nowMs = Date.now();
@@ -292,7 +322,8 @@ async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleVie
 // Routes
 // ---------------------------------------------------------------------------
 
-/// `/v1/admin/people*` (after the admin gate) and a helper's own `/v1/people/*`. Answers null for any other path.
+/// `/v1/admin/people*` (after the admin gate), the owner's own `/v1/people` and its changes, and a helper's own
+/// `/v1/people/accept` and `/v1/people/session`. Answers null for any other path.
 export async function peopleRoute(request: Request, url: URL, env: PeopleEnv, ctx: ExecutionContext):
   Promise<Response | null> {
   if (url.pathname === "/v1/admin/people" || url.pathname.startsWith("/v1/admin/people/")) {
@@ -302,15 +333,24 @@ export async function peopleRoute(request: Request, url: URL, env: PeopleEnv, ct
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     return url.pathname === "/v1/people/accept" ? acceptInvite(request, env) : openSession(request, env);
   }
-  return null;
+  if (url.pathname === "/v1/people") return ownerRoute(request, url, env, null);
+  const change = url.pathname.startsWith("/v1/people/") ? changeAt(url.pathname.slice("/v1/people/".length)) : null;
+  return change ? ownerRoute(request, url, env, change) : null;
 }
 
 type Write = (env: PeopleEnv, shop: PilotShopRecord, body: Record<string, unknown>, actor: AuditActor) =>
   Promise<Response>;
 
-const WRITES: Readonly<Record<string, Write>> = {
-  "POST /v1/admin/people/invites": createInvite,
-  "POST /v1/admin/people/invites/revoke": async (env, shop, body, actor) => {
+/// One change to the shop's people: `keys` is the exact body the owner's session sends for it (the operator's also names
+/// the shop's `tenant`), `exact` checks what must be exact inside it, and `write` makes the change through its one
+/// operation of the shop's record (people-store.ts), whoever asks, so there is one way to make each change.
+type Change = { keys: readonly string[]; exact?: (body: Record<string, unknown>) => boolean; write: Write };
+
+/// The changes, by the last part of their path: `/v1/admin/people/<path>` for the operator, on the owner's word, and
+/// `/v1/people/<path>` for the owner's own session.
+const CHANGES: Readonly<Record<string, Change>> = {
+  invites: { keys: ["name", "identity"], exact: (body) => isExactIdentity(body.identity), write: createInvite },
+  "invites/revoke": { keys: ["inviteId"], write: async (env, shop, body, actor) => {
     if (typeof body.inviteId !== "string") return json({ error: "invalid_request" }, 400);
     const response = await peopleCall(env, shop.tenant, "/people/revoke-invite", { inviteId: body.inviteId, actor });
     const answer = await answered(response);
@@ -318,12 +358,12 @@ const WRITES: Readonly<Record<string, Write>> = {
     const { invite } = (await answer.json()) as { invite: Invite };
     const people = await readPeople(env, shop.tenant);
     return json({ invite: inviteView(invite, people?.names[invite.id] ?? "", Date.now()) });
-  },
-  "POST /v1/admin/people/remove": async (env, shop, body, actor) => {
+  } },
+  remove: { keys: ["helperId"], write: async (env, shop, body, actor) => {
     if (typeof body.helperId !== "string") return json({ error: "invalid_request" }, 400);
     return answered(await peopleCall(env, shop.tenant, "/people/remove", { helperId: body.helperId, actor }));
-  },
-  "POST /v1/admin/people/away": async (env, shop, body, actor) => {
+  } },
+  away: { keys: ["helperId", "until"], write: async (env, shop, body, actor) => {
     if (typeof body.helperId !== "string") return json({ error: "invalid_request" }, 400);
     // A date the rules can compare, or `bad_date`, as the rules answer a date that is not in the future.
     const until = typeof body.until === "string" ? Date.parse(body.until) : Number.NaN;
@@ -334,10 +374,22 @@ const WRITES: Readonly<Record<string, Write>> = {
     const people = await readPeople(env, shop.tenant);
     if (!people) return json({ error: "people_unavailable" }, 503);
     return json({ away: awayView(people.state, people.names, Date.now()) });
-  },
-  "POST /v1/admin/people/away/clear": async (env, shop, _body, actor) =>
-    answered(await peopleCall(env, shop.tenant, "/people/away-clear", { actor })),
+  } },
+  "away/clear": { keys: [], write: async (env, shop, _body, actor) =>
+    answered(await peopleCall(env, shop.tenant, "/people/away-clear", { actor })) },
 };
+
+/// The change at `path`, or null. Only a path the table names as its own: never a name every object inherits.
+function changeAt(path: string): Change | null {
+  return Object.hasOwn(CHANGES, path) ? CHANGES[path] ?? null : null;
+}
+
+/// Whether an invite's identity is exactly a LINE account (`{ kind, id }`) or an email (`{ kind, address }`). The shop's
+/// record keeps only those fields anyway (`keptIdentity`); a session's invite refuses anything more rather than drop it.
+function isExactIdentity(value: unknown): boolean {
+  return isRecord(value) && ((value.kind === "line" && hasExactly(value, ["kind", "id"])) ||
+    (value.kind === "email" && hasExactly(value, ["kind", "address"])));
+}
 
 /// What the shop's object answered, passed on when it is an answer, or 503 when the object failed.
 async function answered(response: Response): Promise<Response> {
@@ -359,8 +411,9 @@ async function operatorRoute(request: Request, url: URL, env: PeopleEnv, ctx: Ex
       const view = await readPeople(env, tenant);
       return view ? json(await peopleList(env, shop, view)) : json({ error: "people_unavailable" }, 503);
     }
-    const write = WRITES[route];
-    if (!write) return json({ error: "not_found" }, 404);
+    const change = request.method === "POST" && url.pathname.startsWith("/v1/admin/people/")
+      ? changeAt(url.pathname.slice("/v1/admin/people/".length)) : null;
+    if (!change) return json({ error: "not_found" }, 404);
     const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
     const body = parsed.value;
@@ -369,15 +422,51 @@ async function operatorRoute(request: Request, url: URL, env: PeopleEnv, ctx: Ex
     const shop = await readShop(env, body.tenant);
     if (!shop) return json({ error: "shop_not_found" }, 404);
     // Who the shop's audit log names for the change: the operator's Access identity (audit-log.ts).
-    return await write(env, shop, body, { kind: "operator", email: await operatorIdentity(ctx) });
+    return await change.write(env, shop, body, { kind: "operator", email: await operatorIdentity(ctx) });
   } catch {
     return json({ error: "people_unavailable" }, 503);
   }
 }
 
-/// `POST /v1/admin/people/invites` with `{ tenant, name, identity }`: an invite for one LINE account (`{ kind: "line",
-/// id }`) or one email (`{ kind: "email", address }`), for 7 days, once, and its link for the operator to copy. Nothing
-/// is sent.
+/// `GET /v1/people` and `POST /v1/people/<change>` (`change` null for the list): the owner managing the shop's helpers
+/// from their own session (docs/several-shops.md, slice 4). The shop and the role come from the session alone
+/// (`callerOf`), so the body names neither, and a session of another shop never reaches this one's people. A helper's
+/// session is told the route is the owner's rather than that it ended, as on the team's routines. The log names the
+/// owner's linked account by its id (`ownerActor`). Nothing here sends anything: an invite's link is the owner's to send.
+///
+/// The order is who is asking (401 or 503), then the role (403), the method (405), the query and the body (400), and only
+/// then the shop's record.
+async function ownerRoute(request: Request, url: URL, env: PeopleEnv, change: Change | null): Promise<Response> {
+  const caller = await callerOf(request, env);
+  if (caller instanceof Response) return caller;
+  if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
+  if (request.method !== (change ? "POST" : "GET")) return json({ error: "method_not_allowed" }, 405);
+  if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+  try {
+    if (!change) {
+      const shop = await readShop(env, caller.shop);
+      // People exist for pilot shops: a person's own sign-in acts for their own tenant, which has none.
+      if (!shop) return json({ error: "not_found" }, 404);
+      const view = await readPeople(env, shop.tenant);
+      return view ? json(await peopleList(env, shop, view)) : json({ error: "people_unavailable" }, 503);
+    }
+    const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+    const body = parsed.value;
+    if (!isRecord(body) || !hasExactly(body, change.keys) || (change.exact && !change.exact(body))) {
+      return json({ error: "invalid_request" }, 400);
+    }
+    const shop = await readShop(env, caller.shop);
+    if (!shop) return json({ error: "not_found" }, 404);
+    return await change.write(env, shop, body, ownerActor(caller));
+  } catch {
+    return json({ error: "people_unavailable" }, 503);
+  }
+}
+
+/// `POST /v1/admin/people/invites` with `{ tenant, name, identity }`, or the owner's `POST /v1/people/invites` with
+/// `{ name, identity }`: an invite for one LINE account (`{ kind: "line", id }`) or one email (`{ kind: "email",
+/// address }`), for 7 days, once, and its link for whoever asked to copy and send. Nothing is sent.
 async function createInvite(env: PeopleEnv, shop: PilotShopRecord, body: Record<string, unknown>, actor: AuditActor):
   Promise<Response> {
   const name = keptName(body.name);

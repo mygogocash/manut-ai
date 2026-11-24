@@ -13,8 +13,8 @@
 /// confirmed, failed or unknown. The link adds only who decides: whoever
 /// holds a link this backend signed for that one action, before it expires,
 /// is the owner. Approving still needs the shop's cloud-work consent, which
-/// only the owner can record, through the link, and the same kill switches as
-/// the session routes.
+/// only the owner can record, through the link or their own shop session, and
+/// the same kill switches as the session routes.
 ///
 /// Deleting a live shop's data is the same shape: the operator's request opens
 /// one owner confirmation in approval-core's store (pilot-store.ts), the
@@ -469,10 +469,12 @@ async function loadView(env: PilotEnv, claim: ApprovalClaim): Promise<{ view: Ap
   return { view, action };
 }
 
-/// `POST /v1/pilot/approvals/{token}/consent`. The only way a pilot shop's
-/// consent is recorded: from the owner, through a live link. Operators have
-/// no route that writes it. The body must say `{ "cloudWork": true }`
-/// exactly; withdrawing is not something this link offers.
+/// `POST /v1/pilot/approvals/{token}/consent`. One of the two ways a pilot
+/// shop's consent is recorded, both the owner's: through a live link, or from
+/// the owner's own shop session once their account is linked (shops.ts).
+/// Operators have no route that writes it. The body must say
+/// `{ "cloudWork": true }` exactly; withdrawing is not something this link
+/// offers, and the owner's session does.
 async function recordOwnerConsent(request: Request, env: PilotEnv, claim: ApprovalClaim): Promise<Response> {
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
@@ -867,12 +869,22 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
 /// exists: from then on it holds what its customers and its owner gave it, so
 /// deleting it needs the owner's own yes. Null when consent cannot be read,
 /// because a deletion never guesses that a shop is not live.
+///
+/// Only the owner writes a pilot shop's consent record (their link, or their
+/// own session, shops.ts), so a record of either value means the owner has
+/// answered. A shop stays live after its owner withdraws consent: withdrawing
+/// stops the team's work, and must not also let an operator delete what the
+/// shop holds without the owner's yes. A shop with no record answers
+/// `{ cloudWork: false }` with no `updatedAt` (tenant-object.ts), which is
+/// how the schedule object tells an answer from none as well
+/// (schedule-object.ts, `liveConsent`).
 async function isLive(env: PilotEnv, shop: PilotShopRecord): Promise<boolean | null> {
   if (shop.lineConnectionId) return true;
   const response = await tenantCall(env, shop.tenant, `/consent?tenant=${encodeURIComponent(shop.tenant)}`);
   if (!response.ok) return null;
-  const record = (await response.json().catch(() => null)) as { cloudWork?: unknown } | null;
-  return typeof record?.cloudWork === "boolean" ? record.cloudWork : null;
+  const record = (await response.json().catch(() => null)) as { cloudWork?: unknown; updatedAt?: unknown } | null;
+  if (typeof record?.cloudWork !== "boolean") return null;
+  return record.cloudWork || typeof record.updatedAt === "string";
 }
 
 /// Opens the owner's confirmation, or answers the one already open, with the

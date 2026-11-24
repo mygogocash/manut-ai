@@ -15,14 +15,13 @@
 /// lives in the vault object and the log in the TenantObject, so the entry is best effort and never holds the change
 /// up. No entry, and no answer here but the redeem's, holds a password.
 
-import { OWNER_SESSION } from "./approvals";
 import { appendAudit, type AuditAction, type AuditOutcome, type AuditSubject } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
 import { handOutSubmit, settleSubmitReport, submitTitle } from "./browser-writes";
 import { isValidTenant } from "./companies";
 import { workGate, type JobFlags } from "./job-flow";
-import { callerOf, type PeopleEnv } from "./people";
+import { callerOf, OWNER_SESSION, type PeopleEnv } from "./people";
 import { operatorIdentity } from "./pilot";
 import { base64url } from "./relay";
 import {

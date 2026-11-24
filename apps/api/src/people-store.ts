@@ -44,8 +44,8 @@ const MAX_FIELD = 256;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SYSTEM: AuditActor = { kind: "system" };
 
-/// The shop's owner in the rules' state. In the pilot the owner has no account: whoever holds the shop's own session or
-/// its owner's link is the owner (docs/people.md, "Who is deciding").
+/// The shop's owner in the rules' state, one id whatever they act through: the shop's own session, its owner's link, or
+/// an owner session of the account the operator linked (`ownerAccount` below; docs/people.md, "Who is deciding").
 export const OWNER_ID = "owner";
 
 /// One helper session: whose it is, which of their sessions in the rules' state, when it runs out, and when it was
@@ -308,7 +308,10 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     const name = record.names[body.inviteId] ?? "";
     return {
       answer: { status: 200, body: { answer: "joined", helperId: answered.helper.id, name } },
+      // The rest of the record is kept as it was: a helper joining must never drop the owner's linked account or its
+      // sessions (docs/several-shops.md).
       next: {
+        ...record,
         state: answered.state,
         names: { ...record.names, [answered.helper.id]: name },
         sessions: { ...record.sessions, [fresh.hash]: fresh.session },

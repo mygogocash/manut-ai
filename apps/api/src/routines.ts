@@ -22,13 +22,12 @@
 
 import { templates, type ShopTemplate } from "@manut/shop-templates";
 import type { Fact } from "@manut/shop-memory";
-import { OWNER_SESSION } from "./approvals";
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { workGate, type JobFlowEnv } from "./job-flow";
 import type { ModelProvider } from "./model-provider";
-import { callerOf, type PeopleEnv } from "./people";
+import { callerOf, ownerActor, type PeopleEnv } from "./people";
 import { operatorIdentity } from "./pilot";
 import type { InboundMessage, PilotShopRecord } from "./pilot-store";
 import type { ClaimAnswer, Question, RoutineRun, StoredRoutine, Team } from "./routine-store";
@@ -99,7 +98,7 @@ export async function routinesRoute(request: Request, url: URL, env: RoutineEnv,
   if ("tenant" in body) return json({ error: "invalid_request" }, 400);
   // The log names the owner's linked account when an owner session made the change, as the owner's decisions do
   // (docs/several-shops.md), and the shop's own session otherwise.
-  return change(route, env, tenant, body, { kind: "owner", id: caller.accountId ?? OWNER_SESSION });
+  return change(route, env, tenant, body, ownerActor(caller));
 }
 
 async function bodyOf(request: Request): Promise<Record<string, unknown> | Response> {

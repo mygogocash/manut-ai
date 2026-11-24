@@ -5,9 +5,9 @@ session names the one shop it acts for; how the desktop shows the shops together
 pilot shop the operator created; and the slices that follow. This is the roadmap's Phase 6 "several shops in one
 view" (`docs/plan.md`, December item 7). The first slice is built in `apps/api`: `shops.ts` and `shops-store.ts`, with
 the owner's account kept beside the helpers in `people.ts` and `people-store.ts`. The routes are in
-`docs/pilot-api.md`, "Several shops". The console's owner link (slice 3) and ending a shop session (slice 5) are built
-too, and so is the desktop (slice 2, 24 Nov 2026): the switcher, one Needs you across the shops, and each shop kept apart
-offline, on `feat/desktop-shop-switcher`.
+`docs/pilot-api.md`, "Several shops". The console's owner link (slice 3), owner sessions on more routes (slice 4) and
+ending a shop session (slice 5) are built too, and so is the desktop (slice 2, 24 Nov 2026): the switcher, one Needs
+you across the shops, and each shop kept apart offline.
 
 ## Where things stood
 
@@ -44,9 +44,10 @@ Tenancy is not weakened:
 
 - No session ever carries a shop's tenant, and a person's own session still acts only for their own tenant.
 - A shop session (below) names one shop, and only that shop's routes that learn who is calling from `callerOf`
-  (`people.ts`) accept it: the approval routes, and for an owner the team's routines, which are the owner's by their own
-  rule. Every other session route (tasks, consent, export, deletion, connections, schedules) answers it 401, so nobody
-  acts as the shop through it.
+  (`people.ts`) accept it: the approval routes for both roles, and for an owner the team's routines, what the team
+  knows, the shop's consent and export, and its helpers, which are the owner's. Those answer a helper's session 403
+  `owner_only`. Every other session route (tasks, deletion, connections, schedules) answers a shop session 401, so
+  nobody acts as the shop through it.
 - The role comes from the shop's record of the session: an owner session is held under the shop's linked account, a
   helper session under a current helper. Never from a body, a query or a header.
 - A shop the person is not linked to answers 404, the same answer as a shop that does not exist.
@@ -74,6 +75,28 @@ with the role the session holds. A linked owner decides as role `owner` with `de
 `owner-session` and the owner's signed link as `owner-link`. The team's routines (`/v1/routines`, `/v1/team/*`) learn
 who is calling the same way, so a linked owner's session reads and changes that shop's routines and pauses its team,
 and the log names the account there too; a helper's session is refused there, as before.
+
+From slice 4, the same owner session also reaches, each for its own shop only:
+
+- **What the team knows** (`/v1/memory`): every fact, and the owner's say over each, "It's true", Correct, Forget and
+  their own words, through the same operations the operator relays them with.
+- **The shop's consent to cloud work** (`/v1/consent/cloud`): the owner reads it, gives it and withdraws it. No operator
+  route writes it, as before. A shop stays live once its owner has answered, so withdrawing consent stops the team's
+  work and never lets an operator delete the shop without the owner's yes.
+- **The shop's export** (`/v1/tenant/export`): everything stored for the shop, the same export the operator gets. It is
+  the answer's body: the app reads it with the session in the `Authorization` header and saves the file itself, so no
+  link is made and no token is put in a URL.
+- **The shop's helpers** (`/v1/people`): the owner invites (a name and a LINE id or an email), revokes an invite,
+  removes a helper (which ends their sessions on every device at once) and sets and clears cover, through the same
+  operations of `@manut/people-rules` the operator routes use, each one write with its audit entry.
+
+Consent and the export keep the lifted routes' own paths, so an app reads them the same way whichever session it holds;
+only a token shaped as a shop session is answered differently there. Every change names the linked account by its id
+in the shop's audit log, never its subject, an email or a name. Bodies are exact, and a shop, a tenant or a role named
+in a body or a query is refused rather than read. Nothing here sends anything to a customer, posts or pays, and none of
+it deletes the shop's data: the only things that go are what the owner asks to go, one fact's words when they say
+Forget, and a helper's sessions when they remove the helper. The operator keeps every one of these routes, to relay the
+owner's word, linked or not.
 
 Why a session per shop, rather than one session naming a shop in each request: the shop is fixed when the session is
 made, from the person's verified link, so no later request can point it at another shop; unlinking or removal ends
@@ -159,9 +182,12 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
    link code and an Unlink that asks first (24 Nov 2026). The Audit page has words for `owner.linked`, `owner.unlinked` and
    the shop sessions' entries, and the practice mode answers both routes as the API does, with sample codes on its home
    page.
-4. **Owner sessions on more routes**, each its own decision: the shop's consent, export and memory. Today an owner
-   session reaches the approval routes and the team's routines. Whether the owner manages helpers from their own
-   session belongs here too (`docs/people.md`, "Not built yet").
+4. **Done here (API): owner sessions on more routes** (24 Nov 2026), each its own decision (`docs/decisions.md`): what
+   the team knows, the shop's consent and export, and the shop's helpers, as above. A helper's session reaches none of
+   them (403 `owner_only`), what the team knows included, since it can hold the owner's costs and suppliers. Not in this
+   slice: deleting the shop's data from an owner session, which stays with the owner's confirmation link (the operator
+   asks, the owner says yes on the link), and a shop session on `DELETE /v1/tenant/data` still answers 401; answering the
+   first-week questions from the app; and the desktop's screens for any of it, which wait for its switcher (slice 2).
 5. **Done here (API):** ending a shop session from the app, `POST /v1/shops/session/end` (24 Nov 2026). It ends the one
    session it is called with, an owner's or a helper's, and the desktop calls it on sign-out for each shop session it holds.
    A sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.

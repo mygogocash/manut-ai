@@ -1,7 +1,6 @@
-import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../src/auth";
-import worker from "../src/index";
 import type { PeopleRecord } from "../src/people-store";
 import { tenantDelete, tenantStub } from "../src/tenant-data";
 import { tenantSession } from "./authenticated-fixtures";
@@ -12,7 +11,9 @@ import {
   call,
   auditEntries,
   bindings,
+  callWith,
   decide,
+  failingWhere,
   invite,
   inviteToken,
   ownerConsents,
@@ -108,38 +109,6 @@ async function openIds(headers: Headers): Promise<string[]> {
     "/v1/approvals?state=open");
   expect(listed.status).toBe(200);
   return listed.body.approvals.map((entry) => entry.record.request.id).sort();
-}
-
-/// The Worker's bindings with one object namespace answering 500 to the requests `fails` picks, as if that object could
-/// not be reached, and passing every other request to the real object.
-function failingWhere(name: "AUTH" | "TENANT", fails: (request: Request) => boolean): typeof bindings {
-  const namespace = bindings[name];
-  return { ...bindings, [name]: {
-    idFromName: (id: string) => namespace.idFromName(id),
-    get: (id: DurableObjectId) => {
-      const stub = namespace.get(id);
-      return { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init);
-        return fails(request) ? Response.json({ error: "fixture" }, { status: 500 }) : stub.fetch(request);
-      } };
-    },
-  } as unknown as DurableObjectNamespace };
-}
-
-/// A request to the Worker with other bindings, as the operator console (with Access) or a signed-in app sends it.
-async function callWith(target: typeof bindings, path: string, init: { method?: string; headers?: Headers; body?: unknown;
-  operator?: boolean }) {
-  const context = createExecutionContext();
-  if (init.operator) {
-    Object.defineProperty(context, "access", { value: { aud: bindings.ADMIN_ACCESS_AUD, getIdentity: async () => undefined },
-      configurable: true });
-  }
-  const headers = { "content-type": "application/json", ...(init.operator ? { authorization: "Bearer test-key" } : {}),
-    ...init.headers };
-  const response = await worker.fetch(new Request(`https://api.manut.test${path}`, { method: init.method ?? "GET", headers,
-    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }), target, context);
-  await waitOnExecutionContext(context);
-  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
 /// Fon, signed in with Apple: the operator linked her account as the owner of Baan Mali and of Khao Hom, and Ran Pa
@@ -591,6 +560,23 @@ describe("the operator's link", () => {
     expect((await linkOwner(another, code)).status).toBe(200);
   });
 
+  it("stays when a helper joins the same shop, with every session of the owner's account", async () => {
+    const fon = await signIn();
+    const shop = await setupShop();
+    const accountId = await linkAsOwner(shop, fon);
+    const asOwner = await shopSession(fon, shop, "owner");
+    // Mint joins Fon's own shop through an invite, which rewrites the shop's people record.
+    const mintEmail = `mint-${crypto.randomUUID()}@example.test`;
+    const made = await invite(shop, "Mint", { kind: "email", address: mintEmail });
+    expect((await accept(await signIn(mintEmail), inviteToken(made.body.inviteUrl))).status).toBe(200);
+    // The link and the owner's session are still there, and Fon still owns the shop.
+    expect((await asSession(asOwner, "GET", "/v1/approvals?state=open")).status).toBe(200);
+    const people = await admin<{ owner: { account: { id: string; devices: number } | null } }>("GET",
+      `/v1/admin/people?tenant=${encodeURIComponent(shop.tenant)}`);
+    expect(people.body.owner.account).toMatchObject({ id: accountId, devices: 1 });
+    expect((await myShops(fon)).body.shops.map((one) => [one.id, one.role])).toEqual([[shop.tenant, "owner"]]);
+  });
+
   it("stands in the shop's record when the owner's list cannot be written, and linking again lists the shop", async () => {
     const fon = await signIn();
     const shop = await setupShop();
@@ -701,15 +687,16 @@ describe("the shop and the role", () => {
     expect((await decide(asOwnerOfMali, maliRefund, DECLINE)).status).toBe(200);
   });
 
-  it("an owner's shop session opens no route of the shop's beyond its approvals and routines", async () => {
+  it("an owner's shop session opens only the shop's routes that learn who is calling from the session", async () => {
     const { fon, mali } = await fonsShops();
     const asOwnerOfMali = await shopSession(fon, mali, "owner");
-    for (const [method, path] of [["GET", "/v1/tenant/export"], ["DELETE", "/v1/tenant/data"],
-      ["GET", "/v1/consent/cloud"], ["GET", "/v1/connections"], ["GET", "/v1/schedules"], ["GET", "/v1/shops"],
-      ["POST", "/v1/shops/owner-code"]] as const) {
+    // The shop's approvals, routines, memory, consent, export and people take it (owner-session-routes.test.ts). Deleting
+    // the shop stays with the owner's confirmation link, and the connections, schedules and the person's own routes take
+    // no shop session at all.
+    for (const [method, path] of [["DELETE", "/v1/tenant/data"], ["GET", "/v1/connections"], ["GET", "/v1/schedules"],
+      ["GET", "/v1/shops"], ["POST", "/v1/shops/owner-code"]] as const) {
       expect((await asSession(asOwnerOfMali, method, path)).status).toBe(401);
     }
-    expect((await asSession(asOwnerOfMali, "PUT", "/v1/consent/cloud", { enabled: false })).status).toBe(401);
     expect((await asSession(asOwnerOfMali, "POST", "/v1/shops/session", { shop: mali.tenant })).status).toBe(401);
     // Passing a request on is a helper's: the owner decides it.
     const refund = await plantRequest(mali.tenant, await shopTask(mali.tenant), "money");

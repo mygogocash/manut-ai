@@ -5,8 +5,10 @@
 ///   their role at each (`GET /v1/shops`); a shop session for one of them (`POST /v1/shops/session`), which is how they
 ///   act for a shop; and a one-use code for the operator to link their account to a shop as its owner
 ///   (`POST /v1/shops/owner-code`).
-/// - The one route a shop session itself calls: the app ends its own shop session when the person signs out
-///   (`POST /v1/shops/session/end`).
+/// - The routes a shop session itself calls here: the app ends its own shop session when the person signs out
+///   (`POST /v1/shops/session/end`), and the owner's session reads and changes the shop's consent to cloud work and reads
+///   its export, on the lifted routes' own paths (`/v1/consent/cloud`, `/v1/tenant/export`), which answer every other
+///   credential as before.
 /// - The operator's routes, under the admin gate as exact `ADMIN_METHODS` entries: link the account a code names to a
 ///   shop as its owner, and unlink it. The shop's audit log records both under the operator's Access identity.
 ///
@@ -24,12 +26,16 @@ import {
   bearer,
   callerOf,
   hasExactly,
+  isShopSession,
   openHelperSession,
   openOwnerSession,
+  ownerActor,
   peopleCall,
+  queryNamesSession,
   readPeople,
   readShop,
   signedInPerson,
+  type Caller,
   type PeopleEnv,
   type SignedInPerson,
 } from "./people";
@@ -45,6 +51,7 @@ import {
   unindexShop,
   type ShopRole,
 } from "./shops-store";
+import { tenantCall, tenantExport, type TenantDataEnv } from "./tenant-data";
 
 const MAX_BODY_BYTES = 16 * 1024;
 /// The letters a link code is made of: Crockford's base 32, which leaves out I, L, O and U, so nobody reading a code
@@ -71,8 +78,9 @@ const iso = (ms: number) => new Date(ms).toISOString();
 /// The same answer for a shop the person is not in and a shop that does not exist, so no one learns which shops exist.
 const notFound = () => json({ error: "not_found" }, 404);
 
-/// `/v1/shops*` and `/v1/admin/shops/owner*` (after the admin gate). Answers null for any other path.
-export async function shopsRoute(request: Request, url: URL, env: PeopleEnv, ctx: ExecutionContext):
+/// `/v1/shops*` and `/v1/admin/shops/owner*` (after the admin gate), and `/v1/consent/cloud` and `/v1/tenant/export`
+/// with a shop session. Answers null for any other path, and for those two with any other credential.
+export async function shopsRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv, ctx: ExecutionContext):
   Promise<Response | null> {
   switch (url.pathname) {
     case "/v1/shops":
@@ -81,6 +89,9 @@ export async function shopsRoute(request: Request, url: URL, env: PeopleEnv, ctx
       return personRoute(request, url.pathname, env);
     case "/v1/shops/session/end":
       return endSessionRoute(request, env);
+    case "/v1/consent/cloud":
+    case "/v1/tenant/export":
+      return shopDataRoute(request, url, env);
     case "/v1/admin/shops/owner":
     case "/v1/admin/shops/owner/unlink":
       return operatorRoute(request, url, env, ctx);
@@ -214,8 +225,79 @@ async function exactBody(request: Request, keys: readonly string[]): Promise<Rec
 }
 
 // ---------------------------------------------------------------------------
-// A shop session's own route
+// A shop session's own routes
 // ---------------------------------------------------------------------------
+
+/// `GET` and `PUT /v1/consent/cloud`, and `GET /v1/tenant/export`, with a shop session (docs/several-shops.md, slice 4).
+/// These are the lifted routes' own paths, so an app reads its shop's consent and export the same way with whichever
+/// session it holds. Only a token shaped as a shop session is answered here; every other credential is left to the lifted
+/// routes, which answer it as before (index.ts): the shop's own session and a person's sign-in for their own tenant, the
+/// operator key and no credential with 401.
+///
+/// Both are the owner's. A helper's session is told so (403 `owner_only`), as on the team's routines, rather than that
+/// it ended. Withdrawing consent stops the team's work; it never sends anything, and giving it permits only what each
+/// approval still asks the owner for. The operator has no route that writes consent, and still has none.
+///
+/// The export is the answer's body, as the lifted export is: the app reads it with the session in the `Authorization`
+/// header and saves the file itself, so no link is made and no token is ever put in a URL. It is not written to the
+/// audit log, as neither the lifted export nor the operator's is.
+///
+/// The order is who is asking (401 or 503), then the role (403), the method (405), and the query and the body (400).
+async function shopDataRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv): Promise<Response | null> {
+  if (!isShopSession(bearer(request))) return null;
+  const caller = await callerOf(request, env);
+  if (caller instanceof Response) return caller;
+  if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
+  const consent = url.pathname === "/v1/consent/cloud";
+  if (request.method !== "GET" && !(consent && request.method === "PUT")) {
+    return json({ error: "method_not_allowed" }, 405);
+  }
+  if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+  if (!consent) return shopExport(env, caller.shop);
+  return request.method === "GET" ? readConsent(env, caller.shop) : recordConsent(request, env, caller);
+}
+
+/// The shop's whole export, as the lifted export assembles it (tenant-data.ts): a part it cannot read is named in a 500,
+/// and an object it cannot reach at all is 503. Every answer is `no-store`.
+async function shopExport(env: TenantDataEnv, shop: string): Promise<Response> {
+  try {
+    return await tenantExport(env, shop);
+  } catch {
+    return json({ error: "export_unavailable" }, 503);
+  }
+}
+
+/// The shop's consent record: `{ cloudWork, updatedAt }`, or `{ cloudWork: false }` before anyone answered.
+async function readConsent(env: TenantDataEnv, shop: string): Promise<Response> {
+  return consentAnswer(() => tenantCall(env, shop, `/consent?tenant=${encodeURIComponent(shop)}`));
+}
+
+/// `PUT` with exactly `{ enabled }`, true or false: the owner gives or withdraws the shop's consent. It is the same
+/// record the owner's link and the lifted route write, in one write with its audit entry, which names the owner's linked
+/// account (tenant-object.ts).
+async function recordConsent(request: Request, env: TenantDataEnv, caller: Extract<Caller, { role: "owner" }>):
+  Promise<Response> {
+  const body = await exactBody(request, ["enabled"]);
+  if (body instanceof Response) return body;
+  if (typeof body.enabled !== "boolean") return json({ error: "invalid_request" }, 400);
+  return consentAnswer(() => tenantCall(env, caller.shop, "/consent", { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tenant: caller.shop, cloudWork: body.enabled, actor: ownerActor(caller) }) }));
+}
+
+/// The consent record the shop's object answered, or 503 when the object failed or could not be reached.
+async function consentAnswer(call: () => Promise<Response>): Promise<Response> {
+  try {
+    const response = await call();
+    if (!response.ok) {
+      await response.body?.cancel();
+      return json({ error: "consent_unavailable" }, 503);
+    }
+    return json(await response.json());
+  } catch {
+    return json({ error: "consent_unavailable" }, 503);
+  }
+}
 
 /// `POST /v1/shops/session/end` with exactly `{}` and the shop session itself as the bearer: the app ends its own session
 /// of one shop when the person signs out of this device. Exactly that session ends, an owner's (`mos1.`) or a helper's

@@ -11,7 +11,7 @@ import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
 import { receiveLinearWebhook } from "./inbound";
-import { memoryAdminRoute } from "./memory";
+import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
 import { peopleRoute } from "./people";
 import { pilotRoute } from "./pilot";
@@ -651,9 +651,9 @@ export default {
     const audit = await auditAdminRoute(request, url, env);
     if (audit) return audit;
 
-    // What the team knows about the shop (memory.ts). The admin gate above already required both credentials and the
-    // exact method.
-    const memory = await memoryAdminRoute(request, url, env, ctx);
+    // What the team knows about the shop (memory.ts): the operator's routes, under the admin gate above, and the owner's
+    // own from the shop's session.
+    const memory = await memoryRoute(request, url, env, ctx);
     if (memory) return memory;
 
     // Nam, Pim and Ton (workers.ts). The admin gate above already required both credentials and the exact method; the
@@ -661,12 +661,14 @@ export default {
     const workers = await workersAdminRoute(request, url, env, ctx, () => featureFlags(env));
     if (workers) return workers;
 
-    // The people around a shop (people.ts): the operator's routes, under the admin gate above, and a helper's own
-    // joining and opening the shop on another device, which need a signed-in session.
+    // The people around a shop (people.ts): the operator's routes, under the admin gate above, the owner's own from the
+    // shop's session, and a helper's own joining and opening the shop on another device, which need a signed-in session.
     const people = await peopleRoute(request, url, env, ctx);
     if (people) return people;
     // Several shops (shops.ts): a signed-in person's shops, a shop session for one of them and the owner's link code,
-    // which need the person's own session; and the operator's link and unlink of an owner's account, under the gate above.
+    // which need the person's own session; a shop session's sign-out, and its consent and export on the lifted routes'
+    // paths below, which answer every other credential; and the operator's link and unlink of an owner's account, under
+    // the gate above.
     const shops = await shopsRoute(request, url, env, ctx);
     if (shops) return shops;
     // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
@@ -899,7 +901,8 @@ export default {
 
     // Explicit cloud-work consent, per tenant. Sessions must opt in before
     // their tasks run anywhere off the Mac. Operator credentials cannot
-    // bypass this public session boundary.
+    // bypass this public session boundary. A shop session never gets here:
+    // shops.ts answers it above, for its shop's owner only.
     if (url.pathname === "/v1/consent/cloud") {
       const context = await contextOf(request, env);
       if (!context) return json({ error: "unauthorized" }, 401);
@@ -935,6 +938,8 @@ export default {
     // through their owning objects, then consent, the task index, and
     // attention items, and leaves a tombstone. Either answers 500 naming the
     // parts that failed rather than reporting a partial result as complete.
+    // A shop session's export is answered above (shops.ts); no shop session
+    // deletes here, which stays with the owner's confirmation link.
     if (url.pathname === "/v1/tenant/export" && request.method === "GET") {
       const context = await contextOf(request, env);
       if (!context) return json({ error: "unauthorized" }, 401);

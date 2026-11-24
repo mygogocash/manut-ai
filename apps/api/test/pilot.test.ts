@@ -922,7 +922,8 @@ describe("deleting a live shop needs its owner's confirmation", () => {
 
   it("counts the owner's consent alone as live", async () => {
     const shop = await newShop("Khao Man Gai Lek");
-    // Consent is only ever recorded through an approval link; written here directly, as that route writes it.
+    // Consent is only ever recorded by the owner, through an approval link or their own shop session; written here
+    // directly, as those routes write it.
     expect((await tenantCall(bindings, shop.tenant, "/consent", { method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tenant: shop.tenant, cloudWork: true }) })).status).toBe(200);
