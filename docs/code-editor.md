@@ -143,6 +143,9 @@ canvas's Code board draws Kit's lane that way ("Tell Kit what to change", Kit's 
 page's + menu starts agents in their own terminal only, where an agent's prompts stay inside the terminal, so the dial
 does not reach those sessions yet. The Code page shows the dial for every project either way.
 
+Words the shell would expand are never read as what they look like: an unquoted pattern (`*`, `?`, `[`) or brace
+list (`{a,b}`, `{1..3}`) makes a command unreadable, so it asks at every level (`lex` in `src/code/command.ts`).
+
 ## Left for later (no owner needed)
 
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed

@@ -145,6 +145,9 @@ function lex(line: string): Lexed {
   let redirect = false;
   /** The redirect being read writes (`>`, `>>`, `&>`), rather than reads (`<`). */
   let writing = false;
+  /** In the word being read: an unquoted `{`, and after it an unquoted `,` or `..`, so that a `}` closes a brace list. */
+  let braceOpen = false;
+  let braceList = false;
 
   const endWord = () => {
     if (!inWord) return;
@@ -158,6 +161,8 @@ function lex(line: string): Lexed {
     } else cur.words.push(word);
     word = "";
     inWord = false;
+    braceOpen = false;
+    braceList = false;
   };
   const endCmd = (piped: boolean) => {
     endWord();
@@ -281,6 +286,15 @@ function lex(line: string): Lexed {
       opaque = true;
       continue;
     }
+    // The shell expands an unquoted word before the program sees it, and this reading cannot follow it there. A pattern
+    // (`*`, `?`, `[`) becomes the names of files, and a file the agent named like an option (`-delete`) then becomes one;
+    // a brace list (`-{true,exec}`) becomes several words, so `find . -{true,exec} rm {} \;` runs `rm` while it reads as
+    // a plain `find`. A command holding either is one that cannot be read in advance, and asks. Quoted or escaped, each
+    // is only itself, and `find`'s `{}`, with no list inside, is not expanded.
+    if (c === "*" || c === "?" || c === "[") opaque = true;
+    if (c === "{") braceOpen = true;
+    else if (braceOpen && (c === "," || (c === "." && next === "."))) braceList = true;
+    else if (c === "}" && braceOpen && braceList) opaque = true;
     word += c;
     inWord = true;
   }
