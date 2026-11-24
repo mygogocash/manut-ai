@@ -1,13 +1,16 @@
 /// Buddy's three cloud team members as workers on the job flow (job-flow.ts; docs/phase-0-spikes.md, section 4). Nam
 /// drafts a reply to a customer's message, Pim drafts a post about a topic an operator gives, and Ton writes the owner a
-/// short summary of yesterday's sales from the order payments the shop has recorded. An operator starts each job from
-/// the console (`POST /v1/admin/workers/run`, below); the runner does the rest. The console reads the jobs back through
-/// `GET /v1/admin/workers/drafts` (`readJobs`, below): a read of the tasks the runner made, which writes nothing.
+/// short summary of yesterday's sales from the order payments the shop has recorded, or asks to append a month of the
+/// shop's books to the owner's Google Sheet. An operator starts each job from the console (`POST /v1/admin/workers/run`,
+/// below), and the owner an append from their own session (`POST /v1/google/books`, google-connect.ts); the runner does
+/// the rest. The console reads the jobs back through `GET /v1/admin/workers/drafts` (`readJobs`, below): a read of the
+/// tasks the runner made, which writes nothing.
 ///
-/// Every result is a draft, kept on the job's own task for the owner to read (task-object.ts, `DraftJSON`). Nothing
-/// here can send, post, pay or refund: the runner never asks for an external write, so the approval paths that already
-/// exist stay the only way anything leaves the app. A reply Nam drafts reaches a customer only if an operator proposes
-/// it through the pilot's reply flow and the owner approves it there.
+/// Every other result is a draft, kept on the job's own task for the owner to read (task-object.ts, `DraftJSON`).
+/// Nothing here sends, posts, pays or refunds by itself: the one external write a job asks for, Ton's append, is asked
+/// through the port as an owner-only approval-core request naming the exact rows (books-sheet.ts), and only the owner's
+/// decision sends it, once. A reply Nam drafts reaches a customer only if an operator proposes it through the pilot's
+/// reply flow and the owner approves it there.
 ///
 /// One run, in order:
 ///
@@ -26,11 +29,13 @@
 /// 5. The draft on the task, then the attempt's end.
 
 import { buildRequest, type Job as PromptJob } from "@manut/agent-prompts";
-import { dailySummary, type DailySummary, type Entry, type Flag } from "@manut/books";
+import { dailySummary, type DailySummary, type Flag } from "@manut/books";
 import { decide, newConnection, type Connection } from "@manut/member-grants";
 import { emptyState } from "@manut/shop-memory";
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
+import { bahtText as baht, isBooksMonth } from "./books-detail";
+import { entriesOf, readPayments } from "./books-sheet";
 import { isValidTenant } from "./companies";
 import {
   startAttempt,
@@ -46,7 +51,7 @@ import {
 import { usableFacts } from "./memory";
 import { operatorIdentity } from "./pilot";
 import { bangkokDay } from "./pilot-gate";
-import type { InboundMessage, Payment, PilotShopRecord } from "./pilot-store";
+import type { InboundMessage, PilotShopRecord } from "./pilot-store";
 import type { AttemptJSON, DraftJSON, TaskDocJSON, TaskEventJSON } from "./task-object";
 import { readRoutines } from "./routine-setup";
 import { memberOn } from "./routine-store";
@@ -61,7 +66,10 @@ export type WorkerMember = (typeof WORKER_MEMBERS)[number];
 export type WorkerJob =
   | { kind: "reply"; messageId: string }
   | { kind: "post"; topic: string }
-  | { kind: "daily_summary" };
+  | { kind: "daily_summary" }
+  /// Ton appends one month (`YYYY-MM`) of the shop's books to the owner's Google Sheet, once the owner approves the
+  /// exact rows (books-sheet.ts). The job names only the month: the rows are the shop's own.
+  | { kind: "books_sheet"; month: string };
 
 /// The model every member drafts with: the cheapest the gateway prices, which a draft for a small shop needs, and the
 /// one the Phase 2 stand-in worker uses. Choosing a model per member is a later decision.
@@ -75,6 +83,8 @@ const JOBS: Readonly<Record<WorkerJob["kind"], { capability: string; maxOutputTo
   reply: { capability: "reply_customers", maxOutputTokens: 600 },
   post: { capability: "draft_posts", maxOutputTokens: 1200 },
   daily_summary: { capability: "draft_books", maxOutputTokens: 600 },
+  // An append calls no model: the rows are the shop's own, and the request's words are the control plane's.
+  books_sheet: { capability: "append_books", maxOutputTokens: 0 },
 };
 
 /// The longest topic an operator may give Pim, in characters (Thai counted the same as English).
@@ -115,6 +125,8 @@ export function parseJob(value: unknown): WorkerJob | null {
     }
     case "daily_summary":
       return only("kind") ? { kind: "daily_summary" } : null;
+    case "books_sheet":
+      return only("kind", "month") && isBooksMonth(value.month) ? { kind: "books_sheet", month: value.month } : null;
     default:
       return null;
   }
@@ -133,6 +145,9 @@ export type WorkerRunInput = {
 export type WorkerRun =
   | { ok: true; taskId: string; member: WorkerMember; passedFrom?: WorkerMember; outcome: "done"; draft: DraftJSON }
   | { ok: true; taskId: string; member: WorkerMember; passedFrom?: WorkerMember; outcome: "failed"; reason: string }
+  /// The member asked the owner for an approval and stopped: the request's id and kind. Approving it sends the write.
+  | { ok: true; taskId: string; member: WorkerMember; passedFrom?: WorkerMember; outcome: "asked"; requestId: string;
+    kind: string }
   | Refused;
 
 /// What the job reads before anything is created for it.
@@ -174,6 +189,9 @@ export async function runWorker(env: JobFlowEnv, input: WorkerRunInput, options:
     const worked = await work(env, workerPort(env, started.job, options), member, job, inputs, passedFrom !== undefined);
     if (worked.outcome === "done") return { ok: true, taskId, member, ...by, outcome: "done", draft: worked.draft };
     if (worked.outcome === "failed") return { ok: true, taskId, member, ...by, outcome: "failed", reason: worked.reason };
+    if (worked.outcome === "asked") {
+      return { ok: true, taskId, member, ...by, outcome: "asked", requestId: worked.requestId, kind: worked.kind };
+    }
     // Passed on: the member whose job it is starts on the same task, and the control plane, not the operator, started it.
     passedFrom = member;
     member = worked.to;
@@ -184,6 +202,7 @@ export async function runWorker(env: JobFlowEnv, input: WorkerRunInput, options:
 type Worked =
   | { outcome: "done"; draft: DraftJSON }
   | { outcome: "failed"; reason: string }
+  | { outcome: "asked"; requestId: string; kind: string }
   | { outcome: "passed"; to: WorkerMember };
 
 /// One member's attempt at the job, through its port only.
@@ -221,8 +240,25 @@ async function work(
     return { outcome: "done", draft: drafted.value };
   };
 
+  /// Passes the job to the member whose job it is, once: the member it goes to owns the capability, so a second handover
+  /// would mean the roster is wrong, and the job ends rather than going round.
+  const passOn = async (to: string): Promise<Worked> => {
+    if (passedAlready || !isWorkerMember(to)) return fail("not_my_job");
+    const handed = await port.report([
+      { type: "handoffNote", from: member, to, job: job.kind },
+      { type: "turnCompleted", status: "completed" },
+    ]);
+    if (!handed.ok) return fail(handed.error, handed);
+    const finished = await port.finish("done");
+    if (!finished.ok) return { outcome: "failed", reason: finished.error };
+    return { outcome: "passed", to };
+  };
+
   const opened = await port.report([{ type: "turnStarted" }]);
   if (!opened.ok) return fail(opened.error, opened);
+
+  // An append asks through the port, which runs the member's permissions itself, as a browser write's ask does.
+  if (job.kind === "books_sheet") return appendBooks(port, job.month, { fail, keep, passOn });
 
   // Permissions come first: nothing is read for the model, and nothing is spent, for a job the member may not do.
   let connection: Connection | null = null;
@@ -234,19 +270,9 @@ async function work(
   const decision = decide(member, JOBS[job.kind].capability, connection, Date.now());
   let send: DraftJSON["send"] = undefined;
   switch (decision.answer) {
-    case "not_my_job": {
-      // A member never does another member's job. It passes it on once; the member it goes to owns the capability,
-      // so a second handover would mean the roster is wrong, and the job ends rather than going round.
-      if (passedAlready || !isWorkerMember(decision.member)) return fail("not_my_job");
-      const handed = await port.report([
-        { type: "handoffNote", from: member, to: decision.member, job: job.kind },
-        { type: "turnCompleted", status: "completed" },
-      ]);
-      if (!handed.ok) return fail(handed.error, handed);
-      const finished = await port.finish("done");
-      if (!finished.ok) return { outcome: "failed", reason: finished.error };
-      return { outcome: "passed", to: decision.member };
-    }
+    case "not_my_job":
+      // A member never does another member's job. It passes it on once.
+      return passOn(decision.member);
     case "not_connected":
       return fail("not_connected");
     case "refused":
@@ -305,6 +331,38 @@ async function work(
     model: WORKER_MODEL, costSatang }]);
   if (!spent.ok) return fail(spent.error, spent);
   return keep(answered.value.text, { ...(about ? { about } : {}), ...(send ? { send } : {}) });
+}
+
+/// The steps of an attempt an append ends with, shared with `work`.
+type Steps = {
+  fail: (reason: string, answer?: PortAnswer<unknown>) => Promise<Worked>;
+  keep: (text: string, extra: { about?: Record<string, string>; send?: DraftJSON["send"] }) => Promise<Worked>;
+  passOn: (to: string) => Promise<Worked>;
+};
+
+/// Ton's append of a month of the books to the owner's Google Sheet: the port asks (books-sheet.ts), naming only the
+/// month. In practice mode the port keeps a draft of the append, and the attempt ends done. With a request raised, the
+/// attempt stops for the owner (`awaiting_owner`) and the owner's decision sends it. A month with nothing recorded is
+/// said in a draft, and nothing is asked.
+async function appendBooks(port: WorkerPort, month: string, steps: Steps): Promise<Worked> {
+  const asked = await port.askBooks(month);
+  if (!asked.ok) {
+    if ("member" in asked) return steps.passOn(asked.member);
+    if (asked.error === "nothing_to_append") {
+      return steps.keep(`No payments were recorded in ${month}, so there is nothing to append.`, { about: { month } });
+    }
+    return steps.fail(asked.error, asked);
+  }
+  const closed = await port.report([{ type: "turnCompleted", status: "completed" }]);
+  if (!closed.ok) return steps.fail(closed.error, closed);
+  if (asked.value.outcome === "draft_only") {
+    const finished = await port.finish("done");
+    if (!finished.ok) return { outcome: "failed", reason: finished.error };
+    return { outcome: "done", draft: asked.value.draft };
+  }
+  const waited = await port.waitForOwner();
+  if (!waited.ok) return { outcome: "failed", reason: waited.error };
+  return { outcome: "asked", requestId: asked.value.requestId, kind: asked.value.kind };
 }
 
 /// Yesterday as the calendar reads in Bangkok, `YYYY-MM-DD`.
@@ -374,34 +432,6 @@ async function replyConnection(env: JobFlowEnv, tenant: string, connectionId: st
   }
 }
 
-/// The customers' order payments the shop has recorded, newest first, as many as the console lists. Null when they
-/// cannot be read.
-async function readPayments(env: JobFlowEnv, tenant: string): Promise<Payment[] | null> {
-  try {
-    const response = await tenantCall(env, tenant, `/pilot/payments?tenant=${enc(tenant)}`);
-    if (!response.ok) {
-      await response.body?.cancel();
-      return null;
-    }
-    const { payments } = (await response.json()) as { payments?: unknown };
-    return Array.isArray(payments) ? payments.filter(isRecord) as Payment[] : null;
-  } catch {
-    return null;
-  }
-}
-
-/// The payments as Ton's books count them: each a sale on LINE, the pilot's one channel, at the moment the payment
-/// was confirmed. A record that is not whole goes in as it is, and the books flag it rather than count it.
-function entriesOf(payments: readonly Payment[]): Entry[] {
-  return payments.map((payment): Entry => ({
-    kind: "sale",
-    ref: payment.orderRef,
-    channel: "line",
-    amountSatang: payment.amountSatang,
-    at: typeof payment.confirmedAt === "string" ? Date.parse(payment.confirmedAt) : Number.NaN,
-  }));
-}
-
 /// The day's numbers as @manut/agent-prompts takes Ton's: how many orders were paid and for how much, then anything
 /// the books flagged for the owner to check. Ton raises flags and never fixes them.
 function numbersOf(summary: DailySummary): { label: string; value: string }[] {
@@ -432,31 +462,31 @@ function flagText(flag: Flag): string {
   }
 }
 
-/// Integer satang written in baht by @manut/format's rule (`formatMoney`): `฿1,250.50`, or `฿500` for whole baht.
-/// apps/api does not depend on that package, so the rule is written out here, in integer arithmetic only: the baht
-/// are the satang less their remainder, divided exactly.
-function baht(satang: number): string {
-  const sign = satang < 0 ? "-" : "";
-  const whole = Math.abs(satang);
-  const rest = whole % 100;
-  const grouped = String((whole - rest) / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}฿${grouped}${rest === 0 ? "" : `.${String(rest).padStart(2, "0")}`}`;
-}
-
 /// What a job's task is titled, in the runner's own words. The drafts list (`readJobs`, below) reads a job's kind back
 /// from the title, because a job that failed before it wrote anything has no draft to say what it was and the task
 /// holds no other record of its kind. One table writes the titles and reads them, so the two cannot drift apart.
 const TITLE_REPLY = "A reply to a customer";
 const TITLE_POST = "A post";
 const TITLE_SUMMARY = "Sales summary for ";
+const TITLE_BOOKS = "Books to Google Sheets for ";
 
 export function taskTitle(job: WorkerJob, day: string): string {
-  return job.kind === "reply" ? TITLE_REPLY : job.kind === "post" ? TITLE_POST : `${TITLE_SUMMARY}${day}`;
+  switch (job.kind) {
+    case "reply":
+      return TITLE_REPLY;
+    case "post":
+      return TITLE_POST;
+    case "daily_summary":
+      return `${TITLE_SUMMARY}${day}`;
+    case "books_sheet":
+      return `${TITLE_BOOKS}${job.month}`;
+  }
 }
 
 function kindOfTitle(title: unknown): WorkerJob["kind"] | null {
   if (title === TITLE_REPLY) return "reply";
   if (title === TITLE_POST) return "post";
+  if (typeof title === "string" && title.startsWith(TITLE_BOOKS)) return "books_sheet";
   return typeof title === "string" && title.startsWith(TITLE_SUMMARY) ? "daily_summary" : null;
 }
 
@@ -469,7 +499,9 @@ async function createTask(env: JobFlowEnv, tenant: string, taskId: string, job: 
     title: taskTitle(job, day),
     objective: job.kind === "reply" ? "Draft a reply to a customer's message for the owner to read."
       : job.kind === "post" ? `Draft a post about ${job.topic}, for the owner to read.`
-        : `Write the owner a short summary of the sales recorded on ${day}.`,
+        : job.kind === "books_sheet"
+          ? `Append the books for ${job.month} to the owner's Google Sheet, once the owner approves the rows.`
+          : `Write the owner a short summary of the sales recorded on ${day}.`,
   };
   try {
     const indexed = await tenantCall(env, tenant, "/index", { method: "POST",
