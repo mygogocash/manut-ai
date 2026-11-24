@@ -12,7 +12,8 @@
 /// the action it records:
 ///
 /// - When that record lives in the same TenantObject (the shop, its LINE pointer, a reply's record and decision time,
-///   payments, consent, the model cap, what the team knows), the entry goes into the same storage write (`auditPut`, `auditPutSync`), so
+///   payments, consent, the model cap and a month's crossings of it, what the team knows), the entry goes into the same
+///   storage write (`auditPut`, `auditPutSync`), so
 ///   the entry exists exactly when the record does. An entry that cannot be made as given (a malformed actor from a
 ///   caller) is not written; the shop's miss count goes up in that same write instead, and the action goes ahead.
 /// - When the record lives in another object (task objects, AuthObject), the entry is appended after the action
@@ -127,6 +128,11 @@ export const AUDIT_ACTIONS = [
   "google.broken",
   "google.sheet_created",
   "google.appended",
+  // The model gateway (model-meter.ts): the system noting that the shop's charged model spend in a Bangkok month reached
+  // 80% of its cap, and then 100%, in the transaction of the charge or cap change that got it there. Each names the month
+  // (`month`) and carries the cap it was measured against (`amountSatang`), never what any call said.
+  "model.cap_near",
+  "model.cap_reached",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -171,6 +177,8 @@ export const AUDIT_SUBJECT_KEYS = [
   "stepId",
   "grantId",
   "ownerAccountId",
+  // A Bangkok month (`YYYY-MM`), which names that month's total in the model meter (model-meter.ts).
+  "month",
 ] as const;
 export type AuditSubject = Partial<Record<(typeof AUDIT_SUBJECT_KEYS)[number], string>>;
 

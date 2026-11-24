@@ -539,7 +539,15 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
       : entry.outcome === "unknown"
         ? `sent a month of the books to ${ownerName}'s Google Sheet without learning whether it landed`
         : `appended a month of the books to ${ownerName}'s Google Sheet`,
+  // The system noting the month's charged model spend reaching 80% of the cap, then all of it (docs/model-gateway.md).
+  "model.cap_near": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached 80% of its monthly cap${amountOf(entry)}`,
+  "model.cap_reached": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached its monthly cap${amountOf(entry)}`,
 };
+
+/// " in November 2026" for an entry about a month of the model meter, or nothing for one that names none.
+function monthOfEntry(entry: AuditEntry): string {
+  return entry.subject.month ? ` in ${monthName(entry.subject.month)}` : "";
+}
 
 /// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the
 /// grant, and a step the vault did not find (a report for an unknown step) names the outpost alone, so it is said in general.
@@ -797,6 +805,8 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["outpostId", "outpost"],
   ["stepId", "browser step"],
   ["grantId", "grant"],
+  // A Bangkok month of the model meter, `YYYY-MM`, as a crossing of the cap names it.
+  ["month", "model month"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {
