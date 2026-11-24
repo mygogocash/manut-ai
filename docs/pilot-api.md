@@ -2151,6 +2151,57 @@ type OwnerAccountView = { id: string; linkedAt: string; devices: number };   // 
   link and every owner session with the rest of its people, and takes the shop out of every person's index. A person who
   deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet.
 
+## The web app's session
+
+The owner's web app (`/app/`, `docs/web-app.md`) signs a person in with a code sent by email and keeps the sign-in after
+the app is closed, in cookies this API sets and the page's script cannot read (`apps/api/src/web-session.ts`). These five
+routes are the only ones in the API that read a cookie. Each hands its request on, with the right bearer from the
+cookies, to the route that does the work: the lifted auth to sign in, refresh and sign out, the person's own routes for
+their shops ("Several shops"), and the shop's approvals with that shop's own session ("Approvals for a session",
+"Deciding from a session"). Every other route keeps taking a bearer and nothing else. Signing in by email is off
+(`email_not_configured`) until the owner turns it on, so the app can sign no one in today.
+
+**The cookies.** Each is `__Host-` (this exact host, every path), `Secure`, `HttpOnly` and `SameSite=Strict`:
+
+| Cookie | Value | Lasts |
+| --- | --- | --- |
+| `__Host-manut-sign-in` | the sign-in's device id (`web-<uuid>`, minted here, never by the page) and refresh token | 30 days, set again by each refresh; the lifted auth ends the chain at 90 days |
+| `__Host-manut-access` | the sign-in's access token | its hour, less a minute |
+| `__Host-manut-shop-<16 hex>` | one shop session (`mos1.` or `mhs1.`) and the id it decides as; the name is the start of the shop id's SHA-256 | the session's 30 days, less an hour |
+
+**Who may call.** Every route answers 403 `csrf_required` without the header `x-manut-web: 1`, which a page on another
+origin can send only after a CORS preflight the API never answers, and 403 `origin_forbidden` for an `Origin` that is
+not this origin, a `Sec-Fetch-Site` other than `same-origin`, or a `POST` with no `Origin`. These come before the
+method (405 `method_not_allowed`) and the cookies. No answer carries a token, and every answer is
+`cache-control: no-store`. A `/v1/web/` path that is none of the five answers 404 `not_found`.
+
+| Method and path | Body or query | Answer |
+| --- | --- | --- |
+| `POST /v1/web/sign-in` | exactly `{ email, code }` | `{ signedIn: true }` and the sign-in's two cookies. The sessions the browser held before are ended and their cookies cleared first. Refusals as the exchange's: 401 `wrong_code` with `triesLeft`, 401 `code_ended`, 400 `invalid_request` (another field, a `deviceId` above all, or a code that is not six digits), 400 `email_not_configured` |
+| `POST /v1/web/shops` | `{}` or none | `{ shops: WebShop[] }`: the person's shops (`GET /v1/shops`), each with a session ready, one kept from its cookie or opened (`POST /v1/shops/session`) and set. A cookie for a shop no longer listed is cleared. Refreshes the sign-in when the access cookie has gone, or the token is refused. 401 `signed_out` with no sign-in or one the lifted auth ended (no cookie is cleared then: another tab's refresh may have set the one that works); 503 `shops_unavailable` |
+| `GET /v1/web/approvals` | `?shop=&state=open\|recent[&limit=]`, nothing else | `GET /v1/approvals`'s answer to that shop's session, as it is |
+| `POST /v1/web/approvals/{requestId}/decision` | exactly `{ shop, optionId, seenRevision }` | `POST /v1/approvals/{requestId}/decision`'s answer to that shop's session with `{ optionId, seenRevision }`, as it is |
+| `POST /v1/web/sign-out` | `{}` or none | `{ signedOut: true, shopsEnded }`: every shop session ended (`POST /v1/shops/session/end`) and the sign-in (`DELETE /v1/auth/session`, refreshed first when the access cookie has gone), best effort; every cookie cleared whatever happened |
+
+```ts
+type WebShop = {
+  id: string; name: string; ownerName: string;
+  role: "owner" | "helper";
+  you: string | null;   // the id this person's decisions name there: the linked account's (owner-…) or the helper's
+  ready: boolean;       // false when its session could not be opened now
+};
+```
+
+- **The two shop routes** answer 401 `session_ended` with `shop` when the browser holds no session for the shop, or the
+  shop no longer holds the one it sent, and clear that cookie: reading the person's shops again opens a new one. A
+  session removal or unlinking ended keeps its own answer (`removed` with `removedAt`, `unlinked` with `unlinkedAt`), with
+  `shop`, and its cookie is cleared too. A query naming anything but `shop`, `state` and `limit`, or a body naming a
+  `role`, is 400 `invalid_request`, as on the shop routes.
+- **Limits.** `POST /v1/web/sign-in` counts in the exchange's bucket (`AUTH_EXCHANGE_LIMITER`), and `POST /v1/web/shops`
+  and `POST /v1/web/sign-out` in the refresh's (`AUTH_SESSION_LIMITER`), per source address, before anything is read.
+- **What the shops see.** Opening a shop session here is opening one anywhere: an owner's writes `owner.session_opened`,
+  a helper's is a new device the owner hears of. The app keeps each for its 30 days, so a phone counts as one device.
+
 ## Google Sheets for Ton's books
 
 The owner connects their own Google account, and Ton appends a month of the shop's books to a Google Sheet in the
