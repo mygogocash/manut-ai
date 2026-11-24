@@ -425,8 +425,9 @@ export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
 /// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
 export type WorkerMember = "nam" | "pim" | "ton";
 
-/// What a job is: a reply to a customer's message, a post about a topic, or yesterday's sales summary.
-export type WorkerJobKind = "reply" | "post" | "daily_summary";
+/// What a job is: a reply to a customer's message, a post about a topic, yesterday's sales summary, or a month of the books
+/// appended to the owner's Google Sheet once the owner approves its rows.
+export type WorkerJobKind = "reply" | "post" | "daily_summary" | "books_sheet";
 
 /// How a worker's job stands. `failed` carries the code the job ended with, which this console puts in words and shows as it
 /// is when it does not know the code yet. `handed_over` is a job passed on to a member who has not taken it up; a job passed

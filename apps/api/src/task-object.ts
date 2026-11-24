@@ -14,6 +14,7 @@ import {
   type Standing,
 } from "@manut/approval-core";
 import { readJsonBody } from "./body";
+import { BOOKS_KIND, booksDetail, booksPayloadOf, SHEETS_APPEND, type BooksDetail } from "./books-detail";
 import {
   BROWSER_SUBMIT,
   SUBMIT_GRANT_REVISION,
@@ -490,6 +491,9 @@ export const JOB_REQUEST_OPTIONS: readonly ApprovalOption[] = [
 const REQUEST_KINDS: Readonly<Record<string, ApprovalKind>> = {
   [LINE_PUSH_OPERATION]: "reply",
   "linear.issue.create": "command",
+  // A month of Ton's books into the owner's own Google Sheet changes the shop's records, and is owner-only
+  // (books-detail.ts).
+  [SHEETS_APPEND]: BOOKS_KIND,
 };
 
 /// The operations a worker may ask for (job-flow.ts). A LINE reply is not one: it needs the reply record binding it
@@ -889,7 +893,8 @@ export class TaskObject extends DurableObject {
     if (request.method === "POST" && url.pathname === "/attempts/sweep") {
       return this.sweepAttempts(request);
     }
-    const attemptJob = url.pathname.match(/^\/attempts\/([^/]+)\/(events|ask|ask-submit|draft|end|outpost-events)$/);
+    const attemptJob = url.pathname.match(
+      /^\/attempts\/([^/]+)\/(events|ask|ask-submit|ask-books|draft|end|outpost-events)$/);
     if (request.method === "POST" && attemptJob) {
       const attemptId = attemptJob[1];
       if (!attemptId) return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -897,6 +902,7 @@ export class TaskObject extends DurableObject {
       if (attemptJob[2] === "outpost-events") return this.outpostEvents(request, attemptId);
       if (attemptJob[2] === "ask") return this.askApproval(request, attemptId);
       if (attemptJob[2] === "ask-submit") return this.askSubmit(request, attemptId);
+      if (attemptJob[2] === "ask-books") return this.askBooks(request, attemptId);
       if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
@@ -1196,6 +1202,49 @@ export class TaskObject extends DurableObject {
         text: submitText(write, site),
         payloadHash: proposal.payloadHash,
       } satisfies SubmitDetail,
+    })));
+  }
+
+  /// `POST /attempts/:id/ask-books` with exactly `{ fence, books, connection, expiresAt }`: Ton asks to append a month
+  /// of the shop's books to the owner's Google Sheet (books-sheet.ts), after the control plane ran member-grants'
+  /// `decide`, read the books from the shop's payments and made sure of the sheet. The books are checked again here
+  /// (books-detail.ts, `booksPayloadOf`) and stored as an immutable proposal whose payload is the month's exact rows and
+  /// the sheet, bound to the Google connection and grant revision the control plane named, and its request is opened in
+  /// the same transaction: of the owner-only kind this module's table gives an append, never one the caller names, with
+  /// a detail naming the sheet, the month, how many rows, the totals as text from integer satang, and the rows. Only the
+  /// attempt that holds the task may ask.
+  private async askBooks(request: Request, attemptId: string): Promise<Response> {
+    const parsed = await readJsonBody<Record<string, unknown>>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const body = parsed.value;
+    const keys = isPlainObject(body) ? Object.keys(body) : [];
+    const books = isPlainObject(body) ? booksPayloadOf(body.books) : null;
+    const connection = isPlainObject(body) && isPlainObject(body.connection) ? body.connection : null;
+    const expiresAt = isPlainObject(body) && typeof body.expiresAt === "string" ? Date.parse(body.expiresAt) : Number.NaN;
+    const nowMs = Date.now();
+    if (keys.length !== 4 || !["fence", "books", "connection", "expiresAt"].every((key) => keys.includes(key)) || !books ||
+        !connection || Object.keys(connection).length !== 3 || typeof connection.id !== "string" ||
+        connection.id.length === 0 || connection.id.length > 256 || typeof connection.accountId !== "string" ||
+        connection.accountId.length === 0 || connection.accountId.length > 256 ||
+        !Number.isSafeInteger(connection.grantRevision) || (connection.grantRevision as number) < 1 ||
+        !Number.isFinite(expiresAt) || expiresAt <= nowMs || expiresAt > nowMs + 30 * 24 * 3600 * 1000) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const fields: HashedActionFields = {
+      connectionId: connection.id,
+      providerAccountId: connection.accountId,
+      operationType: SHEETS_APPEND,
+      targetResourceId: books.sheet.id,
+      resourceScope: [books.sheet.id],
+      payload: books,
+      grantRevision: connection.grantRevision as number,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
+    if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
+    return this.respond(this.openAskedSync(request, attemptId, body.fence, hashed, (proposal) => ({
+      kind: REQUEST_KINDS[SHEETS_APPEND] ?? BOOKS_KIND,
+      detail: booksDetail(proposal.id, books, proposal.payloadHash) satisfies BooksDetail,
     })));
   }
 

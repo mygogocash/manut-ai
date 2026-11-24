@@ -13,6 +13,8 @@
 ///   exchanged with the verifier and the client secret, which never leaves this Worker. The refresh token is sealed in
 ///   the vault as the shop's Google connection, in place of any earlier one, and the browser is shown a short page.
 /// - `POST /v1/google/disconnect` with `{}`: the token is revoked at Google, then forgotten in the vault.
+/// - `POST /v1/google/books` with `{ month }`: the owner asks Ton to append that month of the books. Ton's job asks
+///   through approval-core with the exact rows, and only the owner's decision sends them (books-sheet.ts).
 ///
 /// Only the shop's owner reaches these, from an owner session or the shop's own session; a helper's session answers 403
 /// `owner_only`, as on the owner's other routes. The callback is public, because the browser Google sends back carries
@@ -24,6 +26,7 @@ import type { AuditActor } from "./audit-log";
 import { appendAudit } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
+import { isBooksMonth } from "./books-detail";
 import { brokenWords, googleConnectionOf, googleVaultCall } from "./google-connection";
 import { isValidTenant } from "./companies";
 import { readConnectionSecret } from "./cred-broker";
@@ -53,7 +56,10 @@ import {
   type PeopleEnv,
 } from "./people";
 import type { OwnerSessionCheck } from "./people-store";
+import { readRoutines } from "./routine-setup";
+import { memberOn } from "./routine-store";
 import { credStub } from "./tenant-data";
+import { runWorker } from "./workers";
 
 export type GoogleRouteEnv = JobFlowEnv & PeopleEnv & GoogleEnv;
 
@@ -74,6 +80,7 @@ const OWNER_ROUTES: ReadonlyMap<string, { method: "GET" | "POST"; keys?: readonl
   ["/v1/google", { method: "GET" }],
   ["/v1/google/connect", { method: "POST", keys: [] }],
   ["/v1/google/disconnect", { method: "POST", keys: [] }],
+  ["/v1/google/books", { method: "POST", keys: ["month"] }],
 ]);
 
 function json(data: unknown, status = 200): Response {
@@ -141,8 +148,10 @@ export async function googleRoute(request: Request, url: URL, env: GoogleRouteEn
   switch (url.pathname) {
     case "/v1/google/connect":
       return connect(request, env, caller, config);
-    default:
+    case "/v1/google/disconnect":
       return disconnect(env, caller, config, fetchImpl);
+    default:
+      return books(env, caller, body.month, options);
   }
 }
 
@@ -323,4 +332,26 @@ async function disconnect(env: GoogleRouteEnv, caller: Extract<Caller, { role: "
   await appendAudit(env, caller.shop, { actor: ownerActor(caller), action: "google.disconnected",
     subject: { connectionId: connection.id }, outcome: "ok", ...(revoked ? {} : { reason: "not_revoked" }) });
   return json({ disconnected: true, revoked });
+}
+
+// ---------------------------------------------------------------------------
+// Asking Ton for a month
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/google/books` with exactly `{ month }`: the owner asks Ton to append that month of the books. It runs Ton's
+/// job as the operator's start does (`runWorker`), with the same rule for Pause everyone and a member the shop's
+/// template left off, and the owner named as starting it. The answer is the run's: `asked` with the request, `done`
+/// with a practice draft, or why it failed.
+async function books(env: GoogleRouteEnv, caller: Extract<Caller, { role: "owner" }>, month: unknown,
+  options: GoogleRouteOptions): Promise<Response> {
+  if (!isBooksMonth(month)) return json({ error: "invalid_month" }, 400);
+  const routines = await readRoutines(env, caller.shop);
+  if (!routines) return json({ error: "unavailable" }, 503);
+  if (routines.team.paused) return json({ error: "team_paused" }, 409);
+  if (!memberOn(routines.team, "ton")) return json({ error: "member_off" }, 409);
+  const run = await runWorker(env, { tenant: caller.shop, member: "ton", job: { kind: "books_sheet", month },
+    startedBy: ownerActor(caller) }, { flags: options.flags, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+  if (!run.ok) return json({ error: run.error, ...(run.feature ? { feature: run.feature } : {}) }, run.status);
+  const { ok: _ok, ...answer } = run;
+  return json(answer);
 }

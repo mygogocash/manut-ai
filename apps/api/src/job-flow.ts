@@ -23,6 +23,8 @@
 import type { ApprovalKind, ApprovalRecord, ApprovalRequest, DecideResult, Role, Standing } from "@manut/approval-core";
 import { APPROVAL_LINK_TTL_MS } from "./approval-link";
 import { appendAudit, type AuditActor, type AuditOutcome } from "./audit-log";
+import { booksText } from "./books-detail";
+import { draftSheet, prepareBooks, readyBooks } from "./books-sheet";
 import { beginDispatchAction, finishDispatchAction, type FetchImpl } from "./broker-actions";
 import {
   auditAsk,
@@ -32,6 +34,7 @@ import {
   submitText,
   type SubmitWrite,
 } from "./browser-writes";
+import type { GoogleEnv } from "./google";
 import { callModel, type ModelGatewayEnv } from "./model-gateway";
 import type { UsageState } from "./model-meter";
 import { bangkokMonth, effectiveCap, floorSatang, gatewaySettings, MILLISATANG_PER_SATANG } from "./model-price";
@@ -57,7 +60,9 @@ import {
 } from "./task-object";
 import { credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
 
-export type JobFlowEnv = TenantDataEnv & ModelGatewayEnv;
+/// The Google settings are read by Ton's append (books-sheet.ts); without them that one job answers
+/// `google_not_configured` and every other job runs as before.
+export type JobFlowEnv = TenantDataEnv & ModelGatewayEnv & GoogleEnv;
 
 /// The kill switches the job flow reads (index.ts `featureFlags`), passed in as the pilot's routes get them.
 export type JobFlags = () => Promise<{ officeCloud: boolean; officeExternalWrites: boolean }>;
@@ -104,6 +109,13 @@ export type AskAnswer = { requestId: string; kind: ApprovalKind; revision: numbe
 /// What asking to submit through a browser came to (browser-writes.ts): a request raised for the owner, naming the exact
 /// write; or, while the site is in practice mode, a draft of the write and no request.
 export type SubmitAsked =
+  | ({ outcome: "asked" } & AskAnswer)
+  | { outcome: "draft_only"; kind: ApprovalKind; draft: DraftJSON };
+
+/// What asking to append a month of the books to the owner's Google Sheet came to (books-sheet.ts): a request raised for
+/// the owner, naming the sheet, the month and the exact rows; or, while the Google connection is in practice mode, a
+/// draft of the append and no request.
+export type BooksAsked =
   | ({ outcome: "asked" } & AskAnswer)
   | { outcome: "draft_only"; kind: ApprovalKind; draft: DraftJSON };
 
@@ -154,6 +166,11 @@ export interface WorkerPort {
   /// request naming the site, the page and every value, of the kind the action has in the control plane's table. Once
   /// the request is approved, `browserStep` with `kind: "submit"` and the request queues the write for an outpost.
   askSubmit(write: SubmitWrite): Promise<PortAnswer<SubmitAsked> | NotMyJob>;
+  /// Asks to append one month of the shop's books to the owner's Google Sheet (books-sheet.ts): member-grants' `decide`
+  /// first, then the month's exact rows from the shop's payments, the sheet (made on first use), and one owner-only
+  /// approval-core request naming the sheet, the month, the rows and their totals. The worker names only the month: the
+  /// rows are the shop's own, read by the control plane. Once approved, the decision sends it, once.
+  askBooks(month: string): Promise<PortAnswer<BooksAsked> | NotMyJob>;
 }
 
 /// The provider each operation a worker may ask for writes to. The connection that carries it is the shop's live
@@ -327,6 +344,8 @@ async function liveGrant(env: JobFlowEnv, tenant: string, provider: string, targ
   const { connections } = (await response.json()) as { connections?: Record<string, unknown>[] };
   for (const connection of connections ?? []) {
     const { id, accountId, grantRevision, resourceIds } = connection;
+    // A connection the provider refused (google-vault.ts, `brokenAt`) carries nothing until the owner connects again.
+    if (connection.brokenAt !== undefined) continue;
     if (connection.provider === provider && connection.allowsActions === true && typeof id === "string" &&
         typeof accountId === "string" && typeof grantRevision === "number" && Number.isInteger(grantRevision) &&
         Array.isArray(resourceIds) && resourceIds.includes(target)) {
@@ -563,6 +582,67 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
       }
       const { request } = (await response.json()) as { request: ApprovalRequest };
       await auditAsk(env, at.value, write, { requestId: request.id });
+      return { ok: true, value: { outcome: "asked", requestId: request.id, kind: request.kind,
+        revision: request.revision, expiresAt: new Date(request.expiresAt ?? 0).toISOString() } };
+    },
+
+    /// After the switches (with `officeExternalWrites`), consent and the heartbeat, which gives the member from the task
+    /// object's record: Google configured, `decide`, the month and its books (books-sheet.ts, `prepareBooks`). In
+    /// practice mode the append is kept as the attempt's draft, for the owner to read, and nothing reaches Google.
+    /// Otherwise a fresh access token, the sheet (made on first use), and the task object stores the exact rows and opens
+    /// the owner-only request in one step. Every answer from here is written to the audit log, with ids only.
+    async askBooks(month) {
+      const at = await browserControlAt(true);
+      if (!at.ok) return at;
+      const attempt = at.value;
+      const audit = async (result: { requestId: string } | { skipped: "draft_only" } | { refused: string }) => {
+        const subject = { taskId: job.taskId, attemptId: job.attemptId };
+        await appendAudit(env, job.tenant, { actor: worker, action: "approval.requested",
+          ...("requestId" in result ? { subject: { ...subject, requestId: result.requestId, actionId: result.requestId },
+            outcome: "ok" as const }
+            : "skipped" in result ? { subject, outcome: "skipped" as const, reason: result.skipped }
+              : { subject, outcome: "refused" as const, reason: result.refused }) });
+      };
+      const prepared = await prepareBooks(env, attempt, month, Date.now());
+      if (!prepared.ok) {
+        await audit({ refused: prepared.error });
+        return prepared.error === "not_my_job" && prepared.member !== undefined
+          ? { ok: false, error: "not_my_job", member: prepared.member } : { ok: false, error: prepared.error };
+      }
+      if (prepared.answer === "draft_only") {
+        const drafted = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/draft`, { method: "POST", body: {
+          fence: job.fence,
+          draft: { member: attempt.member, job: "books_sheet",
+            text: booksText({ ...prepared.books, sheet: draftSheet(prepared) }),
+            about: { month: prepared.books.month }, send: { answer: "draft_only", kind: prepared.kind } },
+        } });
+        if (!drafted.ok) {
+          const refusal = await portRefusal(drafted);
+          await audit({ refused: refusal.error });
+          return refusal;
+        }
+        await audit({ skipped: "draft_only" });
+        return { ok: true, value: { outcome: "draft_only", kind: prepared.kind,
+          draft: (await drafted.json()) as DraftJSON } };
+      }
+      const ready = await readyBooks(env, job.tenant, prepared, options.fetchImpl ?? fetch);
+      if (!ready.ok) {
+        await audit({ refused: ready.error });
+        return { ok: false, error: ready.error };
+      }
+      const response = await taskCall(env, job.tenant, job.taskId, `${attemptPath}/ask-books`, { method: "POST", body: {
+        fence: job.fence,
+        books: ready.ask.books,
+        connection: ready.ask.connection,
+        expiresAt: new Date(Date.now() + APPROVAL_LINK_TTL_MS).toISOString(),
+      } });
+      if (!response.ok) {
+        const refusal = await portRefusal(response);
+        await audit({ refused: refusal.error });
+        return refusal;
+      }
+      const { request } = (await response.json()) as { request: ApprovalRequest };
+      await audit({ requestId: request.id });
       return { ok: true, value: { outcome: "asked", requestId: request.id, kind: request.kind,
         revision: request.revision, expiresAt: new Date(request.expiresAt ?? 0).toISOString() } };
     },

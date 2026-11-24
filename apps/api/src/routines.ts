@@ -375,7 +375,9 @@ export async function runRoutineOccurrence(env: RoutineEnv, occurrence: RoutineO
       ...(options.provider ? { provider: options.provider } : {}),
     });
     if (!run.ok) return end({ status: "failed", reason: codeOf(run.error) });
-    return end(run.outcome === "done" ? { status: "done", taskId: run.taskId }
+    // A run that asked the owner did its part, as one that drafted did. No routine asks yet: an append of Ton's books is
+    // started by the owner or an operator, and a monthly schedule for it is a later step.
+    return end(run.outcome === "done" || run.outcome === "asked" ? { status: "done", taskId: run.taskId }
       : { status: "failed", taskId: run.taskId, reason: codeOf(run.reason) });
   } catch {
     return end({ status: "failed", reason: "job_error" });

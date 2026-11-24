@@ -58,6 +58,9 @@ export const DEFAULT_ROSTER: Roster = [
       { id: "confirm_payment", access: "write", kind: "payment_confirmation", needsConnection: true },
       { id: "send_books", access: "write", kind: "message", needsConnection: true },
       { id: "ask_refund", access: "write", kind: "money", needsConnection: true },
+      // A month of the books appended to the owner's own Google Sheet changes the shop's records, so it asks as a
+      // command, which only the owner decides: a month's books are sales, which helpers do not see.
+      { id: "append_books", access: "write", kind: "command", needsConnection: true },
     ],
   },
   { id: "kit", capabilities: [{ id: "run_command", access: "write", kind: "command", needsConnection: true }] },

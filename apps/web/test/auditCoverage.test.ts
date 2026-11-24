@@ -76,6 +76,9 @@ const API_AUDIT_ACTIONS = [
   "browser_step.reported",
   "google.connected",
   "google.disconnected",
+  "google.broken",
+  "google.sheet_created",
+  "google.appended",
 ];
 
 const NOW = "2026-11-24T03:00:00.000Z";
