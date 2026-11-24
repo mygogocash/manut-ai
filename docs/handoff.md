@@ -128,9 +128,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 37, Google Sheets on the desktop and its two guards (`feat/sheets-desktop`, Sonnet);
-   - item 38, a shop make that stops part way leaves nothing half-made (`feat/shop-make-whole`, Sonnet);
-   - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet).
-   Merged: 17 (the owner's web app at `/app/`: `__Host-` HttpOnly SameSite=Strict cookies read only by five routes
+   - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
+   - a security review of the API surface added on 24 Nov as a whole (email sign-in, self-serve, Google, the web
+     session, the join page, the making journal, test-only paths), findings only (Opus).
+   Merged: 38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until
+   whole, and a self-serve slot is never lost; `docs/pilot-api.md`, "A make that stops part way"), 17 (the owner's web app at `/app/`: `__Host-` HttpOnly SameSite=Strict cookies read only by five routes
    under `/v1/web/`, which need `x-manut-web` and this origin; a service worker that caches the shell only, never `/v1`;
    `docs/web-app.md`), 36 (self-serve onboarding, built and off: `POST /v1/shops/new`, three shops an account, `sign_ups_closed`
    until `SELF_SERVE_SHOPS` is on, left out of the pilot gate unless an operator counts it in), 35 (the owner's pages on phones: Playwright in `apps/web/e2e` on four phones, run in CI as "Web on phones";
