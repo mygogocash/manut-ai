@@ -7,7 +7,7 @@ import { MAKE_START, MakeShopFlow, shopToMake, type NewShop, type ShopMaker } fr
 const MADE: ShopRow = { id: "pilot:made", name: "Khao Hom", owner: "Dao", role: "owner" };
 
 /** A runtime that answers each `make` with the next of `answers`: a shop, or a refusal to throw. */
-function maker(...answers: ({ shop: ShopRow } | { code: string; message: string })[]) {
+function maker(...answers: ({ shop: ShopRow; teamWaits?: true } | { code: string; message: string })[]) {
   const asked: NewShop[] = [];
   const m: ShopMaker = {
     make: vi.fn(async (shop: NewShop) => {
@@ -74,6 +74,17 @@ describe("making the shop", () => {
     await flow.make();
     expect(flow.get().name).toBe("  Khao Hom ");
     expect(m.make).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps that the made shop's team waits for Manut AI, when the runtime says so", async () => {
+    const flow = new MakeShopFlow(maker({ shop: MADE, teamWaits: true }).m);
+    filled(flow);
+    await flow.make();
+    expect(flow.get()).toMatchObject({ made: MADE, waits: true });
+    const plain = new MakeShopFlow(maker({ shop: MADE }).m);
+    filled(plain);
+    await plain.make();
+    expect(plain.get()).toMatchObject({ made: MADE, waits: false });
   });
 
   it("keeps what was typed after a refusal, says the refusal by its code, and sends again when pressed", async () => {

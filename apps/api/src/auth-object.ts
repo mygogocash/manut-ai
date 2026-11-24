@@ -10,6 +10,7 @@ import {
 import { deliver } from "./email-sender";
 import { timingSafeEqual } from "./people";
 import { pilotDeletionRoute, pilotRegistryRoute } from "./pilot-store";
+import { sessionIndexKey, sweepSessions, wipeGeneration, wipeTenantSessions, type SessionIndexRow } from "./session-index";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 import { testWorker } from "./test-origin";
 
@@ -83,12 +84,6 @@ const REFRESH_TTL_SECONDS = 30 * 24 * 3600;
 const REFRESH_ABSOLUTE_TTL_SECONDS = 90 * 24 * 3600;
 const MAX_BODY_BYTES = 256 * 1024;
 
-function wipeGeneration(value: unknown): number {
-  if (value === undefined) return 0;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
-  throw new Error("invalid_wipe_generation");
-}
-
 function randomToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -114,11 +109,13 @@ async function mintSession(tenant: string, deviceId: string, email: string | und
   };
 }
 
-/// The storage writes that make a minted session real, at the tenant's wipe generation read in the same transaction.
-function sessionWrites(minted: Minted, generation: number): Record<string, SessionRec | RefreshRec> {
+/// The storage writes that make a minted session real, at the tenant's wipe generation read in the same transaction: its
+/// two records, and its row in the tenant's index, so a wipe finds it without reading anyone else's (session-index.ts).
+function sessionWrites(minted: Minted, generation: number): Record<string, SessionRec | RefreshRec | SessionIndexRow> {
   return {
     [`sat:${minted.grant.accessHash}`]: { ...minted.session, wipeGeneration: generation },
     [`srt:${minted.session.refreshHash}`]: { ...minted.grant, wipeGeneration: generation },
+    [sessionIndexKey(minted.session.tenant, minted.session.refreshHash)]: { accessHash: minted.grant.accessHash, generation },
   };
 }
 
@@ -351,6 +348,8 @@ export class AuthObject extends DurableObject {
       if (result.kind !== "right") return result;
       const generation = wipeGeneration(await storage.get(`wiped:${tenant}`));
       await storage.put({ [key]: result.record, ...sessionWrites(minted, generation) });
+      // The alarm sweeps sessions too (session-index.ts), so one is due by the time this access record ends.
+      await alarmBy(storage, minted.session.exp);
       return result;
     });
     if (outcome.kind === "right") return sessionAnswer(minted);
@@ -363,7 +362,7 @@ export class AuthObject extends DurableObject {
   /// One alarm covers consumed identities and email sign-in records together; no token, code or claim body is stored.
   /// Unknown consumption records stay fail-closed rather than forgetting an unexpired consumption. An email sign-in
   /// record goes a day after its last send (email-code.ts, `purgeAt`); one this code did not write holds no code anyone
-  /// can use, so it goes at once.
+  /// can use, so it goes at once. The same alarm sweeps ended sessions, a bounded page a run (session-index.ts).
   override async alarm(): Promise<void> {
     const now = Date.now() / 1_000;
     await this.ctx.storage.transaction(async (storage) => {
@@ -399,6 +398,8 @@ export class AuthObject extends DurableObject {
         if (done.length) await storage.delete(done);
         if (records.size < 128) break;
       }
+      // Sessions too, a bounded page a run from where the last run stopped (session-index.ts).
+      next = Math.min(next, await sweepSessions(storage, now));
       if (Number.isFinite(next)) await storage.setAlarm(Math.ceil(next * 1_000));
       else await storage.deleteAlarm();
     });
@@ -429,7 +430,7 @@ export class AuthObject extends DurableObject {
       }
       const now = Date.now() / 1000;
       const generation = wipeGeneration(await storage.get(`wiped:${grant.tenant}`));
-      await storage.delete([`sat:${grant.accessHash}`, `srt:${presentedHash}`]);
+      await storage.delete([`sat:${grant.accessHash}`, `srt:${presentedHash}`, sessionIndexKey(grant.tenant, presentedHash)]);
       if (grant.exp <= now || wipeGeneration(grant.wipeGeneration) !== generation) {
         return Response.json({ error: "invalid_grant" }, { status: 401 });
       }
@@ -442,7 +443,10 @@ export class AuthObject extends DurableObject {
         exp: now + ACCESS_TTL_SECONDS, refreshHash, csrfHash, wipeGeneration: generation, ...email };
       const next: RefreshRec = { accessHash, tenant: grant.tenant, deviceId: grant.deviceId,
         exp: now + REFRESH_TTL_SECONDS, born, wipeGeneration: generation, ...email };
-      await storage.put({ [`sat:${accessHash}`]: session, [`srt:${refreshHash}`]: next });
+      const row: SessionIndexRow = { accessHash, generation };
+      await storage.put({ [`sat:${accessHash}`]: session, [`srt:${refreshHash}`]: next,
+        [sessionIndexKey(grant.tenant, refreshHash)]: row });
+      await alarmBy(storage, session.exp);
       return Response.json({ accessToken: access, refreshToken: refresh, csrf,
         expiresIn: ACCESS_TTL_SECONDS, tenant: grant.tenant });
     });
@@ -454,7 +458,7 @@ export class AuthObject extends DurableObject {
     const accessHash = await sha256Hex(header.slice("Bearer ".length));
     const session = await this.ctx.storage.get<SessionRec>(`sat:${accessHash}`);
     if (!session) return Response.json({ error: "invalid_session" }, { status: 401 });
-    await this.forget(accessHash, session.refreshHash);
+    await this.forget(accessHash, session.refreshHash, session.tenant);
     return Response.json({ revoked: true });
   }
 
@@ -472,7 +476,8 @@ export class AuthObject extends DurableObject {
       if (!session) return Response.json({ ok: false });
       const generation = wipeGeneration(await storage.get(`wiped:${session.tenant}`));
       if (session.exp <= Date.now() / 1000 || wipeGeneration(session.wipeGeneration) !== generation) {
-        await storage.delete([`sat:${accessHash}`, `srt:${session.refreshHash}`]);
+        await storage.delete([`sat:${accessHash}`, `srt:${session.refreshHash}`,
+          sessionIndexKey(session.tenant, session.refreshHash)]);
         return Response.json({ ok: false });
       }
       // The verified email rides along only for the routes that check who is signed in (people.ts); every other
@@ -481,9 +486,9 @@ export class AuthObject extends DurableObject {
     });
   }
 
-  private async forget(accessHash: string, refreshHash: string | null): Promise<void> {
+  private async forget(accessHash: string, refreshHash: string | null, tenant: string): Promise<void> {
     await this.ctx.storage.delete(`sat:${accessHash}`);
-    if (refreshHash) await this.ctx.storage.delete(`srt:${refreshHash}`);
+    if (refreshHash) await this.ctx.storage.delete([`srt:${refreshHash}`, sessionIndexKey(tenant, refreshHash)]);
   }
 
   /// Verifies a session-bound CSRF token for company-console writes. The
@@ -652,17 +657,8 @@ export class AuthObject extends DurableObject {
       await storage.put(`wiped:${tenant}`, next);
       return next;
     });
-    const sessionKeys: string[] = [];
-    // No secondary index: sessions are found by scanning the small session
-    // namespace for this tenant's records.
-    const sessions = await this.ctx.storage.list<SessionRec>({ prefix: "sat:" });
-    for (const [key, session] of sessions) {
-      if (session.tenant === tenant && wipeGeneration(session.wipeGeneration) < generation) {
-        sessionKeys.push(key);
-        await this.ctx.storage.delete(`srt:${session.refreshHash}`);
-      }
-    }
-    await this.ctx.storage.delete(sessionKeys);
+    // The tenant's own sessions, found through its own index rows: nobody else's session is read (session-index.ts).
+    const sessionsWiped = await wipeTenantSessions(this.ctx.storage, tenant, generation);
     // Company-console state for this tenant goes with the sessions: the
     // account entitlement and the membership index. Company records
     // themselves are owned by their companies, not by any one member.
@@ -686,6 +682,6 @@ export class AuthObject extends DurableObject {
     }
     // Every person's index rows that name a deleted shop go too, and a person's own waiting link code (shops-store.ts).
     wipeShopsTenant(this.ctx.storage, body.tenant);
-    return Response.json({ sessionsWiped: sessionKeys.length });
+    return Response.json({ sessionsWiped });
   }
 }

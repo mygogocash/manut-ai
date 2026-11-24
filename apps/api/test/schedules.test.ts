@@ -1,5 +1,6 @@
 import { adminFetch, tenantSession } from "./authenticated-fixtures";
 import { env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
+import { sourceWorker } from "./source-worker";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deterministicTaskId, nextFire, latestDueInstant, occurrenceID } from "../src/schedule-object";
 import type { ScheduleJSON } from "../src/schedule-object";
@@ -589,7 +590,7 @@ describe("durable routines", () => {
       await SELF.fetch(`https://test/v1/tenant/export?tenant=${tenant}`, { headers: await tenantSession(tenant, false) })
     ).json()) as { schedules?: { id?: string }[] };
     expect((exported.schedules ?? []).some((entry) => entry.id === schedule.id)).toBe(true);
-    const deleted = await SELF.fetch(`https://test/v1/tenant/data?tenant=${tenant}`, {
+    const deleted = await sourceWorker.fetch(`https://test/v1/tenant/data?tenant=${tenant}`, {
       method: "DELETE",
       headers: await tenantSession(tenant, false),
     });

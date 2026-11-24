@@ -86,7 +86,7 @@ describe("the Pilot gate view", () => {
     expect(await screen.findByText("1 of 3 counted")).toBeTruthy();
     const rows = tableRows();
     expect(rows[0]![0]).toBe("Baan Mali");
-    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added itCount it");
+    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added it. Its team waits until one doesCount it");
     expect(rows[2]![0]).toBe("Baan FonMade by its ownerCounted: an operator added itLeave it out");
     // A shop an operator made has nothing to add or leave out.
     expect(screen.queryByRole("button", { name: "Count Baan Mali in the pilot gate" })).toBeNull();

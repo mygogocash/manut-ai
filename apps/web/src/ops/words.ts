@@ -297,7 +297,8 @@ export const gateWords = {
   noDecision: "None yet",
   /// A shop its owner made in the app: listed, and counted only once an operator adds it.
   selfServe: "Made by its owner",
-  leftOut: "Not counted: its owner made it in the app, and no operator has added it",
+  /// Counting it in is also what starts its team: until then it makes no model call and runs no routine (shop-waits.ts).
+  leftOut: "Not counted: its owner made it in the app, and no operator has added it. Its team waits until one does",
   addedIn: "Counted: an operator added it",
   /// What adding it does, for the operator who has spoken with its owner as the pilot's owners were spoken with.
   countIt: "Count it",
@@ -672,6 +673,8 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   routine_paused: "The routine was paused.",
   team_paused: "Everyone was paused.",
   member_off: "Its team member was not on.",
+  // A shop its owner made does no work, and spends nothing on the model, until an operator counts it in (Count it).
+  not_counted_in: "The shop's owner made it, and it is not counted in yet.",
   routines_off: "Routines were switched off.",
   cloud_off: "Cloud work was switched off.",
   nothing_to_answer: "No customer message was waiting.",

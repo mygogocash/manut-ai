@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker, { type Env } from "../src/index";
-import { APP_POLICY } from "../src/app-policy";
+import { APP_POLICY, JOIN_POLICY, PAGE_POLICY } from "../src/app-policy";
 import pages from "../src/pages";
 
 const bindings = env as unknown as Env;
@@ -66,7 +66,7 @@ describe("the pages Worker", () => {
     return { response, seen };
   }
 
-  it("runs only this origin's scripts in the owner's web app, and changes no other page's policy", async () => {
+  it("gives every page a script policy of its own: the owner's web app, the join page and every other page", async () => {
     for (const path of ["/app/", "/app", "/app/sw.js", "/app/offline.html", "/app/manifest.webmanifest", "/app/elsewhere"]) {
       const { response } = await page(path);
       expect(response.headers.get("content-security-policy"), path).toBe(APP_POLICY);
@@ -77,9 +77,35 @@ describe("the pages Worker", () => {
     expect(APP_POLICY).toContain("script-src 'self';");
     expect(APP_POLICY).toContain("frame-ancestors 'none'");
     expect(APP_POLICY).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
-    for (const path of ["/apps", "/application", "/ops", "/join/inv_123"]) {
-      expect((await page(path)).response.headers.get("content-security-policy"), path).toBe("frame-ancestors 'none'");
+    for (const path of ["/apps", "/application", "/ops", "/", "/approve/tok_123", "/delete/tok_123", "/no-such-page",
+      "/assets/index-abc.js"]) {
+      expect((await page(path)).response.headers.get("content-security-policy"), path).toBe(PAGE_POLICY);
     }
+    for (const path of ["/join/inv_123", "/join/inv_123?from=line"]) {
+      expect((await page(path)).response.headers.get("content-security-policy"), path).toBe(JOIN_POLICY);
+    }
+  });
+
+  it("runs this origin's scripts alone on every page, nothing inline or from a string, and lets no page be framed", () => {
+    const directives = (policy: string) => new Map(policy.split("; ").map((part) => {
+      const [name, ...values] = part.split(" ");
+      return [name!, values] as const;
+    }));
+    for (const [name, policy] of [["app", APP_POLICY], ["page", PAGE_POLICY], ["join", JOIN_POLICY]] as const) {
+      const seen = directives(policy);
+      expect(seen.get("script-src"), name).toEqual(["'self'"]);
+      expect(seen.get("default-src"), name).toEqual(["'self'"]);
+      expect(seen.get("connect-src"), name).toEqual(["'self'"]);
+      expect(seen.get("frame-ancestors"), name).toEqual(["'none'"]);
+      expect(seen.get("object-src"), name).toEqual(["'none'"]);
+      expect(seen.get("base-uri"), name).toEqual(["'none'"]);
+      expect(policy, name).not.toContain("unsafe-eval");
+    }
+    // The console and the links' pages take the brand's fonts from Google's two hosts and nothing else from anywhere.
+    expect([...PAGE_POLICY.matchAll(/https:\/\/[^ ;]+/g)].map((found) => found[0]).sort())
+      .toEqual(["https://fonts.googleapis.com", "https://fonts.gstatic.com"]);
+    // The join page's path carries an invite token: its policy names no other origin at all.
+    expect(JOIN_POLICY).not.toMatch(/https?:/);
   });
 
   it("serves the web app's files with headers that keep pages out of frames and tokens out of Referers", async () => {
@@ -88,7 +114,7 @@ describe("the pages Worker", () => {
       expect(seen.map((entry) => new URL(entry.url).pathname), path).toEqual([path]);
       expect(response.status, path).toBe(200);
       expect(response.headers.get("x-frame-options"), path).toBe("DENY");
-      expect(response.headers.get("content-security-policy"), path).toBe("frame-ancestors 'none'");
+      expect(response.headers.get("content-security-policy"), path).toBe(path.startsWith("/join/") ? JOIN_POLICY : PAGE_POLICY);
       expect(response.headers.get("x-content-type-options"), path).toBe("nosniff");
       expect(response.headers.get("referrer-policy"), path).toBe("no-referrer");
       expect(response.headers.get("x-robots-tag"), path).toBe("noindex, nofollow");

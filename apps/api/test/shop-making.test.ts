@@ -1,11 +1,11 @@
 import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { templates } from "@manut/shop-templates";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import worker, { type Env } from "../src/index";
 import type { PeopleRecord } from "../src/people-store";
 import { MADE_RESERVATION_MS, SHOPS_MADE_LIMIT, type MadeShopRow, type MakingRow } from "../src/shops-store";
 import { authCall, tenantDelete, tenantStub } from "../src/tenant-data";
-import { admin, asSession, auditEntries, bindings, signIn, type SignedIn } from "./people-fixtures";
+import { admin, asSession, auditEntries, bindings, forgetTodaysMakes, signIn, type SignedIn } from "./people-fixtures";
 
 // Making a shop that stops part way (docs/pilot-api.md, "A make that stops part way"). A make writes to several objects: the
 // journal of makes and the person's slot in AuthObject, the shop's clocks, the shop's own object, and last the console's
@@ -174,6 +174,10 @@ const OPERATOR_STEPS: Step[] = [
     lost: true } },
   { when: "listing the shop fails", fail: { binding: "AUTH", method: "POST", path: "/pilot-shops", times: Infinity } },
 ];
+
+// This file makes more shops than a day's sign-ups allow (shops-store.ts, `SELF_SERVE_MAKES_PER_DAY`), so each test starts
+// with the day's count cleared; the cap itself is tested in self-serve-waits.test.ts.
+beforeEach(forgetTodaysMakes);
 
 describe("an operator's make that stops part way", () => {
   it("makes nothing when it cannot begin, and the next try makes one shop", async () => {
@@ -411,7 +415,8 @@ describe("a make by its owner that stops part way", () => {
       expect(await slots(person)).toEqual([{ shop: began!.tenant, at: expect.any(Number), done: true }]);
       expect(await consoleRows(name)).toEqual([{ tenant: began!.tenant, name, ownerName: "Dao", template: "food", consent: false,
         selfServe: true }]);
-      expect(await personsShops(person, name)).toEqual([{ id: began!.tenant, name, ownerName: "Dao", role: "owner" }]);
+      expect(await personsShops(person, name)).toEqual([{ id: began!.tenant, name, ownerName: "Dao", role: "owner",
+        teamWaits: "not_counted_in" }]);
       expect(await journal(name)).toEqual([]);
 
       // The session it was given is the owner's, and works.

@@ -122,6 +122,10 @@ shop more room than it has.
 - **Refuse past the cap.** The reservation is refused with 402 `budget_exceeded` when the month's spend, the
   reservations still open in it and this worst case together would pass the cap. Reaching the cap exactly is
   allowed. A refused call never reaches the provider and is counted in the month's `refused`.
+- **Nothing for a shop that waits.** A shop its owner made, which no operator has counted in yet, is refused every
+  call before anything is held, in the same transaction, with 403 `not_counted_in` (`apps/api/src/shop-waits.ts`):
+  anyone can make a shop once sign-ups open, so no stranger's shop spends on the owner's key or sends what the team
+  knows to a model until someone at Manut AI has looked at it.
 - **Atomic per shop.** The ledger lives in the shop's TenantObject. Each write runs in `transactionSync` with the
   synchronous KV API of SQLite-backed objects: it reads the month, the open reservations and the cap, decides and
   writes, with no await in between. Cloudflare's input gates make reads followed by writes atomic only when no
@@ -169,6 +173,9 @@ const result = await callModel(env, tenant, {
 - 400 `invalid_request` or `unknown_model`: the request could not be sent. Nothing is held.
 - 402 `budget_exceeded` with `month`, `capSatang`, `spentSatang`, `heldSatang` and `neededSatang`. Under the worker
   contract, this ends the attempt with the reason `budget`.
+- 403 `not_counted_in`: the shop's owner made it (self-serve) and no operator has counted it in yet, so its team
+  spends nothing on the model, whatever its cap. Nothing is held or sent, and it is not counted in the month's
+  `refused`. Under the worker contract the attempt fails with the reason `not_counted_in`.
 - 503 `not_configured` with the `setting` that is missing or unreadable. Nothing is held or sent.
 - 503 `meter_unavailable`: the ledger could not hold the call, so it was not made.
 - 502 or 503 `provider_error` with `retryable` and `callId`.

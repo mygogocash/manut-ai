@@ -134,17 +134,18 @@ type Opened = { kind: "open"; held: ShopSessionRecord } | Exclude<ShopAnswer, { 
 /** What making a shop of the person's own came to: the shop, theirs now, with its owner session held; the API's refusal,
  *  with its code; or that the sign-in ended, the API could not be reached, or it could not make the shop. */
 export type Made =
-  | { kind: "made"; shop: ShopRow }
+  | { kind: "made"; shop: ShopRow; teamWaits: boolean }
   | { kind: "refused"; status: number; code: string }
   | { kind: "signed_out" | "offline" | "unavailable" };
 
-/** The shop and the owner session of a `POST /v1/shops/new` answer, or null when it is not one. */
-function decodeMade(json: unknown): { shop: ShopRow; held: ShopSessionRecord } | null {
+/** The shop and the owner session of a `POST /v1/shops/new` answer, or null when it is not one, and whether the answer
+ *  says the shop's team waits for Manut AI to count the shop in (`teamWaits: "not_counted_in"`). */
+function decodeMade(json: unknown): { shop: ShopRow; held: ShopSessionRecord; teamWaits: boolean } | null {
   if (!isObj(json) || json.role !== "owner" || !isObj(json.shop)) return null;
   const { id, name, ownerName } = json.shop;
   const held = decodeOpened(json);
   if (!text(id, 256) || typeof name !== "string" || typeof ownerName !== "string" || !held) return null;
-  return { shop: { id, name, owner: ownerName, role: "owner" }, held };
+  return { shop: { id, name, owner: ownerName, role: "owner" }, held, teamWaits: json.teamWaits === "not_counted_in" };
 }
 
 export class ShopSessions {
@@ -249,7 +250,7 @@ export class ShopSessions {
       const made = decodeMade(answer.json);
       if (!made) return { kind: "unavailable" };
       await this.session.keepShopSession(made.shop.id, made.held, chain);
-      return { kind: "made", shop: made.shop };
+      return { kind: "made", shop: made.shop, teamWaits: made.teamWaits };
     }
     if (answer.kind === "refused") return { kind: "refused", status: answer.status, code: answer.code };
     return { kind: answer.kind };

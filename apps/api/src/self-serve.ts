@@ -23,6 +23,11 @@
 ///
 /// The pilot gate leaves a self-serve shop out of its cohort unless an operator adds it (pilot-gate.ts), and the console's
 /// Shops overview marks it, so an operator sees where it came from.
+///
+/// Across accounts. One mailbox can have as many accounts as it likes, so the day's makes are capped too, all accounts
+/// together (`SELF_SERVE_MAKES_PER_DAY`, decided in the same AuthObject transaction as the slot): 429 `sign_ups_full`. And
+/// the team of a shop made here waits until an operator counts it in (shop-waits.ts): no model call and no routine run,
+/// so nothing it asks for is sent to a model or spent on the owner's key. The answer says so (`teamWaits`).
 
 import type { ShopTemplate } from "@manut/shop-templates";
 import type { AuditActor } from "./audit-log";
@@ -31,6 +36,7 @@ import { bearer, hasExactly, newOwnerSession, openOwnerSession, sessionOf, signe
 import { keptName } from "./people-store";
 import { newShopTenant, writeNewShop, type PilotEnv } from "./pilot";
 import { checkedTemplate } from "./routine-setup";
+import { NOT_COUNTED_IN } from "./shop-waits";
 import { beginMake, finishMadeShop, releaseMadeShop, SHOPS_MADE_LIMIT, twice } from "./shops-store";
 
 export type SelfServeEnv = PeopleEnv & PilotEnv & {
@@ -90,6 +96,11 @@ export async function newShopRoute(request: Request, env: SelfServeEnv): Promise
   const begun = await beginMake(env, { tenant: candidate, name, ownerName, template: template?.id ?? null,
     subject: person.tenant });
   if (begun === "too_many") return json({ error: "too_many_shops", limit: SHOPS_MADE_LIMIT }, 409);
+  // The day's sign-ups are full, all accounts together: nothing was reserved or written.
+  if (begun !== null && "full" in begun) {
+    return Response.json({ error: "sign_ups_full", retryAfter: begun.full },
+      { status: 429, headers: { "retry-after": String(begun.full) } });
+  }
   // A failure whose slot may have been taken all the same (only the answer was lost) gives it back, as every failure below does.
   if (begun === null) {
     await releaseMadeShop(env, person.tenant, candidate);
@@ -120,8 +131,9 @@ export async function newShopRoute(request: Request, env: SelfServeEnv): Promise
     // Listed and indexed together, last, and asked twice if need be: a shop whose setup or listing could not be written is
     // never listed, and its session's token, which only this answer would carry, is never sent, so nothing can use it.
     if (!(await twice(() => finishMadeShop(env, person.tenant, tenant, owner.account.id)))) return await unavailable();
+    // The answer says plainly that the team waits, and why: no operator has counted the shop in yet (shop-waits.ts).
     return json({ shop: { id: tenant, name, ownerName, template: template?.id ?? null }, role: "owner",
-      account: owner.account, session: owner.session }, 201);
+      account: owner.account, session: owner.session, teamWaits: NOT_COUNTED_IN }, 201);
   } catch {
     return await unavailable();
   }

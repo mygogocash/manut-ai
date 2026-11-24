@@ -30,6 +30,11 @@
 ///
 /// No answer here carries a token. The page learns that someone is signed in and which shops they are in, never a
 /// credential, and every answer is `no-store`.
+///
+/// A shop cookie lasts its session's 30 days, which can outlive the sign-in it was opened under: past the lifted auth's 90
+/// days, or once the person's data is wiped. So every route that uses one checks the sign-in first (`stillSignedIn`), and
+/// once it is over answers `signed_out` and clears every shop cookie the browser sent (`signedOut`): no shop session reads
+/// or decides for a browser whose sign-in is over.
 
 import { isValidTenant } from "./companies";
 import { approvalsRoute, type ApprovalsEnv } from "./approvals";
@@ -275,6 +280,32 @@ function clearAll(jar: Jar): string[] {
   return [clearCookie(SIGN_IN_COOKIE), clearCookie(ACCESS_COOKIE), ...[...jar.shops.keys()].map(clearCookie)];
 }
 
+/// Whether the person's sign-in still holds, which every route here that uses a shop cookie asks first: a shop session
+/// reads and decides nothing for a browser whose sign-in is over, whether it ran out at the lifted auth's 90 days, ended
+/// with the person's data, or was signed out. The access cookie's token is checked as the lifted auth checks every
+/// session, and with none, or one it no longer holds, the sign-in cookie refreshes it, with the cookies that refresh sets
+/// added to `cookies`. A check that cannot be made throws, so it is answered as the API being unavailable, never as
+/// signed out, and clears nothing.
+async function stillSignedIn(env: WebSessionEnv, jar: Jar, cookies: string[]): Promise<boolean> {
+  if (jar.access) {
+    const response = await authCall(env, "/verify", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: jar.access }) });
+    const verified = await jsonOf(response);
+    if (!response.ok || !isRecord(verified)) throw new Error("verify_unavailable");
+    if (verified.ok === true) return true;
+  }
+  return (await accessOf(env, jar, cookies, true)) !== null;
+}
+
+/// What every route here answers once the sign-in is over: 401 `signed_out`, with `emailSignIn` as on opening, and every
+/// shop cookie the browser sent cleared with the access cookie, so nothing it keeps can read or decide for a shop any
+/// more. The sign-in cookie is left as it is: another tab's refresh may just have set the one that works, and one that no
+/// longer works only fails again, until a new sign-in replaces it or it runs out.
+function signedOut(env: WebSessionEnv, jar: Jar): Response {
+  return answer({ error: "signed_out", emailSignIn: emailSignIn(env) !== null }, 401,
+    [clearCookie(ACCESS_COOKIE), ...[...jar.shops.keys()].map(clearCookie)]);
+}
+
 // ---------------------------------------------------------------------------
 // The routes
 // ---------------------------------------------------------------------------
@@ -322,26 +353,25 @@ async function signIn(request: Request, url: URL, env: WebSessionEnv, ctx: Execu
 /// browser holds is kept, and one it lacks is opened (`POST /v1/shops/session`) and kept, so a helper's phone counts as
 /// one device for its 30 days rather than one each time the app opens. A cookie for a shop the person is no longer in
 /// (removed, unlinked or deleted) is cleared. 401 `signed_out` when there is no sign-in or the lifted auth ended it, with
-/// `emailSignIn`, whether signing in by email is on, so the app can say on opening that it is not; 503
-/// `shops_unavailable` when the shops cannot be read. A shop whose session could not be opened is listed with
-/// `ready: false`.
+/// `emailSignIn`, whether signing in by email is on, so the app can say on opening that it is not, and every shop cookie
+/// cleared (`signedOut`); 503 `shops_unavailable` when the shops cannot be read. A shop whose session could not be opened
+/// is listed with `ready: false`.
 async function shops(request: Request, url: URL, env: WebSessionEnv, ctx: ExecutionContext, jar: Jar): Promise<Response> {
   if (request.method !== "POST") return answer({ error: "method_not_allowed" }, 405);
   const refused = await emptyBody(request);
   if (refused) return refused;
   const cookies: string[] = [];
-  const signedOut = () => answer({ error: "signed_out", emailSignIn: emailSignIn(env) !== null }, 401, cookies);
   let listed: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const access = await accessOf(env, jar, cookies, attempt > 0);
-    if (!access) return signedOut();
+    if (!access) return signedOut(env, jar);
     const list = inner(url, "/v1/shops", "GET", access);
     listed = await shopsRoute(list.request, list.url, env, ctx);
     // An access token the lifted auth no longer holds (signed out elsewhere, or past its hour) is refreshed once.
     if (listed?.status !== 401) break;
     await listed.body?.cancel();
   }
-  if (!listed || listed.status === 401) return signedOut();
+  if (!listed || listed.status === 401) return signedOut(env, jar);
   const body = await jsonOf(listed);
   if (!listed.ok || !isRecord(body) || !Array.isArray(body.shops)) return answer({ error: "shops_unavailable" }, 503, cookies);
   const access = jar.access ?? "";
@@ -398,22 +428,23 @@ async function heldFor(jar: Jar, shop: string): Promise<{ name: string; token: s
   return held && tokenShop(held.token) === shop ? { name, token: held.token } : null;
 }
 
-/// A shop route's answer, passed on as it was, with its shop named on a 401. A shop session the shop no longer holds is
-/// answered 401 `session_ended`, and its cookie cleared, so the app reads the person's shops again, which opens a new
-/// one; a session that removal or unlinking ended keeps its own answer (`removed`, `unlinked`, with when), and its
-/// cookie is cleared too, as nothing can open it again.
-async function passOn(response: Response, shop: string, name: string): Promise<Response> {
+/// A shop route's answer, passed on as it was, with its shop named on a 401, and the cookies a refresh of the sign-in set
+/// (`cookies`). A shop session the shop no longer holds is answered 401 `session_ended`, and its cookie cleared, so the
+/// app reads the person's shops again, which opens a new one; a session that removal or unlinking ended keeps its own
+/// answer (`removed`, `unlinked`, with when), and its cookie is cleared too, as nothing can open it again.
+async function passOn(response: Response, shop: string, name: string, cookies: readonly string[]): Promise<Response> {
   const body = await jsonOf(response);
   if (response.status === 401) {
     const ended = isRecord(body) && (body.error === "removed" || body.error === "unlinked") ? body : { error: "session_ended" };
-    return answer({ ...ended, shop }, 401, [clearCookie(name)]);
+    return answer({ ...ended, shop }, 401, [...cookies, clearCookie(name)]);
   }
-  return answer(body, response.status);
+  return answer(body, response.status, cookies);
 }
 
 /// `GET /v1/web/approvals?shop=…&state=open|recent[&limit=…]`: that shop's approvals, as `GET /v1/approvals` answers
 /// them to the shop's own session. Only `shop`, `state` and `limit` may be in the query, and the shop route checks the
-/// last two. 401 `session_ended` with `shop` when the browser holds no session for it.
+/// last two. 401 `signed_out`, with every shop cookie cleared, once the person's sign-in is over (`stillSignedIn`), and
+/// 401 `session_ended` with `shop` when the browser holds no session for it.
 async function approvals(request: Request, url: URL, env: WebSessionEnv, flags: JobFlags, jar: Jar): Promise<Response> {
   if (request.method !== "GET") return answer({ error: "method_not_allowed" }, 405);
   const names = [...url.searchParams.keys()];
@@ -422,8 +453,10 @@ async function approvals(request: Request, url: URL, env: WebSessionEnv, flags: 
       names.length !== new Set(names).size || !isValidTenant(shop)) {
     return answer({ error: "invalid_request" }, 400);
   }
+  const cookies: string[] = [];
+  if (!(await stillSignedIn(env, jar, cookies))) return signedOut(env, jar);
   const held = await heldFor(jar, shop);
-  if (!held) return answer({ error: "session_ended", shop }, 401);
+  if (!held) return answer({ error: "session_ended", shop }, 401, cookies);
   const query = new URLSearchParams();
   for (const name of ["state", "limit"]) {
     const value = url.searchParams.get(name);
@@ -431,12 +464,13 @@ async function approvals(request: Request, url: URL, env: WebSessionEnv, flags: 
   }
   const list = inner(url, `/v1/approvals?${query.toString()}`, "GET", held.token);
   const response = await approvalsRoute(list.request, list.url, env, flags);
-  return response ? passOn(response, shop, held.name) : answer({ error: "not_found" }, 404);
+  return response ? passOn(response, shop, held.name, cookies) : answer({ error: "not_found" }, 404, cookies);
 }
 
 /// `POST /v1/web/approvals/{requestId}/decision` with exactly `{ shop, optionId, seenRevision }`: decides one of that
 /// shop's requests through `POST /v1/approvals/{requestId}/decision` with the shop's own session, which takes who decides
-/// from that session and passes the decision through approval-core. The route's answers are passed on as they are.
+/// from that session and passes the decision through approval-core. The route's answers are passed on as they are. Once
+/// the person's sign-in is over nothing is decided: 401 `signed_out`, with every shop cookie cleared (`stillSignedIn`).
 async function decide(request: Request, url: URL, env: WebSessionEnv, flags: JobFlags, jar: Jar, requestId: string):
   Promise<Response> {
   if (request.method !== "POST") return answer({ error: "method_not_allowed" }, 405);
@@ -446,10 +480,12 @@ async function decide(request: Request, url: URL, env: WebSessionEnv, flags: Job
   if (!isRecord(body) || !hasExactly(body, ["shop", "optionId", "seenRevision"]) || !isValidTenant(body.shop)) {
     return answer({ error: "invalid_request" }, 400);
   }
+  const cookies: string[] = [];
+  if (!(await stillSignedIn(env, jar, cookies))) return signedOut(env, jar);
   const held = await heldFor(jar, body.shop);
-  if (!held) return answer({ error: "session_ended", shop: body.shop }, 401);
+  if (!held) return answer({ error: "session_ended", shop: body.shop }, 401, cookies);
   const sent = inner(url, `/v1/approvals/${requestId}/decision`, "POST", held.token,
     { optionId: body.optionId, seenRevision: body.seenRevision });
   const response = await approvalsRoute(sent.request, sent.url, env, flags);
-  return response ? passOn(response, body.shop, held.name) : answer({ error: "not_found" }, 404);
+  return response ? passOn(response, body.shop, held.name, cookies) : answer({ error: "not_found" }, 404, cookies);
 }

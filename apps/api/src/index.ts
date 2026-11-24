@@ -108,6 +108,11 @@ export interface Env {
   /// owner's call. While it is on, every try counts against SELF_SERVE_SHOP_LIMITER, per source address.
   SELF_SERVE_SHOPS?: string;
   SELF_SERVE_SHOP_LIMITER?: RateLimit;
+  /// A person's deletion of their own data (`DELETE /v1/tenant/data`), counted per source address in the ingress gate.
+  TENANT_DELETE_LIMITER?: RateLimit;
+  /// Opening a shop session (`POST /v1/shops/session`, `POST /v1/people/session`), counted per signed-in person
+  /// (session-limits.ts).
+  SHOP_SESSION_LIMITER?: RateLimit;
   /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
   /// Unbound, those paths answer this Worker's own 404.
   WEB?: Fetcher;
@@ -188,6 +193,10 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   }
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
   else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
+  // A person's deletion of their own data wakes AUTH to read the session and then wipes every one of their objects, so
+  // every try counts before the session is read. Per address, not per person: the deletion ends every session of theirs,
+  // so each try needs a sign-in of its own, and only an address is shared by tries from many accounts.
+  else if (request.method === "DELETE" && pathname === "/v1/tenant/data") binding = env.TENANT_DELETE_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
   // owner's two kinds of link share one limit, so probing both doubles nothing.
   else if (pathname.startsWith("/v1/pilot/approvals/") || pathname.startsWith("/v1/pilot/deletions/")) {

@@ -3,6 +3,7 @@ import type { ApprovalKind, ApprovalRecord } from "@manut/approval-core";
 import { expect } from "vitest";
 import worker, { type Env } from "../src/index";
 import { testOutbox } from "../src/email-sender";
+import { MAKES_TODAY_KEY } from "../src/shops-store";
 import { JOB_REQUEST_OPTIONS, type ActionProposalJSON } from "../src/task-object";
 import { tenantCall } from "../src/tenant-data";
 import { adminFetch, trustedTaskPut } from "./authenticated-fixtures";
@@ -99,6 +100,13 @@ export async function call(path: string, init: RequestInit = {}): Promise<Respon
   const response = await worker.fetch(request, bindings, context);
   await waitOnExecutionContext(context);
   return response;
+}
+
+/// Clears the day's count of shops people began to make themselves (shops-store.ts, `SELF_SERVE_MAKES_PER_DAY`), so a file
+/// that makes more shops than a day allows starts each test with the day's sign-ups open.
+export async function forgetTodaysMakes(): Promise<void> {
+  await runInDurableObject(bindings.AUTH.get(bindings.AUTH.idFromName("auth")), (_instance, state) =>
+    state.storage.delete(MAKES_TODAY_KEY));
 }
 
 export type Answer<T = Record<string, unknown>> = { status: number; body: T };

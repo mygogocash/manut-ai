@@ -23,6 +23,8 @@
 ///   the row and finishes that shop, never a second one, and the write that lists the shop takes its row off. Making a
 ///   shop is the mirror of deleting one (tenant-data.ts): a deletion keeps the shop on the list until it is finished, and
 ///   a make keeps it off the list until it is finished, and the same request finishes either.
+/// - `self-serve-makes-today`: `{ day, count }`, how many shops people began to make themselves on that Bangkok day, all
+///   accounts together, which `SELF_SERVE_MAKES_PER_DAY` caps.
 ///
 /// Every change runs inside `transactionSync` with the synchronous KV API, as people-store.ts's do, so two changes to
 /// one person's rows or to one code are decided one after the other. Writes need the Worker's `x-admin` header, like
@@ -55,12 +57,28 @@ export const OWNER_CODE_TTL_MS = 15 * 60 * 1000;
 /// no longer counts. Shops an operator made and linked to the account never count: this limits making, not owning.
 export const SHOPS_MADE_LIMIT = 3;
 
+/// How many shops people may begin to make themselves in one Bangkok day, all accounts together (docs/decisions.md, 24 Nov
+/// 2026). `SHOPS_MADE_LIMIT` counts per account, and one mailbox can have as many accounts as it likes, so this is what
+/// bounds what sign-ups add to the console, the pilot gate and the backend in a day, whoever asks. Decided in the same
+/// transaction as the make's slot (`POST /pilot-making/begin`), so racing makes cannot pass it. A make already on its way
+/// was counted when it began, and an operator's make never counts.
+export const SELF_SERVE_MAKES_PER_DAY = 20;
+
+/// The day's count of self-serve makes: one key, which the first make of a new Bangkok day starts again from zero.
+type MakesToday = { day: number; count: number };
+export const MAKES_TODAY_KEY = "self-serve-makes-today";
+const DAY_MS = 24 * 3600 * 1000;
+const BANGKOK_OFFSET_MS = 7 * 3600 * 1000;
+
 /// How long a reserved row counts before its shop is listed. Making a shop takes seconds; a row still not done after this
 /// is a make that failed part way, and stops counting, so a failure never takes one of the person's shops for good.
 /// Asking again for the same shop reserves it again (`begin`), so a make finished later still has its slot.
 export const MADE_RESERVATION_MS = 10 * 60 * 1000;
 
 const MAX_BODY_BYTES = 16 * 1024;
+/// Rows a scan of a whole index reads at a time (every person's rows, the journal of makes), so no scan ever holds all of
+/// them at once: the storage API loads everything a `list` names into memory.
+export const SCAN_PAGE = 128;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 /// The longest name a shop or its owner may have here: the operator's route allows 200 (pilot.ts), the person's own 80.
 const MAX_NAME = 200;
@@ -132,15 +150,28 @@ function makeOf(body: Record<string, unknown>):
   return { tenant, name, ownerName, template, subject: subject ?? null };
 }
 
+/// Hands `visit` the rows under `prefix`, `SCAN_PAGE` at a time in key order. A page is read whole before `visit` sees it,
+/// so `visit` may change the rows it was handed, and the next page starts after the last key of this one.
+function eachPage<T>(kv: SyncKvStorage, prefix: string, visit: (page: [string, T][]) => void): void {
+  for (let after: string | undefined; ;) {
+    const page = [...kv.list<T>({ prefix, limit: SCAN_PAGE, ...(after === undefined ? {} : { startAfter: after }) })];
+    if (page.length > 0) visit(page);
+    if (page.length < SCAN_PAGE) return;
+    after = page[page.length - 1]![0];
+  }
+}
+
 /// The earliest make on the journal that is for the very shop `make` asks for: the same names, template and asker. There
-/// is at most one, since a make that finds one never writes another.
+/// is at most one, since a make that finds one never writes another. The journal is read a page at a time.
 function heldMake(kv: SyncKvStorage, make: { name: string; ownerName: string; template: string | null; subject: string | null }):
   MakingRow | undefined {
   let held: MakingRow | undefined;
-  for (const [, row] of kv.list<MakingRow>({ prefix: MAKING_PREFIX })) {
-    if (row.by !== make.subject || row.name !== make.name || row.ownerName !== make.ownerName || row.template !== make.template) continue;
-    if (!held || row.at < held.at) held = row;
-  }
+  eachPage<MakingRow>(kv, MAKING_PREFIX, (page) => {
+    for (const [, row] of page) {
+      if (row.by !== make.subject || row.name !== make.name || row.ownerName !== make.ownerName || row.template !== make.template) continue;
+      if (!held || row.at < held.at) held = row;
+    }
+  });
   return held;
 }
 
@@ -162,6 +193,8 @@ const WRITES: Readonly<Record<string, Write>> = {
   /// For a person making their own shop (`subject`) the same transaction reserves one of their made shops for it, or
   /// refuses with 409 `too_many_shops` while `SHOPS_MADE_LIMIT` of their others still count, and writes nothing. A shop
   /// already on its way counts as itself, so finishing it never asks for a second slot. Rows that no longer count are dropped.
+  /// A new one also counts against the day's sign-ups, all accounts together: past `SELF_SERVE_MAKES_PER_DAY` it is
+  /// refused with 429 `sign_ups_full` and `retryAfter`, the whole seconds until the next Bangkok day, and writes nothing.
   "POST /pilot-making/begin": (kv, body, nowMs) => {
     const make = makeOf(body);
     if (!make) return refused(400, "invalid_request");
@@ -171,6 +204,16 @@ const WRITES: Readonly<Record<string, Write>> = {
       const others = countingMade(kv, kv.get<MadeShopRow[]>(keys.made(make.subject)) ?? [], nowMs)
         .filter((row) => row.shop !== tenant);
       if (others.length >= SHOPS_MADE_LIMIT) return refused(409, "too_many_shops");
+      if (!held) {
+        const day = Math.floor((nowMs + BANGKOK_OFFSET_MS) / DAY_MS);
+        const today = kv.get<MakesToday>(MAKES_TODAY_KEY);
+        const count = today?.day === day ? today.count : 0;
+        if (count >= SELF_SERVE_MAKES_PER_DAY) {
+          const retryAfter = Math.ceil(((day + 1) * DAY_MS - BANGKOK_OFFSET_MS - nowMs) / 1000);
+          return { status: 429, body: { error: "sign_ups_full", retryAfter } };
+        }
+        kv.put(MAKES_TODAY_KEY, { day, count: count + 1 } satisfies MakesToday);
+      }
       kv.put(keys.made(make.subject), [...others, { shop: tenant, at: nowMs, done: false }]);
     }
     if (!held) {
@@ -276,28 +319,38 @@ export async function shopsAuthRoute(storage: DurableObjectStorage, request: Req
   return json(answer.body, answer.status);
 }
 
-/// Part of AuthObject's tenant wipe. A deleted shop leaves every person's index, as the lifted wipe takes out the
-/// inbound routes that name a tenant. A person who deletes their own data loses the link code they were waiting to
-/// send, but keeps their rows: those point at their shops' records, which their own data's deletion does not reach,
-/// and leaving a shop is unlinking or removal (docs/several-shops.md).
-export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): void {
-  storage.transactionSync(() => {
-    const kv = storage.kv;
-    // Read every row first and write after, so no write lands under a list that is still being read.
-    const indexes = [...kv.list<IdentityShopRow[]>({ prefix: ROWS_PREFIX })];
-    for (const [key, rows] of indexes) {
-      const kept = rows.filter((row) => row.shop !== tenant);
+/// Whether `tenant` is a person's own: a sign-in's, Apple's (`apple:<sub>`, auth.ts) or an email code's (`email:<hash>`,
+/// email-code.ts). The Worker makes every shop `pilot:<uuid>` (pilot.ts `newShopTenant`), so no person's tenant names a shop.
+function isPersonTenant(tenant: string): boolean {
+  return tenant.startsWith("apple:") || tenant.startsWith("email:");
+}
+
+/// Takes `shop` out of every row list under `prefix`, a page at a time, deleting a list it empties.
+function dropShopRows<T extends { shop: string }>(kv: SyncKvStorage, prefix: string, shop: string): void {
+  eachPage<T[]>(kv, prefix, (page) => {
+    for (const [key, rows] of page) {
+      const kept = rows.filter((row) => row.shop !== shop);
       if (kept.length === rows.length) continue;
       if (kept.length === 0) kv.delete(key);
       else kv.put(key, kept);
     }
-    // A deleted shop its owner made stops counting against their limit: its row goes with it.
-    const made = [...kv.list<MadeShopRow[]>({ prefix: MADE_PREFIX })];
-    for (const [key, rows] of made) {
-      const kept = rows.filter((row) => row.shop !== tenant);
-      if (kept.length === rows.length) continue;
-      if (kept.length === 0) kv.delete(key);
-      else kv.put(key, kept);
+  });
+}
+
+/// Part of AuthObject's tenant wipe. A deleted shop leaves every person's index, as the lifted wipe takes out the
+/// inbound routes that name a tenant. A person who deletes their own data loses the link code they were waiting to
+/// send, but keeps their rows: those point at their shops' records, which their own data's deletion does not reach,
+/// and leaving a shop is unlinking or removal (docs/several-shops.md).
+///
+/// Only a shop's deletion reads the indexes, a page at a time: a person's tenant names no shop, so their deletion, which
+/// any signed-in person can ask for, reads nobody's rows at all.
+export function wipeShopsTenant(storage: DurableObjectStorage, tenant: string): void {
+  storage.transactionSync(() => {
+    const kv = storage.kv;
+    if (!isPersonTenant(tenant)) {
+      dropShopRows<IdentityShopRow>(kv, ROWS_PREFIX, tenant);
+      // A deleted shop its owner made stops counting against their limit: its row goes with it.
+      dropShopRows<MadeShopRow>(kv, MADE_PREFIX, tenant);
     }
     // A shop that is deleted is no longer being made, whatever stopped: its row on the journal goes with it.
     kv.delete(pilotMakingKey(tenant));
@@ -376,15 +429,20 @@ export async function keepOwnerCode(env: Pick<TenantDataEnv, "AUTH">, subject: s
 
 /// Begins a make (`POST /pilot-making/begin`), and for a person making their own shop (`make.subject`) reserves one of
 /// their made shops for it. Answers the tenant to make: `make.tenant`, unless the same shop is already on its way, and then
-/// that one's. `too_many` at the limit of a person's made shops, or null when AuthObject cannot be reached, in which case
-/// nothing is known to have begun: if only the answer was lost, the make is on the journal and asking again finds it.
+/// that one's. `too_many` at the limit of a person's made shops, `{ full }` with the seconds until the next Bangkok day
+/// when the day's sign-ups are full, or null when AuthObject cannot be reached, in which case nothing is known to have
+/// begun: if only the answer was lost, the make is on the journal and asking again finds it.
 export async function beginMake(env: Pick<TenantDataEnv, "AUTH">, make: { tenant: string; name: string; ownerName: string;
-  template: string | null; subject?: string }): Promise<{ tenant: string } | "too_many" | null> {
+  template: string | null; subject?: string }): Promise<{ tenant: string } | "too_many" | { full: number } | null> {
   try {
     const response = await authWrite(env, "/pilot-making/begin", make);
     if (response.status === 409) {
       await response.body?.cancel();
       return "too_many";
+    }
+    if (response.status === 429) {
+      const { retryAfter } = (await response.json()) as { retryAfter?: unknown };
+      return { full: typeof retryAfter === "number" && Number.isSafeInteger(retryAfter) && retryAfter > 0 ? retryAfter : 1 };
     }
     if (!response.ok) {
       await response.body?.cancel();
