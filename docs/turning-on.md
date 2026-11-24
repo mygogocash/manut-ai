@@ -13,7 +13,7 @@ settings only where `PUBLIC_API_ORIGIN` is under `.test`, so one set as a secret
 
 ## Built, and off until the owner says
 
-**Not yet, whatever the owner decides:** a security review of the API surface added on 24 Nov 2026 found ways a stranger
+**The security review of 24 Nov 2026, now fixed:** a review of the API surface added that day found ways a stranger
 could misuse email sign-in and self-serve once they are on (sending codes without a real limit, making shops without
 one, and more). December item 41 fixed the front door: a body must be JSON, every limit counts per address or IPv6 /64,
 codes are capped per address, per source and in all (`docs/pilot-api.md`, "Signing in by email"), an email sign-in is

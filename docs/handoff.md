@@ -128,12 +128,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   the pages and `/app/` load, and the console is behind Access. The first try at 16:42 failed: this Mac's resolver
   held a failed answer for `api.cloudflare.com` for a few minutes while `dig` resolved it; Wrangler said "Unable to
   resolve Cloudflare's API hostname". Waiting it out worked; flushing the cache needs `sudo`.
+- Dev's API was redeployed on 24 Nov at 17:22 from `d0670c3`, with the review's front-door fixes (API `de4ad72d`);
+  smoke-tested: a `text/plain` POST from another origin answers 415 `json_required`, a JSON one
+  `email_not_configured`, self-serve `sign_ups_closed`, the vault 401 without a session, and the console is behind
+  Access. For about a minute after an API deploy the old version still answers some requests, as the pages' edge
+  copy does; check a change again after a minute before calling it missing.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Two helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
+1. One helper is running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
    and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. At
    13:02 items 10, 34, 35 and 36 stopped at the limit ("resets 4:10pm"); 35, 34 and 10 were sent on at 13:16 to 13:20
    and ran, and 36's follow-up stayed queued so that three work at a time; it was sent on once 34 finished.
@@ -144,13 +149,15 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
-   - item 42, the review's session and self-serve findings (`fix/sessions-and-self-serve`, Opus);
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet), sent on
      again at 17:18 after its stop at the limit.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 41 (the review's front door: limits per IPv4 address or IPv6 /64, JSON-only POSTs, code emails capped per
+   Merged: 42 (the review's sessions and self-serve: 20 self-serve shops a Bangkok day, a self-serve shop's team waiting
+   until an operator counts it in, a per-tenant session index and a swept auth object, paged shop scans, a limit on
+   `DELETE /v1/tenant/data`, the web app's shop cookies needing the sign-in, ten sessions a helper and a limit on opening
+   them, and a strict script policy on every page; `SHOP_SESSION_LIMITER` took 2026112349 to 52), 41 (the review's front door: limits per IPv4 address or IPv6 /64, JSON-only POSTs, code emails capped per
    source (20 a day) and in all (300), an address's own limit per source, `email:` sessions refused on the lifted routes
    and the shop routes answering a non-shop 404, test keys only on a `.test` origin, the deploy check reading every
    block; Apple sessions still reach the lifted routes and must not when Apple sign-in is turned on), 40 (the owner adds a sign-in and changes who may use it, from the app: `POST /v1/vault/sign-ins` and
