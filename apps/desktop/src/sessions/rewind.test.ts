@@ -38,6 +38,12 @@ describe("the turns a chat can rewind", () => {
     expect(rewindable(items, [])).toEqual([]);
   });
 
+  it("leave out a message that never reached the agent: its send failed, or Stop threw it away", () => {
+    const items: TimelineItem[] = [user("local-s1", "sent"), { ...user("local-s2", "failed"), error: "agent gone" } as TimelineItem, { ...user("local-s3", "dropped"), wait: "dropped" } as TimelineItem];
+    const marks = ["local-s1", "local-s2", "local-s3"].map((id, n) => ({ id, n }));
+    expect(rewindable(items, marks).map((t) => t.id)).toEqual(["local-s1"]);
+  });
+
   it("are named by the message's first words, without code or links, cut short", () => {
     expect(turnTitle("Add a PromptPay QR to the checkout.\nAnd test it.")).toBe("Add a PromptPay QR to the checkout");
     // a leading /command is not a name; a message that is only one keeps it
@@ -163,6 +169,21 @@ describe("the turn book", () => {
     fail = "";
     await book.beforeSend("s1", "/w/shop", "local-s101");
     expect(book.getState().whyNot.s1).toBeUndefined();
+  });
+
+  it("lets a message go when its turn's files take too long to keep, and does not offer that turn", async () => {
+    let finish: () => void = () => {};
+    const { host } = fakeHost({
+      take: () => new Promise((resolve) => (finish = () => resolve({ n: 1, files: 1, left: 0 }))),
+    });
+    const book = new TurnBook({ host, chatRewind: async () => {}, sendWaitMs: 10 });
+    await book.beforeSend("s1", "/w/shop", "local-s1");
+    expect(book.marksOf("s1")).toEqual([]);
+    expect(book.getState().whyNot.s1).toBe("failed");
+    // kept after all, once the agent may already have changed files: still not offered
+    finish();
+    await flush();
+    expect(book.marksOf("s1")).toEqual([]);
   });
 
   it("rewinds the files, then the chat, and drops that turn and every later one", async () => {

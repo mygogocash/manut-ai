@@ -545,8 +545,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (typeof ev.used === "number" && typeof ev.max === "number" && ev.max > 0) patchLive(id, { usage: { used: ev.used, max: ev.max } });
         return;
       case "session.error":
-        // a rewind to a turn that waits for the agent's answer: this is its refusal (rewind.ts puts the files back)
-        rewinding.get(id)?.fail(String(ev.message ?? ev.kind ?? ""));
+        // a rewind to a turn that waits for the agent's answer: the agents' refusal ("Not taken back: …", agent_chat.rs),
+        // or the agent ending, fails it (rewind.ts puts the files back); any other note leaves it waiting
+        if (/^Not taken back/.test(String(ev.message ?? "")) || ev.kind === "signed_out" || ev.kind === "no_chat_mode") rewinding.get(id)?.fail(String(ev.message ?? ev.kind));
         if (ev.kind === "signed_out") {
           // not signed in: one line in the person's words with the agent's own sign-in command (its row in
           // acp_chat.rs), then the session ends; a turn already started fails with it first

@@ -10,7 +10,7 @@ import type { ChatEvent, ChatInput, SessionHost } from "./host";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
 
-async function setup(agent = "claude", answer: "rewound" | "refused" = "rewound") {
+async function setup(agent = "claude", answer: "rewound" | "refused" | "noted" = "rewound") {
   (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   let sink: (e: ChatEvent) => void = () => {};
   const inputs: ChatInput[] = [];
@@ -41,7 +41,11 @@ async function setup(agent = "claude", answer: "rewound" | "refused" = "rewound"
       if (i.kind === "rewind_to")
         setTimeout(() => {
           if (answer === "refused") sink({ event: "session.error", message: "Not taken back: busy" });
-          else sink({ event: "rewound", id: i.id });
+          else {
+            // another note on the way is not the rewind's answer
+            if (answer === "noted") sink({ event: "session.error", message: "Effort not changed: unknown" });
+            sink({ event: "rewound", id: i.id });
+          }
         }, 0);
     },
     chatClose: async () => {},
@@ -107,6 +111,16 @@ test("when the agent refuses, the files go back as they were and the chat keeps 
   expect(t.folder()).toEqual(before);
   expect(t.row("Fix stock sync with Shopee")).toBeDefined();
   expect(t.ss.turns.marksOf(t.id).map((m) => m.id)).toEqual([first]);
+});
+
+test("a note the agent sends while a rewind waits is not taken for its answer", async () => {
+  const t = await setup("claude", "noted");
+  await t.end();
+  const first = t.row("Fix stock sync with Shopee")!.id;
+  const done = await t.ss.rewindTo(t.id, first, []);
+  expect(done.changed).toBe(1);
+  expect(t.folder()["notes/turn-1.md"]).toBeUndefined();
+  expect(t.chat().items.filter((i) => i.kind === "user")).toEqual([]);
 });
 
 test("an agent that cannot take its chat back keeps no turn's files, and closing a session drops its turns", async () => {

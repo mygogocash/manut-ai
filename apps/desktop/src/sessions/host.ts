@@ -6,13 +6,13 @@ import type { HistoryHost } from "./term/history";
 import { AGENTS, acpRow, agentDef, HERMES_LABEL, type AcpRow, type AgentId, type AgentInfo } from "./agents";
 import { mockPtyOut, nextMockPty } from "./fg";
 import mockAcpAgents from "./mockAcpAgents.json";
+import { MockTurnFiles, tauriTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnFiles";
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
 import type { ApprovalChoice, AskTool, ClarifyAnswers } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
-import { MockTurnFiles, tauriTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnFiles";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */

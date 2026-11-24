@@ -120,7 +120,7 @@ struct Entry {
     c: u64,
     /// inode (0 where the system has none)
     i: u64,
-    /// permission bits, put back with the file (0: the default for its mode)
+    /// read, write and run bits, put back with the file (0: the default for its mode)
     #[serde(default)]
     p: u32,
     o: String,
@@ -304,7 +304,8 @@ fn stat_entry(md: &fs::Metadata, m: u32) -> Entry {
     #[cfg(unix)]
     let (c, i, p) = {
         use std::os::unix::fs::MetadataExt;
-        ((md.ctime().max(0) as u64).saturating_mul(1_000_000_000).saturating_add(md.ctime_nsec().max(0) as u64), md.ino(), md.mode() & 0o7777)
+        // read, write and run bits only: a rewind never sets a set-user, set-group or sticky bit
+        ((md.ctime().max(0) as u64).saturating_mul(1_000_000_000).saturating_add(md.ctime_nsec().max(0) as u64), md.ino(), md.mode() & 0o777)
     };
     #[cfg(not(unix))]
     let (c, i, p) = (0, 0, 0);
@@ -1657,7 +1658,8 @@ mod tests {
         put(r, "sub/x.txt", "x");
         symlink("sub/x.txt", r.join("ln")).unwrap();
         put(r, "run.sh", "echo hi");
-        fs::set_permissions(r.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+        // with a set-user bit, which a rewind never puts back: only the read, write and run bits
+        fs::set_permissions(r.join("run.sh"), fs::Permissions::from_mode(0o4755)).unwrap();
         let b = Book::with_limits(&home.0, SMALL);
         b.take("s15", r, "local-s1").unwrap();
         // the turn: the folder becomes a link that leads out, the link points elsewhere, the script loses its bit
@@ -1680,7 +1682,7 @@ mod tests {
         assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x"));
         assert_eq!(fs::read_link(r.join("ln")).unwrap(), Path::new("sub/x.txt"));
         assert_eq!(read(r, "run.sh").as_deref(), Some("echo hi"));
-        assert_eq!(fs::metadata(r.join("run.sh")).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(fs::metadata(r.join("run.sh")).unwrap().permissions().mode() & 0o7777, 0o755);
         assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
     }
 

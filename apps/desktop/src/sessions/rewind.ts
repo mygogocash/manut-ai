@@ -28,6 +28,10 @@ export const KEPT_TURNS = 20;
 /** Longest turn name in the list, in characters as a person counts them. */
 const TITLE_CHARS = 60;
 
+/** How long a message waits for its turn's files to be kept: a slower snapshot (a folder on a stuck disk, the first
+ *  read of a very large one) lets the message go without it, and that turn is not offered for rewinding. */
+export const SEND_WAIT_MS = 20_000;
+
 /** A turn whose files were kept: the id of the person's message that began it (its bubble's id). */
 export interface TurnMark {
   id: string;
@@ -51,11 +55,12 @@ export function turnTitle(text: string): string {
 }
 
 /** The turns of a chat that can be rewound, newest first: each message in `items` that began a turn whose files were
- *  kept (`marks`). A message the chat no longer holds (an earlier rewind took it) is not offered. */
+ *  kept (`marks`). A message the chat no longer holds (an earlier rewind took it) is not offered, nor one that never
+ *  reached the agent (its send failed, or Stop threw it away): the agent cannot take back what it never took. */
 export function rewindable(items: readonly TimelineItem[], marks: readonly TurnMark[]): RewindTurn[] {
   const kept = new Set(marks.map((m) => m.id));
   const out: RewindTurn[] = [];
-  for (const it of items) if (it.kind === "user" && kept.has(it.id)) out.push({ id: it.id, title: turnTitle(it.text) });
+  for (const it of items) if (it.kind === "user" && kept.has(it.id) && !it.error && it.wait !== "dropped") out.push({ id: it.id, title: turnTitle(it.text) });
   return out.reverse();
 }
 
@@ -132,6 +137,8 @@ export interface TurnBookDeps {
   /** Take session `session`'s chat back to before message `id`: resolves once the agent did, rejects when it refused,
    *  ended or did not answer. */
   chatRewind: (session: string, id: string) => Promise<void>;
+  /** how long a message waits for its turn's files (`SEND_WAIT_MS`; the tests make it short) */
+  sendWaitMs?: number;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e ?? ""));
@@ -177,21 +184,36 @@ export class TurnBook {
     return next;
   }
 
-  /** Message `id` is about to start a turn of session `session` in folder `cwd`: keep the files first. Never throws: a
-   *  turn whose files could not be kept is only not offered for rewinding, and the panel says why. */
+  /** Message `id` is about to start a turn of session `session` in folder `cwd`: keep the files first. Never throws,
+   *  and waits at most `SEND_WAIT_MS`: a turn whose files could not be kept in time is only not offered for rewinding,
+   *  and the panel says why. */
   async beforeSend(session: string, cwd: string, id: string): Promise<void> {
     const host = this.deps.host;
     if (!host || !cwd || !id) return;
-    await this.queue(session, async () => {
+    let late = false;
+    const kept = this.queue(session, async () => {
       try {
         const got = await host.take(session, cwd, id);
+        // the message went without it: the agent may have changed files while it was read, so it is not offered
+        if (late) return;
         this.put(session, [...this.marksOf(session).filter((m) => m.id !== id), { id, n: got.n }].slice(-KEPT_TURNS), null);
       } catch (e) {
+        if (late) return;
         const code = whyOf(e);
         const why: WhyNot = code === "too_many" || code === "too_big" || code === "too_broad" ? code : "failed";
         this.put(session, this.marksOf(session).filter((m) => m.id !== id), why);
       }
     });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        late = true;
+        this.put(session, this.marksOf(session).filter((m) => m.id !== id), "failed");
+        resolve();
+      }, this.deps.sendWaitMs ?? SEND_WAIT_MS);
+    });
+    await Promise.race([kept, waited]);
+    clearTimeout(timer);
   }
 
   /** Session `session`'s turn ended: keep its files as they are, so what changes before the next turn reads as changed

@@ -121,8 +121,8 @@ const RewindIcon = () => (
   </svg>
 );
 
-/** The Rewind chip and its panel, for a coding session whose agent can take its chat back. Shows only once a turn can be
- *  rewound, or the folder's files could not be kept (the panel then says why). */
+/** The Rewind chip and its panel, for a running coding session whose agent can take its chat back. Shows only once a
+ *  turn can be rewound, or the folder's files could not be kept (the panel then says why). */
 export function RewindButton({ rec }: { rec: SessionRec }) {
   const s = useStore();
   const ss = useSessions();
@@ -172,8 +172,10 @@ export function RewindButton({ rec }: { rec: SessionRec }) {
     };
     // a new turn or a rewind changes what goes back: read it again
   }, [open, picked, rec.id, steps, book]);
-  if (!REWINDS.includes(rec.agent) || (!turns.length && !whyNot)) return null;
-  const live = picked ? wentLive(items, picked, { cwd: rec.cwd, root: rec.cwd, home: ss.home ?? undefined, branch: ss.live[rec.id]?.branch || undefined }) : false;
+  // an agent that ended can take nothing back, and its next process starts with no turn kept
+  if (!REWINDS.includes(rec.agent) || rec.status !== "running" || (!turns.length && !whyNot)) return null;
+  // read only while the panel is open: this line draws again with every word of an answer
+  const live = open && picked ? wentLive(items, picked, { cwd: rec.cwd, root: rec.cwd, home: ss.home ?? undefined, branch: ss.live[rec.id]?.branch || undefined }) : false;
   const rewind = async () => {
     if (!picked) return;
     setBusy(true);

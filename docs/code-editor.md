@@ -170,9 +170,10 @@ agents that can take their chat back to a chosen message.
     `DerivedData`, `.dart_tool`, `.expo`, `.terraform` and `.git`;
   - everywhere, `.DS_Store`, `Thumbs.db` and `desktop.ini`, files over 50 MB, and a name with a line break in it.
 - **Bounds.** A folder with more than 50,000 files, or more than 1 GB in them, gets no snapshot, and the panel says its
-  turns cannot be rewound. A session keeps its newest 20 turns. Its snapshots go when the session is closed and when its
-  agent starts again (a new process can take back only the messages it was sent itself). When the app starts, the
-  snapshots of sessions that are gone go too.
+  turns cannot be rewound. A message waits at most 20 seconds for its turn's files; when keeping them takes longer, the
+  message goes and that turn is not offered. A session keeps its newest 20 turns. Its snapshots go when the session is
+  closed and when its agent starts again (a new process can take back only the messages it was sent itself). When the
+  app starts, the snapshots of sessions that are gone go too.
 - **Rewind** (`sessions/RewindPanel.tsx`): pick a turn, read what goes back, press Rewind once. The shell keeps the files as
   they are, then puts that turn's snapshot back. Then the agent takes the chat back to before that message (`rewind_to`:
   Claude Code's `rewind_conversation` to that message, Codex's `thread/revert` to before its turn). When the agent refuses,
