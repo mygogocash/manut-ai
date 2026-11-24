@@ -202,4 +202,65 @@ describe("the Audit page's names for the owner's people", () => {
     expect(read[3]).toContain("ops@manut.test added a site sign-in to the vault.");
     for (const text of read) expect(text).not.toMatch(/signin\.|outpost\.registered|\bdid\b/);
   });
+
+  it("tells a browser write from the owner registering their Mac to the site refusing the form, in plain words", async () => {
+    const worker = { kind: "worker" as const, attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" };
+    const outpost = { kind: "outpost" as const, id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" };
+    const fon = { kind: "owner" as const, id: "owner-fon" };
+    const system = { kind: "system" as const };
+    const write = { taskId: "t1", attemptId: "a1", signInId: "s1", requestId: "req_1", actionId: "req_1" };
+    const forStep = { ...write, stepId: "st1", outpostId: "o1" };
+    const listAudit = vi.fn(async () => page("t1", [
+      entry(9, { actor: system, action: "dispatch.settled", subject: { taskId: "t1", actionId: "req_1" }, outcome: "failed" }),
+      entry(8, { actor: outpost, action: "browser_step.reported", subject: forStep, outcome: "failed", reason: "submit_refused" }),
+      entry(7, { actor: outpost, action: "browser_step.fetched", subject: forStep }),
+      entry(6, { actor: system, action: "dispatch.started", subject: { taskId: "t1", actionId: "req_1" } }),
+      entry(5, { actor: worker, action: "browser_step.queued", subject: forStep }),
+      entry(4, { actor: fon, action: "approval.decided", subject: { taskId: "t1", attemptId: "a1", requestId: "req_1", actionId: "req_1" },
+        outcome: "approved" }),
+      entry(3, { actor: worker, action: "approval.requested", subject: write }),
+      entry(2, { actor: worker, action: "approval.requested", subject: { taskId: "t1", attemptId: "a1", signInId: "s1" },
+        outcome: "refused", reason: "not_my_job" }),
+      entry(1, { actor: fon, action: "outpost.registered", subject: { outpostId: "o1" } }),
+    ]));
+    renderWithApi(<AuditView shops={SHOPS} tenant="t1" onForget={() => {}} />, stubApi({ listAudit, getPeople: noPeople }));
+    await screen.findByText("Outpost b4c8d1e2 reported how submitting the form went.");
+    const read = rows("Baan Mali's audit log");
+    expect(read[0]).toContain("Manut AI finished sending an approved action.");
+    expect(read[0]).toContain("Failed");
+    expect(read[1]).toContain("Outpost b4c8d1e2 reported how submitting the form went.");
+    expect(read[1]).toContain("Failed");
+    expect(read[1]).toContain("The site refused what was submitted and kept the form.");
+    expect(read[1]).toContain("task t1 · attempt a1 · action req_1 · sign-in s1 · outpost o1 · browser step st1");
+    expect(read[2]).toContain("Outpost b4c8d1e2 picked up the approved form to submit.");
+    expect(read[4]).toContain("Worker attempt 6f9d1f0e asked an outpost to submit the approved form.");
+    expect(read[5]).toContain("Fon (linked account owner-fon) decided an approval request.");
+    expect(read[5]).toContain("Approved");
+    expect(read[6]).toContain("Worker attempt 6f9d1f0e asked for approval to submit a form on a site.");
+    expect(read[7]).toContain("Worker attempt 6f9d1f0e asked for approval to submit a form on a site.");
+    expect(read[7]).toContain("Refused");
+    expect(read[7]).toContain("That job belongs to another member of the team.");
+    expect(read[8]).toContain("Fon (linked account owner-fon) registered their Mac as an outpost.");
+    for (const text of read) expect(text).not.toMatch(/browser_step|approval\.|dispatch\.|outpost\.registered|submit_refused|\bdid\b/);
+  });
+
+  it("says what a failed write's report means for the form, and not for a read step's report", async () => {
+    const outpost = { kind: "outpost" as const, id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" };
+    const write = { taskId: "t1", attemptId: "a1", signInId: "s1", requestId: "req_1", actionId: "req_1", outpostId: "o1" };
+    const listAudit = vi.fn(async () => page("t1", [
+      entry(3, { actor: outpost, action: "browser_step.reported", subject: { stepId: "st3", taskId: "t1", attemptId: "a1", outpostId: "o1" },
+        outcome: "failed", reason: "timed_out" }),
+      entry(2, { actor: outpost, action: "browser_step.reported", subject: { ...write, stepId: "st2" }, outcome: "failed", reason: "timed_out" }),
+      entry(1, { actor: outpost, action: "browser_step.reported", subject: { ...write, stepId: "st1" }, outcome: "refused",
+        reason: "attempt_ended" }),
+    ]));
+    renderWithApi(<AuditView shops={SHOPS} tenant="t1" onForget={() => {}} />, stubApi({ listAudit, getPeople: noPeople }));
+    await screen.findByRole("list", { name: "Baan Mali's audit log" });
+    await waitFor(() => expect(rows("Baan Mali's audit log")).toHaveLength(3));
+    const read = rows("Baan Mali's audit log");
+    expect(read[0]).toContain("The step took too long.");
+    expect(read[0]).not.toContain("not known");
+    expect(read[1]).toContain("The step took too long. It is not known whether the site took the form.");
+    expect(read[2]).toContain("Its attempt had already ended. The form itself stands as the outpost reported it.");
+  });
 });

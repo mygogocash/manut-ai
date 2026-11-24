@@ -413,7 +413,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "dispatch.settled": () => "finished sending an approved action",
   "attempt.started": () => "started a worker attempt",
   "attempt.ended": (entry) => (entry.actor.kind === "worker" ? "finished its attempt" : "ended a worker attempt"),
-  "approval.requested": () => "asked for approval of an action",
+  // A browser write's ask names the sign-in it would use, which no other approval request does (docs/pilot-api.md, "Audit log").
+  "approval.requested": (entry) =>
+    entry.subject.signInId ? "asked for approval to submit a form on a site" : "asked for approval of an action",
   "approval.decided": () => "decided an approval request",
   "approval.superseded": () => "closed an approval request",
   "memory.remembered": () => "told the team something to remember",
@@ -462,7 +464,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "signin.created": () => "added a site sign-in to the vault",
   "signin.password_replaced": () => "replaced a site sign-in's password",
   "signin.removed": () => "removed a site sign-in from the vault",
-  "outpost.registered": () => "registered an outpost",
+  // The owner can register only the Mac their desktop app runs on (`POST /v1/outposts/register`); an operator registers any kind.
+  "outpost.registered": (entry) =>
+    entry.actor.kind === "owner" ? "registered their Mac as an outpost" : "registered an outpost",
   "signin.requested": () => "asked to sign in to a site",
   "signin.broken": () => "reported that a site refused a saved password",
   "signin.redeemed": () => "asked for a sign-in to type into a site",
@@ -470,11 +474,35 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "outpost.credential_rotated": () => "gave an outpost a new credential",
   // The whole vault sealed again under a new key after a rotation (no ids: the counts were in the operator's answer).
   "vault.resealed": () => "sealed the shop's vault again under a new key",
-  // The step channel: a worker's browser steps, by id only, never a page or what it read.
-  "browser_step.queued": () => "asked an outpost to run a browser step",
-  "browser_step.fetched": () => "picked up a browser step",
-  "browser_step.reported": () => "reported how a browser step went",
+  // The step channel: a worker's browser steps, by id only, never a page or what it read. A write's steps name the request they
+  // carry and a sign-in's name the grant, so the ids say which kind of step it was. An outpost that was refused a step was not
+  // handed it, and the words say so rather than that it picked it up.
+  "browser_step.queued": (entry) => stepWords(entry, {
+    write: "asked an outpost to submit the approved form",
+    signIn: "asked an outpost to sign in to a site",
+    other: "asked an outpost to run a browser step",
+  }),
+  "browser_step.fetched": (entry) => stepWords(entry, entry.outcome === "refused" ? {
+    write: "was not handed the approved form to submit",
+    signIn: "was not handed a sign-in step",
+    other: "was not handed a browser step",
+  } : {
+    write: "picked up the approved form to submit",
+    signIn: "picked up a sign-in step",
+    other: "picked up a browser step",
+  }),
+  "browser_step.reported": (entry) => stepWords(entry, {
+    write: "reported how submitting the form went",
+    signIn: "reported how signing in went",
+    other: "reported how a browser step went",
+  }),
 };
+
+/// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the
+/// grant, and a step the vault did not find (a report for an unknown step) names the outpost alone, so it is said in general.
+function stepWords(entry: AuditEntry, words: { write: string; signIn: string; other: string }): string {
+  return entry.subject.requestId ? words.write : entry.subject.grantId ? words.signIn : words.other;
+}
 
 /// The actions the Audit page has words for. A test holds this list against the API's own (`AUDIT_ACTIONS` in
 /// apps/api/src/audit-log.ts), so an action the API gains cannot reach the page as "did something.new".
@@ -564,7 +592,7 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   unseal_failed: "The vault could not open the saved password.",
   task_unavailable: "The task could not be read.",
   // Why a browser step was refused, and how an outpost may say one failed (docs/browser-control.md, the step channel).
-  step_kind_not_allowed: "Only steps that read are allowed so far.",
+  step_kind_not_allowed: "That kind of step cannot be asked for this way. A form is submitted only as an approved write.",
   invalid_url: "The page's address was not a plain https address.",
   origin_not_allowed: "The page was not on a site that member may use.",
   invalid_selector: "The part of the page to read was not written as one.",
@@ -585,10 +613,60 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   not_run: "The outpost did not run the step, so nothing was submitted.",
   timed_out: "The step took too long.",
   browser_error: "The browser stopped part way.",
+  // Why a browser write was not asked for, not queued or not handed out: the ask's own checks, the step's, and the begin gate's
+  // (docs/pilot-api.md, "Submitting through a browser"). Words the Drafts page has for its own jobs (`not_my_job`,
+  // `not_connected`) stay its own; these are for the audit log.
+  not_my_job: "That job belongs to another member of the team.",
+  not_connected: "The shop had nothing connected for that job, or the sign-in was not in the vault.",
+  kind_mismatch: "The write and the member's rules disagreed about what kind of approval it needs, so nobody was asked.",
+  unknown_member: "The team member is not one the rules know.",
+  unknown_capability: "The job is not one the rules know.",
+  unknown_kind: "The kind of approval is not one the rules know.",
+  unknown_action: "The kind of write is not one the API allows.",
+  invalid_write: "The write was not written so that an outpost could run it exactly and its owner could read it word for word.",
+  draft_only: "The job is in practice mode, so the form was kept as a draft and nobody was asked to approve it.",
+  invalid_request: "The request was not written the way the API reads it.",
+  request_not_found: "There was no such approved write.",
+  not_approved: "The write had not been approved.",
+  request_changed: "The request had changed since it was approved.",
+  already_begun: "The write had already been started.",
+  action_expired: "The approved write had run out of time.",
+  request_queued: "Another step already carried that write.",
+  already_settled: "The write had already been settled.",
+  dispatch_in_flight: "The write was already on its way.",
+  action_unknown: "The write had been on its way for over five minutes, so whether it went through is not known.",
+  payload_changed: "What was approved no longer matched what would be submitted, so nothing was submitted.",
+  grant_changed: "The member's grant had changed since the write was approved.",
+  task_settled: "The task had already finished.",
 };
 
-export function auditReasonText(reason: string): string {
-  return Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+/// What a failed write step's report means for the form, in place of the general words. The API settles a write from the code
+/// (`NOTHING_SUBMITTED` in apps/api/src/browser-writes.ts): after these codes the outpost had typed and sent nothing, so the
+/// write failed; after any other it cannot be said that the site did not take it, so the write is not known. `submit_refused`
+/// and `not_run` are about writes already, and their general words say so.
+const WRITE_REPORT_REASONS: Readonly<Record<string, string>> = {
+  page_unavailable: "The page did not load, so nothing was submitted.",
+  selector_not_found: "A field or the form was not on the page, so nothing was submitted.",
+  sign_in_refused: "The site refused the saved password, so nothing was submitted.",
+  grant_refused: "There was no sign-in to type, so nothing was submitted.",
+  origin_not_allowed: "The browser went off the page's site. It is not known whether the site took the form.",
+  timed_out: "The step took too long. It is not known whether the site took the form.",
+  browser_error: "The browser stopped part way. It is not known whether the site took the form.",
+};
+
+/// The refusals of a write step's report that come after the write was settled from it: the switches, the owner's consent, and
+/// the attempt and task the outcome must land in. What was done on the site stands, whatever could not be recorded in the attempt.
+/// A report the vault refused (an expired or repeated one) settled nothing, so it has no such note.
+const WRITE_STANDS: ReadonlySet<string> = new Set(["feature_disabled", "consent_required", "attempt_ended", "task_unavailable"]);
+
+/// Why, in words. Given the entry, a write step's report says what its reason means for the form; every other entry, and the
+/// Drafts page, read the reason alone.
+export function auditReasonText(reason: string, entry?: AuditEntry): string {
+  const general = Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+  if (entry?.action !== "browser_step.reported" || !entry.subject.requestId) return general;
+  if (entry.outcome === "failed" && Object.hasOwn(WRITE_REPORT_REASONS, reason)) return WRITE_REPORT_REASONS[reason]!;
+  if (entry.outcome === "refused" && WRITE_STANDS.has(reason)) return `${general} The form itself stands as the outpost reported it.`;
+  return general;
 }
 
 /// The ids an entry is about, in one order whatever order they came in. A worker's request shares its action's id,
