@@ -1,9 +1,9 @@
 // Pause everyone's rules, apart from the page: how the flow moves between asking, paused and back, and how the page's
 // sentences are chosen from what the runtime says. The sentences are the design canvas's (PauseAll.dc.html).
 import { afterEach, describe, expect, it } from "vitest";
-import { setLang } from "../i18n";
+import { setLang, t } from "../i18n";
 import type { PausedJob } from "../runtime/mission";
-import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, routinesLine, sinceText } from "./pause";
+import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseWords, routinesLine, sinceText } from "./pause";
 
 const NOW = new Date(2026, 10, 22, 12, 0).getTime();
 const at = (day: number, h: number, m: number) => new Date(2026, 10, day, h, m).getTime() / 1000;
@@ -74,6 +74,21 @@ describe("what the page says", () => {
     expect(pausedJobLine(job({ out: { sent: 0, total: 3 } }), nameOf)).toBe("0 of 3 sent. 3 are waiting.");
     expect(pausedJobLine(job({ out: { sent: 3, total: 3 } }), nameOf)).toBe("3 of 3 sent.");
     expect(pausedJobLine(job({ bot: "pim", out: null }), nameOf)).toBe("Pim’s work is kept.");
+  });
+
+  it("says only what the runtime's pause holds: where it holds routines alone, a running job is finished, not stopped", () => {
+    expect(pausedJobLine(job(), nameOf, "routines")).toBe("Nam is finishing it.");
+    const api = pauseWords({ holds: "routines" });
+    const canvas = pauseWords({ holds: "team" });
+    // a runtime that says nothing about what its pause holds is the canvas's
+    expect({ ...pauseWords(null), stops: [pauseWords(null).stops(1), pauseWords(null).stops(3)] }).toEqual({ ...canvas, stops: [canvas.stops(1), canvas.stops(3)] });
+    expect(t(api.keeps)).toBe("Requests in Needs you keep waiting until they expire.");
+    expect(t(api.keeps)).not.toMatch(/Nothing expires/);
+    expect(t(canvas.keeps)).toMatch(/Nothing expires/);
+    expect(t(api.stops(3), { names: "Nam, Pim and Ton" })).toBe("Nam, Pim and Ton run no routines until you resume.");
+    expect(t(api.stays)).toBe("Jobs already running are not stopped.");
+    expect(api.still).toEqual(["pause.still1", "pause.still2", "pause.r.still3", "pause.r.still4"]);
+    for (const l of ["en", "ko", "ja", "zh"] as const) for (const key of [api.keeps, api.banner, api.was, api.hint, api.stays, ...api.still]) expect(t(key, { since: "09:15" }, l).trim(), `${l} ${key}`).not.toBe("");
   });
 
   it("says when everyone was paused: the time today, and the day too when it was another", () => {

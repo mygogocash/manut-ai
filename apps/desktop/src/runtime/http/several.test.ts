@@ -116,8 +116,10 @@ describe("one Needs you across the shops", () => {
       [`${ORIGIN}/v1/approvals?state=open`, OWNER_A],
       [`${ORIGIN}/v1/approvals?state=open`, HELPER_B],
     ]);
-    // a shop session reads nothing else: the API answers it 401 there
-    for (const path of ["/v1/tenant/export", "/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path)).toEqual([]);
+    // the owner's session of Baan Mali also reads its export and its routines; the helper's session of Ran Pa Noi reads
+    // nothing but what waits there; and no shop session is sent where the API answers it 401
+    for (const path of ["/v1/tenant/export", "/v1/routines"]) expect(api.to("GET", path).map((c) => c.bearer)).toEqual([OWNER_A]);
+    for (const path of ["/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path)).toEqual([]);
     for (const call of api.calls) expect(call.url, call.url).not.toMatch(/mos1|mhs1|access-/);
   });
 
@@ -146,7 +148,8 @@ describe("one Needs you across the shops", () => {
       current: SHOP_A.id,
       left: [],
     });
-    expect(await rt.request("bots.list", {})).toMatchObject({ bots: [{ name: "buddy" }] });
+    // the person owns the shop shown, so its team is listed: Buddy, then each member it has on
+    expect((await rt.request("bots.list", {})).bots.map((b) => b.name)).toEqual(["buddy", "nam", "pim", "ton"]);
   });
 });
 

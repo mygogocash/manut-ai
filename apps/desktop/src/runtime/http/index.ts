@@ -24,8 +24,9 @@ import { shellCacheStore, shellFetch, shellVault } from "./shell";
 export { HttpHost, type CacheView, type LinkState } from "./host";
 export { ApiSession } from "./session";
 
-/** What the connected runtime offers beyond chat: the shop's schedules, read-only, on the Automations page. The
- *  other groups belong to a runtime on this computer (Hermes' places, plugins, restarts, coding-CLI logins). */
+/** What the connected runtime offers beyond chat: the shop's schedules and its team's routines on the Automations page
+ *  (an owner pauses and resumes a team routine there; the rest is read-only). The other groups belong to a runtime on
+ *  this computer (Hermes' places, plugins, restarts, coding-CLI logins). */
 export const HTTP_CAPABILITIES: RuntimeCapabilities = { elsewhere: false, automations: true, plugins: false, restart: false, accounts: false };
 
 const REFUSAL: Record<Exclude<LinkState, "open">, () => BridgeError> = {

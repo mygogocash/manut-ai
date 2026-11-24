@@ -2,7 +2,7 @@
 // paused and back, and how the page's sentences are chosen from what the runtime says. The page is the design canvas's
 // "Team: pause everyone" (PauseAll.dc.html). Pausing is the runtime's to do; nothing here stops anyone.
 import { dayLabel, hhmm, sameDay } from "../app/time";
-import { listText, t } from "../i18n";
+import { listText, t, type Key } from "../i18n";
 import type { PausedJob, TeamState } from "../runtime/mission";
 import { unavailable } from "./load";
 
@@ -52,8 +52,27 @@ export function goneOut(running: readonly PausedJob[]): { id: string; title: str
   return running.flatMap((j) => (j.out ? [{ id: j.id, title: j.title, sent: j.out.sent, total: j.out.total }] : []));
 }
 
-/** A stopped job's line in "What was running": what went and what waits, or that its work is kept (a draft sends nothing). */
-export function pausedJobLine(j: PausedJob, nameOf: (bot: string) => string): string {
+/** The words the page says a pause does, as the runtime's pause holds (`TeamState.holds`). The canvas's, as Practice runs
+ *  it: every member stops at the next safe point, and nothing expires while paused. apps/api's (`routines`): the team's
+ *  routines skip their runs and nothing else changes, so a job already running finishes and a request keeps its own
+ *  expiry; saying the canvas's words there would promise the owner what the API does not do. */
+export function pauseWords(state: Pick<TeamState, "holds"> | null) {
+  const api = state?.holds === "routines";
+  return {
+    stops: (members: number): Key => (api ? (members === 1 ? "pause.r.stops1" : "pause.r.stops") : members === 1 ? "pause.stops1" : "pause.stops"),
+    stays: (api ? "pause.r.finish" : "pause.stays") as Key,
+    keeps: (api ? "pause.r.keeps" : "pause.keeps") as Key,
+    banner: (api ? "pause.r.banner" : "pause.banner") as Key,
+    was: (api ? "pause.r.was" : "pause.was") as Key,
+    still: (api ? ["pause.still1", "pause.still2", "pause.r.still3", "pause.r.still4"] : ["pause.still1", "pause.still2", "pause.still3", "pause.still4"]) as Key[],
+    hint: (api ? "pause.r.hint" : "pause.hint") as Key,
+  };
+}
+
+/** A stopped job's line in "What was running": what went and what waits, or that its work is kept (a draft sends nothing).
+ *  Where the pause holds only routines, a job still running is not stopped, so its line says it is being finished. */
+export function pausedJobLine(j: PausedJob, nameOf: (bot: string) => string, holds?: TeamState["holds"]): string {
+  if (holds === "routines") return t("pause.r.finishing", { who: nameOf(j.bot) });
   if (!j.out) return t("pause.kept", { who: nameOf(j.bot) });
   const waiting = j.out.total - j.out.sent;
   const gone = t("pause.sentOf", { sent: j.out.sent, total: j.out.total });

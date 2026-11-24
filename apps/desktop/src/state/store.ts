@@ -2105,10 +2105,11 @@ export interface Actions {
   openJob(job: string): void;
   openActivity(): void;
   /** Mission Control's reads and Pause everyone, straight from the runtime (never cached in the store: a page keeps its
-   *  own copy). They reject with the runtime's own error, which is "not yet" on the connected runtime. */
+   *  own copy). They reject with the runtime's own error, as the connected runtime's "not yet" for a team it is not told of
+   *  (the signed-in tenant's) and "only the owner" for a shop the person helps at. */
   missionJobs(): Promise<{ jobs: JobRow[] }>;
   missionJob(job: string): Promise<Job>;
-  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number }>;
+  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number | null }>;
   teamState(): Promise<TeamState>;
   /** Stops every member but the lead at the next safe point; unsends nothing. The members' rows learn of it through
    *  `bots.update`. */

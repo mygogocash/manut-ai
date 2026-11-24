@@ -5,7 +5,7 @@ import { isUnknown } from "@manut/approval-core";
 import { describe, expect, it } from "vitest";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, CACHE_VERSION, ShopCache, cacheKey, decodeCached, encodeSnapshot } from "./cache";
-import type { ShopSnapshot } from "./shop";
+import type { ShopSnapshot, ShopWork } from "./shop";
 import { approvalJson, memoryCacheStore, replyDetail, type ApprovalOver } from "./testkit";
 
 const NOW = Date.UTC(2026, 10, 23, 7, 0, 0);
@@ -43,9 +43,14 @@ function snapshot(over: Partial<ShopSnapshot> = {}): ShopSnapshot {
             state: "proposed",
             proposedAt: NOW - 90_000,
             expiresAt: NOW + DAY,
+            approvedAt: null,
+            approvedBy: "",
+            dispatchedAt: null,
             raw: { accessToken: "RAW-ACTION-SECRET" },
           },
         ],
+        attempts: [],
+        draft: null,
         raw: { refreshToken: "RAW-TASK-SECRET", events: [{ kind: "created" }] },
       },
     ],
@@ -98,11 +103,14 @@ describe("what is kept", () => {
     const text = encodeSnapshot(snapshot());
     const file = JSON.parse(text);
     expect(Object.keys(file).sort()).toEqual(["snapshot", "v"]);
-    expect(file.v).toBe(3);
-    expect(CACHE_VERSION).toBe(3);
+    expect(file.v).toBe(4);
+    expect(CACHE_VERSION).toBe(4);
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
-    expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "createdAt", "events", "id", "objective", "state", "title", "updatedAt"]);
+    expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "attempts", "createdAt", "draft", "events", "id", "objective", "state", "title", "updatedAt"]);
     expect(Object.keys(file.snapshot.tasks[0].actions[0]).sort()).toEqual([
+      "approvedAt",
+      "approvedBy",
+      "dispatchedAt",
       "expiresAt",
       "id",
       "operationType",
@@ -319,5 +327,81 @@ describe("the saved file", () => {
     await Promise.all([loading, waiting, cleared]);
     expect(store.calls).toEqual(["read", "clear"]);
     expect(store.files.size).toBe(0);
+  });
+});
+
+describe("a shop the person owns (version 4)", () => {
+  const work = (): ShopWork => ({
+    tasks: [
+      {
+        id: "worker-task-1",
+        title: "A post",
+        objective: "Draft a post.",
+        state: "draft",
+        createdAt: NOW - 60_000,
+        updatedAt: NOW - 30_000,
+        events: 4,
+        actions: [],
+        attempts: [{ id: "a1", executor: "pim", status: "done", outcome: "done", reason: "", claimedAt: NOW - 50_000, finishedAt: NOW - 45_000, deadline: NOW + 1_000_000, leaseUntil: NOW + 300_000, handedTo: null, costSatang: 52, tokens: 900, model: "claude-haiku-5-5" }],
+        draft: { member: "pim", job: "post", text: "New candles are in!", at: NOW - 45_000 },
+        raw: { secret: "RAW-WORK-SECRET" },
+      },
+    ],
+    schedules: [],
+    attention: [],
+    team: { paused: true, since: NOW - 120_000, members: ["pim", "ton"] },
+    routines: [{ id: "rt-1", name: "Weekly post", action: "send", member: "pim", when: "Every Monday at 10:00", timeZone: "Asia/Bangkok", asksFirst: true, paused: false, next: NOW + 3_600_000, trigger: { kind: "weekly", weekdays: [1], at: "10:00", extra: "RAW-TRIGGER-SECRET" } }],
+  });
+  const owned = (): ShopSnapshot => ({
+    ...snapshot(),
+    approvals: [],
+    shops: [
+      { shop: { id: "pilot:a", name: "Baan Mali", owner: "Fon", role: "owner" }, approvals: [], work: work() },
+      { shop: { id: "pilot:b", name: "Ran Pa Noi", owner: "Noi", role: "helper" }, approvals: [] },
+    ],
+    viewing: "pilot:a",
+  });
+
+  it("keeps the shop's work under its id, field by field, and reads the viewed shop's back as what the pages show", () => {
+    const text = encodeSnapshot(owned());
+    expect(text).not.toMatch(/RAW-WORK-SECRET|RAW-TRIGGER-SECRET/);
+    const read = decodeCached(text, NOW);
+    expect(read.kind).toBe("usable");
+    if (read.kind !== "usable") return;
+    const { snapshot: s } = read;
+    expect(s.shops?.[0].work?.tasks[0]).toEqual({ ...work().tasks[0], raw: null });
+    expect(s.shops?.[0].work?.routines[0].trigger).toEqual({ kind: "weekly", weekdays: [1], at: "10:00" });
+    expect(s.shops?.[1].work).toBeUndefined();
+    // the viewed shop's work is the pages' own, as the host shows it
+    expect(s.tasks.map((x) => x.id)).toEqual(["worker-task-1"]);
+    expect(s.team).toEqual({ paused: true, since: NOW - 120_000, members: ["pim", "ton"] });
+    expect(s.routines?.map((r) => r.id)).toEqual(["rt-1"]);
+  });
+
+  it("ignores the whole file when a shop's work is damaged, or when a shop the person helps at claims any", () => {
+    const text = encodeSnapshot(owned());
+    const edit = (change: (file: any) => void) => {
+      const file = JSON.parse(text);
+      change(file);
+      return JSON.stringify(file);
+    };
+    expect(decodeCached(edit((f) => delete f.snapshot.shops[0].work.team), NOW).kind).toBe("none");
+    expect(decodeCached(edit((f) => (f.snapshot.shops[0].work.tasks[0].attempts[0].costSatang = 0.5)), NOW).kind).toBe("none");
+    expect(decodeCached(edit((f) => (f.snapshot.shops[1].work = f.snapshot.shops[0].work)), NOW).kind).toBe("none");
+  });
+
+  it("still reads a file of version 3, which kept no runs, drafts or approval times: those are none", () => {
+    const file = JSON.parse(encodeSnapshot(snapshot()));
+    file.v = 3;
+    for (const task of file.snapshot.tasks) {
+      delete task.attempts;
+      delete task.draft;
+      for (const action of task.actions) for (const key of ["approvedAt", "approvedBy", "dispatchedAt"]) delete action[key];
+    }
+    const read = decodeCached(JSON.stringify(file), NOW);
+    expect(read.kind).toBe("usable");
+    if (read.kind !== "usable") return;
+    expect(read.snapshot.tasks[0]).toMatchObject({ attempts: [], draft: null });
+    expect(read.snapshot.tasks[0].actions[0]).toMatchObject({ approvedAt: null, approvedBy: "", dispatchedAt: null });
   });
 });
