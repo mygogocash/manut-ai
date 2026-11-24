@@ -23,8 +23,13 @@ test.describe("the checks catch what they are for", () => {
   });
 
   test("a long word runs out of the box that holds it", async ({ page }) => {
+    // The owner's pages let a word with nowhere to break wrap at the edge (`overflow-wrap: anywhere` on their column), so
+    // the control turns that off for its own paragraph: it stands for a page without it.
     const word = "Pneumonoultramicroscopicsilicovolcanoconiosis".repeat(2);
-    const problems = await problemsWith(page, `<section class="box" style="padding: 16px"><p style="margin: 0">${word}</p></section>`);
+    const problems = await problemsWith(
+      page,
+      `<section class="box" style="padding: 16px"><p style="margin: 0; overflow-wrap: normal">${word}</p></section>`,
+    );
     expect(problems).toContain("Text sticks out of its box");
   });
 
