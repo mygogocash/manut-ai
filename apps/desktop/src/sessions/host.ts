@@ -12,6 +12,8 @@ import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
+import { readView, type GitView } from "../code/moved";
+import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -107,6 +109,11 @@ export interface SessionHost extends HistoryHost {
   /** The git branch checked out in `cwd` (read from its `.git/HEAD`; no program runs), "" when it is not a
    *  repository, a short commit id when detached. */
   branch(cwd: string): Promise<string>;
+  /** The main branch moving while Kit worked (src/code/moved.ts): what the person's own `git` says of `cwd`, read-only
+   *  (src-tauri/src/git_moved.rs): its branch, the branch it started from, and the files each side changed since. `show`
+   *  are the paths whose two diffs are wanted; `base` names the branch it started from (none: `origin/HEAD`'s, else
+   *  `main`, else `master`). null when there is nothing to say: not a repository, a detached HEAD, no git, the base itself. */
+  mainMoved(cwd: string, o?: { base?: string | null; show?: string[] }): Promise<GitView | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -250,6 +257,10 @@ export class TauriHost implements SessionHost {
     const { invoke } = await this.core();
     return invoke<string>("session_branch", { cwd });
   }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    const { invoke } = await this.core();
+    return readView(await invoke<unknown>("session_main_moved", { cwd, base: o.base ?? null, show: o.show ?? [] }));
+  }
   async reveal(cwd: string) {
     const { invoke } = await this.core();
     await invoke("session_reveal", { cwd });
@@ -382,6 +393,7 @@ export interface MockCall {
     | "import.read"
     | "reveal"
     | "terminal"
+    | "main.moved"
     | "custom.preview"
     | "custom.botPreview"
     | "custom.confirm"
@@ -408,6 +420,8 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
+  /** main.moved: the paths whose two diffs were asked for */
+  show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
   key?: string;
 }
@@ -463,6 +477,9 @@ type MockGlobals = {
   __manutMockImport?: Partial<Record<ImportApp, ImportProfile[]>>;
   /** e2e: the branch of each folder (none = not a repository) */
   __manutBranches?: Record<string, string>;
+  /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
+   *  lane whose main moved; a folder left out: nothing to say) */
+  __manutMoved?: Record<string, GitView>;
   /** e2e: these agents are an old version that never answers in chat mode (the shell's start deadline ends them) */
   __manutMockNoChat?: AgentId[];
   /** ACP agents the mock host treats as signed in (the others of MOCK_SIGNED_OUT answer -32000). */
@@ -890,6 +907,14 @@ export class MockHost implements SessionHost {
     const b = this.g.__manutBranches ?? { "/home/you/code/manut": "feat/session-controls" };
     return b[cwd] ?? "";
   }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    this.log({ op: "main.moved", cwd, show: o.show ?? [] });
+    const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
+    if (!v) return null;
+    // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
+    const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
+    return { ...v, both };
+  }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });
   }
@@ -1275,6 +1300,7 @@ class MockChat {
         const asks: Record<string, { title: string; command: string; tool: AskTool }> = {
           install: run("pnpm add qrcode"),
           test: run("pnpm test"),
+          merge: run("git merge main"),
           commit: run("git commit -m 'Add a PromptPay QR'"),
           deploy: run("wrangler deploy"),
           edit: { title: "Allow Edit to change src/checkout.tsx?", command: "", tool: { kind: "edit", name: "Edit", paths: [`${cwd}/src/checkout.tsx`], cwd } },

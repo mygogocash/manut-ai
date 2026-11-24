@@ -109,3 +109,64 @@
   font-weight: 600;
   color: var(--danger);
 }
+
+/* The main branch moving while Kit worked (MainMoved.tsx, the canvas's "The main branch moved"): the line, the files in
+   mono, the two buttons, then both sides of each file. The desktop's own: the canvas draws the card on a stage; here it is
+   the panel's banner stood up as a column. */
+.kitp .banner.kitm {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.kitp .kitm p {
+  margin: 0;
+}
+.kitp .kitm-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kitp .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kitp .kitm-both {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+.kitp .kitm-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kitp .kitm-pair h4,
+.kitp .kitm-pair h5 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.kitp .kitm-pair h5 {
+  margin-bottom: 4px;
+  color: var(--aui-muted);
+  font-weight: 500;
+}
+/* two columns while each has room, one under the other when it does not */
+.kitp .kitm-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.kitp .kitm-cols > div {
+  min-width: 0;
+}
+/* the pair's own heading names the file, so each side's diff header keeps only its counts */
+.kitp .kitm-cols .dv-path {
+  display: none;
+}
