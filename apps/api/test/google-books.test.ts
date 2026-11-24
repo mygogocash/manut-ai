@@ -4,7 +4,7 @@ import { appendRequest } from "@manut/sheets-rows";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/index";
 import { bahtText, booksPayloadOf, booksText, booksTotals, type BooksDetail } from "../src/books-detail";
-import { monthIsWhole } from "../src/books-sheet";
+import { monthIsWhole, plainTitle, sheetTitle } from "../src/books-sheet";
 import { dispatchApproved } from "../src/job-flow";
 import { bangkokMonth } from "../src/model-price";
 import { sortableId, type Payment } from "../src/pilot-store";
@@ -246,6 +246,23 @@ describe("a month of the books, asked, approved once and sent once", () => {
     expect(world.google.appends()).toEqual([]);
     expect((await decide(owner.headers, fourth.body.requestId!)).body.action).toBe("confirmed");
     expect(world.google.appends()).toHaveLength(1);
+  });
+
+  it("names the sheet as the owner renamed it, as one line of plain text", async () => {
+    const { shop, owner } = await readyShop();
+    const month = lastMonth();
+    await paidIn(shop, month, [{ orderRef: "SP-8", amountSatang: 800 }]);
+    expect((await askBooks(owner, month)).body.outcome).toBe("asked");
+    const [sheet] = [...world.google.sheets.values()];
+    sheet!.title = `Fon's\nbooks\t2026 ${"x".repeat(300)}`;
+    const renamed = await askBooks(owner, month);
+    expect(renamed.body.outcome).toBe("asked");
+    const named = (await openApprovals(owner.headers)).find((entry) => entry.record.request.id === renamed.body.requestId);
+    const title = (named!.record.request.detail as unknown as BooksDetail).sheet.title;
+    expect(title).toBe(`Fon's books 2026 ${"x".repeat(200 - "Fon's books 2026 ".length)}`);
+    expect([...title]).toHaveLength(200);
+    expect(sheetTitle("Baan\nMali  ")).toBe("Manut AI books: Baan Mali");
+    expect(plainTitle(`\t${"ก".repeat(150)}`, 100)).toBe("ก".repeat(100));
   });
 
   it("sends once when two approvals race, and a send started beside them takes nothing", async () => {

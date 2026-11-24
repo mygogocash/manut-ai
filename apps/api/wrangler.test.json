@@ -17,7 +17,7 @@
     "WEB_ORIGIN": "https://web.manut.test",
     "PUBLIC_API_ORIGIN": "https://api.manut.test",
     "APPROVAL_LINK_SECRET": "test-approval-link-secret-0123456789abcdef",
-    "GOOGLE_TEST_ORIGIN": "https://google.test",
+    "TEST_GOOGLE_ORIGIN": "https://google.test",
     "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
   },
   "ratelimits": [

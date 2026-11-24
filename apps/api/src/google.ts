@@ -44,7 +44,7 @@ const MAX_ANSWER_BYTES = 256 * 1024;
 export const SPREADSHEET_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /// Where Google lives for one environment. Production always uses Google's own hosts; only a test configuration may
-/// name a fake one (`GOOGLE_TEST_ORIGIN`, below).
+/// name a fake one (`TEST_GOOGLE_ORIGIN`, below).
 export type GoogleConfig = {
   clientId: string;
   clientSecret: string;
@@ -63,9 +63,11 @@ export type GoogleEnv = {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /// Test only, set in wrangler.test.json and nowhere else: one origin standing in for every Google host, served by the
-  /// tests themselves. It must be an https origin under `.test`, a name no network resolves, so even a value set by
-  /// mistake can never send a token anywhere real; any other value is ignored and Google's own hosts are used.
-  GOOGLE_TEST_ORIGIN?: string;
+  /// tests themselves. Its name starts with `TEST_`, so the dev deploy check refuses a config that sets it
+  /// (.github/scripts/check-dev-deploys.mjs). It must also be an https origin under `.test`, a name no network resolves,
+  /// so even a value set some other way can never send a token anywhere real; any other value is ignored and Google's
+  /// own hosts are used.
+  TEST_GOOGLE_ORIGIN?: string;
   /// This Worker's public origin, which the callback's address is built from.
   PUBLIC_API_ORIGIN?: string;
 };
@@ -91,7 +93,7 @@ export function googleConfig(env: GoogleEnv): GoogleConfig | null {
   const clientSecret = env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
   const origin = originOf(env.PUBLIC_API_ORIGIN);
   if (!clientId || !clientSecret || !origin) return null;
-  const fake = env.GOOGLE_TEST_ORIGIN && TEST_ORIGIN.test(env.GOOGLE_TEST_ORIGIN) ? env.GOOGLE_TEST_ORIGIN : null;
+  const fake = env.TEST_GOOGLE_ORIGIN && TEST_ORIGIN.test(env.TEST_GOOGLE_ORIGIN) ? env.TEST_GOOGLE_ORIGIN : null;
   return {
     clientId,
     clientSecret,

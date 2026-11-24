@@ -2074,7 +2074,7 @@ files the app makes, and which needs no Google review.
 **Off until the owner's OAuth client exists.** Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are both Wrangler
 secrets, and `PUBLIC_API_ORIGIN` is set, every route below answers 503 `{ "error": "google_not_configured" }` before it
 reads anything else, the callback included, and Ton's append fails with `google_not_configured`. No environment sets
-them yet. Tests use a fake Google at `GOOGLE_TEST_ORIGIN`, a setting only `wrangler.test.json` has and that is ignored
+them yet. Tests use a fake Google at `TEST_GOOGLE_ORIGIN`, a setting only `wrangler.test.json` has and that is ignored
 unless it is an `https://…test` origin, so even a value set by mistake can send nothing anywhere real.
 
 ### The owner's routes

@@ -72,9 +72,9 @@ describe("off until the owner's OAuth client exists", () => {
       tokenUrl: "https://oauth2.googleapis.com/token", revokeUrl: "https://oauth2.googleapis.com/revoke",
       sheetsOrigin: "https://sheets.googleapis.com" });
     for (const fake of ["https://evil.example", "http://google.test", "https://google.test.example.com"]) {
-      expect(googleConfig({ ...base, GOOGLE_TEST_ORIGIN: fake })?.tokenUrl).toBe("https://oauth2.googleapis.com/token");
+      expect(googleConfig({ ...base, TEST_GOOGLE_ORIGIN: fake })?.tokenUrl).toBe("https://oauth2.googleapis.com/token");
     }
-    expect(googleConfig({ ...base, GOOGLE_TEST_ORIGIN: GOOGLE })?.tokenUrl).toBe(`${GOOGLE}/token`);
+    expect(googleConfig({ ...base, TEST_GOOGLE_ORIGIN: GOOGLE })?.tokenUrl).toBe(`${GOOGLE}/token`);
     const { PUBLIC_API_ORIGIN: _origin, ...noOrigin } = base;
     expect(googleConfig(noOrigin)).toBeNull();
     expect(googleConfig({ ...base, PUBLIC_API_ORIGIN: "http://api.manut.xyz" })).toBeNull();
@@ -374,7 +374,7 @@ describe("the vault's Google operations", () => {
 
 describe("Google's answers, classified", () => {
   const config = googleConfig({ GOOGLE_CLIENT_ID: CLIENT_ID, GOOGLE_CLIENT_SECRET: CLIENT_SECRET,
-    PUBLIC_API_ORIGIN: "https://api.manut.test", GOOGLE_TEST_ORIGIN: GOOGLE }) as GoogleConfig;
+    PUBLIC_API_ORIGIN: "https://api.manut.test", TEST_GOOGLE_ORIGIN: GOOGLE }) as GoogleConfig;
   const answering = (status: number, body: unknown = {}): FetchImpl => async () => Response.json(body, { status });
   const dropped: FetchImpl = async () => {
     throw new TypeError("connection dropped");

@@ -99,10 +99,10 @@ export interface Env {
   /// Google Sheets for Ton's books (google-connect.ts, docs/connectors.md 4b): the owner's own OAuth client, two
   /// Wrangler secrets (`wrangler secret put GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`). Never in config; until both
   /// are set every Google route answers 503 google_not_configured and nothing reaches Google. No environment sets them
-  /// yet. GOOGLE_TEST_ORIGIN is test-only, set in wrangler.test.json alone (google.ts).
+  /// yet. TEST_GOOGLE_ORIGIN is test-only, set in wrangler.test.json alone (google.ts).
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  GOOGLE_TEST_ORIGIN?: string;
+  TEST_GOOGLE_ORIGIN?: string;
   /// The Google callback, which the owner's browser reaches with no session: one bucket per address.
   GOOGLE_CALLBACK_LIMITER?: RateLimit;
 }

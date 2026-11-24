@@ -65,6 +65,8 @@ const enc = encodeURIComponent;
 const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
 /// The longest title a new sheet is given, in characters.
 const MAX_SHEET_TITLE = 100;
+/// The longest title a request names, in characters: the task object takes up to 200 (books-detail.ts).
+const MAX_NAMED_TITLE = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -264,7 +266,14 @@ export async function prepareBooks(env: BooksEnv, attempt: AttemptRef, month: un
 
 /// The title a new sheet is given: the app's name and the shop's, so an owner with several shops tells them apart.
 export function sheetTitle(shopName: string): string {
-  return [...`Manut AI books: ${shopName.trim()}`].slice(0, MAX_SHEET_TITLE).join("");
+  return plainTitle(`Manut AI books: ${shopName}`, MAX_SHEET_TITLE);
+}
+
+/// A title as one line of plain text: control characters (a line break, a tab) become spaces, runs of spaces one, and
+/// it is cut to `max` characters. A shop's name, and a sheet's title as the owner may have renamed it, are anybody's
+/// text, and the request names the sheet in a sentence, which the task object refuses to hold a control character in.
+export function plainTitle(text: string, max: number): string {
+  return [...text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim()].slice(0, max).join("").trim();
 }
 
 /// The sheet the books go to, for a draft: the connection's, or the one that would be made.
@@ -285,8 +294,9 @@ async function sheetFor(env: BooksEnv, tenant: string, connection: GoogleConnect
     if (read.state === "unreachable") return { ok: false, error: "google_unavailable" };
     if (read.state === "found") {
       if (!read.tabs.includes(connection.sheet.tab)) return { ok: false, error: "sheet_tab_missing" };
-      return { ok: true, sheet: { id: connection.sheet.id, title: read.title || connection.sheet.title,
-        tab: connection.sheet.tab }, grantRevision: connection.grantRevision };
+      return { ok: true, sheet: { id: connection.sheet.id,
+        title: plainTitle(read.title, MAX_NAMED_TITLE) || connection.sheet.title, tab: connection.sheet.tab },
+      grantRevision: connection.grantRevision };
     }
   }
   const claimed = await googleVaultCall(env, tenant, "/google/sheet-claim",

@@ -1,5 +1,5 @@
 // A fake Google for the tests: the OAuth token and revoke endpoints and the three Sheets calls Ton's books use, served
-// inside the test through the global fetch, at `GOOGLE_TEST_ORIGIN` (wrangler.test.json). It holds what Google would:
+// inside the test through the global fetch, at `TEST_GOOGLE_ORIGIN` (wrangler.test.json). It holds what Google would:
 // the codes a consent gave out, each bound to its PKCE challenge and redirect address; the refresh and access tokens;
 // and the spreadsheets with their rows. It checks what Google checks (the client's id and secret, the verifier against
 // the challenge, a code used once, a bearer token on every Sheets call), and keeps every call, so a test reads exactly
