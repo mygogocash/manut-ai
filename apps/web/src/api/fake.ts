@@ -1024,6 +1024,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             trialStartedAt: shop.trialStartedAt ?? null,
             decisions: db.actions.flatMap((a) => (a.tenant === shop.tenant && a.decidedAt ? [a.decidedAt] : [])),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === shop.tenant),
+            ...(shop.selfServe ? { selfServe: true } : {}),
           })),
           now(),
         );

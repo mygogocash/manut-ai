@@ -70,6 +70,8 @@ export type Shop = {
   lineConnectionId?: string;
   /// The shop template it was made from, when it was.
   template?: string;
+  /// Its owner made it in the app, signed in, with no operator (docs/pilot-api.md, "Making a shop of your own").
+  selfServe?: true;
   consent: boolean;
   deletion?: DeletionRequest;
   deleting?: Deleting;
@@ -144,6 +146,11 @@ export type GateShop = {
   paidSatang: number;
   activeOnDay14: ActiveOnDay14;
   lastDecisionAt?: string;
+  /// Its owner made it in the app, with no operator.
+  selfServe?: true;
+  /// Whether it is counted once its day 14 has passed: false for a shop its owner made that an operator has not added. An
+  /// API from before shops could be made that way leaves it out, which reads as counted.
+  inCohort?: boolean;
 };
 
 /// One of the gate's two shares: `percent` is rounded down, and null while no shop is counted. `met` compares the

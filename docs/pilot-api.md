@@ -172,7 +172,9 @@ reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the ro
 shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
 spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
 have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
-says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages.
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages. A shop its
+owner made in the app (`selfServe`, "Making a shop of your own", below) is marked "Made by its owner" under its name, so an
+operator sees where it came from; the Pilot gate page marks it the same way and says whether it is counted.
 
 Secrets (`channelSecret`, `channelAccessToken`) go straight into the encrypted credential vault and are never
 returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`; `approvalUrl` is

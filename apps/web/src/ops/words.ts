@@ -288,6 +288,10 @@ export const gateWords = {
   notYet: "Not yet",
   active: { yes: "Yes", no: "No", not_yet: "Not yet" },
   noDecision: "None yet",
+  /// A shop its owner made in the app: listed, and counted only once an operator adds it.
+  selfServe: "Made by its owner",
+  leftOut: "Not counted: its owner made it in the app, and no operator has added it",
+  addedIn: "Counted: an operator added it",
 
   // Recording the shop's payment to Manut AI
   formTitle: "Record a subscription payment",
@@ -1585,6 +1589,9 @@ export const shopsWords = {
   noShops: "No shops yet.",
   noShopsHint: "Add a shop with POST /v1/admin/pilot/shops, then connect its LINE account.",
   tableLabel: "Every shop",
+  /// A shop its owner made in the app, with no operator (docs/pilot-api.md, "Making a shop of your own").
+  selfServe: "Made by its owner",
+  selfServeHelp: "Its owner made it in the app, signed in, with no operator. The pilot gate leaves it out unless an operator adds it.",
   unreadable: "Could not be read",
   nothingRecorded: "Nothing recorded",
   gateFailed: "The pilot gate could not be read, so trials, payments and activity are not shown. Try again.",

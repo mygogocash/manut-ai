@@ -77,6 +77,30 @@ describe("the Pilot gate view", () => {
     ]);
   });
 
+  it("lists a shop its owner made in the app as not counted, past its day 14 and paid, and says when an operator added one", async () => {
+    const own = shop({ tenant: "t5", name: "Khao Hom", trialStartedAt: "2026-12-07T03:00:00.000Z", day: 16, trialEnded: true,
+      paid: true, paidAt: "2026-12-21T05:00:00.000Z", paidSatang: 49900, activeOnDay14: "yes", selfServe: true, inCohort: false });
+    const added = shop({ tenant: "t6", name: "Baan Fon", selfServe: true, inCohort: true });
+    renderGate(gateOf([BAAN_MALI, own, added], { counted: 1, paid: measure(1, 100, 25, true), active: measure(1, 100, 50, true),
+      status: "on_track" }));
+    expect(await screen.findByText("1 of 3 counted")).toBeTruthy();
+    const rows = tableRows();
+    expect(rows[0]![0]).toBe("Baan Mali");
+    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added it");
+    expect(rows[2]![0]).toBe("Baan FonMade by its ownerCounted: an operator added it");
+  });
+
+  it("counts a shop its owner made only once an operator adds it, in practice as on the API", async () => {
+    const { pilotGate } = await import("../src/api/gate");
+    const ended = { name: "Khao Hom", trialStartedAt: "2026-12-07T03:00:00.000Z", decisions: ["2026-12-18T05:00:00.000Z"],
+      subscriptionPayments: [] };
+    const now = Date.parse("2027-01-10T03:00:00.000Z");
+    const left = pilotGate([{ tenant: "t1", ...ended }, { tenant: "t2", ...ended, selfServe: true }], now);
+    expect(left.shops.map((one) => [one.selfServe, one.inCohort])).toEqual([[undefined, true], [true, false]]);
+    expect(left.cohort.counted).toBe(1);
+    expect(pilotGate([{ tenant: "t2", ...ended, selfServe: true, addedToCohort: true }], now).cohort.counted).toBe(1);
+  });
+
   it("says which share is under its line when the pilot is below the line", async () => {
     renderGate(gateOf([SABAI_TEA], { counted: 1, paid: measure(0, 0, 25, false), active: measure(0, 0, 50, false),
       status: "below_line" }));

@@ -222,6 +222,17 @@ function ShopRow({ shop, rules, measuredAt }: { shop: GateShop; rules: PilotGate
     <tr>
       <th scope="row" style={{ ...CELL, fontWeight: 500 }}>
         {shop.name}
+        {/* A shop its owner made in the app is listed with the others and counted only once an operator adds it. */}
+        {shop.selfServe ? (
+          <div style={{ fontWeight: 400, marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+            <span>
+              <span className="tag">{gateWords.selfServe}</span>
+            </span>
+            <span className="mut" style={{ fontSize: 12 }}>
+              {shop.inCohort === false ? gateWords.leftOut : gateWords.addedIn}
+            </span>
+          </div>
+        ) : null}
       </th>
       <td style={CELL}>{shop.trialStartedAt ? formatDate(shop.trialStartedAt) : gateWords.notStarted}</td>
       <td style={CELL}>
