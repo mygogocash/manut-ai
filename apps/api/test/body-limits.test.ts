@@ -147,10 +147,11 @@ describe("streaming request bounds", () => {
       .toEqual({ ok: true, raw, value: undefined });
   });
 
-  it.each(["exchange", "refresh"])("refuses a headerless auth %s without reading or invoking AUTH", async (route) => {
+  it.each(["exchange", "refresh"])("refuses an auth %s with no length without reading or invoking AUTH", async (route) => {
     const { body, state } = flood();
     const counter = authCounter();
-    const response = await send(new Request(`https://test/v1/auth/${route}`, { method: "POST", body }), counter.target);
+    const response = await send(new Request(`https://test/v1/auth/${route}`, { method: "POST",
+      headers: { "content-type": "application/json" }, body }), counter.target);
     expect(response.status).toBe(411);
     expect(state.pulled).toBe(0);
     expect(counter.calls()).toBe(0);

@@ -109,7 +109,7 @@ describe("public ingress rate limits", () => {
     expect(counter.keys).toEqual(["192.0.2.17"]);
     expect(counter.calls()).toBe(1);
     const headerless = new Request("https://test/v1/auth/exchange", { method: "POST",
-      headers: { "cf-connecting-ip": "192.0.2.17" }, body: "{}" });
+      headers: { "cf-connecting-ip": "192.0.2.17", "content-type": "application/json" }, body: "{}" });
     expect((await send(headerless, counter.target)).status).toBe(411);
     expect(counter.calls()).toBe(1);
   });

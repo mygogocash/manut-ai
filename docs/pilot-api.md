@@ -61,6 +61,16 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   addresses inside it would otherwise give a fresh bucket each time. An IPv4-mapped IPv6 address counts as its IPv4
   address. A request whose source cannot be read answers 503 `rate_limit_unavailable` before anything is counted or
   read. "Per source address" below means this.
+- A body the API reads is JSON and says so (24 Nov 2026): every `POST`, `PUT` and `PATCH` under `/v1/` that carries a
+  body takes only `Content-Type: application/json` (a `charset` or other parameter is fine), and answers any other type,
+  or none, 415 `{ error: "json_required" }` before anything is counted, read or woken. That is every route that reads a
+  body: signing in (`/v1/auth/email/code`, `/v1/auth/exchange`, `/v1/auth/refresh`), the web app's (`/v1/web/*`), the
+  owner's links, the shop's and a person's session routes, the outposts', the lifted routes and the operator's. Only
+  the webhooks under `/v1/inbound/` are left to their senders, who sign the exact body and choose its type. A request
+  with no body, or `Content-Length: 0`, passes, and `GET` and `DELETE` are as they were. A page on another site can make
+  a browser send a POST without a CORS preflight only as `text/plain`, a form or a multipart upload, so no other site
+  can make a visitor's browser ask for a sign-in code, spend a code's tries or send anything else here. The desktop's
+  shell and page and the web app send `application/json` with every body.
 
 ## Public routes
 
@@ -1604,6 +1614,7 @@ characters, one `@` between two parts with no spaces.
 | 400 | `{ error: "invalid_request" }` | The body is not exactly `{ email }` with an address |
 | 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
 | 411, 413 | `length_required`, `body_too_large` | As the exchange |
+| 415 | `{ error: "json_required" }` | The body is not sent as `application/json` ("Security rules", above), as another site can make a browser send it. Nothing is counted or sent |
 
 A new code replaces the one before, which stops working. The email is plain English: the subject "Your Manut AI sign-in
 code", never with the code in it, so a lock screen does not show it; the body gives the code, says it works for 10
@@ -1622,6 +1633,7 @@ characters, as Apple's.
 | 401 | `{ error: "code_ended" }` | No code to try: none was asked for, it was used, its 10 minutes passed, or five wrong tries ended it. Ask for a new one |
 | 400 | `{ error: "invalid_request" }` | The body is not exactly that, or the code is not six digits, which does not count as a try |
 | 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+| 415 | `{ error: "json_required" }` | The body is not sent as `application/json` ("Security rules", above), so no other site can make a browser spend a code's tries. It is not a try |
 
 - **The identity.** The tenant is `email:` and the SHA-256, in hex, of the normalized address, so it never equals an
   Apple tenant (`apple:<sub>`) and the address itself names nothing that is stored. The session's email is the

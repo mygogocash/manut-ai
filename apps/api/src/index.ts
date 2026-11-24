@@ -140,6 +140,25 @@ function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
+/// The methods whose bodies the API reads as JSON.
+const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
+
+/// A body the API reads is JSON, and it must say so: every POST, PUT and PATCH under /v1/ that carries a body takes only
+/// `application/json` (a `charset` or other parameter is fine), or answers 415 `json_required` before anything is
+/// counted, read or woken. A page on another site can make a visitor's browser send a POST without asking first only
+/// as `text/plain`, a form or a multipart upload (a CORS "simple" request, with `mode: "no-cors"`), so with this no
+/// other site can make a browser ask for a sign-in code, spend a code's tries or send anything else here; a JSON body
+/// from another origin needs a CORS preflight, which this API answers only on the owner's link routes (pilot.ts). The
+/// webhooks under /v1/inbound/ are left to their senders, who sign the exact body and choose its type, and no browser
+/// can sign one. A request with no body has nothing to read and passes. The desktop's shell and page and apps/web send
+/// `application/json` with every body.
+function jsonBodyRefusal(request: Request, pathname: string): Response | null {
+  if (!BODY_METHODS.has(request.method) || pathname.startsWith("/v1/inbound/")) return null;
+  if (request.body === null || request.headers.get("content-length") === "0") return null;
+  const media = (request.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return media === "application/json" ? null : json({ error: "json_required" }, 415);
+}
+
 /// These unauthenticated routes must be limited before parsing or waking AUTH.
 /// Cloudflare supplies this source IP; client forwarding headers and body fields
 /// never choose a bucket. Per-location limits are abuse control, not accounting.
@@ -602,6 +621,9 @@ export default {
     // pages Worker. This Worker keeps no static assets of its own: Cloudflare runs a Worker with assets behind a
     // router that does not pass ctx.access, and the admin gate below needs it (pages.ts).
     if (!isApiPath(url.pathname)) return env.WEB ? env.WEB.fetch(request) : json({ error: "not_found" }, 404);
+    // Before the limits, so a request another site makes a browser send never spends that visitor's bucket.
+    const typeDenial = jsonBodyRefusal(request, url.pathname);
+    if (typeDenial) return typeDenial;
     const rateDenial = await ingressRateGate(request, url.pathname, env);
     if (rateDenial) return rateDenial;
     const adminDenial = adminGate(request, url.pathname, env, ctx);

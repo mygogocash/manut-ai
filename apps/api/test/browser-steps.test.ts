@@ -683,7 +683,7 @@ describe("browser steps", () => {
     for (const [method, path] of [["GET", "/v1/outposts/steps"], ["PUT", "/v1/outposts/steps"],
       ["GET", "/v1/outposts/steps/report"], ["POST", "/v1/outposts/steps/other"]] as const) {
       expect((await sourceWorker.fetch(`${API}${path}`, { method,
-        ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(404);
+        ...(method === "GET" ? {} : { headers: { "content-type": "application/json" }, body: "{}" }) })).status).toBe(404);
     }
   });
 
