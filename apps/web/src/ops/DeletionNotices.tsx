@@ -1,11 +1,14 @@
 import { useState } from "react";
-import type { ShopDeletion, UnfinishedDeletion } from "./useShopDeletion";
+import type { Shop } from "../api";
+import { unfinishedDeletions, type ShopDeletion, type UnfinishedDeletion } from "./useShopDeletion";
 import { deletedText, shopDataWords as W, unfinishedText } from "./words";
 
 /// What became of a deletion, shown above every tab and every shop: the shop it was about may no longer be
-/// on the list, and a deletion that did not finish must stay in sight until it does.
-export function DeletionNotices({ deletion }: { deletion: ShopDeletion }) {
-  const { finished, unfinished } = deletion;
+/// on the list, or no longer open, and a deletion that did not finish must stay in sight until it does. `shops`
+/// is the list as the API last answered it, which reports the deletions this console did not send.
+export function DeletionNotices({ deletion, shops }: { deletion: ShopDeletion; shops: readonly Shop[] | null }) {
+  const { finished } = deletion;
+  const unfinished = unfinishedDeletions(deletion, shops);
   if (!finished && unfinished.length === 0) return null;
   return (
     <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 8 }}>

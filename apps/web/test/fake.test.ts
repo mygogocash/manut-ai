@@ -194,6 +194,40 @@ describe("the fake, deleting shops as the API does", () => {
     expect((await api.getDeletion(deletionTokenOf(link.confirmUrl))).state).toBe("awaiting_owner");
   });
 
+  it("lists a deletion that stopped part way as deleting, as the API does, and the same request finishes it", async () => {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    const api = createFakeApi({ now: () => NOW, webOrigin: "https://web.test", storage });
+    const link = asked(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" }));
+    expect((await api.listShops()).map((shop) => shop.deleting)).toEqual([undefined, undefined]);
+    // A practice wipe never stops part way, so the saved world is changed to hold two that did, as the API can
+    // leave them: Fon said yes to Baan Mali's, and Sabai Tea's was recorded by an operator and went no further.
+    type SavedWorld = { confirmations: { status: string; approved?: boolean; decidedAt?: string }[];
+      deletions: Record<string, unknown>[] };
+    const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as SavedWorld;
+    Object.assign(world.confirmations.at(-1)!, { status: "decided", approved: true, decidedAt: "2026-11-23T03:00:00.000Z" });
+    world.deletions.push({ tenant: "shop_sabaitea", name: "Sabai Tea", requestedAt: "2026-11-23T02:00:00.000Z",
+      deletedBy: "ops@manut.test" });
+    saved.set("manut.pilot.fake.v1", JSON.stringify(world));
+
+    const listed = await api.listShops();
+    expect(listed.map((shop) => [shop.name, shop.deletion?.state, shop.deleting])).toEqual([
+      ["Baan Mali", "deleting", { shopRecord: true }], ["Sabai Tea", undefined, { shopRecord: true }]]);
+    expect(await api.getDeletion(deletionTokenOf(link.confirmUrl))).toMatchObject({ state: "deleting" });
+
+    expect(await api.deleteShop({ tenant: "shop_sabaitea", confirmName: "Sabai Tea" })).toMatchObject({ tasksWiped: 0 });
+    expect(await api.deleteShop({ tenant: "shop_baanmali", confirmName: "Baan Mali" })).toMatchObject({ tasksWiped: 1 });
+    expect(await api.listShops()).toEqual([]);
+    expect(await api.getDeletion(deletionTokenOf(link.confirmUrl))).toMatchObject({ state: "deleted" });
+    // Sabai Tea's record keeps who asked and when, as the API's does.
+    await expect(api.listMessages("shop_sabaitea")).rejects.toMatchObject({ code: "tenant_deleted",
+      deletedBy: "ops@manut.test" });
+  });
+
   it("answers the demo deletion links in every state", async () => {
     const api = fake();
     expect((await api.getDeletion(DEMO_DELETION_TOKENS.waiting)).state).toBe("awaiting_owner");

@@ -27,7 +27,7 @@ import { QuestionsTab } from "./QuestionsTab";
 import { ShopDataTab } from "./ShopDataTab";
 import { ShopsView, type ShopPage } from "./ShopsView";
 import { useLoad } from "./useLoad";
-import { deletionOf, useShopDeletion } from "./useShopDeletion";
+import { deletionOf, isDeleting, useShopDeletion } from "./useShopDeletion";
 import {
   auditWords,
   draftsWords,
@@ -74,8 +74,10 @@ export function OpsConsole() {
   const shops = useLoad(hasKey ? () => api.listShops() : null, `shops:${hasKey}`);
   // After a deletion the operator lands on the next shop's messages, never on its delete button.
   const deletion = useShopDeletion(api, { onAnswered: shops.reload, onDeleted: () => setTab("messages") });
+  // A shop whose deletion stopped after removing its own record has nothing left to open, so no page lists it; the
+  // notices above the shop's page offer to finish its deletion instead (DeletionNotices).
   const shopList = useMemo(
-    () => shops.data?.filter((s) => !deletion.gone.has(s.tenant)) ?? null,
+    () => shops.data?.filter((s) => !deletion.gone.has(s.tenant) && s.deleting?.shopRecord !== false) ?? null,
     [shops.data, deletion.gone],
   );
   const shop = shopList?.find((s) => s.tenant === tenant) ?? null;
@@ -253,8 +255,17 @@ export function OpsConsole() {
                       }}
                     >
                       <StoreIcon />
-                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {s.name}
+                      <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                        {/* A shop stays on the list until its deletion has finished, and says so on a line of its own,
+                            so the name keeps the narrow menu's width. The space makes the mark a word of its own in
+                            the button's name. */}
+                        {isDeleting(s) && (
+                          <span style={{ fontSize: 11.5, lineHeight: 1.3, color: "var(--erri)" }}>
+                            {" "}
+                            {shopDataWords.listTag}
+                          </span>
+                        )}
                       </span>
                     </button>
                   </li>
@@ -318,7 +329,7 @@ export function OpsConsole() {
                   {shopDeletion?.state === "awaiting_owner" && (
                     <span className="tag warn">{shopDataWords.waitingTag(shop.ownerName)}</span>
                   )}
-                  {shopDeletion?.state === "deleting" && <span className="tag err">{shopDataWords.unfinishedTag}</span>}
+                  {isDeleting(shop) && <span className="tag err">{shopDataWords.unfinishedTag}</span>}
                 </>
               )}
               <div className="tabs" role="tablist" aria-label="Sections">
@@ -375,7 +386,7 @@ export function OpsConsole() {
                 </button>
               </div>
             </div>
-            <DeletionNotices deletion={deletion} />
+            <DeletionNotices deletion={deletion} shops={shops.data} />
             {(creating || shopList?.length === 0) && (
               <NewShopForm
                 onCreated={(created) => {
@@ -437,6 +448,7 @@ export function OpsConsole() {
                   key={shop.tenant}
                   shop={shop}
                   request={shopDeletion}
+                  noted={deletion.unfinished.some((entry) => entry.tenant === shop.tenant)}
                   onDelete={(name) => deletion.run(shop.tenant, name)}
                   onFinish={() => deletion.run(shop.tenant, shop.name, true)}
                 />

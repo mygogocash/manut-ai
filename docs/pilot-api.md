@@ -113,8 +113,8 @@ what happened until it expires.
 
 Body `{ "approve": true }` or `{ "approve": false }`, else 400 `invalid_request`. Approving settles the decision,
 then runs the tenant deletion and completes the deletion record, and answers the view as `deleted`; if the wipe
-stops part way the decision still stands, the view answers `deleting`, and the operator's same deletion request
-finishes it. Declining deletes nothing and answers `declined`. A second decision answers 409
+stops before the shop's data is gone the decision still stands, the view answers `deleting`, and the operator's same
+deletion request finishes it. Declining deletes nothing and answers `declined`. A second decision answers 409
 `{ "error": "already_decided", "view": DeletionView }`. A confirmation past its expiry answers 410 `link_expired`,
 a bad link 404 `link_invalid`. Nothing in the request chooses who decides: whoever holds the link is the owner.
 
@@ -132,7 +132,8 @@ type DeletionView = {
 
 - `awaiting_owner`: open; nothing is deleted.
 - `deleting`: the owner said yes and the wipe has not finished: it is running, or it stopped part way.
-- `deleted`: the wipe finished.
+- `deleted`: the shop's data is deleted. The wipe's very last step, taking the shop off the operator's list, may still
+  be left; the operator's same request finishes it ("Export and deletion", below).
 - `declined`: the owner kept the data; nothing was deleted.
 - `expired`: nobody answered in 24 hours; nothing was deleted.
 
@@ -177,12 +178,19 @@ returned. `webhookUrl` is `${PUBLIC_API_ORIGIN}/v1/inbound/line/{connectionId}`;
 type Shop = {
   tenant: string;
   name: string;
-  ownerName: string;
+  ownerName: string;            // "" once a deletion has removed the shop's own record (below)
   lineConnectionId?: string;
   template?: string;            // the shop template it was made from, if any ("Shop templates", below)
   consent: boolean;
   deletion?: DeletionRequest;   // the shop's latest deletion put to its owner, if any
+  deleting?: Deleting;          // its deletion started and has not finished ("Export and deletion", below)
 };
+
+// A deletion under way: running, or stopped part way, for a shop that never went live or one whose owner said yes.
+// The operator's same deletion request finishes it, and the shop leaves the list once it has. `shopRecord` is false
+// once the deletion has removed the shop's own record: the row is then only what the record of the deletion kept,
+// `{ tenant, name, ownerName: "", consent: false, deleting: { shopRecord: false } }`.
+type Deleting = { shopRecord: boolean };
 
 // A shop's latest owner confirmation. The link is re-minted on each read, same expiry.
 type DeletionRequest = {
@@ -292,8 +300,8 @@ type DeletedShop = {
   through the same tenant export and deletion a shop's own session would use. Deletion removes the task and
   every reply, the sealed LINE secrets and the webhook route, messages, order and subscription payments, consent,
   what the team knows about the shop, its people (helpers, invites and every helper session, so no helper can open it
-  again) and the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the webhook
-  answers 404.
+  again), and last of all the shop's registry row. The owner's approval links answer `link_invalid` afterwards and the
+  webhook answers 404.
   - It cannot be undone, so the operator sends the shop's name with its id. The name matches when it differs
     only in outer spaces or in how an accented letter was composed; shop names are stored trimmed.
   - **A live shop also needs its owner's yes.** The operator's request deletes nothing: it records who asked
@@ -304,7 +312,26 @@ type DeletedShop = {
     confirmation names one shop, so it also settles which of two same-named shops is meant.
   - **A shop that never went live** is deleted by the operator's request at once, as before (200 `DeletedShop`).
   - Once the owner has said yes, the operator's same request finishes a wipe that stopped part way, without
-    asking the owner again: 200 `DeletedShop`, or 500 `wipe_incomplete` while something still fails.
+    asking the owner again: 200 `DeletedShop`, or 500 `wipe_incomplete` while something still fails. For a shop
+    that never went live, the same request finishes its stopped deletion as it was asked for, keeping who asked and
+    when; if the shop has gone live since, its owner is asked instead.
+  - **A stopped deletion stays on the list.** The wipe runs in a fixed order: the tasks, the vault and the
+    schedules; the sessions and the other global rows that name the shop; the shop's own object, ending with its
+    tombstone; and last of all its registry row. So the shop leaves `GET /v1/admin/pilot/shops` only once the rest is
+    gone. Until then it is listed with `deleting`, and the same request finishes it. If the wipe stopped after it
+    had removed the shop's own record, the row is only what the record of the deletion kept (`Deleting`, above),
+    the same request still finishes it, and `confirmName` is checked against the name that record kept. A shop
+    whose record or deletion cannot be read fails the list with 503 `shops_unavailable` rather than drop off it,
+    and a deletion request for it answers 503 `shop_unavailable`, deleting nothing, rather than take it for one
+    whose record is gone (which would skip asking the owner of a shop that went live since its deletion stopped).
+  - The console shows such a shop as the list does: "Deleting" under its name in the side menu, "Deletion not
+    finished" in its header, and in its Shop data tab what stopped with "Finish deleting", which sends the same
+    request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page
+    says its deletion did not finish and offers the same button. The practice fake lists and finishes a deletion
+    that did not finish by the same rules, though a practice wipe never stops part way.
+  - Every step answers again after its own wipe: the task index reads as empty once the shop's own object is wiped,
+    and each wipe finds nothing more to remove. So the same request runs to the end after a stop at any step,
+    including one after the tombstone, when only taking the shop off the list is left.
   - A record of the deletion outlives the shop: who asked (`deletedBy`: the operator's Access identity, or
     `null` for a service token), when, the owner confirmation for a live shop, and once the wipe finished, when
     and what was removed. It is written before anything is wiped, and for a live shop before any link is handed
@@ -314,9 +341,12 @@ type DeletedShop = {
     with the `setting`, deleting nothing.
   - Afterwards every operator route naming the shop answers 404 `{ "error": "tenant_deleted", "deletedAt",
     "deletedBy" }`. If the wipe finished but completing its record did not, `deletedAt` is the tenant's
-    tombstone, which the wipe writes last.
-  - A partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`; sending the same request
-    again finishes it.
+    tombstone, which the wipe writes last of the shop's data. Once the tombstone is written, every route but the
+    deletion request already answers so, though taking the shop off the list may still be left, and the owner's page
+    says `deleted`, since none of the shop's data is left.
+  - A partial wipe answers 500 `{ "error": "wipe_incomplete", "failed": [...] }`, naming the step that stopped it
+    (`index-read`, a task id, `connections`, `schedules`, `sessions`, `index` for the shop's own object, or `registry`
+    for taking it off the list); sending the same request again finishes it.
 
 ## The pilot gate (Phase 1)
 

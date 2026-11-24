@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../src/api";
-import { classifyDeleteError, confirmsShopName } from "../src/ops/useShopDeletion";
+import { ApiError, type Shop } from "../src/api";
+import { classifyDeleteError, confirmsShopName, isDeleting, unfinishedDeletions } from "../src/ops/useShopDeletion";
+
+describe("deletions that did not finish", () => {
+  const gone = (tenant: string, name: string): Shop =>
+    ({ tenant, name, ownerName: "", consent: false, deleting: { shopRecord: false } });
+
+  it("shows the console's own first, then each the list reports for a shop that cannot be opened, once", () => {
+    const own = { tenant: "a", name: "A", partial: true, tries: 2, error: new ApiError(500, "wipe_incomplete") };
+    const shops: Shop[] = [
+      gone("a", "A"),
+      gone("b", "B"),
+      { tenant: "c", name: "C", ownerName: "Dao", consent: false, deleting: { shopRecord: true } },
+      { tenant: "d", name: "D", ownerName: "Fon", consent: true },
+      gone("e", "E"),
+    ];
+    // "e" was just seen deleted here, before the list was read again; "c" still has a page that says so.
+    expect(unfinishedDeletions({ gone: new Set(["e"]), unfinished: [own] }, shops)).toEqual([
+      own,
+      { tenant: "b", name: "B", partial: true, tries: 0, error: null },
+    ]);
+    expect(unfinishedDeletions({ gone: new Set(), unfinished: [] }, null)).toEqual([]);
+  });
+
+  it("reads a shop as deleting by the list's word or by the owner's yes that has not finished", () => {
+    const shop: Shop = { tenant: "c", name: "C", ownerName: "Dao", consent: false };
+    expect(isDeleting(shop)).toBe(false);
+    expect(isDeleting({ ...shop, deleting: { shopRecord: true } })).toBe(true);
+    const asked = { confirmUrl: "https://web.test/delete/x", expiresAt: "2026-11-24T03:00:00Z" };
+    expect(isDeleting({ ...shop, deletion: { state: "deleting", ...asked } })).toBe(true);
+    for (const state of ["awaiting_owner", "declined", "expired", "deleted"] as const) {
+      expect(isDeleting({ ...shop, deletion: { state, ...asked } }), state).toBe(false);
+    }
+  });
+});
 
 describe("what a failed deletion's answer means", () => {
   it("reads a shop the API has deleted as gone, as the API and the practice fake both say it", () => {

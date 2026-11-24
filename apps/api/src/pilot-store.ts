@@ -10,7 +10,8 @@
 ///   customer messages out after the source-snapshot window.
 /// - Globally, in AuthObject: one registry row per pilot shop, so the
 ///   operator console can list shops. The row names only the tenant and goes
-///   with the tenant's other global rows when the tenant is deleted.
+///   last of all when the tenant is deleted, after the shop's own data, so a
+///   deletion that stops part way leaves the shop listed (tenant-data.ts).
 ///
 /// Only the Worker reaches these paths. Writes additionally require the
 /// `x-pilot` (or, for the registry, `x-admin`) header the Worker sets, the
@@ -614,13 +615,31 @@ export function pilotRegistryKey(tenant: string): string {
   return `pilot-registry:${enc(tenant)}`;
 }
 
-/// `/pilot-shops` on AuthObject: list the pilot tenants, or add one. Adding
-/// needs the Worker's `x-admin` header, like the other global index writes.
+/// `/pilot-shops` on AuthObject:
+/// - `GET`: the pilot tenants, oldest first;
+/// - `GET ?tenant=`: whether that one is still listed;
+/// - `POST`: add one, with the Worker's `x-admin` header, like the other global index writes;
+/// - `DELETE ?tenant=`: take one off, with the Worker's `x-wipe` header, as the tenant deletion's last step
+///   (tenant-data.ts).
 export async function pilotRegistryRoute(storage: DurableObjectStorage, request: Request): Promise<Response> {
+  const tenant = new URL(request.url).searchParams.get("tenant");
   if (request.method === "GET") {
+    // A shop stays listed until its deletion has finished, so this tells a deletion that stopped part way from one
+    // that finished but could not complete its record.
+    if (tenant !== null) {
+      if (!bounded(tenant)) return json({ error: "invalid_request" }, 400);
+      return json({ registered: (await storage.get(pilotRegistryKey(tenant))) !== undefined });
+    }
     const rows = await values<{ tenant: string; createdAt: string }>(storage, "pilot-registry:");
     rows.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
     return json({ tenants: rows.map((row) => row.tenant) });
+  }
+  if (request.method === "DELETE") {
+    if (request.headers.get("x-wipe") !== "1") return json({ error: "forbidden" }, 403);
+    if (!bounded(tenant)) return json({ error: "invalid_request" }, 400);
+    // The one row that names this tenant, and nothing else: no prefix scan, so no other shop's row can go with it.
+    await storage.delete(pilotRegistryKey(tenant));
+    return json({ removed: true });
   }
   if (request.method !== "POST") return json({ error: "not_found" }, 404);
   if (request.headers.get("x-admin") !== "1") return json({ error: "forbidden" }, 403);
