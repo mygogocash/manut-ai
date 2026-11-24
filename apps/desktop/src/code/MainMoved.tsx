@@ -89,24 +89,28 @@ export function MainMovedView({ moved, both, onMerge, onShow }: MainMovedProps) 
   );
 }
 
-/** `root`: the folder. `base`, `branch`: a lane's own base and the branch it works on (none: the project's default base, and
+/** `root`: the project's folder, where Let Kit merge finds its lane. `dir`: the folder git is read in, a lane's own working folder
+ *  (none: `root`). `base`, `branch`: a lane's own base and the branch it works on (none: the project's default base, and
  *  whichever branch the folder has checked out). `lane`: the session the ask goes to first. `off`: another row shows it. */
 export interface MainMovedWhere {
   root: string;
+  dir?: string;
   base?: string;
   branch?: string;
   lane?: string;
   off?: boolean;
 }
 
-export function MainMoved({ root, base, branch, lane, off }: MainMovedWhere) {
-  const moved = useMoved(root, getHost(), { base, branch, off });
+export function MainMoved({ root, dir, base, branch, lane, off }: MainMovedWhere) {
+  // a lane's branch is checked out in its own folder, so git is read there
+  const at = dir ?? root;
+  const moved = useMoved(at, getHost(), { base, branch, off });
   const [open, setOpen] = useState(false);
   const [both, setBoth] = useState<Both>({ state: "closed" });
   const key = moved ? `${moved.branch}\n${moved.base}\n${moved.files.join("\n")}` : "";
 
   // Another project, or the state is gone: the two sides close. While they are open they are read again when the files change.
-  useEffect(() => setOpen(false), [root, moved === null]);
+  useEffect(() => setOpen(false), [at, moved === null]);
   useEffect(() => {
     if (!open || !moved) {
       setBoth({ state: "closed" });
@@ -114,7 +118,7 @@ export function MainMoved({ root, base, branch, lane, off }: MainMovedWhere) {
     }
     let live = true;
     setBoth((was) => (was.state === "open" ? was : { state: "loading" }));
-    readSides(getHost(), root, moved.files, base).then(
+    readSides(getHost(), at, moved.files, base).then(
       (sides) => {
         if (live) setBoth(sides ? { state: "open", sides } : { state: "failed" });
       },
@@ -126,7 +130,7 @@ export function MainMoved({ root, base, branch, lane, off }: MainMovedWhere) {
       live = false;
     };
     // `key` stands for `moved`: the files, not the object a new read makes
-  }, [open, root, base, key]);
+  }, [open, at, base, key]);
 
   if (!moved) return null;
   return (

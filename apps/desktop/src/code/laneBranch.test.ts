@@ -1,6 +1,6 @@
 // A lane's branch, named from the work and planned before the shell makes it (src/code/laneBranch.ts).
 import { describe, expect, it } from "vitest";
-import { laneBranchNames, planLaneBranch } from "./laneBranch";
+import { laneBranchNames, planLaneBranch, readKept, readMade, readRemoved, workDir } from "./laneBranch";
 
 /** What git takes as a branch name, as narrow as Kit makes them: one folder, lower case words joined by hyphens. */
 const VALID = /^kit\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -61,9 +61,9 @@ describe("a lane's branch is named from its work", () => {
 });
 
 describe("planning a lane's branch", () => {
-  const plan = (current: string, others: { branch: string; busy: boolean }[] = [], title = "PromptPay QR") => planLaneBranch({ title, current, others });
+  const plan = (current: string, title = "PromptPay QR") => planLaneBranch({ title, current });
 
-  it("makes a branch from the one the folder is on", () => {
+  it("makes a branch from the one the developer's folder is on", () => {
     expect(plan("main")).toEqual({ kind: "make", base: "main", names: laneBranchNames("PromptPay QR") });
     expect(plan("feat/session-controls")).toMatchObject({ kind: "make", base: "feat/session-controls" });
   });
@@ -76,16 +76,40 @@ describe("planning a lane's branch", () => {
     expect(plan("")).toEqual({ kind: "none", why: "no_repository" });
   });
 
-  it("joins the branch of a lane that is working on it, for one folder has one checkout", () => {
-    expect(plan("kit/thai-date", [{ branch: "kit/thai-date", busy: true }])).toEqual({ kind: "join", branch: "kit/thai-date" });
+  it("never joins or stacks on another lane: each has a folder of its own, made from the developer's branch", () => {
+    // a second lane started while the first works is made from the same branch as the first, not from the first's
+    expect(plan("main", "Thai date format")).toEqual(plan("main", "Thai date format"));
+    expect(Object.keys(plan("main"))).toEqual(["kind", "names", "base"]);
+  });
+});
+
+describe("where a session's agent works", () => {
+  it("is its lane's own folder, else the session's", () => {
+    expect(workDir({ cwd: "/home/you/code/web-app", lane: { name: "kit/qr", base: "main", dir: "/home/you/.manut/lanes/web-app/qr/apps/web", worktree: "/home/you/.manut/lanes/web-app/qr" } })).toBe(
+      "/home/you/.manut/lanes/web-app/qr/apps/web",
+    );
+    expect(workDir({ cwd: "/home/you/code/web-app", lane: { name: "kit/qr", base: "main" } })).toBe("/home/you/code/web-app");
+    expect(workDir({ cwd: "/home/you/code/web-app" })).toBe("/home/you/code/web-app");
+  });
+});
+
+describe("the shell's answers about a lane's folder", () => {
+  it("takes a made folder only with a branch Kit makes and absolute folders", () => {
+    const ok = { branch: "kit/qr", base: "main", dir: "/h/.manut/lanes/a/qr", worktree: "/h/.manut/lanes/a/qr", left: 2 };
+    expect(readMade(ok)).toEqual(ok);
+    expect(readMade({ ...ok, left: undefined })).toEqual({ ...ok, left: 0 });
+    for (const bad of [null, "x", { ...ok, branch: "main" }, { ...ok, dir: "relative" }, { ...ok, worktree: "" }, { ...ok, base: "" }]) expect(readMade(bad), JSON.stringify(bad)).toBeNull();
   });
 
-  it("makes its own from a branch a lane left idle, so the work stays one piece to a branch", () => {
-    expect(plan("kit/thai-date", [{ branch: "kit/thai-date", busy: false }])).toMatchObject({ kind: "make", base: "kit/thai-date" });
+  it("lists the kept folders it can read, and counts it cannot as unknown", () => {
+    const k = { worktree: "/h/.manut/lanes/a/qr", dir: "/h/.manut/lanes/a/qr", branch: "kit/qr", base: "main", made: 5, exists: true, changed: 2, ahead: 0 };
+    expect(readKept([k, { ...k, branch: "main" }, null, { ...k, worktree: "" }, { ...k, changed: -1, ahead: "2", exists: "yes" }])).toEqual([k, { ...k, changed: null, ahead: null, exists: false }]);
+    expect(readKept({})).toEqual([]);
   });
 
-  it("is not held by a busy lane that is on some other branch, or on none", () => {
-    expect(plan("main", [{ branch: "kit/thai-date", busy: true }])).toMatchObject({ kind: "make", base: "main" });
-    expect(plan("main", [{ branch: "", busy: true }])).toMatchObject({ kind: "make", base: "main" });
+  it("takes nothing as removed unless the shell said so", () => {
+    expect(readRemoved({ removed: true, deleted: true, changed: null, ahead: null, error: null })).toEqual({ removed: true, deleted: true, changed: null, ahead: null, error: null });
+    expect(readRemoved({ removed: "yes", changed: 3, ahead: 1, error: "" })).toEqual({ removed: false, deleted: false, changed: 3, ahead: 1, error: null });
+    expect(readRemoved(undefined)).toEqual({ removed: false, deleted: false, changed: null, ahead: null, error: null });
   });
 });

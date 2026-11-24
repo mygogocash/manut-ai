@@ -6,6 +6,7 @@ import "./kit.css";
 import { t, type Key } from "../i18n";
 import type { ApprovalChoice } from "../lib/protocol";
 import { getSessions } from "../sessions/sessions";
+import { workDir } from "./laneBranch";
 import type { ApprovalItem } from "../state/store";
 import { askOfItem, kitAnswered, kitCard, useKeysVersion, type AskContext, type KitCard } from "./kitAsks";
 import { useKitProjects } from "./project";
@@ -16,7 +17,8 @@ function sessionContext(chat: string): AskContext | null {
   const ss = getSessions().getState();
   const id = chat.slice("agent:".length);
   const r = ss.list.find((x) => x.id === id);
-  return r?.cwd ? { chat, root: r.cwd, home: ss.home, branch: ss.live[id]?.branch } : null;
+  // a lane's asks are read inside its own folder; the project, whose settings the dial keeps, is the session's folder
+  return r?.cwd ? { chat, root: workDir(r), project: r.cwd, home: ss.home, branch: ss.live[id]?.branch } : null;
 }
 
 /** Kit's reading of an open ask of chat `chat`, read again when a project's settings or a session's keys change; null

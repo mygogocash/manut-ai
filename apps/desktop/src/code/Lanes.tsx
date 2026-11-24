@@ -22,16 +22,18 @@ import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord,
 import { laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
 
-/** The branch a lane's row shows, and why: Kit's own for the lane, one shared with a lane already working in the folder, the
- *  folder's branch now that it is not the lane's, or the folder's own for a lane that made none. */
+/** The branch a lane's row shows, and why: Kit's own for the lane (with the folder of its own it works in), the folder's
+ *  branch now that it is not the lane's, or the folder's own for a lane that made none. */
 export type LaneBranchTag =
-  | { name: string; kind: "own" | "shared"; base: string }
+  | { name: string; kind: "own"; base: string; dir?: string }
   | { name: string; kind: "moved"; base: string; lane: string }
   | { name: string; kind: "folder" };
 
 export interface LaneRow {
   /** The session's id. */
   id: string;
+  /** The folder of its own the lane works in, where its main-moved note reads git; null: it works in the session's folder. */
+  dir: string | null;
   title: string;
   /** The agent's name, as the session's row names it. */
   agent: string;
@@ -64,21 +66,22 @@ export interface LaneRowInput {
   canBringBack?: boolean;
 }
 
-/** The branch a lane works on and the branch it was made from (`lane.base`), while the folder is on that branch: what the lane's
- *  main-moved note reads (MainMoved.tsx). None for a lane with no branch of its own, and for one whose branch the folder has left,
- *  since the shell answers for the checked-out branch and has nothing to say about this lane's. */
+/** The branch a lane works on and the branch it was made from (`lane.base`), while its folder is on that branch: what the lane's
+ *  main-moved note reads (MainMoved.tsx), in the lane's own folder. None for a lane with no branch of its own, and for one whose
+ *  folder has left its branch, since the shell answers for the checked-out branch and has nothing to say about this lane's. */
 export function laneBase(row: Pick<LaneRow, "branch">): { branch: string; base: string } | null {
   const b = row.branch;
-  return b && (b.kind === "own" || b.kind === "shared") ? { branch: b.name, base: b.base } : null;
+  return b && b.kind === "own" ? { branch: b.name, base: b.base } : null;
 }
 
 /** The row of one lane. `time` writes a time of day. */
 export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) => hhmm(new Date(ms))): LaneRow {
   const { rec, lane, turn } = i;
   const own = rec.lane;
+  // the branch of the folder the lane works in (its own), as last read
   const now = i.live?.branch ?? "";
   let branch: LaneBranchTag | null = null;
-  if (own) branch = now && now !== own.name ? { name: now, kind: "moved", base: own.base, lane: own.name } : { name: own.name, kind: own.shared ? "shared" : "own", base: own.base };
+  if (own) branch = now && now !== own.name ? { name: now, kind: "moved", base: own.base, lane: own.name } : { name: own.name, kind: "own", base: own.base, ...(own.dir ? { dir: own.dir } : {}) };
   else if (now) branch = { name: now, kind: "folder" };
 
   const ended = rec.status === "failed" || (rec.status === "exited" && !!rec.error);
@@ -88,12 +91,13 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
   const at = lane.revertedAt ?? lane.backAt;
   return {
     id: rec.id,
+    dir: own?.dir ?? null,
     title: pickTitle(rec, folderName(rec.cwd)).title,
     agent: i.agent,
     branch,
     status,
-    // a lane works on a separate branch only while the folder is on it
-    line: laneLine({ status, lane, branch: branch?.kind === "own" || branch?.kind === "shared", ask: i.asks[0], time: at === undefined ? undefined : time(at), error }),
+    // a lane works on a separate branch only while its folder is on it
+    line: laneLine({ status, lane, branch: branch?.kind === "own", ask: i.asks[0], time: at === undefined ? undefined : time(at), error }),
     failed: status === "tests_failed" ? failedNames(lane) : { names: [], more: 0 },
     step: turn?.status ?? "",
     since: turn?.startedAt ?? null,
@@ -155,9 +159,7 @@ export interface LanesProps {
 function branchTitle(b: LaneBranchTag): string {
   switch (b.kind) {
     case "own":
-      return t("lane.madeFrom", { base: b.base });
-    case "shared":
-      return t("lane.shared");
+      return b.dir ? t("lane.madeFromIn", { base: b.base, folder: b.dir }) : t("lane.madeFrom", { base: b.base });
     case "moved":
       return t("lane.moved", { branch: b.lane, now: b.name });
     case "folder":

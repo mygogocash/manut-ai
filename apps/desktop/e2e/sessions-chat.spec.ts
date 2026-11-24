@@ -136,7 +136,8 @@ test("the empty section's New session row opens a New session chat, then gives w
   await page.getByTestId("session-choose").click();
   await page.getByTestId("composer").fill("hello");
   await page.keyboard.press("Enter");
-  await expect.poll(async () => (await calls(page)).find((c) => c.op === "chat.start")).toMatchObject({ agent: "claude", cwd: "/home/you/code/manut" });
+  // the folder is a repository, so the chat is a lane, and its agent works in the lane's own folder (src/code/laneBranch.ts)
+  await expect.poll(async () => (await calls(page)).find((c) => c.op === "chat.start")).toMatchObject({ agent: "claude", cwd: "/home/you/.manut/lanes/manut/hello" });
 });
 
 test("an approval card in a session: Deny first, answered with Allow for session, the row waits", async ({ page }) => {

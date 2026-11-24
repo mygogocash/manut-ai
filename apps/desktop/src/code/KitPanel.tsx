@@ -10,6 +10,7 @@ import { KIT_LEVELS, type KitLevel } from "@manut/member-grants";
 import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
 import { useSessions } from "../sessions/sessions";
+import type { SessionRec } from "../sessions/agents";
 import { getStore } from "../state/store";
 import { useNow } from "../elsewhere/useNow";
 import { RunningPanel } from "../running/RunningPanel";
@@ -17,6 +18,7 @@ import { ruleText, type Rule } from "./command";
 import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
+import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
@@ -50,6 +52,8 @@ export interface KitPanelProps {
   onOpenSession: (id: string) => void;
   /** What the project's own state adds under the keys: a preview on a sample, the main branch moving (KitPanel fills it). */
   children?: ReactNode;
+  /** The lanes' folders kept on this computer, under the lanes (KitPanel fills it: KeptLanes.tsx). */
+  kept?: ReactNode;
 }
 
 /** A folder as the developer reads it: `~` for the home folder. */
@@ -62,6 +66,7 @@ export function KitPanelView(p: KitPanelProps) {
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
       <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} {...p.laneBack} />
+      {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
         {p.projects.length > 1 ? (
@@ -110,7 +115,7 @@ export function KitPanelView(p: KitPanelProps) {
             <div key={b.path} data-testid="kit-blocked">
               <div className="rowl">
                 <span className="tag">{t("kit.blocked")}</span>
-                <span className="grow">{t(`kit.blocked.${b.what}`, { project: name })}</span>
+                <span className="grow">{t(b.lane ? `kit.blocked.lane.${b.what}` : `kit.blocked.${b.what}`, { project: name })}</span>
               </div>
               <div className="rowl">
                 <span className="mono grow">{b.path}</span>
@@ -162,15 +167,23 @@ export function KitPanelView(p: KitPanelProps) {
   );
 }
 
-/** The projects the Code page lists: the folders sessions run in, newest first, then the folders the person added. */
-export function codeProjects(cwds: readonly string[], added: readonly string[]): string[] {
+/** Whether every session of project `root` works in a lane's folder of its own (and there is one): Kit then works nowhere in the
+ *  developer's folder, so the note under the dial, which reads that folder, stands down. */
+export function onlyInOwnFolders(list: readonly Pick<SessionRec, "cwd" | "status" | "lane">[], root: string): boolean {
+  const here = list.filter((r) => r.status !== "draft" && pathKey(r.cwd) === pathKey(root));
+  return here.length > 0 && here.every((r) => !!r.lane?.dir);
+}
+
+/** The projects the Code page lists: the folders sessions run in, newest first, then the folders the person added, then the
+ *  folders lanes were made from whose folders are kept (`lanes`), so a kept folder is never out of sight. */
+export function codeProjects(cwds: readonly string[], added: readonly string[], lanes: readonly string[] = []): string[] {
   const groups = folderGroups(cwds.map((cwd) => ({ cwd }))).map((g) => g.cwd);
-  return [...new Set([...groups, ...added.map(pathKey)])].filter(Boolean);
+  return [...new Set([...groups, ...added.map(pathKey), ...lanes.map(pathKey)])].filter(Boolean);
 }
 
 /** What a lane's row shows under its line: Bring it back's panel, while the person has it open and the lane can still bring its
- *  files back, then the note that the branch it was made from changed the files it changed (read for the lane's own base, while
- *  the folder is on its branch). */
+ *  files back, then the note that the branch it was made from changed the files it changed (read in the lane's own folder for its
+ *  own base, while that folder is on its branch). */
 function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
   // a lane that can no longer bring its files back (a turn began, or they were brought back) shuts its panel for good
   useEffect(() => {
@@ -180,7 +193,7 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
   return (
     <>
       {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}
-      {own && <MainMoved root={root} base={own.base} branch={own.branch} lane={row.id} />}
+      {own && <MainMoved root={root} {...(row.dir ? { dir: row.dir } : {})} base={own.base} branch={own.branch} lane={row.id} />}
     </>
   );
 }
@@ -189,9 +202,11 @@ export function KitPanel() {
   const ss = useSessions();
   const prefs = useFolderPrefs();
   useKeysVersion();
+  const lanesMadeIn = useLaneProjects();
   const projects = codeProjects(
     ss.list.map((r) => r.cwd).filter(Boolean),
     addedFolders(prefs),
+    lanesMadeIn,
   );
   const [picked, setPicked] = useState<string | null>(null);
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
@@ -228,10 +243,13 @@ export function KitPanel() {
         onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
         onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
         onOpenSession={(id) => getStore().actions.openSession(id)}
+        kept={<KeptLanes root={root} />}
       >
         <PreviewSample root={root} />
-        {/* a lane's row carries its own note while the folder is on its branch; the folder that no row covers keeps it here */}
-        <MainMoved root={root} off={lanes.some((l) => laneBase(l) !== null)} />
+        {/* a lane's row carries its own note, read in its own folder. The developer's folder keeps one here while Kit works in it:
+            a session with no folder of its own (a terminal, a lane that could not have one), or no session yet; with every
+            session in a folder of its own, Kit does not work in the developer's folder and this note has nothing of Kit's to say */}
+        <MainMoved root={root} off={onlyInOwnFolders(ss.list, root)} />
       </KitPanelView>
       {/* what keeps running (src/running/) for the project the panel shows, right under it */}
       <RunningPanel project={root} />

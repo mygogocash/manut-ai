@@ -188,4 +188,13 @@ describe("what is listed", () => {
     expect(inProject([mine, other, inside], "/home/you/code//baanmali-preorder").map((r) => r.pid)).toEqual([1]);
     expect(inProject([mine, other], undefined).map((r) => r.pid)).toEqual([1, 2]);
   });
+
+  it("keeps a lane's commands with its project, though they run in the lane's own folder", () => {
+    const lane = row({ pid: 4, session: 7, folder: "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr" });
+    const mine = row({ pid: 1, folder: "/home/you/code/baanmali-preorder" });
+    // the session's own folder, as the page knows it
+    const projectOf = (r: RunningRow) => (r.session === 7 ? "/home/you/code/baanmali-preorder" : r.folder);
+    expect(inProject([mine, lane], "/home/you/code/baanmali-preorder", projectOf).map((r) => r.pid)).toEqual([1, 4]);
+    expect(inProject([mine, lane], "/home/you/code/baanmali-preorder").map((r) => r.pid)).toEqual([1]);
+  });
 });

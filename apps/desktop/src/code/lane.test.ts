@@ -63,6 +63,23 @@ describe("what a lane learns from its events", () => {
     expect(noteLane(lane, { ...end("t9", true, "text"), command: "ls" }, 9_999)).toBe(lane);
   });
 
+  it("reads no run its words send to another folder than the lane's own", () => {
+    const where = { root: "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr", home: "/Users/fon" };
+    const dev = "cd /Users/fon/work/baanmali-preorder && pnpm test";
+    const at = (events: Ev[]) => events.reduce((lane, ev, i) => noteLane(lane, ev, 1_000 + i, where), emptyLane());
+    // in the developer's folder: never running, never a result
+    expect(testState(at([start("t1", dev)]))).toBe("none");
+    expect(at(ran(dev, true, out("vitest-pass"))).run).toBeUndefined();
+    // a start that looked like the lane's, whose whole command at the end went elsewhere: the step goes, with no result
+    const cut = "pnpm test …";
+    expect(at([start("t1", cut)]).steps).toEqual({ t1: cut });
+    expect(at([start("t1", cut), { ...end("t1", true, out("vitest-pass")), command: `pnpm test; ${dev}` }])).toEqual(emptyLane());
+    // in its own folder, as before
+    expect(at(ran("cd apps/web && pnpm test", true, out("vitest-pass"))).run?.read).toEqual({ kind: "passed", passed: 2 });
+    // with no folder known, every run is read as before
+    expect(feed(ran(dev, true, out("vitest-pass"))).run?.read).toEqual({ kind: "passed", passed: 2 });
+  });
+
   it("counts no run for a step the person refused, which never ran", () => {
     const refused = feed([start("t1", "pnpm test"), { event: "tool.end", tool_id: "t1", name: "", ok: false, ms: 0, declined: true }]);
     expect(testState(refused)).toBe("none");
@@ -290,7 +307,7 @@ describe("the line under a lane's row", () => {
   });
 
   it("is in every language, with the same slots", () => {
-    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.shared", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.broughtBack", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.back", "lane.moreNames"] as const;
+    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.madeFromIn", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.broughtBack", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.back", "lane.moreNames"] as const;
     for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
   });
 });

@@ -67,6 +67,17 @@ export interface SavedSession {
   messages?: SavedMsg[];
   /** A Shell row's shell id (`shells_available`). */
   shell?: string;
+  /** A chat's lane: its branch, the branch it was made from, and its own working folder (src/code/laneBranch.ts), so a lane
+   *  that comes back works where it did, never in the developer's folder. */
+  lane?: SavedLane;
+}
+
+export interface SavedLane {
+  name: string;
+  base: string;
+  /** Where its agent works, and the worktree that holds it: both, or neither (a lane made before lanes had folders). */
+  dir?: string;
+  worktree?: string;
 }
 
 export interface ResumeSnap {
@@ -96,6 +107,18 @@ function parseMsg(v: unknown): SavedMsg | null {
   const id = str(v.id, 200);
   if (!id || (v.role !== "user" && v.role !== "assistant") || typeof v.text !== "string" || typeof v.ts !== "number") return null;
   return { id, role: v.role, text: cut(v.text, MAX_TEXT), ts: v.ts };
+}
+
+const absolute = (p: string | undefined): p is string => !!p && (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p));
+
+function parseLane(v: unknown): SavedLane | null {
+  if (!isObj(v)) return null;
+  const name = str(v.name, 200);
+  const base = str(v.base, 200);
+  if (!name?.startsWith("kit/") || !base) return null;
+  const dir = str(v.dir);
+  const worktree = str(v.worktree);
+  return absolute(dir) && absolute(worktree) ? { name, base, dir, worktree } : { name, base };
 }
 
 function parseSession(v: unknown): SavedSession | null {
@@ -129,6 +152,8 @@ function parseSession(v: unknown): SavedSession | null {
   }
   const shell = cleanShellId(v.shell);
   if (shell) out.shell = shell;
+  const lane = parseLane(v.lane);
+  if (lane) out.lane = lane;
   if (Array.isArray(v.messages)) {
     const msgs = v.messages.map(parseMsg).filter((m): m is SavedMsg => !!m).slice(-MAX_MESSAGES);
     if (msgs.length) out.messages = msgs;

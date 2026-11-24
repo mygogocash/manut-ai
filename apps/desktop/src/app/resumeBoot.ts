@@ -65,6 +65,8 @@ function snapshot(): ResumeSnap {
         ...(r.mode ? { mode: r.mode } : {}),
         ...(r.effort ? { effort: r.effort } : {}),
         ...(r.shell ? { shell: r.shell } : {}),
+        // a lane comes back in its own folder
+        ...(r.lane ? { lane: r.lane } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

@@ -48,8 +48,8 @@ import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFi
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { kitAnswer, noteChange } from "../code/kitAsks";
-import { planLaneBranch, type LaneBranch } from "../code/laneBranch";
-import { forgetLane, noteLaneEvent } from "../code/laneStore";
+import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
+import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
@@ -392,7 +392,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const r = rec(id);
     if (!r?.agentSession || !TITLED.includes(r.agent)) return;
     try {
-      const res = await store().actions.cliTitle(r.agent as "claude" | "codex", r.agentSession, r.cwd);
+      // the agent keeps its conversation for the folder it ran in: a lane's own
+      const res = await store().actions.cliTitle(r.agent as "claude" | "codex", r.agentSession, workDir(r));
       const t = typeof res?.title === "string" ? res.title.trim() : "";
       if (t && rec(id) && rec(id)!.agentTitle !== t) patchRec(id, { agentTitle: t });
     } catch {
@@ -400,51 +401,66 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     }
   };
   const patchLive = (id: string, p: Partial<AgentLive>) => set({ live: { ...state.live, [id]: { ...state.live[id], ...p } } });
-  /** The folder's branch, read again when a turn ends (the agent may have switched it). */
+  /** The branch of the folder the agent works in (a lane's own), read again when a turn ends (the agent may have switched it). */
   const readBranch = async (id: string) => {
     const r = rec(id);
     if (!r?.cwd) return;
     try {
-      const b = await host.branch(r.cwd);
+      const b = await host.branch(workDir(r));
       if (rec(id) && state.live[id]?.branch !== b) patchLive(id, { branch: b });
     } catch {
       /* an older shell */
     }
   };
-  /** Session `id`'s lane works now or waits on the person: a turn runs, or one of its asks is open. */
-  const laneBusy = (id: string): boolean => {
-    const key = keys.get(id);
-    if (!key) return false;
-    const app = store().getState();
-    return !!app.chats[key]?.turn || selectAsks(app).some((a) => a.bot === key);
-  };
-
-  /** A lane's branch (src/code/laneBranch.ts). As a chat session starts, Kit makes a branch of its own for it, from the
-   *  branch the folder is on, so what the session changes never lands on the developer's own branch; a folder that
-   *  already has a working lane on its branch has one checkout, so the lane that starts second joins that branch. Never
-   *  fatal and never pushed: a lane with no branch (no repository, a shell older than lanes, git refusing) works where
-   *  the folder is, and its row shows no branch. */
+  /** A lane's own working folder (src/code/laneBranch.ts). As a chat session starts, Kit makes a branch of its own for it from
+   *  the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), and
+   *  the session's agent works there: several lanes work at once without touching each other's files, and the developer's
+   *  folder (its branch, index, stash and HEAD) never changes because of a lane. Never fatal and never pushed: a lane with no
+   *  folder (no repository, a shell older than lanes' folders, git refusing) works in the session's folder, and its row shows
+   *  no branch. The chat says where the lane works and what did not come along. */
   const startLane = async (id: string) => {
     const r = rec(id);
-    if (!r?.cwd || !host.laneBranch) return;
+    if (!r?.cwd || !host.laneWorktree) return;
     try {
       const current = await host.branch(r.cwd);
-      const here = pathKey(r.cwd);
-      const others = state.list.filter((o) => o.id !== id && o.status !== "draft" && o.lane && pathKey(o.cwd) === here);
-      const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, others: others.map((o) => ({ branch: o.lane!.name, busy: laneBusy(o.id) })) });
+      const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current });
       if (plan.kind === "none") return;
-      let lane: LaneBranch;
-      if (plan.kind === "join") {
-        // the branch is the other lane's, made from the branch that lane was made from
-        lane = { name: plan.branch, base: others.find((o) => o.lane!.name === plan.branch)?.lane?.base ?? current, shared: true };
-      } else {
-        const made = await host.laneBranch(r.cwd, plan.names);
-        lane = { name: made.branch, base: made.base };
+      const made = await host.laneWorktree(r.cwd, plan.names);
+      if (!rec(id)) {
+        // closed while its folder was made: the folder goes as a close takes it (nothing is in it yet)
+        void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree });
+        return;
       }
-      if (rec(id)) patchRec(id, { lane });
+      patchRec(id, { lane: { name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree } });
+      const key = keys.get(id);
+      if (key) {
+        const said = [tr("lane.note.made", { branch: made.branch, base: made.base, folder: made.dir })];
+        if (made.left > 0) said.push(made.left === 1 ? tr("lane.note.leftOne", { base: made.base }) : tr("lane.note.leftMany", { n: made.left, base: made.base }));
+        said.push(tr("lane.note.install"));
+        store().dispatch({ type: "system.note", bot: key, text: said.join(" "), now: Date.now() });
+      }
     } catch {
-      /* no branch of its own */
+      /* no folder of its own */
     }
+  };
+
+  /** A closed session's lane folder goes when nothing in it would be lost: the shell keeps it when git says a file in it is
+   *  changed or new (the Code page then lists it with Remove, which asks first), and the branch always stays. */
+  const letLaneGo = async (lane: LaneBranch | undefined) => {
+    if (!lane?.worktree || !host.laneRemove) return;
+    try {
+      await host.laneRemove(lane.worktree, { changed: 0, branch: false, ahead: null });
+    } catch {
+      /* kept: the Code page lists it */
+    } finally {
+      keptLanesChanged();
+    }
+  };
+
+  /** Where session `id`'s lane runs its tests (lane.ts): a run its words send to another folder is not the lane's. */
+  const laneWhere = (id: string): { root: string; home: string | null } | undefined => {
+    const r = rec(id);
+    return r?.cwd ? { root: workDir(r), home: state.home } : undefined;
   };
 
   const note = (id: string, text: string | null) => {
@@ -505,7 +521,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const r = rec(id);
     if (ev.event !== "approval.request" || !key?.startsWith("agent:") || !r?.cwd) return null;
     const ask = ev as unknown as EventOf<"approval.request">;
-    const a = kitAnswer(ask, { chat: key, root: r.cwd, home: state.home, branch: state.live[id]?.branch });
+    // a lane's project is the session's folder, whose settings the dial keeps; what is inside it is the lane's own folder
+    const a = kitAnswer(ask, { chat: key, root: workDir(r), project: r.cwd, home: state.home, branch: state.live[id]?.branch });
     return a ? () => settleApproval(store(), key, { id: `approval-${ask.request_id}`, request_id: ask.request_id }, a.choice) : null;
   };
 
@@ -640,7 +657,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         const last = named ?? [...items].reverse().find((i) => i.kind === "user");
         const text = last && last.kind === "user" ? last.text : typeof ev.text === "string" ? ev.text : "";
         // the lane's turn is taken back: it reads Reverted, and what its tests said is of work that is gone
-        noteLaneEvent(key ?? "", ev);
+        noteLaneEvent(key ?? "", ev, Date.now(), laneWhere(id));
         dispatchChat(id, ev);
         if (key && text) store().dispatch({ type: "ui.draft", bot: key, text });
         rewinding.get(id)?.done();
@@ -657,7 +674,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (kit) void kit();
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         // what the lane's work has shown: its test runs read from their output, and the files that changed
-        noteLaneEvent(keys.get(id) ?? "", ev);
+        noteLaneEvent(keys.get(id) ?? "", ev, Date.now(), laneWhere(id));
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
         if (ev.event === "turn.end") turns.afterTurn(id);
@@ -701,7 +718,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // and so no turn kept before it can be rewound: their snapshots go
     turns.forget(id);
     try {
-      proc.hostId = await host.chatStart(r.agent, r.cwd, onAgentEvent(id, proc), resume, accountOf(r), id);
+      // a lane's agent works in the lane's own folder
+      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id);
       // it said it is not signed in before manut knew its id: it is ended already, so only the process goes
       if (proc.signedOut) {
         void host.chatClose(proc.hostId).catch(() => undefined);
@@ -820,7 +838,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       // a message that starts a turn of a coding session: its files are kept first, so the turn can be rewound
       // (rewind.ts); a message that joins a running turn starts none
       const key = keys.get(id);
-      if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, r.cwd, i.id);
+      if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, workDir(r), i.id);
       await host.chatInput(proc.hostId, i);
       return;
     }
@@ -1301,7 +1319,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const r = rec(id);
     if (!r?.cwd) return;
     try {
-      await host.reveal(r.cwd);
+      await host.reveal(workDir(r));
     } catch (e) {
       note(id, errText(e));
     }
@@ -1312,7 +1330,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     const r = rec(id);
     if (!r?.cwd) return;
     try {
-      await host.openTerminal(r.cwd);
+      await host.openTerminal(workDir(r));
     } catch (e) {
       note(id, errText(e));
     }
@@ -1678,7 +1696,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
           // a collapsed group would hide its notice
           if (at) openFolderGroup(r.cwd);
         }
-      } else hostId = await host.start(r.agent, r.cwd, cols, rows, onData, onExit, resume, accountOf(r), sessionId, link);
+      } else hostId = await host.start(r.agent, workDir(r), cols, rows, onData, onExit, resume, accountOf(r), sessionId, link);
       if (t.run !== run) {
         // replaced while starting
         void io.close(hostId).catch(() => undefined);
@@ -2224,6 +2242,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         ...(s.mode ? { mode: s.mode } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         ...(s.shell && isShell(s.agent) ? { shell: s.shell } : {}),
+        // a lane keeps its branch and its own folder: Resume and Restart start its agent there, never in the developer's
+        ...(s.lane ? { lane: s.lane } : {}),
         ...(s.running && !auto && !termAuto && !folderAuto ? { paused: true } : {}),
       };
       list.push(r);
@@ -2416,7 +2436,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     termAgain.delete(id);
     if (r && isTerminalRec(state.agents, { ...r, status: "exited" })) forgetHistory(host, id);
     disposeTerm(id);
-    void stopChat(id).then(() => host.removeFiles(id).catch(() => undefined));
+    // the lane's folder goes once its agent has stopped, when nothing in it would be lost
+    void stopChat(id).then(() => Promise.all([host.removeFiles(id).catch(() => undefined), letLaneGo(r?.lane)]));
     turns.forget(id);
     forgetSentFiles(id);
     const key = keys.get(id);

@@ -6,7 +6,7 @@ import { createSessions } from "../sessions/sessions";
 import type { ChatEvent, ChatInput, SessionHost } from "../sessions/host";
 import { createStore, type ApprovalItem, type BridgeLike } from "../state/store";
 import type { AskTool, BridgeEvent, EventOf } from "../lib/protocol";
-import { askOfItem, kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
+import { askOfItem, kitAnswer, kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
 import { addRule, kitProjects, projectOf, resetKitProjects, setLevel, updateKitProjects } from "./project";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
@@ -205,5 +205,44 @@ describe("Kit's dial on what the shell names of an ask", () => {
     const card = await s.ask("t6", "Run this command?", "pnpm test", { kind: "command", name: "Bash", cwd: ROOT });
     expect(card.resolved).toBeUndefined();
     expect(kitCard(askOfItem(s.key, card), ctx(s.key))).toBeNull();
+  });
+});
+
+describe("Kit's dial for a lane in a folder of its own", () => {
+  const LANE = "/w/.manut/lanes/baanmali-preorder/promptpay-qr";
+  const ctx = { chat: "agent:s9", root: LANE, project: ROOT, home: "/w" };
+  const edit = (request_id: string, path: string, cwd = LANE) =>
+    ({ event: "approval.request", bot: "", request_id, title: `Allow Edit to change ${path}?`, command: "", cwd, choices: ["deny", "once", "session"], tool: { kind: "edit", name: "Edit", paths: [path], cwd } }) as EventOf<"approval.request">;
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+
+  it("reads inside the lane's own folder at the project's level, and keeps nothing under the lane's folder", () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "edits_alone"));
+    expect(kitAnswer(edit("r1", `${LANE}/src/checkout.tsx`), ctx)).toEqual({ choice: "once", answer: { by: "dial", level: "edits_alone" } });
+    expect(Object.keys(kitProjects())).toEqual([ROOT]);
+  });
+
+  it("stops a change in the developer's own folder, and lists it under the project as the lane's", () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+    expect(kitAnswer(edit("r2", `${ROOT}/src/checkout.tsx`), ctx)).toEqual({ choice: "deny", answer: { by: "blocked", project: "baanmali-preorder" } });
+    expect(projectOf(kitProjects(), ROOT).blocked).toMatchObject([{ what: "edit", path: `${ROOT}/src/checkout.tsx`, lane: true }]);
+    // another lane's folder is outside it too
+    expect(kitAnswer(edit("r3", "/w/.manut/lanes/baanmali-preorder/thai-date/src/a.ts"), ctx)?.choice).toBe("deny");
+    // a session with no folder of its own is not a lane: what it stops is the project's own words
+    expect(kitAnswer(edit("r4", "/w/Documents/a.ts", ROOT), { chat: "agent:s8", root: ROOT, home: "/w" })?.choice).toBe("deny");
+    expect(projectOf(kitProjects(), ROOT).blocked.find((b) => b.path === "/w/Documents/a.ts")?.lane).toBeUndefined();
+  });
+
+  it("keeps Always allow's rule for the project, which every lane of it reads", () => {
+    const card = kitCard({ ...asked("r5", "Run this command?", "pnpm add qrcode"), cwd: LANE }, ctx);
+    expect(card).toMatchObject({ root: ROOT, always: { words: ["pnpm", "add"] } });
+    updateKitProjects((p) => addRule(p, ROOT, { words: ["pnpm", "add"] }));
+    expect(kitAnswer({ ...asked("r6", "Run this command?", "pnpm add qrcode"), cwd: LANE }, ctx)).toEqual({ choice: "once", answer: { by: "rule" } });
   });
 });

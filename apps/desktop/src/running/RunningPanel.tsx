@@ -7,7 +7,7 @@ import "./running.css";
 import { useEffect, useSyncExternalStore } from "react";
 import { useNow } from "../elsewhere/useNow";
 import { t } from "../i18n";
-import { folderName, termFallbackName } from "../sessions/agents";
+import { folderName, termFallbackName, type SessionRec } from "../sessions/agents";
 import { pathKey } from "../sessions/folders";
 import { getSessions, useSessions, type SessionsState } from "../sessions/sessions";
 import { pickTitle } from "../sessions/titles";
@@ -42,13 +42,17 @@ export interface ItemContext {
   project?: string;
   /** The terminal row of a command's session, with what opens it: only a terminal has one on this page. */
   lane: (row: RunningRow) => { name: string; open: () => void } | null;
+  /** The project a command belongs to: the folder its session started in (a lane's commands run in its own folder); none:
+   *  the folder the shell names. */
+  projectOf?: (row: RunningRow) => string;
 }
 
 /** The rows to draw, in order, with their words made at `c.now` (they follow the language as the page draws again). */
 export function runningItems(s: Pick<RunningState, "rows" | "seen" | "stopping" | "failed">, c: ItemContext): RunningItem[] {
   const seen = new Map(Object.entries(s.seen));
-  const rows = listed(inProject(s.rows, c.project), c.now, seen);
-  const several = new Set(rows.map((r) => pathKey(r.folder))).size > 1;
+  const projectOf = c.projectOf ?? ((r: RunningRow) => r.folder);
+  const rows = listed(inProject(s.rows, c.project, projectOf), c.now, seen);
+  const several = new Set(rows.map((r) => pathKey(projectOf(r)))).size > 1;
   return rows.map((row) => {
     const key = rowKey(row);
     const lane = c.lane(row);
@@ -60,7 +64,7 @@ export function runningItems(s: Pick<RunningState, "rows" | "seen" | "stopping" 
       ports: portsText(row.ports),
       lane: lane?.name ?? null,
       open: lane?.open ?? null,
-      project: several ? folderName(row.folder) : null,
+      project: several ? folderName(projectOf(row)) : null,
       stopping: s.stopping[key] !== undefined,
       failed: s.failed[key] === true,
     };
@@ -69,10 +73,10 @@ export function runningItems(s: Pick<RunningState, "rows" | "seen" | "stopping" 
 
 /** How many commands are listed for other projects than `c.project`: what the project's own list does not show, so a dev server
  *  left running in another one is still said. None when no project is asked for (the list then holds every command). */
-export function othersOf(s: Pick<RunningState, "rows" | "seen">, c: Pick<ItemContext, "now" | "project">): number {
+export function othersOf(s: Pick<RunningState, "rows" | "seen">, c: Pick<ItemContext, "now" | "project" | "projectOf">): number {
   if (c.project === undefined) return 0;
   const seen = new Map(Object.entries(s.seen));
-  return listed(s.rows, c.now, seen).length - listed(inProject(s.rows, c.project), c.now, seen).length;
+  return listed(s.rows, c.now, seen).length - listed(inProject(s.rows, c.project, c.projectOf), c.now, seen).length;
 }
 
 export function RunningPanelView({ items, onStop, others = 0 }: { items: RunningItem[]; onStop: (row: RunningRow) => void; others?: number }) {
@@ -148,11 +152,16 @@ function useFeed(feed: RunningFeed): RunningState {
   return useSyncExternalStore(feed.subscribe, feed.getState, feed.getState);
 }
 
-/** The session the shell's id names (a terminal's pty, or a chat's), as the page names it, with what opens it: a terminal as its
- *  row is named, a chat, which is a lane, as its lane is. None when the page has no session for it (a shell of the bottom panel). */
-function laneOf(ss: SessionsState, r: RunningRow): { name: string; open: () => void } | null {
+/** The session the shell's id names (a terminal's pty, or a chat's), when the page has one (none: a shell of the bottom panel). */
+function sessionOf(ss: SessionsState, r: RunningRow): SessionRec | undefined {
   const sessions = getSessions();
-  const rec = ss.list.find((x) => (r.kind === "pty" ? sessions.ptyOf(x.id) : sessions.chatIdOf(x.id)) === r.session);
+  return ss.list.find((x) => (r.kind === "pty" ? sessions.ptyOf(x.id) : sessions.chatIdOf(x.id)) === r.session);
+}
+
+/** The session the shell's id names, as the page names it, with what opens it: a terminal as its row is named, a chat, which is
+ *  a lane, as its lane is. None when the page has no session for it (a shell of the bottom panel). */
+function laneOf(ss: SessionsState, r: RunningRow): { name: string; open: () => void } | null {
+  const rec = sessionOf(ss, r);
   if (!rec) return null;
   const name = pickTitle(rec, r.kind === "pty" ? termFallbackName(rec, ss.agents) : folderName(rec.cwd)).title;
   return { name, open: () => getStore().actions.openSession(rec.id) };
@@ -168,6 +177,8 @@ export function RunningPanel({ project }: { project?: string }) {
   // the ages move between looks
   const now = useNow(true, POLL_MS);
   if (!s.supported || !s.loaded) return null;
-  const items = runningItems(s, { now, project, lane: (r) => laneOf(ss, r) });
-  return <RunningPanelView items={items} others={othersOf(s, { now, project })} onStop={(r) => void feed.stop(r)} />;
+  // a command is its session's project's, wherever it runs: a lane's run in the lane's own folder
+  const projectOf = (r: RunningRow) => sessionOf(ss, r)?.cwd || r.folder;
+  const items = runningItems(s, { now, project, lane: (r) => laneOf(ss, r), projectOf });
+  return <RunningPanelView items={items} others={othersOf(s, { now, project, projectOf })} onStop={(r) => void feed.stop(r)} />;
 }

@@ -184,7 +184,8 @@ export function listed(rows: readonly RunningRow[], now: number, seen: ReadonlyM
 }
 
 /** The rows of the project at `root` (a folder, compared as the Code page groups its sessions: exactly, with `//` and a
- *  closing `/` ignored); every row when no project is given. */
-export function inProject(rows: readonly RunningRow[], root: string | undefined): RunningRow[] {
-  return root === undefined ? [...rows] : rows.filter((r) => pathKey(r.folder) === pathKey(root));
+ *  closing `/` ignored); every row when no project is given. `projectOf` says whose a row is: the folder its session started
+ *  in, since a lane's commands run in the lane's own folder (none: the folder the shell names). */
+export function inProject(rows: readonly RunningRow[], root: string | undefined, projectOf: (row: RunningRow) => string = (r) => r.folder): RunningRow[] {
+  return root === undefined ? [...rows] : rows.filter((r) => pathKey(projectOf(r)) === pathKey(root));
 }

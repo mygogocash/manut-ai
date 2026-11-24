@@ -1,0 +1,117 @@
+// Kit's folders kept on this computer (KeptLanes.tsx), drawn with react-dom/server from props, and its buttons read from the
+// elements it returns (the view uses no hooks). The folders are the canvas's baanmali-preorder's lanes.
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToString } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLang } from "../i18n";
+import { KeptLanesView, askOf, type KeptLanesProps, type KeptOpen } from "./KeptLanes";
+import type { KeptLane } from "./laneBranch";
+
+const HOME = "/Users/fon";
+const kept = (over: Partial<KeptLane> = {}): KeptLane => ({
+  worktree: `${HOME}/.manut/lanes/baanmali-preorder/promptpay-qr`,
+  dir: `${HOME}/.manut/lanes/baanmali-preorder/promptpay-qr`,
+  branch: "kit/promptpay-qr",
+  base: "main",
+  made: 1,
+  exists: true,
+  changed: 3,
+  ahead: 2,
+  ...over,
+});
+const opened = (over: Partial<KeptOpen> = {}): KeptOpen => ({ worktree: kept().worktree, changed: 3, ahead: 2, branch: false, busy: false, why: null, ...over });
+
+function props(over: Partial<KeptLanesProps> = {}): KeptLanesProps {
+  return { rows: [kept()], home: HOME, open: null, notice: null, onShow: vi.fn(), onRemove: vi.fn(), onBranch: vi.fn(), onConfirm: vi.fn(), onCancel: vi.fn(), ...over };
+}
+
+function drawn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(drawn);
+  if (!isValidElement(node)) return [];
+  const el = node as ReactElement<Record<string, unknown>>;
+  if (typeof el.type === "function") return drawn((el.type as (props: unknown) => ReactNode)(el.props));
+  return [...(typeof el.type === "string" ? [el] : []), ...drawn(el.props.children as ReactNode)];
+}
+const byId = (p: KeptLanesProps, id: string) => drawn(KeptLanesView(p)).filter((e) => e.props["data-testid"] === id);
+const html = (p: KeptLanesProps) => renderToString(createElement(KeptLanesView, p));
+const press = (p: KeptLanesProps, id: string) => (byId(p, id)[0].props.onClick as () => void)();
+
+afterEach(() => setLang("en"));
+
+describe("Kit's folders kept", () => {
+  it("draws nothing while no folder is kept", () => {
+    expect(KeptLanesView(props({ rows: [] }))).toBeNull();
+  });
+
+  it("names each kept folder by its branch, with what is in it and where it is", () => {
+    const out = html(props({ rows: [kept(), kept({ worktree: "/x/1", branch: "kit/thai-date", changed: 1 }), kept({ worktree: "/x/2", branch: "kit/a", changed: 0 }), kept({ worktree: "/x/3", branch: "kit/b", changed: null }), kept({ worktree: "/x/4", branch: "kit/c", exists: false })] }));
+    expect(out).toContain("Kit&#x27;s folders kept");
+    expect(byId(props(), "kept-line")[0].props.children).toBe("3 changed files in it are not on the branch.");
+    for (const words of ["1 changed file in it is not on the branch.", "Everything in it is on the branch.", "Could not read what is in it.", "The folder is gone."]) expect(out).toContain(words);
+    expect(out).toContain('title="~/.manut/lanes/baanmali-preorder/promptpay-qr"');
+  });
+
+  it("shows a folder that is there, and opens Remove's panel for it", () => {
+    const p = props();
+    press(p, "kept-show");
+    expect(p.onShow).toHaveBeenCalledWith(kept());
+    press(p, "kept-remove");
+    expect(p.onRemove).toHaveBeenCalledWith(kept());
+    // a folder that is gone has nothing to show
+    expect(byId(props({ rows: [kept({ exists: false })] }), "kept-show")).toHaveLength(0);
+  });
+
+  it("says in Remove's panel what goes with the folder, and that the branch stays unless it is ticked", () => {
+    const p = props({ open: opened() });
+    const out = html(p);
+    expect(out).toContain("Remove Kit&#x27;s folder for kit/promptpay-qr?");
+    expect(out).toContain("~/.manut/lanes/baanmali-preorder/promptpay-qr");
+    expect(byId(p, "kept-lose")[0].props.children).toBe("3 changed files in it go with it.");
+    expect(byId(p, "kept-ahead")[0].props.children).toBe("The branch stays, with its commits.");
+    expect(byId(p, "kept-branch")[0].props.checked).toBe(false);
+    expect(byId(props({ open: opened({ changed: 1 }) }), "kept-lose")[0].props.children).toBe("1 changed file in it goes with it.");
+    expect(byId(props({ open: opened({ changed: 0 }) }), "kept-lose")).toHaveLength(0);
+  });
+
+  it("says how many commits go with a ticked branch, and when it cannot tell", () => {
+    const ahead = (a: number | null) => byId(props({ open: opened({ branch: true, ahead: a }) }), "kept-ahead")[0].props.children;
+    expect(ahead(2)).toBe("2 commits on it are not on main. They go with the branch.");
+    expect(ahead(1)).toBe("1 commit on it is not on main. It goes with the branch.");
+    expect(ahead(0)).toBe("Everything on it is on main.");
+    expect(ahead(null)).toBe("Could not tell whether its commits are on main. Any that are not go with the branch.");
+  });
+
+  it("ticks the branch, presses Remove, and cancels", () => {
+    const p = props({ open: opened() });
+    (byId(p, "kept-branch")[0].props.onChange as (e: { currentTarget: { checked: boolean } }) => void)({ currentTarget: { checked: true } });
+    expect(p.onBranch).toHaveBeenCalledWith(true);
+    press(p, "kept-confirm-remove");
+    expect(p.onConfirm).toHaveBeenCalled();
+    // the row's Remove closes an open panel
+    press(p, "kept-remove");
+    expect(p.onCancel).toHaveBeenCalled();
+    expect(byId(props({ open: opened({ busy: true }) }), "kept-confirm-remove")[0].props.disabled).toBe(true);
+  });
+
+  it("says when what is in it changed since, when it could not be removed, and when the branch stayed", () => {
+    expect(html(props({ open: opened({ why: "changed" }) }))).toContain("What is in it changed since. Nothing was removed: look again.");
+    expect(html(props({ open: opened({ why: "failed", error: "fatal: cannot remove" }) }))).toContain("Could not remove it: fatal: cannot remove");
+    expect(html(props({ rows: [], notice: "The folder is gone. The branch stays: error: cannot delete" }))).toContain("The branch stays");
+  });
+
+  it("asks for exactly the numbers the person saw", () => {
+    expect(askOf(opened({ branch: true }))).toEqual({ changed: 3, branch: true, ahead: 2 });
+    expect(askOf(opened({ changed: 0, ahead: null }))).toEqual({ changed: 0, branch: false, ahead: null });
+  });
+
+  it("says its words in Korean, Japanese and Chinese", () => {
+    for (const [lang, words] of [
+      ["ko", "남겨 둔 Kit의 폴더"],
+      ["ja", "残してある Kit のフォルダ"],
+      ["zh", "保留的 Kit 文件夹"],
+    ] as const) {
+      setLang(lang);
+      expect(html(props({ open: opened() }))).toContain(words);
+    }
+  });
+});

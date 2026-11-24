@@ -228,3 +228,24 @@
 .kitp .lane .banner.kitm {
   margin: 4px 10px 8px;
 }
+
+/* Kit's folders kept (KeptLanes.tsx): a lane's folder that outlived its session, as a row under the lanes, with Remove's panel
+   under it stood up as a column like the main-moved note, indented to where a row's line starts. The desktop's own: the canvas
+   draws no kept folder. */
+.kitp .kept .rowl {
+  cursor: default;
+}
+.kitp .banner.kept-confirm {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 4px 10px 8px;
+}
+.kitp .kept-confirm p {
+  margin: 0;
+}
+.kitp .kept-tick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
