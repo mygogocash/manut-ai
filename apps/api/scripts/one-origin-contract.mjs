@@ -97,12 +97,19 @@ async function start(config) {
 const NAVIGATIONS = [{ "sec-fetch-mode": "navigate", accept: "text/html" }, {}];
 
 /// A page as an owner or an operator gets it: the app's one page, with headers that keep it out of every frame
-/// (so no other site can trick an owner into pressing Approve) and the token in its path out of every Referer.
-async function assertPage(response, label) {
+/// (so no other site can trick an owner into pressing Approve) and the token in its path out of every Referer, and a
+/// script policy of its own that runs only this origin's scripts (app-policy.ts): the brand's fonts from Google's two
+/// hosts on every page but the join page, which names no other origin at all.
+async function assertPage(response, label, join = false) {
   assert.equal(response.status, 200, label);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html/, label);
   assert.equal(response.headers.get("x-frame-options"), "DENY", label);
-  assert.equal(response.headers.get("content-security-policy"), "frame-ancestors 'none'", label);
+  const policy = response.headers.get("content-security-policy") ?? "";
+  assert.match(policy, /^default-src 'self'; script-src 'self';/, label);
+  assert.match(policy, /frame-ancestors 'none'$/, label);
+  assert.doesNotMatch(policy, /'unsafe-eval'|script-src [^;]*'unsafe-inline'/, label);
+  if (join) assert.doesNotMatch(policy, /https?:/, `${label} names no other origin`);
+  else assert.match(policy, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com;/, label);
   assert.equal(response.headers.get("referrer-policy"), "no-referrer", label);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff", label);
   const html = await response.text();
@@ -118,7 +125,8 @@ try {
   let home = "";
   for (const path of ["/approve/tok_123", "/delete/tok_123", "/join/inv_123", "/ops", "/", "/no-such-page"]) {
     for (const headers of NAVIGATIONS) {
-      const html = await assertPage(await pages.fetch(new URL(path, pagesBase), { headers }), `pages ${path}`);
+      const html = await assertPage(await pages.fetch(new URL(path, pagesBase), { headers }), `pages ${path}`,
+        path.startsWith("/join/"));
       if (path === "/") home = html;
       // The built page names nothing on another origin, so the join page, whose path carries an invite token, asks no
       // other origin for anything (the brand's fonts are linked by the app on the other pages, docs/people.md).

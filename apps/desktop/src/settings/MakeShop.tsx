@@ -59,6 +59,7 @@ const REFUSAL_KEY: Readonly<Record<string, Key>> = {
   invalid_owner_name: "make.fail.invalid_owner_name",
   unknown_template: "make.fail.unknown_template",
   too_many_shops: "make.fail.too_many_shops",
+  sign_ups_full: "make.fail.sign_ups_full",
   rate_limited: "make.fail.rate_limited",
   unavailable: "make.fail.unavailable",
   signed_out: "rt.signedOut",
@@ -94,7 +95,8 @@ export function MakeShopView(p: MakeShopViewProps) {
   if (s.made) {
     return (
       <div className="dev-make" data-testid="make-shop" data-state="made">
-        <Row title={t("make.done", { name: s.made.name })} hint={t(p.practice ? "make.donePractice" : "make.doneHint")} />
+        <Row title={t("make.done", { name: s.made.name })}
+          hint={t(p.practice ? "make.donePractice" : s.waits ? "make.doneWaits" : "make.doneHint")} />
       </div>
     );
   }

@@ -30,10 +30,11 @@ import { isValidTenant } from "./companies";
 import { operatorIdentity } from "./pilot";
 import { keptIdentity, keptName, type OwnerSessionCheck, type PeopleView, type SessionCheck } from "./people-store";
 import type { PilotShopRecord } from "./pilot-store";
+import { sessionOpenRefusal, type SessionLimitEnv } from "./session-limits";
 import { indexShop } from "./shops-store";
 import { authCall, tenantCall, type TenantDataEnv } from "./tenant-data";
 
-export type PeopleEnv = Pick<TenantDataEnv, "AUTH" | "TENANT"> & {
+export type PeopleEnv = Pick<TenantDataEnv, "AUTH" | "TENANT"> & SessionLimitEnv & {
   /// Where the web app lives: an invite's link is `${WEB_ORIGIN}/join/{token}`.
   WEB_ORIGIN?: string;
   /// Signs invite links, as it signs the owner's links (approval-link.ts).
@@ -576,10 +577,13 @@ async function acceptInvite(request: Request, env: PeopleEnv): Promise<Response>
 }
 
 /// `POST /v1/people/session` with `{ shop }` and a signed-in session: a helper opens the shop on another device, as the
-/// identity they joined with. Anyone else, for any shop or none, hears only `not_a_helper`.
+/// identity they joined with. Anyone else, for any shop or none, hears only `not_a_helper`. Every try counts against the
+/// person's own limit on opening sessions before the shop is read (session-limits.ts).
 async function openSession(request: Request, env: PeopleEnv): Promise<Response> {
   const asked = await personAndField(request, env, "shop");
   if (asked instanceof Response) return asked;
+  const limited = await sessionOpenRefusal(env, asked.person.tenant);
+  if (limited) return limited;
   if (!isValidTenant(asked.value)) return json({ error: "invalid_request" }, 400);
   try {
     const shop = await readShop(env, asked.value);

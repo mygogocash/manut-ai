@@ -18,13 +18,17 @@ could misuse email sign-in and self-serve once they are on (sending codes withou
 one, and more). December item 41 fixed the front door: a body must be JSON, every limit counts per address or IPv6 /64,
 codes are capped per address, per source and in all (`docs/pilot-api.md`, "Signing in by email"), an email sign-in is
 refused on the lifted routes and on every shop route of its own tenant, and the test keys work only on a `.test`
-origin. Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until item 42 (sessions and self-serve) has merged too.
+origin. Item 42 fixed sessions and self-serve: ended sessions are swept and a wipe reads only its own tenant's, a
+deletion is limited per address and opening shop sessions per person, a helper keeps at most 10 sessions, the web
+app's shop cookies need the sign-in, every page has a script policy, at most 20 shops are made in a day by all accounts
+together, and a shop its owner made does no work and spends nothing until an operator counts it in. Neither switch
+waits on the review any more: each waits only for what its row below needs from the owner.
 
 | What | The switch | What it needs from the owner | Details |
 | --- | --- | --- | --- |
 | Sign-in by a code sent by email (the API, the desktop's Settings › Developer, the web's join page) | var `EMAIL_SIGN_IN` set to `"on"`, the `send_email` binding `EMAIL`, and vars `EMAIL_FROM_ADDRESS` and `EMAIL_FROM_NAME` | A yes; the Workers Paid plan; a sending domain onboarded to Cloudflare Email Service, with the sender's address and name; the Thai words for the email | `docs/sign-in-options.md`; `docs/pilot-api.md`, "Signing in by email" |
 | Sign in with Apple | var `APPLE_CLIENT_ID` | The Apple Developer Program as an organization ($99 a year), the app's identifier, and the Mac app signed by that team. Before it is turned on, Apple's sign-ins (`apple:`) must be refused on the lifted routes as email's are (`REFUSED_PERSON` in `apps/api/src/index.ts`), with the lifted routes' own tests moved off Apple tenants: anyone with an Apple ID could otherwise use them | `docs/sign-in-options.md`; `docs/pilot-api.md`, "What a person's own sign-in reaches" |
-| Self-serve onboarding (a person makes their own shop) | var `SELF_SERVE_SHOPS` set to `"on"` | Who may sign up; whether self-serve shops are their own cohort, and their price; the Thai words. Sign-in must be on first | `docs/several-shops.md`; `docs/pilot-api.md` |
+| Self-serve onboarding (a person makes their own shop) | var `SELF_SERVE_SHOPS` set to `"on"` | Who may sign up; whether self-serve shops are their own cohort, and their price; the Thai words; whether 20 new shops a day, all accounts together, is right (`SELF_SERVE_MAKES_PER_DAY`); and someone to count each new shop in (the console's Count it) before its team does any work. Sign-in must be on first | `docs/several-shops.md`; `docs/pilot-api.md` |
 | Google Sheets for Ton's books | secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` | A Google Cloud project of the owner's: the Sheets API on; the consent screen named Manut AI and published out of Testing (in Testing, refresh tokens end after 7 days); a Web client whose one redirect is `https://<API host>/v1/google/callback` | `docs/connectors.md`, 4b |
 | Real models for the AI team | secret `ANTHROPIC_API_KEY`; vars `MODEL_SATANG_PER_USD` (default 3500, ฿35.00 a dollar) and `MODEL_DEFAULT_CAP_SATANG` (default 20000, ฿200 a shop a month) | A paid Anthropic account; the exchange rate; each shop's monthly cap | `docs/model-gateway.md` |
 | Routines running, and the team's cloud work | `PUT /v1/admin/flags` with `officeRoutines` and `officeCloud` (the console's operator key) | The owner's go. Each shop also gives its own consent to cloud work, from the owner's app or link | `docs/handoff.md`; `docs/pilot-api.md` |

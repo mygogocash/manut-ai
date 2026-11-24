@@ -33,6 +33,7 @@ export const MADE_SHOPS_LIMIT = 3;
  *  - `invalid_name`, `invalid_owner_name`: a name the API would not keep;
  *  - `unknown_template`: a kind of shop the API does not have;
  *  - `too_many_shops`: the account has made as many shops as it may;
+ *  - `sign_ups_full`: Manut AI has made as many new shops as it makes in a day, all accounts together;
  *  - `rate_limited`: too many tries from this address in a minute;
  *  - `signed_out`, `offline`, `unavailable`: nobody is signed in or the sign-in ended, the API could not be reached, or it
  *    could not make the shop (nothing is listed, and trying again makes a whole new one). */
@@ -42,6 +43,7 @@ export type MakeShopRefusal =
   | "invalid_owner_name"
   | "unknown_template"
   | "too_many_shops"
+  | "sign_ups_full"
   | "rate_limited"
   | "signed_out"
   | "offline"
@@ -50,6 +52,10 @@ export type MakeShopRefusal =
 export interface MakeShopOps {
   /** Makes a shop owned by the signed-in person: `name` is the shop's, `ownerName` theirs, `template` its kind or null for
    *  none. The answer is the shop as the switcher lists it; the runtime holds its owner session and shows it on every page
-   *  from now on. Refused with a `MakeShopRefusal`. */
-  "shops.make": { params: { name: string; ownerName: string; template: ShopTemplateId | null }; result: { shop: ShopRow } };
+   *  from now on. `teamWaits` when the API says the shop's team waits until someone at Manut AI counts the shop in (no
+   *  routine runs and no AI is used until then), which the page says plainly. Refused with a `MakeShopRefusal`. */
+  "shops.make": {
+    params: { name: string; ownerName: string; template: ShopTemplateId | null };
+    result: { shop: ShopRow; teamWaits?: true };
+  };
 }

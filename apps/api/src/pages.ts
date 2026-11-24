@@ -11,7 +11,7 @@
 /// Every request runs this script first (`run_worker_first`), so the headers below are set here, in code the
 /// tests run, rather than through a `_headers` file whose reach depends on how a request arrived.
 
-import { APP_POLICY } from "./app-policy";
+import { APP_POLICY, JOIN_POLICY, PAGE_POLICY } from "./app-policy";
 
 export type PagesEnv = { ASSETS: Fetcher };
 
@@ -19,7 +19,6 @@ export type PagesEnv = { ASSETS: Fetcher };
 /// link's path never leaves in a Referer; nothing is indexed.
 const PAGE_HEADERS: Record<string, string> = {
   "x-frame-options": "DENY",
-  "content-security-policy": "frame-ancestors 'none'",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-robots-tag": "noindex, nofollow",
@@ -30,12 +29,20 @@ const PAGE_HEADERS: Record<string, string> = {
 const NEVER_STORED = /^\/(approve|delete|join)\//;
 
 const APP_PAGES = /^\/app(\/|$)/;
+const JOIN_PAGES = /^\/join\//;
+
+/// Every page's script policy (app-policy.ts): this origin's scripts only, nothing inline, never framed. The owner's web
+/// app has its own, the join page one that names no other origin, and every other page the rest's.
+function policyFor(pathname: string): string {
+  if (APP_PAGES.test(pathname)) return APP_POLICY;
+  return JOIN_PAGES.test(pathname) ? JOIN_POLICY : PAGE_POLICY;
+}
 
 export function withPageHeaders(response: Response, pathname: string): Response {
   const answer = new Response(response.body, response);
   for (const [name, value] of Object.entries(PAGE_HEADERS)) answer.headers.set(name, value);
+  answer.headers.set("content-security-policy", policyFor(pathname));
   if (NEVER_STORED.test(pathname)) answer.headers.set("cache-control", "no-store");
-  if (APP_PAGES.test(pathname)) answer.headers.set("content-security-policy", APP_POLICY);
   return answer;
 }
 

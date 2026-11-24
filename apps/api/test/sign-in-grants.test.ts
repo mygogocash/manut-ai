@@ -449,7 +449,7 @@ describe("the sign-in step", () => {
     const mac = await outpost(s.tenant);
     const waiting = await grantOf(await attempt(s, "nam"), signInId, mac.id);
     expect((await vaultKeys(s.tenant)).some((key) => key.startsWith("signin-grant:"))).toBe(true);
-    const deleted = await SELF.fetch(`${API}/v1/tenant/data`, { method: "DELETE",
+    const deleted = await sourceWorker.fetch(`${API}/v1/tenant/data`, { method: "DELETE",
       headers: await tenantSession(s.tenant) });
     expect(deleted.status).toBe(200);
     expect((await vaultKeys(s.tenant)).filter((key) => /^(signin|outpost|signin-grant):/.test(key))).toEqual([]);

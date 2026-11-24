@@ -1,6 +1,7 @@
 import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { codeKey, emailAccount } from "../src/email-code";
+import { sha256Hex } from "../src/auth";
+import { codeKey, emailAccount, emailTenant } from "../src/email-code";
 import { testOutbox } from "../src/email-sender";
 import worker, { type Env } from "../src/index";
 import { ACCESS_COOKIE, SHOP_COOKIE_PREFIX, SIGN_IN_COOKIE, shopCookieName } from "../src/web-session";
@@ -298,14 +299,20 @@ describe("the person's shops", () => {
     expect(browser.jar.get(ACCESS_COOKIE)).toMatch(/^[0-9a-f]{64}$/);
     expect(browser.jar.get(SIGN_IN_COOKIE)).not.toBe(refreshedFrom);
 
-    // A refresh token the lifted auth no longer holds: signed out, and no cookie cleared, since another tab's refresh
-    // may have set the one that works.
+    // A refresh token the lifted auth no longer holds: signed out, and every shop cookie cleared with the access cookie,
+    // so nothing the browser keeps decides for a shop. The sign-in cookie is not cleared, since another tab's refresh may
+    // have set the one that works.
     browser.jar.delete(ACCESS_COOKIE);
     browser.jar.set(SIGN_IN_COOKIE, refreshedFrom!);
+    const shopsHeld = browser.shopCookies();
+    expect(shopsHeld).toHaveLength(2);
     const ended = await browser.shops();
     expect(ended.status).toBe(401);
     expect(ended.body).toEqual({ error: "signed_out", emailSignIn: true });
-    expect(ended.cookies).toEqual([]);
+    expect(ended.cookies.sort()).toEqual([ACCESS_COOKIE, ...shopsHeld]
+      .map((name) => `${name}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict`).sort());
+    expect(browser.shopCookies()).toEqual([]);
+    expect(browser.jar.get(SIGN_IN_COOKIE)).toBe(refreshedFrom);
 
     expect((await new Browser().shops()).body).toEqual({ error: "signed_out", emailSignIn: true });
   });
@@ -432,6 +439,70 @@ describe("approvals through the shop's own session", () => {
   });
 });
 
+describe("a sign-in that is over", () => {
+  const auth = () => bindings.AUTH.get(bindings.AUTH.idFromName("auth"));
+
+  /// The key of the grant the browser's sign-in cookie holds, as the auth object keeps it.
+  async function grantKey(browser: Browser): Promise<string> {
+    return `srt:${await sha256Hex(browser.jar.get(SIGN_IN_COOKIE)!.split(".").at(-1)!)}`;
+  }
+
+  it("reads and decides nothing once the sign-in is past its 90 days, and clears every shop cookie", async () => {
+    const { owned, browser } = await ownerAndHelper();
+    await browser.shops();
+    const reply = await proposeReply(owned, "ส่งของพรุ่งนี้ค่ะ");
+    await ownerConsents(reply);
+    const kept = new Map(browser.jar);
+    // The chain began 91 days ago, and the access cookie's hour has gone, as on a phone not opened for a while.
+    const key = await grantKey(browser);
+    await runInDurableObject(auth(), async (_instance, state) => {
+      const grant = await state.storage.get<Record<string, unknown>>(key);
+      await state.storage.put(key, { ...grant, born: Date.now() / 1000 - 91 * 24 * 3600 });
+    });
+    browser.jar.delete(ACCESS_COOKIE);
+    const listed = await browser.approvals(owned.tenant);
+    expect(listed.status).toBe(401);
+    expect(listed.body).toEqual({ error: "signed_out", emailSignIn: true });
+    expect(browser.shopCookies()).toEqual([]);
+    expect(browser.jar.has(SIGN_IN_COOKIE)).toBe(true);
+    // A browser that kept every cookie anyway, its access cookie included, decides nothing with them.
+    const stale = new Browser();
+    for (const [name, value] of kept) stale.jar.set(name, value);
+    const decided = await stale.decide(owned.tenant, reply.actionId, "approve");
+    expect(decided.status).toBe(401);
+    expect(decided.body).toEqual({ error: "signed_out", emailSignIn: true });
+    expect(stale.shopCookies()).toEqual([]);
+    expect((await storedRequest(owned.tenant, reply.taskId, reply.actionId)).record.status).toBe("pending");
+    expect(line.pushes()).toBe(0);
+  });
+
+  it("reads nothing once the person's data is wiped, while the access cookie's hour is not over", async () => {
+    const { email, owned, browser } = await ownerAndHelper();
+    await browser.shops();
+    expect(browser.jar.has(ACCESS_COOKIE)).toBe(true);
+    // The person's data is deleted: every session of theirs ends with it, the web app's included.
+    const tenant = emailTenant(await emailAccount(email));
+    expect((await auth().fetch("https://auth/tenant-wipe", { method: "POST",
+      headers: { "content-type": "application/json", "x-wipe": "1" }, body: JSON.stringify({ tenant }) })).status).toBe(200);
+    const listed = await browser.approvals(owned.tenant);
+    expect(listed.status).toBe(401);
+    expect(listed.body).toEqual({ error: "signed_out", emailSignIn: true });
+    expect(browser.shopCookies()).toEqual([]);
+  });
+
+  it("refreshes a sign-in whose hour has gone, and reads as before", async () => {
+    const { owned, browser } = await ownerAndHelper();
+    await browser.shops();
+    browser.jar.delete(ACCESS_COOKIE);
+    const before = browser.jar.get(SIGN_IN_COOKIE);
+    const listed = await browser.approvals(owned.tenant);
+    expect(listed.status).toBe(200);
+    expect(browser.jar.get(ACCESS_COOKIE)).toMatch(/^[0-9a-f]{64}$/);
+    expect(browser.jar.get(SIGN_IN_COOKIE)).not.toBe(before);
+    expect(browser.shopCookies()).toHaveLength(2);
+  });
+});
+
 describe("signing out", () => {
   it("ends every session the browser holds and clears every cookie", async () => {
     const { owned, helped, browser } = await ownerAndHelper();
@@ -441,11 +512,17 @@ describe("signing out", () => {
     expect(out.status).toBe(200);
     expect(out.body).toEqual({ signedOut: true, shopsEnded: 2 });
     expect(browser.jar.size).toBe(0);
-    // A browser that kept the old cookies holds nothing that works.
+    // A browser that kept the old cookies holds nothing that works: its sign-in is over, so it is told so and its shop
+    // cookies are cleared, and the shop sessions themselves were ended.
     const stale = new Browser();
     for (const [name, value] of held) stale.jar.set(name, value);
-    expect((await stale.approvals(owned.tenant)).body).toEqual({ error: "session_ended", shop: owned.tenant });
-    expect((await stale.approvals(helped.tenant)).body).toEqual({ error: "session_ended", shop: helped.tenant });
+    for (const shop of [owned, helped]) {
+      const token = held.get(await shopCookieName(shop.tenant))!.split("~")[1]!;
+      expect((await asSession({ authorization: `Bearer ${token}` }, "GET", "/v1/approvals?state=open")).status).toBe(401);
+    }
+    expect((await stale.approvals(owned.tenant)).body).toEqual({ error: "signed_out", emailSignIn: true });
+    expect(stale.shopCookies()).toEqual([]);
+    expect((await stale.approvals(helped.tenant)).body).toEqual({ error: "signed_out", emailSignIn: true });
     stale.jar.delete(ACCESS_COOKIE);
     expect((await stale.shops()).body).toEqual({ error: "signed_out", emailSignIn: true });
     expect((await new Browser().send("POST", "/v1/web/sign-out", {})).body).toEqual({ signedOut: true, shopsEnded: 0 });

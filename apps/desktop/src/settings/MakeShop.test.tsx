@@ -103,6 +103,12 @@ describe("the form", () => {
     expect(html).not.toContain("make-submit");
     expect(words(draw({ made: shop }, { practice: true }))).toContain("Practice: it's in your shops until the app closes. Nothing was sent.");
   });
+
+  it("says plainly that the made shop's team waits for Manut AI, and why, when the API says so", () => {
+    const shop = { id: "pilot:made", name: "Khao Hom", owner: "Dao", role: "owner" as const };
+    expect(words(draw({ made: shop, waits: true }))).toBe("Khao Hom is made, and it's yours It's in your shops now. Your team starts " +
+      "work once someone at Manut AI has checked your new shop: until then nothing runs and no AI is used.");
+  });
 });
 
 describe("what each answer says", () => {
@@ -114,6 +120,7 @@ describe("what each answer says", () => {
     expect(said("invalid_owner_name")).toBe("Your name is 1 to 80 characters.");
     expect(said("unknown_template")).toBe("Manut AI doesn't have that kind of shop. Pick another, or None of these.");
     expect(said("too_many_shops")).toBe("You've made 3 shops, which is as many as one account can make.");
+    expect(said("sign_ups_full")).toBe("Manut AI has opened as many new shops today as it can. Try again tomorrow.");
     expect(said("rate_limited")).toBe("Too many tries from this computer. Wait a minute, then try again.");
     expect(said("unavailable")).toBe("Your shop wasn't made just now. Try again in a minute.");
     expect(said("signed_out")).toBe(t("rt.signedOut"));

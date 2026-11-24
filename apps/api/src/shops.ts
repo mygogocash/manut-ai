@@ -43,6 +43,8 @@ import type { OwnerAccount } from "./people-store";
 import { operatorIdentity } from "./pilot";
 import type { PilotShopRecord } from "./pilot-store";
 import { newShopRoute, type SelfServeEnv } from "./self-serve";
+import { sessionOpenRefusal } from "./session-limits";
+import { NOT_COUNTED_IN, waitsForOperator } from "./shop-waits";
 import {
   indexShop,
   keepOwnerCode,
@@ -153,8 +155,9 @@ async function listShops(env: PeopleEnv, person: SignedInPerson): Promise<Respon
   const standings = await Promise.all(tenants.map((tenant) => standingAt(env, person, tenant)));
   const shops = standings.filter((standing) => standing !== null).sort((a, b) =>
     ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || compare(a.shop.name, b.shop.name) || compare(a.shop.tenant, b.shop.tenant));
+  // A shop its owner made says while its team waits for an operator to count it in, and why (shop-waits.ts).
   return json({ shops: shops.map(({ shop, role }) => ({ id: shop.tenant, name: shop.name, ownerName: shop.ownerName,
-    role })) });
+    role, ...(waitsForOperator(shop) ? { teamWaits: NOT_COUNTED_IN } : {}) })) });
 }
 
 function compare(a: string, b: string): number {
@@ -164,8 +167,11 @@ function compare(a: string, b: string): number {
 /// `POST /v1/shops/session` with exactly `{ shop }`: a shop session for one shop the person is in, as the role the
 /// shop's record gives them. The owner's session if their account is the one linked, else a helper's if they are one;
 /// a shop they are in neither way answers 404, as a shop that does not exist does. A body with any other field, a role
-/// above all, is refused.
+/// above all, is refused. Every try counts against the person's own limit on opening sessions before the body or the shop
+/// is read (session-limits.ts), so the web app's `POST /v1/web/shops`, which opens its sessions here, counts too.
 async function openShop(request: Request, env: PeopleEnv, person: SignedInPerson): Promise<Response> {
+  const limited = await sessionOpenRefusal(env, person.tenant);
+  if (limited) return limited;
   const body = await exactBody(request, ["shop"]);
   if (body instanceof Response) return body;
   if (!isValidTenant(body.shop)) return json({ error: "invalid_request" }, 400);

@@ -1,6 +1,7 @@
 import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { sha256Hex } from "../src/auth";
 import worker, { type Env } from "../src/index";
+import { sessionIndexKey } from "../src/session-index";
 import { sourceWorker } from "./source-worker";
 
 const bindings = env as unknown as Env;
@@ -14,8 +15,12 @@ export async function tenantSession(tenant: string, consent = true): Promise<{ a
   const auth = bindings.AUTH.get(bindings.AUTH.idFromName("auth"));
   await runInDurableObject(auth, async (_instance, state) => {
     const generation = await state.storage.get<number>(`wiped:${tenant}`) ?? 0;
-    await state.storage.put(`sat:${hash}`, { tenant, deviceId: "fixture", exp: Date.now() / 1000 + 3600,
-      refreshHash: `synthetic-unused-refresh-${crypto.randomUUID()}`, wipeGeneration: generation });
+    const refreshHash = `synthetic-unused-refresh-${crypto.randomUUID()}`;
+    // With its row in the tenant's index, as every session the auth object mints has (session-index.ts).
+    await state.storage.put({
+      [`sat:${hash}`]: { tenant, deviceId: "fixture", exp: Date.now() / 1000 + 3600, refreshHash, wipeGeneration: generation },
+      [sessionIndexKey(tenant, refreshHash)]: { accessHash: hash, generation },
+    });
   });
   const headers = { authorization: `Bearer ${token}` };
   if (consent) {

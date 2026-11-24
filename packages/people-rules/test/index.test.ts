@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { APPROVAL_KINDS, type ApprovalKind } from "@manut/approval-core";
 import {
-  INVITE_LIFETIME_MS, acceptInvite, addSession, canDecide, clearAway, coverAt, deciders, emptyPeople, endSession, invite,
-  passOn, removeHelper, revokeInvite, sameIdentity, setAway, type Identity, type PeopleState,
+  INVITE_LIFETIME_MS, MAX_HELPER_SESSIONS, acceptInvite, addSession, canDecide, clearAway, coverAt, deciders, emptyPeople,
+  endSession, invite, passOn, removeHelper, revokeInvite, sameIdentity, setAway, type Identity, type PeopleState,
 } from "../src/index";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -213,6 +213,31 @@ describe("removal", () => {
   });
   it("refuses a session for someone who is not a helper", () => {
     expect(addSession(team(), "nobody", "s")).toEqual({ ok: false, refused: "not_a_helper" });
+  });
+});
+
+describe("a helper's sessions", () => {
+  it(`keeps at most ${MAX_HELPER_SESSIONS} open, ending the oldest when one more opens`, () => {
+    // team() gives Pim one session already, s-pim-1.
+    let state = team();
+    const ended: string[] = [];
+    for (let n = 2; n <= MAX_HELPER_SESSIONS + 3; n++) {
+      const added = addSession(state, "h-pim", `s-pim-${n}`);
+      if (!added.ok) throw new Error("expected ok");
+      ended.push(...added.ended);
+      state = added.state;
+    }
+    expect(ended).toEqual(["s-pim-1", "s-pim-2", "s-pim-3"]);
+    const sessions = state.helpers.find((h) => h.id === "h-pim")?.sessions;
+    expect(sessions).toEqual(Array.from({ length: MAX_HELPER_SESSIONS }, (_, n) => `s-pim-${n + 4}`));
+    // Another helper's sessions are as they were, and removal ends exactly the ones still open.
+    expect(state.helpers.find((h) => h.id === "h-nam")?.sessions).toEqual(["s-nam-1"]);
+    const removed = removeHelper(state, "h-pim");
+    expect(removed.ok && removed.endSessions).toEqual(sessions);
+  });
+  it("records a session already open once, and ends nothing for it", () => {
+    const again = addSession(team(), "h-pim", "s-pim-1");
+    expect(again).toEqual({ ok: true, state: team(), ended: [] });
   });
 });
 

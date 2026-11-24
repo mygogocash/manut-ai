@@ -13,7 +13,8 @@
 /// - `sessions`: every helper session, by the SHA-256 of its token (people.ts mints the token and never sends it here).
 ///   Removing a helper marks each of their sessions ended in the same write that removes them, which is how removal signs
 ///   them out on every device at once. An ended or lapsed session is dropped at the next change after the time it would
-///   have run out, so the record stays small.
+///   have run out, so the record stays small, and a helper has at most `rules.MAX_HELPER_SESSIONS` open: one more ends
+///   their oldest. The owner's account is capped the same way (`MAX_OWNER_SESSIONS`).
 /// - `ownerAccount` and `ownerSessions`: the account the shop's owner signs in with, once the operator linked it, and
 ///   every owner shop session, by the SHA-256 of its token (docs/several-shops.md). Unlinking the account marks each of
 ///   its sessions ended in the same write, as removal does for a helper's. Both are absent until an account is linked.
@@ -74,6 +75,9 @@ export type HelperSignIn = { sessionId: string; helperId: string; at: number };
 export const SIGN_IN_LISTED_MS = 30 * 24 * 3600 * 1000;
 /// The most sign-ins the record keeps, the newest ones, so a helper who signs in over and over cannot grow it.
 export const MAX_SIGN_INS = 50;
+/// The most owner sessions the linked account has open at once, one for each device, as a helper's are capped
+/// (`rules.MAX_HELPER_SESSIONS`): opening one more ends the oldest, so the owner's own sign-ins never grow the record either.
+export const MAX_OWNER_SESSIONS = rules.MAX_HELPER_SESSIONS;
 
 export type PeopleRecord = {
   state: PeopleState;
@@ -369,9 +373,14 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     if (!fresh) return refused(400, "invalid_request");
     const added = rules.addSession(record.state, helper.id, fresh.session.sessionId);
     if (!added.ok) return refused(403, added.refused);
+    // Past the rules' cap (`rules.MAX_HELPER_SESSIONS`) the helper's oldest sessions end, as signing out of a device ends
+    // one: they leave the record, so their tokens are unknown from now on.
+    const ended = new Set(added.ended);
+    const sessions = Object.fromEntries(Object.entries(record.sessions).filter(([, session]) =>
+      !(session.helperId === helper.id && ended.has(session.sessionId))));
     return {
       answer: { status: 200, body: { helperId: helper.id, name: record.names[helper.id] ?? "" } },
-      next: { ...record, state: added.state, sessions: { ...record.sessions, [fresh.hash]: fresh.session },
+      next: { ...record, state: added.state, sessions: { ...sessions, [fresh.hash]: fresh.session },
         signIns: withSignIn(record, fresh.session, nowMs) },
       audit: entry({ kind: "helper", id: helper.id }, SYSTEM, "helper.session_opened", { helperId: helper.id }),
     };
@@ -505,16 +514,22 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   },
 
   /// `{ subject, sessionId, tokenHash, expiresAt }`: the linked account opens the shop on a device. Anyone else is not
-  /// this shop's owner, whatever they hold for another shop.
-  "POST /people/open-owner-session": (record, body) => {
+  /// this shop's owner, whatever they hold for another shop. Past `MAX_OWNER_SESSIONS` the account's oldest live sessions
+  /// end, as signing out of a device ends one: they leave the record. Every session lasts as long, so the oldest are the
+  /// ones that run out first.
+  "POST /people/open-owner-session": (record, body, nowMs) => {
     const account = record.ownerAccount;
     if (!text(body.subject) || !account || account.subject !== body.subject) return refused(403, "not_the_owner");
     const fields = sessionFields(body);
     if (!fields) return refused(400, "invalid_request");
     const session: OwnerSession = { sessionId: fields.sessionId, accountId: account.id, expiresAt: fields.expiresAt };
+    const live = Object.entries(record.ownerSessions ?? {}).filter(([, one]) => ownerSessionLive(record, one, nowMs))
+      .sort(([, a], [, b]) => a.expiresAt - b.expiresAt);
+    const ending = new Set(live.slice(0, Math.max(0, live.length + 1 - MAX_OWNER_SESSIONS)).map(([hash]) => hash));
+    const kept = Object.fromEntries(Object.entries(record.ownerSessions ?? {}).filter(([hash]) => !ending.has(hash)));
     return {
       answer: { status: 200, body: { accountId: account.id } },
-      next: { ...record, ownerSessions: { ...(record.ownerSessions ?? {}), [fields.hash]: session } },
+      next: { ...record, ownerSessions: { ...kept, [fields.hash]: session } },
       audit: entry({ kind: "owner", id: account.id }, SYSTEM, "owner.session_opened", { ownerAccountId: account.id }),
     };
   },

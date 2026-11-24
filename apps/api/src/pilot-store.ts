@@ -41,6 +41,7 @@ import { ownerMadeRecord } from "./people-store";
 import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
 import { newShopState, routineStateKey, templateSetupOf, type RoutineState, type TemplateSetup } from "./routine-store";
+import { pilotShopKey } from "./shop-waits";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -78,6 +79,7 @@ export type PilotShopRecord = {
   /// an operator made.
   selfServe?: true;
   /// When an operator added this self-serve shop to the pilot gate's cohort (pilot-gate.ts); absent while it is left out.
+  /// Until it is set, the shop's team waits: no model call and no routine run (shop-waits.ts).
   addedToCohortAt?: string;
 };
 
@@ -148,7 +150,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const enc = encodeURIComponent;
 const keys = {
-  shop: (tenant: string) => `pilot-shop:${enc(tenant)}`,
+  shop: pilotShopKey,
   messages: (tenant: string) => `pilot-msg:${enc(tenant)}:`,
   message: (tenant: string, id: string) => `pilot-msg:${enc(tenant)}:${id}`,
   events: (tenant: string) => `pilot-line-event:${enc(tenant)}:`,

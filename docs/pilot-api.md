@@ -1454,8 +1454,18 @@ covers the console and the operator routes. They are two Workers, both deployed 
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
   `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
-  `Cache-Control: no-store`, since each carries a token in its path. Everything under `/app/` gets a policy of its own
-  that runs only this origin's scripts (`src/app-policy.ts`). They never apply to the API's answers.
+  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
+- **Every page's script policy** (`src/app-policy.ts`). Any script running anywhere on the one origin could use what the
+  origin holds while it runs: the web app's cookies, and the operator key the console keeps in `sessionStorage`, on
+  pages that show what customers wrote. So every page has a Content-Security-Policy that runs only this origin's
+  scripts: none written into the page, from another site, or from a string (`eval`), and refuses every frame
+  (`frame-ancestors 'none'`); styles may be inline, images may be `data:`, and every request goes to this origin.
+  Three of them, by what each page loads: the owner's web app (`/app/`) adds its manifest and service worker and the
+  brand's fonts from Google's two hosts (`fonts.googleapis.com`, `fonts.gstatic.com`); the console at `/ops`, the
+  approval and deletion pages, the practice home and every other page add only those fonts; and the join page
+  (`/join/`), whose path carries an invite's token, names no other origin at all. Checked on both local Workers in
+  Chromium and WebKit on 24 Nov 2026: no page broke a rule, each drew, the console's fonts loaded, and an injected inline script, a
+  script from another site and a string timer were each refused.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
@@ -1742,6 +1752,54 @@ owner's Apple team. `docs/turning-on.md` says to refuse it as an email sign-in i
   check refuses a config that sets a `TEST_` var, or a `PUBLIC_API_ORIGIN` under `.test`, in any of its blocks: the top
   level, dev, staging and production (`.github/scripts/check-dev-deploys.mjs`).
 
+## Sessions
+
+Every sign-in's session, Apple's and email's alike, lives in the one global auth object (`apps/api/src/auth-object.ts`,
+`session-index.ts`), so it is kept small and never read whole (`docs/decisions.md`, 24 Nov 2026, item 42):
+
+- **Each tenant's sessions are found by its own rows.** Every grant chain, an access record and its refresh grant, has
+  one row under its tenant, `tenant-session:<tenant>:<refresh hash>` with the access record's hash and the wipe
+  generation it was minted at. The row is written and deleted in the same transaction as the chain's own records: minted
+  with them, moved on by each refresh, and gone when the chain is signed out, ends at a check, is wiped or is swept. A
+  tenant's wipe (`DELETE /v1/tenant/data`, a shop's deletion) lists only its own rows and ends every chain older than the
+  wipe, with both of its records; a sign-in just after the wipe stays. It reads no one else's session.
+- **Ended sessions are swept.** The auth object's alarm, which already deletes used Apple tokens and old email code
+  records, also sweeps sessions: each run reads at most 256 session records from where the last run stopped and deletes
+  the access records past their hour, and the grants past their 30 days or their chain's 90 together with their access
+  record and their row. A grant refreshed just before its chain's 90 days waits until its last access record's hour is
+  over. A pass part way through runs again ten seconds on; a finished pass starts the next an hour later while sessions
+  are left, and none is set when none are. Every sign-in and refresh makes sure an alarm is due by the time its access
+  record ends.
+- **Sessions made before the rows.** The sweep's first full pass gives every live grant made before the rows existed the
+  row it would have been minted with, a page at a time, and then marks the index filled. Until it has, a wipe also looks
+  for its tenant's records the old way, a page at a time, so no old session outlives its tenant's deletion.
+- **The shop indexes are read a page at a time** (`shops-store.ts`): a shop's deletion takes it out of every person's
+  rows and every maker's made shops 128 rows at a time, and a make looks for itself on the journal of makes the same way.
+  A person's own deletion reads neither index: a person's tenant (`apple:` or `email:`) never names a shop, which the
+  Worker always makes as `pilot:<uuid>`.
+- **A person's own deletion is limited per address.** `DELETE /v1/tenant/data` counts every try against
+  `TENANT_DELETE_LIMITER`, 10 a minute per source address (an IPv4 address or an IPv6 /64, as every ingress limit
+  counts), in the ingress gate before the session is read: 429
+  `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding. Per address, not per person:
+  the deletion ends every session of the person, so each try needs a sign-in of its own, and only an address is shared by
+  tries from many accounts.
+
+### Opening a shop session
+
+`POST /v1/shops/session` and `POST /v1/people/session` (below), and through the first the web app's `POST /v1/web/shops`,
+each write a session into a shop's one people record, and a helper's is a new device the owner is told of. So:
+
+- **Every try counts per person.** Once the signed-in person is known, and before the body or the shop is read, each try
+  counts against `SHOP_SESSION_LIMITER`, 20 a minute per person (the sign-in's verified subject), one bucket for both
+  routes whatever address the person comes from (`apps/api/src/session-limits.ts`): 429 `rate_limited` with
+  `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding. A shop the web app cannot open a session for is
+  listed with `ready: false`, as before.
+- **Ten sessions at a time.** A helper keeps at most 10 helper sessions open (`MAX_HELPER_SESSIONS` in
+  `@manut/people-rules`), and the owner's linked account at most 10 owner sessions (`MAX_OWNER_SESSIONS`,
+  `people-store.ts`). Opening one more ends the oldest, as signing out of that device would: it leaves the shop's record,
+  and its token is answered 401 from then on, so that device opens the shop again with the sign-in. The audit log keeps
+  the opening's entry; the session that ended has none of its own.
+
 ## Helpers
 
 The owner's helpers (`docs/people.md`): an invite for one LINE account or email, once, for 7 days; joining as that
@@ -1880,7 +1938,8 @@ Only `joined` and `wrong_account` name the shop.
 
 **`POST /v1/people/session`** with `{ shop }` (the shop's id from `joined`) and a signed-in session: a helper opens the
 shop on another device, as the identity they joined with. 200 `{ shop, helper, session: HelperSession }`; anyone else,
-for any shop or none, 403 `not_a_helper`.
+for any shop or none, 403 `not_a_helper`. Every try counts against the person's own limit on opening sessions, and an
+eleventh open session ends the helper's oldest ("Opening a shop session", above).
 
 ```ts
 type HelperSession = {
@@ -2022,7 +2081,8 @@ A refusal answers `{ "error": code }`, and nothing is kept:
   `missed` and does not run it. Only the latest instant is considered: older ones are not caught up, and a new clock
   never opens with old misses.
 - **Skipped, and why.** A run does not start, and says so as `skipped` with a reason, while the routine is paused
-  (`routine_paused`), everyone is paused (`team_paused`), its member is not on the team (`member_off`), routines or cloud
+  (`routine_paused`), everyone is paused (`team_paused`), its member is not on the team (`member_off`), its shop is one its
+  owner made that no operator has counted in yet (`not_counted_in`, "Making a shop of your own"), routines or cloud
   work are off by the environment's default with no switch set (`routines_off`, `cloud_off`), or the owner has not
   consented to cloud work (`consent_required`). A template's routines start paused, so they record `skipped` at each
   time they would have run until the owner turns them on.
@@ -2135,7 +2195,8 @@ type Shops = { shops: { id: string; name: string; ownerName: string; role: "owne
 
 **`POST /v1/shops/session`** with exactly `{ shop }`: a shop session for one shop. The shop's record decides the role:
 the owner's session while the person's account is the one linked to the shop, else a helper's while a current helper has
-the identity they signed in with.
+the identity they signed in with. Every try counts against the person's own limit (429 `rate_limited`), and an eleventh
+open session ends the oldest ("Opening a shop session", in "Sessions" above).
 
 | Status | Body | When |
 | --- | --- | --- |
@@ -2190,7 +2251,7 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 
 | Status | Body | When |
 | --- | --- | --- |
-| 201 | `{ shop: { id, name, ownerName, template }, role: "owner", account: { id }, session: ShopSession }` | The shop is made, listed and the person's: `account.id` is what their decisions name, and `session` is this device's owner session, as `POST /v1/shops/session` answers an owner. `template` is the id, or `null` |
+| 201 | `{ shop: { id, name, ownerName, template }, role: "owner", account: { id }, session: ShopSession, teamWaits: "not_counted_in" }` | The shop is made, listed and the person's: `account.id` is what their decisions name, and `session` is this device's owner session, as `POST /v1/shops/session` answers an owner. `template` is the id, or `null`. `teamWaits` says the shop's team waits until an operator counts it in, below |
 | 403 | `{ error: "sign_ups_closed" }` | Sign-ups are not open, above |
 | 401 | `{ error: "unauthorized" }` | No signed-in session: none, the operator key, a shop session (`mos1.`) or a helper's (`mhs1.`). Making a shop takes the person's own sign-in |
 | 405 | `{ error: "method_not_allowed" }` | Anything but `POST`, after the session is checked |
@@ -2199,6 +2260,7 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 | 400 | `{ error: "invalid_name" }`, `{ error: "invalid_owner_name" }` | The shop's name, or the person's own, is empty, longer than 80 characters once its outer spaces are off, or holds a control character (a helper's name's rule, `keptName` in `people-store.ts`) |
 | 400 | `{ error: "unknown_template" }` | `template` is not one of the three, or `null` |
 | 409 | `{ error: "too_many_shops", limit: 3 }` | The account has made 3 shops that still exist |
+| 429 | `{ error: "sign_ups_full", retryAfter }`, with `retry-after` | 20 shops were begun today, all accounts together; `retryAfter` is the whole seconds until the next Bangkok day, below |
 | 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again with the same name, owner name and template finishes that very shop, never a second one ("A make that stops part way", below) |
 
 - **The same shop the operator's route makes.** Both go through `writeNewShop` in `pilot.ts`: the shop's record with
@@ -2218,6 +2280,20 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
   counts, and a reservation whose make failed is given back at once, and taken again by the request that finishes that
   make, or stops counting after 10 minutes if nobody asks again. Shops an operator linked to the account never count: the
   limit is on making, not owning.
+- **At most 20 made in a day, all accounts together.** One mailbox can have as many accounts as it likes (`me+1@`,
+  `me+2@`, a catch-all domain), so the per-account limit alone bounds nothing. The same AuthObject transaction that takes
+  a make's slot counts it against the Bangkok day's makes (`SELF_SERVE_MAKES_PER_DAY` in `shops-store.ts`, under
+  `self-serve-makes-today`) and refuses a new one past 20 with 429 `sign_ups_full`, after the account's own limit and
+  before anything is written. A make already on its way, finished by asking again, was counted when it began; a make that
+  fails still counts, since the cap bounds what can be asked for in a day; an operator's make never counts. The first make
+  of a new Bangkok day counts from zero.
+- **Its team waits until an operator counts it in** (`apps/api/src/shop-waits.ts`). Until an operator adds the shop to
+  the pilot gate's cohort (the console's Count it, `POST /v1/admin/pilot/gate/cohort` with `counted: true`, which sets
+  `addedToCohortAt`), the model gateway refuses its every call with 403 `not_counted_in` before anything is held or sent
+  (`docs/model-gateway.md`), so a worker's job ends failed with that reason, and its routines' runs are `skipped` with
+  `not_counted_in` (Routines, "Skipped, and why"). Nothing such a shop asks for reaches a model: not a routine's topic, not
+  the shop's name, not what the team knows. The answer says so with `teamWaits: "not_counted_in"`, and so does each such
+  shop in `GET /v1/shops`, until it is counted in. Leaving it out again holds its team again.
 - **The pilot gate** lists a self-serve shop and leaves it out of the cohort unless an operator adds it ("The pilot gate",
   above).
 
@@ -2412,10 +2488,19 @@ method (405 `method_not_allowed`) and the cookies. No answer carries a token, an
 | Method and path | Body or query | Answer |
 | --- | --- | --- |
 | `POST /v1/web/sign-in` | exactly `{ email, code }` | `{ signedIn: true }` and the sign-in's two cookies. The sessions the browser held before are ended and their cookies cleared first. Refusals as the exchange's: 401 `wrong_code` with `triesLeft`, 401 `code_ended`, 400 `invalid_request` (another field, a `deviceId` above all, or a code that is not six digits), 400 `email_not_configured` |
-| `POST /v1/web/shops` | `{}` or none | `{ shops: WebShop[] }`: the person's shops (`GET /v1/shops`), each with a session ready, one kept from its cookie or opened (`POST /v1/shops/session`) and set. A cookie for a shop no longer listed is cleared. Refreshes the sign-in when the access cookie has gone, or the token is refused. 401 `signed_out` with `emailSignIn` (whether signing in by email is on, so the app can say on opening that it is not) when there is no sign-in or the lifted auth ended it (no cookie is cleared then: another tab's refresh may have set the one that works); 503 `shops_unavailable` |
-| `GET /v1/web/approvals` | `?shop=&state=open\|recent[&limit=]`, nothing else | `GET /v1/approvals`'s answer to that shop's session, as it is |
-| `POST /v1/web/approvals/{requestId}/decision` | exactly `{ shop, optionId, seenRevision }` | `POST /v1/approvals/{requestId}/decision`'s answer to that shop's session with `{ optionId, seenRevision }`, as it is |
+| `POST /v1/web/shops` | `{}` or none | `{ shops: WebShop[] }`: the person's shops (`GET /v1/shops`), each with a session ready, one kept from its cookie or opened (`POST /v1/shops/session`) and set. A cookie for a shop no longer listed is cleared. Refreshes the sign-in when the access cookie has gone, or the token is refused. 401 `signed_out` with `emailSignIn` (whether signing in by email is on, so the app can say on opening that it is not) when there is no sign-in or the lifted auth ended it, with every shop cookie and the access cookie cleared (the sign-in cookie is not: another tab's refresh may have set the one that works); 503 `shops_unavailable` |
+| `GET /v1/web/approvals` | `?shop=&state=open\|recent[&limit=]`, nothing else | `GET /v1/approvals`'s answer to that shop's session, as it is, once the sign-in still holds (below) |
+| `POST /v1/web/approvals/{requestId}/decision` | exactly `{ shop, optionId, seenRevision }` | `POST /v1/approvals/{requestId}/decision`'s answer to that shop's session with `{ optionId, seenRevision }`, as it is, once the sign-in still holds (below) |
 | `POST /v1/web/sign-out` | `{}` or none | `{ signedOut: true, shopsEnded }`: every shop session ended (`POST /v1/shops/session/end`) and the sign-in (`DELETE /v1/auth/session`, refreshed first when the access cookie has gone), best effort; every cookie cleared whatever happened |
+
+**A shop cookie needs the sign-in.** A shop session's cookie lasts its 30 days, which can outlive the sign-in it was opened
+under: past the lifted auth's 90 days, or once the person's data is wiped. So `GET /v1/web/approvals` and
+`POST /v1/web/approvals/{requestId}/decision` check the sign-in first, as the lifted auth checks every session, refreshing
+it with the sign-in cookie when the access cookie has gone or its token is refused (the refresh's cookies ride on the
+answer). Once it is over they read and decide nothing: 401 `signed_out` with `emailSignIn`, and every shop cookie the
+browser sent is cleared with the access cookie, as `POST /v1/web/shops` answers then. The sign-in cookie is left, since
+another tab's refresh may have set the one that works. A check the API cannot make answers 503 `web_unavailable` and clears
+nothing.
 
 ```ts
 type WebShop = {
