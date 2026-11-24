@@ -255,6 +255,35 @@ fn path_bytes(p: &Path) -> Vec<u8> {
     }
 }
 
+/// Make `dir` (and the folders above it that are missing) for the app's own use only: a session's copy holds the
+/// project's files, keys and all, so no other account on the computer may list or read it. A folder made earlier with
+/// wider rights is closed too.
+fn private_dir(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| e.to_string())?;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())
+    }
+}
+
+/// Write `bytes` to the new file `tmp`, readable by this account only from the moment it exists, then move it to
+/// `dest`. A file already at `tmp` is never written through.
+fn write_private(tmp: &Path, dest: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut o = fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(tmp).and_then(|mut f| f.write_all(bytes)).and_then(|_| fs::rename(tmp, dest)).map_err(|e| {
+        let _ = fs::remove_file(tmp);
+        e.to_string()
+    })
+}
+
 fn hex_id(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
@@ -562,12 +591,8 @@ fn hash_files(store: &Store, home: &Path, root: &Path, todo: &[(String, bool)], 
                 if write {
                     let dest = blobs.join(&id);
                     if !dest.is_file() {
-                        fs::create_dir_all(blobs).map_err(|e| e.to_string())?;
-                        let tmp = blobs.join(format!(".tmp-{}-{}", std::process::id(), nonce()));
-                        fs::write(&tmp, &bytes).and_then(|_| fs::rename(&tmp, &dest)).map_err(|e| {
-                            let _ = fs::remove_file(&tmp);
-                            e.to_string()
-                        })?;
+                        private_dir(blobs)?;
+                        write_private(&blobs.join(format!(".tmp-{}-{}", std::process::id(), nonce())), &dest, &bytes)?;
                     }
                 }
                 out[i] = id;
@@ -927,6 +952,9 @@ impl<'a> Book<'a> {
         };
         // refs an earlier run left under this session's name in this repository are not this session's
         self.drop_refs(&o, session);
+        // the app's own folder for every session's snapshots, and this session's, for this account only
+        private_dir(&root_dir(self.home))?;
+        private_dir(&o.dir)?;
         Ok(o)
     }
 
@@ -936,13 +964,9 @@ impl<'a> Book<'a> {
 
     fn write_json<T: Serialize>(path: &Path, v: &T) -> Result<(), String> {
         let dir = path.parent().ok_or("no folder")?;
-        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let tmp = dir.join(format!(".tmp-{}-{}", std::process::id(), nonce()));
+        private_dir(dir)?;
         let text = serde_json::to_vec(v).map_err(|e| e.to_string())?;
-        fs::write(&tmp, text).and_then(|_| fs::rename(&tmp, path)).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            e.to_string()
-        })
+        write_private(&dir.join(format!(".tmp-{}-{}", std::process::id(), nonce())), path, &text)
     }
 
     /// The session's turn-start snapshots, oldest first.
@@ -979,7 +1003,7 @@ impl<'a> Book<'a> {
                 input.extend(p.as_bytes());
                 input.push(0);
             }
-            fs::create_dir_all(&o.dir).map_err(|e| e.to_string())?;
+            private_dir(&o.dir)?;
             let env = [("GIT_DIR", dir.as_os_str()), ("GIT_INDEX_FILE", index.as_os_str())];
             let built = run_git(git, self.home, dir, &["update-index", "-z", "--index-info"], &env, Some(input))
                 .and_then(|_| run_git(git, self.home, dir, &["write-tree"], &env, None))
@@ -1658,6 +1682,29 @@ mod tests {
         assert_eq!(read(r, "run.sh").as_deref(), Some("echo hi"));
         assert_eq!(fs::metadata(r.join("run.sh")).unwrap().permissions().mode() & 0o777, 0o755);
         assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_copy_of_a_project_is_for_this_account_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+        put(&proj.0, ".env", "KEY=not-a-real-key");
+        // a folder an earlier run made with wider rights is closed too
+        let root = root_dir(&home.0);
+        fs::create_dir_all(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        Book::with_limits(&home.0, SMALL).take("s17", &proj.0, "local-s1").unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let dir = root.join("s17");
+        for d in [&root, &dir, &dir.join("blobs"), &dir.join("snaps")] {
+            assert_eq!(mode(d), 0o700, "{}", d.display());
+        }
+        let blobs: Vec<PathBuf> = fs::read_dir(dir.join("blobs")).unwrap().flatten().map(|e| e.path()).collect();
+        assert_eq!(blobs.len(), 1);
+        for f in blobs.iter().chain([&dir.join("meta.json"), &dir.join("snaps").join("1.json")]) {
+            assert_eq!(mode(f), 0o600, "{}", f.display());
+        }
     }
 
     #[test]
