@@ -133,6 +133,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `email_not_configured`, self-serve `sign_ups_closed`, the vault 401 without a session, and the console is behind
   Access. For about a minute after an API deploy the old version still answers some requests, as the pages' edge
   copy does; check a change again after a minute before calling it missing.
+- Dev was redeployed on 24 Nov at 17:57 from `4f77bd7`, with the review's session and self-serve fixes (pages
+  `19fb6c3d`, API `0dca257c`); smoke-tested: every page has a strict script policy (`script-src 'self'`; the join
+  page names no other origin), self-serve answers `sign_ups_closed`, `DELETE /v1/tenant/data` answers 401 without a
+  session, a `text/plain` POST 415, and the console is behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -148,13 +152,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
-   - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet), sent on
-     again at 17:18 after its stop at the limit.
+   - item 43, the model gateway's alerts and sweep (`feat/model-alerts`, Opus);
+   - item 45, removing a sign-in and changing its account or addresses from the app (`feat/sign-in-changes`, Opus).
+   Item 44 (a task list route, so the desktop stops reading the whole export each minute) starts when one of them
+   finishes: two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 42 (the review's sessions and self-serve: 20 self-serve shops a Bangkok day, a self-serve shop's team waiting
+   Merged: 39 (Bring it back after a rewind: `turn_files.rs` keeps the files from just before a rewind the agent agreed
+   to until the next turn starts, puts them back with no file changed by hand since overwritten unless the person
+   unticks it, and never through a link; the chat is not brought back, since neither agent has a message for it; the
+   main-moved note reads each lane's own base and shows on its row), 42 (the review's sessions and self-serve: 20 self-serve shops a Bangkok day, a self-serve shop's team waiting
    until an operator counts it in, a per-tenant session index and a swept auth object, paged shop scans, a limit on
    `DELETE /v1/tenant/data`, the web app's shop cookies needing the sign-in, ten sessions a helper and a limit on opening
    them, and a strict script policy on every page; `SHOP_SESSION_LIMITER` took 2026112349 to 52), 41 (the review's front door: limits per IPv4 address or IPv6 /64, JSON-only POSTs, code emails capped per
@@ -204,8 +212,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
    - the code editor's remaining states are running; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
-     with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
-     2026112333 up for the next limiter.
+     with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Items 31 to 42 took
+     2026112333 to 2026112352 (four each: dev, staging, production and the top level); pick the next limiter's ids
+     from 2026112353 up.
    Parked by the owner: LINE (`feat/owner-line-cards` holds owner cards and the morning brief, not reviewed or
    merged) and payments (the owner's billing page, anything new about payments, slips or refunds).
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
