@@ -107,10 +107,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 26, rewinding a turn, files and chat together (`feat/rewind-files`, Opus; a Rust build);
-   - item 28, what keeps running, with its age, its port and Stop (`feat/what-keeps-running`, Sonnet);
    - item 31, sign-in by a code sent by email, built and off (`feat/email-code-sign-in`, Opus);
-   - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet).
-   Merged: 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
+   - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet);
+   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus).
+   Next: item 33, the sign-in screens, once item 31 merges.
+   Merged: 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
+   the app's own sessions, and Stop checks each process again by its start time before each signal), 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
    the shell's `git_moved.rs` only reads), 27 (Kit's lanes on their own branches, with Checked, Tests failed and
    Reverted; `lane.rs` is the one place the shell changes a repository), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
