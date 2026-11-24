@@ -134,6 +134,46 @@ chat."; with one, Unlink asks once more ("{owner}'s app will be signed out of th
 sessions it ended. That line says where a code may come from and no more: how operators confirm a code is not settled by the
 owner (`docs/decisions.md`).
 
+## A shop its owner makes
+
+Built, and off until the owner opens sign-ups (`apps/api/src/self-serve.ts`; `docs/pilot-api.md`, "Making a shop of your
+own"). A signed-in person, with Apple or with a code sent by email, makes their own shop from one of the three shop
+templates or none, with `POST /v1/shops/new` and exactly `{ name, ownerName, template }`, and is its owner from the first
+write. No operator makes it, and no link code links it.
+
+- **The same shop.** It is made by the operator's own code (`writeNewShop` in `pilot.ts`), template and all, so it is a
+  pilot shop like any other: its own tenant, its records in its own objects, its export and its deletion unchanged.
+- **Owned from the first write.** The write that makes the shop's record also writes its people record with the person's
+  account linked as its owner and this device's first owner session, and the template's setup, so the shop never exists
+  without its owner or half set up. The model above holds: the shop's record is the authority, and the person's index row,
+  written last, only finds it.
+- **Its log.** That write holds `shop.created`, `shop.made_by_owner`, `owner.linked` and `owner.session_opened`, then
+  `template.applied` and a `routine.created` for each routine, each by the owner's linked account, named by its id, never its
+  subject or an email.
+- **Listed together.** The console's list and the person's own list get the shop in one AuthObject transaction, last, so
+  the operator never sees a shop its owner cannot, nor the other way round.
+- **A make that stops part way.** It is on AuthObject's journal of makes from the transaction that takes its slot, before
+  anything of the shop is written, and is never listed until whole. Asking again with the same name, owner name and template
+  finishes that very shop, on a slot it takes again, and gives this device an owner session of its own, since the first
+  one's token never reached anyone; it never makes a second shop, and never loses a slot. `docs/pilot-api.md`, "A make that
+  stops part way", has each step and what a stop at it leaves.
+- **Its limits.** While sign-ups are open, every try counts against a per-address rate limit. An account may have made 3
+  shops that still exist, decided in AuthObject before anything is made; shops an operator linked to it never count.
+- **Where it shows.** The console's Shops overview marks it "Made by its owner", and the pilot gate lists it without counting it
+  in the cohort unless an operator adds it.
+- **Off.** Until the var `SELF_SERVE_SHOPS` is `"on"`, which no environment sets, the route answers `sign_ups_closed` and
+  reads nothing. Who may sign up, the pilot's customers and any price are the owner's calls; a self-serve shop has no
+  payment step while billing is parked.
+- **On the desktop** (`src/settings/MakeShop.tsx`, `makeShopFlow.ts`; the op `shops.make`, `src/runtime/makeShop.ts`).
+  Settings › Developer offers "Make your shop" in a group of its own below the sign-in, while a signed-in person is in no
+  shop: the shop's name, their own name, and which kind of shop it is (Handmade and gifts, Clothes and accessories,
+  Packaged food and drinks, or None of these). The connected runtime sends it with the sign-in, keeps the owner session
+  the API answers with the sign-in (the keychain item), reads the shop with the person's others and shows it, so it is in the
+  switcher by the time the answer arrives; the app then opens it, as choosing it in the switcher does. While the API
+  answers `sign_ups_closed` the page says so plainly: "Making your own shop isn't open yet. For now, Manut AI sets each shop
+  up with its owner." Practice offers the same form whenever it runs and makes the shop in memory, with nothing sent, up to
+  3 of them, listed after the person's own shop. The first run does not offer it: it does not sign in at all.
+
 ## How the desktop shows them
 
 Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `cache.ts`; the switcher in
@@ -224,8 +264,9 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
   the same email can still open the shop by its id, but does not see it listed until it has.
 - A person who deletes their own tenant's data keeps their links: those are the shops' records, and leaving a shop is
   unlinking or removal. Their pending link code is deleted with their data.
-- A person's index has no cap on its rows. Only an operator's link or an invite an operator made adds a row, so nothing
-  a person does alone can grow it.
+- A person's index has no cap on its rows. An operator's link, an invite an operator made, and a shop the person made
+  themselves add one each, and the last is capped at 3 made shops that still exist ("A shop its owner makes"), so what a
+  person does alone grows it by 3 rows at most.
 
 ## Known limits of the desktop slice
 

@@ -30,6 +30,7 @@ import type {
   ModelCurrent,
   Msg,
   OpMap,
+  ShopRow,
 } from "../../lib/protocol";
 import type { NodeSessionResult } from "../../harness/session";
 import { firstWords, type ThreadEvent, type ThreadOps } from "../../threads/types";
@@ -57,6 +58,7 @@ import {
 import { HELPED_INTRO, HELPED_REFUSAL, HELPED_SHOP, OWN_SHOP, sampleAsks, sampleShops, SHOPS_SAID, type WaitingAsk } from "./shops";
 import { PracticePeople, type PeopleResult } from "./people";
 import { PracticeGoogle, readPracticeGoogleStart, type GoogleResult } from "./google";
+import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf } from "../makeShop";
 import { PracticeVault, type VaultResult } from "./vault";
 
 /** A refusal, as the protocol's reply frame carries it. */
@@ -192,6 +194,9 @@ export class MockHost {
   /** Practice's sample shops (shops.ts): the one every page shows, and their requests still waiting, by request id. */
   private shop = OWN_SHOP;
   private shopAsks = new Map<string, WaitingAsk>();
+  /** The shops the person made here with Make your shop (`shops.make`), oldest first. They live only as long as the page, as
+   *  everything in Practice does, and nothing about them leaves it. */
+  private made: ShopRow[] = [];
   /** The person's own shop's sample vault and outposts, for Customize › Connections (vault.ts). */
   private vault = new PracticeVault(0);
   /** The person's own shop's sample people, for Settings › People (people.ts). */
@@ -252,6 +257,7 @@ export class MockHost {
     }, emptyState());
     this.shop = OWN_SHOP;
     this.shopAsks = new Map();
+    this.made = [];
     this.vault = new PracticeVault(boot);
     this.people = new PracticePeople(boot);
     this.google = new PracticeGoogle(boot, readPracticeGoogleStart());
@@ -793,15 +799,16 @@ export class MockHost {
       return {};
     },
     "approval.pass_on": (p) => (this.needBot(p), this.passOnShopAsk(this.needText(p.request_id, "request_id"), p.note)),
-    "shops.list": () => ({ shops: sampleShops(), current: this.shop, left: [] }),
+    "shops.list": () => ({ shops: this.shopRows(), current: this.shop, left: [] }),
     "shops.switch": (p) => {
-      if (p.shop !== OWN_SHOP && p.shop !== HELPED_SHOP) throw new OpError("not_found", "no such shop");
+      if (!this.shopRows().some((shop) => shop.id === p.shop)) throw new OpError("not_found", "no such shop");
       if (p.shop !== this.shop) {
         this.shop = p.shop;
         this.soon(() => this.broadcast({ event: "shops.update", bot: "buddy" }));
       }
       return {};
     },
+    "shops.make": (p) => this.makeShop(p),
     "clarify.respond": (p) => {
       const key = this.target(p);
       this.refusePaused(splitKey(key)[0]);
@@ -1145,10 +1152,37 @@ export class MockHost {
     }),
   };
 
+  /** The person's shops as the switcher lists them: the ones they own first (their own sample shop, then each one they made
+   *  here, oldest first), then Ran Pa Noi, which they help at, as the API lists a person's shops. */
+  private shopRows(): ShopRow[] {
+    const [own, ...helped] = sampleShops();
+    return [own!, ...this.made.map((shop) => ({ ...shop })), ...helped];
+  }
+
+  /** Make your shop, in Practice: a shop of the person's own, named as they typed, with no network. It refuses as the API
+   *  would (a name it would not keep, a kind it does not have, more than `MADE_SHOPS_LIMIT` made shops), and is then listed
+   *  with their other shops and shown on every page, with the demo team, as the API's own shop would be. */
+  private makeShop(p: OpMap["shops.make"]["params"]): OpMap["shops.make"]["result"] {
+    const name = shopNameOf(p.name);
+    if (!name) throw new OpError("invalid_name", "A shop's name is 1 to 80 characters.");
+    const ownerName = shopNameOf(p.ownerName);
+    if (!ownerName) throw new OpError("invalid_owner_name", "Your name is 1 to 80 characters.");
+    if (p.template !== null && !isShopTemplateId(p.template)) throw new OpError("unknown_template", "There is no such kind of shop.");
+    if (this.made.length >= MADE_SHOPS_LIMIT) {
+      throw new OpError("too_many_shops", `One account can make ${MADE_SHOPS_LIMIT} shops, and this one has.`);
+    }
+    const shop: ShopRow = { id: `practice:made-${this.made.length + 1}`, name, owner: ownerName, role: "owner" };
+    this.made.push(shop);
+    this.shop = shop.id;
+    this.soon(() => this.broadcast({ event: "shops.update", bot: "buddy" }));
+    return { shop: { ...shop } };
+  }
+
   /** Runs a Connections op on `shop`'s sample vault: the person's own shop's. At Ran Pa Noi they are a helper, and only Noi,
    *  its owner, sees its sign-ins and outposts, as the API answers a helper's session; any other shop is not theirs. */
   private atVault<T>(shop: unknown, run: () => VaultResult<T>): T {
     if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees its sign-ins and outposts.");
+    if (this.made.some((one) => one.id === shop)) throw new OpError("not_yet", MADE_IN_PRACTICE);
     if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
     const done = run();
     if (!done.ok) throw new OpError(done.code, done.message);
@@ -1159,6 +1193,7 @@ export class MockHost {
    *  owner, sees or changes its Google Sheets, as the API answers a helper's session; any other shop is not theirs. */
   private atGoogle<T>(shop: unknown, run: () => GoogleResult<T>): T {
     if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees or changes its Google Sheets.");
+    if (this.made.some((one) => one.id === shop)) throw new OpError("not_yet", MADE_NO_SHEET);
     if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
     const done = run();
     if (!done.ok) throw new OpError(done.code, done.message);
@@ -1169,6 +1204,7 @@ export class MockHost {
    *  sees or changes who can help there, as the API answers a helper's session; any other shop is not theirs. */
   private atPeople<T>(shop: unknown, run: () => PeopleResult<T>): T {
     if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees or changes who can help at Ran Pa Noi.");
+    if (this.made.some((one) => one.id === shop)) throw new OpError("not_yet", MADE_IN_PRACTICE);
     if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
     const done = run();
     if (!done.ok) throw new OpError(done.code, done.message);
@@ -1179,6 +1215,10 @@ export class MockHost {
     throw new OpError("unsupported", UNSUPPORTED);
   }
 }
+
+/** What People and Connections say about a shop made in Practice, which has no sample people or sign-ins of its own. */
+const MADE_NO_SHEET = "A shop you made in Practice has no sample Google Sheet. Switch back to your own shop to try it.";
+const MADE_IN_PRACTICE = "A shop you made in Practice has no sample helpers or sign-ins. Switch back to your own shop to try them.";
 
 let shared: MockHost | null = null;
 /** The one runtime every adapter in this page talks to, as every client of a real runtime would. */

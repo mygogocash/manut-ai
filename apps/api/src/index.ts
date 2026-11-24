@@ -22,12 +22,14 @@ import { routinesRoute } from "./routines";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
+import { signUpsOpen } from "./self-serve";
 import { shopsRoute } from "./shops";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
 import { workersAdminRoute } from "./workers";
+import { webSessionRoute } from "./web-session";
 
 export { AuthObject, CompanyObject, CredObject, RelayObject, ScheduleObject, TaskObject, TenantObject };
 
@@ -97,6 +99,11 @@ export interface Env {
   PILOT_APPROVAL_LIMITER?: RateLimit;
   /// The outposts' own routes (browser-control.ts), which take an outpost's credential: one bucket per address.
   OUTPOST_LIMITER?: RateLimit;
+  /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
+  /// answers `sign_ups_closed` until SELF_SERVE_SHOPS is exactly "on", which no environment sets: opening sign-ups is the
+  /// owner's call. While it is on, every try counts against SELF_SERVE_SHOP_LIMITER, per source address.
+  SELF_SERVE_SHOPS?: string;
+  SELF_SERVE_SHOP_LIMITER?: RateLimit;
   /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
   /// Unbound, those paths answer this Worker's own 404.
   WEB?: Fetcher;
@@ -146,6 +153,12 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
+  // The owner's web app (web-session.ts): signing in with a code counts in the exchange's bucket, and reading the
+  // person's shops and signing out, which may refresh and end the sign-in, in the refresh's.
+  else if (request.method === "POST" && pathname === "/v1/web/sign-in") binding = env.AUTH_EXCHANGE_LIMITER;
+  else if (request.method === "POST" && (pathname === "/v1/web/shops" || pathname === "/v1/web/sign-out")) {
+    binding = env.AUTH_SESSION_LIMITER;
+  }
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
   else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
@@ -158,6 +171,10 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   // Google's redirect back to the owner's browser carries no session, only a state: every try counts, any method, before
   // the state is read.
   else if (pathname === "/v1/google/callback") binding = env.GOOGLE_CALLBACK_LIMITER;
+  // Making a shop of one's own wakes AUTH to read the session and then makes a shop, so every try counts, any method, before
+  // anything is read; but only while sign-ups are open: while they are closed the route answers sign_ups_closed and
+  // touches nothing at all (self-serve.ts).
+  else if (pathname === "/v1/shops/new" && signUpsOpen(env)) binding = env.SELF_SERVE_SHOP_LIMITER;
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
@@ -234,6 +251,8 @@ const ADMIN_METHODS = new Set([
   // The Phase 1 gate: the shop's own subscription payments, and the measurement.
   "POST /v1/admin/pilot/subscription-payments", "GET /v1/admin/pilot/subscription-payments",
   "GET /v1/admin/pilot/gate",
+  // An operator adds a shop its owner made to the gate's cohort, or leaves it out again (pilot.ts). The tenant is in the body.
+  "POST /v1/admin/pilot/gate/cohort",
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
@@ -665,6 +684,12 @@ export default {
         }),
       );
     }
+
+    // The owner's web app (web-session.ts): its session lives in cookies the page cannot read, and these routes are
+    // the only ones that read them. Each hands its request on to the route that does the work with the right bearer from
+    // the cookies; every other route takes a bearer and nothing else. Its ingress limits ran above.
+    const web = await webSessionRoute(request, url, env, ctx, () => featureFlags(env));
+    if (web) return web;
 
     // Inbound Linear webhooks (inbound.ts). Public, because Linear holds no
     // session: the signature is the credential. While officeInbound is off

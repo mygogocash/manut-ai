@@ -935,8 +935,18 @@ describe("the audit log's words for the owner's linked account", () => {
       .toBe("Mint signed out on a device.");
   });
 
+  it("says how a shop its owner made came to be, by the owner's linked account, never by an operator", () => {
+    const made = { subject: { ownerAccountId: "owner-1" } };
+    expect(said({ actor: owner, action: "shop.created" })).toBe("Fon (linked account owner-1) created the shop.");
+    expect(said({ actor: owner, action: "shop.made_by_owner", ...made }))
+      .toBe("Fon (linked account owner-1) made the shop themselves in the app, with no operator.");
+    expect(said({ actor: owner, action: "owner.linked", ...made }))
+      .toBe("Fon (linked account owner-1) became the shop's owner as they made it.");
+  });
+
   it("has words for each of them: none is shown by its raw name or as an action it does not know", () => {
-    for (const [action, actor] of [["owner.linked", op], ["owner.unlinked", op], ["owner.session_opened", owner],
+    for (const [action, actor] of [["owner.linked", op], ["owner.linked", owner], ["shop.made_by_owner", owner],
+      ["owner.unlinked", op], ["owner.session_opened", owner],
       ["owner.session_ended", owner], ["helper.session_ended", helper]] as const) {
       const sentence = said({ actor, action });
       expect(sentence, action).not.toContain(action);

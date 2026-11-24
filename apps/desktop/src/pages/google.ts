@@ -180,6 +180,8 @@ const REFUSALS = new Map<string, () => string>([
   ["consent_required", () => t("google.err.consent")],
   ["feature_disabled", () => t("google.err.switchedOff")],
   ["unavailable", () => t("google.err.unavailable")],
+  // a shop made in Practice has no sample Google Sheet (runtime/mock/host.ts)
+  ["not_yet", () => t("google.err.practiceShop")],
 ]);
 
 export function refusalText(code: string, message: string): string {

@@ -43,7 +43,7 @@
 // on this computer and goes with the shop. The store turns the event into the notification (store.ts `notifySessionEvent`,
 // notify.ts `showNewDevice`).
 import { mayDecide } from "@manut/approval-core";
-import { t } from "../../i18n";
+import { t, type Key } from "../../i18n";
 import type { ApprovalChoice, BridgeEvent, OpMap, PassedOnNote, ShopLeft, ShopRow } from "../../lib/protocol";
 import { leftWords, onlyOwnerWords } from "../../lib/shops";
 import type { NodeSessionResult } from "../../harness/session";
@@ -57,6 +57,7 @@ import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
 import { peopleHandlers } from "./people";
+import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
 import type { TeamState } from "../mission";
 import type { RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
@@ -123,6 +124,8 @@ const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
+/** The API's refusals of a shop of one's own that the page has words for; any other is the API not making it. */
+const MAKE_REFUSALS: ReadonlySet<string> = new Set(["sign_ups_closed", "invalid_name", "invalid_owner_name", "unknown_template", "too_many_shops"]);
 /** What a shop the person helps at answers about its team: it is its owner's to see and change. */
 const ownerOnly = (shop: ShopRow) => new OpError("owner_only", t("rt.ownerOnly", { owner: shop.owner, shop: shop.name }));
 
@@ -657,6 +660,28 @@ export class HttpHost {
     return {};
   }
 
+  /** Makes a shop of the signed-in person's own (docs/pilot-api.md, "Making a shop of your own") and shows it: the API makes
+   *  it owned by them from its first write and answers its owner session, which is kept with the sign-in (shops.ts), and the
+   *  read that follows lists it with their other shops and shows it on every page, so the switcher has it by the time this
+   *  answers. A name or a kind the API would refuse is refused here, with nothing sent. Every refusal keeps the API's code,
+   *  so the page can say it in plain words (`MakeShopRefusal`). */
+  private async makeShop(p: OpMap["shops.make"]["params"]): Promise<OpMap["shops.make"]["result"]> {
+    const name = shopNameOf(p.name);
+    if (!name) throw new OpError("invalid_name", t("make.fail.invalid_name"));
+    const ownerName = shopNameOf(p.ownerName);
+    if (!ownerName) throw new OpError("invalid_owner_name", t("make.fail.invalid_owner_name"));
+    if (p.template !== null && !isShopTemplateId(p.template)) throw new OpError("unknown_template", t("make.fail.unknown_template"));
+    const made = await this.shopSessions.make({ name, ownerName, template: p.template });
+    if (made.kind === "made") {
+      this.viewing = made.shop.id;
+      await this.refresh().catch(() => undefined);
+      return { shop: made.shop };
+    }
+    if (made.kind !== "refused") throw new OpError(made.kind, t(FAILURE_TEXT[made.kind]));
+    const code: MakeShopRefusal = made.status === 429 ? "rate_limited" : MAKE_REFUSALS.has(made.code) ? (made.code as MakeShopRefusal) : "unavailable";
+    throw new OpError(code, t(`make.fail.${code}` as Key, { limit: MADE_SHOPS_LIMIT }));
+  }
+
   /** The person's shops for the switcher: the ones they own first, the one viewed, and the ones whose place ended. */
   private shopList(): OpMap["shops.list"]["result"] {
     const snapshot = this.snapshot;
@@ -923,6 +948,7 @@ export class HttpHost {
       "approval.pass_on": (p) => (member(p), this.passOn(p.request_id, p.note)),
       "shops.list": () => this.shopList(),
       "shops.switch": (p) => this.switchTo(p.shop),
+      "shops.make": (p) => this.makeShop(p),
       "chat.send": notYet,
       "chat.steer": notYet,
       "chat.interrupt": notYet,

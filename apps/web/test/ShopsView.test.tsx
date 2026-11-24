@@ -172,6 +172,21 @@ describe("the Shops overview", () => {
     expect(listAudit).toHaveBeenCalledTimes(4);
   });
 
+  it("marks a shop its owner made in the app, so an operator sees where it came from, and no other", async () => {
+    const own: Shop = { tenant: "t3", name: "Khao Hom", ownerName: "Dao", template: "food", selfServe: true, consent: false };
+    const gate: PilotGate = { ...GATE, shops: [...GATE.shops, { tenant: "t3", name: "Khao Hom", trialStartedAt: null, day: null,
+      trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "not_yet", selfServe: true, inCohort: false }] };
+    renderWithApi(<ShopsView shops={[...SHOPS, own]} onOpen={noop} onForget={noop} />, reads({ getGate: vi.fn(async () => gate) }));
+    await screen.findByRole("table", { name: "Every shop" });
+    const rows = table();
+    expect(rows[2]![0]).toBe("Khao HomDaoMade by its owner");
+    expect(rows[0]![0]).toBe("Baan MaliFon");
+    expect(rows[1]![0]).toBe("Sabai TeaDao");
+    const tag = within(screen.getByRole("rowheader", { name: /Khao Hom/ })).getByText("Made by its owner");
+    expect(tag.getAttribute("title")).toBe(
+      "Its owner made it in the app, signed in, with no operator. The pilot gate leaves it out unless an operator adds it.");
+  });
+
   it("says which shop could not be read, and in what, and still shows every part that was", async () => {
     const api = reads({
       getModelUsage: vi.fn(async (tenant: string) => {

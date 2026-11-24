@@ -1,12 +1,16 @@
-// Writes the desktop Playwright suite's result into the CI job summary: how many tests passed, failed, were flaky
-// or were skipped, and which ones failed. That job may fail without failing the run while the specs inherited from
-// Oh My Hermes are brought up to date, so this summary is where the suite's state gets read.
+// Writes a Playwright suite's result into the CI job summary: how many tests passed, failed, were flaky or were
+// skipped, and which ones failed. It serves the desktop suite and the web app's phone specs (the `web-phones` job).
+// The desktop jobs may fail without failing the run while the specs inherited from Oh My Hermes are brought up to date,
+// so this summary is where that suite's state gets read.
 //
-// The suite runs as shards side by side (the `e2e` job's matrix). Each shard calls this with its own report and a
-// title naming it; the last job calls it with every shard's report, and the counts are added up.
+// The desktop suite runs as shards side by side (the `e2e` job's matrix). Each shard calls this with its own report
+// and a title naming it; the last job calls it with every shard's report, and the counts are added up.
 //
-// Usage: node .github/scripts/playwright-summary.mjs [--title <text>] <report.json | directory>...
-// A report is what Playwright's JSON reporter writes; a directory stands for the .json files in it. The summary is
+// Usage: node .github/scripts/playwright-summary.mjs [--title <text>] [--note <text>] <report.json | directory>...
+// A report is what Playwright's JSON reporter writes; a directory stands for the .json files in it. --note is the
+// sentence under the title: without it, the desktop's ("This job may fail without failing the run ..."); with an empty
+// one there is none, for a job that is a real check (Web on phones). A failing test that ran in several Playwright
+// projects (the web app's four phones run each spec) is listed once with the projects it failed in. The summary is
 // appended to the file GitHub names in GITHUB_STEP_SUMMARY, or printed when run outside Actions. The script never
 // fails the step: a missing or unreadable report is itself what the summary then says.
 import { appendFileSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -14,9 +18,11 @@ import { join } from "node:path";
 
 const args = process.argv.slice(2);
 let title = "Desktop Playwright";
+let note = "This job may fail without failing the run while the inherited specs are brought up to date.";
 const inputs = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--title") title = args[++i] ?? title;
+  else if (args[i] === "--note") note = args[++i] ?? note;
   else inputs.push(args[i]);
 }
 
@@ -73,7 +79,11 @@ function failing(report) {
   const failed = [];
   const walk = (suite, titles) => {
     for (const spec of suite.specs ?? []) {
-      if (!spec.ok) failed.push(`${spec.file}:${spec.line} › ${[...titles, spec.title].join(" › ")}`);
+      if (spec.ok) continue;
+      // A spec runs once in each project, and its title says nothing of which: name the ones it failed in. A report
+      // with no named projects (the desktop's) adds nothing.
+      const projects = (spec.tests ?? []).filter((test) => test.status === "unexpected" && test.projectName).map((test) => test.projectName);
+      failed.push(`${spec.file}:${spec.line} › ${[...titles, spec.title].join(" › ")}${projects.length > 0 ? ` [${projects.join(", ")}]` : ""}`);
     }
     for (const child of suite.suites ?? []) walk(child, [...titles, child.title]);
   };
@@ -105,8 +115,7 @@ try {
     }
     const several = wholeRun || reports.length > 1;
     lines.push(
-      "This job may fail without failing the run while the inherited specs are brought up to date.",
-      "",
+      ...(note ? [escape(note), ""] : []),
       `| Passed | Failed | Flaky | Skipped | ${several ? "Slowest shard" : "Time"} |`,
       "| ---: | ---: | ---: | ---: | ---: |",
       `| ${sum.expected} | ${sum.unexpected} | ${sum.flaky} | ${sum.skipped} | ${duration(slowest)} |`,

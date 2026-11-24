@@ -32,10 +32,12 @@ import {
   type Shop,
   type SubscriptionPayment,
   type UnlinkedOwner,
+  type WebSession,
   type WorkerDraft,
   type WorkerJobEntry,
 } from "./types";
 import { pilotGate } from "./gate";
+import { PRACTICE_SHOPS, practiceOwner, type PracticeOwner } from "./practiceOwner";
 import { isCode, normalizeEmail } from "./email";
 import { endOfShopDay, formatIsoDate } from "../format";
 import * as peopleRules from "@manut/people-rules";
@@ -70,8 +72,13 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// Sample world: Baan Mali (owner Fon) on LINE, on day 14 of its trial, with customers asking about late parcels
 /// and a refund, and a second shop, Sabai Tea, with nothing connected yet. Demo links on the practice home page
 /// open the owner's page in each state: /approve/demo, demo-failed, demo-unknown, demo-sent, demo-declined,
-/// demo-old and demo-expired; any other token is an invalid link. The deletion page's demo links (DEMO_DELETION_TOKENS) are
-/// about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes nothing there.
+/// demo-old and demo-expired; any other token is an invalid link. Two more are about the words on the page, for the specs that
+/// open it at phone sizes: demo-long-thai (a long Thai message from a customer and a long Thai reply, in a shop with a long
+/// Thai name) and demo-long-link (a long order id and a long link that have no place to break, in a message, a reply and a
+/// customer's name). Each belongs to a shop of its own that the console never lists (`demoShops`), as the deletion demos do.
+/// demo-offline cannot be read at all, the way a link opened on a dead connection cannot. The deletion page's demo links
+/// (DEMO_DELETION_TOKENS) are about Khao Soi Nimman, a shop that is not on the console's list, so practising them deletes
+/// nothing there; one of them is about a shop with a long Thai name and counts in the millions, and one is unreadable too.
 ///
 /// Each shop's audit log is kept as the API keeps it: the same actions and outcomes, metadata only, ids that sort by
 /// time and page with the API's cursor, exported with the shop and deleted with it. Practice actions are an
@@ -133,6 +140,9 @@ export type FakeApiOptions = {
   /// (`DEMO_JOIN_TOKENS.signInOff`), both sign-in routes answer `email_not_configured`, as every real environment does
   /// today. Defaults to this page's own path.
   pagePath?: () => string;
+  /// The query of the page open now: the owner's app opened as `/app/?demo=sign-in-off` (`APP_SIGN_IN_OFF`) answers the
+  /// same way. Defaults to this page's own query.
+  pageSearch?: () => string;
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
@@ -140,7 +150,7 @@ type Outcome = "confirmed" | "failed" | "unknown";
 /// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list. A shop
 /// made from a template keeps its first-week questions here, where the API keeps them beside its routines; a question
 /// holds only its answer's fact id, and the words are the fact's.
-type FakeShop = Shop & { trialStartedAt?: string; questions?: FakeQuestion[] };
+type FakeShop = Shop & { trialStartedAt?: string; questions?: FakeQuestion[]; addedToCohort?: true };
 type FakeQuestion = { id: string; text: string; factId?: string; answeredAt?: string };
 type FakeConnection = {
   connectionId: string;
@@ -206,9 +216,12 @@ type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: 
 /// is recorded nowhere else.
 type FakeHelperSession = { tenant: string | null; helperId: string; sessionId: string };
 type FakeDb = {
-  version: 10;
+  version: 11;
   seq: number;
   shops: FakeShop[];
+  /// Shops that only the owner's page practises on (a long Thai name, a long link), so they answer `shopOf` and a reply link
+  /// for one works as any does. Every list of shops, the pilot gate and every export read `shops` and never see them.
+  demoShops: FakeShop[];
   connections: FakeConnection[];
   messages: FakeMessage[];
   actions: FakeAction[];
@@ -233,9 +246,9 @@ type FakeDb = {
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
-/// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8) or before
-/// the sample log of the owner's own changes, this Mac and browser writes (version 9) is replaced by a fresh one rather than read
-/// without them.
+/// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8), before
+/// the sample log of the owner's own changes, this Mac and browser writes (version 9) or before the shops and links the owner's
+/// page practises its long words on (version 10) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -282,6 +295,10 @@ export const DEMO_JOIN_SHOP = {
 /// The join page's sign-in-off demo link, wherever it is open.
 const SIGN_IN_OFF_PATH = new RegExp(`^/join/${DEMO_JOIN_TOKENS.signInOff}/?$`);
 
+/// The owner's app opened with this query stands for an environment where signing in by email is off, as every real one
+/// is today: `/app/?demo=sign-in-off`.
+export const APP_SIGN_IN_OFF = "demo=sign-in-off";
+
 /// The link codes the practice world holds, as an owner's app shows them (`XXXX-XXXX`). Each works once, and a code goes the first
 /// time it is tried, whatever the answer. The sample world's accounts are Fon's, whom Baan Mali already has, Dao's and a guest's.
 export const PRACTICE_OWNER_CODES = {
@@ -303,6 +320,12 @@ export const DEMO_TOKENS = {
   declined: "demo-declined",
   expiredRequest: "demo-old",
   expiredLink: "demo-expired",
+  /// A long Thai message and a long Thai reply, in a shop with a long Thai name.
+  longThai: "demo-long-thai",
+  /// A long order id and link that have nowhere to break, in a message, a reply and a customer's name.
+  longLink: "demo-long-link",
+  /// A link that cannot be read, as on a phone with no connection.
+  offline: "demo-offline",
 } as const;
 
 export const DEMO_DELETION_TOKENS = {
@@ -312,6 +335,10 @@ export const DEMO_DELETION_TOKENS = {
   kept: "demo-delete-kept",
   unanswered: "demo-delete-old",
   expiredLink: "demo-delete-expired",
+  /// A shop with a long Thai name, and counts in the millions.
+  longName: "demo-delete-long",
+  /// A link that cannot be read, as on a phone with no connection.
+  offline: "demo-delete-offline",
 } as const;
 
 export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(): void } {
@@ -323,6 +350,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const webOrigin =
     options.webOrigin ?? (typeof location !== "undefined" ? location.origin : "http://localhost:5173");
   const pagePath = options.pagePath ?? (() => (typeof location !== "undefined" ? location.pathname : "/"));
+  const pageSearch = options.pageSearch ?? (() => (typeof location !== "undefined" ? location.search : ""));
 
   let db = load() ?? seed(now());
 
@@ -333,6 +361,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const signIns = new Map<string, string>();
   const helperSessions = new Map<string, FakeHelperSession>();
   let tokenSeq = 0;
+  // The owner's web app's sign-in (src/app): the address and the practice world made for it, in this closure only, as the
+  // real one is in cookies the page cannot read. A reload forgets it.
+  let webSession: { address: string; world: PracticeOwner } | null = null;
 
   function load(): FakeDb | null {
     if (!storage) return null;
@@ -340,7 +371,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 10 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+      return parsed && parsed.version === 11 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
+        Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
         Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers) &&
@@ -378,9 +410,27 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return work();
   }
 
-  /// Signing in by email is off while the sign-in-off demo link is open, as it is in every real environment today.
+  /// Signing in by email is off while the sign-in-off demo link is open, or the owner's app with its sign-in-off demo
+  /// query, as it is in every real environment today.
   function signInOff(): boolean {
-    return SIGN_IN_OFF_PATH.test(pagePath());
+    const path = pagePath();
+    return SIGN_IN_OFF_PATH.test(path) ||
+      (/^\/app(\/|$)/.test(path) && new URLSearchParams(pageSearch()).get("demo") === "sign-in-off");
+  }
+
+  /// Tries a code for an address, as the API's auth object does: no live code (never asked, used, or past its ten minutes)
+  /// is `code_ended`; a wrong code takes a try and the fifth ends it; the right one is used up, so it signs in once.
+  function useCode(address: string, code: string): void {
+    const record = emailCodes.get(address);
+    const live = record?.live;
+    if (!record || !live || now() >= live.expiresAt) throw new ApiError(401, "code_ended");
+    if (code !== PRACTICE_SIGN_IN_CODE) {
+      const wrong = live.wrong + 1;
+      const triesLeft = Math.max(0, MAX_WRONG_TRIES - wrong);
+      emailCodes.set(address, { ...record, live: triesLeft > 0 ? { ...live, wrong } : null });
+      throw new ApiError(401, "wrong_code", undefined, { triesLeft });
+    }
+    emailCodes.set(address, { ...record, live: null });
   }
 
   /// The API's 429 for an address that had a code in the last minute or ten in the last day: whole seconds, rounded up.
@@ -483,7 +533,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   /// The API's answers for a shop that is not there: `tenant_deleted`, saying when and by whom, once it has been
   /// deleted, and `shop_not_found` for a tenant that was never a shop.
   function shopOf(tenant: string): FakeShop {
-    const shop = db.shops.find((s) => s.tenant === tenant);
+    const shop = db.shops.find((s) => s.tenant === tenant) ?? db.demoShops.find((s) => s.tenant === tenant);
     if (shop) return shop;
     const record = db.deletions.find((d) => d.tenant === tenant);
     if (record?.deletedAt) {
@@ -631,6 +681,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
 
   /// A deletion link's confirmation. Its link expires with it, as the API signs both with one expiry.
   function confirmationByToken(token: string): FakeConfirmation {
+    // The sample of a phone with no connection: the page's own client answers this way when its request never arrives.
+    if (token === DEMO_DELETION_TOKENS.offline) throw new ApiError(0, "network");
     if (db.expiredTokens.includes(token)) throw new ApiError(410, "link_expired");
     const confirmation = db.confirmations.find((c) => c.token === token);
     if (!confirmation) throw new ApiError(404, "link_invalid");
@@ -649,6 +701,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   }
 
   function byToken(token: string): FakeAction {
+    // The sample of a phone with no connection: the page's own client answers this way when its request never arrives.
+    if (token === DEMO_TOKENS.offline) throw new ApiError(0, "network");
     if (db.expiredTokens.includes(token)) throw new ApiError(410, "link_expired");
     const action = db.actions.find((a) => a.token === token);
     if (!action) throw new ApiError(404, "link_invalid");
@@ -893,7 +947,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, ...shop }): Shop => {
+        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, addedToCohort: _added, ...shop }): Shop => {
           const deletion = deletionRequestOf(shop.tenant);
           // A shop here still has its record: a practice wipe takes the record and the rest in one step.
           const deleting: Deleting | undefined = startedDeletionOf(shop.tenant) ? { shopRecord: true } : undefined;
@@ -1168,6 +1222,20 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         );
       }),
 
+    // As the API: only a shop its owner made is added or left out, and asking for what holds records nothing.
+    setGateCohort: (tenant, counted) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        if (!shop.selfServe) throw new ApiError(409, "not_self_serve");
+        if (counted !== Boolean(shop.addedToCohort)) {
+          if (counted) shop.addedToCohort = true;
+          else delete shop.addedToCohort;
+          audit(tenant, PRACTICE_OPERATOR, counted ? "cohort.added" : "cohort.removed", {});
+        }
+        return { tenant, counted };
+      }),
+
     // Every shop, in the order they were created, with the owner's decisions as the times recorded on its replies,
     // approvals and declines alike, as the API reads them.
     getGate: () =>
@@ -1180,6 +1248,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             trialStartedAt: shop.trialStartedAt ?? null,
             decisions: db.actions.flatMap((a) => (a.tenant === shop.tenant && a.decidedAt ? [a.decidedAt] : [])),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === shop.tenant),
+            ...(shop.selfServe ? { selfServe: true } : {}),
+            ...(shop.addedToCohort ? { addedToCohort: true } : {}),
           })),
           now(),
         );
@@ -1453,16 +1523,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           throw new ApiError(400, "invalid_request");
         }
         if (signInOff()) throw new ApiError(400, "email_not_configured");
-        const record = emailCodes.get(address);
-        const live = record?.live;
-        if (!record || !live || now() >= live.expiresAt) throw new ApiError(401, "code_ended");
-        if (code !== PRACTICE_SIGN_IN_CODE) {
-          const wrong = live.wrong + 1;
-          const triesLeft = Math.max(0, MAX_WRONG_TRIES - wrong);
-          emailCodes.set(address, { ...record, live: triesLeft > 0 ? { ...live, wrong } : null });
-          throw new ApiError(401, "wrong_code", undefined, { triesLeft });
-        }
-        emailCodes.set(address, { ...record, live: null });
+        useCode(address, code);
         tokenSeq += 1;
         const accessToken = `practice-access-${tokenSeq}`;
         signIns.set(accessToken, address);
@@ -1508,6 +1569,36 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     signOut: async (accessToken) => {
       await quiet(() => {
         if (!signIns.delete(accessToken)) throw new ApiError(401, "invalid_session");
+      });
+    },
+
+    // The owner's web app (docs/pilot-api.md, "The web app's session"), on its practice world (practiceOwner.ts). The body
+    // is read as the API reads it, the code as the join page's is, and a sign-in makes a new world, so practising changes
+    // nothing anywhere else.
+    webSignIn: async (input) => {
+      await quiet(async () => {
+        const address = typeof input.email === "string" ? normalizeEmail(input.email) : null;
+        if (!address || typeof input.code !== "string" || !isCode(input.code)) throw new ApiError(400, "invalid_request");
+        if (signInOff()) throw new ApiError(400, "email_not_configured");
+        useCode(address, input.code);
+        webSession = { address, world: await practiceOwner(now) };
+      });
+    },
+    webShops: () =>
+      quiet((): WebSession => (webSession
+        ? { signedIn: true, shops: PRACTICE_SHOPS.map((shop) => ({ ...shop })) }
+        : { signedIn: false, emailSignIn: !signInOff() })),
+    webApprovals: async (shop, state) => {
+      await quiet(() => undefined);
+      return webSession ? webSession.world.approvals(shop, state) : { status: 401, body: { error: "session_ended", shop } };
+    },
+    webDecide: async (input) => {
+      await quiet(() => undefined);
+      return webSession ? webSession.world.decide(input) : { status: 401, body: { error: "session_ended", shop: input.shop } };
+    },
+    webSignOut: async () => {
+      await quiet(() => {
+        webSession = null;
       });
     },
   };
@@ -1638,10 +1729,11 @@ function seed(at: number): FakeDb {
     state: ApprovalState,
     outcome: Outcome,
     decidedMinutesAgo?: number,
+    shop: string = tenant,
   ): FakeAction => {
     const a: FakeAction = {
-      tenant,
-      taskId: `task_${tenant}`,
+      tenant: shop,
+      taskId: `task_${shop}`,
       actionId: id,
       messageId,
       replyText,
@@ -1700,32 +1792,112 @@ function seed(at: number): FakeDb {
     action("act_fah", "msg_fah", DEMO_TOKENS.declined, "ได้เลยค่ะ ลด 20% ให้นะคะ", 410, "rejected", "confirmed", 395),
     action("act_joy", "msg_joy", DEMO_TOKENS.expiredRequest, "ร้านเปิดทุกวัน 10:00 ถึง 19:00 ค่ะ", 1320, "expired", "confirmed"),
   ];
+
+  // The words the owner's page has to hold on a small screen, each in a shop of its own that the console never lists, so
+  // the console's counts (seven messages for Baan Mali) and what a link does for one shop never touch the others. Each is
+  // a reply that waits for the owner, as /approve/demo does, and each shop has not given its one-time permission yet.
+  // A long Thai message and reply: Thai has no spaces between words, so the page must break it where a reader would.
+  const thaiShop = "shop_demo_long_thai";
+  const thaiMessage = "demo_msg_long_thai";
+  // A long order id and a long link: strings with no place to break, in the customer's message, in the reply and in the
+  // customer's name, as LINE names and tracking links often are.
+  const linkShop = "shop_demo_long_link";
+  const linkMessage = "demo_msg_long_link";
+  const orderId = "SP-2291-WEB-20261124-0042-BKK-TH-PRIORITY-EXPRESS-000000123456789";
+  const trackingLink =
+    "https://tracking.example.com/track?number=TH0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ&lang=th&ref=baan-mali-order-confirmation-2026-11-24";
+  const demoShops: FakeShop[] = [
+    {
+      tenant: thaiShop,
+      name: "ร้านเทียนหอมและน้ำมันหอมระเหยบ้านสวนมะลิ สาขาเชียงใหม่ ถนนนิมมานเหมินท์",
+      ownerName: "Fon",
+      consent: false,
+    },
+    { tenant: linkShop, name: "Baan Suan Mali Natural Candles and Essential Oils, Chiang Mai", ownerName: "Fon", consent: false },
+  ];
+  messages.push(
+    {
+      id: thaiMessage,
+      tenant: thaiShop,
+      connectionId: "line_demo",
+      lineUserId: "Udemothai",
+      displayName: "ศิริพรรณเจริญสุขสวัสดิ์",
+      receivedAt: ago(15),
+      text:
+        "สวัสดีค่ะ ขอโทษที่รบกวนนะคะ ดิฉันสั่งเทียนหอมกลิ่นลาเวนเดอร์กับกลิ่นมะลิเป็นชุดของขวัญไว้ 3 ชุดตั้งแต่วันพุธที่ผ่านมา " +
+        "(ออเดอร์ SP-2291) ตอนนี้ผ่านมา 5 วันแล้วแต่ยังไม่ได้รับของเลยค่ะ ในแอปขึ้นว่ากำลังเตรียมจัดส่ง " +
+        "แต่ต้องใช้ของขวัญนี้ในงานแต่งงานของเพื่อนวันเสาร์นี้ ไม่ทราบว่าจะทันไหมคะ\n\n" +
+        "รบกวนช่วยตรวจสอบและแจ้งเลขพัสดุให้ด้วยนะคะ ถ้าไม่ทันดิฉันขอยกเลิกและขอเงินคืนทั้งหมดค่ะ เบอร์ติดต่อ 081-234-5678 ขอบคุณมากค่ะ",
+    },
+    {
+      id: linkMessage,
+      tenant: linkShop,
+      connectionId: "line_demo",
+      lineUserId: "Udemolink",
+      displayName: "Khun_Wichai_Chaiyaphum_01",
+      receivedAt: ago(20),
+      text:
+        `ออเดอร์ ${orderId} ยังไม่ได้รับของเลยค่ะ ลองเช็คตามลิงก์นี้แล้วขึ้นว่าไม่พบข้อมูล ${trackingLink.replace("number=", "order=")}`,
+    },
+  );
+  actions.push(
+    action(
+      "act_demo_long_thai",
+      thaiMessage,
+      DEMO_TOKENS.longThai,
+      "สวัสดีค่ะ คุณศิริพรรณ ขออภัยอย่างยิ่งที่ทำให้ต้องรอนานนะคะ ทางร้านตรวจสอบออเดอร์ SP-2291 แล้ว " +
+        "พัสดุออกจากคลังเมื่อเช้านี้และอยู่ระหว่างการขนส่ง คาดว่าจะถึงมือคุณภายในวันศุกร์ ก่อนงานวันเสาร์แน่นอนค่ะ\n\n" +
+        "ทางร้านจะส่งเลขพัสดุให้ทาง LINE ภายในวันนี้ และถ้าถึงเช้าวันเสาร์แล้วยังไม่ได้รับของ รบกวนแจ้งทางร้านได้ทันที " +
+        "ทางร้านจะส่งชุดใหม่ด่วนให้ฟรีค่ะ ขอบคุณที่รอและขออภัยอีกครั้งนะคะ",
+      14,
+      "proposed",
+      "confirmed",
+      undefined,
+      thaiShop,
+    ),
+    action(
+      "act_demo_long_link",
+      linkMessage,
+      DEMO_TOKENS.longLink,
+      `ขอบคุณที่แจ้งค่ะ ลองติดตามพัสดุของออเดอร์ ${orderId} ได้ที่ลิงก์นี้นะคะ ${trackingLink} ` +
+        "ถ้ายังไม่พบข้อมูล ทางร้านจะตรวจสอบกับขนส่งให้อีกครั้งค่ะ",
+      19,
+      "proposed",
+      "confirmed",
+      undefined,
+      linkShop,
+    ),
+  );
   for (const a of actions) {
     const m = messages.find((x) => x.id === a.messageId);
     if (m) m.replyActionId = a.actionId;
   }
 
   // The deletion page's demo links, each about its own copy of Khao Soi Nimman, a shop that is not on the console's
-  // list. Each copy has the deletion record its state needs, so answering one never changes another.
+  // list. Each copy has the deletion record its state needs, so answering one never changes another. One is about a shop
+  // with a long Thai name and counts in the millions, which the page has to fit on a small screen at a larger text size.
   const goes: DeletionGoes = { messages: 12, replies: 9, payments: 3, lineConnected: true };
+  const longName = "ร้านขนมไทยโบราณและเครื่องแกงสดบ้านคุณยายสมศรี สาขาเชียงใหม่ ถนนนิมมานเหมินท์ ซอย 9";
+  const bigGoes: DeletionGoes = { messages: 1_234_567, replies: 98_765, payments: 4_321, lineConnected: true };
   const demo = (
     key: keyof typeof DEMO_DELETION_TOKENS,
     state: Pick<FakeConfirmation, "status" | "approved" | "decidedAt">,
     deletedAt?: string,
+    shop: { name: string; goes: DeletionGoes } = { name: "Khao Soi Nimman", goes },
   ) => {
     const tenant = `shop_khaosoi_${key}`;
     const confirmation: FakeConfirmation = {
       id: `del_${key}`,
       tenant,
       token: DEMO_DELETION_TOKENS[key],
-      shopName: "Khao Soi Nimman",
-      goes,
+      shopName: shop.name,
+      goes: shop.goes,
       expiresAt: later(24 * 60),
       ...state,
     };
     const record: FakeDeletionRecord = {
       tenant,
-      name: "Khao Soi Nimman",
+      name: shop.name,
       requestedAt: ago(30),
       deletedBy: null,
       confirmationId: confirmation.id,
@@ -1739,11 +1911,13 @@ function seed(at: number): FakeDb {
     demo("deleted", { status: "decided", approved: true, decidedAt: ago(20) }, ago(20)),
     demo("kept", { status: "decided", approved: false, decidedAt: ago(20) }),
     demo("unanswered", { status: "withdrawn" }),
+    demo("longName", { status: "pending" }, undefined, { name: longName, goes: bigGoes }),
   ];
 
   return {
-    version: 10,
+    version: 11,
     seq: 100,
+    demoShops,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
       {

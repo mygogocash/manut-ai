@@ -511,8 +511,14 @@ async function newSession(shop: string, prefix: "mhs1" | "mos1" = "mhs1") {
     sessionId: `${prefix === "mos1" ? "os" : "hs"}-${crypto.randomUUID()}`, expiresAt: Date.now() + HELPER_SESSION_TTL_MS };
 }
 
+/// A new owner session for `shop`, minted as `openOwnerSession` mints one, for a shop whose owner makes it and so holds its
+/// first session from the write that makes it (self-serve.ts).
+export function newOwnerSession(shop: string) {
+  return newSession(shop, "mos1");
+}
+
 /// The session a device is given, as it is sent: the token once, and its end.
-const sessionOf = (session: { accessToken: string; expiresAt: number }) =>
+export const sessionOf = (session: { accessToken: string; expiresAt: number }) =>
   ({ accessToken: session.accessToken, expiresAt: iso(session.expiresAt) });
 
 /// The person's signed-in session and the one field a helper's route reads, or the refusal to send.
@@ -609,8 +615,10 @@ export async function openHelperSession(env: PeopleEnv, person: SignedInPerson, 
 /// An owner session of `shop` for `person`, while their account is the one the operator linked to the shop
 /// (docs/several-shops.md): the account and the session to send the device, `not_the_owner` for anyone else, or null
 /// when the shop's record cannot be reached. The shop goes into the person's index again, which mends a row a failed
-/// write left out.
-export async function openOwnerSession(env: PeopleEnv, person: SignedInPerson, shop: string):
+/// write left out, unless `options.index` is false: a shop its owner is still making goes into their index only in the
+/// write that lists it (self-serve.ts), so the console's list and theirs never disagree about it.
+export async function openOwnerSession(env: PeopleEnv, person: SignedInPerson, shop: string,
+  options: { index?: boolean } = {}):
   Promise<{ account: { id: string }; session: DeviceSession } | "not_the_owner" | null> {
   const session = await newSession(shop, "mos1");
   const response = await peopleCall(env, shop, "/people/open-owner-session", { subject: person.tenant,
@@ -620,7 +628,7 @@ export async function openOwnerSession(env: PeopleEnv, person: SignedInPerson, s
     return response.status === 403 ? "not_the_owner" : null;
   }
   const { accountId } = (await response.json()) as { accountId: string };
-  await indexShop(env, person.tenant, { shop, role: "owner", ref: accountId });
+  if (options.index !== false) await indexShop(env, person.tenant, { shop, role: "owner", ref: accountId });
   return { account: { id: accountId }, session: sessionOf(session) };
 }
 

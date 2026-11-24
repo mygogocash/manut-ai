@@ -12,6 +12,9 @@
 ///   operator console can list shops. The row names only the tenant and goes
 ///   last of all when the tenant is deleted, after the shop's own data, so a
 ///   deletion that stops part way leaves the shop listed (tenant-data.ts).
+///   Making a shop is the mirror: the row is written last, in the write that
+///   ends the shop's make on the journal of makes (shops-store.ts), so a make
+///   that stops part way lists nothing, and the same request finishes it.
 ///
 /// Only the Worker reaches these paths. Writes additionally require the
 /// `x-pilot` (or, for the registry, `x-admin`) header the Worker sets, the
@@ -34,11 +37,16 @@ import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { actorOr, auditPut, type AuditActor, type AuditRecord } from "./audit-log";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
+import { ownerMadeRecord } from "./people-store";
 import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
+import { newShopState, routineStateKey, templateSetupOf, type RoutineState, type TemplateSetup } from "./routine-store";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
 const MAX_BODY_BYTES = 256 * 1024;
+/// A shop template's id (`@manut/shop-templates`), as the shop's own record and the journal of makes keep one: the Worker
+/// checked the template itself, and this keeps what is stored to an id's shape.
+export const TEMPLATE_ID = /^[a-z][a-z0-9_-]{0,31}$/;
 /// Lists the console reads. Export always reads everything.
 const MAX_LISTED_MESSAGES = 500;
 const MAX_LISTED_REPLIES = 200;
@@ -65,6 +73,12 @@ export type PilotShopRecord = {
   /// The shop template it was made from (`@manut/shop-templates`), when it was: its team, routines and first-week
   /// questions are the routines' records (routine-store.ts).
   template?: string;
+  /// The shop was made by its owner, signed in, with no operator (self-serve.ts), rather than by an operator in the
+  /// console. The console marks it, and the pilot gate leaves it out of the cohort (pilot-gate.ts). Absent for every shop
+  /// an operator made.
+  selfServe?: true;
+  /// When an operator added this self-serve shop to the pilot gate's cohort (pilot-gate.ts); absent while it is left out.
+  addedToCohortAt?: string;
 };
 
 export type InboundMessage = {
@@ -128,6 +142,10 @@ function bounded(value: unknown, max = 256): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= max;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 const enc = encodeURIComponent;
 const keys = {
   shop: (tenant: string) => `pilot-shop:${enc(tenant)}`,
@@ -184,9 +202,9 @@ async function values<T>(storage: DurableObjectStorage, prefix: string, options:
 /// Worker named: the operator's Access identity for the console's writes, the owner for the owner's link. A write
 /// that names nobody is the system's. An actor the log cannot keep becomes a counted miss rather than a wrong name.
 function audited(storage: DurableObjectStorage, tenant: string, actor: unknown, fallback: AuditActor,
-  record: Omit<AuditRecord, "actor">): Promise<Record<string, unknown>> {
+  record: Omit<AuditRecord, "actor">, nowMs?: number): Promise<Record<string, unknown>> {
   const who = actorOr(actor, fallback);
-  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action);
+  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action, nowMs);
 }
 
 /// `/pilot/*` on a TenantObject. Reads need only the tenant; writes need the
@@ -253,6 +271,8 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
       return createShop(storage, tenant, body);
     case "POST /pilot/shop-connection":
       return setShopConnection(storage, tenant, body);
+    case "POST /pilot/shop-cohort":
+      return setShopCohort(storage, tenant, body);
     case "POST /pilot/messages":
       return storeMessages(storage, tenant, body);
     case "POST /pilot/names":
@@ -271,29 +291,86 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
   return json({ error: "not_found" }, 404);
 }
 
+/// Makes the shop: its record, its people record when its owner makes it, its template's setup when it has one, and an audit
+/// entry for each, all in one write, so the shop's object holds either nothing of the shop or all of it, and its log never
+/// says the shop was made, or set up, when it was not. A shop that is already here answers 409 `already_exists` and changes
+/// nothing, so a make that stopped after this write, with its answer lost, finds the shop whole when it goes on.
 async function createShop(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
   if (!bounded(body.name, 200) || !bounded(body.ownerName, 200) || !bounded(body.taskId)) {
     return json({ error: "invalid_request" }, 400);
   }
-  // The Worker checked the template against @manut/shop-templates; this keeps the record to an id's shape.
-  if (body.template !== undefined && !(typeof body.template === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(body.template))) {
+  if (body.template !== undefined && !(typeof body.template === "string" && TEMPLATE_ID.test(body.template))) {
     return json({ error: "invalid_request" }, 400);
   }
+  // A shop made from a template comes with its setup: checked as the template route checks one (routine-store.ts), the
+  // template the record names, and no more routines than a shop keeps. Anything else makes no shop.
+  let setup: TemplateSetup | null = null;
+  let routines: RoutineState | null = null;
+  if (body.setup !== undefined) {
+    setup = isRecord(body.setup) ? templateSetupOf(body.setup) : null;
+    routines = setup && setup.template === body.template ? newShopState(setup) : null;
+    if (!setup || !routines) return json({ error: "invalid_request" }, 400);
+  }
   if (await storage.get(keys.shop(tenant))) return json({ error: "already_exists" }, 409);
+  // A shop its owner makes (self-serve.ts) starts owned: the owner's account linked and their device's first owner session,
+  // in the people record (people-store.ts), go into this same put, so the shop never exists without its owner. Anything
+  // that is not a whole owner makes no shop.
+  const nowMs = Date.now();
+  const owned = body.owner === undefined ? null : ownerMadeRecord(tenant, body.owner, nowMs);
+  if (body.owner !== undefined && !owned) return json({ error: "invalid_request" }, 400);
   const shop: PilotShopRecord = {
     tenant,
     name: body.name,
     ownerName: body.ownerName,
     taskId: body.taskId,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(nowMs).toISOString(),
     ...(typeof body.template === "string" ? { template: body.template } : {}),
+    ...(owned ? { selfServe: true as const } : {}),
   };
-  await storage.put({
-    [keys.shop(tenant)]: shop,
-    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
-      outcome: "ok" })),
-  });
+  // Each entry is minted after the one before, so the log reads them in this order (audit-log.ts), and every one of them
+  // says the write's own moment, the shop's `createdAt`. The owner's entries name the account by its link id only, as
+  // `owner.linked` does when an operator links one: never its subject or an email.
+  const byOwner = owned ? { kind: "owner" as const, id: owned.accountId } : null;
+  const about = owned ? { ownerAccountId: owned.accountId } : {};
+  const entries = [await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
+    outcome: "ok" }, nowMs)];
+  if (byOwner) {
+    for (const action of ["shop.made_by_owner", "owner.linked", "owner.session_opened"] as const) {
+      entries.push(await audited(storage, tenant, byOwner, { kind: "system" }, { action, subject: about, outcome: "ok" }, nowMs));
+    }
+  }
+  // The template's, by whoever made the shop: one entry for the template and one for each routine, as the template route
+  // writes them.
+  if (setup) {
+    entries.push(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "template.applied",
+      subject: { templateId: setup.template }, outcome: "ok" }, nowMs));
+    for (const routine of setup.routines) {
+      entries.push(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "routine.created",
+        subject: { routineId: routine.id }, outcome: "ok" }, nowMs));
+    }
+  }
+  await storage.put(Object.assign({ [keys.shop(tenant)]: shop }, owned ? { [owned.key]: owned.record } : {},
+    routines ? { [routineStateKey(tenant)]: routines } : {}, ...entries));
   return json({ shop });
+}
+
+/// An operator adds a self-serve shop to the pilot gate's cohort, or leaves it out again (`{ counted, actor }`), in one write
+/// with its audit entry. Only a shop its owner made can be added or left out: every shop an operator made is counted. Asking
+/// for what already holds changes and records nothing.
+async function setShopCohort(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  if (typeof body.counted !== "boolean") return json({ error: "invalid_request" }, 400);
+  const shop = await storage.get<PilotShopRecord>(keys.shop(tenant));
+  if (!shop) return json({ error: "not_found" }, 404);
+  if (!shop.selfServe) return json({ error: "not_self_serve" }, 409);
+  if (body.counted === (shop.addedToCohortAt !== undefined)) return json({ shop });
+  const { addedToCohortAt: _left, ...rest } = shop;
+  const next: PilotShopRecord = body.counted ? { ...rest, addedToCohortAt: new Date().toISOString() } : rest;
+  await storage.put({
+    [keys.shop(tenant)]: next,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, {
+      action: body.counted ? "cohort.added" : "cohort.removed", subject: {}, outcome: "ok" })),
+  });
+  return json({ shop: next });
 }
 
 /// Points the shop at its LINE connection and answers with the one it
@@ -615,10 +692,28 @@ export function pilotRegistryKey(tenant: string): string {
   return `pilot-registry:${enc(tenant)}`;
 }
 
+/// A shop that is being made, as AuthObject's journal of makes keeps it (shops-store.ts): one row from before anything of
+/// the shop is written until the write that lists it, so a make that stopped part way can always be found again.
+export const MAKING_PREFIX = "pilot-making:";
+
+export function pilotMakingKey(tenant: string): string {
+  return `${MAKING_PREFIX}${enc(tenant)}`;
+}
+
+/// Lists `tenant` on the registry and takes its make off the journal, in the caller's transaction, so a shop is listed
+/// exactly when its make is over. A shop already listed keeps its place on the list: asking again, as a make does when
+/// the answer to its first ask was lost, moves nothing.
+export function listShop(kv: SyncKvStorage, tenant: string, nowMs: number): void {
+  const kept = kv.get<{ createdAt: string }>(pilotRegistryKey(tenant));
+  kv.put(pilotRegistryKey(tenant), { tenant, createdAt: kept?.createdAt ?? new Date(nowMs).toISOString() });
+  kv.delete(pilotMakingKey(tenant));
+}
+
 /// `/pilot-shops` on AuthObject:
 /// - `GET`: the pilot tenants, oldest first;
 /// - `GET ?tenant=`: whether that one is still listed;
-/// - `POST`: add one, with the Worker's `x-admin` header, like the other global index writes;
+/// - `POST`: list one and end its make (`listShop`), with the Worker's `x-admin` header, like the other global index
+///   writes. It answers the same again, so a make may ask twice;
 /// - `DELETE ?tenant=`: take one off, with the Worker's `x-wipe` header, as the tenant deletion's last step
 ///   (tenant-data.ts).
 export async function pilotRegistryRoute(storage: DurableObjectStorage, request: Request): Promise<Response> {
@@ -646,7 +741,8 @@ export async function pilotRegistryRoute(storage: DurableObjectStorage, request:
   const parsed = await readJsonBody<{ tenant?: unknown }>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   if (!bounded(parsed.value?.tenant)) return json({ error: "invalid_request" }, 400);
-  await storage.put(pilotRegistryKey(parsed.value.tenant), { tenant: parsed.value.tenant, createdAt: new Date().toISOString() });
+  const listed = parsed.value.tenant;
+  storage.transactionSync(() => listShop(storage.kv, listed, Date.now()));
   return json({ registered: true });
 }
 

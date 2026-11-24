@@ -90,6 +90,22 @@ describe("Practice's Google Sheets", () => {
     await rt.request("shops.switch", { shop: HELPED_SHOP });
     expect(await refusal(rt.request("google.status", {}))).toBe("owner_only");
   });
+
+  it("is the sample shop's alone: a shop the person made in Practice has no sample sheet, and says so", async () => {
+    const { rt } = await open();
+    const { shop } = await rt.request("shops.make", { name: "Baan Dao", ownerName: "Dao", template: null });
+    expect(await refusal(rt.request("google.status", {}))).toBe("not_yet");
+    for (const [op, params] of [
+      ["google.connect", { shop: shop.id }],
+      ["google.disconnect", { shop: shop.id }],
+      ["google.books", { shop: shop.id, month: "2026-12" }],
+    ] as const) {
+      expect(await refusal((rt.request as (op: string, p: unknown) => Promise<unknown>)(op, params)), op).toBe("not_yet");
+    }
+    // back at the person's own shop the sample is as it was
+    await rt.request("shops.switch", { shop: OWN_SHOP });
+    expect(await rt.request("google.status", {})).toMatchObject({ shop: OWN_SHOP, state: "working" });
+  });
 });
 
 describe("where the sample can start", () => {

@@ -14,12 +14,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Seg } from "../chat/model/Seg";
 import { t, type Key } from "../i18n";
+import { runtimeKind } from "../runtime";
 import { sessionFor } from "../runtime/http";
+import { useStore } from "../state/store";
 import type { SignInState } from "../runtime/http/session";
 import { pendingRestart, restartApp, saveRuntimeChoice, useSignIn } from "../runtime/link";
 import { parseOrigin, readRuntimeSetting, type OriginRefusal, type RuntimeSetting } from "../runtime/setting";
 import { Row } from "./DevRow";
 import { EmailSignIn } from "./EmailSignIn";
+import { MakeShop, makeShopOffer } from "./MakeShop";
 
 type Mode = RuntimeSetting["mode"];
 
@@ -48,6 +51,8 @@ export interface DeveloperViewProps {
   onSignOut: () => void;
   /** the sign-in by email, drawn above Apple's rows when signed out and alone in Practice (EmailSignIn.tsx); none when absent */
   email?: ReactNode;
+  /** Make your shop (MakeShop.tsx), drawn in a group of its own below the sign-in where `makeShopOffer` offers it */
+  make?: ReactNode;
 }
 
 /** What the top row says under "Not signed in", for either way in: that the API ended the session, that a sign-out could
@@ -187,6 +192,14 @@ export function DeveloperView(p: DeveloperViewProps) {
           </div>
         </>
       )}
+      {p.make && (
+        <>
+          <div className="st-gh">{t("make.title")}</div>
+          <div className="st-grp" data-testid="dev-make">
+            {p.make}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -202,6 +215,10 @@ export function DeveloperPage() {
   const origin = saved.mode === "connected" ? saved.origin : null;
   const signIn = useSignIn(origin);
   const signingIn = signIn?.kind === "signing_in";
+  const shops = useStore().shops;
+  // Once this page has made a shop it keeps saying so for as long as it shows, though the person is no longer in no shop.
+  const [made, setMade] = useState(false);
+  const offer = makeShopOffer({ kind: runtimeKind(), saved, restart: pendingRestart(saved), signIn, shops, made });
 
   // A sign-out that the API was not told of is said until the next sign-in starts, whichever way the person signs in.
   useEffect(() => {
@@ -226,6 +243,7 @@ export function DeveloperPage() {
       token={token}
       nonce={nonce}
       email={<EmailSignIn key={origin ?? "practice"} origin={origin} held={signingIn} />}
+      make={offer ? <MakeShop key={origin ?? "practice"} practice={offer === "practice"} onMade={() => setMade(true)} /> : undefined}
       onMode={(next) => {
         setMode(next);
         setOriginError(null);

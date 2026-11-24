@@ -324,6 +324,7 @@ describe("how a change reaches the runtime", () => {
       ["invalid_month", "Pick a month that has ended."],
       ["no_shop", "No shop is linked to your account yet, so there is no Google Sheets to set up here."],
       ["unavailable", "Google Sheets did not answer. Try again in a moment."],
+      ["not_yet", "A shop you made in Practice has no sample Google Sheet. Switch back to your own shop to try it."],
     ];
     for (const [code, message] of cases) {
       expect((await googleBooks(calls({ books: () => refuse(code) }).fake, WORKING, "2026-10")).action, code).toEqual({ type: "failed", message });
