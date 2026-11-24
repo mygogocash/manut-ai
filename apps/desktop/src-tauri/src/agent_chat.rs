@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::acp_chat::{acp_agent, is_acp_session_id, no_rules, Acp, RuleProbe};
+use crate::ask_tool::{ask_tool, claude_tool, codex_change, codex_change_tool, codex_command_tool, pi_tool};
 use crate::dsh_chat::DshChat;
 use crate::session_files;
 use crate::sessions::{agent, chat_args, cmd_path_arg, coalesce, is_uuid, launch_for, layout, resume_args, signal_group, unrecognized_program, Mode, ProcessTree, COALESCE_BYTES, COALESCE_WINDOW, INPUT_QUEUE};
@@ -1468,8 +1469,11 @@ impl Adapter for Claude {
                         }
                         _ => (format!("Allow {shown}?"), ask_detail(&name, &input)),
                     };
+                    // the title and command above are cut to a line for the person; Kit's dial reads the tool's name and
+                    // input as Claude Code sent them (ask_tool.rs)
+                    let tool = claude_tool(&name, &input, &s(req, "blocked_path"), &self.cwd);
                     self.pending.insert(rid.clone(), ClaudeAsk::Tool(name, input, req.get("permission_suggestions").cloned().unwrap_or(Value::Null)));
-                    let mut f = json!({"request_id": rid, "title": title, "command": command, "choices": CHOICES});
+                    let mut f = json!({"request_id": rid, "title": title, "command": command, "choices": CHOICES, "tool": tool});
                     if let Some(p) = plan {
                         f["plan"] = Value::String(p);
                         f["choices"] = json!(["deny", "once"]);
@@ -1816,6 +1820,9 @@ pub struct Codex {
     ask_helpers: HashMap<String, String>,
     /// diff summaries of fileChange items, shown on their approval card
     changes: HashMap<String, String>,
+    /// every path of each fileChange item and whether it deletes a file (`ask_tool::codex_change`), named on its
+    /// approval for Kit's dial; an item whose paths cannot all be read has none
+    change_paths: HashMap<String, (Vec<String>, bool)>,
     /// the last error notification was a 401 (not signed in)
     unauthorized: bool,
     /// Stop was pressed before Codex named the turn: interrupt it as soon as it does
@@ -1858,6 +1865,7 @@ impl Codex {
             pending: HashMap::new(),
             ask_helpers: HashMap::new(),
             changes: HashMap::new(),
+            change_paths: HashMap::new(),
             unauthorized: false,
             stop_asked: false,
             mode: None,
@@ -2063,6 +2071,10 @@ impl Codex {
             "fileChange" => {
                 let detail = self.file_changes(item);
                 let paths: Vec<String> = item.get("changes").and_then(Value::as_array).into_iter().flatten().map(|c| rel(&s(c, "path"), &self.cwd)).filter(|p| !p.is_empty()).collect();
+                match codex_change(item) {
+                    Some(c) => self.change_paths.insert(iid.clone(), c),
+                    None => self.change_paths.remove(&iid),
+                };
                 self.changes.insert(iid, clip(&paths.join(", "), 120));
                 ("patch".into(), detail)
             }
@@ -2272,13 +2284,18 @@ impl Adapter for Codex {
                     let title = if reason.is_empty() { "Run this command?".to_string() } else { clip(&reason, 120) };
                     let cwd = if s(&p, "cwd").is_empty() { self.cwd.clone() } else { s(&p, "cwd") };
                     self.pending.insert(key.clone(), CodexAsk::Command(rpc_id));
-                    st.emit(ev("approval.request", with_cwd(json!({"request_id": key, "title": title, "command": Codex::command_of(&p), "choices": CHOICES}), &cwd)));
+                    // the title is Codex's reason, for the person; Kit's dial reads the command itself (ask_tool.rs)
+                    let tool = codex_command_tool(&p, &self.cwd);
+                    st.emit(ev("approval.request", with_cwd(json!({"request_id": key, "title": title, "command": Codex::command_of(&p), "choices": CHOICES, "tool": tool}), &cwd)));
                 }
                 "item/fileChange/requestApproval" => {
-                    let files = self.changes.get(&s(&p, "itemId")).cloned().unwrap_or_default();
+                    let item = s(&p, "itemId");
+                    let files = self.changes.get(&item).cloned().unwrap_or_default();
                     let title = if files.is_empty() { "Allow Codex to change files?".to_string() } else { format!("Allow Codex to change {files}?") };
                     self.pending.insert(key.clone(), CodexAsk::File(rpc_id));
-                    st.emit(ev("approval.request", with_cwd(json!({"request_id": key, "title": title, "command": "", "choices": CHOICES}), &self.cwd)));
+                    // the title's list is cut short for the card; the dial gets every path the item names
+                    let tool = codex_change_tool(self.change_paths.get(&item), &p, &self.cwd);
+                    st.emit(ev("approval.request", with_cwd(json!({"request_id": key, "title": title, "command": "", "choices": CHOICES, "tool": tool}), &self.cwd)));
                 }
                 "item/tool/requestUserInput" => {
                     let mut qids = Vec::new();
@@ -2635,6 +2652,9 @@ pub struct Pi {
     last_stop: String,
     last_error: String,
     pending: HashMap<String, PiAsk>,
+    /// tool calls started and not ended, by call id: (tool name, arguments). An approval dialog names its tool but no
+    /// call, so the arguments of that tool's one running call are what Kit's dial reads (`ask_tool::pi_tool`)
+    running: HashMap<String, (String, Value)>,
     /// thinking levels it offers (`get_available_thinking_levels`)
     levels: Vec<String>,
     reads: u64,
@@ -2658,8 +2678,8 @@ pub struct Pi {
 }
 
 /// oh-my-pi's tool approval as a select (`Allow tool: bash\nCommand: ls -la` with Approve / Approve bash for this
-/// session / Deny): the card title, the command and the labels, or `None` for an ordinary select.
-fn pi_approval(title: &str, options: &[String]) -> Option<(String, String, PiAsk)> {
+/// session / Deny): the tool it names, the card title, the command and the labels, or `None` for an ordinary select.
+fn pi_approval(title: &str, options: &[String]) -> Option<(String, String, String, PiAsk)> {
     let mut lines = title.lines();
     let tool = lines.next()?.strip_prefix("Allow tool: ")?.trim().to_string();
     let deny = options.iter().find(|o| o.as_str() == "Deny")?.clone();
@@ -2675,7 +2695,7 @@ fn pi_approval(title: &str, options: &[String]) -> Option<(String, String, PiAsk
         }
         _ => (format!("Allow {tool}?"), clip(&rest.join(" "), 160)),
     };
-    Some((title, command, PiAsk::Approve { once, session, deny }))
+    Some((tool, title, command, PiAsk::Approve { once, session, deny }))
 }
 
 /// OmO's own folder: `~/.omo`.
@@ -3121,6 +3141,7 @@ impl Adapter for Pi {
                 let name = s(&v, "toolName");
                 let args = v.get("args").cloned().unwrap_or(Value::Null);
                 let call = s(&v, "toolCallId");
+                self.running.insert(call.clone(), (name.clone(), args.clone()));
                 if name == "todo" && self.label == "OmO" {
                     // OmO's todo list: the turn's checklist once its result says how the list stands, never a step
                     self.todo_calls.insert(call);
@@ -3141,6 +3162,7 @@ impl Adapter for Pi {
             "tool_execution_end" => {
                 let ok = !v.get("isError").and_then(Value::as_bool).unwrap_or(false);
                 let call = s(&v, "toolCallId");
+                self.running.remove(&call);
                 if self.todo_calls.remove(&call) {
                     if let Some(items) = omo_todo(&v["result"]["details"]) {
                         st.emit(plan_event(&items));
@@ -3189,14 +3211,24 @@ impl Adapter for Pi {
                     "confirm" => {
                         let msg = s(&v, "message");
                         self.pending.insert(id.clone(), PiAsk::Confirm);
-                        st.emit(ev("approval.request", with_cwd(json!({"request_id": id, "title": if title.is_empty() { "Allow this?".into() } else { title }, "command": msg, "choices": ["deny", "once"]}), &self.cwd)));
+                        // an extension's own question, not a tool call: Kit's dial leaves it to the person
+                        let tool = ask_tool("other", "", None, None, &self.cwd);
+                        st.emit(ev("approval.request", with_cwd(json!({"request_id": id, "title": if title.is_empty() { "Allow this?".into() } else { title }, "command": msg, "choices": ["deny", "once"], "tool": tool}), &self.cwd)));
                     }
                     "select" => {
                         let options: Vec<String> = v.get("options").and_then(Value::as_array).into_iter().flatten().filter_map(|o| o.as_str().map(String::from)).collect();
-                        if let Some((t, command, ask)) = pi_approval(&title, &options) {
+                        if let Some((name, t, command, ask)) = pi_approval(&title, &options) {
                             let choices: Vec<&str> = if matches!(&ask, PiAsk::Approve { session: Some(_), .. }) { CHOICES.to_vec() } else { vec!["deny", "once"] };
                             self.pending.insert(id.clone(), ask);
-                            st.emit(ev("approval.request", with_cwd(json!({"request_id": id, "title": t, "command": command, "choices": choices}), &self.cwd)));
+                            // the dialog's "Command:" line is pi's words, cut to one line; the dial reads the running
+                            // call's own arguments, when exactly one call of that tool is running
+                            let mut calls = self.running.values().filter(|(n, _)| *n == name);
+                            let args = match (calls.next(), calls.next()) {
+                                (Some((_, a)), None) => Some(a),
+                                _ => None,
+                            };
+                            let tool = pi_tool(&name, args, &self.cwd);
+                            st.emit(ev("approval.request", with_cwd(json!({"request_id": id, "title": t, "command": command, "choices": choices, "tool": tool}), &self.cwd)));
                         } else {
                             self.pending.insert(id.clone(), PiAsk::Select);
                             st.emit(ev("clarify.request", json!({"request_id": id, "question": title, "choices": options})));
@@ -5206,6 +5238,109 @@ mod tests {
         assert_eq!(s(card, "title"), "Allow Codex to change notes.txt?");
         assert_eq!(s(&written(&st)[0]["result"], "decision"), "accept");
         assert_eq!(ends(&st.events), [("done".into(), "".into())]);
+    }
+
+    // -- what each ask names for Kit's dial, from the agent's own message (ask_tool.rs) --
+
+    /// The `tool` of every approval card `a` draws from the recorded `files`, each answered "once".
+    fn ask_tools(a: &mut dyn Adapter, files: &[&str]) -> Vec<Value> {
+        of(&replay(a, files, &[]).events, "approval.request").iter().map(|c| c["tool"].clone()).collect()
+    }
+
+    /// The `tool` of the card each recorded Claude Code permission request in `file` draws, fed alone to a chat in
+    /// /w/proj (a question is a question card, not an ask).
+    fn claude_ask_tools(file: &str) -> Vec<Value> {
+        real(file)
+            .iter()
+            .filter(|l| l.contains("\"can_use_tool\""))
+            .flat_map(|l| Claude::new("/w/proj").on_line(l).events)
+            .filter(|e| s(e, "event") == "approval.request")
+            .map(|e| e["tool"].clone())
+            .collect()
+    }
+
+    #[test]
+    fn real_claude_asks_name_the_tool_and_its_line_or_paths() {
+        // claude-approve.jsonl (2.1.319): a Write, by its absolute path, in the session's folder
+        let mut c = Claude::new("/w/t14");
+        c.start();
+        c.on_input(Input::send("write note.txt")).unwrap();
+        let lines = fixture("claude-approve.jsonl");
+        let at = lines.iter().position(|l| l.contains("\"can_use_tool\"")).unwrap();
+        let card = run(&mut c, &lines[..=at]).events.pop().unwrap();
+        assert_eq!(card["tool"], json!({"kind": "write", "name": "Write", "paths": ["/w/t14/note.txt"], "cwd": "/w/t14"}));
+        // a command with the path Claude Code found it writing (`blocked_path`)
+        let d: Vec<Value> = ["d1", "d2", "d3"].iter().map(|d| json!({"kind": "command", "name": "Bash", "line": format!("mkdir -p {d}"), "paths": [format!("/w/proj/{d}")], "cwd": "/w/proj"})).collect();
+        assert_eq!(claude_ask_tools("claude-2-approvals.jsonl"), d);
+        assert_eq!(claude_ask_tools("claude-9-subagent-ask.jsonl"), [json!({"kind": "command", "name": "Bash", "line": "echo three > \"/w/proj/c.txt\"", "paths": ["/w/proj/c.txt"], "cwd": "/w/proj"})]);
+        // the line exactly as Claude Code sent it, quotes and all
+        assert_eq!(claude_ask_tools("claude-10-close.jsonl")[0]["line"], "python3 -c \"import time; time.sleep(30); print('finished again')\"");
+        // a read outside the folder Claude Code may use
+        assert_eq!(claude_ask_tools("claude-12-attach-read.jsonl"), [json!({"kind": "read", "name": "Read", "paths": ["/w/elsewhere/plan.txt"], "cwd": "/w/proj"})]);
+        // a plan is no tool the dial reads; the edits after it name their files
+        assert_eq!(
+            claude_ask_tools("claude-14-plan-allow.jsonl"),
+            [json!({"kind": "other", "name": "ExitPlanMode", "cwd": "/w/proj"}), json!({"kind": "edit", "name": "Edit", "paths": ["/w/proj/calc.py"], "cwd": "/w/proj"}), json!({"kind": "edit", "name": "Edit", "paths": ["/w/proj/README.md"], "cwd": "/w/proj"})]
+        );
+    }
+
+    #[test]
+    fn a_claude_command_on_two_lines_reaches_the_dial_whole_while_its_card_shows_one_line() {
+        let req = json!({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "pnpm test\ngit push origin main"}, "tool_use_id": "t1"}});
+        let card = Claude::new("/w/proj").on_line(&req.to_string()).events.remove(0);
+        // the card's line is for the person: one line, which reads as one other command
+        assert_eq!(s(&card, "command"), "pnpm test git push origin main");
+        assert_eq!(card["tool"]["line"], "pnpm test\ngit push origin main");
+    }
+
+    #[test]
+    fn real_codex_asks_name_the_command_it_runs_and_every_file() {
+        let mut x = codex_up();
+        x.on_input(Input::send("mkdir")).unwrap();
+        // `/bin/zsh -lc 'mkdir -p d1'`: the script, in the folder Codex names
+        let want: Vec<Value> = ["d1", "d2", "d3", "d4"].iter().map(|d| json!({"kind": "command", "line": format!("mkdir -p {d}"), "cwd": "/w/proj"})).collect();
+        assert_eq!(ask_tools(&mut x, &["codex-2-approvals.jsonl"]), want);
+        let mut x = codex_up();
+        x.on_input(Input::send("sleep")).unwrap();
+        let st = run(&mut x, &real("codex-4-stop.jsonl"));
+        assert_eq!(of(&st.events, "approval.request")[0]["tool"]["line"], "sleep 30; echo finished");
+        // a file change names its item's paths, which arrived before its approval
+        let mut x = codex_up();
+        x.on_input(Input::send("notes")).unwrap();
+        assert_eq!(ask_tools(&mut x, &["codex-3-edit.jsonl"]), [json!({"kind": "edit", "paths": ["/w/proj/notes.txt"], "cwd": "/w/proj"})]);
+    }
+
+    #[test]
+    fn real_omp_asks_name_their_running_calls_arguments() {
+        let mut p = pi_up("oh-my-pi", &["omp-init.jsonl"]);
+        p.on_input(Input::send("ls")).unwrap();
+        let want: Vec<Value> = ["ls -la", "echo hi", "pwd"].iter().map(|l| json!({"kind": "command", "name": "bash", "line": l, "cwd": "/w/proj"})).collect();
+        assert_eq!(ask_tools(&mut p, &["omp-2-approvals.jsonl"]), want);
+        // a write names its file; oh-my-pi's own edit names it inside its patch, so it names none
+        let mut p = pi_up("oh-my-pi", &["omp-init.jsonl"]);
+        p.on_input(Input::send("notes")).unwrap();
+        assert_eq!(
+            ask_tools(&mut p, &["omp-3-edit.jsonl"]),
+            [json!({"kind": "write", "name": "write", "paths": ["notes.txt"], "cwd": "/w/proj"}), json!({"kind": "edit", "name": "edit", "cwd": "/w/proj"})]
+        );
+    }
+
+    #[test]
+    fn a_pi_approval_names_no_arguments_while_two_calls_of_its_tool_run() {
+        let mut p = Pi::new("/w/proj", "oh-my-pi");
+        p.on_input(Input::send("x")).unwrap();
+        p.on_line(r#"{"type":"tool_execution_start","toolCallId":"a","toolName":"bash","args":{"command":"pnpm test"}}"#);
+        p.on_line(r#"{"type":"tool_execution_start","toolCallId":"b","toolName":"bash","args":{"command":"git push origin main"}}"#);
+        let select = |id: &str, cmd: &str| json!({"type": "extension_ui_request", "id": id, "method": "select", "title": format!("Allow tool: bash\nCommand: {cmd}"), "options": ["Approve", "Deny"]}).to_string();
+        let card = p.on_line(&select("u1", "pnpm test")).events.pop().unwrap();
+        assert_eq!(card["tool"], json!({"kind": "command", "name": "bash", "cwd": "/w/proj"}));
+        // once one has ended, the other is the one asking
+        p.on_line(r#"{"type":"tool_execution_end","toolCallId":"a","toolName":"bash","isError":false}"#);
+        let card = p.on_line(&select("u2", "git push origin main")).events.pop().unwrap();
+        assert_eq!(card["tool"]["line"], "git push origin main");
+        // an extension's own confirm is no tool call
+        let card = p.on_line(r#"{"type":"extension_ui_request","id":"u3","method":"confirm","title":"Proceed?","message":"git status"}"#).events.pop().unwrap();
+        assert_eq!(card["tool"], json!({"kind": "other", "cwd": "/w/proj"}));
     }
 
     #[test]
