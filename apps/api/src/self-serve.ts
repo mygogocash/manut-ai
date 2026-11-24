@@ -14,8 +14,12 @@
 /// open (`SELF_SERVE_SHOP_LIMITER`). An account may have made `SHOPS_MADE_LIMIT` shops at a time: the slot is reserved in
 /// AuthObject before anything is made (shops-store.ts), in one transaction, so racing requests cannot pass it. Once the shop
 /// is made, one more AuthObject transaction puts it on the console's list and in the person's index together, so the
-/// console and the person's own list never disagree about it. A make that fails part way is never listed, gives its slot
-/// back, and asking again makes a whole new shop.
+/// console and the person's own list never disagree about it.
+///
+/// A make that fails part way. The same transaction that takes the slot puts the make on AuthObject's journal of makes, so
+/// a stopped make is never lost: it is never listed, it gives its slot back, and asking again for the same shop (the same
+/// name, owner name and template) finds it and finishes that shop on a slot it takes again, never a second one. The shop's
+/// own object holds the shop whole or nothing of it, so there is no half-made shop to find.
 ///
 /// The pilot gate leaves a self-serve shop out of its cohort unless an operator adds it (pilot-gate.ts), and the console's
 /// Shops overview marks it, so an operator sees where it came from.
@@ -23,11 +27,11 @@
 import type { ShopTemplate } from "@manut/shop-templates";
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
-import { bearer, hasExactly, newOwnerSession, sessionOf, signedInPerson, type PeopleEnv } from "./people";
+import { bearer, hasExactly, newOwnerSession, openOwnerSession, sessionOf, signedInPerson, type PeopleEnv } from "./people";
 import { keptName } from "./people-store";
 import { newShopTenant, writeNewShop, type PilotEnv } from "./pilot";
 import { checkedTemplate } from "./routine-setup";
-import { finishMadeShop, releaseMadeShop, reserveMadeShop, SHOPS_MADE_LIMIT } from "./shops-store";
+import { beginMake, finishMadeShop, releaseMadeShop, SHOPS_MADE_LIMIT, twice } from "./shops-store";
 
 export type SelfServeEnv = PeopleEnv & PilotEnv & {
   /// Sign-ups are open only while this is exactly "on". Unset in every environment until the owner opens them.
@@ -80,10 +84,22 @@ export async function newShopRoute(request: Request, env: SelfServeEnv): Promise
   const template = templateOf(body.template);
   if (template === undefined) return json({ error: "unknown_template" }, 400);
 
-  const tenant = newShopTenant();
-  const reserved = await reserveMadeShop(env, person.tenant, tenant);
-  if (reserved === "too_many") return json({ error: "too_many_shops", limit: SHOPS_MADE_LIMIT }, 409);
-  if (reserved !== "reserved") return json({ error: "shop_unavailable" }, 503);
+  const candidate = newShopTenant();
+  // The make goes on the journal and takes one of the person's slots in one transaction, before anything of the shop is
+  // written. If this same shop is already on the journal, an earlier try stopped part way and this one finishes it.
+  const begun = await beginMake(env, { tenant: candidate, name, ownerName, template: template?.id ?? null,
+    subject: person.tenant });
+  if (begun === "too_many") return json({ error: "too_many_shops", limit: SHOPS_MADE_LIMIT }, 409);
+  // A failure whose slot may have been taken all the same (only the answer was lost) gives it back, as every failure below does.
+  if (begun === null) {
+    await releaseMadeShop(env, person.tenant, candidate);
+    return json({ error: "shop_unavailable" }, 503);
+  }
+  const { tenant } = begun;
+  const unavailable = async () => {
+    await releaseMadeShop(env, person.tenant, tenant);
+    return json({ error: "shop_unavailable" }, 503);
+  };
   try {
     const accountId = `owner-${crypto.randomUUID()}`;
     const session = await newOwnerSession(tenant);
@@ -91,16 +107,22 @@ export async function newShopRoute(request: Request, env: SelfServeEnv): Promise
     const actor: AuditActor = { kind: "owner", id: accountId };
     const made = await writeNewShop(env, tenant, { name, ownerName, template }, actor, { accountId, subject: person.tenant,
       sessionId: session.sessionId, tokenHash: session.tokenHash, expiresAt: session.expiresAt });
-    // Listed and indexed together, last: a shop whose setup or listing could not be written is never listed, and its
-    // session's token, which only this answer would carry, is never sent, so nothing can use it.
-    if (!made || !(await finishMadeShop(env, person.tenant, tenant, accountId))) {
-      await releaseMadeShop(env, person.tenant, tenant);
-      return json({ error: "shop_unavailable" }, 503);
+    if (!made) return await unavailable();
+    let owner = { account: { id: accountId }, session: sessionOf(session) };
+    if (made === "existing") {
+      // An earlier try wrote the shop with its first owner session, whose token only that try's answer would have carried
+      // and never reached anyone. This try opens a session of its own, as the person's sign-in opens their shop (shops.ts),
+      // for the account that try linked, and leaves the person's index to the write that lists the shop.
+      const opened = await openOwnerSession(env, person, tenant, { index: false });
+      if (!opened || opened === "not_the_owner") return await unavailable();
+      owner = opened;
     }
+    // Listed and indexed together, last, and asked twice if need be: a shop whose setup or listing could not be written is
+    // never listed, and its session's token, which only this answer would carry, is never sent, so nothing can use it.
+    if (!(await twice(() => finishMadeShop(env, person.tenant, tenant, owner.account.id)))) return await unavailable();
     return json({ shop: { id: tenant, name, ownerName, template: template?.id ?? null }, role: "owner",
-      account: { id: accountId }, session: sessionOf(session) }, 201);
+      account: owner.account, session: owner.session }, 201);
   } catch {
-    await releaseMadeShop(env, person.tenant, tenant);
-    return json({ error: "shop_unavailable" }, 503);
+    return await unavailable();
   }
 }
