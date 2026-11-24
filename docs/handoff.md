@@ -105,17 +105,20 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
-   and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. A
+1. Three helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
+   and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. At
+   13:02 items 10, 34, 35 and 36 stopped at the limit ("resets 4:10pm"); 35, 34 and 10 were sent on at 13:16 to 13:20
+   and ran, and 36's follow-up stayed queued so that three work at a time; it was sent on once 34 finished. A
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus);
    - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
    - item 10, the join page with the web's own sign-in by email code (`feat/join-page`, Opus);
    - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus).
    Next: item 17, the installable web app (after item 10).
-   Merged: 33 (the desktop's sign-in by email code in Settings › Developer, kept and refreshed as Apple's is), 32
+   Merged: 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
+   append asked as an owner-only command and sent once; the broker now sends an operation only through a connection of
+   its own provider; turning it on is in `docs/connectors.md` 4b), 33 (the desktop's sign-in by email code in Settings › Developer, kept and refreshed as Apple's is), 32
    (Settings › People for the owner: helpers, invite links to copy, Cancel, Remove, cover dates; the
    new-device notification opens it), 31 (sign-in by a code sent by email, built and off: both routes answer `email_not_configured` until
    `EMAIL_SIGN_IN` is on, a sender is bound and `APPROVAL_LINK_SECRET` is set; the dev deploy check now refuses any `TEST_`
