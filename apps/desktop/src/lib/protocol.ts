@@ -844,7 +844,8 @@ export type BridgeEvent =
   | (EventBase & { event: "plan"; items: PlanItem[] })
   /** A SESSIONS agent took back the person's last message and what came after it (its own rewind); `text` is
    *  that message as the agent read it, when it says. */
-  | (EventBase & { event: "rewound"; text?: string });
+  /** `id`: the person's message a rewind to a turn took back, with everything after it (none: the last message) */
+  | (EventBase & { event: "rewound"; text?: string; id?: string });
 
 /** One file's change in the diff view. `lines` start with `+`, `-`, ` ` or `@@`; `more` lines were not sent. */
 export interface DiffFile {

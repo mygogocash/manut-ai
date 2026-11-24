@@ -760,9 +760,10 @@ function doneWaiting(c: Chat): Chat {
 }
 
 /** The agent took back the person's last message: it and everything after it leave the chat. */
-function rewind(c: Chat): Chat {
-  let at = -1;
-  for (let i = c.items.length - 1; i >= 0; i--) {
+function rewind(c: Chat, id?: string): Chat {
+  // a rewind to a turn names the message it took back; the agent's own rewind of the last message names none
+  let at = id ? c.items.findIndex((i) => i.kind === "user" && i.id === id) : -1;
+  for (let i = c.items.length - 1; at < 0 && i >= 0; i--) {
     if (c.items[i].kind === "user") {
       at = i;
       break;
@@ -1200,7 +1201,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
     case "plan":
       return touchChat(state, bot, (c) => patchTurn(c, (t) => ({ ...t, plan: parsePlan(ev.items) })));
     case "rewound":
-      return touchChat(state, bot, (c) => rewind(c));
+      return touchChat(state, bot, (c) => rewind(c, ev.id));
     case "tool.start":
       return touchChat(state, bot, (c0) => {
         // the note written before this call is the bot's first word on a steer it read
