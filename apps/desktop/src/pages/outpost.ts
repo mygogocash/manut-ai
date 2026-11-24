@@ -38,6 +38,8 @@ export function outpostRow(context: OutpostContext): OutpostRow {
       return { line: t("outpost.unavailable"), tag: null, action: null };
     case "unregistered":
       return { line: t("outpost.notSetUp"), tag: null, action: "register" };
+    case "elsewhere":
+      return { line: t("outpost.elsewhere"), tag: null, action: "register" };
     case "refused":
       return { line: t("outpost.refused"), tag: "asleep", action: "register" };
     case "stopped":

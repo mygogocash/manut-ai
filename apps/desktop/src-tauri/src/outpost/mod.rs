@@ -38,25 +38,30 @@ pub fn is_outpost_webview(label: &str) -> bool {
     label == browser::LABEL
 }
 
-/// What the Connections page shows about this Mac's outpost: never its credential, its id, or anything it read.
+/// What the Connections page shows about this Mac's outpost for the shop it asks about: never its credential, or anything
+/// it read.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
     /// `unavailable`: this computer keeps no keychain item (only macOS does), or its keychain could not be read.
-    /// `unregistered`: this Mac is not the signed-in shop's outpost. `running`; `stopped`: the owner's Stop; `refused`:
-    /// the API no longer takes its credential (removed, or given a new one), so it must be registered again; `idle`:
-    /// registered, but not running, because nobody is signed in to that shop here.
+    /// `unregistered`: this Mac is no shop's outpost. `elsewhere`: it is another shop's (or another API's), so registering
+    /// it for this one moves it. `running`; `stopped`: the owner's Stop; `refused`: the API no longer takes its credential
+    /// (removed, or given a new one), so it must be registered again; `idle`: registered, but not running, because
+    /// nobody who owns that shop is here.
     pub state: &'static str,
     /// Online as the API counts it: running, its last heartbeat under 90 seconds old.
     pub online: bool,
     /// How many steps it holds: handed out, and not yet reported.
     pub steps: u32,
     pub name: Option<String>,
+    /// The outpost's id, the one the shop's list of outposts names it by, so the page can tell which of them is this Mac.
+    /// Only for the shop this Mac is the outpost of. It opens nothing: only the credential does.
+    pub id: Option<String>,
 }
 
 impl View {
     fn bare(state: &'static str) -> View {
-        View { state, online: false, steps: 0, name: None }
+        View { state, online: false, steps: 0, name: None, id: None }
     }
 }
 
@@ -227,7 +232,7 @@ impl Outposts {
         }
         let item = registered(&origin, &answer).ok_or("failed")?;
         item::write(&item)?;
-        let page = serde_json::json!({ "tenant": item.tenant, "outpost": { "name": item.name } }).to_string();
+        let page = page_answer(&item);
         let mut inner = self.lock();
         self.stop_locked(&mut inner);
         inner.loaded = Loaded::Item(Some(item));
@@ -291,10 +296,18 @@ fn view_of(inner: &Inner, origin: &str, tenant: &str) -> View {
             } else {
                 "idle"
             };
-            View { state, online: running.is_some_and(|s| s.online()), steps: running.map_or(0, |s| s.held()), name: Some(item.name.clone()) }
+            View { state, online: running.is_some_and(|s| s.online()), steps: running.map_or(0, |s| s.held()), name: Some(item.name.clone()),
+                id: Some(item.outpost_id.clone()) }
         }
-        Loaded::Item(_) => View::bare("unregistered"),
+        // One keychain item, so registering this Mac for the shop asked about would take it from the one it serves now.
+        Loaded::Item(Some(_)) => View::bare("elsewhere"),
+        Loaded::Item(None) => View::bare("unregistered"),
     }
+}
+
+/// What the page is told of a registration that worked: the shop and the outpost's name, never its credential.
+fn page_answer(item: &Item) -> String {
+    serde_json::json!({ "tenant": item.tenant, "outpost": { "name": item.name } }).to_string()
 }
 
 fn is_title(title: &str) -> bool {
@@ -567,15 +580,48 @@ mod tests {
         let (origin, shop) = ("https://dev.manut.xyz", "pilot:shop-1");
         assert_eq!(view_of(&inner(Loaded::Unavailable, None, false), origin, shop).state, "unavailable");
         assert_eq!(view_of(&inner(Loaded::Item(None), None, false), origin, shop).state, "unregistered");
-        assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, false), origin, "pilot:another").state, "unregistered");
-        assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, false), "http://localhost:8787", shop).state, "unregistered");
+        // Another shop's outpost, or another API's: registering it here would move it, and nothing of it is shown.
+        assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, false), origin, "pilot:another"), View::bare("elsewhere"));
+        assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, false), "http://localhost:8787", shop), View::bare("elsewhere"));
         assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, false), origin, shop),
-            View { state: "idle", online: false, steps: 0, name: Some("This Mac".into()) });
+            View { state: "idle", online: false, steps: 0, name: Some("This Mac".into()), id: Some("op-1".into()) });
         assert_eq!(view_of(&inner(Loaded::Item(Some(sample(true))), None, false), origin, shop).state, "stopped");
         assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), Some(Arc::new(Shared::default())), false), origin, shop).state, "running");
         assert_eq!(view_of(&inner(Loaded::Item(Some(sample(false))), None, true), origin, shop).state, "refused");
         let shown = serde_json::to_string(&view_of(&inner(Loaded::Item(Some(sample(false))), None, false), origin, shop)).unwrap();
-        assert_eq!(shown, r#"{"state":"idle","online":false,"steps":0,"name":"This Mac"}"#);
+        assert_eq!(shown, r#"{"state":"idle","online":false,"steps":0,"name":"This Mac","id":"op-1"}"#);
+    }
+
+    #[test]
+    fn nothing_the_page_can_be_given_holds_the_credential() {
+        // Every answer a page's command can carry: the view in each place the outpost can stand, for its own shop and for
+        // others, and what a registration that worked tells the page.
+        let item = || sample(false);
+        let credential = item().credential.to_string();
+        let mut shown = Vec::new();
+        let places: [fn() -> Loaded; 4] =
+            [|| Loaded::Unavailable, || Loaded::Item(None), || Loaded::Item(Some(sample(false))), || Loaded::Item(Some(sample(true)))];
+        for loaded in places {
+            for running in [None, Some(Arc::new(Shared::default()))] {
+                for refused in [false, true] {
+                    let inner = Inner { loaded: loaded(), following: following("https://dev.manut.xyz", &["pilot:shop-1"]), running: running.clone(), refused };
+                    for (origin, tenant) in [("https://dev.manut.xyz", "pilot:shop-1"), ("https://dev.manut.xyz", "apple:fon"), ("http://localhost:8787", "pilot:shop-1")] {
+                        shown.push(serde_json::to_string(&view_of(&inner, origin, tenant)).unwrap());
+                    }
+                }
+            }
+        }
+        shown.push(page_answer(&item()));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&page_answer(&item())).unwrap(),
+            serde_json::json!({ "tenant": "pilot:shop-1", "outpost": { "name": "This Mac" } }));
+        for text in &shown {
+            // The message names only where it leaked, never what: a failing run must not print the credential.
+            assert!(!text.contains(&credential) && !text.contains(&credential[4..]), "an answer to the page holds the credential");
+            assert!(!text.contains("mo1_"), "an answer to the page holds something shaped as a credential");
+        }
+        // The id it does give names the outpost on the shop's list, and is not the credential.
+        assert!(shown.iter().any(|text| text.contains(r#""id":"op-1""#)));
+        assert_ne!(item().outpost_id, credential);
     }
 
     /// A stand-in for the API on this computer: it answers each request with what `answer` says for its path and body,
@@ -696,7 +742,8 @@ mod tests {
 
         // Nothing else: no request the outpost sent, nothing it noted, nothing the page is shown.
         let escaped = serde_json::to_string(password).unwrap();
-        let shown = serde_json::to_string(&View { state: "running", online: shared.online(), steps: shared.held(), name: Some("This Mac".into()) }).unwrap();
+        let shown = serde_json::to_string(&View { state: "running", online: shared.online(), steps: shared.held(), name: Some("This Mac".into()),
+            id: Some("op-1".into()) }).unwrap();
         let notes = shared.notes().join("\n");
         for (what, text) in seen.iter().map(|r| ("a request", r.as_str())).chain([("the notes", notes.as_str()), ("the view", shown.as_str())]) {
             // The message names only where it leaked, never what: a failing run must not print the value it caught.

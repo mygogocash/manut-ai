@@ -238,10 +238,12 @@ describe("registering this Mac for the shop the switcher shows", () => {
 
 describe("where the outpost stands", () => {
   it("reads the shell's view and nothing else", () => {
-    const view: OutpostView = { state: "running", online: true, steps: 2, name: "This Mac" };
+    const view: OutpostView = { state: "running", online: true, steps: 2, name: "This Mac", id: "0c7d6a4e-8f1b-4e2a-9c3d-5b6a7f8e9d0c" };
     expect(decodeView({ ...view, credential: "mo1_x", outpostId: "op-1" })).toEqual(view);
-    expect(decodeView({ state: "stopped", online: "yes", steps: -1, name: " " })).toEqual({ state: "stopped", online: false, steps: 0, name: null });
-    for (const state of ["unavailable", "unregistered", "running", "stopped", "refused", "idle"]) expect(decodeView({ state }).state).toBe(state);
+    expect(decodeView({ state: "stopped", online: "yes", steps: -1, name: " " })).toEqual({ state: "stopped", online: false, steps: 0, name: null, id: null });
+    // The id is read only as an outpost's id is written; anything else, a credential's shape above all, is not kept.
+    for (const id of ["mo1_" + "a".repeat(43), "op 1", "", "a".repeat(65), 7]) expect(decodeView({ state: "idle", id }).id).toBeNull();
+    for (const state of ["unavailable", "unregistered", "elsewhere", "running", "stopped", "refused", "idle"]) expect(decodeView({ state }).state).toBe(state);
     // A state this build does not know is not guessed at.
     expect(decodeView({ state: "moving", online: true, steps: 1 })).toEqual(UNAVAILABLE);
     expect(decodeView(null)).toEqual(UNAVAILABLE);

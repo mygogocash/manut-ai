@@ -15,7 +15,7 @@ import { ROUTINES_START } from "./routines";
 
 afterEach(() => setLang("en"));
 
-const view = (over: Partial<OutpostView> = {}): OutpostView => ({ state: "running", online: true, steps: 0, name: "This Mac", ...over });
+const view = (over: Partial<OutpostView> = {}): OutpostView => ({ state: "running", online: true, steps: 0, name: "This Mac", id: null, ...over });
 const signedIn = (over: Partial<OutpostView> = {}): OutpostContext => ({ kind: "signed_in", view: view(over) });
 const pane = (context: OutpostContext, over: Partial<OutpostPaneProps> = {}): OutpostPaneProps => ({
   row: outpostRow(context),
@@ -62,6 +62,8 @@ describe("the Outposts box", () => {
       [{ kind: "helper" }, "Only the shop's owner can use this Mac as its outpost.", null, null],
       [signedIn({ state: "unavailable" }), "This computer cannot be an outpost yet.", null, null],
       [signedIn({ state: "unregistered" }), "Not set up. Your team can read your shop's own sites in a browser on this Mac.", null, "Register this Mac"],
+      // Another shop's outpost: one keychain item, so registering it here moves it, and the row says so first.
+      [signedIn({ state: "elsewhere" }), "This Mac works for another shop. Register it here and it works for this shop instead.", null, "Register this Mac"],
       [signedIn({ state: "refused" }), "This Mac is no longer one of your shop's outposts. Register it again to use it.", "Asleep", "Register this Mac"],
       [signedIn({ state: "stopped" }), "Stopped. Your team cannot use this Mac's browser until you start it again.", "Asleep", "Start"],
       [signedIn({ state: "idle" }), "Not running", "Asleep", "Start"],
@@ -78,7 +80,7 @@ describe("the Outposts box", () => {
   });
 
   it("does what its button says, and offers nothing while a click is under way", () => {
-    for (const [state, action] of [["unregistered", "register"], ["refused", "register"], ["running", "stop"], ["stopped", "start"], ["idle", "start"]] as const) {
+    for (const [state, action] of [["unregistered", "register"], ["elsewhere", "register"], ["refused", "register"], ["running", "stop"], ["stopped", "start"], ["idle", "start"]] as const) {
       const onAction = vi.fn();
       const buttons = drawn(OutpostPane(pane(signedIn({ state }), { onAction }))).filter((e) => e.type === "button");
       expect(buttons.map((b) => b.props["data-testid"])).toEqual([`outpost-${action}`]);
@@ -103,7 +105,7 @@ describe("the Outposts box", () => {
   });
 
   it("has its words in every language", () => {
-    const states = ["unregistered", "refused", "stopped", "idle", "unavailable"] as const;
+    const states = ["unregistered", "elsewhere", "refused", "stopped", "idle", "unavailable"] as const;
     const english = states.map((state) => outpostRow(signedIn({ state })).line);
     const helper = outpostRow({ kind: "helper" }).line;
     const left = registeredError("left");

@@ -15,13 +15,14 @@ import type { OwnerLink } from "./connections";
 import { LinkDown, type FetchLike } from "./shell";
 import type { ApiSession } from "./session";
 
-/** Where this Mac's outpost stands for the shop the page is signed in to (the shell's `View`):
+/** Where this Mac's outpost stands for the shop the page asks about (the shell's `View`):
  *  - `unavailable`: this computer keeps no keychain item (only macOS does), or its keychain said no;
- *  - `unregistered`: this Mac is not that shop's outpost;
+ *  - `unregistered`: this Mac is no shop's outpost;
+ *  - `elsewhere`: it is another shop's outpost (or another API's), so registering it for this one moves it here;
  *  - `running`, or `stopped` by the owner;
  *  - `refused`: the API no longer takes its credential (an operator removed it, or gave it a new one);
- *  - `idle`: registered, but not running. */
-export type OutpostState = "unavailable" | "unregistered" | "running" | "stopped" | "refused" | "idle";
+ *  - `idle`: registered, but not running, because nobody who owns the shop is here. */
+export type OutpostState = "unavailable" | "unregistered" | "elsewhere" | "running" | "stopped" | "refused" | "idle";
 
 export interface OutpostView {
   state: OutpostState;
@@ -30,11 +31,17 @@ export interface OutpostView {
   /** how many browser steps it holds: handed out, and not yet reported */
   steps: number;
   name: string | null;
+  /** The id the shop's list of outposts names this Mac by, so the page can tell which of them it is. Only for the shop
+   *  this Mac is the outpost of, and never its credential, which no answer of the shell holds. */
+  id: string | null;
 }
 
-export const UNAVAILABLE: OutpostView = { state: "unavailable", online: false, steps: 0, name: null };
+export const UNAVAILABLE: OutpostView = { state: "unavailable", online: false, steps: 0, name: null, id: null };
 
-const STATES: readonly OutpostState[] = ["unavailable", "unregistered", "running", "stopped", "refused", "idle"];
+const STATES: readonly OutpostState[] = ["unavailable", "unregistered", "elsewhere", "running", "stopped", "refused", "idle"];
+
+/** An outpost's id as the vault mints them (a UUID), and as the shell checks one (`is_outpost_id` in outpost/item.rs). */
+const OUTPOST_ID = /^[0-9a-fA-F-]{1,64}$/;
 
 /** The shell's answer as a view; anything this build does not read as one is `unavailable`, never a guess. */
 export function decodeView(value: unknown): OutpostView {
@@ -42,7 +49,8 @@ export function decodeView(value: unknown): OutpostView {
   if (!v || typeof v !== "object" || !STATES.includes(v.state as OutpostState)) return UNAVAILABLE;
   const steps = typeof v.steps === "number" && Number.isInteger(v.steps) && v.steps >= 0 ? v.steps : 0;
   const name = typeof v.name === "string" && v.name.trim() ? v.name : null;
-  return { state: v.state as OutpostState, online: v.online === true, steps, name };
+  const id = typeof v.id === "string" && OUTPOST_ID.test(v.id) ? v.id : null;
+  return { state: v.state as OutpostState, online: v.online === true, steps, name, id };
 }
 
 /** What the page asks of the shell about the outpost. */

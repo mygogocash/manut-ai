@@ -1,7 +1,8 @@
 // Customize › Connections, as the design canvas draws its Outposts box (Connections.dc.html): "Outposts. The machines
 // your team works on.", and this Mac's row with where it stands, Online or Asleep, and one button: Register this Mac,
-// Stop or Start. The canvas's other parts of the page (the shop's channels, the AI models, the vault's sign-ins and the
-// cloud outpost) are later slices, so the box stands alone here.
+// Stop or Start. Once the shell says which of the shop's outposts this Mac is, its record on the shop's list is folded in
+// below that row, with its name, Rename and Remove (`ThisMacRecord` in ConnectionsPane.tsx, which lists the others). The
+// canvas's shop channels and AI models are later slices.
 //
 // The view uses no hooks, so a test can call it as a plain function and read its button's handler. `useOutpost` feeds it:
 // it reads where this Mac's outpost stands for the shop the switcher shows from the shell when the tab opens and every 3
@@ -11,8 +12,10 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { ShopRow } from "../lib/protocol";
+import type { ShopOutpost } from "../runtime/connections";
 import { ownerLinkFor } from "../runtime/http";
 import { registerThisMac, shellOutpost, type OutpostView } from "../runtime/http/outpost";
+import { Said, ThisMacRecord, type ConnectionsProps } from "./ConnectionsPane";
 import { runtimeKind, startedRuntime } from "../runtime";
 import { useSignIn } from "../runtime/link";
 import { actionLabel, outpostRow, registeredError, type OutpostAction, type OutpostContext, type OutpostRow } from "./outpost";
@@ -24,9 +27,19 @@ export interface OutpostPaneProps {
   /** why the last click did not do what it said */
   error: string | null;
   onAction: (action: OutpostAction) => void;
+  /** The id this Mac's outpost has on the shop's list, once the shell says which it is (never its credential); null while
+   *  this Mac is not the shop's outpost. */
+  thisMac?: string | null;
 }
 
-export function OutpostPane({ row, busy, error, onAction }: OutpostPaneProps) {
+/** The shop's vault and outposts as the Connections tab read them, and this Mac's own record among them (null when the
+ *  shell has not said which it is, or the list does not have it), which this Mac's row takes in. */
+export interface OutpostFold {
+  p: ConnectionsProps;
+  record: ShopOutpost | null;
+}
+
+export function OutpostPane({ row, busy, error, onAction, fold }: OutpostPaneProps & { fold?: OutpostFold }) {
   const action = row.action;
   return (
     <section className="side2 outposts" aria-labelledby="outposts-title" data-testid="outposts">
@@ -55,7 +68,9 @@ export function OutpostPane({ row, busy, error, onAction }: OutpostPaneProps) {
             </button>
           )}
         </div>
+        {fold?.record && <ThisMacRecord o={fold.record} p={fold.p} />}
       </div>
+      {fold && <Said ui={fold.p.ui} at="this_mac" />}
       {error && (
         <p className="msg err" role="alert" data-testid="outpost-error">
           {error}
@@ -113,5 +128,6 @@ export function useOutpost(viewing: string | null = null, shops: readonly ShopRo
   };
 
   const context: OutpostContext = !origin ? { kind: "practice" } : !tenant ? { kind: "signed_out" } : helper ? { kind: "helper" } : { kind: "signed_in", view };
-  return { row: outpostRow(context), busy, error, onAction: (action) => void act(action) };
+  const thisMac = context.kind === "signed_in" ? (view?.id ?? null) : null;
+  return { row: outpostRow(context), busy, error, onAction: (action) => void act(action), thisMac };
 }
