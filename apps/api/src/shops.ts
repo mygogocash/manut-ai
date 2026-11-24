@@ -6,9 +6,10 @@
 ///   act for a shop; and a one-use code for the operator to link their account to a shop as its owner
 ///   (`POST /v1/shops/owner-code`).
 /// - The routes a shop session itself calls here: the app ends its own shop session when the person signs out
-///   (`POST /v1/shops/session/end`), and the owner's session reads and changes the shop's consent to cloud work and reads
-///   its export, on the lifted routes' own paths (`/v1/consent/cloud`, `/v1/tenant/export`), which answer every other
-///   credential as before.
+///   (`POST /v1/shops/session/end`), and the owner's session reads and changes the shop's consent to cloud work, reads
+///   its export, reads its tasks a page at a time, and reads its schedules and its attention items, on the lifted routes'
+///   own paths (`/v1/consent/cloud`, `/v1/tenant/export`, `/v1/tasks`, `/v1/schedules`, `/v1/inbound/attention`), which
+///   answer every other credential as before.
 /// - The operator's routes, under the admin gate as exact `ADMIN_METHODS` entries: link the account a code names to a
 ///   shop as its owner, and unlink it. The shop's audit log records both under the operator's Access identity.
 ///
@@ -54,7 +55,8 @@ import {
   unindexShop,
   type ShopRole,
 } from "./shops-store";
-import { tenantCall, tenantExport, type TenantDataEnv } from "./tenant-data";
+import { listTasks } from "./task-list";
+import { scheduleStub, tenantCall, tenantExport, type TenantDataEnv } from "./tenant-data";
 
 const MAX_BODY_BYTES = 16 * 1024;
 /// The letters a link code is made of: Crockford's base 32, which leaves out I, L, O and U, so nobody reading a code
@@ -82,7 +84,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const notFound = () => json({ error: "not_found" }, 404);
 
 /// `/v1/shops*` (making a shop of one's own is self-serve.ts's) and `/v1/admin/shops/owner*` (after the admin gate), and
-/// `/v1/consent/cloud` and `/v1/tenant/export` with a shop session. Answers null for any other path, and for those two
+/// the lifted paths a shop session reads its shop on (`shopDataRoute`). Answers null for any other path, and for those
 /// with any other credential.
 export async function shopsRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv & SelfServeEnv,
   ctx: ExecutionContext): Promise<Response | null> {
@@ -98,6 +100,9 @@ export async function shopsRoute(request: Request, url: URL, env: PeopleEnv & Te
       return endSessionRoute(request, env);
     case "/v1/consent/cloud":
     case "/v1/tenant/export":
+    case "/v1/tasks":
+    case "/v1/schedules":
+    case "/v1/inbound/attention":
       return shopDataRoute(request, url, env);
     case "/v1/admin/shops/owner":
     case "/v1/admin/shops/owner/unlink":
@@ -239,19 +244,24 @@ async function exactBody(request: Request, keys: readonly string[]): Promise<Rec
 // A shop session's own routes
 // ---------------------------------------------------------------------------
 
-/// `GET` and `PUT /v1/consent/cloud`, and `GET /v1/tenant/export`, with a shop session (docs/several-shops.md, slice 4).
-/// These are the lifted routes' own paths, so an app reads its shop's consent and export the same way with whichever
-/// session it holds. Only a token shaped as a shop session is answered here; every other credential is left to the lifted
-/// routes, which answer it as before (index.ts): the shop's own session and a person's sign-in for their own tenant, the
-/// operator key and no credential with 401.
+/// `GET` and `PUT /v1/consent/cloud`, and `GET /v1/tenant/export`, `/v1/tasks`, `/v1/schedules` and
+/// `/v1/inbound/attention`, with a shop session (docs/several-shops.md, slice 4). These are the lifted routes' own paths,
+/// so an app reads its shop the same way with whichever session it holds. Only a token shaped as a shop session is
+/// answered here; every other credential is left to the lifted routes, which answer it as before (index.ts): the shop's
+/// own session and a person's sign-in for their own tenant, the operator key and no credential with 401.
 ///
-/// Both are the owner's. A helper's session is told so (403 `owner_only`), as on the team's routines, rather than that
+/// All are the owner's. A helper's session is told so (403 `owner_only`), as on the team's routines, rather than that
 /// it ended. Withdrawing consent stops the team's work; it never sends anything, and giving it permits only what each
 /// approval still asks the owner for. The operator has no route that writes consent, and still has none.
 ///
 /// The export is the answer's body, as the lifted export is: the app reads it with the session in the `Authorization`
 /// header and saves the file itself, so no link is made and no token is ever put in a URL. It is not written to the
 /// audit log, as neither the lifted export nor the operator's is.
+///
+/// The tasks, the schedules and the attention items are what the desktop reads of a shop the person owns every minute,
+/// in place of the export (docs/runtime-adapter.md, "A shop the person owns"): the tasks a page at a time (task-list.ts),
+/// and the other two whole, as the export carried them. Each is a read and nothing else: making or deleting a schedule
+/// stays closed to a shop session, as on the lifted routes, and these paths answer it 405.
 ///
 /// The order is who is asking (401 or 503), then the role (403), the method (405), and the query and the body (400).
 async function shopDataRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv): Promise<Response | null> {
@@ -264,8 +274,52 @@ async function shopDataRoute(request: Request, url: URL, env: PeopleEnv & Tenant
     return json({ error: "method_not_allowed" }, 405);
   }
   if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
-  if (!consent) return shopExport(env, caller.shop);
+  switch (url.pathname) {
+    case "/v1/tenant/export":
+      return shopExport(env, caller.shop);
+    case "/v1/tasks":
+      return listTasks(env, caller.shop, url);
+    case "/v1/schedules":
+      return shopSchedules(env, caller.shop);
+    case "/v1/inbound/attention":
+      return shopAttention(env, caller.shop);
+  }
   return request.method === "GET" ? readConsent(env, caller.shop) : recordConsent(request, env, caller);
+}
+
+/// The shop's schedules, as its schedule object lists them and the export carries them: the team's routine clocks among
+/// them, each naming its `routineId`, which the desktop leaves out because the routine itself is listed. 503
+/// `schedules_unavailable` when the object cannot be read.
+async function shopSchedules(env: TenantDataEnv, shop: string): Promise<Response> {
+  try {
+    const response = await scheduleStub(env, shop).fetch(new Request("https://schedules/schedules",
+      { headers: { "x-tenant": shop } }));
+    if (!response.ok) {
+      await response.body?.cancel();
+      return json({ error: "schedules_unavailable" }, 503);
+    }
+    const { schedules } = (await response.json()) as { schedules?: unknown[] };
+    return json({ schedules: schedules ?? [] });
+  } catch {
+    return json({ error: "schedules_unavailable" }, 503);
+  }
+}
+
+/// The shop's attention items, newest first, as its object keeps them and the export carries them: whatever the inbound
+/// switch, which gates what comes in and not what the owner may read of what was kept, as the export never asked it.
+/// 503 `attention_unavailable` when the object cannot be read.
+async function shopAttention(env: TenantDataEnv, shop: string): Promise<Response> {
+  try {
+    const response = await tenantCall(env, shop, `/attention?tenant=${encodeURIComponent(shop)}`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      return json({ error: "attention_unavailable" }, 503);
+    }
+    const { items } = (await response.json()) as { items?: unknown[] };
+    return json({ items: items ?? [] });
+  } catch {
+    return json({ error: "attention_unavailable" }, 503);
+  }
 }
 
 /// The shop's whole export, as the lifted export assembles it (tenant-data.ts): a part it cannot read is named in a 500,

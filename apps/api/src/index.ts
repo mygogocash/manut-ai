@@ -16,7 +16,7 @@ import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
 import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
-import { peopleRoute } from "./people";
+import { peopleRoute, queryNamesSession } from "./people";
 import { pilotRoute } from "./pilot";
 import { routinesRoute } from "./routines";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
@@ -24,6 +24,7 @@ import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
 import { signUpsOpen } from "./self-serve";
 import { shopsRoute } from "./shops";
+import { listTasks } from "./task-list";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
@@ -257,9 +258,10 @@ type People = "allowed" | "refused";
 /// explicitly refused here, so it cannot bypass tenant or company checks.
 ///
 /// A person's own email sign-in is refused too, as a shop session already is
-/// (people.ts), on every lifted route but the three reads the desktop makes
-/// for a person in no shop: `GET /v1/tenant/export`, `GET /v1/schedules` and
-/// `GET /v1/inbound/attention` (`people: "allowed"`). These routes act for a
+/// (people.ts), on every lifted route but the reads the desktop makes for a
+/// person in no shop: `GET /v1/tasks`, `GET /v1/schedules` and
+/// `GET /v1/inbound/attention`, and `GET /v1/tenant/export`, which it read
+/// before the task list (`people: "allowed"`). These routes act for a
 /// tenant's own cloud tasks, schedules, connections, consent, data and
 /// companies, and a person's tenant is no shop: nothing of a shop's is ever
 /// there. Since anyone can sign in by email once it is on, they would
@@ -1729,6 +1731,17 @@ export default {
         }
         return response;
       }
+    }
+
+    // The session's own tasks, newest first, a page at a time (task-list.ts). One of the desktop's reads for a person in
+    // no shop (contextOf), whose own tenant holds no shop's tasks, so it lists what the export would list for them. A shop
+    // session never gets here: shops.ts answers it above, for its shop's owner only. The tenant is the session's alone, so
+    // a query naming a shop, a tenant or a role is refused, as on the shop routes.
+    if (request.method === "GET" && url.pathname === "/v1/tasks") {
+      const context = await contextOf(request, env, "allowed");
+      if (!context?.tenant) return json({ error: "unauthorized" }, 401);
+      if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+      return listTasks(env, context.tenant, url);
     }
 
     if (request.method === "POST" && url.pathname === "/v1/tasks") {
