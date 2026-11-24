@@ -17,12 +17,24 @@
     "WEB_ORIGIN": "https://web.manut.test",
     "PUBLIC_API_ORIGIN": "https://api.manut.test",
     "APPROVAL_LINK_SECRET": "test-approval-link-secret-0123456789abcdef",
+    "EMAIL_SIGN_IN": "on",
+    "EMAIL_FROM_ADDRESS": "codes@manut.test",
+    "EMAIL_FROM_NAME": "Manut AI",
+    "TEST_EMAIL_OUTBOX": "on",
     "TEST_JWKS_JSON": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"kid\":\"test-key-1\",\"alg\":\"ES256\",\"x\":\"XkiBzVCEinLxSV5HTHlIk_dP5ebqKbf50G0GUVfMdIQ\",\"y\":\"RZYriukHp_ncrsqWDuh0NRFJZR4vQ2ZP7JlWgYLlH_I\"}]}"
   },
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
       "namespace_id": "2026100491",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "AUTH_CODE_LIMITER",
+      "namespace_id": "2026100499",
       "simple": {
         "limit": 10,
         "period": 60
