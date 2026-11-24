@@ -91,6 +91,9 @@ export const AUDIT_ACTIONS = [
   // A shop its owner made, signed in, with no operator (self-serve.ts): written with `shop.created`, `owner.linked` and
   // `owner.session_opened` in the one write that makes the shop, by the owner's linked account, named by its id.
   "shop.made_by_owner",
+  // An operator adds a shop its owner made to the pilot gate's cohort, or leaves it out again (pilot.ts). No id: the shop.
+  "cohort.added",
+  "cohort.removed",
   // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
   // sign-in or the outpost by its id, never an account, a password or a credential.
   "signin.created",

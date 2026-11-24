@@ -206,6 +206,9 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         })
       ).payments,
     getGate: () => request<PilotGate>({ method: "GET", path: "/v1/admin/pilot/gate", admin: true }),
+    setGateCohort: (tenant, counted) =>
+      request<{ tenant: string; counted: boolean }>({ method: "POST", path: "/v1/admin/pilot/gate/cohort", body: { tenant, counted },
+        admin: true }),
 
     // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
     listAudit: (tenant, query = {}) =>

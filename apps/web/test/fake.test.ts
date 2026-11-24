@@ -1727,3 +1727,12 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     expect(has(log, "vault.resealed")).toBe(true);
   });
 });
+
+// An operator counting a shop its owner made in the pilot gate, in practice as on the API (docs/pilot-api.md, "The pilot gate").
+describe("the fake's pilot gate cohort", () => {
+  it("refuses a shop an operator made, which is always counted", async () => {
+    const api = createFakeApi({ now: () => Date.parse("2026-11-24T03:00:00Z") });
+    await expect(api.setGateCohort("shop_baanmali", true)).rejects.toMatchObject({ status: 409, code: "not_self_serve" });
+    await expect(api.setGateCohort("shop_nobody", true)).rejects.toMatchObject({ status: 404 });
+  });
+});

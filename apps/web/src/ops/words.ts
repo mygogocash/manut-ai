@@ -292,6 +292,12 @@ export const gateWords = {
   selfServe: "Made by its owner",
   leftOut: "Not counted: its owner made it in the app, and no operator has added it",
   addedIn: "Counted: an operator added it",
+  /// What adding it does, for the operator who has spoken with its owner as the pilot's owners were spoken with.
+  countIt: "Count it",
+  countItLabel: (shop: string) => `Count ${shop} in the pilot gate`,
+  leaveItOut: "Leave it out",
+  leaveItOutLabel: (shop: string) => `Leave ${shop} out of the pilot gate`,
+  cohortFailed: (shop: string) => `${shop} could not be changed. Try again.`,
 
   // Recording the shop's payment to Manut AI
   formTitle: "Record a subscription payment",
@@ -468,6 +474,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   // A shop its owner made in the app, signed in, with no operator (docs/several-shops.md, "A shop its owner makes"). The
   // log names the owner's account by its id, which the actor says.
   "shop.made_by_owner": () => "made the shop themselves in the app, with no operator",
+  // The pilot gate's cohort (docs/pilot-api.md, "The pilot gate"): a shop its owner made counts once an operator adds it.
+  "cohort.added": () => "counted the shop in the pilot gate's cohort",
+  "cohort.removed": () => "left the shop out of the pilot gate's cohort again",
   // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
   // ids only, never a username or a password.
   "signin.created": () => "added a site sign-in to the vault",

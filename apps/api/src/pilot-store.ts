@@ -70,6 +70,8 @@ export type PilotShopRecord = {
   /// console. The console marks it, and the pilot gate leaves it out of the cohort (pilot-gate.ts). Absent for every shop
   /// an operator made.
   selfServe?: true;
+  /// When an operator added this self-serve shop to the pilot gate's cohort (pilot-gate.ts); absent while it is left out.
+  addedToCohortAt?: string;
 };
 
 export type InboundMessage = {
@@ -258,6 +260,8 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
       return createShop(storage, tenant, body);
     case "POST /pilot/shop-connection":
       return setShopConnection(storage, tenant, body);
+    case "POST /pilot/shop-cohort":
+      return setShopCohort(storage, tenant, body);
     case "POST /pilot/messages":
       return storeMessages(storage, tenant, body);
     case "POST /pilot/names":
@@ -313,6 +317,25 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
   }
   await storage.put(Object.assign({ [keys.shop(tenant)]: shop }, owned ? { [owned.key]: owned.record } : {}, ...entries));
   return json({ shop });
+}
+
+/// An operator adds a self-serve shop to the pilot gate's cohort, or leaves it out again (`{ counted, actor }`), in one write
+/// with its audit entry. Only a shop its owner made can be added or left out: every shop an operator made is counted. Asking
+/// for what already holds changes and records nothing.
+async function setShopCohort(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  if (typeof body.counted !== "boolean") return json({ error: "invalid_request" }, 400);
+  const shop = await storage.get<PilotShopRecord>(keys.shop(tenant));
+  if (!shop) return json({ error: "not_found" }, 404);
+  if (!shop.selfServe) return json({ error: "not_self_serve" }, 409);
+  if (body.counted === (shop.addedToCohortAt !== undefined)) return json({ shop });
+  const { addedToCohortAt: _left, ...rest } = shop;
+  const next: PilotShopRecord = body.counted ? { ...rest, addedToCohortAt: new Date().toISOString() } : rest;
+  await storage.put({
+    [keys.shop(tenant)]: next,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, {
+      action: body.counted ? "cohort.added" : "cohort.removed", subject: {}, outcome: "ok" })),
+  });
+  return json({ shop: next });
 }
 
 /// Points the shop at its LINE connection and answers with the one it

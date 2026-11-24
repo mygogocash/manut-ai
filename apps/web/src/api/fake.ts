@@ -124,7 +124,7 @@ type Outcome = "confirmed" | "failed" | "unknown";
 /// The API keeps the trial start on its shop record but answers it only through the gate, never in the shop list. A shop
 /// made from a template keeps its first-week questions here, where the API keeps them beside its routines; a question
 /// holds only its answer's fact id, and the words are the fact's.
-type FakeShop = Shop & { trialStartedAt?: string; questions?: FakeQuestion[] };
+type FakeShop = Shop & { trialStartedAt?: string; questions?: FakeQuestion[]; addedToCohort?: true };
 type FakeQuestion = { id: string; text: string; factId?: string; answeredAt?: string };
 type FakeConnection = {
   connectionId: string;
@@ -737,7 +737,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, ...shop }): Shop => {
+        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, addedToCohort: _added, ...shop }): Shop => {
           const deletion = deletionRequestOf(shop.tenant);
           // A shop here still has its record: a practice wipe takes the record and the rest in one step.
           const deleting: Deleting | undefined = startedDeletionOf(shop.tenant) ? { shopRecord: true } : undefined;
@@ -1012,6 +1012,20 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         );
       }),
 
+    // As the API: only a shop its owner made is added or left out, and asking for what holds records nothing.
+    setGateCohort: (tenant, counted) =>
+      run(() => {
+        admin();
+        const shop = shopOf(tenant);
+        if (!shop.selfServe) throw new ApiError(409, "not_self_serve");
+        if (counted !== Boolean(shop.addedToCohort)) {
+          if (counted) shop.addedToCohort = true;
+          else delete shop.addedToCohort;
+          audit(tenant, PRACTICE_OPERATOR, counted ? "cohort.added" : "cohort.removed", {});
+        }
+        return { tenant, counted };
+      }),
+
     // Every shop, in the order they were created, with the owner's decisions as the times recorded on its replies,
     // approvals and declines alike, as the API reads them.
     getGate: () =>
@@ -1025,6 +1039,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             decisions: db.actions.flatMap((a) => (a.tenant === shop.tenant && a.decidedAt ? [a.decidedAt] : [])),
             subscriptionPayments: db.subscriptionPayments.filter((p) => p.tenant === shop.tenant),
             ...(shop.selfServe ? { selfServe: true } : {}),
+            ...(shop.addedToCohort ? { addedToCohort: true } : {}),
           })),
           now(),
         );

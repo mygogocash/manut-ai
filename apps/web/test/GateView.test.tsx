@@ -86,8 +86,27 @@ describe("the Pilot gate view", () => {
     expect(await screen.findByText("1 of 3 counted")).toBeTruthy();
     const rows = tableRows();
     expect(rows[0]![0]).toBe("Baan Mali");
-    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added it");
-    expect(rows[2]![0]).toBe("Baan FonMade by its ownerCounted: an operator added it");
+    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added itCount it");
+    expect(rows[2]![0]).toBe("Baan FonMade by its ownerCounted: an operator added itLeave it out");
+    // A shop an operator made has nothing to add or leave out.
+    expect(screen.queryByRole("button", { name: "Count Baan Mali in the pilot gate" })).toBeNull();
+  });
+
+  it("counts a shop its owner made when the operator adds it, reads the gate again, and says so when the change fails", async () => {
+    const own = shop({ tenant: "t5", name: "Khao Hom", selfServe: true, inCohort: false });
+    const left = gateOf([own], { counted: 0, paid: measure(0, null, 25, false), active: measure(0, null, 50, false),
+      status: "not_enough_data" });
+    const added = gateOf([{ ...own, inCohort: true }], left.cohort);
+    const getGate = vi.fn().mockResolvedValueOnce(left).mockResolvedValue(added);
+    const setGateCohort = vi.fn().mockRejectedValueOnce(new ApiError(503, "shop_unavailable")).mockResolvedValue({ tenant: "t5", counted: true });
+    renderWithApi(<GateView onForget={() => {}} />, stubApi({ getGate, setGateCohort, listSubscriptionPayments: () => Promise.resolve([]) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Count Khao Hom in the pilot gate" }));
+    expect(await screen.findByText("Khao Hom could not be changed. Try again.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Count Khao Hom in the pilot gate" }));
+    expect(await screen.findByRole("button", { name: "Leave Khao Hom out of the pilot gate" })).toBeTruthy();
+    expect(setGateCohort.mock.calls).toEqual([["t5", true], ["t5", true]]);
+    expect(getGate).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Counted: an operator added it")).toBeTruthy();
   });
 
   it("counts a shop its owner made only once an operator adds it, in practice as on the API", async () => {

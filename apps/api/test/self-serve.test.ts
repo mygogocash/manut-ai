@@ -375,4 +375,41 @@ describe("the pilot gate and a shop its owner made", () => {
     expect(theirs?.inCohort).toBe(true);
     expect(theirs?.selfServe).toBeUndefined();
   });
+
+  it("is counted once an operator adds it, and left out again when they take it back, each change in its log", async () => {
+    const made = await make(await signIn(), shopBody("Added Shop", null));
+    const tenant = made.body.shop.id;
+    const inCohort = async () => (await admin<{ shops: { tenant: string; inCohort: boolean }[] }>("GET", "/v1/admin/pilot/gate"))
+      .body.shops.find((shop) => shop.tenant === tenant)?.inCohort;
+    expect(await admin("POST", "/v1/admin/pilot/gate/cohort", { tenant, counted: true })).toEqual({ status: 200,
+      body: { tenant, counted: true } });
+    expect(await inCohort()).toBe(true);
+    // Asking for what already holds changes and records nothing.
+    expect((await admin("POST", "/v1/admin/pilot/gate/cohort", { tenant, counted: true })).body).toEqual({ tenant, counted: true });
+    expect(await admin("POST", "/v1/admin/pilot/gate/cohort", { tenant, counted: false })).toEqual({ status: 200,
+      body: { tenant, counted: false } });
+    expect(await inCohort()).toBe(false);
+    const changes = (await auditEntries(tenant)).filter((entry) => entry.action.startsWith("cohort."));
+    expect(changes.map((entry) => [entry.action, entry.actor.kind, entry.subject])).toEqual([
+      ["cohort.removed", "operator", {}],
+      ["cohort.added", "operator", {}],
+    ]);
+  });
+
+  it("refuses a shop an operator made, which is always counted, and a body that is not exactly the change", async () => {
+    const operators = await setupShop("Always Counted");
+    expect(await admin("POST", "/v1/admin/pilot/gate/cohort", { tenant: operators.tenant, counted: true })).toEqual({ status: 409,
+      body: { error: "not_self_serve" } });
+    const made = await make(await signIn(), shopBody("Body Shop", null));
+    for (const body of [{ tenant: made.body.shop.id }, { tenant: made.body.shop.id, counted: "yes" },
+      { tenant: made.body.shop.id, counted: true, by: "me" }]) {
+      expect((await admin("POST", "/v1/admin/pilot/gate/cohort", body)).body).toEqual({ error: "invalid_request" });
+    }
+    expect((await admin("POST", "/v1/admin/pilot/gate/cohort", { counted: true })).body).toEqual({ error: "tenant_required" });
+    expect((await admin("POST", "/v1/admin/pilot/gate/cohort", { tenant: "pilot:nobody", counted: true })).status).toBe(404);
+    // Only the operator reaches it: a person's session is not the admin gate's.
+    const person = await signIn();
+    expect((await asSession(person.headers, "POST", "/v1/admin/pilot/gate/cohort", { tenant: made.body.shop.id,
+      counted: true })).status).toBe(403);
+  });
 });

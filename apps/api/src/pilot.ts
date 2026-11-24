@@ -781,6 +781,7 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags, actor);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body, actor);
+  if (route === "POST /v1/admin/pilot/gate/cohort") return setCohort(env, shop, body, actor);
   return json({ error: "not_found" }, 404);
 }
 
@@ -1435,6 +1436,25 @@ async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, b
   return json(((await recorded.json()) as { payment: SubscriptionPayment }).payment);
 }
 
+/// `POST /v1/admin/pilot/gate/cohort` with exactly `{ tenant, counted }`: an operator adds a shop its owner made to the pilot
+/// gate's cohort (`counted: true`), or leaves it out again, after speaking with its owner as the pilot's owners were spoken
+/// with. Answers `{ tenant, counted }`. A shop an operator made is always counted, so it answers 409 `not_self_serve`.
+async function setCohort(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, actor: AuditActor):
+  Promise<Response> {
+  const keys = Object.keys(body);
+  if (keys.length !== 2 || !keys.includes("counted") || typeof body.counted !== "boolean") {
+    return json({ error: "invalid_request" }, 400);
+  }
+  if (!shop.selfServe) return json({ error: "not_self_serve" }, 409);
+  const written = await pilotWrite(env, shop.tenant, "/pilot/shop-cohort", { counted: body.counted, actor }).catch(() => null);
+  if (!written?.ok) {
+    await written?.body?.cancel();
+    return written?.status === 409 ? json({ error: "not_self_serve" }, 409) : json({ error: "shop_unavailable" }, 503);
+  }
+  const { shop: stored } = (await written.json()) as { shop: PilotShopRecord };
+  return json({ tenant: shop.tenant, counted: stored.addedToCohortAt !== undefined });
+}
+
 /// `GET /v1/admin/pilot/gate`: every pilot shop's trial, payment and activity,
 /// and the cohort's two shares against the gate's lines. A shop whose records
 /// cannot be read fails the whole answer rather than leaving the cohort: a
@@ -1464,6 +1484,7 @@ async function gateInput(env: PilotEnv, tenant: string): Promise<GateShopInput |
     decisions: records.decisions,
     subscriptionPayments: records.subscriptionPayments,
     ...(records.shop.selfServe ? { selfServe: true } : {}),
+    ...(records.shop.addedToCohortAt ? { addedToCohort: true } : {}),
   };
 }
 

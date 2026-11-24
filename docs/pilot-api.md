@@ -158,6 +158,7 @@ type DeletionView = {
 | `POST /v1/admin/pilot/subscription-payments` | `{ tenant, amountSatang, slipRef, slipNote? }` | `SubscriptionPayment`. 409 `{ "error": "slip_already_recorded" }`, recording nothing, for a slip already recorded for the shop |
 | `GET /v1/admin/pilot/subscription-payments` | `?tenant=` | `{ payments: SubscriptionPayment[] }`, newest first |
 | `GET /v1/admin/pilot/gate` | none | `PilotGate`: every shop's trial, payment and activity, and the cohort against the gate's two lines (below) |
+| `POST /v1/admin/pilot/gate/cohort` | `{ tenant, counted }` | `{ tenant, counted }`: a shop its owner made counted in the gate's cohort, or left out again (below). 409 `{ "error": "not_self_serve" }` for a shop an operator made, which is always counted; 400 `invalid_request` for a body that is not exactly that with a boolean `counted` |
 | `GET /v1/admin/audit` | `?tenant=&before=&limit=` | `AuditPage`: one page of the shop's audit log, newest first ("Audit log", below) |
 | `GET /v1/admin/memory` | `?tenant=` | `Memory`: every fact the team holds for the shop, waiting ones included, and how many texts it was told to forget ("Memory", below) |
 | `POST /v1/admin/memory/remember` | `{ tenant, text }` | `Fact`: the owner's own fact, confirmed at once |
@@ -386,9 +387,13 @@ practice-mode fake in `apps/web` keeps the same rules.
   cohort and a trial start is never guessed.
 - **Deleted shops** leave the registry, and with it the gate.
 - **Self-serve shops.** A shop its owner made in the app ("Making a shop of your own", below) is listed with `selfServe:
-  true` and `inCohort: false`, and left out of the cohort's counts, however it does, unless an operator adds it
-  (`addedToCohort` in `pilot-gate.ts`). The pilot's cohort is the shops chosen for it and spoken with; a stranger who signs
-  up on their own is another measure, which the owner has not set. Every shop an operator made is `inCohort: true`.
+  true` and `inCohort: false`, and left out of the cohort's counts, however it does, unless an operator adds it with
+  `POST /v1/admin/pilot/gate/cohort` and `{ tenant, counted: true }`, which they can take back with `counted: false`. The
+  pilot's cohort is the shops chosen for it and spoken with; a stranger who signs up on their own is another measure, which
+  the owner has not set, so an operator adds one only after speaking with its owner as the pilot's owners were. Each change
+  is one write to the shop's record (`addedToCohortAt`) with `cohort.added` or `cohort.removed` in its log, and asking for
+  what already holds writes nothing. Every shop an operator made is `inCohort: true`. The console's Pilot gate page offers
+  "Count it" and "Leave it out" on a self-serve shop's row.
 
 ```ts
 type PilotGate = {
@@ -478,6 +483,7 @@ What is written, and by whom:
 | Action | Actor | Subject | Outcome |
 | --- | --- | --- | --- |
 | `shop.created` | operator; for a shop its owner made, the owner's linked account by its id | none | `ok` |
+| `cohort.added`, `cohort.removed` | operator | none | `ok` |
 | `shop.made_by_owner` | the owner's linked account, by its id, in the write that makes the shop, beside `owner.linked` and `owner.session_opened` by the same account ("Making a shop of your own") | `ownerAccountId` | `ok` |
 | `line.connected` | operator | `connectionId`, and `previousConnectionId` when it replaced one | `ok` |
 | `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |

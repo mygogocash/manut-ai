@@ -231,6 +231,8 @@ const ADMIN_METHODS = new Set([
   // The Phase 1 gate: the shop's own subscription payments, and the measurement.
   "POST /v1/admin/pilot/subscription-payments", "GET /v1/admin/pilot/subscription-payments",
   "GET /v1/admin/pilot/gate",
+  // An operator adds a shop its owner made to the gate's cohort, or leaves it out again (pilot.ts). The tenant is in the body.
+  "POST /v1/admin/pilot/gate/cohort",
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
   "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",

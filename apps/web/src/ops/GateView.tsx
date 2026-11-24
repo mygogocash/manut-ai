@@ -70,7 +70,7 @@ export function GateView({ onForget }: { onForget: () => void }) {
                 counted={data.cohort.counted}
               />
             </div>
-            <CohortTable gate={data} />
+            <CohortTable gate={data} onChanged={gate.reload} />
           </div>
           <aside className="side2" aria-label={gateWords.sideLabel}>
             {data.shops.length > 0 ? (
@@ -174,7 +174,7 @@ const CELL: CSSProperties = {
   fontVariantNumeric: "tabular-nums",
 };
 
-function CohortTable({ gate }: { gate: PilotGate }) {
+function CohortTable({ gate, onChanged }: { gate: PilotGate; onChanged: () => void }) {
   const { rules, shops, cohort } = gate;
   // "Today" is the day the gate was measured, so every stamp in the table reads from the same moment.
   const measuredAt = Date.parse(gate.asOf);
@@ -205,7 +205,7 @@ function CohortTable({ gate }: { gate: PilotGate }) {
             </thead>
             <tbody>
               {shops.map((shop) => (
-                <ShopRow key={shop.tenant} shop={shop} rules={rules} measuredAt={measuredAt} />
+                <ShopRow key={shop.tenant} shop={shop} rules={rules} measuredAt={measuredAt} onChanged={onChanged} />
               ))}
             </tbody>
           </table>
@@ -217,7 +217,8 @@ function CohortTable({ gate }: { gate: PilotGate }) {
 
 const ACTIVE_TAG: Record<GateShop["activeOnDay14"], string> = { yes: "tag ok", no: "tag warn", not_yet: "tag" };
 
-function ShopRow({ shop, rules, measuredAt }: { shop: GateShop; rules: PilotGate["rules"]; measuredAt: number }) {
+function ShopRow({ shop, rules, measuredAt, onChanged }: { shop: GateShop; rules: PilotGate["rules"]; measuredAt: number;
+  onChanged: () => void }) {
   return (
     <tr>
       <th scope="row" style={{ ...CELL, fontWeight: 500 }}>
@@ -231,6 +232,7 @@ function ShopRow({ shop, rules, measuredAt }: { shop: GateShop; rules: PilotGate
             <span className="mut" style={{ fontSize: 12 }}>
               {shop.inCohort === false ? gateWords.leftOut : gateWords.addedIn}
             </span>
+            <CohortButton shop={shop} onChanged={onChanged} />
           </div>
         ) : null}
       </th>
@@ -262,6 +264,40 @@ function ShopRow({ shop, rules, measuredAt }: { shop: GateShop; rules: PilotGate
       </td>
       <td style={CELL}>{shop.lastDecisionAt ? formatStamp(shop.lastDecisionAt, measuredAt) : gateWords.noDecision}</td>
     </tr>
+  );
+}
+
+/// Counts a shop its owner made in the cohort, or leaves it out again: the operator's call, once they have spoken with its
+/// owner as the pilot's owners were spoken with. The gate is read again after it, so every share says what the API holds.
+function CohortButton({ shop, onChanged }: { shop: GateShop; onChanged: () => void }) {
+  const api = useApi();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const counting = shop.inCohort === false;
+  const change = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await api.setGateCohort(shop.tenant, counting);
+      onChanged();
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+      <button type="button" className="lk" disabled={busy} onClick={() => void change()}
+        aria-label={counting ? gateWords.countItLabel(shop.name) : gateWords.leaveItOutLabel(shop.name)}>
+        {counting ? gateWords.countIt : gateWords.leaveItOut}
+      </button>
+      {failed ? (
+        <span role="alert" style={{ fontSize: 12, color: "var(--danger)" }}>
+          {gateWords.cohortFailed(shop.name)}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
