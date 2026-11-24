@@ -385,10 +385,11 @@ function RoutineLine({ row, p }: { row: RoutineRow; p: RoutinesPaneProps }) {
   const busy = p.ui.saving || p.ui.switching !== null || p.ui.removing !== null;
   const keep = () => p.dispatch({ type: "keep" });
   // Remove: a question in its row, with the routine still shown and the safe answer holding the focus. Nothing is removed until
-  // the owner says so.
+  // the owner says so. The two rows are keyed apart, so the question is a new row: React would otherwise reuse the row's buttons for
+  // its answers, and the safe answer's autoFocus, which only acts when it is mounted, would never move the focus there.
   if (p.ui.ask === row.id)
     return (
-      <div className="tr" data-testid="routine" data-routine={row.id} onKeyDown={formKeys(keep)}>
+      <div key="ask" className="tr" data-testid="routine" data-routine={row.id} onKeyDown={formKeys(keep)}>
         <div className="grow">
           <div className="strong">{nameLine(row)}</div>
           <p className="mut small" data-testid="routine-remove-question">
@@ -404,7 +405,7 @@ function RoutineLine({ row, p }: { row: RoutineRow; p: RoutinesPaneProps }) {
       </div>
     );
   return (
-    <div className="tr" data-testid="routine" data-routine={row.id}>
+    <div key="row" className="tr" data-testid="routine" data-routine={row.id}>
       <div className="grow">
         <div className="mut small">{row.when}</div>
         <div className="strong">{nameLine(row)}</div>
