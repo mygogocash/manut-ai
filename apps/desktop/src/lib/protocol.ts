@@ -754,6 +754,10 @@ export type BridgeEvent =
        *  and every value): every surface shows it with nothing cut or scrolled away, and a notification approves it only when
        *  its body is that text, shown whole (notify-rules' `shownWhole`). */
       whole?: boolean;
+      /** What a notification says in place of the whole text, when the text is too long for one and the ask is one no notification
+       *  approves (Ton's append of the books to the owner's Google Sheet): one line, and the title says the same. The text stays
+       *  `command`, which the card shows whole. */
+      brief?: string;
       choices: ApprovalChoice[];
       /** Asked inside a subagent: which one (its id and name or task). */
       subagent?: AskSubagent;

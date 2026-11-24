@@ -117,7 +117,8 @@ export function noteFor(
       return {
         // an ask from one of several shops says whose it is: "Buddy at Ran Pa Noi needs your approval"
         title: t("note.approval", { bot: ev.shop?.name ? t("note.atShop", { bot: who, shop: ev.shop.name }) : who }),
-        body: clip(shortenRefs(ev.command || ev.title || t("ask.allowThis"))),
+        // a request whose whole text is too long for a notification says its own short line instead (Ton's append of the books)
+        body: clip(shortenRefs(ev.brief || ev.command || ev.title || t("ask.allowThis"))),
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only

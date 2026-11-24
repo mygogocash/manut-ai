@@ -279,8 +279,8 @@ type Stage = { __calls: { cmd: string; method?: string; path?: string; bearer?: 
 /** The desktop shell is stood in the page, as the connected runtime reaches the API only through its commands: a person who owns one
  *  shop, Baan Mali, and an API that answers `google` for it. `off` is what every environment says until the owner's Google client
  *  exists; `open` lets the owner connect, and the owner's coming back from Google's page is `__consent()`. */
-async function stubShell(page: Page, google: "off" | "open") {
-  await page.addInitScript((mode) => {
+async function stubShell(page: Page, google: "off" | "open", books = false) {
+  await page.addInitScript(({ mode, books }) => {
     localStorage.setItem("manut.runtime", JSON.stringify({ mode: "connected", origin: "https://dev.manut.xyz" }));
     const w = window as unknown as Stage;
     w.__calls = [];
@@ -292,6 +292,36 @@ async function stubShell(page: Page, google: "off" | "open") {
     const shop = { id: "pilot:shop-a", name: "Baan Mali", ownerName: "Fon" };
     const reply = (status: number, json: unknown) => ({ status, body: JSON.stringify(json) });
     const cache = new Map<string, string>();
+    // Ton's request to add October's books to the owner's sheet, as the API lists it for the owner (docs/pilot-api.md): approval-core's
+    // own wire record, of the kind `command`, with the month sent two days ago said first
+    const append = {
+      taskId: "task-books",
+      record: {
+        status: "pending",
+        request: {
+          id: "append-1",
+          kind: "command",
+          options: [{ id: "approve", label: "Approve", effect: "approve" }, { id: "decline", label: "Decline", effect: "decline" }],
+          revision: 1,
+          createdAt: now - 600_000,
+          expiresAt: now + 86_400_000,
+          detail: {
+            actionId: "append-1",
+            operationType: "google.sheets.append",
+            sheet: { id: "sheet1", title: "Manut AI books: Baan Mali", tab: "Books" },
+            month: "2026-10",
+            rows: 41,
+            totals: { sales: "฿12,300", salesCount: 30, refunds: "฿350", refundsCount: 1, expenses: "฿0", expensesCount: 0, net: "฿11,950" },
+            flags: 1,
+            earlier: { count: 1, at: iso(now - 2 * 86_400_000), rows: 41, outcome: "confirmed" },
+            lines: [{ date: "2026-10-10", ref: "SP-2291", kind: "sale", channelOrCategory: "line", amountSatang: 129033, beforeVatSatang: null, vatSatang: null }],
+            text: "Append the books for 2026-10 to the Google Sheet.",
+            payloadHash: "hash",
+          },
+        },
+      },
+      standing: { state: "open", reason: "waiting" },
+    };
     let n = 0;
     (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
@@ -317,7 +347,7 @@ async function stubShell(page: Page, google: "off" | "open") {
           case "POST /v1/shops/session":
             return reply(200, { shop, role: "owner", account: { id: "owner-account-1" }, session: { accessToken: "mos1.shop-a", expiresAt: iso(now + 30 * 86_400_000) } });
           case "GET /v1/approvals":
-            return reply(200, { state: "open", approvals: [] });
+            return reply(200, { state: "open", approvals: books ? [append] : [] });
           case "GET /v1/tenant/export":
             return reply(200, { tenant: shop.id, exportedAt: iso(now), tasks: [], schedules: [], attention: [] });
           case "GET /v1/routines":
@@ -341,7 +371,7 @@ async function stubShell(page: Page, google: "off" | "open") {
         }
       },
     };
-  }, google);
+  }, { mode: google, books });
 }
 
 test.describe("connected to an API", () => {
@@ -426,4 +456,68 @@ test.describe("connected to an API", () => {
     await page.getByTestId("google-open-needs").click();
     await expect(page.getByTestId("needs-empty")).toBeVisible();
   });
+
+  /** What the owner reads of Ton's request for October, line for line, with the month sent two days ago said first. */
+  const WHOLE = [
+    "Already sent: this month went to the sheet on 22 November (41 rows) and Google confirmed it. Approving adds its rows a second time.",
+    "",
+    "Add the books for October 2026 to the Google Sheet “Manut AI books: Baan Mali”, tab “Books”.",
+    "41 rows, after the header row.",
+    "Sales ฿12,300 (30)",
+    "Refunds ฿350 (1)",
+    "Expenses ฿0 (0)",
+    "Net sales ฿11,950",
+    "Ton flagged 1 entry for you to check.",
+  ].join("\n");
+
+  test("shows Ton's request whole in Needs you and on its card, the month sent before first, and offers Approve only there", async ({ page }) => {
+    await stubShell(page, "open", true);
+    await page.goto("/");
+    await page.getByTestId("menu-needs").click();
+    const needs = page.getByTestId("needs-row");
+    await expect(needs).toHaveCount(1);
+    await expect(needs).toContainText("Ton asks to add the books for October 2026 to Google Sheets");
+    await expect(needs.locator("code.act.whole")).toHaveText(WHOLE, { useInnerText: true });
+    // nothing is approved from this list: Look first opens the card, which shows the same text in a block that is never cut
+    await expect(page.getByTestId("needs-approve")).toHaveCount(0);
+    await page.getByTestId("needs-look").click();
+    const card = page.getByTestId("card-approval");
+    await expect(card).toBeVisible();
+    await expect(card.locator("pre.card-cmd.whole")).toHaveText(WHOLE, { useInnerText: true });
+    await expect(card.locator("button[data-choice]")).toHaveText(["Deny", "Allow once"]);
+    await expect(card.getByTestId("card-outdated")).toHaveCount(0);
+    // the block grows with its words: nothing is scrolled out of sight
+    const clipped = await card.locator("pre.card-cmd.whole").evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect(clipped).toBe(false);
+  });
+
+  test("Home offers Approve beside the whole text, and a notification-sized summary is no part of it", async ({ page }) => {
+    await stubShell(page, "open", true);
+    await page.goto("/");
+    await page.getByTestId("menu-home").click();
+    const need = page.getByTestId("home-need");
+    await expect(need).toHaveCount(1);
+    await expect(need.locator("code.act.whole")).toHaveText(WHOLE, { useInnerText: true });
+    await expect(page.getByTestId("home-approve")).toBeVisible();
+  });
+
+  for (const [name, scheme, width] of [["light", "light", 1280], ["dark", "dark", 1280], ["narrow", "light", 900]] as const) {
+    test(`draws Ton's request in ${name}: the whole text on Needs you and on its card, with nothing wider than the window`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await stubShell(page, "open", true);
+      await page.goto("/");
+      await page.getByTestId("menu-needs").click();
+      await expect(page.getByTestId("needs-row").locator("code.act.whole")).toHaveText(WHOLE, { useInnerText: true });
+      expect(await fits(page), "needs you").toBe(true);
+      if (SHOTS) {
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: join(SHOTS, `books-needs-${name}.png`) });
+      }
+      await page.getByTestId("needs-look").click();
+      await expect(page.getByTestId("card-approval")).toBeVisible();
+      expect(await fits(page), "card").toBe(true);
+      if (SHOTS) await page.getByTestId("card-approval").screenshot({ path: join(SHOTS, `books-card-${name}.png`) });
+    });
+  }
 });

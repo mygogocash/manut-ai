@@ -2349,5 +2349,10 @@ anything starts.
 
 **Deleting the shop** revokes the token at Google first, as disconnecting does ("Export and deletion", above).
 
-**Not built yet.** The desktop's and the web's screens (Customize › Connections gets a Google row); the Google Picker,
-for the owner to choose an existing sheet; and a monthly schedule for the append.
+**The desktop** reads these routes from Customize › Connections, with the viewed shop's own owner session: the Google row (its
+status, Connect, Disconnect and Send a month's books) and, in Needs you, Ton's append with its whole text (`apps/desktop`:
+`src/pages/GooglePane.tsx`, `src/runtime/http/google.ts`, `books.ts`; `docs/decisions.md`). It reads the 503
+`google_not_configured` as Google being off, which needs the API's `error` code on a 5xx.
+
+**Not built yet.** The web's screens; the Google Picker, for the owner to choose an existing sheet; and a monthly schedule for
+the append.

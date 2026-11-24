@@ -20,6 +20,7 @@ import { t, type Key } from "../../i18n";
 import type { Automation, Bot, EventOf, Msg, Routine } from "../../lib/protocol";
 import type { ThreadOpenResult, ThreadRow } from "../../threads/types";
 import { answerable, askId, choicesOf, detailOf, isAsk, shopAskId, type ShopApproval } from "./approvals";
+import { booksText, booksTitle, SHEETS_APPEND } from "./books";
 import { ROSTER_ORDER, type Attention, type ShopAction, type ShopAttempt, type ShopPart, type ShopSchedule, type ShopSnapshot, type ShopTask, type TeamRoutine } from "./shop";
 
 /** Buddy's profile name: the lead, whom the connected runtime always lists, and who stands for the team where the app
@@ -193,9 +194,29 @@ function submitSentence(a: ShopApproval): string | null {
   return detail.operationType === BROWSER_SUBMIT && detail.text !== undefined && detail.text.trim() !== "" ? detail.text : null;
 }
 
+/** Ton's append of a month of the books to the owner's Google Sheet, when this build reads the request whole (books.ts): the sheet,
+ *  the month, how many rows, the totals as the API words them, and a month sent before. */
+const booksOf = (a: ShopApproval) => detailOf(a.record.request).books;
+
+/** An append this build cannot read whole. It is shown, and says to update the app, with no answer offered: an owner must read the
+ *  books whole before approving them, and approving what cannot be shown would be approving unseen. */
+const unreadableBooks = (a: ShopApproval): boolean => detailOf(a.record.request).operationType === SHEETS_APPEND && booksOf(a) === undefined;
+
 /** Whether an ask must be read whole before it is approved: a browser write, whose sentence every surface shows with
- *  nothing cut or scrolled away (the card, Home, Needs you), and which a notification approves only shown whole. */
-const wholeOf = (a: ShopApproval) => (submitSentence(a) === null ? {} : { whole: true });
+ *  nothing cut or scrolled away (the card, Home, Needs you), and which a notification approves only shown whole; and Ton's
+ *  append of the books, whose every line is read the same way. */
+const wholeOf = (a: ShopApproval) => (submitSentence(a) === null && booksOf(a) === undefined ? {} : { whole: true });
+
+/** Ton's append of the books in one line, which is the ask's title and what a notification says in place of the whole text (which no
+ *  notification shows whole, and which, being a command, none may approve). Undefined for any other ask. */
+const booksTitleOf = (a: ShopApproval): string | undefined => {
+  const books = booksOf(a);
+  return books ? booksTitle(books) : undefined;
+};
+const briefOf = (a: ShopApproval): { brief?: string } => {
+  const line = booksTitleOf(a);
+  return line === undefined ? {} : { brief: line };
+};
 
 /** The exact action a request asks for, in words: a browser write's sentence, or a reply's own words, as its request
  *  carries them; else the action of its task it decides, which carries a worker's words; else what the request names, as
@@ -205,6 +226,7 @@ export function askText(a: ShopApproval, task: ShopTask | undefined): string {
   const detail = detailOf(request);
   const sentence = submitSentence(a);
   if (sentence !== null) return sentence;
+  if (detail.books) return booksText(detail.books);
   if (detail.operationType === "line.message.push" && detail.text !== undefined) return t("rt.op.linePush", { text: detail.text });
   const action = task?.actions.find((x) => x.id === (detail.actionId ?? request.id));
   if (action) return actionText(action);
@@ -224,21 +246,23 @@ function shopAsks(part: ShopPart): EventOf<"approval.request">[] {
   const { shop } = part;
   return part.approvals.filter(isAsk).map((a) => {
     const request = answerable(a);
-    const decides = !!request && mayDecide(shop.role, request.kind);
+    const unreadable = unreadableBooks(a);
+    const decides = !!request && !unreadable && mayDecide(shop.role, request.kind);
     const kind = a.record.request.kind;
     return {
       event: "approval.request",
       bot: TEAM,
       request_id: shopAskId(shop.id, a),
-      title: "",
+      title: booksTitleOf(a) ?? "",
       command: askText(a, undefined),
       ...wholeOf(a),
+      ...briefOf(a),
       choices: decides ? choicesOf(a) : [],
-      ...(request ? {} : { outdated: true }),
+      ...(request && !unreadable ? {} : { outdated: true }),
       kind: isUnknown(kind) ? kind.raw : kind,
       shop: { id: shop.id, name: shop.name, owner: shop.owner, role: shop.role },
       asked_at: sec(a.record.request.createdAt),
-      ...(request && !decides && shop.role === "helper" && !a.passedOn ? { pass_on: true } : {}),
+      ...(request && !unreadable && !decides && shop.role === "helper" && !a.passedOn ? { pass_on: true } : {}),
       ...(a.passedOn ? { passed_on: { name: a.passedOn.name, note: a.passedOn.note, ...(a.passedOn.at === null ? {} : { at: sec(a.passedOn.at) }) } } : {}),
     };
   });
@@ -257,14 +281,15 @@ export function pendingAsks(snapshot: ShopSnapshot): EventOf<"approval.request">
     .sort(byAsked)
     .map((a) => {
       const task = snapshot.tasks.find((x) => x.id === a.taskId);
-      const choices = choicesOf(a);
+      const choices = unreadableBooks(a) ? [] : choicesOf(a);
       return {
         event: "approval.request",
         bot: TEAM,
         request_id: askId(a),
-        title: task ? titleOf(task) : "",
+        title: booksTitleOf(a) ?? (task ? titleOf(task) : ""),
         command: askText(a, task),
         ...wholeOf(a),
+        ...briefOf(a),
         choices,
         ...(choices.length ? {} : { outdated: true }),
         // a kind this build does not know is the text the API sent, and a notification offers no Approve for it
