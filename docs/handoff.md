@@ -198,6 +198,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   (form.flowaccount.com/request-openapi, as an app partner for the OpenID flow), a 30-day sandbox first, and each shop
   needs its own Pro Business plan (฿457 a month, or ฿5,490 a year). Google Sheets needs a Google Cloud project of the
   owner's with an OAuth client for the `drive.file` scope only, which needs no Google review.
+- **The cloud outpost** (`docs/browser-control.md`, "Next slices", 2): Cloudflare's hosted browser comes with Workers
+  Paid (10 browser hours and 10 concurrent browsers a month included, then $0.09 an hour); ten pilot shops would cost
+  about $8 a month above the plan. It needs the plan and the spending, and the owner's word that shops' sites may be
+  reached from Cloudflare's addresses.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's

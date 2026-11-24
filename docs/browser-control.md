@@ -465,6 +465,24 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
+   **What it would cost (checked 24 Nov 2026, for the owner's decision).** Cloudflare's hosted browser, Browser Run
+   (it was called Browser Rendering), comes with the Workers Paid plan: each month 10 browser hours and 10 concurrent
+   browsers (the month's average of each day's peak) are included, then $0.09 an hour and $2.00 a concurrent browser
+   [CF1]. A step is short (open 30 seconds, read 15, sign-in 40, at most), so a shop whose routines open, read and
+   answer a few pages a night uses minutes a day: ten pilot shops at 20 browser minutes a day each would come to about
+   100 hours a month, or about $8 above the plan. The account's limit on concurrent browsers is far above the pilot's
+   (Cloudflare's pages give 120 and 200 in different places; confirm before relying on either) [CF2].
+
+   **How it would fit.** A Worker of its own drives the browser through Playwright or Puppeteer and is an outpost like
+   this Mac: registered by the operator, it beats only while work waits, takes its steps through the same step channel,
+   redeems a grant only for a sign-in step, keeps each step's page in a fresh incognito context and closes it, and
+   reports each outcome once. The vault's rules do not change: the password reaches the cloud outpost's memory for one
+   step, as it reaches this Mac's, and no model ever sees it. What is new is that the shop's sites see Cloudflare's
+   addresses rather than the owner's Mac, which some seller centres may ask to verify.
+
+   **Needs the owner:** the Workers Paid plan (if the account is not on it) and the spending, and whether a shop's sites
+   may be reached from Cloudflare's addresses at all. Until then, work waits for this Mac, as the step channel's offline
+   state already says.
 3. **The rest of Customize › Connections on the desktop**: the shop's sign-ins ("Change" types a new password), the
    cloud outpost's row, and an owner's route to remove or rename an outpost (today only an operator can remove one).
 4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
@@ -475,3 +493,8 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
    page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
    (the username first), the outpost on Windows and Linux (no keychain support there yet), and the shop sessions of the several-shops switcher (the outpost follows
    the session the page holds, which is the shop's own signed-in session today).
+
+## Sources
+
+- CF1 https://developers.cloudflare.com/browser-run/pricing/ (and the 28 July 2025 pricing note, https://developers.cloudflare.com/changelog/2025-07-28-br-pricing/)
+- CF2 https://developers.cloudflare.com/browser-run/limits/ and https://developers.cloudflare.com/browser-rendering/platform/limits
