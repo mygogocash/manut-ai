@@ -181,7 +181,7 @@ describe("the audit log's words", () => {
     expect(auditActorText(op, "Fon")).toBe("ops@manut.test");
     expect(auditActorText({ kind: "operator", email: null }, "Fon")).toBe("An operator (no Access identity)");
     expect(auditActorText({ kind: "owner" }, "Fon")).toBe("Fon");
-    expect(auditActorText({ kind: "owner", id: "owner-phone-1" }, "Fon")).toBe("Fon (owner-phone-1)");
+    expect(auditActorText({ kind: "owner", id: "owner-phone-1" }, "Fon")).toBe("Fon (linked account owner-phone-1)");
     expect(auditActorText({ kind: "helper", id: "staff-2" }, "Fon")).toBe("Helper staff-2");
     expect(auditActorText({ kind: "worker", attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" }, "Fon"))
       .toBe("Worker attempt 6f9d1f0e");
@@ -861,9 +861,9 @@ describe("the audit log's words for the owner's linked account", () => {
     expect(said({ actor: op, action: "owner.unlinked", subject: { ownerAccountId: "owner-1" } }))
       .toBe("ops@manut.test unlinked Fon's account from the shop.");
     expect(said({ actor: owner, action: "owner.session_opened", subject: { ownerAccountId: "owner-1" } }))
-      .toBe("Fon (owner-1) signed in to the shop on a device.");
+      .toBe("Fon (linked account owner-1) signed in to the shop on a device.");
     expect(said({ actor: owner, action: "owner.session_ended", subject: { ownerAccountId: "owner-1" } }))
-      .toBe("Fon (owner-1) signed out of the shop on a device.");
+      .toBe("Fon (linked account owner-1) signed out of the shop on a device.");
     expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }))
       .toBe("Helper helper-1 signed out on a device.");
     expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }, { "helper-1": "Mint" }))
@@ -883,6 +883,59 @@ describe("the audit log's words for the owner's linked account", () => {
   it("labels the link's id an entry is about", () => {
     expect(auditSubjectText({ ownerAccountId: "owner-1" })).toBe("owner account owner-1");
     expect(auditSubjectText({ helperId: "helper-1", ownerAccountId: "owner-1" })).toBe("helper helper-1 · owner account owner-1");
+  });
+});
+
+// Since the owner can change the shop's people, memory, consent and routines from their own session (docs/several-shops.md,
+// slice 4), the log names the owner three ways: the linked account's id (an owner session), `owner-session` (the shop's own
+// signed-in session) and no id at all (a signed link). The page says which, in words, never the raw `owner-session`.
+describe("the audit log says who acted: the operator, the owner's linked account, the shop's own session, a helper or an outpost", () => {
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>, names: Record<string, string> = {}) =>
+    auditSentence(entry(overrides), "Fon", names);
+
+  it("names the owner's linked account by its id, the shop's own session in words, and a link by the owner alone", () => {
+    expect(auditActorText({ kind: "owner", id: "owner-fon" }, "Fon")).toBe("Fon (linked account owner-fon)");
+    expect(auditActorText({ kind: "owner", id: "owner-session" }, "Fon")).toBe("Fon (the shop's own session)");
+    expect(auditActorText({ kind: "owner" }, "Fon")).toBe("Fon");
+    // `owner-link` is the name the owner's link gives in a decision's record; it is the link, not an account.
+    expect(auditActorText({ kind: "owner", id: "owner-link" }, "Fon")).toBe("Fon");
+    // An id that merely starts like the shop's own session is an account's.
+    expect(auditActorText({ kind: "owner", id: "owner-session-2" }, "Fon")).toBe("Fon (linked account owner-session-2)");
+  });
+
+  it("says so in the sentence of each change the owner can now make from their own session", () => {
+    const account = { kind: "owner" as const, id: "owner-fon" };
+    const own = { kind: "owner" as const, id: "owner-session" };
+    const names = { "inv-1": "Beam", "helper-1": "Mint" };
+    expect(said({ actor: account, action: "invite.created", subject: { inviteId: "inv-1" } }, names))
+      .toBe("Fon (linked account owner-fon) invited Beam.");
+    expect(said({ actor: own, action: "invite.revoked", subject: { inviteId: "inv-1" } }, names))
+      .toBe("Fon (the shop's own session) cancelled Beam's invite.");
+    expect(said({ actor: account, action: "helper.removed", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (linked account owner-fon) removed Mint.");
+    expect(said({ actor: own, action: "away.set", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (the shop's own session) set Mint to cover messages while Fon is away.");
+    expect(said({ actor: account, action: "away.cleared", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (linked account owner-fon) ended Mint's cover.");
+    expect(said({ actor: account, action: "memory.confirmed", subject: { factId: "f1" } }))
+      .toBe("Fon (linked account owner-fon) confirmed a fact as true.");
+    expect(said({ actor: own, action: "consent.withdrawn" }))
+      .toBe("Fon (the shop's own session) withdrew permission to send for the shop.");
+    expect(said({ actor: account, action: "approval.decided", outcome: "approved" }))
+      .toBe("Fon (linked account owner-fon) decided an approval request.");
+  });
+
+  it("still names an operator by their Access identity, a helper by the owner's name for them, an outpost by its id", () => {
+    expect(said({ actor: { kind: "operator", email: "ops@manut.test" }, action: "away.cleared", subject: { helperId: "h" } }))
+      .toBe("ops@manut.test ended the cover.");
+    expect(said({ actor: { kind: "operator", email: null }, action: "away.cleared", subject: { helperId: "h" } }))
+      .toBe("An operator (no Access identity) ended the cover.");
+    expect(said({ actor: { kind: "helper", id: "helper-1" }, action: "helper.session_ended", subject: { helperId: "helper-1" } },
+      { "helper-1": "Mint" })).toBe("Mint signed out on a device.");
+    expect(said({ actor: { kind: "outpost", id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" }, action: "browser_step.fetched" }))
+      .toBe("Outpost b4c8d1e2 picked up a browser step.");
   });
 });
 

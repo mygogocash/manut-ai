@@ -357,14 +357,24 @@ export function auditNamesOf(people: People): AuditNames {
   );
 }
 
-/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name, a helper by the name
-/// the owner gave them when the people list knows it.
+/// What the API writes as the owner's id when the shop's own signed-in session acted (`OWNER_SESSION` in apps/api/src/people.ts),
+/// and what a decision's record calls the owner's link. Any other id on an owner is the account linked as the owner's.
+const OWN_SESSION_ID = "owner-session";
+const OWNER_LINK_ID = "owner-link";
+
+/// Who did it, the way an operator knows them: an operator by their Access email, a helper by the name the owner gave them
+/// when the people list knows it, an outpost by its id. The owner is named three ways, because the owner can act three ways
+/// (docs/several-shops.md): through a signed link, which has no id, and so is the owner's name alone; from the shop's own
+/// session, which the log names `owner-session`; and from the app of the account linked as theirs, which the log names by the
+/// link's id. The words say which, so the raw `owner-session` is never what an operator reads.
 export function auditActorText(actor: AuditActor, ownerName: string, names: AuditNames = NO_NAMES): string {
   switch (actor.kind) {
     case "operator":
       return actor.email ?? "An operator (no Access identity)";
     case "owner":
-      return actor.id ? `${ownerName} (${actor.id})` : ownerName;
+      if (!actor.id || actor.id === OWNER_LINK_ID) return ownerName;
+      if (actor.id === OWN_SESSION_ID) return `${ownerName} (the shop's own session)`;
+      return `${ownerName} (linked account ${actor.id})`;
     case "helper":
       return nameOf(names, actor.id) ?? `Helper ${actor.id}`;
     case "worker":
@@ -465,6 +475,12 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "browser_step.fetched": () => "picked up a browser step",
   "browser_step.reported": () => "reported how a browser step went",
 };
+
+/// The actions the Audit page has words for. A test holds this list against the API's own (`AUDIT_ACTIONS` in
+/// apps/api/src/audit-log.ts), so an action the API gains cannot reach the page as "did something.new".
+export function auditActionsWithWords(): string[] {
+  return Object.keys(AUDIT_ACTIONS);
+}
 
 /// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290." Given the people list's names, a helper
 /// is named as the owner named them.
