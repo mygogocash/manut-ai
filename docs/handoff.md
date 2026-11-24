@@ -146,6 +146,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `ef7f070f`, since the desktop needs the new route); smoke-tested: `GET /v1/tasks`, `/v1/schedules` and
   `/v1/inbound/attention` answer 401 without a session and with a session that is not one, before any query check,
   `POST /v1/tasks` still 401, and the pages, `/app/` and the console's Access load.
+- Dev's API was redeployed on 24 Nov at 20:53 from `9224fb1`, with item 48's approval lookup (API `4c340b5d`, deployed
+  whole, not as a gradual rollout); smoke-tested: `GET /v1/approvals?state=open` and a decision answer 401 without a
+  session, and the approval page, `/app/` and the console's Access load. The pages are unchanged since 19:38.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
