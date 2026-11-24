@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@manut/approval-core": "workspace:*",
+    "@manut/member-grants": "workspace:*",
     "@manut/notify-rules": "workspace:*",
     "@manut/routine-rules": "workspace:*",
     "@manut/shop-memory": "workspace:*",

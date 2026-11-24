@@ -1060,6 +1060,8 @@ class MockChat {
   private subWaiting = false;
   /** the open approval is plan mode's plan (/plan) */
   private planAsk = false;
+  /** "/kit …": the command a scripted ask of Kit's (src/code/) is waiting to run, or "" */
+  private kitAsk = "";
   /** the open approval is a background subagent's, asked after the turn ended (/lateask) */
   private lateAsk = false;
   /** "/subagents hold": the second subagent is still out */
@@ -1253,6 +1255,39 @@ class MockChat {
           this.waiting = rid;
           this.planAsk = true;
           this.emit({ event: "approval.request", request_id: rid, title: "Start working on this plan?", command: "", cwd: this.cwd, choices: ["deny", "once"], plan: MOCK_PLAN });
+        });
+        return;
+      }
+      if (text.startsWith("/kit ")) {
+        // Kit's states on the Code page (src/code/): an ask as the shell writes it (agent_chat.rs), a key typed into a
+        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key
+        const word = text.slice(5).trim();
+        if (word === "key") {
+          const lines = ["@@ -1,2 +1,3 @@", " export const CURRENCY = 'THB';", '+export const PROMPTPAY_KEY = "sk-FAKE0000000000000000TEST";'];
+          this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/config.ts", kind: "update", lines, added: 1, removed: 0 }] }));
+          this.say("I put the PromptPay key in src/config.ts.", 120);
+          this.at(400, () => this.end("done"));
+          return;
+        }
+        const asks: Record<string, { title: string; command: string }> = {
+          install: { title: "Run this command?", command: "pnpm add qrcode" },
+          test: { title: "Run this command?", command: "pnpm test" },
+          commit: { title: "Run this command?", command: "git commit -m 'Add a PromptPay QR'" },
+          deploy: { title: "Run this command?", command: "wrangler deploy" },
+          edit: { title: "Allow Edit to change src/checkout.tsx?", command: "" },
+          outside: { title: "Allow Read?", command: "/home/you/Documents/tax-2026.xlsx" },
+        };
+        const a = asks[word];
+        if (!a) {
+          this.say(`No such step: ${word}`, 40);
+          this.at(200, () => this.end("done"));
+          return;
+        }
+        const rid = `kit-${++this.seq}`;
+        this.at(60, () => {
+          this.waiting = rid;
+          this.kitAsk = a.command || a.title;
+          this.emit({ event: "approval.request", request_id: rid, title: a.title, command: a.command, cwd: this.cwd, choices: ["deny", "once", "session"] });
         });
         return;
       }
@@ -1553,6 +1588,11 @@ class MockChat {
           this.at(30, () => this.emit({ event: "session.info", mode: "default" }));
           this.say("Starting on the plan.", 60);
         }
+        this.at(400, () => this.end("done"));
+      } else if (this.kitAsk) {
+        const what = this.kitAsk;
+        this.kitAsk = "";
+        this.say(i.choice === "deny" ? `Okay, I did not do it: ${what}` : `Done: ${what}`, 60);
         this.at(400, () => this.end("done"));
       } else if (i.request_id.startsWith("req-") && this.subWaiting) {
         // the subagent's command ran (or was refused); the subagent hands back, then the agent answers

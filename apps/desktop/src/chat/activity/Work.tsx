@@ -3,6 +3,7 @@
 // (`tool.diff`, `plan`, `thinking.text`); an agent that sends none of them shows none of these.
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { DiffFile, PlanItem } from "../../lib/protocol";
+import { maskSecrets } from "../../lib/secrets";
 import { t, type Key } from "../../i18n";
 import { ChevronRight } from "../../ui";
 import "./work.css";
@@ -23,9 +24,10 @@ function DiffFileView({ f }: { f: DiffFile }) {
       <div className="dv-body" data-testid="diff-body">
         {f.lines.map((l, i) => {
           const k = l.startsWith("@@") ? "hunk" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : "ctx";
+          // a key typed into the code is never shown, here or anywhere: the app's one masker hides it
           return (
             <div key={i} className={`dv-l ${k}`} data-kind={k}>
-              {k === "hunk" ? "⋯" : l.slice(1) || " "}
+              {k === "hunk" ? "⋯" : maskSecrets(l.slice(1)) || " "}
             </div>
           );
         })}
