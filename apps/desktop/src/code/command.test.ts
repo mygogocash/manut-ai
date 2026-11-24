@@ -57,6 +57,88 @@ describe("what a step does", () => {
     expect(read("pnpm run db:migrate").say).toEqual({ key: "kit.say.script", vars: { name: "db:migrate" } });
   });
 
+  it("never reads as a read what can run another program or write a file", () => {
+    // a read or a check runs alone at every level, so these must not pass as one
+    for (const line of [
+      "fd -e ts -x rm {}",
+      "fd . --exec-batch rm",
+      "rg --pre ./decode.sh secret src",
+      "sed -n '1e rm -rf build' src/a.ts",
+      "sed 's/a/b/w /tmp/out' src/a.ts",
+      "sed -f script.sed src/a.ts",
+      "awk 'BEGIN { system(\"rm -rf build\") }'",
+      "awk '{ print > \"out.txt\" }' src/a.ts",
+      "awk '{ print | \"sh\" }' src/a.ts",
+      "awk -f prog.awk src/a.ts",
+      "tar --to-command='sh -c x' -xf a.tar",
+      "tar -I ./unpack.sh -xf a.tar",
+      "rsync -e ./tunnel.sh src/ backup/",
+      "sort --compress-program=./x src/a.txt",
+      "date -s 2027-01-01",
+      "alias ls='rm -rf'",
+      "set -o vi",
+    ])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    // the plain forms still read
+    for (const line of ["sed -n '1,20p' src/a.ts", "sed -n '/export/p' src/a.ts", "sed 's/foo/bar/g' src/a.ts", "sed -e 's|a|b|' -e '3d' src/a.ts", "awk '$3 > 100 { print $1 }' data.txt", "fd -e ts src", "rg -n checkout src"])
+      expect([line, action(line)]).toEqual([line, "read"]);
+    expect(action("sed -i '' 's/foo/bar/g' src/a.ts")).toBe("change");
+    expect(action("sed -i 's/a/b/w x' src/a.ts")).toBe("unknown");
+    expect(action("tree -o out.txt")).toBe("change");
+  });
+
+  it("never reads git as a read when an option could run a program or point it elsewhere", () => {
+    for (const line of [
+      "git -c core.pager='sh -c x' log",
+      "git -c core.fsmonitor=./x status",
+      "git --config-env=core.pager=X log",
+      "git --exec-path=/tmp diff",
+      "git --git-dir=.evil/.git status",
+      "git --work-tree=other status",
+      "git fetch --upload-pack='sh -c x' origin",
+      "git clone -u ./x origin vendor/x",
+      "git clone --template=./t https://example.com/x.git vendor/x",
+      "git ls-remote --upload-pack=./x origin",
+      "git grep -O./x foo",
+      "git grep --open-files-in-pager=./x foo",
+      "git rebase -x 'pnpm test' main",
+      "git rebase --exec ./x main",
+      "git bisect run ./x",
+      "git submodule foreach 'rm -rf .'",
+      "git difftool",
+      "git config alias.st '!rm -rf .'",
+      "git config core.hooksPath ./hooks",
+      "git credential fill",
+      "git archive --remote=x HEAD",
+    ])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    expect(action("git -C sub status")).toBe("read");
+    expect(action("git --no-pager log --oneline")).toBe("read");
+    expect(action("git config --get user.name")).toBe("read");
+    expect(action("git log --output=log.txt")).toBe("change");
+    expect(action("git diff --output=/tmp/d.txt")).toBe("change");
+    expect(read("git diff --output=/tmp/d.txt").outside).toEqual(["/tmp/d.txt"]);
+  });
+
+  it("asks for a command run with a variable set before it, unless the variable is a harmless one", () => {
+    for (const line of ["PATH=/tmp/evil pnpm test", "NODE_OPTIONS=--require=./x.js pnpm test", "GIT_SSH_COMMAND=./x git fetch", "DYLD_INSERT_LIBRARIES=./x.dylib ls", "BASH_ENV=./x bash -c ls", "PAGER=./x git log", "export PATH=/tmp/evil", "export NODE_OPTIONS=--require=./x.js && pnpm test"])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    for (const line of ["CI=1 pnpm test", "NODE_ENV=test pnpm test", "FORCE_COLOR=0 pnpm test", "TZ=Asia/Bangkok pnpm test", "export CI=1"]) expect([line, action(line)]).not.toEqual([line, "unknown"]);
+  });
+
+  it("asks for a tool fetched from somewhere other than the project", () => {
+    for (const line of ["npx -p evil-pkg vitest run", "npx --package=evil-pkg vitest", "pnpm dlx vitest run", "yarn dlx prettier --check ."]) expect([line, action(line)]).toEqual([line, "unknown"]);
+    expect(action("npx vitest run")).toBe("check");
+    expect(action("pnpm exec vitest run")).toBe("check");
+  });
+
+  it("checks a file:// link as the path it is", () => {
+    expect(read("curl file:///etc/passwd").outside).toEqual(["/etc/passwd"]);
+    expect(read(`curl file://${root}/src/a.ts`).outside).toEqual([]);
+    expect(action("curl -K ./curlrc https://example.com")).toBe("unknown");
+    expect(action("curl https://example.com/a")).toBe("read");
+  });
+
   it("changes to this Mac outside the project ask every time", () => {
     for (const line of ["npm install -g typescript", "pnpm add -g vercel", "brew install jq", "cargo install ripgrep", "go install golang.org/x/tools/gopls@latest", "pip install requests"]) {
       expect([line, action(line)]).toEqual([line, "unknown"]);

@@ -83,6 +83,12 @@ describe("deciding an ask by Kit's dial", () => {
     expect(decide(run("git add -A"), p, ["src/config.ts"])).toEqual({ answer: "alone" });
   });
 
+  it("asks before a change to git's own folder at every level", () => {
+    for (const title of ["Allow Edit to change .git/config?", "Allow Write to change .git/hooks/pre-commit?", `Allow Edit to change ${root}/.git/config?`])
+      expect([title, decide({ title, command: "" }, at("everything_in_project"))]).toEqual([title, { answer: "ask", kind: "command", mayAlwaysAllow: false }]);
+    expect(decide({ title: "Allow Edit to change src/.gitignore?", command: "" }, at("edits_alone"))).toEqual({ answer: "alone" });
+  });
+
   it("asks before going live at every level", () => {
     expect(decide(run("git push origin main"), at("everything_in_project"))).toEqual({ answer: "ask", kind: "command", mayAlwaysAllow: false });
   });

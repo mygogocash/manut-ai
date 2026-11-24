@@ -70,7 +70,10 @@ export function readAsk(ask: AskWords, where: Where): AskRead | null {
     const paths = list.split(", ").filter(Boolean);
     // a change is a write: the folders Kit may read do not count for it
     const outside = outsideOf(paths, at, []);
-    return { what: "edit", action: "edit", outside, folder: outside.length ? folderOf(outside[0], at) : null, saves: false, rule: null, say: { key: "kit.say.edit", vars: { path: list } } };
+    // git's own folder holds its settings and hooks, which can make a later read run a program: a change there asks
+    // at every level
+    const gitOwn = paths.some((p) => /(^|[\\/])\.git([\\/]|$)/.test(p));
+    return { what: "edit", action: gitOwn ? "unknown" : "edit", outside, folder: outside.length ? folderOf(outside[0], at) : null, saves: false, rule: null, say: { key: "kit.say.edit", vars: { path: list } } };
   }
   if (READ.test(ask.title)) {
     const path = ask.command.trim();

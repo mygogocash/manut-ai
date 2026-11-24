@@ -367,7 +367,9 @@ function packageManager(words: string[], where: Where): Verdict {
     const name = rest[0];
     return name ? script(name, head + 1) : v("read", say("kit.say.read"));
   }
-  if (["exec", "dlx", "x"].includes(sub)) return at$(tool(words.slice(head), where), head);
+  // dlx fetches the tool from the registry every time; exec (and bun's x) runs the project's own
+  if (sub === "dlx") return v("unknown", say("kit.say.opaque"));
+  if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where), head);
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
   if (["ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor", "explain", "licenses", "config", "--version", "-v"].includes(sub))
@@ -383,16 +385,31 @@ function packageManager(words: string[], where: Where): Verdict {
 
 /** The main branch's usual names: a push to one goes live. */
 const MAIN = new Set(["main", "master", "trunk", "production", "prod", "release", "live", "stable", "gh-pages"]);
-const GIT_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+/** git's options before its subcommand that change nothing about what it runs: anything else (`-c`, `--exec-path`,
+ *  `--git-dir`, …) can make a read run a program, or read another repository, so it is not read in advance. */
+const GIT_GLOBAL_SAFE = new Set(["--no-pager", "-P", "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects"]);
+/** Options of git's subcommands that run a program, or take one from where nobody looked. */
+const GIT_RUNS = ["--upload-pack", "--receive-pack", "--exec", "--template", "--open-files-in-pager", "--config"];
 
 function git(words: string[], where: Where): Verdict {
-  const ops = operands(words, 1, GIT_VALUE);
-  if (!ops.length) return v("read", say("kit.say.read"));
-  const at = ops[0];
+  let at = 1;
+  while (at < words.length && words[at].startsWith("-")) {
+    if (words[at] === "-C") at += 2;
+    else if (GIT_GLOBAL_SAFE.has(words[at])) at++;
+    else return unknownProgram("git");
+  }
+  if (at >= words.length) return v("read", say("kit.say.read"));
+  const ops = operands(words, at);
   const sub = words[at];
   const head = at + 1;
   const args = words.slice(head);
   const rest = ops.slice(1).map((i) => words[i]);
+  if (has(args, ...GIT_RUNS)) return unknownProgram("git");
+  if (["fetch", "clone", "ls-remote", "pull"].includes(sub) && has(args, "-u", "-c")) return unknownProgram("git");
+  if (sub === "grep" && args.some((w) => w === "-O" || /^-O./.test(w))) return unknownProgram("git");
+  if (sub === "rebase" && has(args, "-x")) return unknownProgram("git");
+  // a file it writes its output to: a change, and the path is checked as any other
+  if (["log", "diff", "show", "format-patch", "archive"].includes(sub) && has(args, "--output", "-o")) return v("change", say("kit.say.change"), head);
   const history = () => v("read", say("kit.say.history"));
   const change = () => v("change", say("kit.say.change"), head);
   const del = (s: Say = say("kit.say.delete")) => v("delete", s, "exact");
@@ -421,6 +438,10 @@ function git(words: string[], where: Where): Verdict {
       return { ...history(), text: new Set(ops.slice(1, 2)) };
     case "fetch":
       return v("read", say("kit.say.fetch"));
+    case "archive":
+      return has(args, "--remote") ? unknownProgram("git") : history();
+    case "bisect":
+      return rest[0] === "run" ? unknownProgram("git") : change();
     case "reflog":
       return has(args, "expire", "delete") ? del() : history();
     case "commit":
@@ -475,13 +496,15 @@ function git(words: string[], where: Where): Verdict {
       if (["remove", "prune"].includes(rest[0] ?? "")) return del();
       return rest[0] === "list" ? history() : change();
     case "submodule":
+      if (rest[0] === "foreach") return unknownProgram("git");
       return rest[0] === "status" || !rest.length ? history() : change();
     case "remote":
       if (["remove", "rm"].includes(rest[0] ?? "")) return del();
       return !rest.length || ["show", "get-url"].includes(rest[0] ?? "") ? history() : change();
     case "config":
       if (has(args, "--global", "--system")) return thisMac();
-      return has(args, "--get", "--list", "-l", "--get-all", "--get-regexp") || rest.length <= 1 ? history() : change();
+      // a setting can name a program git runs later (an alias, a pager, a hook folder), so setting one is never a safe step
+      return has(args, "--get", "--list", "-l", "--get-all", "--get-regexp") || rest.length <= 1 ? history() : unknownProgram("git");
     case "push":
       return push(words, head, where);
     default:
@@ -555,8 +578,10 @@ const SEARCH_VALUE: Record<string, ReadonlySet<string>> = {
   rg: new Set(["-e", "-f", "-g", "-t", "-T", "-A", "-B", "-C", "-m", "-j", "-M", "-r", "-E", "--glob", "--iglob", "--type", "--type-not", "--regexp", "--file", "--replace", "--max-count", "--after-context", "--before-context", "--context", "--threads", "--max-columns", "--max-depth", "--maxdepth", "--sort", "--sortr", "--encoding", "--pre", "--pre-glob", "--ignore-file", "--type-add", "--type-clear"]),
 };
 
-/** grep, rg and the like: the first word that is not an option is the pattern, unless one came with `-e` or `-f`. */
+/** grep, rg and the like: the first word that is not an option is the pattern, unless one came with `-e` or `-f`. A
+ *  preprocessor (`rg --pre`) runs a program on every file, so it is not a read. */
 function search(words: string[], kind: "grep" | "rg"): Verdict {
+  if (kind === "rg" && has(words, "--pre", "--pre-glob")) return unknownProgram(words[0]);
   const takes = SEARCH_VALUE[kind];
   const ops = operands(words, 1, takes);
   const text = new Set<number>();
@@ -571,15 +596,39 @@ const READS = new Set([
   "cat", "head", "tail", "less", "more", "wc", "file", "stat", "du", "df", "ls", "tree", "pwd", "realpath", "readlink",
   "basename", "dirname", "diff", "cmp", "comm", "uniq", "cut", "tr", "nl", "od", "hexdump", "xxd", "strings", "column",
   "fold", "rev", "tac", "which", "type", "whereis", "true", "false", "test", "[", "date", "sleep", "whoami", "uname", "id",
-  "hostname", "sw_vers", "fd", "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "ps", "lsof", "uptime", "history",
-  "export", "unset", "set", "alias", "exit", "wait",
+  "hostname", "sw_vers", "fd", "fdfind", "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "ps", "lsof", "uptime", "history",
+  "unset", "exit", "wait",
 ]);
-const ONLY_TEXT = new Set(["echo", "printf", "export", "unset", "set", "alias"]);
+const ONLY_TEXT = new Set(["echo", "printf", "unset"]);
+/** Options of programs that otherwise read or change files, which make them run another program. */
+const RUNS_PROGRAM: Record<string, string[]> = {
+  fd: ["-x", "--exec", "-X", "--exec-batch"],
+  fdfind: ["-x", "--exec", "-X", "--exec-batch"],
+  tar: ["--to-command", "--checkpoint-action", "-I", "--use-compress-program", "--info-script", "--new-volume-script", "-F"],
+  rsync: ["-e", "--rsh", "--rsync-path"],
+  sort: ["--compress-program"],
+  zip: ["-TT", "--unzip-command"],
+  curl: ["-K", "--config"],
+  date: ["-s", "--set"],
+};
 const CHANGES = new Set(["mkdir", "touch", "cp", "mv", "ln", "chmod", "install", "patch", "tar", "unzip", "zip", "gzip", "gunzip", "dos2unix", "truncate"]);
 const DELETES = new Set(["rm", "rmdir", "unlink", "shred", "trash"]);
 const THIS_MAC = new Set(["brew", "port", "apt", "apt-get", "yum", "dnf", "pacman", "snap", "choco", "winget", "scoop", "softwareupdate", "defaults", "launchctl", "systemctl", "crontab", "mas", "sudo", "doas", "su", "chown", "nvm", "fnm", "volta", "asdf", "mise", "pyenv", "rbenv"]);
 const SENDS = new Set(["ssh", "scp", "sftp", "nc", "ncat", "telnet", "ftp", "mosh"]);
-const OPAQUE_PROGRAMS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "source", ".", "eval", "open", "xdg-open", "osascript", "kill", "pkill", "killall", "printenv", "env"]);
+const OPAQUE_PROGRAMS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "source", ".", "eval", "open", "xdg-open", "osascript", "kill", "pkill", "killall", "printenv", "env", "set", "alias", "unalias", "trap", "function"]);
+
+/** Variables a command may be run with and still be read in advance. Any other (`PATH`, `NODE_OPTIONS`, `DYLD_*`,
+ *  `GIT_*`, a pager) can make the same words run another program. */
+const SAFE_VAR = /^(CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|LANG|LANGUAGE|LC_[A-Z]+|DEBUG|PORT|TERM|COLUMNS|LINES|NODE_NO_WARNINGS|RUST_BACKTRACE|RUST_LOG)=/;
+
+/** sed's own commands that only print or change lines on their way through: an address or two, then print, delete,
+ *  quit and the like, a substitution whose flags write nothing and run nothing, or a transliteration. `e`, `w`, `r`
+ *  and a substitution's `w` and `e` flags run a program or touch a file, so a script with one is not read in advance. */
+const SED_ADDR = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/I?)`;
+const SED_SAFE = new RegExp(
+  String.raw`^(?:${SED_ADDR}(?:,${SED_ADDR})?!?)?\s*(?:[pdqQnNPDgGhHxl=]|s(.)(?:(?!\1)[^\\]|\\.)*\1(?:(?!\1)[^\\]|\\.)*\1[gpiImM0-9]*|y(.)(?:(?!\2)[^\\]|\\.)*\2(?:(?!\2)[^\\]|\\.)*\2)$`,
+);
+const sedSafe = (script: string) => script.split(/[;\n]/).every((c) => SED_SAFE.test(c.trim()) || c.trim() === "");
 const RUNTIMES = new Set(["node", "deno", "ts-node", "tsx", "ruby", "perl", "php", "java", "lua", "Rscript", "swift"]);
 
 /** Checks that only report, and tools that report unless told to fix. */
@@ -589,9 +638,11 @@ const FRAMEWORKS = new Set(["vite", "next", "nuxt", "astro", "remix", "webpack",
 
 /** A tool run by name, through npx or a package manager's exec as much as directly. */
 function tool(words: string[], where: Where): Verdict {
-  // npx's own options come before the tool
+  // npx's own options come before the tool; one that names the package to fetch (`-p`, `--package`, `-c`) runs what
+  // that package holds, not the project's own tool of that name
+  if (words.some((w) => ["-p", "--package", "-c", "--call"].includes(w) || w.startsWith("--package=") || w.startsWith("--call="))) return v("unknown", say("kit.say.opaque"));
   let i = 0;
-  while (i < words.length && words[i].startsWith("-")) i += ["-p", "--package"].includes(words[i]) ? 2 : 1;
+  while (i < words.length && words[i].startsWith("-")) i++;
   return i < words.length ? at$(classify(words.slice(i), where), i) : v("unknown", say("kit.say.opaque"));
 }
 
@@ -773,21 +824,35 @@ function classify(words: string[], where: Where): Verdict {
   if (["grep", "egrep", "fgrep"].includes(name)) return (search(words, "grep"));
   if (["rg", "ag", "ack"].includes(name)) return (search(words, "rg"));
   if (name === "find") return find(words, where);
+  if (RUNS_PROGRAM[name] && words.some((w) => RUNS_PROGRAM[name].some((o) => w === o || w.startsWith(`${o}=`)))) return unknownProgram(name);
   if (name === "sed") {
+    // a script from a file cannot be read in advance
+    if (has(words, "-f", "--file")) return unknownProgram(name);
     const inPlace = words.some((w) => w === "-i" || w.startsWith("-i") || w === "--in-place" || w.startsWith("--in-place="));
-    const ops = operands(words, 1, new Set(["-e", "-f", "--expression", "--file"]));
-    const text = new Set(words.flatMap((w, i) => (["-e", "--expression"].includes(w) ? [i + 1] : [])));
-    if (!has(words, "-e", "--expression", "-f", "--file") && ops.length) text.add(ops[0]);
     // macOS's `sed -i ''`: the empty word is the backup's suffix, not the script
-    if (words.includes("-i") && words[words.indexOf("-i") + 1] === "") text.add(words.indexOf("-i") + 1);
-    return (inPlace ? v("change", say("kit.say.change"), 1, { text }) : v("read", say("kit.say.read"), undefined, { text }));
+    const suffix = words.includes("-i") && words[words.indexOf("-i") + 1] === "" ? words.indexOf("-i") + 1 : -1;
+    const ops = operands(words, 1, new Set(["-e", "--expression"])).filter((i) => i !== suffix);
+    const scripts = words.flatMap((w, i) => (["-e", "--expression"].includes(w) ? [i + 1] : []));
+    if (!scripts.length && ops.length) scripts.push(ops[0]);
+    if (!scripts.every((i) => sedSafe(words[i] ?? ""))) return unknownProgram(name);
+    const text = new Set([...scripts, ...(suffix >= 0 ? [suffix] : [])]);
+    return inPlace ? v("change", say("kit.say.change"), 1, { text }) : v("read", say("kit.say.read"), undefined, { text });
   }
   if (name === "awk" || name === "gawk") {
-    const ops = operands(words, 1, new Set(["-F", "-v", "-f"]));
+    // a program from a file, or one that runs a command, pipes or writes, is not read in advance
+    if (has(words, "-f", "-i", "--include", "--file")) return unknownProgram(name);
+    const ops = operands(words, 1, new Set(["-F", "-v"]));
     const prog = ops.length ? words[ops[0]] : "";
-    if (/system\s*\(|\|\s*"|>\s*"|getline/.test(prog) || words.includes("-i")) return unknownProgram(name);
-    return (v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) }));
+    if (/system\s*\(|getline|\|&|\bprintf?\b[^;}]*[>|]/.test(prog)) return unknownProgram(name);
+    return v("read", say("kit.say.read"), undefined, { text: new Set(ops.slice(0, 1)) });
   }
+  if (name === "export") {
+    // a value set for the next commands is read in advance only when it is a harmless one
+    const ops = operands(words, 1);
+    return ops.every((i) => !words[i].includes("=") || SAFE_VAR.test(words[i])) ? v("read", say("kit.say.read"), undefined, { text: new Set(ops) }) : v("unknown", say("kit.say.opaque"));
+  }
+  if (name === "tree" && has(words, "-o")) return v("change", say("kit.say.change"), 1);
+  if (name === "hostname" && operands(words, 1).length) return thisMac();
   if (name === "jq" || name === "yq") {
     if (has(words, "-i", "--inplace")) return (v("change", say("kit.say.change"), 1));
     const ops = operands(words, 1, new Set(["--arg", "--argjson", "-f", "--from-file", "--indent"]));
@@ -886,6 +951,11 @@ export function readCommand(line: string, where: Where): ReadCommand {
     let at = 0;
     while (at < c.words.length && ASSIGNMENT.test(c.words[at])) at++;
     const words = c.words.slice(at);
+    // a variable set for this command can make the same words run another program, unless it is a harmless one
+    if (c.words.slice(0, at).some((w) => !SAFE_VAR.test(w))) {
+      verdicts.push(v("unknown", say("kit.say.opaque")));
+      continue;
+    }
     // a pipe into a shell or a runtime runs text nobody has read
     if (c.piped && words.length && (OPAQUE_PROGRAMS.has(words[0]) || RUNTIMES.has(words[0]) || ["python", "python3"].includes(words[0]))) {
       verdicts.push(v("unknown", say("kit.say.opaque")));
@@ -909,7 +979,9 @@ export function readCommand(line: string, where: Where): ReadCommand {
     words.forEach((w, i) => {
       if (i === 0 || verdict.text?.has(i)) return;
       const value = w.startsWith("-") ? (w.includes("=") ? w.slice(w.indexOf("=") + 1) : "") : w;
-      if (value && !URL_LIKE.test(value) && !SCP_LIKE.test(value)) check(value, pathLike(value));
+      // a file:// link is the path it names; any other link is not on this computer
+      if (/^file:\/\//i.test(value)) check(value.replace(/^file:\/\/(localhost)?/i, ""), true);
+      else if (value && !URL_LIKE.test(value) && !SCP_LIKE.test(value)) check(value, pathLike(value));
     });
     for (const r of c.redirects) check(r, true);
 
