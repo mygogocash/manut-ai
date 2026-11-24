@@ -105,8 +105,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    were sent on again at 09:35 in their own threads (`t3_thread_send`, as for item 9), once a new helper (item 25)
    showed the limit no longer held. They run, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 19, this Mac's outpost following the shop sessions, registered and run for the shop the switcher shows
-     (`feat/outpost-shop-sessions`, Opus; a Rust build, after item 25's);
+   - item 26, rewinding a turn, files and chat together (`feat/rewind-files`, Opus; a Rust build);
    - item 29, a preview with sample values, and main moving while Kit worked (`feat/preview-and-main-moved`, Sonnet);
    - item 27, Kit's lanes on their own branches, with Checked, Tests failed and Reverted (`feat/kit-lanes`, Sonnet);
    - item 28, what keeps running, with its age, its port and Stop (`feat/what-keeps-running`, Sonnet).
@@ -117,7 +116,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    (the outpost's step channel), 23 (re-sealing the vault after a key rotation, `POST /v1/admin/vault/reseal`, and a
    worker's list of its sign-ins), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 20 (the connected desktop shows a shop the person owns whole, and pauses routines and
+   9 (desktop leftovers), 19 (this Mac's outpost registered and run for the shop the switcher shows, and shown once
+   on Connections), 20 (the connected desktop shows a shop the person owns whole, and pauses routines and
    everyone), 24 (the console's words for every audit action, held by a test that reads `audit-log.ts`),
    25 (each coding ask carries the agent's own tool, command and paths; Kit reads those, and a word the shell would
    expand asks), 21 (Customize › Connections for the owner: sign-ins with Change, outposts with Rename and
@@ -130,7 +130,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
-   - item 26, rewinding files and chat together (`docs/code-editor.md`), as a slot frees; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
+   - the code editor's remaining states are running; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
