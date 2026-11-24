@@ -1,6 +1,6 @@
 // Small time formatters shared by the sidebar and the timeline. `ts` is seconds since epoch. Words and units
 // follow the current language; weekday and month names come from Intl in that language.
-import { locale, t } from "../i18n";
+import { lang, locale, t } from "../i18n";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -57,4 +57,12 @@ export function busyFor(ms: number): string {
   if (s < 60) return t("unit.s", { n: s });
   if (s < 3600) return t("unit.m", { n: Math.floor(s / 60) });
   return t("unit.h", { n: Math.floor(s / 3600) });
+}
+
+/** "3 November", or "3 November 2025" when it is not this year. English writes the day first, as the canvas does and as the
+ *  shop's own country does. Connections and Google Sheets say their days the same way (connections.ts, google.ts), and so does a books request in Needs you (runtime/http/books.ts). */
+export function dayText(sec: number, nowMs: number): string {
+  const at = new Date(sec * 1000);
+  const thisYear = at.getFullYear() === new Date(nowMs).getFullYear();
+  return at.toLocaleDateString(lang() === "en" ? "en-GB" : locale(), { day: "numeric", month: "long", ...(thisYear ? {} : { year: "numeric" }) });
 }

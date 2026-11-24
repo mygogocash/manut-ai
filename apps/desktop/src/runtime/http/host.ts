@@ -53,6 +53,7 @@ import { decisionPath, outcomeOf, type Closing } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { connectionHandlers, type OwnerLink } from "./connections";
+import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
 import { peopleHandlers } from "./people";
@@ -990,6 +991,9 @@ export class HttpHost {
       "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.routine, true) }),
       // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
       ...connectionHandlers(this.ownerLink()),
+      // Customize › Connections: the shop's Google Sheet for Ton's books, with the owner's session (google.ts). A month Ton asked
+      // the owner about shows in Needs you at once, from a new read of the shop.
+      ...googleHandlers(this.ownerLink(), { asked: () => this.refresh() }),
       // Settings › People: who can use Manut AI for the shop, invites, removal and cover, with the owner's session (people.ts).
       ...peopleHandlers(this.ownerLink()),
     };
