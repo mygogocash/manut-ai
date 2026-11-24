@@ -12,6 +12,7 @@ export const ko: Record<Key, string> = {
   "run.port": "포트 {ports}",
   "run.ports": "포트 {ports}",
   "run.unnamed": "명령",
+  "run.others": "다른 프로젝트에서 {n}개 더 실행 중",
   // graph (the dag box view and its header)
   "graph.deps": "의존 관계",
   "graph.waitsFor": "기다림",

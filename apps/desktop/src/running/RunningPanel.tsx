@@ -4,7 +4,8 @@
 // (feed.ts) asks for them while this is on the page, and model.ts says what a row shows. `RunningPanelView` takes what it
 // shows as props and uses no hooks, so a test can draw it; `RunningPanel` reads the feed and the sessions.
 import "./running.css";
-import { useEffect, useReducer, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { useNow } from "../elsewhere/useNow";
 import { t } from "../i18n";
 import { folderName, termFallbackName } from "../sessions/agents";
 import { pathKey } from "../sessions/folders";
@@ -66,7 +67,15 @@ export function runningItems(s: Pick<RunningState, "rows" | "seen" | "stopping" 
   });
 }
 
-export function RunningPanelView({ items, onStop }: { items: RunningItem[]; onStop: (row: RunningRow) => void }) {
+/** How many commands are listed for other projects than `c.project`: what the project's own list does not show, so a dev server
+ *  left running in another one is still said. None when no project is asked for (the list then holds every command). */
+export function othersOf(s: Pick<RunningState, "rows" | "seen">, c: Pick<ItemContext, "now" | "project">): number {
+  if (c.project === undefined) return 0;
+  const seen = new Map(Object.entries(s.seen));
+  return listed(s.rows, c.now, seen).length - listed(inProject(s.rows, c.project), c.now, seen).length;
+}
+
+export function RunningPanelView({ items, onStop, others = 0 }: { items: RunningItem[]; onStop: (row: RunningRow) => void; others?: number }) {
   return (
     <section className="runp" aria-labelledby="run-title" data-testid="running-panel">
       <div className="band">
@@ -124,6 +133,11 @@ export function RunningPanelView({ items, onStop }: { items: RunningItem[]; onSt
           })}
         </ul>
       )}
+      {others > 0 && (
+        <p className="mut" data-testid="running-others">
+          {t("run.others", { n: others })}
+        </p>
+      )}
     </section>
   );
 }
@@ -134,27 +148,26 @@ function useFeed(feed: RunningFeed): RunningState {
   return useSyncExternalStore(feed.subscribe, feed.getState, feed.getState);
 }
 
-/** The terminal row whose pty the shell named, with what opens it. A chat has no row on this page. */
+/** The session the shell's id names (a terminal's pty, or a chat's), as the page names it, with what opens it: a terminal as its
+ *  row is named, a chat, which is a lane, as its lane is. None when the page has no session for it (a shell of the bottom panel). */
 function laneOf(ss: SessionsState, r: RunningRow): { name: string; open: () => void } | null {
-  if (r.kind !== "pty") return null;
   const sessions = getSessions();
-  const rec = ss.list.find((x) => sessions.ptyOf(x.id) === r.session);
-  return rec ? { name: pickTitle(rec, termFallbackName(rec, ss.agents)).title, open: () => getStore().actions.openSession(rec.id) } : null;
+  const rec = ss.list.find((x) => (r.kind === "pty" ? sessions.ptyOf(x.id) : sessions.chatIdOf(x.id)) === r.session);
+  if (!rec) return null;
+  const name = pickTitle(rec, r.kind === "pty" ? termFallbackName(rec, ss.agents) : folderName(rec.cwd)).title;
+  return { name, open: () => getStore().actions.openSession(rec.id) };
 }
 
-/** What keeps running, for every project at once (or for `project`, a folder): nothing is drawn where the shell cannot
- *  say what runs (Windows), nor before it has first said. */
+/** What keeps running for `project` (a folder, the one Kit's panel shows), with a line for what runs in the others; for every
+ *  project at once when none is given. Nothing is drawn where the shell cannot say what runs (Windows), nor before it has
+ *  first said. */
 export function RunningPanel({ project }: { project?: string }) {
   const feed = getRunningFeed();
   const s = useFeed(feed);
   const ss = useSessions();
   // the ages move between looks
-  const [, tick] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => {
-    const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
-  }, []);
+  const now = useNow(true, POLL_MS);
   if (!s.supported || !s.loaded) return null;
-  const items = runningItems(s, { now: Date.now(), project, lane: (r) => laneOf(ss, r) });
-  return <RunningPanelView items={items} onStop={(r) => void feed.stop(r)} />;
+  const items = runningItems(s, { now, project, lane: (r) => laneOf(ss, r) });
+  return <RunningPanelView items={items} others={othersOf(s, { now, project })} onStop={(r) => void feed.stop(r)} />;
 }

@@ -12,6 +12,7 @@ export const ja: Record<Key, string> = {
   "run.port": "ポート {ports}",
   "run.ports": "ポート {ports}",
   "run.unnamed": "コマンド",
+  "run.others": "ほかのプロジェクトで {n} 件が実行中",
   // graph (the dag box view and its header)
   "graph.deps": "依存関係",
   "graph.waitsFor": "待ち",

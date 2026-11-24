@@ -12,6 +12,7 @@ export const en = {
   "run.port": "port {ports}",
   "run.ports": "ports {ports}",
   "run.unnamed": "A command",
+  "run.others": "{n} more running in other projects",
   // graph (the dag box view and its header)
   "graph.deps": "Dependencies",
   "graph.waitsFor": "waits for",

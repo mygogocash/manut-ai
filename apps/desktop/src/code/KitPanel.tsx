@@ -12,6 +12,7 @@ import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions
 import { useSessions } from "../sessions/sessions";
 import { getStore } from "../state/store";
 import { useNow } from "../elsewhere/useNow";
+import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { LanesView, openLane, useLaneRows, type LaneRow } from "./Lanes";
@@ -176,21 +177,25 @@ export function KitPanel() {
     .map((k) => ({ session: k.chat.slice("agent:".length), files: k.files }))
     .filter((k) => pathKey(ss.list.find((r) => r.id === k.session)?.cwd ?? "") === root);
   return (
-    <KitPanelView
-      root={root}
-      projects={projects}
-      project={project}
-      keys={keys}
-      home={ss.home}
-      lanes={lanes}
-      now={now}
-      onOpenLane={openLane}
-      onProject={setPicked}
-      onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
-      onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}
-      onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
-      onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
-      onOpenSession={(id) => getStore().actions.openSession(id)}
-    />
+    <>
+      <KitPanelView
+        root={root}
+        projects={projects}
+        project={project}
+        keys={keys}
+        home={ss.home}
+        lanes={lanes}
+        now={now}
+        onOpenLane={openLane}
+        onProject={setPicked}
+        onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
+        onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}
+        onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
+        onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
+        onOpenSession={(id) => getStore().actions.openSession(id)}
+      />
+      {/* what keeps running (src/running/) for the project the panel shows, right under it */}
+      <RunningPanel project={root} />
+    </>
   );
 }

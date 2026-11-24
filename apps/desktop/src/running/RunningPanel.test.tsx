@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
 import { MIN_AGE_MS, rowKey, type RunningRow } from "./model";
-import { RunningPanelView, runningItems, type ItemContext, type RunningItem } from "./RunningPanel";
+import { RunningPanelView, othersOf, runningItems, type ItemContext, type RunningItem } from "./RunningPanel";
 
 const NOW = 10_000_000;
 const ROOT = "/home/you/code/baanmali-preorder";
@@ -20,9 +20,9 @@ function drawn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
   if (typeof el.type === "function") return drawn((el.type as (props: unknown) => ReactNode)(el.props));
   return [...(typeof el.type === "string" ? [el] : []), ...drawn(el.props.children as ReactNode)];
 }
-const view = (items: RunningItem[], onStop = vi.fn()) => ({ items, onStop });
-const byId = (items: RunningItem[], id: string, onStop = vi.fn()) => drawn(RunningPanelView(view(items, onStop))).filter((e) => e.props["data-testid"] === id);
-const html = (items: RunningItem[]) => renderToString(createElement(RunningPanelView, view(items)));
+const view = (items: RunningItem[], onStop = vi.fn(), others = 0) => ({ items, onStop, others });
+const byId = (items: RunningItem[], id: string, onStop = vi.fn(), others = 0) => drawn(RunningPanelView(view(items, onStop, others))).filter((e) => e.props["data-testid"] === id);
+const html = (items: RunningItem[], others = 0) => renderToString(createElement(RunningPanelView, view(items, vi.fn(), others)));
 
 afterEach(() => setLang("en"));
 
@@ -88,6 +88,42 @@ describe("the items", () => {
     expect(runningItems(state([unknown]), ctx())).toEqual([]);
     const [item] = runningItems(state([unknown], { seen: { [rowKey(unknown)]: NOW - 125_000 } }), ctx());
     expect(item.ran).toBe("2m");
+  });
+});
+
+describe("the other projects", () => {
+  const storefront = "/home/you/code/storefront";
+
+  it("counts the commands listed for other projects, which a project's own list does not show", () => {
+    const mine = row({ pid: 1 });
+    const other = row({ pid: 2, folder: `${storefront}/`, started: NOW - 3_600_000 });
+    const young = row({ pid: 3, folder: storefront, started: NOW - (MIN_AGE_MS - 1) });
+    expect(othersOf(state([mine, other, young]), ctx({ project: ROOT }))).toBe(1);
+    expect(othersOf(state([mine, other, young]), ctx({ project: storefront }))).toBe(1);
+    // asked for no project, every command is in the list, so none is another's
+    expect(othersOf(state([mine, other, young]), ctx())).toBe(0);
+    expect(othersOf(state([]), ctx({ project: ROOT }))).toBe(0);
+  });
+
+  it("says so under the list, and under the line that nothing runs here", () => {
+    const items = runningItems(state([row()]), ctx({ project: ROOT }));
+    expect(html(items, 0)).not.toContain("other projects");
+    expect(html(items, 2)).toContain("2 more running in other projects");
+    expect(html([], 1)).toContain("Nothing started here is still running.");
+    expect(html([], 1)).toContain("1 more running in other projects");
+    expect(byId(items, "running-others", vi.fn(), 2)).toHaveLength(1);
+    expect(byId(items, "running-others", vi.fn(), 0)).toHaveLength(0);
+  });
+
+  it("says it in all four languages", () => {
+    for (const [lang, words] of [
+      ["ko", "다른 프로젝트에서 3개 더 실행 중"],
+      ["ja", "ほかのプロジェクトで 3 件が実行中"],
+      ["zh", "其他项目中还有 3 个在运行"],
+    ] as const) {
+      setLang(lang);
+      expect(html([], 3), lang).toContain(words);
+    }
   });
 });
 

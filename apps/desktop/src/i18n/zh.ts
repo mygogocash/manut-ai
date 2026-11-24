@@ -12,6 +12,7 @@ export const zh: Record<Key, string> = {
   "run.port": "端口 {ports}",
   "run.ports": "端口 {ports}",
   "run.unnamed": "命令",
+  "run.others": "其他项目中还有 {n} 个在运行",
   // graph (the dag box view and its header)
   "graph.deps": "依赖关系",
   "graph.waitsFor": "等待",

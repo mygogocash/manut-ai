@@ -78,7 +78,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | The terminal: Kit runs commands here, and you can type too | Has | `sessions/term/`, `terminal/Panel.tsx` |
-| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list on the Code page of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
+| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
 
 ## KitCode: the parts
 
@@ -199,8 +199,9 @@ list (`{a,b}`, `{1..3}`) makes a command unreadable, so it asks at every level (
 ## What keeps running
 
 The Code page lists the commands that this app's own terminals and chats started and that still run, under Kit's
-panel (`src/running/`). Each row has the command, how long it has run, the port it listens on if there is one, and
-Stop. The canvas draws it in StatesCodeDev, "Watching it run": a Running tag, "Dev server, 42 minutes, port 3000" and
+panel and for the project that panel shows (`src/running/`, mounted by `code/KitPanel.tsx`, so picking another project
+there switches the list). Each row has the command, how long it has run, the port it listens on if there is one, and
+Stop. A line under the list counts what runs in the other projects, so a dev server left in one is never out of sight. The canvas draws it in StatesCodeDev, "Watching it run": a Running tag, "Dev server, 42 minutes, port 3000" and
 a Stop button. It draws no question before Stop, so there is none.
 
 **Where it comes from.** The shell holds the program of each terminal (`Sessions`) and each chat (`ChatSessions`).
@@ -224,8 +225,9 @@ hidden with the cards' masker (`maskSecrets`), and only then is a long command c
 leave the front of a key too short for the masker to know. Then how long it has run (the system's own start time; the
 app's `elapsed` and `duration` words), and the ports: the TCP ports the command, or anything it started, listens on
 (`pnpm dev` listens through the `node` two levels down), as "port 3000" or "ports 5173, 24678", with the rest counted.
-A command of a terminal that has a row on this page names that terminal, which opens it. Rows are oldest first, and
-stay in that order. With commands from more than one project, each row names its project.
+A command names the session it runs in, which opens it: a terminal as its row is named, and a chat, which is a lane, as
+its lane is (`chatIdOf` beside `ptyOf` gives the shell's id for each). A shell of the bottom panel has no session here, so
+its commands name none. Rows are oldest first, and stay in that order.
 
 **Stop** ends the command and everything it started: SIGTERM to each, parent first, and SIGKILL three seconds later to
 whatever still runs. The page tells the shell only which command it is (kind of session, session id, process id, start
@@ -239,7 +241,7 @@ after 10 seconds the button comes back, with "Could not stop it. Try again."
 and `running_stop` in `lib.rs`; `Sessions::roots` and `ChatSessions::roots` give the programs; `fg.rs` lends its readers).
 `src/running/model.ts` (the words of a row), `feed.ts` (the polling and Stop's states), `host.ts` (the shell, and a mock
 for a browser: `window.__manutMockRunning` seeds it and `window.__manutRunningCalls` records each stop),
-`RunningPanel.tsx` and `running.css`. `e2e/running.spec.ts` walks it in a browser.
+`RunningPanel.tsx` and `running.css`. `e2e/running.spec.ts` walks it in a browser, with Kit's panel and its project picker.
 
 ## Left for later (no owner needed)
 
@@ -261,11 +263,10 @@ for a browser: `window.__manutMockRunning` seeds it and `window.__manutRunningCa
   needs a push, which asks; New lane waits on the owner's call on chats and terminals.
 - A lane after a restart: a chat session that comes back has no lane, since chat sessions are not listed after one.
 - The main branch moving while Kit worked, with Let Kit merge and Show me both.
-- What keeps running, for the lane open: the list is on the Code page, for every project at once. It does not follow
-  the project Kit's panel has picked (that pick is state inside `code/KitPanel.tsx`; `RunningPanel` already takes a
-  `project`), and an open session does not show its own commands. Also: Windows has no reader, so the page draws
-  nothing there; a command that left its parent for good (a daemon) is no longer found; and a long-lived `sh -c` that
-  an agent keeps for its own use would be listed as a command.
+- What keeps running, inside an open session: the list is on the Code page, for the project Kit's panel shows, and an
+  open session does not show its own commands. Also: Windows has no reader, so the page draws nothing there; a command
+  that left its parent for good (a daemon) is no longer found; a long-lived `sh -c` that an agent keeps for its own use
+  would be listed as a command; and so might a helper a shell's startup file leaves running (not seen yet).
 - A preview with sample values until the owner adds a real one.
 - Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
   and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
