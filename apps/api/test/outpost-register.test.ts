@@ -8,6 +8,7 @@ import {
   auditEntries,
   bindings,
   call,
+  emailSignIn,
   joinHelper,
   setupShop,
   signIn,
@@ -115,10 +116,10 @@ describe("this Mac registering itself through the owner's session", () => {
     const owners = await asSession<{ tenant: string; outposts: Outpost[] }>(fon.headers, "GET", "/v1/vault/outposts");
     expect(owners.status).toBe(200);
     expect(owners.body).toEqual({ tenant: shop.tenant, outposts: [outpost] });
-    // Nothing was registered to the person's own tenant, and their own session's Connections list none.
+    // Nothing was registered to the person's own tenant, and their own sign-in has no vault: its tenant is no shop.
     expect(await outposts(person.tenant)).toEqual([]);
-    const own = await asSession<{ tenant: string; outposts: Outpost[] }>(person.headers, "GET", "/v1/vault/outposts");
-    expect(own.body).toEqual({ tenant: person.tenant, outposts: [] });
+    const own = await asSession(person.headers, "GET", "/v1/vault/outposts");
+    expect(own).toEqual({ status: 404, body: { error: "not_found" } });
 
     // The credential beats for the pilot shop only: the same outpost named under the person's own tenant is refused.
     expect((await heartbeat(shop.tenant, outpost.id, credential)).status).toBe(200);
@@ -147,7 +148,7 @@ describe("this Mac registering itself through the owner's session", () => {
   });
 
   it("registers with the shop's own signed-in session, logged as the shop's own session", async () => {
-    const tenant = `apple:outpost-owner-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const response = await register(await tenantSession(tenant, false));
     expect(response.status).toBe(200);
     const { tenant: answered, outpost } = (await response.json()) as Registered;
@@ -156,6 +157,18 @@ describe("this Mac registering itself through the owner's session", () => {
     expect((await auditEntries(tenant)).filter((entry) => entry.action === "outpost.registered"))
       .toEqual([expect.objectContaining({ actor: { kind: "owner", id: "owner-session" },
         subject: { outpostId: outpost.id } })]);
+  });
+
+  it("answers a person's own sign-in not_found, and registers nothing for its tenant, which is no shop", async () => {
+    // The review (24 Nov 2026): once email sign-in is on, a stranger could register outposts in a vault of their own
+    // `email:` tenant. Apple's sign-in is answered the same.
+    for (const person of [await emailSignIn(`outpost-stranger-${crypto.randomUUID()}@example.org`), await signIn()]) {
+      const response = await register(person.headers);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "not_found" });
+      expect(await outposts(person.tenant)).toEqual([]);
+      expect((await auditEntries(person.tenant)).some((entry) => entry.action.startsWith("outpost."))).toBe(false);
+    }
   });
 
   it("refuses a helper's session, and registers nothing", async () => {
@@ -209,7 +222,7 @@ describe("this Mac registering itself through the owner's session", () => {
   });
 
   it("stops at the shop's twenty outposts", async () => {
-    const tenant = `apple:outpost-many-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const headers = await tenantSession(tenant, false);
     for (let i = 0; i < 20; i++) expect((await register(headers, { ...MAC, name: `Mac ${i}` })).status).toBe(200);
     const response = await register(headers);

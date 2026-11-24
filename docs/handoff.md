@@ -123,6 +123,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 15:38 from `445d47c`, with Google Sheets' two guards and its desktop row (pages
   `4ead247d`, API `17b0aeac`); smoke-tested: `/v1/google` still answers 503 `google_not_configured`, the pages and
   `/app/` load, and the console is behind Access.
+- Dev was redeployed on 24 Nov at 16:49 from `0ff3d84`, with the owner adding a sign-in and changing its members (pages
+  `38e22bea`, API `6e337079`); smoke-tested: `POST /v1/vault/sign-ins` and `/members` answer 401 without a session,
+  the pages and `/app/` load, and the console is behind Access. The first try at 16:42 failed: this Mac's resolver
+  held a failed answer for `api.cloudflare.com` for a few minutes while `dig` resolved it; Wrangler said "Unable to
+  resolve Cloudflare's API hostname". Waiting it out worked; flushing the cache needs `sudo`.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -139,14 +144,16 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
-   - item 41, the security review's front-door findings (`fix/front-door-hardening`, Opus);
-   - item 42, the review's session and self-serve findings (`fix/sessions-and-self-serve`, Opus).
-   Next: item 39 (Bring it back; its run stopped at the limit before it pushed anything, so send it on in its own
-   thread).
+   - item 42, the review's session and self-serve findings (`fix/sessions-and-self-serve`, Opus);
+   - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet), sent on
+     again at 17:18 after its stop at the limit.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 40 (the owner adds a sign-in and changes who may use it, from the app: `POST /v1/vault/sign-ins` and
+   Merged: 41 (the review's front door: limits per IPv4 address or IPv6 /64, JSON-only POSTs, code emails capped per
+   source (20 a day) and in all (300), an address's own limit per source, `email:` sessions refused on the lifted routes
+   and the shop routes answering a non-shop 404, test keys only on a `.test` origin, the deploy check reading every
+   block; Apple sessions still reach the lifted routes and must not when Apple sign-in is turned on), 40 (the owner adds a sign-in and changes who may use it, from the app: `POST /v1/vault/sign-ins` and
    `/members`, through the vault's own operations), 37 (Google Sheets on the desktop: Customize › Connections' row, the append shown whole before Approve, a
    month already sent asked again only with words that say so, and a shop's deletion revoking its Google token first),
    38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until

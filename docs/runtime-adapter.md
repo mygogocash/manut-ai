@@ -360,7 +360,9 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
 - **Which session.** `connections.list` reads the shop the switcher shows, with that shop's own session, or the signed-in
   tenant with the sign-in while the person is in no shops. Each change names the shop its row was read for (`shop`,
   null for the signed-in tenant) and goes with that shop's session. A shop the person helps at is refused `owner_only`
-  here with nothing sent, and nothing is sent while only a kept read is shown (`offline`).
+  here with nothing sent, and nothing is sent while only a kept read is shown (`offline`). The API answers a person's own
+  sign-in 404 `not_found` on the vault routes (24 Nov 2026: a vault is a pilot shop's), which these ops read as
+  `no_shop` (`conn.err.noShop`), and `registerThisMac` as `no_shop` (`outpost.err.noShop`).
 - **The password** crosses once, a new sign-in's (`connections.add`) as a new password: the same session reads the
   sign-ins first, so it is one that works, the shop still has the sign-in a new password is for (`sign_in_not_found`
   otherwise, with nothing sent), and the vault has room for a new one (`too_many_sign_ins` at 50, with nothing sent); then

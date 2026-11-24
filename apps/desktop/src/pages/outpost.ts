@@ -58,6 +58,7 @@ const REGISTER_ERRORS: Record<Exclude<Registered, "registered">, Key> = {
   offline: "outpost.err.offline",
   keychain: "outpost.err.keychain",
   left: "outpost.err.left",
+  no_shop: "outpost.err.noShop",
   failed: "outpost.err.failed",
 };
 

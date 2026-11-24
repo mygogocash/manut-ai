@@ -67,7 +67,7 @@ describe("worker routes", () => {
 
   it("rejects oversized bodies with 413", async () => {
     const response = await SELF.fetch("https://test/v1/tasks/anything", {
-      headers: AUTH,
+      headers: { ...AUTH, "content-type": "application/json" },
       method: "PUT",
       body: "x".repeat(257 * 1024),
     });

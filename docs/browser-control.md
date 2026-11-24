@@ -348,7 +348,11 @@ The owner's Connections, on the desktop (24 Nov 2026):
   Asleep, with Rename and Remove, which ask once before they act. Every word in en, ko, ja and zh.
 - **Which shop.** The lists are of the shop the switcher shows, read with that shop's own session (or with the sign-in
   while the person is in no shops); a change goes to the shop its row was read for. A shop the person helps at is
-  refused with nothing sent, and nothing is sent while only a kept read of the shop is shown.
+  refused with nothing sent, and nothing is sent while only a kept read of the shop is shown. Since 24 Nov 2026 a vault
+  is a pilot shop's: the API answers a person's own sign-in 404 on every vault route and on registering this Mac, so a
+  person in no shops sees "No shop is linked to your account yet, so there are no sign-ins or outposts to manage here."
+  in the Vault box and the outposts box, and Register this Mac answers "No shop is linked to your account yet, so this
+  Mac has no shop to work for." No password is sent first: a new one goes only after a read of the sign-ins that works.
 - **The password's path on the desktop.** It lives only in the open Change question's draft, leaves the page's state as
   Save is pressed, and goes once through a client of the runtime of the tab's own (never the store) to the shell's request
   command: the same session reads the sign-ins first, so it is one that works and the shop still has the sign-in, then

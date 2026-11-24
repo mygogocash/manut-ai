@@ -9,7 +9,8 @@
 // rather than `api_request`: the shell keeps the credential in the keychain and hands back the status, the shop and the
 // outpost's name, or a refusal's code. Nothing the page can call ever returns the credential. Which session sends it is
 // the shop the page shows: that shop's own owner session (shops.ts), or the sign-in while the person is in no shops, so a
-// pilot shop the operator made, which no sign-in carries, can have this Mac as its outpost (docs/several-shops.md).
+// pilot shop the operator made, which no sign-in carries, can have this Mac as its outpost (docs/several-shops.md). The
+// API answers a person's own sign-in 404, its tenant being no shop (24 Nov 2026), which reads as `no_shop`.
 import { OpError } from "../mock/host";
 import type { OwnerLink } from "./connections";
 import { LinkDown, type FetchLike } from "./shell";
@@ -130,6 +131,9 @@ export type Registered =
   | "keychain"
   /** the person's place in the shop ended (their account unlinked from it, or the shop gone); the account row says how */
   | "left"
+  /** the person is in no shops, and the API answered their sign-in that its own tenant is no shop (24 Nov 2026): this Mac
+   *  has no shop to work for */
+  | "no_shop"
   | "failed";
 
 /** The API's route for registering this Mac (`ownerOutpostRoute` in apps/api/src/browser-control.ts). */
@@ -176,6 +180,8 @@ export async function registerThisMac(link: RegisterLink, shop: string | null, s
     case "offline":
       return "offline";
     case "refused":
+      // The sign-in's 404: a person's own tenant is no shop, so it has no outposts (the API keeps nothing for it).
+      if (shop === null && answer.status === 404 && answer.code === "not_found") return "no_shop";
       if (answer.code === "owner_only") return "owner_only";
       if (answer.code === "too_many_outposts") return "too_many";
       if (answer.code === "unlinked" || answer.code === "unauthorized") return "signed_out";

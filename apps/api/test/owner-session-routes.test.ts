@@ -212,7 +212,7 @@ describe("what the team knows, from the owner's session", () => {
       entry.actor.kind !== "operator")).toEqual([]);
   });
 
-  it("keeps the shop's own session on the shop's memory, named owner-session, and a person's sign-in on their own", async () => {
+  it("keeps the shop's own session on the shop's memory, named owner-session, and a person's sign-in out of it", async () => {
     const shop = await setupShop();
     const own = await tenantSession(shop.tenant);
     expect((await asSession(own, "POST", "/v1/memory/remember", { text: "Closed on Mondays" })).status).toBe(200);
@@ -220,10 +220,17 @@ describe("what the team knows, from the owner's session", () => {
       body: { tenant: shop.tenant, facts: [{ text: "Closed on Mondays", status: "confirmed" }] } });
     expect((await auditEntries(shop.tenant)).find((entry) => entry.action === "memory.remembered")?.actor).toEqual({
       kind: "owner", id: "owner-session" });
-    // A person's own sign-in is the owner of their own tenant only, as on every route that learns who is calling.
+    // A person's own sign-in is the owner of their own tenant only, which is no shop: what the team knows is a shop's, so
+    // it is answered not_found, as the owner's people and Google answer it, and nothing is kept for that tenant.
     const person = await signIn();
-    expect(await asSession(person.headers, "GET", "/v1/memory")).toEqual({ status: 200,
-      body: { tenant: person.tenant, facts: [], forgottenCount: 0 } });
+    expect(await asSession(person.headers, "GET", "/v1/memory")).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(await asSession(person.headers, "POST", "/v1/memory/remember", { text: "Kept for a stranger" })).toEqual({
+      status: 404, body: { error: "not_found" } });
+    const kept = await tenantCall(bindings, person.tenant, `/memory?tenant=${encodeURIComponent(person.tenant)}`);
+    expect(await kept.json()).toMatchObject({ facts: [] });
+    // Its body is still checked first, so a wrong one is refused before anything is read.
+    expect(await asSession(person.headers, "POST", "/v1/memory/remember", { text: "x", tenant: shop.tenant })).toEqual({
+      status: 400, body: { error: "invalid_request" } });
   });
 });
 

@@ -56,6 +56,21 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   it with its first decision. None of the answers below changed.
 - Customer message text is stored for the pilot (the operator must read it to draft a reply) and falls under
   the backend's existing retention and tenant export/delete.
+- Every ingress limit counts per source group (24 Nov 2026): the address Cloudflare gives as `CF-Connecting-IP`, as an
+  IPv4 address, or as an IPv6 /64 and never a whole IPv6 address, since one subscriber holds a whole /64 and rotating
+  addresses inside it would otherwise give a fresh bucket each time. An IPv4-mapped IPv6 address counts as its IPv4
+  address. A request whose source cannot be read answers 503 `rate_limit_unavailable` before anything is counted or
+  read. "Per source address" below means this.
+- A body the API reads is JSON and says so (24 Nov 2026): every `POST`, `PUT` and `PATCH` under `/v1/` that carries a
+  body takes only `Content-Type: application/json` (a `charset` or other parameter is fine), and answers any other type,
+  or none, 415 `{ error: "json_required" }` before anything is counted, read or woken. That is every route that reads a
+  body: signing in (`/v1/auth/email/code`, `/v1/auth/exchange`, `/v1/auth/refresh`), the web app's (`/v1/web/*`), the
+  owner's links, the shop's and a person's session routes, the outposts', the lifted routes and the operator's. Only
+  the webhooks under `/v1/inbound/` are left to their senders, who sign the exact body and choose its type. A request
+  with no body, or `Content-Length: 0`, passes, and `GET` and `DELETE` are as they were. A page on another site can make
+  a browser send a POST without a CORS preflight only as `text/plain`, a form or a multipart upload, so no other site
+  can make a visitor's browser ask for a sign-in code, spend a code's tries or send anything else here. The desktop's
+  shell and page and the web app send `application/json` with every body.
 
 ## Public routes
 
@@ -660,9 +675,10 @@ Each answers the fact on success (`Fact`, status 200; Forget answers `{ id }`), 
 | `POST /v1/memory/forget` | `{ id }` | `{ id }` |
 
 - **Who.** An owner session of the account linked to the shop is its owner, and so is the shop's own session (the lifted
-  auth's, whose tenant is the shop); a person's own sign-in reads and changes their own tenant's memory only. A helper's
-  session answers 403 `owner_only` on all five: what the team knows can hold the owner's costs and suppliers, and a
-  helper's work is the conversations.
+  auth's, whose tenant is the shop). A person's own sign-in, whose tenant is no shop, answers 404 `not_found` on all
+  five (24 Nov 2026), after its query and body are checked, and nothing is kept for it: what the team knows is a shop's.
+  A helper's session answers 403 `owner_only` on all five: what the team knows can hold the owner's costs and
+  suppliers, and a helper's work is the conversations.
 - **Exact.** A body is exactly the fields above: any other field, a `tenant`, a `shop` or a `role` above all, answers 400
   `invalid_request`, and so does a query that names `shop`, `tenant` or `role`. Each path takes one method (405
   `method_not_allowed` for another). No route leads to a proposal: `/v1/memory/propose`, and any other path under
@@ -1087,8 +1103,10 @@ ingress limit: it needs a session, and a shop holds 20 outposts at most.
 | 400 | `invalid_request` | Not a JSON object, or one that names a `tenant`: the shop is the session's |
 | 400 | `invalid_kind` | Anything but `this_mac`: a cloud outpost is the operator's to register |
 | 400 | `invalid_name` | Blank once trimmed, over 80 characters, or holding a control character |
+| 404 | `not_found` | A person's own sign-in (24 Nov 2026), after its body is checked: its tenant is no shop, so it has no vault, and nothing is registered. The desktop reads it as `no_shop` |
 | 409 | `too_many_outposts` | The shop already has 20 |
 | 503 | `people_unavailable` | The shop's record could not be read to check a shop session |
+| 503 | `vault_unavailable` | The shop's record could not be read to see that the tenant is a shop |
 
 ### The owner's vault and outposts
 
@@ -1111,7 +1129,10 @@ signed-in session, and the shop is the session's: no route reads one from a body
   outpost's credential; 401 `unlinked` with `unlinkedAt`, or `removed`; 503 `people_unavailable` when the session cannot
   be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`; the shop's
   sign-ins take `GET` and `POST`, every other route one method), then the query (a `shop`, `tenant` or `role` in it: 400
-  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods.
+  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods. Only
+  then is the tenant checked to be a pilot shop (24 Nov 2026): a person's own sign-in, whose tenant is none, answers 404
+  `not_found` on every route, and nothing is kept for it (503 `vault_unavailable` when the shop's record cannot be read).
+  The desktop reads that as `no_shop` ("No shop is linked to your account yet").
 - **Exact.** A body is exactly the keys above. An id, a new password and a name are strings. Anything more, a `tenant`,
   a `shop` or a `role` above all, a key missing, or an id, password or name of another type answers 400
   `invalid_request`; a body that is not JSON, 400 `invalid_json`; over 16 KB, 413 `body_too_large`. Every other value
@@ -1606,18 +1627,31 @@ Service. Then the environment's block in `wrangler.jsonc` gets `"send_email": [{
 
 ### `POST /v1/auth/email/code`
 
-Body exactly `{ email }`. It is limited per source IP before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed
-and configured as the exchange's limiter): 429 `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable`
-without the binding. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
-characters, one `@` between two parts with no spaces.
+Body exactly `{ email }`. It is limited per source address, an IPv4 address or an IPv6 /64 ("Security rules", above),
+before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed and configured as the exchange's limiter): 429
+`rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding or a source. The address is
+normalized as Apple's verified email is: trimmed and lower-cased, at most 254 characters, one `@` between two parts with
+no spaces.
+
+How many codes go out (24 Nov 2026; `docs/decisions.md`), each counted when it is sent, in one auth object transaction
+with the address's record, against the source the ingress limit counted:
+
+- An address gets at most one code a minute, from anywhere.
+- An address gets at most ten in any 24 hours asked from one source, and thirty from every source together. A stranger
+  asking ten times from their own network leaves the address's owner asking from theirs; filling an address's day takes
+  three sources, and thirty is still all a mailbox can be sent in a day.
+- One source has at most twenty codes sent a day across every address, and every source together three hundred. The
+  day is Bangkok's: both start again at midnight there.
 
 | Status | Body | When |
 | --- | --- | --- |
 | 200 | `{ sent: true, expiresIn: 600, resendIn: 60 }` | A code went to the email service for the address. The same for every address: nothing here looks the address up, so the answer cannot say whether Manut AI or any shop knows it, and it never waits for the email or says what the service did with it |
-| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours. `retryAfter` is whole seconds until it may have another |
+| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours asked from this source, or thirty from every source; or this source had twenty sent today. `retryAfter` is whole seconds until one may be sent, after every limit that holds |
+| 503 | `{ error: "codes_paused", retryAfter }`, with `retry-after` | Three hundred codes went out today across every address. Codes are paused for everyone until midnight in Bangkok, which `retryAfter` counts down to. Nothing is sent or kept |
 | 400 | `{ error: "invalid_request" }` | The body is not exactly `{ email }` with an address |
 | 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
 | 411, 413 | `length_required`, `body_too_large` | As the exchange |
+| 415 | `{ error: "json_required" }` | The body is not sent as `application/json` ("Security rules", above), as another site can make a browser send it. Nothing is counted or sent |
 
 A new code replaces the one before, which stops working. The email is plain English: the subject "Your Manut AI sign-in
 code", never with the code in it, so a lock screen does not show it; the body gives the code, says it works for 10
@@ -1636,6 +1670,7 @@ characters, as Apple's.
 | 401 | `{ error: "code_ended" }` | No code to try: none was asked for, it was used, its 10 minutes passed, or five wrong tries ended it. Ask for a new one |
 | 400 | `{ error: "invalid_request" }` | The body is not exactly that, or the code is not six digits, which does not count as a try |
 | 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+| 415 | `{ error: "json_required" }` | The body is not sent as `application/json` ("Security rules", above), so no other site can make a browser spend a code's tries. It is not a try |
 
 - **The identity.** The tenant is `email:` and the SHA-256, in hex, of the normalized address, so it never equals an
   Apple tenant (`apple:<sub>`) and the address itself names nothing that is stored. The session's email is the
@@ -1648,23 +1683,64 @@ characters, as Apple's.
   by the address the owner invited, so either sign-in that verified it opens their helper sessions: the owner sees one
   helper, the other sign-in arrives as a new device ("Mint signed in on a new device"), and removing the helper ends
   both. The helper's own list of shops (`GET /v1/shops`) is per sign-in until they open the shop with the other.
-- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows.
-  What they do show is whether someone asked for a code for the address lately (a 429, or `wrong_code` rather than
-  `code_ended`), whoever asked.
+- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows:
+  no limit looks the address up. What they do show is whether someone asked for a code for the address lately (a 429,
+  or `wrong_code` rather than `code_ended`), whoever asked, and whether this source or everyone has used today's codes.
+
+### What a person's own sign-in reaches
+
+A person signed in by email has a tenant of their own (`email:` and their address's hash), which is no shop. They act
+for a shop with its owner or helper session (`POST /v1/shops/session`, `POST /v1/people/session`, "Several shops" and
+"Helpers", below), and their sign-in itself is for their own routes: their shops (`GET /v1/shops`), opening a shop
+session, an owner's link code, joining by invite and making a shop. Anyone can sign in by email once it is on, so the
+security review of 24 Nov 2026 asked that nothing else take it (`docs/decisions.md`):
+
+- **The lifted routes answer it 401 `unauthorized`**, as they answer a shop session, but for the three reads the desktop
+  makes for a person in no shop, which find nothing: `GET /v1/tenant/export`, `GET /v1/schedules` and
+  `GET /v1/inbound/attention`. Refused, and why:
+  - `/v1/connections` (`GET`, `POST`), `DELETE /v1/connections/{id}` and `GET /v1/connections/{id}/linear/issues`: a
+    shop's connections are the operator's (LINE) or the owner's (Google); these would store a Linear token for anyone
+    and read Linear through this API with it.
+  - `GET` and `PUT /v1/consent/cloud`: consent to cloud work is a shop's, given from its owner's session or link.
+  - `DELETE /v1/tenant/data`: a shop is deleted on its owner's yes through the deletion link; this would also run the
+    tenant wipe, which reads every session.
+  - `POST /v1/schedules`, and `GET` and `DELETE /v1/schedules/{id}`: a schedule that fires mints cloud tasks; the team's
+    routines are its shop's (below).
+  - `/v1/tasks` and everything under `/v1/tasks/{id}` (the task, its commands, attempts, actions, decisions, dispatch and
+    events): cloud tasks and their executor's protocol; the team's work runs in the Worker's job flow, never here.
+  - `/v1/companies` and everything under it: the lifted product's companies, not a shop's.
+- **The shop's routes answer it 404 `not_found`**, as the owner's people and Google already did, after its body is
+  checked and with nothing kept: the team's routines and Pause everyone (`/v1/routines`, `/v1/team/*`, "Routines"), what
+  the team knows (`/v1/memory`, "Memory"), the shop's vault and outposts (`/v1/vault/*`) and registering this Mac
+  (`POST /v1/outposts/register`), "Vault sign-ins and outposts". The desktop reads the vault's and the registration's 404
+  for the sign-in of a person in no shops as `no_shop`, and says "No shop is linked to your account yet" in Customize ›
+  Connections, as it does for Google and people.
+
+Apple's sign-in (`apple:`) keeps the lifted routes as they were for now: it is on in no environment, and needs the
+owner's Apple team. `docs/turning-on.md` says to refuse it as an email sign-in is before it is turned on.
 
 ### What is kept, and where the code never is
 
 - In the auth object, under `email-code:<SHA-256 of the address>`: the live code's HMAC-SHA256 under
   `APPROVAL_LINK_SECRET`, in a domain tag of its own (`manut-ai/email-code/v1.`, over the address's hash and the code),
-  when it ends and its wrong tries; and when each code of the last 24 hours was sent. Never the code, never the address.
-  The alarm deletes the record a day after its last send, and a tenant wipe of the email identity deletes it with the
-  sessions. Changing `APPROVAL_LINK_SECRET` ends every live code, as it ends every link.
+  when it ends and its wrong tries; and when each code of the last 24 hours was sent, and from which source, as a tag:
+  an HMAC-SHA256 under the same secret in a domain tag of its own (`manut-ai/email-code-source/v1.`, over the address's
+  hash and the source group), so no one can read a source's address back from it, and two addresses' records cannot be
+  joined by where their asks came from. Never the code, never the address, never a source's address. The alarm deletes
+  the record a day after its last send, and a tenant wipe of the email identity deletes it with the sessions. Changing
+  `APPROVAL_LINK_SECRET` ends every live code, as it ends every link, and starts every source's count again.
+- Beside them, `email-sends:day`: the Bangkok day, how many codes went out on it, and how many from each source, by the
+  source's tag for no one address (the same HMAC over no hash and the group). It holds counts and tags only, at most one
+  tag a send, and the next day's first send replaces it.
 - The code is never in a log, the audit log, an error, an answer or a URL: it goes only into the email. A send the email
   service refuses is logged as the service's error code alone (`E_RECIPIENT_SUPPRESSED` and the like), never its
   message, which may name the address.
 - The test configuration sends to an in-memory outbox instead (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`), as the test
-  Apple key stands in for Apple's. The dev deploy check refuses any config that sets a `TEST_` var
-  (`.github/scripts/check-dev-deploys.mjs`).
+  Apple key (`TEST_JWKS_JSON`) stands in for Apple's. Both work only on a test Worker, whose `PUBLIC_API_ORIGIN` is an
+  https origin under `.test` (24 Nov 2026; `apps/api/src/test-origin.ts`), so either set anywhere else, even as a secret
+  the deploy check cannot see, does nothing: the outbox is no sender, and the test key signs no one in. The dev deploy
+  check refuses a config that sets a `TEST_` var, or a `PUBLIC_API_ORIGIN` under `.test`, in any of its blocks: the top
+  level, dev, staging and production (`.github/scripts/check-dev-deploys.mjs`).
 
 ## Helpers
 
@@ -1862,7 +1938,9 @@ The shop's own session (the lifted auth's, whose tenant is the shop) has the sam
 `tenant` in the body (a body that names one is refused): `GET /v1/routines`, `POST /v1/routines`,
 `POST /v1/routines/pause`, `POST /v1/routines/resume`, `POST /v1/routines/remove` (each `{ routineId }`), and
 `POST /v1/team/pause` and `POST /v1/team/resume` (`{}`). No session answers 401 `unauthorized`, and so does the operator
-key; a helper's session answers 403 `owner_only`, because the team's routines are the owner's. A pilot shop's tenant can
+key; a helper's session answers 403 `owner_only`, because the team's routines are the owner's; and a person's own
+sign-in, whose tenant is no shop, answers 404 `not_found` (24 Nov 2026), after its body is checked, with nothing read or
+written: a routine made for it would set a clock that fires for nothing, every time, for good. A pilot shop's tenant can
 never be a session, so its routines are the operator's until the operator links the owner's account: that account's
 owner session then has these routes for its shop ("Several shops", below), and the log names the account's id.
 
@@ -2201,8 +2279,9 @@ does the wipe of any tenant.
 Besides the approvals and the routines, an owner session reaches what the team knows (`/v1/memory`, "Memory") and the
 shop's people (`/v1/people`, "Helpers"), and these two routes on the lifted routes' own paths, so an app reads a shop's
 consent and export the same way whichever session it holds. Only a token shaped as a shop session (`mos1.`, `mhs1.`) is
-answered as below; the shop's own session and a person's sign-in keep the lifted routes as they were, for their own
-tenant, and the operator key and no credential answer 401 there as before.
+answered as below; the shop's own session keeps the lifted routes as they were, for its own tenant, a person's sign-in
+keeps three reads there ("What a person's own sign-in reaches", below), and the operator key and no credential answer
+401 there as before.
 
 | Method and path | Body | Answer |
 | --- | --- | --- |
