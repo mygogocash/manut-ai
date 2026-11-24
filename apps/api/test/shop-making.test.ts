@@ -56,6 +56,38 @@ function failing(fail: Fail) {
   return { env: { ...bindings, [fail.binding]: wrapped } as Env, seen };
 }
 
+type Call = { method: string; path: string };
+
+/// The Worker's environment where each call of kind `hold` waits until `times` calls of kind `after` have been answered, so
+/// that two asks for one shop overlap at the step a test is about, however busy the machine is, instead of the second coming
+/// after the first is over.
+function overlapping(binding: Binding, after: Call, hold: Call, times = 2): Env {
+  let answered = 0;
+  let enough!: () => void;
+  const enoughAnswered = new Promise<void>((resolve) => { enough = resolve; });
+  const namespace = bindings[binding];
+  const wrapped = {
+    idFromName: (name: string) => namespace.idFromName(name),
+    get: (id: DurableObjectId) => {
+      const stub = namespace.get(id);
+      return {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          const path = new URL(request.url).pathname;
+          const is = (call: Call) => request.method === call.method && path === call.path;
+          if (is(hold)) await enoughAnswered;
+          const answer = await stub.fetch(request);
+          if (is(after) && ++answered >= times) enough();
+          return answer;
+        },
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+  return { ...bindings, [binding]: wrapped } as Env;
+}
+
+const BEGIN: Call = { method: "POST", path: "/pilot-making/begin" };
+
 async function send(target: Env, path: string, init: { method?: string; authorization?: string; body?: unknown;
   operator?: boolean }) {
   const groups = crypto.randomUUID().replaceAll("-", "").slice(0, 24).match(/.{4}/g)!;
@@ -251,7 +283,8 @@ describe("an operator's make that stops part way", () => {
 
   it("makes one shop when the same make is asked twice at once", async () => {
     const name = uniqueName("Twice");
-    const answers = await Promise.all([operatorMake(bindings, operatorBody(name)), operatorMake(bindings, operatorBody(name))]);
+    const target = overlapping("AUTH", BEGIN, { method: "POST", path: "/pilot-shops" });
+    const answers = await Promise.all([operatorMake(target, operatorBody(name)), operatorMake(target, operatorBody(name))]);
     expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
     expect(answers[1]!.body.tenant).toBe(answers[0]!.body.tenant);
     const rows = await consoleRows(name);
@@ -276,6 +309,19 @@ describe("an operator's make that stops part way", () => {
       expect((await shopState(retried.body.tenant as string)).log).toEqual(WHOLE);
       expect(await journal(name)).toEqual([]);
     }
+  });
+
+  it("goes on with a shop that another try of the same make wrote in the meantime, and logs it once", async () => {
+    const name = uniqueName("Meanwhile");
+    // Both tries have looked and found no shop before either writes, so one of them writes into a shop the other wrote.
+    const target = overlapping("TENANT", { method: "GET", path: "/pilot/shop" }, { method: "POST", path: "/pilot/shop" });
+    const answers = await Promise.all([operatorMake(target, operatorBody(name)), operatorMake(target, operatorBody(name))]);
+    expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+    expect(answers[1]!.body.tenant).toBe(answers[0]!.body.tenant);
+    const rows = await consoleRows(name);
+    expect(rows).toHaveLength(1);
+    expect((await shopState(rows[0]!.tenant)).log).toEqual(WHOLE);
+    expect(await journal(name)).toEqual([]);
   });
 
   it("makes a shop with no template whole in the same way", async () => {
@@ -491,6 +537,27 @@ describe("a make by its owner that stops part way", () => {
     expect(await slotsLeft(person)).toBe(SHOPS_MADE_LIMIT - 1);
   });
 
+  it("goes on with a shop that another try of the same make wrote in the meantime, with one session each", async () => {
+    const person = await signIn();
+    const name = uniqueName("Meanwhile");
+    const target = overlapping("TENANT", { method: "GET", path: "/pilot/shop" }, { method: "POST", path: "/pilot/shop" });
+    const answers = await Promise.all([ownMake(target, person, ownBody(name)), ownMake(target, person, ownBody(name))]);
+    expect(answers.map((answer) => answer.status)).toEqual([201, 201]);
+    const ids = answers.map((answer) => (answer.body.shop as { id: string }).id);
+    expect(ids[1]).toBe(ids[0]);
+    // The one that wrote the shop holds the session its write opened; the other opened one of its own for the same account.
+    expect((answers[1]!.body.account as { id: string }).id).toBe((answers[0]!.body.account as { id: string }).id);
+    expect((answers[1]!.body.session as { accessToken: string }).accessToken)
+      .not.toBe((answers[0]!.body.session as { accessToken: string }).accessToken);
+    for (const answer of answers) {
+      const owner = { authorization: `Bearer ${(answer.body.session as { accessToken: string }).accessToken}` };
+      expect((await asSession(owner, "GET", "/v1/routines")).status).toBe(200);
+    }
+    expect(await personsShops(person, name)).toHaveLength(1);
+    expect(await slots(person)).toHaveLength(1);
+    expect((await shopState(ids[0]!)).log.filter((action) => action === "shop.created")).toHaveLength(1);
+  });
+
   it("finishes the shop, after the ten minutes its slot was held, on a slot it takes again", async () => {
     const person = await signIn();
     const name = uniqueName("Late");
@@ -551,7 +618,8 @@ describe("a make by its owner that stops part way", () => {
   it("makes one shop when the same person asks twice at once, with one slot", async () => {
     const person = await signIn();
     const name = uniqueName("Twice");
-    const answers = await Promise.all([ownMake(bindings, person, ownBody(name)), ownMake(bindings, person, ownBody(name))]);
+    const target = overlapping("AUTH", BEGIN, { method: "POST", path: "/shops-made/finish" });
+    const answers = await Promise.all([ownMake(target, person, ownBody(name)), ownMake(target, person, ownBody(name))]);
     expect(answers.map((answer) => answer.status)).toEqual([201, 201]);
     expect((answers[1]!.body.shop as { id: string }).id).toBe((answers[0]!.body.shop as { id: string }).id);
     expect(await personsShops(person, name)).toHaveLength(1);
