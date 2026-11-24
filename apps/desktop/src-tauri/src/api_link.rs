@@ -611,6 +611,9 @@ mod tests {
             "https://dev.manut.xyz:8443/v1/tenant/export",
             "https://DEV.manut.xyz/v1/tasks/task-1/events?after=3&limit=200",
             "http://localhost:8787/v1/auth/exchange",
+            // asking for a sign-in code (Settings › Developer): a path under /v1/ like the rest, so no change to the shell
+            "https://dev.manut.xyz/v1/auth/email/code",
+            "http://localhost:8787/v1/auth/email/code",
             "http://127.0.0.1:8787/v1/schedules",
             "http://[::1]:8787/v1/schedules",
         ] {

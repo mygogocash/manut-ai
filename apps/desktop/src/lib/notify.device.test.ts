@@ -1,8 +1,9 @@
 // A helper's new device reaching the owner outside the app (docs/people.md, "A helper's new device"; the canvas's board
 // "States: people and roles", "A new device"). One of the two alerts quiet hours never silence. It goes through
 // `showOutside` and notify-rules like every notification: the helper and the shop are named unless details are hidden, it
-// rings at any hour, Look first (or a click) brings the app forward on that shop, and Later only dismisses. Run end to end
-// under the app's own store over a fake API, with the notification plugin stood in.
+// rings at any hour, Look first (or a click) brings the app forward and opens Settings › People for that shop, where its owner
+// removes access, and Later only dismisses. Run end to end under the app's own store over a fake API, with the notification
+// plugin stood in.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -194,21 +195,60 @@ describe("a pressed button on that notification", () => {
     return world;
   }
 
-  it("Look first brings the app forward and shows that shop; a click on the notification itself does the same", async () => {
+  it("Look first brings the app forward and opens People for that shop; a click on the notification itself does the same", async () => {
     for (const action of ["look_first", "tap"]) {
       h.sent.length = 0;
       h.front.length = 0;
-      const { store, khaoHom } = await alertForKhaoHom();
+      const { store, khaoHom, api } = await alertForKhaoHom();
+      // before the press the app is on the chat and Settings is on its first page
+      expect(store.getState().ui.view, action).not.toBe("settings");
       await press(action, h.sent[0]!.id);
       expect(h.front, action).toEqual(["unminimize", "show", "focus"]);
+      // that shop is the one every page shows, and Settings is open on People
       expect(store.getState().shops.current, action).toBe(khaoHom.id);
+      expect([store.getState().ui.view, store.getState().ui.settingsPage], action).toEqual(["settings", "people"]);
+      // the shop was chosen once, and nothing was asked of the API for it but what the app always reads
+      expect(api.calls.filter((c) => c.path.startsWith("/v1/people") && c.path !== "/v1/people/devices"), action).toEqual([]);
     }
   });
 
-  it("Later only dismisses: the app does not come forward and the shop shown does not change", async () => {
+  it("opens People for the shop already shown without switching, and for the shop it names when another is shown", async () => {
+    const { store, kit, devices } = await opened();
+    devices[kit.SHOP_A.id] = [signIn("a-1", "08:05")];
+    await poll();
+    await shown(1);
+    expect(store.getState().shops.current).toBe(kit.SHOP_A.id);
+    await press("tap", h.sent[0]!.id);
+    expect([store.getState().shops.current, store.getState().ui.view, store.getState().ui.settingsPage]).toEqual([kit.SHOP_A.id, "settings", "people"]);
+  });
+
+  it("Later only dismisses: the app does not come forward, the shop shown does not change and Settings does not open", async () => {
     const { store, kit } = await alertForKhaoHom();
+    const before = store.getState().ui;
     await press("later", h.sent[0]!.id);
     expect(h.front).toEqual([]);
     expect(store.getState().shops.current).toBe(kit.SHOP_A.id);
+    expect([store.getState().ui.view, store.getState().ui.settingsPage]).toEqual([before.view, before.settingsPage]);
+  });
+
+  it("does not open People on another shop's people when the shop it names can no longer be shown", async () => {
+    const { store, kit, khaoHom, shops } = await alertForKhaoHom();
+    // Khao Hom leaves the person's list before the notification is pressed
+    shops.list = shops.list.filter((s) => s.id !== khaoHom.id);
+    await poll();
+    const before = store.getState().ui;
+    await press("look_first", h.sent[0]!.id);
+    // the app still comes forward, but Settings is not opened onto Baan Mali's people under Khao Hom's alert
+    expect(h.front).toEqual(["unminimize", "show", "focus"]);
+    expect(store.getState().shops.current).toBe(kit.SHOP_A.id);
+    expect([store.getState().ui.view, store.getState().ui.settingsPage]).toEqual([before.view, before.settingsPage]);
+  });
+
+  it("keeps the notification as it was: the same words and the same two buttons", async () => {
+    const { store, khaoHom } = await alertForKhaoHom();
+    expect(h.sent[0]).toMatchObject({ title: "Nok signed in on a new device", actionTypeId: "manut:look_first+later" });
+    expect(String(h.sent[0]!.body)).toContain("If this was not Nok, remove access.");
+    expect(h.types.at(-1)!.actions.map((a) => a.title)).toEqual(["Look first", "Later"]);
+    expect(store.getState().shops.current).not.toBe(khaoHom.id);
   });
 });

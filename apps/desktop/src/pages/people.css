@@ -1,0 +1,411 @@
+/* Settings › People (PeoplePane.tsx): the design canvas's People.dc.html. The canvas's rules from packages/ui-kit/app.css (.btn, .lk,
+   .tag, .av, .band, .rowl, .box, .dialog, .field, .input, .help, .chips, .hint, .msg) are copied and scoped under .people, as
+   customize.css scopes Customize's under .brain, so the page does not depend on which other page's sheet the window has loaded.
+   The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is --aui-surface, --band is --aui-subtle, --mut is
+   --aui-muted, --pri and --onpri are --aui-primary and --aui-on-primary, and --oki and --erri are --aui-success and --aui-danger.
+   Lines that are the desktop's own rather than the canvas's say so. */
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.people .mut {
+  color: var(--aui-muted);
+}
+.people .mono {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+
+/* The desktop's own: the title and Invite a helper on one line, as the canvas's top bar has them. The header is as tall as the
+   button, so the title does not drop when the button appears once the people have been read. */
+.people .phead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+}
+.people .ph1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.people .part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.people .band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.people .bh {
+  margin: 0;
+  font: inherit;
+}
+.people .row {
+  margin: 0;
+  padding: 4px 10px;
+}
+.people .none {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The chat's pop-up `.hint` is a global rule (src/chat/chat.css) that floats it above its parent and fades it; its place and look
+   are undone here, as customize.css undoes them. */
+.people .hint {
+  margin: 0;
+  padding: 0 10px;
+  color: var(--aui-muted);
+  font-size: 12.5px;
+  position: static;
+  max-width: none;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/* A person: their picture, their name over quiet lines, their tag and their buttons. */
+.people .rowl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+}
+.people .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.people .nm {
+  display: block;
+  font-weight: 500;
+}
+.people .sub {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.people .av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--rad-pill);
+  /* The pastel behind an initial is the same in both themes, so its letter is dark in both. */
+  color: #1f2022;
+  font-size: 15px;
+  font-weight: 600;
+}
+.people .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.people .tag.run {
+  background: var(--bluebg);
+  color: var(--aui-info);
+}
+.people .tag.warn {
+  background: var(--warnbg);
+}
+.people .inv .rowl {
+  padding-bottom: 4px;
+}
+
+/* ---- buttons and the quiet link ------------------------------------------------------------------------------------------ */
+
+.people .btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.people .btn:hover {
+  background: var(--hov);
+}
+.people .btn.dark {
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
+}
+.people .btn.dark:hover {
+  opacity: 0.88;
+}
+.people .btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--aui-muted);
+}
+.people .btn.ghost:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.people .btn.danger.solid,
+.people .btn.danger.solid:hover {
+  border-color: var(--aui-danger);
+  background: var(--aui-danger);
+  color: var(--aui-surface);
+}
+.people .btn.danger.solid:hover {
+  opacity: 0.88;
+}
+.people .btn:disabled,
+.people .lk:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.people .btn:focus-visible,
+.people .lk:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.people .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+/* The canvas's larger touch targets: each control reaches a few pixels past its top and bottom. */
+.people .btn::after,
+.people .lk::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
+}
+
+/* ---- the question, the form and what a change said ------------------------------------------------------------------------- */
+
+/* The question stands in the helper's row, not over the page: the canvas draws it as a card among the rows. */
+.people .dialog {
+  width: 100%;
+  max-width: 560px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-xl, 16px);
+  background: var(--aui-overlay, var(--aui-surface));
+  box-shadow: var(--aui-shadow-card, none);
+}
+.people .dialog h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.people .dialog p {
+  margin: 0;
+}
+.people .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.people .box {
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+}
+.people .invform {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.people .invform p {
+  margin: 0;
+}
+.people .h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.people .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.people .field > label {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.people .input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--aui-border-strong);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+}
+.people .input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.people .input[aria-invalid="true"] {
+  border-color: var(--aui-danger);
+}
+.people .input:disabled {
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+}
+.people .help {
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+/* The desktop's own: what the kind of account typed needs, in the warm ground the canvas gives a warning, since it is the one thing
+   that can stop an invite from ever being opened. */
+.people .help.note {
+  padding: 6px 8px;
+  border-radius: var(--rad);
+  background: var(--warnbg);
+  color: var(--ink);
+}
+.people .msg {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  /* The chat's `.msg` is a flex column for a bubble; this one is a line of words. */
+  display: block;
+}
+.people .msg.err {
+  background: var(--errbg);
+  color: var(--aui-danger);
+}
+.people .msg.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+
+/* The link an invite was just made with: a field to select and a button to copy it, then Done. */
+.people .linkbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 8px 62px;
+}
+.people .linkbox p {
+  margin: 0;
+}
+.people .linkrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.people .linkrow .input {
+  flex: 1 1 260px;
+}
+
+/* ---- what each role can do ------------------------------------------------------------------------------------------------- */
+
+.people .roles {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.people .roles th,
+.people .roles td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 400;
+}
+.people .roles thead th {
+  font-size: 13px;
+}
+.people .roles tbody tr {
+  border-top: 1px solid var(--line);
+}
+.people .roles td,
+.people .roles thead th:nth-child(n + 2) {
+  width: 120px;
+}
+.people .yes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.people .ic {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* ---- while the owner is away ------------------------------------------------------------------------------------------------ */
+
+.people .coverform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0 10px;
+}
+.people .coverform .field {
+  flex: 1 1 180px;
+}
+/* The button sits on a row of its own below the fields, so it never lands beside them at a width where they wrap. */
+.people .coverform .chips {
+  flex: 1 1 100%;
+}
+
+/* The window is never narrower than 900px, which leaves the page about 440px beside the menus: the link box loses its indent to
+   the picture, and the table's columns stay narrow. */
+@media (max-width: 1100px) {
+  .people .linkbox {
+    padding-left: 10px;
+  }
+}
