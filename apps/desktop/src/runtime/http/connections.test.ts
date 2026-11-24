@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError, BridgeEvent } from "../../lib/protocol";
 import { ShopCache } from "./cache";
-import { OUTPOSTS_PATH, PASSWORD_PATH, REMOVE_PATH, RENAME_PATH, SIGN_INS_PATH } from "./connections";
+import { MEMBERS_PATH, OUTPOSTS_PATH, PASSWORD_PATH, REMOVE_PATH, RENAME_PATH, SIGN_INS_PATH } from "./connections";
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { ApiSession } from "./session";
@@ -109,6 +109,25 @@ function serveVault(api: FakeApi, served: ServedShops | null) {
         vaults[tenant].outposts = vaults[tenant].outposts.filter((o) => o.id !== outpostId);
         return { status: 200, json: { removed: true, outpostId, stepsRefused: 0, grantsRefused: 0 } };
       }),
+    )
+    // The vault adds what it is sent and answers its public view, as apps/api does: never the password.
+    .on("POST", SIGN_INS_PATH, (req) =>
+      at(req, (tenant) => {
+        const { site, origins, username, members } = req.body as { site: string; origins: string[]; username: string; members: string[] };
+        const signIn = signInJson({ id: `signin-new-${vaults[tenant].signIns.length + 1}`, site, origins, username, members, state: "working",
+          brokenAt: null, brokenBy: null, lastUsedAt: null, lastUsedBy: null, passwordSetAt: iso(NOW), createdAt: iso(NOW) });
+        vaults[tenant].signIns.push(signIn);
+        return { status: 200, json: { signIn } };
+      }),
+    )
+    .on("POST", MEMBERS_PATH, (req) =>
+      at(req, (tenant) => {
+        const { signInId, members } = req.body as { signInId: string; members: string[] };
+        const signIn = vaults[tenant].signIns.find((s) => s.id === signInId);
+        if (!signIn) return { status: 404, json: { error: "sign_in_not_found" } };
+        signIn.members = members;
+        return { status: 200, json: { signIn } };
+      }),
     );
   return vaults;
 }
@@ -132,6 +151,8 @@ async function setup(opts: { shops: boolean }) {
 
 const refusal = (p: Promise<unknown>) => p.then(() => null, (e: BridgeError) => e);
 const OWNER_A = shopToken(SHOP_A.id, "owner");
+/** A new sign-in as Add a sign-in sends it. */
+const NEW_SIGN_IN = { site: "Carrier portal", origins: ["https://track.carrier.example"], username: "baan.mali", password: PASSWORD, members: ["nam", "ton"] };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
@@ -250,7 +271,9 @@ describe("the owner's new password", () => {
     const before = api.calls.length;
     for (const [op, params] of [
       ["connections.list", {}],
+      ["connections.add", { shop: null, ...NEW_SIGN_IN }],
       ["connections.password", { shop: null, signIn: "signin-1", password: PASSWORD }],
+      ["connections.members", { shop: null, signIn: "signin-1", members: ["kit"] }],
       ["connections.rename", { shop: null, outpost: "outpost-1", name: "Counter Mac" }],
       ["connections.remove", { shop: null, outpost: "outpost-1" }],
     ] as const) {
@@ -280,5 +303,105 @@ describe("renaming and removing an outpost", () => {
     expect(api.to("POST", RENAME_PATH)).toEqual([]);
     expect(await refusal(ask("connections.remove", { shop: null, outpost: "outpost-9" }))).toEqual({ code: "outpost_not_found", message: t("conn.err.outpostGone") });
     expect(await refusal(ask("connections.rename", { shop: null, outpost: "outpost-9", name: "Mac" }))).toEqual({ code: "outpost_not_found", message: t("conn.err.outpostGone") });
+  });
+});
+
+describe("adding a sign-in", () => {
+  it("sends exactly its five fields once, with the shop's own session, after a read, and the password is found nowhere else", async () => {
+    const { api, ask, disk, events, host } = await setup({ shops: true });
+    const { signIn } = await ask("connections.add", { shop: SHOP_A.id, ...NEW_SIGN_IN, site: "  Carrier portal " });
+    expect(signIn).toMatchObject({ id: "signin-new-2", site: "Carrier portal", members: ["nam", "ton"], state: "working", lastUsedAt: null, createdAt: NOW / 1000 });
+    const sent = api.to("POST", SIGN_INS_PATH);
+    expect(sent.map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, { ...NEW_SIGN_IN, site: "Carrier portal" }]]);
+    // Before it went, the same session read the sign-ins, so it went with a session that works, to a vault with room.
+    const vaultCalls = api.calls.filter((c) => c.path.startsWith("/v1/vault/"));
+    expect(vaultCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${SIGN_INS_PATH}`, `POST ${SIGN_INS_PATH}`]);
+    for (const call of api.calls.filter((c) => c !== sent[0])) expect(JSON.stringify(call)).not.toContain(PASSWORD);
+    expect(JSON.stringify([...disk.files.values()])).not.toContain(PASSWORD);
+    expect(JSON.stringify(events)).not.toContain(PASSWORD);
+    expect(JSON.stringify(host)).not.toContain(PASSWORD);
+    expect(JSON.stringify(signIn)).not.toContain(PASSWORD);
+  });
+
+  it("is sent with the sign-in while the person is in no shops, and to the shop its rows were read for after the switcher moved", async () => {
+    const alone = await setup({ shops: false });
+    await alone.ask("connections.add", { shop: null, ...NEW_SIGN_IN });
+    expect(alone.api.to("POST", SIGN_INS_PATH).map((c) => c.bearer)).toEqual(["access-1"]);
+    const inShops = await setup({ shops: true });
+    await inShops.ask("shops.switch", { shop: SHOP_B.id });
+    await inShops.ask("connections.add", { shop: SHOP_A.id, ...NEW_SIGN_IN });
+    expect(inShops.api.to("POST", SIGN_INS_PATH).map((c) => c.bearer)).toEqual([OWNER_A]);
+  });
+
+  it("is never sent twice: a 401 asks the owner to type the password again, with no second try", async () => {
+    for (const shops of [true, false]) {
+      const { api, ask } = await setup({ shops });
+      api.on("POST", SIGN_INS_PATH, { status: 401, json: { error: "unauthorized" } });
+      const out = await refusal(ask("connections.add", { shop: shops ? SHOP_A.id : null, ...NEW_SIGN_IN }));
+      expect(out).toEqual({ code: "not_saved", message: t("conn.err.again") });
+      expect(api.to("POST", SIGN_INS_PATH), `in shops: ${shops}`).toHaveLength(1);
+    }
+  });
+
+  it("is refused with nothing sent for what the vault would not take, a full vault, or a shop the person helps at", async () => {
+    const { api, ask, vaults } = await setup({ shops: true });
+    const refused = async (over: Record<string, unknown>, shop: string | null = SHOP_A.id) =>
+      refusal((ask as (op: string, p: unknown) => Promise<unknown>)("connections.add", { shop, ...NEW_SIGN_IN, ...over }));
+    for (const [over, code, words] of [
+      [{ site: "  " }, "invalid_site", t("conn.err.site", { max: 80 })],
+      [{ site: "x".repeat(81) }, "invalid_site", t("conn.err.site", { max: 80 })],
+      [{ origins: [] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ origins: ["http://track.carrier.example"] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ origins: ["https://track.carrier.example/parcels"] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ origins: ["https://track.carrier.example", "https://track.carrier.example"] }, "invalid_origins", t("conn.err.origins", { max: 5 })],
+      [{ username: "" }, "invalid_username", t("conn.err.username", { max: 256 })],
+      [{ password: "" }, "invalid_password", t("conn.err.password", { max: 1024 })],
+      [{ password: "x".repeat(1025) }, "invalid_password", t("conn.err.password", { max: 1024 })],
+      [{ members: [] }, "invalid_members", t("conn.err.members")],
+      [{ members: ["buddy"] }, "invalid_members", t("conn.err.members")],
+    ] as const) {
+      expect(await refused(over), JSON.stringify(over)).toEqual({ code, message: words });
+    }
+    expect((await refused({}, SHOP_B.id))?.code).toBe("owner_only");
+    expect((await refused({}, "pilot:elsewhere"))?.code).toBe("not_found");
+    expect((await refused({}, null))?.code).toBe("not_found");
+    // A vault that already keeps 50 takes no more: the read before the send says so, and the password stays here.
+    vaults[SHOP_A.id].signIns = Array.from({ length: 50 }, (_, i) => signInJson({ id: `signin-${i}` }));
+    expect(await refused({})).toEqual({ code: "too_many_sign_ins", message: t("conn.err.tooMany", { max: 50 }) });
+    expect(api.to("POST", SIGN_INS_PATH)).toEqual([]);
+    for (const call of api.calls) expect(JSON.stringify(call)).not.toContain(PASSWORD);
+  });
+
+  it("says the API's own refusals in words", async () => {
+    const { api, ask } = await setup({ shops: false });
+    api.on("POST", SIGN_INS_PATH, { status: 400, json: { error: "invalid_origins" } }, { status: 409, json: { error: "too_many_sign_ins" } },
+      { status: 503, json: { error: "vault_not_configured" } });
+    expect(await refusal(ask("connections.add", { shop: null, ...NEW_SIGN_IN }))).toEqual({ code: "invalid_origins", message: t("conn.err.origins", { max: 5 }) });
+    expect(await refusal(ask("connections.add", { shop: null, ...NEW_SIGN_IN }))).toEqual({ code: "too_many_sign_ins", message: t("conn.err.tooMany", { max: 50 }) });
+    expect((await refusal(ask("connections.add", { shop: null, ...NEW_SIGN_IN })))?.message).not.toContain(PASSWORD);
+  });
+});
+
+describe("who may use a sign-in", () => {
+  it("sends exactly the sign-in and the members to the shop its row was read for, even after the switcher moved", async () => {
+    const { api, ask } = await setup({ shops: true });
+    await ask("shops.switch", { shop: SHOP_B.id });
+    const { signIn } = await ask("connections.members", { shop: SHOP_A.id, signIn: "signin-a", members: ["nam", "kit"] });
+    expect(signIn).toMatchObject({ id: "signin-a", members: ["nam", "kit"] });
+    expect(api.to("POST", MEMBERS_PATH).map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, { signInId: "signin-a", members: ["nam", "kit"] }]]);
+  });
+
+  it("refuses members the vault would not take with nothing sent, and says the vault's refusals in words", async () => {
+    const { api, ask } = await setup({ shops: true });
+    for (const members of [[], ["buddy"], ["nam", "nam"], ["nam", "pim", "ton", "kit", "nam"]]) {
+      expect(await refusal(ask("connections.members", { shop: SHOP_A.id, signIn: "signin-a", members })), JSON.stringify(members))
+        .toEqual({ code: "invalid_members", message: t("conn.err.members") });
+    }
+    expect((await refusal(ask("connections.members", { shop: SHOP_B.id, signIn: "signin-b", members: ["kit"] })))?.code).toBe("owner_only");
+    expect(api.to("POST", MEMBERS_PATH)).toEqual([]);
+    expect(await refusal(ask("connections.members", { shop: SHOP_A.id, signIn: "signin-gone", members: ["kit"] }))).toEqual({
+      code: "sign_in_not_found",
+      message: t("conn.err.signInGone"),
+    });
   });
 });

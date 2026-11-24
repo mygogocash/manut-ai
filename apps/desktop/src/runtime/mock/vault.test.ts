@@ -86,3 +86,54 @@ describe("Practice's vault and outposts", () => {
     expect((await rt.request("connections.list", {})).outposts).toHaveLength(2);
   });
 });
+
+describe("Practice adding a sign-in and choosing who may use one", () => {
+  const NEW_SIGN_IN = { site: " Carrier portal ", origins: ["https://track.carrier.example"], username: "baan.mali", password: PASSWORD, members: ["nam", "ton"] };
+
+  it("adds a sign-in by the vault's rules, working and never used, and keeps the password nowhere", async () => {
+    const { rt, host } = await open();
+    const { signIn } = await rt.request("connections.add", { shop: OWN_SHOP, ...NEW_SIGN_IN });
+    expect(signIn).toEqual({ id: "practice-signin-added-1", site: "Carrier portal", members: ["nam", "ton"], state: "working", passwordSetAt: T0,
+      brokenAt: null, brokenBy: null, lastUsedAt: null, lastUsedBy: null, createdAt: T0 });
+    expect((await rt.request("connections.list", {})).signIns.map((s) => s.id)).toEqual(["practice-signin-shopee", "practice-signin-carrier", "practice-signin-added-1"]);
+    expect(JSON.stringify(host)).not.toContain(PASSWORD);
+    expect(JSON.stringify(await rt.request("connections.list", {}))).not.toContain(PASSWORD);
+  });
+
+  it("refuses what the vault would not take, field by field, and a 51st sign-in", async () => {
+    const { rt } = await open();
+    const cases: [Record<string, unknown>, string][] = [
+      [{ site: "" }, "invalid_site"],
+      [{ origins: ["http://track.carrier.example"] }, "invalid_origins"],
+      [{ origins: ["https://Track.carrier.example"] }, "invalid_origins"],
+      [{ username: "   " }, "invalid_username"],
+      [{ password: "x".repeat(1025) }, "invalid_password"],
+      [{ members: ["buddy"] }, "invalid_members"],
+    ];
+    for (const [over, code] of cases) {
+      expect(await refusal(rt.request("connections.add", { shop: OWN_SHOP, ...NEW_SIGN_IN, ...over })), code).toBe(code);
+    }
+    expect((await rt.request("connections.list", {})).signIns).toHaveLength(2);
+    for (let i = 0; i < 48; i++) await rt.request("connections.add", { shop: OWN_SHOP, ...NEW_SIGN_IN, site: `Site ${i}` });
+    expect(await refusal(rt.request("connections.add", { shop: OWN_SHOP, ...NEW_SIGN_IN }))).toBe("too_many_sign_ins");
+  });
+
+  it("changes who may use a sign-in, and nothing else about it, by the vault's rule for members", async () => {
+    const { rt } = await open();
+    const before = (await rt.request("connections.list", {})).signIns[1]!;
+    const { signIn } = await rt.request("connections.members", { shop: OWN_SHOP, signIn: "practice-signin-carrier", members: ["nam", "kit"] });
+    expect(signIn).toEqual({ ...before, members: ["nam", "kit"] });
+    for (const members of [[], ["buddy"], ["nam", "nam"]]) {
+      expect(await refusal(rt.request("connections.members", { shop: OWN_SHOP, signIn: "practice-signin-carrier", members })), JSON.stringify(members)).toBe("invalid_members");
+    }
+    expect(await refusal(rt.request("connections.members", { shop: OWN_SHOP, signIn: "nowhere", members: ["nam"] }))).toBe("sign_in_not_found");
+    expect((await rt.request("connections.list", {})).signIns[1]!.members).toEqual(["nam", "kit"]);
+  });
+
+  it("refuses both at Ran Pa Noi, where the person helps, as the API refuses a helper's session", async () => {
+    const { rt } = await open();
+    expect(await refusal(rt.request("connections.add", { shop: HELPED_SHOP, ...NEW_SIGN_IN }))).toBe("owner_only");
+    expect(await refusal(rt.request("connections.members", { shop: HELPED_SHOP, signIn: "practice-signin-shopee", members: ["kit"] }))).toBe("owner_only");
+    expect((await rt.request("connections.list", {})).signIns.map((s) => s.members)).toEqual([["nam", "ton"], ["nam"]]);
+  });
+});

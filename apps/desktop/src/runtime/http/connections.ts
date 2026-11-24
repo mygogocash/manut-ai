@@ -1,6 +1,6 @@
 // Customize › Connections on the connected runtime (docs/browser-control.md, "The owner's Connections"; the routes are
 // docs/pilot-api.md, "The owner's vault and outposts"): the shop's sign-ins and outposts, read with the owner's session, a
-// new password sent to the vault, and an outpost renamed or removed.
+// sign-in added, a new password sent to the vault, who may use a sign-in, and an outpost renamed or removed.
 //
 // Rules this module keeps:
 // - The list is of the shop the switcher shows, read with that shop's own session (shops.ts), or with the sign-in while the
@@ -8,22 +8,38 @@
 //   one the switcher shows now, as an answer to an ask goes to the ask's own shop.
 // - Only the owner sees or changes these. A shop the person helps at is refused here (`owner_only`) with nothing sent, as
 //   the API would refuse it, so a helper's session never carries a password anywhere.
-// - The password is sent once, over the shell's request command, to the password route, and kept nowhere: not in this
-//   module, the host, the saved read of the shop or an error's words. Before it goes, the shop's session is read with, so it
-//   is one that works, and that read must still list the sign-in: a password is never sent for a sign-in the shop no
-//   longer has. Then it crosses once, with no second try after a 401 (`ApiSession.writeOnce`, or the held shop session as
-//   it is), so the owner types it again rather than the app sending it twice.
+// - A password, a new sign-in's or a new one for a sign-in, is sent once, over the shell's request command, and kept
+//   nowhere: not in this module, the host, the saved read of the shop or an error's words. What the vault would refuse is
+//   refused here with nothing sent. Before it goes, the shop's session is read with, so it is one that works, and that read
+//   must still list the sign-in a new password is for, and have room for a new sign-in. Then it crosses once, with no
+//   second try after a 401 (`ApiSession.writeOnce`, or the held shop session as it is), so the owner types it again rather
+//   than the app sending it twice.
 // - While only a kept read of the shop is shown (the API cannot be reached), nothing here is sent: the kept read holds no
 //   vault, and a change made blind could act on a list that moved on.
 import { t } from "../../i18n";
 import type { ShopRole } from "../../lib/protocol";
-import { MAX_OUTPOST_NAME, MAX_PASSWORD, type ConnectionOps, type ShopOutpost, type VaultSignIn } from "../connections";
+import {
+  MAX_ORIGINS,
+  MAX_OUTPOST_NAME,
+  MAX_PASSWORD,
+  MAX_SIGN_INS,
+  MAX_SITE,
+  MAX_USERNAME,
+  membersOf,
+  newSignInRefusal,
+  siteOf,
+  type ConnectionOps,
+  type ShopOutpost,
+  type VaultSignIn,
+} from "../connections";
 import { OpError } from "../mock/host";
 import type { FetchLike } from "./shell";
 import type { Departure, ShopAnswer } from "./shops";
 
+/** The shop's sign-ins: `GET` lists them, `POST` adds one. */
 export const SIGN_INS_PATH = "/v1/vault/sign-ins";
 export const PASSWORD_PATH = "/v1/vault/sign-ins/password";
+export const MEMBERS_PATH = "/v1/vault/sign-ins/members";
 export const OUTPOSTS_PATH = "/v1/vault/outposts";
 export const RENAME_PATH = "/v1/vault/outposts/rename";
 export const REMOVE_PATH = "/v1/vault/outposts/remove";
@@ -76,6 +92,12 @@ const REFUSED: Record<string, () => string> = {
   sign_in_not_found: () => t("conn.err.signInGone"),
   invalid_name: () => t("conn.err.name", { max: MAX_OUTPOST_NAME }),
   outpost_not_found: () => t("conn.err.outpostGone"),
+  invalid_site: () => t("conn.err.site", { max: MAX_SITE }),
+  invalid_origins: () => t("conn.err.origins", { max: MAX_ORIGINS }),
+  invalid_username: () => t("conn.err.username", { max: MAX_USERNAME }),
+  invalid_members: () => t("conn.err.members"),
+  too_many_sign_ins: () => t("conn.err.tooMany", { max: MAX_SIGN_INS }),
+  vault_not_configured: () => t("conn.err.vaultKey"),
   not_found: () => t("rt.notFound"),
 };
 
@@ -107,7 +129,7 @@ export interface OwnerLink {
 
 type Handlers = { [K in keyof ConnectionOps]: (p: ConnectionOps[K]["params"]) => Promise<ConnectionOps[K]["result"]> };
 
-/** The four Connections ops over `link`. */
+/** The six Connections ops over `link`. */
 export function connectionHandlers(link: OwnerLink): Handlers {
   /** The JSON of an answer that did what it said, or the refusal to throw. */
   const ok = (answer: ShopAnswer, shop: string | null): unknown => {
@@ -145,6 +167,28 @@ export function connectionHandlers(link: OwnerLink): Handlers {
       return { shop, signIns: s, outposts: o };
     },
 
+    "connections.add": async (p) => {
+      link.live();
+      const shop = target(p.shop);
+      // The vault's own rules, so a sign-in it would refuse is refused here and its password is never sent.
+      const refused = newSignInRefusal(p);
+      if (refused) throw refusal(refused);
+      // Exactly the five fields, as the vault keeps them: the name trimmed, the rest as given.
+      const body = { site: siteOf(p.site), origins: [...p.origins], username: p.username, password: p.password, members: [...p.members] };
+      // A read first, with the same session: it opens or renews the session, so the one send below goes with one that works,
+      // and it says whether the vault has room for one more.
+      const listed = decodeList(ok(await link.read(shop, SIGN_INS_PATH), shop), "signIns", decodeSignIn);
+      if (!listed) throw new OpError("unavailable", t("conn.err.unavailable"));
+      if (listed.length >= MAX_SIGN_INS) throw refusal("too_many_sign_ins");
+      const answer = await link.writeOnce(shop, SIGN_INS_PATH, body);
+      // A 401 here is a session that ended between the read and the send: nothing was taken, and nothing is sent again.
+      if (answer.kind === "refused" && answer.status === 401) throw new OpError("not_saved", t("conn.err.again"));
+      const json = ok(answer, shop);
+      const signIn = decodeSignIn(isObj(json) ? json.signIn : null);
+      if (!signIn) throw new OpError("unavailable", t("conn.err.unavailable"));
+      return { signIn };
+    },
+
     "connections.password": async (p) => {
       link.live();
       const shop = target(p.shop);
@@ -160,6 +204,19 @@ export function connectionHandlers(link: OwnerLink): Handlers {
       // A 401 here is a session that ended between the read and the send: nothing was taken, and nothing is sent again.
       if (answer.kind === "refused" && answer.status === 401) throw new OpError("not_saved", t("conn.err.again"));
       const json = ok(answer, shop);
+      const signIn = decodeSignIn(isObj(json) ? json.signIn : null);
+      if (!signIn) throw new OpError("unavailable", t("conn.err.unavailable"));
+      return { signIn };
+    },
+
+    // Who may use a sign-in carries no secret, so it goes as every other change does, again after a 401 if it must.
+    "connections.members": async (p) => {
+      link.live();
+      const shop = target(p.shop);
+      const signInId = id(p.signIn, "sign_in_not_found");
+      const members = membersOf(p.members);
+      if (!members) throw refusal("invalid_members");
+      const json = ok(await link.write(shop, MEMBERS_PATH, { signInId, members }), shop);
       const signIn = decodeSignIn(isObj(json) ? json.signIn : null);
       if (!signIn) throw new OpError("unavailable", t("conn.err.unavailable"));
       return { signIn };
