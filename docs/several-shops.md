@@ -187,7 +187,9 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
    the shop sessions' entries, and the practice mode answers both routes as the API does, with sample codes on its home
    page.
 4. **Done here (API): owner sessions on more routes** (24 Nov 2026), each its own decision (`docs/decisions.md`): what
-   the team knows, the shop's consent and export, and the shop's helpers, as above. A helper's session reaches none of
+   the team knows, the shop's consent and export, and the shop's helpers, as above. The console's Audit page names the
+   owner by how they acted (their linked account by its id, the shop's own session, or a link), and its People page says
+   whether the owner can change the list and who changed it. A helper's session reaches none of
    them (403 `owner_only`), what the team knows included, since it can hold the owner's costs and suppliers. Not in this
    slice: deleting the shop's data from an owner session, which stays with the owner's confirmation link (the operator
    asks, the owner says yes on the link), and a shop session on `DELETE /v1/tenant/data` still answers 401; answering the

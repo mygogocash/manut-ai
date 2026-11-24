@@ -1,8 +1,4 @@
 import { describe, expect, it } from "vitest";
-// The API's audit log module, read as text. It cannot be imported: it runs on Durable Object storage and pulls in the
-// Worker's other modules, none of which belong in the console's bundle or its jsdom tests. `?raw` hands the test the file's
-// own words, so the lists below are checked against the API as it stands, not against what someone remembered of it.
-import auditLogSource from "../../api/src/audit-log.ts?raw";
 import type { AuditActor, AuditEntry } from "../src/api";
 import {
   auditActionsWithWords,
@@ -11,6 +7,7 @@ import {
   auditSentence,
   auditSubjectText,
 } from "../src/ops/words";
+import { apiActorKinds, apiList } from "./apiAuditLog";
 
 // What the API can write into a shop's audit log, copied from `apps/api/src/audit-log.ts` (`AUDIT_ACTIONS`). The copy is
 // here so a reader of this test sees the whole list at a glance; the first test below fails the moment the file and the
@@ -78,25 +75,6 @@ const API_AUDIT_ACTIONS = [
   "browser_step.reported",
 ];
 
-/// The string literals of one `export const NAME = [ ... ] as const;` in the API's audit log, comments left out.
-function listFrom(name: string): string[] {
-  const start = auditLogSource.indexOf(`export const ${name} = [`);
-  const end = auditLogSource.indexOf("] as const;", start);
-  if (start < 0 || end < 0) {
-    throw new Error(`apps/api/src/audit-log.ts no longer has "export const ${name} = [ ... ] as const;": teach this test where the list went`);
-  }
-  const body = auditLogSource.slice(start, end).replace(/\/\/.*$/gm, "");
-  return [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
-}
-
-/// The kinds of the API's `AuditActor` union: the text between its declaration and the next export.
-function actorKindsFrom(): string[] {
-  const start = auditLogSource.indexOf("export type AuditActor =");
-  const end = auditLogSource.indexOf("export type AuditEntry", start);
-  if (start < 0 || end < 0) throw new Error("apps/api/src/audit-log.ts no longer declares `AuditActor` before `AuditEntry`");
-  return [...auditLogSource.slice(start, end).matchAll(/\{ kind: "([a-z_]+)"/g)].map((match) => match[1]!);
-}
-
 const NOW = "2026-11-24T03:00:00.000Z";
 const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d", at: NOW,
   actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
@@ -113,7 +91,7 @@ const SAMPLE_ACTORS: Record<string, AuditActor> = {
 
 describe("the console's words against what the API's audit log can write", () => {
   it("is held to the API's own list: the copy in this test matches audit-log.ts, so a new action cannot slip past", () => {
-    const fromApi = listFrom("AUDIT_ACTIONS");
+    const fromApi = apiList("AUDIT_ACTIONS");
     expect(fromApi.length).toBeGreaterThan(50);
     const gained = fromApi.filter((action) => !API_AUDIT_ACTIONS.includes(action));
     const lost = API_AUDIT_ACTIONS.filter((action) => !fromApi.includes(action));
@@ -123,9 +101,9 @@ describe("the console's words against what the API's audit log can write", () =>
 
   it("has words for every action the API writes, none shown by its raw name", () => {
     // Every action in the API's file, read from the file itself, so this fails for an action the copy above lacks too.
-    const missing = listFrom("AUDIT_ACTIONS").filter((action) => !auditActionsWithWords().includes(action));
+    const missing = apiList("AUDIT_ACTIONS").filter((action) => !auditActionsWithWords().includes(action));
     expect(missing, "actions the API writes that the Audit page has no words for").toEqual([]);
-    for (const action of listFrom("AUDIT_ACTIONS")) {
+    for (const action of apiList("AUDIT_ACTIONS")) {
       for (const actor of Object.values(SAMPLE_ACTORS)) {
         const sentence = auditSentence(entry({ actor, action }), "Fon", {});
         expect(sentence, `${action} by ${actor.kind}`).not.toContain(action);
@@ -136,12 +114,12 @@ describe("the console's words against what the API's audit log can write", () =>
   });
 
   it("has no words for an action the API does not write, which would be a typo or one that was retired", () => {
-    const stale = auditActionsWithWords().filter((action) => !listFrom("AUDIT_ACTIONS").includes(action));
+    const stale = auditActionsWithWords().filter((action) => !apiList("AUDIT_ACTIONS").includes(action));
     expect(stale, "words for actions that are not in audit-log.ts").toEqual([]);
   });
 
   it("says who acted for every kind of actor the API names", () => {
-    const kinds = actorKindsFrom();
+    const kinds = apiActorKinds();
     expect(kinds.sort()).toEqual(["helper", "operator", "outpost", "owner", "system", "worker"]);
     for (const kind of kinds) {
       const actor = SAMPLE_ACTORS[kind];
@@ -153,7 +131,7 @@ describe("the console's words against what the API's audit log can write", () =>
   });
 
   it("gives every outcome the API writes a tag, or none for the plain ok", () => {
-    for (const outcome of listFrom("AUDIT_OUTCOMES")) {
+    for (const outcome of apiList("AUDIT_OUTCOMES")) {
       const tag = auditOutcomeTag(outcome, "Fon");
       if (outcome === "ok") {
         expect(tag).toBeNull();
@@ -167,7 +145,7 @@ describe("the console's words against what the API's audit log can write", () =>
   });
 
   it("labels every id an entry may name, none shown by its raw key", () => {
-    for (const key of listFrom("AUDIT_SUBJECT_KEYS")) {
+    for (const key of apiList("AUDIT_SUBJECT_KEYS")) {
       const said = auditSubjectText({ [key]: "x1" });
       expect(said, key).toMatch(/x1$/);
       expect(said, key).not.toBe(`${key} x1`);

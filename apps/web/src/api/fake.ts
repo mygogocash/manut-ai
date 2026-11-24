@@ -184,7 +184,7 @@ type FakeOwnerCode = { code: string; subject: string; ranOut?: boolean };
 /// A job with the shop it belongs to, which the API finds through the shop's own task index.
 type FakeWorkerJob = WorkerJobEntry & { tenant: string };
 type FakeDb = {
-  version: 9;
+  version: 10;
   seq: number;
   shops: FakeShop[];
   connections: FakeConnection[];
@@ -211,8 +211,9 @@ type FakeDb = {
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
-/// (version 6), before the owner's people (version 7) or before the owner's linked account and its codes (version 8) is
-/// replaced by a fresh one rather than read without them.
+/// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8) or before
+/// the sample log of the owner's own changes, this Mac and browser writes (version 9) is replaced by a fresh one rather than read
+/// without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -269,7 +270,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 9 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
+      return parsed && parsed.version === 10 && Array.isArray(parsed.actions) && Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
         Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers) &&
@@ -1500,7 +1501,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 9,
+    version: 10,
     seq: 100,
     shops: [
       // Connected 13 days ago, so today is day 14 of its trial, and Fon's answers this morning make it active.
@@ -1618,17 +1619,17 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
   const taskId = `task_${tenant}`;
   let seq = 0;
   const entry = (shop: string, minutesAgo: number, actor: AuditActor, action: string, subject: Record<string, string>,
-    outcome = "ok", amountSatang?: number): FakeAuditEntry => {
+    outcome = "ok", amountSatang?: number, reason?: string): FakeAuditEntry => {
     const ms = at - minutesAgo * MINUTE_MS;
     seq += 1;
     return { tenant: shop, id: auditId(ms, seq), at: new Date(ms).toISOString(), actor, action, subject, outcome,
-      ...(amountSatang !== undefined ? { amountSatang } : {}) };
+      ...(reason !== undefined ? { reason } : {}), ...(amountSatang !== undefined ? { amountSatang } : {}) };
   };
   const helper: AuditActor = { kind: "helper", id: "helper-mint" };
   const fon: AuditActor = { kind: "owner", id: SAMPLE_OWNER_ACCOUNT };
   const reply = (actionId: string, messageId: string) => ({ taskId, actionId, messageId });
   const decided = (actionId: string) => ({ taskId, actionId });
-  return [
+  const earlier = [
     entry(tenant, 13 * 24 * 60 + 30, operator, "shop.created", {}),
     entry(tenant, 13 * 24 * 60, operator, "line.connected", { connectionId }),
     entry(tenant, 5 * 24 * 60, named, "model.cap_set", {}, "ok", 30000),
@@ -1667,7 +1668,111 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     entry(tenant, 40, operator, "reply.proposed", reply("act_nok", "msg_nok")),
     entry(tenant, 10, operator, "reply.proposed", reply("act_ploy", "msg_ploy")),
   ];
+
+  // What this week's API added, so every word for it can be seen without an API. Who acts in it: Fon from her linked account and,
+  // for two changes, from the shop's own session; Mint on devices that came and went; Ice, a helper Fon has since removed; an
+  // outpost on each machine; and a worker's attempt for each job. The ids are the ones `samplePeople` and the sample vault name.
+  const ownSession: AuditActor = { kind: "owner", id: "owner-session" };
+  const ice: AuditActor = { kind: "helper", id: "helper-ice" };
+  const mac: AuditActor = { kind: "outpost", id: SAMPLE_MAC_OUTPOST };
+  const worker = (n: number): AuditActor => ({ kind: "worker", attemptId: sampleUuid(n) });
+  const said = (minutesAgo: number, actor: AuditActor, action: string, subject: Record<string, string>, outcome = "ok",
+    reason?: string) => entry(tenant, minutesAgo, actor, action, subject, outcome, undefined, reason);
+  const day = 24 * 60;
+
+  // The owner's own changes (docs/several-shops.md, slice 4), beside an operator's, and the devices they sign in on.
+  const ownerChanges = [
+    // Fon invited Tum from her own app and cancelled the invite three minutes later.
+    said(9 * day, fon, "invite.created", { inviteId: "inv-tum" }),
+    said(9 * day - 3, fon, "invite.revoked", { inviteId: "inv-tum" }),
+    // An operator invited Ice on Fon's word. Ice joined half an hour later and was set to cover from the shop's own session six
+    // days ago; Fon ended that cover and then removed Ice five days ago.
+    said(8 * day, named, "invite.created", { inviteId: "inv-ice" }),
+    said(8 * day - 30, ice, "helper.joined", { inviteId: "inv-ice", helperId: "helper-ice" }),
+    said(6 * day, ownSession, "away.set", { helperId: "helper-ice" }),
+    said(5 * day + 60, fon, "away.cleared", { helperId: "helper-ice" }),
+    said(5 * day, fon, "helper.removed", { helperId: "helper-ice" }),
+    // Fon allowed cloud work from her app twelve days ago and the shop's own session withdrew it two days ago: it is off now.
+    said(12 * day - 20, fon, "consent.given", {}),
+    said(2 * day + 30, ownSession, "consent.withdrawn", {}),
+    // A device of Mint's and one of Fon's each signed in and out again; the devices still open are the ones `samplePeople` counts.
+    said(4 * day, helper, "helper.session_opened", { helperId: "helper-mint" }),
+    said(4 * day - 20, helper, "helper.session_ended", { helperId: "helper-mint" }),
+    said(6 * day + 90, fon, "owner.session_opened", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
+    said(6 * day, fon, "owner.session_ended", { ownerAccountId: SAMPLE_OWNER_ACCOUNT }),
+  ];
+
+  // Browser control: the vault's sign-in, an operator's cloud outpost, Fon registering her own Mac, the vault sealed again after a
+  // key rotation, and one sign-in's story: the site refused the saved password, the worker said so, an operator typed a new one.
+  const signIn = SAMPLE_SIGN_IN;
+  const grant = { taskId: "task_signin", attemptId: sampleUuid(7), signInId: signIn, grantId: "grant_1" };
+  const signInStep = { stepId: "step_signin", outpostId: SAMPLE_MAC_OUTPOST, ...grant };
+  const browserControl = [
+    said(9 * day - 10, named, "signin.created", { signInId: signIn }),
+    said(9 * day - 20, named, "outpost.registered", { outpostId: SAMPLE_CLOUD_OUTPOST }),
+    said(2 * day - 40, fon, "outpost.registered", { outpostId: SAMPLE_MAC_OUTPOST }),
+    said(day + 40, named, "vault.resealed", {}),
+    said(1100, worker(7), "signin.requested", { ...grant, outpostId: SAMPLE_MAC_OUTPOST }),
+    said(1099.5, worker(7), "browser_step.queued", signInStep),
+    said(1099, mac, "browser_step.fetched", signInStep),
+    said(1098.8, mac, "signin.redeemed", { ...grant, outpostId: SAMPLE_MAC_OUTPOST }),
+    said(1098.5, mac, "browser_step.reported", signInStep, "failed", "sign_in_refused"),
+    said(1098, worker(7), "signin.broken", { taskId: grant.taskId, attemptId: grant.attemptId, signInId: signIn }),
+    said(1050, named, "signin.password_replaced", { signInId: signIn }),
+  ];
+
+  // Browser writes (docs/pilot-api.md, "Submitting through a browser"), each told as the API writes it: the worker's ask, the
+  // decision, the step queued, the write begun as the outpost takes it, and how it settled. Each ends its own way.
+  const writeStory = (n: number, minutesAgo: number, decider: AuditActor,
+    ending: { fetched: "ok" | "payload_changed"; report?: string; settled?: string }) => {
+    const ids = { taskId: `task_write_${n}`, attemptId: sampleUuid(n), signInId: signIn };
+    const request = { requestId: `req_form_${n}`, actionId: `req_form_${n}` };
+    const step = { stepId: `step_form_${n}`, outpostId: SAMPLE_MAC_OUTPOST, ...ids, ...request };
+    const write = { taskId: ids.taskId, actionId: request.actionId };
+    const told = [
+      said(minutesAgo, worker(n), "approval.requested", { ...ids, ...request }),
+      said(minutesAgo - 2, decider, "approval.decided", { taskId: ids.taskId, attemptId: ids.attemptId, ...request }, "approved"),
+      said(minutesAgo - 2.5, worker(n), "browser_step.queued", step),
+      said(minutesAgo - 3, system, "dispatch.started", write),
+    ];
+    if (ending.fetched === "ok") {
+      told.push(said(minutesAgo - 3.1, mac, "browser_step.fetched", step),
+        said(minutesAgo - 3.5, mac, "browser_step.reported", step, "failed", ending.report),
+        said(minutesAgo - 3.6, system, "dispatch.settled", write, ending.settled));
+    } else {
+      // The begin gate found the approved write no longer matched what would be submitted: the write failed, and the outpost
+      // was refused the step.
+      told.push(said(minutesAgo - 3.05, system, "dispatch.settled", write, "failed"),
+        said(minutesAgo - 3.1, mac, "browser_step.fetched", step, "refused", "payload_changed"));
+    }
+    return told;
+  };
+  const writes = [
+    // The site refused the form and kept it, so nothing changed.
+    ...writeStory(1, 400, fon, { fetched: "ok", report: "submit_refused", settled: "failed" }),
+    // A reply may be approved by a helper; the outpost did not run the step at all.
+    ...writeStory(2, 330, helper, { fetched: "ok", report: "not_run", settled: "failed" }),
+    // The step took too long, so nobody can say the site did not take it.
+    ...writeStory(3, 200, fon, { fetched: "ok", report: "timed_out", settled: "unknown" }),
+    // What was approved no longer matched what would have been submitted.
+    ...writeStory(4, 150, fon, { fetched: "payload_changed" }),
+    // Asks that opened no request: it was another member's job, and a job in practice mode keeps a draft.
+    said(180, worker(5), "approval.requested", { taskId: "task_write_5", attemptId: sampleUuid(5), signInId: signIn }, "refused",
+      "not_my_job"),
+    said(100, worker(6), "approval.requested", { taskId: "task_write_6", attemptId: sampleUuid(6), signInId: signIn }, "skipped",
+      "draft_only"),
+  ];
+
+  return [...earlier, ...ownerChanges, ...browserControl, ...writes];
 }
+
+/// Ids the API makes as UUIDs, written so that their first eight characters, which the console shows, tell one from another.
+const sampleUuid = (n: number) => `${(0x6f9d1f00 + n).toString(16)}-9a7e-4a53-9a0b-2f5c1d1f7c11`;
+/// The outposts of Baan Mali's sample vault: Fon's own Mac, registered from her desktop app, and a cloud outpost an operator made.
+const SAMPLE_MAC_OUTPOST = "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b";
+const SAMPLE_CLOUD_OUTPOST = "c0a1d2e3-7a81-4b92-9c03-1d2e3f4a5b6c";
+/// The one site sign-in in the sample vault, whose members' forms the sample writes submit.
+const SAMPLE_SIGN_IN = "5d0e7c3a-2b41-4f6e-9a1d-7e8f9a0b1c2d";
 
 /// Baan Mali's people as its sample world would have made them, by the package's own rules, as the design canvas's People
 /// board draws them: Mint, a helper for ten days with two devices, who covers messages until the end of the fourth day from
@@ -1679,6 +1784,22 @@ function samplePeople(at: number, tenant: string): FakePeople {
   const joinedAt = at - 10 * DAY_MS + 5 * MINUTE_MS;
   const refused = (what: string, why: string) => new Error(`the sample ${what} was refused: ${why}`);
   let state = peopleRules.emptyPeople(tenant, OWNER_ID);
+
+  // Older history, by the ids `sampleAudit` names. Fon invited Tum and cancelled it three minutes later. An operator invited Ice, who
+  // joined and was removed by Fon five days ago. Neither is on the list now, but each keeps a name, so the log can still say them.
+  const tum: Identity = { kind: "line", id: "tum.baanmali" };
+  const ice: Identity = { kind: "email", address: "ice@baanmali.example" };
+  const invitedTum = peopleRules.invite(state, "inv-tum", tum, at - 9 * DAY_MS);
+  if (!invitedTum.ok) throw refused("invite for Tum", invitedTum.refused);
+  const cancelledTum = peopleRules.revokeInvite(invitedTum.state, "inv-tum");
+  if (!cancelledTum.ok) throw refused("cancelling of Tum's invite", cancelledTum.refused);
+  const invitedIce = peopleRules.invite(cancelledTum.state, "inv-ice", ice, at - 8 * DAY_MS);
+  if (!invitedIce.ok) throw refused("invite for Ice", invitedIce.refused);
+  const joinedIce = peopleRules.acceptInvite(invitedIce.state, "inv-ice", ice, "helper-ice", "hs-ice-1", at - 8 * DAY_MS + 30 * MINUTE_MS);
+  if (joinedIce.answer !== "joined") throw refused("joining of Ice", joinedIce.answer);
+  const removedIce = peopleRules.removeHelper(joinedIce.state, "helper-ice");
+  if (!removedIce.ok) throw refused("removal of Ice", removedIce.refused);
+  state = removedIce.state;
 
   const invitedMint = peopleRules.invite(state, "inv-mint", mint, at - 10 * DAY_MS);
   if (!invitedMint.ok) throw refused("invite for Mint", invitedMint.refused);
@@ -1700,7 +1821,7 @@ function samplePeople(at: number, tenant: string): FakePeople {
   // Fon's account was linked eleven days ago, and her app has the shop open on two devices.
   return {
     state,
-    names: { "inv-mint": "Mint", "helper-mint": "Mint", "inv-beam": "Beam" },
+    names: { "inv-mint": "Mint", "helper-mint": "Mint", "inv-beam": "Beam", "inv-tum": "Tum", "inv-ice": "Ice", "helper-ice": "Ice" },
     ownerAccount: { id: SAMPLE_OWNER_ACCOUNT, subject: "apple:practice-fon", linkedAt: at - 11 * DAY_MS },
     ownerDevices: 2,
   };

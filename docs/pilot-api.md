@@ -526,7 +526,16 @@ from their session names the linked account by its id, never its subject, an ema
   in `export_incomplete` when it cannot be read. The tenant deletion wipes the log and its miss count with the
   shop's other records; entries written while the deletion runs, the owner's yes among them, go with it.
 - **The console** shows one shop's log at a time on its Audit page, newest first, with "Show older entries" for the
-  next page. The practice-mode fake keeps the same log for its sample shops, by the same rules.
+  next page. It says who acted: an operator by their Access email, the owner by name (with "the shop's own session"
+  for `owner-session` and "linked account" and its id for an account's id, and by name alone for a signed link), a
+  helper by the name the owner gave them, an outpost or a worker by the start of its id. It tells a browser write's
+  entries from any other's by the ids they carry (an ask that names a sign-in; a step that names a request, or a
+  grant for a sign-in's) and says what a write's failed report means for the form: not submitted, not known, or
+  settled all the same. The People page reads the newest 200 entries for the changes to the people and shows the
+  newest ten, each tagged as the owner's or an operator's. A test reads this file's lists (`AUDIT_ACTIONS`, the actor
+  kinds, `AUDIT_OUTCOMES` and `AUDIT_SUBJECT_KEYS`) and fails when the console lacks words for one. The practice-mode
+  fake keeps the same log for its sample shops, by the same rules, and Baan Mali's sample log holds an entry for each
+  kind above.
 
 ## Memory
 

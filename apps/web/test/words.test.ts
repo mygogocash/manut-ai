@@ -667,7 +667,7 @@ describe("the People page's words for the owner's linked account", () => {
   it("words the list of who changed it, and what it says when there is nothing to show", () => {
     expect(peopleWords.changesTitle).toBe("Who changed this list");
     expect(peopleWords.changesNote).toBe("Newest first");
-    expect(peopleWords.changesLabel("Baan Mali")).toBe("Changes to Baan Mali's people");
+    expect(peopleWords.changesLabel("Baan Mali")).toBe("Changes to Baan Mali's list of people");
     expect(peopleWords.changesNone).toBe("No change to the list is recorded yet.");
     expect(peopleWords.changesNoneNewest(200)).toBe(
       "No change to the list in the newest 200 audit entries. The Audit page has older ones.");

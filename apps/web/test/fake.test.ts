@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isAwaitingOwner, type AwaitingOwner, type DeletedShop } from "../src/api";
+import { isAwaitingOwner, type AuditEntry, type AwaitingOwner, type DeletedShop } from "../src/api";
+import { auditReasonText, auditSentence } from "../src/ops/words";
+import { apiList } from "./apiAuditLog";
 import {
   createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET, PRACTICE_OWNER_CODES,
 } from "../src/api/fake";
@@ -932,9 +934,15 @@ describe("the fake's people, kept as the API keeps them", () => {
   const SABAI_TEA = "shop_sabaitea";
   const fresh = (now = () => NOW) => createFakeApi({ now, webOrigin: "https://web.test" });
   const operator = { kind: "operator", email: null };
+  const named = { kind: "operator", email: "ops@manut.test" };
+  const fonDid = { kind: "owner", id: "owner-fon" };
+  const ownSession = { kind: "owner", id: "owner-session" };
   const mint = { kind: "email", address: "mint@baanmali.example" } as const;
   const beam = { kind: "line", id: "beam.baanmali" } as const;
   const kai = { kind: "email", address: "kai@sabai.example" } as const;
+  // The sample's older people: Tum, whose invite Fon cancelled, and Ice, who joined and whom Fon removed.
+  const tum = { kind: "line", id: "tum.baanmali" } as const;
+  const ice = { kind: "email", address: "ice@baanmali.example" } as const;
 
   /// The people entries of a shop's log, oldest first, as what they say: no id and no time.
   async function peopleTrail(api: ReturnType<typeof createFakeApi>, tenant: string) {
@@ -961,6 +969,10 @@ describe("the fake's people, kept as the API keeps them", () => {
       owner: { name: "Fon", account: { id: "owner-fon", linkedAt: "2026-11-12T03:00:00.000Z", devices: 2 } },
       helpers: [{ id: "helper-mint", name: "Mint", identity: mint, joinedAt: "2026-11-13T03:05:00.000Z", devices: 2 }],
       invites: [
+        { id: "inv-tum", name: "Tum", identity: tum, status: "revoked", createdAt: "2026-11-14T03:00:00.000Z",
+          expiresAt: "2026-11-21T03:00:00.000Z" },
+        { id: "inv-ice", name: "Ice", identity: ice, status: "used", createdAt: "2026-11-15T03:00:00.000Z",
+          expiresAt: "2026-11-22T03:00:00.000Z" },
         { id: "inv-mint", name: "Mint", identity: mint, status: "used", createdAt: "2026-11-13T03:00:00.000Z",
           expiresAt: "2026-11-20T03:00:00.000Z" },
         { id: "inv-beam", name: "Beam", identity: beam, status: "pending", createdAt: "2026-11-23T01:00:00.000Z",
@@ -970,7 +982,8 @@ describe("the fake's people, kept as the API keeps them", () => {
       away: { helperId: "helper-mint", name: "Mint", until: "2026-11-27T16:59:59.000Z", inForce: true },
       passedOn: [{ requestId: "req_refund", kind: "money", by: "helper-mint", name: "Mint",
         note: "The customer sent a photo of the broken jar. It looks right to me.", at: "2026-11-23T00:00:00.000Z" }],
-      removed: [],
+      // Ice joined and was removed by Fon; the people list keeps the name so the log can still say who it was.
+      removed: [{ id: "helper-ice", name: "Ice" }],
     });
     expect(await api.getPeople(SABAI_TEA)).toEqual({ tenant: SABAI_TEA, owner: { name: "Dao", account: null }, helpers: [],
       invites: [], away: null, passedOn: [], removed: [] });
@@ -1075,6 +1088,7 @@ describe("the fake's people, kept as the API keeps them", () => {
     await expect(api.revokeInvite({ tenant: BAAN_MALI, inviteId: 5 as never })).rejects
       .toMatchObject({ status: 400, code: "invalid_request" });
     expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action === "invite.revoked")).toEqual([
+      { actor: fonDid, action: "invite.revoked", subject: { inviteId: "inv-tum" }, outcome: "ok" },
       { actor: operator, action: "invite.revoked", subject: { inviteId: "inv-beam" }, outcome: "ok" }]);
   });
 
@@ -1085,7 +1099,7 @@ describe("the fake's people, kept as the API keeps them", () => {
     const people = await api.getPeople(BAAN_MALI);
     expect(people.helpers).toEqual([]);
     expect(people.away).toBeNull();
-    expect(people.removed).toEqual([{ id: "helper-mint", name: "Mint" }]);
+    expect(people.removed).toEqual([{ id: "helper-ice", name: "Ice" }, { id: "helper-mint", name: "Mint" }]);
     // What Mint passed on stays, with Mint's name.
     expect(people.passedOn).toEqual([expect.objectContaining({ by: "helper-mint", name: "Mint" })]);
     await expect(api.removeHelper({ tenant: BAAN_MALI, helperId: "helper-mint" })).rejects
@@ -1093,6 +1107,7 @@ describe("the fake's people, kept as the API keeps them", () => {
     await expect(api.removeHelper({ tenant: BAAN_MALI, helperId: 7 as never })).rejects
       .toMatchObject({ status: 400, code: "invalid_request" });
     expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action === "helper.removed")).toEqual([
+      { actor: fonDid, action: "helper.removed", subject: { helperId: "helper-ice" }, outcome: "ok" },
       { actor: operator, action: "helper.removed", subject: { helperId: "helper-mint" }, outcome: "ok" }]);
     // A removed helper can be invited again, as a new helper.
     expect(await api.createInvite({ tenant: BAAN_MALI, name: "Mint", identity: mint })).toMatchObject({ invite: { status: "pending" } });
@@ -1128,6 +1143,9 @@ describe("the fake's people, kept as the API keeps them", () => {
     expect(await api.clearAway({ tenant: BAAN_MALI })).toEqual({ away: null });
     expect((await api.listAudit(BAAN_MALI, { limit: 200 })).entries.length).toBe(written);
     expect((await peopleTrail(api, BAAN_MALI)).filter((entry) => entry.action.startsWith("away."))).toEqual([
+      // Ice's cover, set from the shop's own session and ended by Fon before Ice was removed, then Mint's from the sample.
+      { actor: ownSession, action: "away.set", subject: { helperId: "helper-ice" }, outcome: "ok" },
+      { actor: fonDid, action: "away.cleared", subject: { helperId: "helper-ice" }, outcome: "ok" },
       { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
       { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
       { actor: operator, action: "away.cleared", subject: { helperId: "helper-mint" }, outcome: "ok" },
@@ -1140,6 +1158,19 @@ describe("the fake's people, kept as the API keeps them", () => {
     expect(await peopleTrail(api, BAAN_MALI)).toEqual([
       { actor: operator, action: "invite.created", subject: { inviteId: "inv-mint" }, outcome: "ok" },
       { actor: mintDid, action: "helper.joined", subject: { inviteId: "inv-mint", helperId: "helper-mint" }, outcome: "ok" },
+      // Fon cancelled Tum's invite; an operator invited Ice, who joined, was set to cover from the shop's own session, had the
+      // cover ended by Fon, and was removed by Fon.
+      { actor: fonDid, action: "invite.created", subject: { inviteId: "inv-tum" }, outcome: "ok" },
+      { actor: fonDid, action: "invite.revoked", subject: { inviteId: "inv-tum" }, outcome: "ok" },
+      { actor: named, action: "invite.created", subject: { inviteId: "inv-ice" }, outcome: "ok" },
+      { actor: { kind: "helper", id: "helper-ice" }, action: "helper.joined", subject: { inviteId: "inv-ice", helperId: "helper-ice" },
+        outcome: "ok" },
+      { actor: ownSession, action: "away.set", subject: { helperId: "helper-ice" }, outcome: "ok" },
+      { actor: fonDid, action: "away.cleared", subject: { helperId: "helper-ice" }, outcome: "ok" },
+      { actor: fonDid, action: "helper.removed", subject: { helperId: "helper-ice" }, outcome: "ok" },
+      // A device of Mint's signed in and out again, and the one still open signed in two days ago.
+      { actor: mintDid, action: "helper.session_opened", subject: { helperId: "helper-mint" }, outcome: "ok" },
+      { actor: mintDid, action: "helper.session_ended", subject: { helperId: "helper-mint" }, outcome: "ok" },
       { actor: mintDid, action: "helper.session_opened", subject: { helperId: "helper-mint" }, outcome: "ok" },
       { actor: operator, action: "away.set", subject: { helperId: "helper-mint" }, outcome: "ok" },
       { actor: mintDid, action: "request.passed_on", subject: { requestId: "req_refund", taskId: "task_shop_baanmali" },
@@ -1147,7 +1178,8 @@ describe("the fake's people, kept as the API keeps them", () => {
       { actor: operator, action: "invite.created", subject: { inviteId: "inv-beam" }, outcome: "ok" },
     ]);
     const written = JSON.stringify(await api.listAudit(BAAN_MALI, { limit: 200 }));
-    for (const private_ of ["Mint", "mint@baanmali", "Beam", "beam.baanmali", "broken jar"]) expect(written).not.toContain(private_);
+    for (const private_ of ["Mint", "mint@baanmali", "Beam", "beam.baanmali", "broken jar", "Tum", "tum.baanmali", "Ice",
+      "ice@baanmali"]) expect(written).not.toContain(private_);
     // The newest entry is still the newest reply of the sample world.
     expect((await api.listAudit(BAAN_MALI)).entries[0]).toMatchObject({ action: "reply.proposed" });
   });
@@ -1360,6 +1392,9 @@ describe("the fake's owner link, kept as the API keeps it", () => {
     expect(await linkTrail(api, BAAN_MALI)).toEqual([
       { actor: operator, action: "owner.linked", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
       { actor: fonDid, action: "owner.session_opened", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
+      // A device that signed in and out again; the two still open are the first and the one of three days ago.
+      { actor: fonDid, action: "owner.session_opened", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
+      { actor: fonDid, action: "owner.session_ended", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
       { actor: fonDid, action: "owner.session_opened", subject: { ownerAccountId: "owner-fon" }, outcome: "ok" },
     ]);
     // The newest entry is still the newest reply of the sample world, and the log never names the account itself.
@@ -1493,5 +1528,197 @@ describe("the fake's owner link, kept as the API keeps it", () => {
       () => api.linkOwner({ tenant: SABAI_TEA, code: dao }),
       () => api.unlinkOwner({ tenant: BAAN_MALI }),
     ]) await expect(call()).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+});
+
+// Practice mode must show every word the console has, without an API. This week's API added the owner's own changes (from their
+// linked account and from the shop's own session), a helper's device signing out, this Mac registering as an outpost, and browser
+// writes asked for and submitted, so Baan Mali's sample log holds an entry for each, in the shapes the API writes them
+// (docs/pilot-api.md, "Audit log"), and the sample people hold the history those entries are about.
+describe("the fake's sample audit log, for what the API added this week", () => {
+  const NOW = Date.parse("2026-11-24T03:00:00Z");
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const everything = async (tenant = BAAN_MALI) => {
+    const api = createFakeApi({ now: () => NOW });
+    return { api, log: (await api.listAudit(tenant, { limit: 200 })).entries };
+  };
+  const has = (log: AuditEntry[], action: string, test: (entry: AuditEntry) => boolean = () => true) =>
+    log.some((entry) => entry.action === action && test(entry));
+  const by = (kind: string, id?: string) => (entry: AuditEntry) =>
+    entry.actor.kind === kind && (id === undefined || ("id" in entry.actor && entry.actor.id === id));
+
+  it("keeps every sample entry within the API's own rules for an entry", async () => {
+    const actions = new Set(apiList("AUDIT_ACTIONS"));
+    const outcomes = new Set(apiList("AUDIT_OUTCOMES"));
+    const keys = new Set(apiList("AUDIT_SUBJECT_KEYS"));
+    const ID = /^[A-Za-z0-9._:-]{1,256}$/;
+    const CODE = /^[a-z][a-z0-9_]{0,63}$/;
+    for (const tenant of [BAAN_MALI, SABAI_TEA]) {
+      const { log } = await everything(tenant);
+      expect(log.length).toBeGreaterThan(0);
+      for (const entry of log) {
+        const says = `${entry.action} ${entry.id}`;
+        expect(actions.has(entry.action), says).toBe(true);
+        expect(outcomes.has(entry.outcome), says).toBe(true);
+        for (const [key, id] of Object.entries(entry.subject)) {
+          expect(keys.has(key), `${says}: ${key}`).toBe(true);
+          expect(ID.test(id), `${says}: ${key} ${id}`).toBe(true);
+        }
+        if (entry.reason !== undefined) expect(CODE.test(entry.reason), `${says}: ${entry.reason}`).toBe(true);
+        // Each kind of actor carries exactly the fields the API's `isAuditActor` allows.
+        const actor = entry.actor as Record<string, unknown>;
+        const fields = Object.keys(actor).sort().join(",");
+        switch (actor.kind) {
+          case "operator": expect(fields, says).toBe("email,kind"); break;
+          case "owner": expect(["kind", "id,kind"], says).toContain(fields); break;
+          case "helper": case "outpost": expect(fields, says).toBe("id,kind"); break;
+          case "worker": expect(fields, says).toBe("attemptId,kind"); break;
+          case "system": expect(fields, says).toBe("kind"); break;
+          default: throw new Error(`${says}: an actor kind the API does not have`);
+        }
+        for (const text of Object.values(actor)) if (typeof text === "string") expect(ID.test(text) || text.includes("@"), says).toBe(true);
+      }
+    }
+  });
+
+  it("says every sample entry in words: none by its raw name, no reason by its code", async () => {
+    const { log } = await everything();
+    const names = { "helper-mint": "Mint", "helper-ice": "Ice", "inv-beam": "Beam", "inv-mint": "Mint", "inv-tum": "Tum", "inv-ice": "Ice" };
+    for (const entry of log) {
+      const sentence = auditSentence(entry, "Fon", names);
+      expect(sentence, entry.action).not.toContain(entry.action);
+      expect(sentence, entry.action).not.toMatch(/\bdid\b/);
+      if (entry.reason !== undefined) expect(auditReasonText(entry.reason, entry), `${entry.action} ${entry.reason}`).not.toMatch(/^Reason:/);
+    }
+  });
+
+  it("holds the owner's own changes, by their linked account and by the shop's own session, beside an operator's", async () => {
+    const { log } = await everything();
+    for (const action of ["invite.created", "invite.revoked", "helper.removed", "away.set", "away.cleared", "consent.given",
+      "consent.withdrawn"]) {
+      expect(has(log, action, by("owner")), `${action} by the owner`).toBe(true);
+    }
+    expect(log.some(by("owner", "owner-fon")), "from the linked account").toBe(true);
+    expect(log.some(by("owner", "owner-session")), "from the shop's own session").toBe(true);
+    expect(has(log, "invite.created", by("operator"))).toBe(true);
+    expect(has(log, "away.set", by("operator"))).toBe(true);
+  });
+
+  it("holds a helper's device signing in and out, and the owner's own devices", async () => {
+    const { log } = await everything();
+    expect(has(log, "helper.session_opened", by("helper", "helper-mint"))).toBe(true);
+    expect(has(log, "helper.session_ended", by("helper", "helper-mint"))).toBe(true);
+    expect(has(log, "owner.session_opened", by("owner", "owner-fon"))).toBe(true);
+    expect(has(log, "owner.session_ended", by("owner", "owner-fon"))).toBe(true);
+  });
+
+  it("holds the owner registering their Mac as an outpost, beside an operator's cloud outpost, and a vault sealed again", async () => {
+    const { log } = await everything();
+    expect(has(log, "outpost.registered", by("owner", "owner-fon"))).toBe(true);
+    expect(has(log, "outpost.registered", by("operator"))).toBe(true);
+    expect(has(log, "signin.created", by("operator"))).toBe(true);
+    expect(has(log, "vault.resealed", (entry) => by("operator")(entry) && Object.keys(entry.subject).length === 0)).toBe(true);
+  });
+
+  it("tells a sign-in's story, from the grant to the password mended", async () => {
+    const { log } = await everything();
+    const grant = log.find((entry) => entry.action === "signin.requested")?.subject.grantId;
+    expect(grant).toBeTruthy();
+    const told = log.filter((entry) => entry.subject.grantId === grant).reverse().map((entry) => `${entry.actor.kind} ${entry.action} ${entry.outcome}${entry.reason ? ` ${entry.reason}` : ""}`);
+    expect(told).toEqual([
+      "worker signin.requested ok",
+      "worker browser_step.queued ok",
+      "outpost browser_step.fetched ok",
+      "outpost signin.redeemed ok",
+      "outpost browser_step.reported failed sign_in_refused",
+    ]);
+    expect(has(log, "signin.broken", by("worker"))).toBe(true);
+    expect(has(log, "signin.password_replaced", by("operator"))).toBe(true);
+  });
+
+  it("tells each browser write's story in order, from the ask to how it settled, each ending its own way", async () => {
+    const { log } = await everything();
+    const story = (requestId: string) => log
+      .filter((entry) => entry.subject.requestId === requestId || entry.subject.actionId === requestId)
+      .reverse()
+      .map((entry) => `${entry.actor.kind} ${entry.action} ${entry.outcome}${entry.reason ? ` ${entry.reason}` : ""}`);
+    const requestOf = (reason: string) => log.find((entry) => entry.action === "browser_step.reported" && entry.reason === reason
+      && entry.subject.requestId)?.subject.requestId ?? "";
+    const through = (settled: string, report: string) => [
+      "worker approval.requested ok",
+      "owner approval.decided approved",
+      "worker browser_step.queued ok",
+      "system dispatch.started ok",
+      "outpost browser_step.fetched ok",
+      `outpost browser_step.reported failed ${report}`,
+      `system dispatch.settled ${settled}`,
+    ];
+    // The site refused the form: nothing changed, so the write failed.
+    expect(story(requestOf("submit_refused"))).toEqual(through("failed", "submit_refused"));
+    // A helper approved this one (a reply may be decided by a helper); the outpost did not run the step.
+    expect(story(requestOf("not_run"))).toEqual(through("failed", "not_run").map((line) => line.replace("owner approval", "helper approval")));
+    // The step took too long, so nobody can say the site did not take it.
+    expect(story(requestOf("timed_out"))).toEqual(through("unknown", "timed_out"));
+    // The outpost was refused the step: the approved write no longer matched what would be submitted.
+    const refused = log.find((entry) => entry.action === "browser_step.fetched" && entry.reason === "payload_changed");
+    expect(refused?.subject.requestId).toBeTruthy();
+    expect(story(refused!.subject.requestId!)).toEqual([
+      "worker approval.requested ok",
+      "owner approval.decided approved",
+      "worker browser_step.queued ok",
+      "system dispatch.started ok",
+      "system dispatch.settled failed",
+      "outpost browser_step.fetched refused payload_changed",
+    ]);
+  });
+
+  it("holds the asks that were refused or kept as drafts, which open no request", async () => {
+    const { log } = await everything();
+    const ask = (outcome: string, reason: string) => log.find((entry) => entry.action === "approval.requested"
+      && entry.outcome === outcome && entry.reason === reason);
+    for (const [outcome, reason] of [["refused", "not_my_job"], ["skipped", "draft_only"]] as const) {
+      const one = ask(outcome, reason);
+      expect(one, `${outcome} ${reason}`).toBeTruthy();
+      // A write's ask names its sign-in, and opens no request, so it has none.
+      expect(one!.subject.signInId).toBeTruthy();
+      expect(one!.subject.requestId).toBeUndefined();
+    }
+  });
+
+  it("keeps the people the sample entries are about: a cancelled invite and a removed helper still have their names", async () => {
+    const { api, log } = await everything();
+    const people = await api.getPeople(BAAN_MALI);
+    expect(people.removed).toEqual([{ id: "helper-ice", name: "Ice" }]);
+    expect(people.invites.find((invite) => invite.id === "inv-tum")).toMatchObject({ name: "Tum", status: "revoked" });
+    expect(people.invites.find((invite) => invite.id === "inv-ice")).toMatchObject({ name: "Ice", status: "used" });
+    // The page still lists the owner, Mint and Beam's open invite, and nobody else.
+    expect(people.helpers.map((helper) => helper.id)).toEqual(["helper-mint"]);
+    expect(people.invites.filter((invite) => invite.status === "pending").map((invite) => invite.id)).toEqual(["inv-beam"]);
+    // Every person a sample entry names is one the people list knows by name.
+    const known = new Set([...people.invites.map((one) => one.id), ...people.helpers.map((one) => one.id), ...people.removed.map((one) => one.id)]);
+    for (const entry of log) {
+      for (const key of ["inviteId", "helperId"] as const) {
+        const id = entry.subject[key];
+        if (id !== undefined) expect(known.has(id), `${entry.action} ${key} ${id}`).toBe(true);
+      }
+    }
+  });
+
+  it("replaces a practice world saved before these samples, whether it is a version behind or only lacks them", async () => {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    const first = createFakeApi({ now: () => NOW, storage });
+    await first.listShops();
+    const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+    expect(world.version).toBe(10);
+    saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, version: 9, audit: [] }));
+    const api = createFakeApi({ now: () => NOW, storage });
+    const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
+    expect(has(log, "vault.resealed")).toBe(true);
   });
 });

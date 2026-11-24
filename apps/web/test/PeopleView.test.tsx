@@ -397,7 +397,8 @@ describe("inviting a helper", () => {
     await refusal("Mint again", " MINT@baanmali.example ", "That person is already a helper.");
     await refusal("Kai", "kai@", "Write a LINE ID, or an email address like name@example.com.");
     expect(rowsOf(PEOPLE)).toHaveLength(3);
-    expect((await api.getPeople(BAAN_MALI)).invites).toHaveLength(2);
+    // No invite was made: the sample's four are Tum's (cancelled), Ice's and Mint's (used) and Beam's (waiting).
+    expect((await api.getPeople(BAAN_MALI)).invites.map((invite) => invite.id)).toEqual(["inv-tum", "inv-ice", "inv-mint", "inv-beam"]);
     // A right answer then goes through, and the old refusal is gone.
     fill(name, contact, "Kai", "kai@sabai.example");
     fireEvent.click(submit);
@@ -518,7 +519,8 @@ describe("removing a helper", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(rowsOf(PEOPLE)).toHaveLength(2));
     expect(within(who()).getByText("1 person, 1 invited")).toBeTruthy();
-    expect(within(who()).getByText("Removed helpers: Mint. What they approved stays in the activity log, with their names.")).toBeTruthy();
+    // Ice was removed earlier, by Fon, and Mint now: both keep their names.
+    expect(within(who()).getByText("Removed helpers: Ice and Mint. What they approved stays in the activity log, with their names.")).toBeTruthy();
     // The cover Mint held ended with Mint, so nobody is covering and there is no one to choose.
     expect(within(cover()).queryByRole("status")).toBeNull();
     expect(within(cover()).getByText("Invite a helper first: cover needs someone to approve messages while Fon is away.")).toBeTruthy();
@@ -989,7 +991,7 @@ describe("unlinking the owner's account", () => {
 // reads the shop's audit log for those changes and says which the owner made and which an operator did. The People answer itself
 // does not say, and the log does: each entry names its actor (docs/pilot-api.md, "Audit log").
 describe("the People page: who changed the list", () => {
-  const CHANGES = "Changes to Baan Mali's people";
+  const CHANGES = "Changes to Baan Mali's list of people";
   const operator = { kind: "operator" as const, email: "ops@manut.test" };
   const fonsAccount = { kind: "owner" as const, id: "owner-fon" };
   const shopsOwnSession = { kind: "owner" as const, id: "owner-session" };

@@ -1228,7 +1228,7 @@ export const peopleWords = {
   // a change, and the log does, for the owner's changes as well as an operator's (docs/pilot-api.md, "Audit log").
   changesTitle: "Who changed this list",
   changesNote: "Newest first",
-  changesLabel: (shop: string) => `Changes to ${shop}'s people`,
+  changesLabel: (shop: string) => `Changes to ${shop}'s list of people`,
   changesLoading: "Loading who changed the list",
   changesNone: "No change to the list is recorded yet.",
   /// The page reads the newest entries only, so when it found no change and the log goes back further, it does not say there was none.

@@ -35,6 +35,18 @@ function rows(name: string): string[] {
   return within(screen.getByRole("list", { name })).getAllByRole("listitem").map((item) => item.textContent ?? "");
 }
 
+/// The practice shop's log is longer than a page, so a test that reads all of it presses "Show older entries" until the
+/// page has no more to offer.
+async function showEveryEntry() {
+  for (let pressed = 0; pressed < 6; pressed += 1) {
+    const more = screen.queryByRole("button", { name: "Show older entries" });
+    if (!more) return;
+    fireEvent.click(more);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Loading older entries" })).toBeNull());
+  }
+  throw new Error("the log never ran out of older entries");
+}
+
 describe("the Audit page", () => {
   it("opens from the side menu and lists the chosen shop's log newest first, in plain words", async () => {
     sessionStorage.setItem("manut.pilot.operatorKey", "op-key-123");
@@ -47,12 +59,19 @@ describe("the Audit page", () => {
     expect(await screen.findByRole("heading", { name: "Audit" })).toBeTruthy();
     expect(nav.getAttribute("aria-current")).toBe("page");
     await screen.findByRole("list", { name: "Baan Mali's audit log" });
+    const newest = rows("Baan Mali's audit log");
+    expect(newest[0]).toContain("An operator (no Access identity) proposed a reply.");
+    // The sample log is longer than a page: the page holds the newest 50 and offers the rest.
+    expect(newest).toHaveLength(50);
+    await showEveryEntry();
     const read = rows("Baan Mali's audit log");
-    expect(read[0]).toContain("An operator (no Access identity) proposed a reply.");
     // Newest first: Fon approved Khun Mai's reply after declining Khun Fah's.
     expect(read.filter((text) => text.includes("Fon decided a reply."))).toEqual([expect.stringContaining("Approved"),
       expect.stringContaining("Declined")]);
-    expect(read.find((text) => text.includes("Manut AI finished sending an approved action."))).toContain("Sent");
+    // Two sends finished: a browser write that failed, newer, and Khun Mai's reply, which was sent.
+    const finished = read.filter((text) => text.includes("Manut AI finished sending an approved action."));
+    expect(finished.length).toBeGreaterThan(1);
+    expect(finished.some((text) => text.includes("Sent"))).toBe(true);
     expect(read.some((text) => text.includes("recorded an order payment of ฿1,290."))).toBe(true);
     expect(read.at(-1)).toContain("An operator (no Access identity) created the shop.");
     // Going back to a shop leaves the Audit page.
@@ -132,6 +151,7 @@ describe("the Audit page's names for the owner's people", () => {
     renderWithApi(<AuditView shops={[{ ...SHOPS[0]!, tenant: "shop_baanmali" }, SHOPS[1]!]} tenant="shop_baanmali" onForget={() => {}} />,
       fakeApi());
     await screen.findByRole("list", { name: "Baan Mali's audit log" });
+    await showEveryEntry();
     await waitFor(() => expect(read().some((text) => text.includes("Mint joined the shop through an invite."))).toBe(true));
     const text = read();
     for (const sentence of [
