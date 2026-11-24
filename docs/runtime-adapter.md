@@ -63,6 +63,8 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `routine.pause`, `routine.resume`, `team.pause`, `team.resume`, and `automations.pause` and `.resume` of a team routine | for a shop the person owns, through apps/api's routines routes with that shop's session (A shop the person owns, below) |
 | `connections.list` | the shop's site sign-ins and outposts, `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts`, for Customize › Connections (below) |
 | `connections.password`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins/password`, `/v1/vault/outposts/rename` or `/remove` (below) |
+| `people.list` | who can use Manut AI for the shop the switcher shows, `GET /v1/people`, for Settings › People (below) |
+| `people.invite`, `people.cancelInvite`, `people.remove`, `people.setAway`, `people.clearAway` | the owner's change, to `POST /v1/people/invites`, `/invites/revoke`, `/remove`, `/away` or `/away/clear` (below) |
 | every other write (`chat.send`, `routine.create`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, pauses your team's routines and looks after Connections for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
@@ -265,8 +267,10 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   keychain. A shop the person leaves, or no longer owns, takes it with it; signing out leaves it. A read of the devices
   that fails (offline, 5xx, a refusal, an answer this build cannot read) says and forgets nothing, as does one that
   answers after the person signed out. The store shows each one with `showNewDevice` (`notify.ts`) as "Mint signed in on a new device",
-  through `showOutside` and notify-rules: quiet hours never silence it and Hide details hides who and where. Look first
-  brings the app forward on that shop, and Later only dismisses. "Notify me" off switches it off, as every notification.
+  through `showOutside` and notify-rules: quiet hours never silence it and Hide details hides who and where. Look first (and a
+  click on the notification) brings the app forward and opens Settings › People for that shop, where its owner can remove
+  access (`openPeopleOf`, `store.ts`: it shows the shop, then opens the page, and opens no page when the shop could not be
+  shown); the notification is as it was. Later only dismisses. "Notify me" off switches it off, as every notification.
 - **Signing out** ends each shop session with `POST /v1/shops/session/end` (the session as the bearer, exactly `{}`),
   together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
   says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same
@@ -362,6 +366,36 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
   has on the shop's list, only when this Mac is that shop's outpost, and never its credential. The tab folds that record
   into this Mac's row (its name, Rename and Remove) and leaves it out of the shop's list; with no id, or an id the list
   does not have, every outpost is listed.
+
+## Settings › People
+
+Who can use Manut AI for the shop, for its owner (`src/runtime/http/people.ts`; the routes are `docs/pilot-api.md`, "The owner's
+own routes"; the rules are `docs/people.md`). It is a page of Settings, under Shop (`src/pages/PeoplePane.tsx`,
+`src/pages/people.ts`), with six ops (`src/runtime/people.ts`).
+
+- **Which session.** `people.list` reads the shop the switcher shows, with that shop's own owner session. Each change names the
+  shop its list was read for (`shop`) and goes with that shop's session, never the shop the switcher shows by then. A shop the
+  person helps at is refused `owner_only` here with nothing sent, so a helper's session never carries a name, a LINE ID or an
+  email to the API, and the page says whose people they are without asking. A person in no shops has none to manage: the API
+  answers a person's own sign-in 404 (People exist for pilot shops), so `people.list` says `no_shop` and nothing is sent. Nothing
+  is sent either while only a kept read is shown (`offline`).
+- **What a change sends.** Exactly what each route reads and nothing more: `{ name, identity }` with the identity exactly
+  `{ kind: "line", id }` or `{ kind: "email", address }`; `{ inviteId }`; `{ helperId }`; `{ helperId, until }` with `until`
+  as an ISO time (the page makes it the end of the chosen day on this computer's calendar); and `{}`. A name the shop's record
+  would not keep (empty, over 80 characters, a control character) and an account the rules would not take are refused here
+  first, with nothing sent; whether a cover's day is in the future is the API's to say (`bad_date`), by its clock.
+- **What the page is shown.** The owner, each helper and each invite that waits or ran out, field by field; an entry this build
+  cannot read is left out, and an answer that is not a people list is `unavailable`. An answer to a change that this build cannot
+  read (an invite with no readable status, a removal with no counts) is `unavailable` too, never done. The invite's link is
+  `inviteUrl`, shown only if it is an http or https address. Every 5xx reaches the runtime as no answer, because the session keeps
+  no body for one, so `not_configured` (an invite link cannot be made) and `people_unavailable` are both said as "No reply from the
+  API. Checking whether it changed.", and the page reads the list again to see.
+- **Nothing is kept.** The page asks through a client of the runtime of its own (`usePeople`), as Connections does, so the helpers'
+  names and accounts and the invite links are in the page's state only: not the store, the kept read of the shop, an event or a
+  log. On the loopback bridge the Playwright suite uses (which logs what it is sent, and has no people), Settings has no People.
+- **Practice** answers the same six ops with `@manut/people-rules` itself (`src/runtime/mock/people.ts`), so its rules are the
+  shop's: the canvas's Fon, Mint and Beam, an invite for one account at a time, removal ending sessions, invites and cover, and
+  cover until a day that has not passed. Its invite links end in `.invalid`, which can never be a real address.
 
 ## Signing in
 
