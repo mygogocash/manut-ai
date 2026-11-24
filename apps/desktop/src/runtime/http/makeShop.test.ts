@@ -71,7 +71,7 @@ describe("making a shop on the connected runtime", () => {
       current: MADE_ID, left: [] });
     expect(events.some((ev) => ev.event === "shops.update")).toBe(true);
     expect(api.calls.filter((c) => c.bearer === MADE_TOKEN).map((c) => c.path)).toEqual(expect.arrayContaining(["/v1/approvals",
-      "/v1/routines", "/v1/tenant/export"]));
+      "/v1/routines", "/v1/tasks", "/v1/schedules", "/v1/inbound/attention"]));
   });
 
   it("says that the shop's team waits for Manut AI when the API's answer does", async () => {

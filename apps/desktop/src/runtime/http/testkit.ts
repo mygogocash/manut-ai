@@ -200,7 +200,8 @@ export function actionJson(over: Record<string, unknown> = {}) {
   };
 }
 
-/** One entry of `GET /v1/tenant/export`'s `tasks`: the document, its event log, its actions and attempts. */
+/** One task as the shop's records hold it, in the shape of an entry of `GET /v1/tenant/export`'s `tasks`: the document,
+ *  its event log, its actions and attempts. The task list carries what `listedJson` keeps of it. */
 export function taskJson(over: { task?: Record<string, unknown>; actions?: Record<string, unknown>[]; [k: string]: unknown } = {}) {
   const { task, actions, ...rest } = over as { task?: Record<string, unknown>; actions?: Record<string, unknown>[]; [k: string]: unknown };
   return {
@@ -319,7 +320,7 @@ export function approvalJson(over: ApprovalOver = {}) {
   };
 }
 
-/** The open requests the API lists for these export entries' LINE replies: one per reply still proposed and not past its
+/** The open requests the API lists for these tasks' LINE replies: one per reply still proposed and not past its
  *  expiry, as the task object opens a request with every reply and lists one stored before that as the request it would
  *  have opened (docs/pilot-api.md, "Approvals for a session"). */
 function openReplies(tasks: unknown[], now: number) {
@@ -339,12 +340,55 @@ function openReplies(tasks: unknown[], now: number) {
   });
 }
 
-/** Serves the four routes a read of the shop makes. Without `approvals`, the open approvals are the export's LINE replies
+/** What the task list carries of one task (`taskJson`'s shape), as apps/api's task object builds it (task-listing.ts): its
+ *  document and its actions whole, its runs without their steps, fencing tokens and revisions, the first 200 of them as
+ *  the export keeps them, its newest draft, and from its log only the entries the lists read: the one that made it, each
+ *  run's claim, and each handoff note and spend report a run made. */
+export function listedJson(entry: unknown): Record<string, unknown> {
+  const e = (entry && typeof entry === "object" ? entry : {}) as Record<string, any>;
+  const reads = (ev: any) => ev?.kind === "created" || /^attempt:claim:/.test(ev?.via ?? "") ||
+    (ev?.kind === "agent" && !!ev.event && typeof ev.event === "object" && !Array.isArray(ev.event) && (ev.event.type === "handoffNote" || ev.event.type === "spend"));
+  const runs: any[] = Array.isArray(e.attempts) ? e.attempts : [];
+  const pick = (a: any) => Object.fromEntries(["id", "executorId", "status", "outcome", "reason", "finishedAt", "deadline", "leaseUntil"].filter((k) => a?.[k] !== undefined).map((k) => [k, a[k]]));
+  const drafts = [...(Array.isArray(e.drafts) ? e.drafts : [])].sort((a: any, b: any) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  return {
+    task: e.task,
+    events: (Array.isArray(e.events) ? e.events : []).filter(reads),
+    actions: Array.isArray(e.actions) ? e.actions : [],
+    attempts: runs.slice(0, 200).map(pick),
+    attemptsTruncated: runs.length > 200,
+    drafts: drafts.slice(-1),
+  };
+}
+
+/** `GET /v1/tasks` over a shop's tasks (`taskJson`'s shape, oldest first as the shop's index holds them), as apps/api answers
+ *  it (task-list.ts): newest first, at most `limit` (25 when the query does not say, never more), from just after the task
+ *  the cursor names, and the cursor of the next page. */
+export function taskPage(tasks: readonly unknown[], req: Recorded): FakeAnswer {
+  const url = new URL(req.url);
+  const raw = url.searchParams.get("limit");
+  const limit = raw === null ? 25 : /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25) return { status: 400, json: { error: "invalid_limit" } };
+  const newest = [...tasks].reverse();
+  const ids = newest.map((t) => (t as { task?: { id?: unknown } } | null)?.task?.id);
+  const cursor = url.searchParams.get("cursor");
+  let start = 0;
+  if (cursor !== null) {
+    const at = ids.indexOf(cursor);
+    if (at < 0) return { status: 400, json: { error: "invalid_cursor" } };
+    start = at + 1;
+  }
+  const looked = newest.slice(start, start + limit);
+  const end = start + looked.length;
+  return { status: 200, json: { tasks: looked.map(listedJson), next: end < newest.length ? (ids[end - 1] ?? null) : null } };
+}
+
+/** Serves the four routes a read of the shop makes. Without `approvals`, the open approvals are the tasks' LINE replies
  *  still waiting, as the API would list them. Later calls to `api.on` replace one of them. */
 export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown[]; attention?: unknown[]; approvals?: unknown[] } = {}): FakeApi {
   const tasks = over.tasks ?? [taskJson()];
   return api
-    .on("GET", "/v1/tenant/export", { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(T0), tasks, schedules: [], attention: [] } })
+    .on("GET", "/v1/tasks", (req) => taskPage(tasks, req))
     .on("GET", "/v1/schedules", { status: 200, json: { schedules: over.schedules ?? [scheduleJson()] } })
     .on("GET", "/v1/inbound/attention", { status: 200, json: { items: over.attention ?? [attentionJson()] } })
     .on("GET", "/v1/approvals", () => ({ status: 200, json: { state: "open", approvals: over.approvals ?? openReplies(tasks, Date.now()) } }));
@@ -439,13 +483,14 @@ export interface ServedShops {
   refused: Set<string>;
   /** how many times each shop was opened */
   opened: Record<string, number>;
-  /** each shop's work, by shop id, as an owner's session reads it (`GET /v1/tenant/export`, `GET /v1/routines`), and as the
-   *  owner's changes to the team leave it; a shop the person owns with none listed here has no tasks, no routines and
-   *  all three members on */
+  /** each shop's work, by shop id, as an owner's session reads it (`GET /v1/tasks`, `/v1/schedules`, `/v1/inbound/attention`
+   *  and `/v1/routines`), and as the owner's changes to the team leave it; a shop the person owns with none listed here has
+   *  no tasks, no routines and all three members on */
   work: Record<string, ShopWorkJson>;
 }
 
-/** A shop's work as the fake API keeps it: the export's tasks, schedules and attention items, and the team's routines. */
+/** A shop's work as the fake API keeps it: its tasks (`taskJson`'s shape, oldest first), schedules and attention items,
+ *  and the team's routines. */
 export interface ShopWorkJson {
   tasks: unknown[];
   schedules: unknown[];
@@ -568,8 +613,8 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     return { status: 200, json: { state: "open", approvals: served.approvals[at.shop] ?? [] } };
   };
   api.on("GET", "/v1/approvals", listing);
-  // An owner's session reads its shop's export and routines and changes its team, as apps/api answers them; a helper's is
-  // told they are the owner's (403 `owner_only`).
+  // An owner's session reads its shop's tasks, schedules, attention items and routines and changes its team, as apps/api
+  // answers them; a helper's is told they are the owner's (403 `owner_only`).
   const ownerAt = (req: Recorded): { shop: string; work: ShopWorkJson } | FakeAnswer => {
     const at = shopOf(req);
     if (at === null) return { status: 401, json: { error: "unauthorized" } };
@@ -581,12 +626,13 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     const at = ownerAt(req);
     return isAnswer(at) ? at : answer(at.shop, at.work);
   };
+  // The sign-in's own tenant has nothing in these tests: a person in shops is never read as it.
+  const ownTenant = (req: Recorded, empty: FakeAnswer, answer: (w: ShopWorkJson) => FakeAnswer): FakeAnswer =>
+    shopOf(req) === null ? empty : owned(req, (_shop, w) => answer(w));
   api
-    .on("GET", "/v1/tenant/export", (req) =>
-      // the sign-in's own tenant has nothing in these tests: a person in shops is never read as it
-      shopOf(req) === null ? { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(now()), tasks: [], schedules: [], attention: [] } }
-        : owned(req, (shop, w) => ({ status: 200, json: { tenant: shop, exportedAt: iso(now()), tasks: w.tasks, schedules: w.schedules, attention: w.attention } })),
-    )
+    .on("GET", "/v1/tasks", (req) => ownTenant(req, { status: 200, json: { tasks: [], next: null } }, (w) => taskPage(w.tasks, req)))
+    .on("GET", "/v1/schedules", (req) => ownTenant(req, { status: 200, json: { schedules: [] } }, (w) => ({ status: 200, json: { schedules: w.schedules } })))
+    .on("GET", "/v1/inbound/attention", (req) => ownTenant(req, { status: 200, json: { items: [] } }, (w) => ({ status: 200, json: { items: w.attention } })))
     .on("GET", "/v1/routines", (req) => owned(req, (shop, w) => ({ status: 200, json: { tenant: shop, team: w.team, routines: w.routines } })))
     .on("POST", "/v1/team/pause", (req) => owned(req, (_shop, w) => ((w.team = { ...w.team, paused: true, since: w.team.since ?? iso(now()) }), { status: 200, json: { team: w.team } })))
     .on("POST", "/v1/team/resume", (req) => owned(req, (_shop, w) => ((w.team = { ...w.team, paused: false, since: null }), { status: 200, json: { team: w.team } })));

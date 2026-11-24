@@ -63,7 +63,7 @@ describe("the app's store on the connected runtime", () => {
 
 /** The store on a connected runtime that keeps its reads in `files` (what an earlier run left), with no way to the API. */
 function offlineStore(files: Record<string, string>) {
-  const api = fakeApi().on("GET", "/v1/tenant/export", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
+  const api = fakeApi().on("GET", "/v1/tasks", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
   const cache = new ShopCache(memoryCacheStore(files));
   const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(Date.now())), onEnd: () => cache.clear() });
   const store = createStore(new HttpRuntime(new HttpHost({ session, cache })), {

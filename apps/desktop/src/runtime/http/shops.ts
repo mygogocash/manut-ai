@@ -17,7 +17,7 @@
 //   or the screen.
 import type { ShopRole, ShopRow } from "../../lib/protocol";
 import { decodeApprovals } from "./approvals";
-import { decodeWork, type ReadFailure, type ShopPart, type ShopWork } from "./shop";
+import { decodeWork, readTaskList, type ReadFailure, type ShopPart, type ShopWork, type TaskListRead } from "./shop";
 import type { Answer, ApiSession, ShopSessionRecord } from "./session";
 import type { FetchLike } from "./shell";
 
@@ -49,31 +49,32 @@ export type ShopsRead = { ok: true; parts: ShopPart[]; unreadable: unknown[]; le
 
 /** What `GET /v1/approvals?state=open` reads for one shop: its asks. */
 export const OPEN_ASKS = "/v1/approvals?state=open";
-/** What an owner's session also reads of a shop (docs/several-shops.md, slice 4): its export, which holds its tasks with
- *  each member's runs and drafts, its schedules and its attention items, and its team with its routines. */
-export const SHOP_EXPORT = "/v1/tenant/export";
+/** What an owner's session also reads of a shop (docs/several-shops.md, slice 4), each minute: its tasks from the task
+ *  list (shop.ts `readTaskList`), with each member's runs and newest draft; its schedules and its attention items; and its
+ *  team with its routines. It never reads the shop's export, which holds every task's whole history. */
 export const TEAM_ROUTINES = "/v1/routines";
+export const SHOP_SCHEDULES = "/v1/schedules";
+export const SHOP_ATTENTION = "/v1/inbound/attention";
 
-/** One shop's answers in a read: its asks, and for a shop the person owns its export and its routines. */
+/** One shop's answers in a read: its asks, and for a shop the person owns its tasks, routines, schedules and attention
+ *  items. */
 interface ShopAnswers {
   asks: ShopAnswer;
-  exported: ShopAnswer | null;
-  routines: ShopAnswer | null;
+  work: { tasks: TaskListRead<ShopAnswer>; routines: ShopAnswer; schedules: ShopAnswer; attention: ShopAnswer } | null;
 }
 
 /** What an owner's work read came to: the work, none (the session may not read it: a helper's session answers 403
- *  `owner_only`), or the reason the read failed. A deleted shop's export (404 `tenant_deleted`) has no tasks. */
+ *  `owner_only` on every part), or the reason the read failed. A deleted shop's list (404 `tenant_deleted`) has no tasks,
+ *  as its export had none. */
 function workOf(a: ShopAnswers, unreadable: unknown[]): ShopWork | null | ReadFailure {
-  if (!a.exported || !a.routines) return null;
-  const answers = [a.exported, a.routines];
+  if (!a.work) return null;
+  const { tasks, routines, schedules, attention } = a.work;
+  const answers = [tasks, routines, schedules, attention];
   for (const worst of ["signed_out", "offline", "unavailable"] as const) if (answers.some((x) => x.kind === worst)) return worst;
-  if (a.routines.kind === "refused") return a.routines.status === 403 ? null : "unavailable";
-  if (a.exported.kind === "refused") {
-    if (a.exported.status === 403) return null;
-    if (!(a.exported.status === 404 && a.exported.code === "tenant_deleted")) return "unavailable";
-  }
-  const exported = a.exported.kind === "ok" ? a.exported.json : { tasks: [] };
-  return a.routines.kind === "ok" ? decodeWork(exported, a.routines.json, unreadable) : "unavailable";
+  if (answers.some((x) => x.kind === "refused" && x.status === 403)) return null;
+  const deleted = tasks.kind === "refused" && tasks.status === 404 && tasks.code === "tenant_deleted";
+  if (routines.kind !== "ok" || schedules.kind !== "ok" || attention.kind !== "ok" || (tasks.kind !== "ok" && !deleted)) return "unavailable";
+  return decodeWork({ tasks: tasks.kind === "ok" ? tasks.tasks : [], schedules: schedules.json, attention: attention.json, routines: routines.json }, unreadable);
 }
 
 /** A shop session is opened again this long before it ends, so an ending one is never sent. */
@@ -163,8 +164,8 @@ export class ShopSessions {
   }
 
   /** Reads what waits at each listed shop, each with its own session, at once (docs/several-shops.md, "One Needs you across
-   *  the shops"), and of each shop the person owns its export and its routines as well, so its pages show its tasks, its
-   *  team and its routines (`ShopPart.work`). A shop they help at is read for its asks only: what a helper sees is the
+   *  the shops"), and of each shop the person owns its tasks, routines, schedules and attention items as well, so its pages
+   *  show its tasks, its team and its routines (`ShopPart.work`). A shop they help at is read for its asks only: what a helper sees is the
    *  owner's call. A shop whose place ended in this read is left out and said in `left`, and so is each shop this computer
    *  holds a session for that the list no longer has. Any other failure fails the whole read with the worst reason (signed
    *  out, then offline, then unavailable), so one shop's asks never vanish because its read did not answer, and half a
@@ -177,7 +178,8 @@ export class ShopSessions {
     const unreadable: unknown[] = [];
     answers.forEach((answer, i) => {
       const shop = listed[i];
-      const ended = [answer.asks, answer.exported, answer.routines].find((a): a is Extract<ShopAnswer, { kind: "left" }> => a?.kind === "left");
+      const answered = answer.work ? [answer.asks, answer.work.tasks, answer.work.routines, answer.work.schedules, answer.work.attention] : [answer.asks];
+      const ended = answered.find((a): a is Extract<ShopAnswer, { kind: "left" }> => a.kind === "left");
       if (ended) return void left.push({ shop: shop.id, departure: ended.departure });
       // Nothing that waits is ever read as "nothing waits": the API answers 503 rather than leave a request out.
       if (answer.asks.kind !== "ok") return void failures.push(answer.asks.kind === "refused" || answer.asks.kind === "left" ? "unavailable" : answer.asks.kind);
@@ -191,15 +193,17 @@ export class ShopSessions {
   }
 
   /** One shop's requests, made together with its own session: what waits there, and while the person acts there as its
-   *  owner (the session held, else the list, says so) its export and its routines. */
+   *  owner (the session held, else the list, says so) its tasks, routines, schedules and attention items. */
   private async readShop(shop: ShopRow): Promise<ShopAnswers> {
-    const owner = this.roleAt(shop) === "owner";
-    const [asks, exported, routines] = await Promise.all([
+    if (this.roleAt(shop) !== "owner") return { asks: await this.read(shop.id, OPEN_ASKS), work: null };
+    const [asks, tasks, routines, schedules, attention] = await Promise.all([
       this.read(shop.id, OPEN_ASKS),
-      owner ? this.read(shop.id, SHOP_EXPORT) : null,
-      owner ? this.read(shop.id, TEAM_ROUTINES) : null,
+      readTaskList((path) => this.read(shop.id, path)),
+      this.read(shop.id, TEAM_ROUTINES),
+      this.read(shop.id, SHOP_SCHEDULES),
+      this.read(shop.id, SHOP_ATTENTION),
     ]);
-    return { asks, exported, routines };
+    return { asks, work: { tasks, routines, schedules, attention } };
   }
 
   /** The shops this computer holds a session for that `listed` no longer has: each one's session is looked at once, with

@@ -1,19 +1,22 @@
 // One read of a shop from apps/api, for the connected runtime: its tasks with their exact actions, what waits for the
 // owner, its schedules, and its inbound attention items. docs/runtime-adapter.md maps each to the screens.
 //
-// - Tasks come from `GET /v1/tenant/export`, the only route a session can use today that lists its own tasks (each with
-//   its event log and its action proposals). It is heavy, so the runtime reads it at most once a minute; a task list
-//   route is the first thing the note asks the API for.
+// - Tasks come from the task list, `GET /v1/tasks`, newest first, a page at a time (`readTaskList`): the newest
+//   `LISTED_TASKS` of them, each with its document, its exact actions, its runs, its newest draft and the entries of its
+//   log the screens read. Before the list the runtime read every task with its whole log from `GET /v1/tenant/export` once
+//   a minute, which grew without bound; it reads the export no more. The screens keep the tasks oldest first, as the
+//   export listed them, so every list they sort shows ties as it did.
 // - What waits for the owner comes from `GET /v1/approvals?state=open`: approval-core's own records, read with its own
-//   decoders (approvals.ts). These, and nothing in the export, are the asks: every one of them is decided through
+//   decoders (approvals.ts). These, and nothing in the task list, are the asks: every one of them is decided through
 //   approval-core, and an action no request decides is not the owner's to answer here.
 // - Schedules come from `GET /v1/schedules`, attention items from `GET /v1/inbound/attention`. With the API's inbound
 //   flag off, attention answers 403 `feature_disabled`, which reads as "no feed", not as a failure.
 //
-// A shop the person owns (docs/several-shops.md) is read with its own owner session, which the API answers 401 on the
-// schedules and attention routes: its export carries both, so they are read from the export (`decodeWork`), with the
-// team and its routines from `GET /v1/routines`. The team's routines run on clocks in the same schedule object, so a
-// schedule that is one of those clocks (it names its `routineId`) is left out of the schedules: the routine says it.
+// A shop the person owns (docs/several-shops.md) is read with its own owner session: its tasks, its schedules and its
+// attention items on those same routes, which the API answers an owner session on as the export carried them (the
+// attention items whatever the inbound flag), and its team with its routines from `GET /v1/routines` (`decodeWork`). The
+// team's routines run on clocks in the same schedule object, so a schedule that is one of those clocks (it names its
+// `routineId`) is left out of the schedules: the routine says it.
 //
 // Decoding never throws. A record keeps the API's whole object in `raw`, so a field this app does not know yet is
 // still there for a later slice; a state, an operation or an event kind it does not know is kept as written; and an
@@ -88,8 +91,8 @@ export interface TeamRoutine {
   trigger: unknown;
 }
 
-/** What an owner's session reads of a shop beyond what waits there (docs/several-shops.md): its tasks, schedules and
- *  attention items from its export, and its team and routines. */
+/** What an owner's session reads of a shop beyond what waits there (docs/several-shops.md): its tasks from the task list,
+ *  its schedules and attention items, and its team and routines. */
 export interface ShopWork {
   tasks: ShopTask[];
   schedules: ShopSchedule[];
@@ -131,8 +134,6 @@ export interface ShopTask {
   /** ms; when the task's log says it was created, if the log still holds that entry */
   createdAt: number | null;
   updatedAt: number | null;
-  /** how many entries its event log holds */
-  events: number;
   actions: ShopAction[];
   /** each member's run of it, in the order they were claimed; none for a task no member ran */
   attempts: ShopAttempt[];
@@ -306,8 +307,9 @@ function decodeDraft(v: Obj): ShopDraft | null {
   return drafts.sort((a, b) => (a.at ?? 0) - (b.at ?? 0)).at(-1) ?? null;
 }
 
-/** One export entry (`{ task, events, actions, attempts, drafts, … }`) as a task. */
-function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
+/** One task as the task list gives it (`{ task, events, actions, attempts, drafts, … }`: the shape of an export entry, with
+ *  the entries of the log the screens read and its newest draft), as a task. */
+export function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
   const doc = isObj(v) && isObj(v.task) ? v.task : null;
   const taskId = doc ? id(doc.id) : null;
   if (!isObj(v) || !doc || !taskId) {
@@ -323,7 +325,6 @@ function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
     state: str(doc.state),
     createdAt: isObj(created) ? ms(created.at) : null,
     updatedAt: ms(doc.updatedAt),
-    events: events.length,
     actions: list(v.actions)
       .map((a) => decodeAction(a, taskId, unreadable))
       .filter((a): a is ShopAction => !!a),
@@ -376,27 +377,64 @@ export function decodeTeamRoutines(json: unknown, unreadable: unknown[]): TeamRo
 /** A schedule that is one of the team's routine clocks: the API's routine setup writes `routineId` on it. */
 const isRoutineClock = (v: unknown) => isObj(v) && id(v.routineId) !== null;
 
-/** What an owner's session read of a shop beyond its asks: the tasks, schedules and attention items of its export
- *  (`GET /v1/tenant/export`) and the team and routines of `GET /v1/routines`. Null when the routines' answer holds no team
- *  this build can read. A routine's clock is left out of the schedules, since the routine itself is listed. */
-export function decodeWork(exported: unknown, routines: unknown, unreadable: unknown[]): ShopWork | null {
-  const team = decodeTeam(routines);
+/** What an owner's session read of a shop beyond its asks: its tasks from the task list (`readTaskList`), its schedules
+ *  (`GET /v1/schedules`, `{ schedules }`) and attention items (`GET /v1/inbound/attention`, `{ items }`), and the team and
+ *  routines of `GET /v1/routines`. Null when the routines' answer holds no team this build can read. A routine's clock is
+ *  left out of the schedules, since the routine itself is listed. */
+export function decodeWork(read: { tasks: readonly unknown[]; schedules: unknown; attention: unknown; routines: unknown }, unreadable: unknown[]): ShopWork | null {
+  const team = decodeTeam(read.routines);
   if (!team) return null;
-  const body = isObj(exported) ? exported : {};
   return {
-    tasks: list(body.tasks)
-      .map((v) => decodeTask(v, unreadable))
-      .filter((x): x is ShopTask => !!x),
-    schedules: list(body.schedules)
+    tasks: decodeTasks(read.tasks, unreadable),
+    schedules: list(isObj(read.schedules) ? read.schedules.schedules : null)
       .filter((v) => !isRoutineClock(v))
       .map((v) => decodeSchedule(v, unreadable))
       .filter((x): x is ShopSchedule => !!x),
-    attention: list(body.attention)
+    attention: list(isObj(read.attention) ? read.attention.items : null)
       .map((v) => decodeAttention(v, unreadable))
       .filter((x): x is Attention => !!x),
     team,
-    routines: decodeTeamRoutines(routines, unreadable),
+    routines: decodeTeamRoutines(read.routines, unreadable),
   };
+}
+
+/** The task list's entries, newest first as it gives them, as tasks oldest first: the order the export listed them in, so
+ *  every screen that sorts them shows ties as it did. */
+function decodeTasks(entries: readonly unknown[], unreadable: unknown[]): ShopTask[] {
+  return [...entries]
+    .reverse()
+    .map((v) => decodeTask(v, unreadable))
+    .filter((x): x is ShopTask => !!x);
+}
+
+/** The task list's path, and how many tasks a page of it holds: the most the API gives in one (apps/api task-list.ts). */
+export const TASK_LIST = "/v1/tasks";
+export const TASK_PAGE = 25;
+/** The tasks the screens show: the newest this many of the shop's, read as two pages of the list each time the shop is
+ *  read. A shop with more shows its newest; reading older ones when a screen asks for them is a later slice
+ *  (docs/runtime-adapter.md, "Next slices"). Two pages keep a read's calls to the API, and the API's to the tasks, the same
+ *  however many tasks the shop has kept. */
+export const LISTED_TASKS = 50;
+
+/** What reading the task list came to: its entries, newest first, or the first answer that was not a page. */
+export type TaskListRead<A> = { kind: "ok"; tasks: unknown[] } | Exclude<A, { kind: "ok" }>;
+
+/** Reads the newest `LISTED_TASKS` of the tenant's tasks from the task list, a page at a time with the cursor each page
+ *  gives (the list stays stable while tasks are made, so no task is read twice or skipped), with `read`, which carries the
+ *  session the tenant is read with. Any page that is not one ends the read with its answer: half a list is never shown as
+ *  the whole one. */
+export async function readTaskList<A extends { kind: string }>(read: (path: string) => Promise<A>): Promise<TaskListRead<A>> {
+  const tasks: unknown[] = [];
+  let cursor: string | null = null;
+  for (let pages = 0; pages < LISTED_TASKS / TASK_PAGE; pages++) {
+    const answer = await read(`${TASK_LIST}?limit=${TASK_PAGE}${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
+    if (answer.kind !== "ok") return answer as Exclude<A, { kind: "ok" }>;
+    const page = (answer as unknown as { json: unknown }).json;
+    tasks.push(...list(isObj(page) ? page.tasks : null));
+    cursor = isObj(page) && typeof page.next === "string" && page.next !== "" ? page.next : null;
+    if (cursor === null) break;
+  }
+  return { kind: "ok", tasks };
 }
 
 function decodeSchedule(v: unknown, unreadable: unknown[]): ShopSchedule | null {
@@ -440,14 +478,14 @@ function bodyOf(a: Answer, allow: (status: number, code: string) => boolean): { 
 /** Reads the shop once. Any part that fails fails the whole read, with the worst reason: signed out, then offline,
  *  then unavailable. Half a shop is never shown as the whole one. */
 export async function readShop(session: ApiSession, now: () => number = Date.now): Promise<ShopRead> {
-  const [exported, asked, scheduled, attended] = await Promise.all([
-    session.read("/v1/tenant/export"),
+  const [listed, asked, scheduled, attended] = await Promise.all([
+    readTaskList((path) => session.read(path)),
     session.read("/v1/approvals?state=open"),
     session.read("/v1/schedules"),
     session.read("/v1/inbound/attention"),
   ]);
-  // A deleted tenant's export answers 404 tenant_deleted: it has no tasks.
-  const tasksBody = bodyOf(exported, (status, code) => status === 404 && code === "tenant_deleted");
+  // A deleted tenant's list answers 404 tenant_deleted, as its export did: it has no tasks.
+  const tasksBody = bodyOf(listed.kind === "ok" ? { kind: "ok", status: 200, json: { tasks: listed.tasks } } : listed, (status, code) => status === 404 && code === "tenant_deleted");
   // Nothing that waits for the owner is ever read as "nothing waits": the API answers 503 rather than leave one out.
   const approvalsBody = bodyOf(asked, () => false);
   const schedulesBody = bodyOf(scheduled, () => false);
@@ -456,9 +494,7 @@ export async function readShop(session: ApiSession, now: () => number = Date.now
   for (const worst of ["signed_out", "offline", "unavailable"] as const) if (failures.includes(worst)) return { ok: false, failure: worst };
   const [t, p, s, a] = [tasksBody, approvalsBody, schedulesBody, attentionBody] as { json: unknown; allowed?: boolean }[];
   const unreadable: unknown[] = [];
-  const tasks = list(isObj(t.json) ? t.json.tasks : null)
-    .map((v) => decodeTask(v, unreadable))
-    .filter((x): x is ShopTask => !!x);
+  const tasks = decodeTasks(list(isObj(t.json) ? t.json.tasks : null), unreadable);
   const schedules = list(isObj(s.json) ? s.json.schedules : null)
     .map((v) => decodeSchedule(v, unreadable))
     .filter((x): x is ShopSchedule => !!x);
