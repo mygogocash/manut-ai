@@ -6,6 +6,7 @@
 //
 // Without --token it accepts `e2e` (playwright.config.ts) and `dev` (the UI's built-in default URL).
 // Test-control ops (not part of the protocol): mock.calls, mock.submits, mock.emit {events}, mock.reset,
+// mock.shops {shops, current} (the person's shops, which `shops.list` answers; none until set, and none after a reset),
 // mock.cliTitle {agent, session, title} (the title a CLI wrote in its own session files),
 // mock.ask {bot, kind: approval|clarify|interview, timeout_ms?} (raise an ask on any bot, e.g. one not open),
 // mock.demo (Kami's live "Docs dark mode" plan on top of his list, its nodes' PRs in mixed states; `--demo` seeds it
@@ -622,6 +623,8 @@ let threadsShown = new Set(); // bots whose threads the app read (thread.list): 
 let answers = {}; // bot -> recorded answers for its next main-chat turns (mock.answer)
 // Bots that have no Bot Chat yet (mock.noBotChat): chat.open with existing_only answers not_found for them.
 let noBotChat = new Set();
+/** The person's shops, as `shops.list` answers them (docs/several-shops.md): none until mock.shops sets them. */
+let shops = { shops: [], current: null, left: [] };
 /** Timers of subagents still reporting after their turn ended (cleared by mock.reset). */
 const subTimers = new Set();
 // Bots whose turns the test drives by hand (mock.manual).
@@ -763,6 +766,7 @@ function acctFind(p) {
 }
 
 function reset() {
+  shops = { shops: [], current: null, left: [] };
   usageFixture = "default";
   skillsLater = { add: [], after: 0 };
   providerFixture = "default";
@@ -1371,6 +1375,25 @@ const OPS = {
     resumeApproval(target, choice);
     return {};
   },
+  // Several shops: the list, a switch (which says `shops.update`, as the app's runtimes do), and a helper passing an ask
+  // on to the owner, which this bridge only records (mock.calls) and answers as taken.
+  "shops.list": () => ({ shops: shops.shops.map((x) => ({ ...x })), current: shops.current, left: shops.left.map((x) => ({ ...x })) }),
+  "shops.switch": (p) => {
+    const shop = needStr(p, "shop");
+    if (!shops.shops.some((x) => x.id === shop)) throw new OpError("not_found", "no such shop");
+    if (shops.current !== shop) {
+      shops.current = shop;
+      setTimeout(() => broadcast({ event: "shops.update", bot: "kami" }), 0);
+    }
+    return {};
+  },
+  "approval.pass_on": (p) => {
+    needBot(p);
+    needStr(p, "request_id");
+    const note = typeof p.note === "string" ? p.note.trim() : "";
+    if (!note || [...note].length > 500) throw new OpError("bad_note", "Write a note of 1 to 500 characters");
+    return { passed_on: { name: "", note, at: now() } };
+  },
   "clarify.respond": (p) => {
     const b = needBot(p);
     const id = needStr(p, "request_id");
@@ -1948,6 +1971,11 @@ const OPS = {
     const b = needBot(p);
     if (p.server) linearMcp.set(b.name, String(p.server));
     else linearMcp.delete(b.name);
+    return {};
+  },
+  "mock.shops": (p) => {
+    if (!Array.isArray(p.shops)) throw new OpError("bad_request", "shops must be an array");
+    shops = { shops: p.shops.map((x) => ({ ...x })), current: p.current ?? p.shops[0]?.id ?? null, left: Array.isArray(p.left) ? p.left : [] };
     return {};
   },
   "mock.reset": () => {

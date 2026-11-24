@@ -9,7 +9,8 @@ the API's decide route, where approval-core settles each request once. It change
 Status on 23 Nov 2026: built and tested on `feat/desktop-runtime-adapter`, behind a developer setting. Practice (the
 demo) stays the default, so a fresh install still reaches no network. The offline cache (see Offline, below) is built and
 tested on `feat/desktop-offline-cache`, on top of it. Answering approvals (below) is built and tested on
-`feat/desktop-answers-approvals`, 24 Nov 2026, with fakes of the API and no real sign-in yet.
+`feat/desktop-answers-approvals`, 24 Nov 2026, with fakes of the API and no real sign-in yet. Several shops (below) is
+built and tested on `feat/desktop-shop-switcher`, 24 Nov 2026, the same way.
 
 ## Choosing it
 
@@ -28,7 +29,8 @@ It is not drawn for a WebSocket runtime, which only the Playwright suite configu
 
 ## What it reads, and how each call maps to the API
 
-One read of the shop is four requests, made together through the session (`src/runtime/http/shop.ts`):
+Each read first asks which shops the person is in (`GET /v1/shops`; Several shops, below). In none, as before shops, the
+read is the signed-in tenant's, four requests made together through the session (`src/runtime/http/shop.ts`):
 
 | Request | Gives | Notes |
 | --- | --- | --- |
@@ -193,15 +195,57 @@ to answer this" offline too.
   session can carry. So an owner needs real sign-in (Sign in with Apple in the app, or LINE Login, which is parked) and
   the API's link from their identity to their shop. With a session for the shop, the desktop decides as the owner, once
   the shop has consented and the API's `officeCloud` and `officeExternalWrites` switches are on.
-- **Helpers on the desktop.** The API has helper sessions (`mhs1.` tokens from `POST /v1/people/accept` and
-  `/v1/people/session`), but the desktop cannot hold one yet. It already says "Only the owner can approve money" and
-  the like, and ends the session on a 401 `removed`.
+- **Helpers on the desktop.** Built since (Several shops, below): a person who helps at a shop holds a helper session for
+  it (`mhs1.`, from `POST /v1/shops/session`), decides its messages and replies, and passes the rest on to the owner.
 - **How it was tested.** The desktop's tests use a fake API whose answers are built with approval-core's own encoders,
   as the API builds them (`approvalJson` in `testkit.ts`); the routes themselves are tested in real workerd in
   `apps/api` (`approvals-route.test.ts`, `session-decisions.test.ts`). By hand, the local API and test identity of
   Signing in, below, reach the routes, but nothing waits for that tenant: a request is opened by a reply proposed
   through a LINE connection (parked) or by a worker's run, which only the operator's `POST /v1/admin/workers/run` starts,
   for a pilot shop no session can carry.
+
+## Several shops
+
+Built on `feat/desktop-shop-switcher` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `cache.ts`, `view.ts`), the
+desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.ts` and `people.ts` (`docs/pilot-api.md`,
+"Several shops").
+
+- **The list.** Every read starts with `GET /v1/shops`, with the sign-in. An API from before shops answers it 404, which
+  reads as none. In none, the read is the signed-in tenant's, as above; in some, the signed-in tenant is not read at all.
+- **A session per shop.** Each shop is opened with `POST /v1/shops/session` and exactly `{ shop }`, with the sign-in (its
+  refresh rules apply). The answer's role and token, and its end, are kept with the sign-in in the keychain item, under
+  the shop's id (Where the tokens live, below). A shop's requests carry only its own session. A session within a minute of
+  its 30 days is opened again before it is sent; one the API answers 401 for any reason but `removed` or `unlinked` is
+  opened again once and the request sent once more, a decision too, since the API answers 401 from the credential before
+  it reads the body. Two requests that find it ended open it once.
+- **What a shop reads.** `GET /v1/approvals?state=open`, with its own session, and nothing else: the API answers a shop
+  session 401 on the export, the schedules and the attention feed. So the shop being viewed shows Buddy, its asks, no
+  tasks (History is empty), no schedules and no notes. Every listed shop is read each time, at once; one shop that fails
+  (offline, 5xx) fails the whole read, and the kept read stands in for all of them.
+- **One Needs you.** Every shop's open requests are asks in Buddy's chat, sorted by when each was asked (the protocol
+  event's new `asked_at`, which the card keeps as its time). An ask's id is `<shop>/<requestId>@<revision>`, the shop
+  written as `encodeURIComponent` writes it, so two shops' asks never share a card and an answer finds its shop from the
+  card alone. The event names the shop (`shop`: id, name, owner, the person's role) and, where the role may not decide
+  the kind (`mayDecide`), offers no choices and `pass_on` instead; a note passed on rides as `passed_on`. A read that
+  shows a waiting ask differently (a note passed on since, a role that moved) sends it again, and the open card takes the
+  new fields.
+- **Answering.** `approval.respond` on a shop's ask goes to that shop's decide route with that shop's session, exactly
+  `{ optionId, seenRevision }`, as above. It is refused here, with nothing sent, when the role there may not decide the
+  kind ("Only Noi can approve money"). `approval.pass_on` (new) sends `POST /v1/approvals/{id}/pass-on` with exactly
+  `{ note }`, trimmed, with that shop's session; refused here for an owner ("Only a helper passes a request on"), a kind
+  the helper decides ("You can decide this one yourself"), a request passed on already, and a note that is empty or over
+  500 characters. While only a kept read is shown both answer "Connect to answer this". The shop the switcher shows never
+  enters either path.
+- **Switching.** `shops.list` gives the shops (owned first), the one viewed and the ones whose place ended this run;
+  `shops.switch` changes the one viewed and sends `shops.update`. Nothing new is read for a switch. The store then drops
+  what the last shop's pages showed (chats but for the shops' asks, threads, schedules, places) and reads every page again.
+- **A place that ended.** 401 `removed` or `unlinked` from a shop's session drops its session and kept read at once and
+  closes its asks in words that say when. Each read also looks once, with its own session, at a shop it holds a session
+  for that the list no longer has, to say why and when, then drops it. `shops.update` follows either.
+- **Signing out** ends each shop session with `POST /v1/shops/session/end` (the session as the bearer, exactly `{}`),
+  together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
+  says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same
+  way, without waiting.
 
 ## Signing in
 
@@ -228,8 +272,9 @@ The `csrf` token is only for company-console writes, which this runtime never ma
   at a time, because each one rotates both tokens and a second would spend the same refresh token and end the session.
   A 401 gets one refresh and one retry; a second 401, or a refresh the API refuses, ends the session here and clears the
   keychain item.
-- Sign out: `DELETE /v1/auth/session`, then the keychain item is cleared whatever the API said. When the API could not be
-  told, Settings says so; the session then ends on its own.
+- Sign out: `DELETE /v1/auth/session`, with `POST /v1/shops/session/end` for each shop session held (Several shops,
+  below), then the keychain item is cleared whatever the API said. When the API could not be told, Settings says so; the
+  session then ends on its own.
 - A new sign-in first ends the session the keychain held, including another origin's (on that origin's own API), so
   replacing the one keychain item never leaves a live session behind.
 
@@ -268,7 +313,12 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
 ## Where the tokens live
 
 - In the operating system's keychain, one generic password item (service `xyz.manut.desktop.api`, account `session`),
-  holding `{ v, origin, tenant, deviceId, accessToken, refreshToken, accessExpiresAt, signedInAt }` as JSON. The shell's
+  holding `{ v, origin, tenant, deviceId, accessToken, refreshToken, accessExpiresAt, signedInAt, shops }` as JSON, where
+  `shops` is each shop session by shop id: `{ role, accessToken, expiresAt }` (version 2; a value of version 1, which
+  has no `shops`, is read as one with none, and nothing is written for it until something changes). Every write to the
+  item, a refresh's new tokens or a shop session kept or dropped, takes its turn and writes what is held at that moment,
+  so a refresh never writes back a shop list that a later change replaced, and nothing written after a sign-out brings the
+  item back. The shell's
   `api_session_read`, `api_session_write` and `api_session_clear` commands (`apps/desktop/src-tauri/src/api_link.rs`)
   are the only way to it, and the page cannot name any other item. The app makes the item, so macOS lets it read the
   item without asking and asks the person before any other program reads it. Ad-hoc signed development builds change
@@ -325,7 +375,10 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   either: the file's name is the only link to them. It does hold the shop's own words in plain text: task titles, the
   exact words of replies waiting for the owner and the LINE ids they go to, and schedule prompts. The file is the owner's
   alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
-- **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one signed-in shop. The key is the SHA-256, in hex, of the
+- **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one sign-in. With several shops (version 3 of the file),
+  every shop's record in it is under that shop's id, with its name, owner and the person's role, so a shop's asks are only
+  ever read back as that shop's; the shell needs no change, since it keeps one file per sign-in and removes any other. A
+  file of version 2 is read as the signed-in tenant's own. The key is the SHA-256, in hex, of the
   origin and the tenant, made by the page (`cacheKey`, with a small synchronous SHA-256 in `sha256.ts`, because the Web
   Crypto digest is asynchronous and exists only in a secure context); the shell accepts nothing but 64 hex digits as a
   name, never a path. It is written to a temporary file and renamed, so a crash never leaves half a file; at most 8 MiB;
@@ -364,7 +417,8 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
 2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
    shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
    re-read and lets a task's row change live.
-3. **Asks of the API**, none built here: a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
+3. **Asks of the API**, none built here: owner sessions on the export, schedules and attention feed, so a pilot shop's
+   pages show more than what waits (`docs/several-shops.md`, slice 4); a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
    replace the export; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
    provider; a tenant-wide event feed; a helper's name with a decision (so "Already decided by Mint" does not depend on
    a note she passed on), and a way to say how a request that left on its own was decided (reading
@@ -382,6 +436,14 @@ in `session.ts`, `answering.test.ts`, the `note` of `prompt.expired` and the car
 from the actions in `view.ts`, remove `src/runtime/http/approvals.ts`, the fourth read in `shop.ts`, the requests in the
 cache (version 1 again), the `outdated` field (protocol, store, card) and `rt.updateToAnswer`, and the
 `@manut/approval-core` dependency.
+
+To take only several shops out: drop `readAll` and `depart` in `host.ts` (each read is `readShop` again), with
+`src/runtime/http/shops.ts`, the `shops` of the keychain value (session.ts; version 1 again), the `shops` and `viewing`
+of a read and of the cache file (version 2 again), the shop asks in `view.ts` and `approvals.ts`, the protocol's `shop`,
+`asked_at`, `pass_on`, `passed_on`, `approval.pass_on`, `shops.list`, `shops.switch` and `shops.update`, the store's
+`shops`, the switcher (`ShopSwitcher.tsx` and its place in `Sidebar.tsx`), the card's shop lines, the Practice shops
+(`src/runtime/mock/shops.ts`), and the `shops.`, `card.pass*`, `card.askOwner`, `rt.only.*`, `rt.pass.*` and
+`note.atShop` keys.
 
 To take only the buttons out of notifications: pass no `approve` handler in `notifySessionEvent` (`store.ts`) and remove
 `approveFromNotification`, `src/chat/cards/askNote.ts` and its use in `Cards.slot.tsx`; notifications then carry Look first and
