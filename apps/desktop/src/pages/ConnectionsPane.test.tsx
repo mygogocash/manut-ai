@@ -378,7 +378,7 @@ describe("Connections in every language", () => {
 
 describe("the Connections tab", () => {
   const memory: MemoryPaneProps = { state: LOADING, ui: MEMORY_START, nowMs: 0, dispatch: () => {}, onRemember: () => {}, onConfirm: () => {}, onCorrect: () => {}, onForget: () => {} };
-  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {} };
+  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {}, onRemove: () => {} };
   const thisMac = { row: outpostRow({ kind: "practice" }), busy: false, error: null, onAction: () => {} };
 
   it("draws the Vault box, then this Mac's Outposts box, then every outpost of the shop", () => {
@@ -398,7 +398,7 @@ describe("the Connections tab", () => {
 
 describe("this Mac, folded into its own row", () => {
   const memory: MemoryPaneProps = { state: LOADING, ui: MEMORY_START, nowMs: 0, dispatch: () => {}, onRemember: () => {}, onConfirm: () => {}, onCorrect: () => {}, onForget: () => {} };
-  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {} };
+  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {}, onRemove: () => {} };
   /** This Mac's Outposts box with what the shell said: running, and the id this Mac's outpost has on the shop's list. */
   const running = (id: string | null): OutpostPaneProps => ({
     row: outpostRow({ kind: "signed_in", view: { state: "running", online: true, steps: 2, name: "This Mac", id } }),

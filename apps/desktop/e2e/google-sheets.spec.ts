@@ -348,8 +348,13 @@ async function stubShell(page: Page, google: "off" | "open", books = false) {
             return reply(200, { shop, role: "owner", account: { id: "owner-account-1" }, session: { accessToken: "mos1.shop-a", expiresAt: iso(now + 30 * 86_400_000) } });
           case "GET /v1/approvals":
             return reply(200, { state: "open", approvals: books ? [append] : [] });
-          case "GET /v1/tenant/export":
-            return reply(200, { tenant: shop.id, exportedAt: iso(now), tasks: [], schedules: [], attention: [] });
+          // an owner's session reads the task list, its schedules and its attention items (src/runtime/http/shops.ts), not the export
+          case "GET /v1/tasks":
+            return reply(200, { tasks: [] });
+          case "GET /v1/schedules":
+            return reply(200, { schedules: [] });
+          case "GET /v1/inbound/attention":
+            return reply(200, { items: [] });
           case "GET /v1/routines":
             return reply(200, { tenant: shop.id, team: { paused: false, since: null, members: ["nam", "pim", "ton"] }, routines: [] });
           case "GET /v1/vault/sign-ins":

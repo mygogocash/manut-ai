@@ -1,6 +1,6 @@
 // The Customize page's routines on the connected runtime. For a shop the person owns, the team's routines come first, as
 // `GET /v1/routines` says each (its timing in `@manut/routine-rules`' words, what it does, whether it asks first, its next
-// run); the owner pauses and resumes them through the API's own routes (host.ts). Then the shop's other schedules, as the
+// run); the owner makes, pauses, resumes and removes them through the API's own routes (host.ts). Then the shop's other schedules, as the
 // runtime already reads them from the API (shop.ts), shown as routines and never changed: no session may change a schedule.
 // A schedule says when to run and what to ask the team to do, but not what kind of work that is or whether it asks first,
 // so its row says `null` for both and the page shows nothing about them.
@@ -44,6 +44,7 @@ export function teamRoutineRow(r: TeamRoutine): RoutineRow {
     enabled: !r.paused,
     next: !r.paused && r.next !== null ? r.next / 1000 : null,
     timeZone: r.timeZone,
+    removable: true,
   };
 }
 
@@ -64,5 +65,7 @@ function scheduleRows(snapshot: ShopSnapshot): RoutineRow[] {
     enabled: s.enabled,
     next: s.enabled && s.nextFire !== null ? s.nextFire / 1000 : null,
     timeZone: s.timeZone,
+    // no session may change a schedule, so the owner is not offered to remove one
+    removable: false,
   }));
 }

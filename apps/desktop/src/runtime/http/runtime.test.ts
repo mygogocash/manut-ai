@@ -271,11 +271,13 @@ describe("writing", () => {
     serveShop(api);
     await rt.connect();
     const req = rt.request.bind(rt) as unknown as (op: string, p: unknown) => Promise<unknown>;
+    // What the team knows, and the team it gives routines to, are a shop's, so a person in no shops has none: it says so. Every other write
+    // of theirs says it is not yet.
+    const noShop = (op: string) => (op.startsWith("memory.") ? t("memory.err.noShop") : t("routines.err.noShop"));
     for (const op of WRITE_OPS.filter((op) => op !== "approval.respond"))
-      expect(await refusal(req(op, { bot: "buddy", request_id: "action-1@1", choice: "once", text: "hi", job: "sched-1" })), op).toEqual({
-        code: "not_yet",
-        message: t("rt.notYet"),
-      });
+      expect(await refusal(req(op, { bot: "buddy", request_id: "action-1@1", choice: "once", text: "hi", job: "sched-1", shop: null, fact: "f1", routine: "sched-1", name: "Remind me", action: "draft", trigger: { kind: "daily", at: "15:00" } })), op).toEqual(
+        op.startsWith("memory.") || op === "routine.create" || op === "routine.remove" ? { code: "no_shop", message: noShop(op) } : { code: "not_yet", message: t("rt.notYet") },
+      );
     expect(api.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });

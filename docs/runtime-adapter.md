@@ -12,9 +12,10 @@ tested on `feat/desktop-offline-cache`, on top of it. Answering approvals (below
 `feat/desktop-answers-approvals`, 24 Nov 2026, with fakes of the API and no real sign-in yet. Several shops (below) is
 built and tested on `feat/desktop-shop-switcher`, 24 Nov 2026, the same way. A shop the person owns, whole (below), is
 built and tested on `feat/connected-whole-shop`, 24 Nov 2026, the same way: its tasks, its team, Mission Control's jobs
-and activity log, and the owner's routine and pause writes. The task list (below) is built and tested on `feat/task-list`,
-24 Nov 2026 (December item 44): every read takes the newest tasks from `GET /v1/tasks`, a page at a time, and never the
-export, which carries every task's whole history.
+and activity log, and the owner's routine and pause writes. Customize › Memory and routines (below) is built and tested on
+`feat/connected-memory-routines`, 24 Nov 2026, the same way: what the team knows, and making and removing a routine. The task
+list (below) is built and tested on `feat/task-list`, 24 Nov 2026 (December item 44): every read takes the newest tasks from
+`GET /v1/tasks`, a page at a time, and never the export, which carries every task's whole history.
 
 ## Choosing it
 
@@ -63,12 +64,15 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `jobs.list`, `jobs.get`, `activity.list`, `team.state` | Mission Control from the read (A shop the person owns, below): every task as a job, the activity log, and for a shop the person owns its team's state |
 | every other read the screens make | empty (`elsewhere.list`, `plugins.list`, `runs.*`, …), or `not_found` for one thing asked by name |
 | `approval.respond` | the person's answer, through the decide route (Answering approvals, below) |
-| `routine.pause`, `routine.resume`, `team.pause`, `team.resume`, and `automations.pause` and `.resume` of a team routine | for a shop the person owns, through apps/api's routines routes with that shop's session (A shop the person owns, below) |
+| `routine.list` | the shop's team routines, then its other schedules as routines, for the shop the switcher shows, with the shop they were read for (`shop`). A shop the person only helps at is refused `owner_only` (Customize › Memory and routines, below) |
+| `routine.create`, `routine.remove`, `routine.pause`, `routine.resume`, `team.pause`, `team.resume`, and `automations.pause` and `.resume` of a team routine | for a shop the person owns, through apps/api's routines routes with that shop's session (A shop the person owns, and Customize › Memory and routines, below). Every `routine.*` change names the shop its list was read for |
+| `memory.list` | what the team knows, `GET /v1/memory`, for the shop the switcher shows, read live when the page asks and kept nowhere (Customize › Memory and routines, below) |
+| `memory.remember`, `memory.confirm`, `memory.correct`, `memory.forget` | the owner's say over a fact, to `POST /v1/memory/remember`, `/confirm`, `/correct` or `/forget`, with the shop its list was read for |
 | `connections.list` | the shop's site sign-ins and outposts, `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts`, for Customize › Connections (below) |
 | `connections.add`, `connections.password`, `connections.members`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins`, `/v1/vault/sign-ins/password`, `/v1/vault/sign-ins/members`, `/v1/vault/outposts/rename` or `/remove` (below) |
 | `people.list` | who can use Manut AI for the shop the switcher shows, `GET /v1/people`, for Settings › People (below) |
 | `people.invite`, `people.cancelInvite`, `people.remove`, `people.setAway`, `people.clearAway` | the owner's change, to `POST /v1/people/invites`, `/invites/revoke`, `/remove`, `/away` or `/away/clear` (below) |
-| every other write (`chat.send`, `routine.create`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, pauses your team's routines and looks after Connections for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
+| every other write (`chat.send`, `thread.create`, `automations.add`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
 this computer (other places, plugins, restarts, coding-CLI logins) stay hidden.
@@ -344,13 +348,17 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   refused, "Only Noi can see and change the team at Ran Pa Noi.", and for the signed-in tenant it is still "not yet".
 - **The owner's writes.** Pausing and resuming one of the team's routines (Customize's routines, and the Automations
   page's pause for a team routine) is `POST /v1/routines/pause` or `/resume` with exactly `{ routineId }`; Pause everyone
-  and Resume everyone are `POST /v1/team/pause` and `/resume` with exactly `{}`. Each goes with the viewed shop's own owner
-  session, only for a routine the read lists, and is refused here with nothing sent for a shop the person helps at and for
-  the signed-in tenant. The API's answer is shown at once and the shop is read again. A refusal is said in words ("The API
-  did not make this change, so nothing changed."), and a change that got no answer is never sent again from here ("No reply
-  from the API. Checking whether it changed."): the read that follows says. None of these sends, posts, pays or deletes
-  anything, and approvals still settle only through the decide route. Making a routine, a schedule of the shop's own,
-  memory, Buddy's chat (which needs a model, the owner's key) and every other write stay "not yet".
+  and Resume everyone are `POST /v1/team/pause` and `/resume` with exactly `{}`. Each goes with its shop's own owner
+  session, only for a routine the read lists for that shop, and is refused here with nothing sent for a shop the person
+  helps at and for the signed-in tenant. A routine change names the shop its list was read for (`shop`), so it goes with that
+  shop's session whichever shop the switcher shows by then, and an op that names none is refused (`not_found`), never read as
+  the shop viewed; Pause everyone and the Automations page's pause are for the shop viewed. The API's answer is shown at once
+  and the shop is read again. A refusal is said in words ("The API did not make this change, so nothing changed."), and a
+  change that got no answer is never sent again from here ("No reply from the API. Checking whether it changed."): the read
+  that follows says, and is waited for before the refusal is thrown, so the list the page asks for next is that read. None of
+  these sends, posts, pays or deletes anything, and approvals still settle only through the decide route. Making and removing
+  a routine and the owner's say over what the team knows are Customize › Memory and routines, below. A schedule of the shop's
+  own, Buddy's chat (which needs a model, the owner's key) and every other write stay "not yet".
 - **Pause everyone's words.** apps/api's pause holds the team's routines and nothing else: a job already running finishes
   and a request keeps its own expiry. The page's canvas words ("stop at the next safe point", "Nothing expires while the
   team is paused") would promise the owner what the API does not do, so `TeamState.holds` says which pause it is and the
@@ -407,6 +415,89 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
   has on the shop's list, only when this Mac is that shop's outpost, and never its credential. The tab folds that record
   into this Mac's row (its name, Rename and Remove) and leaves it out of the shop's list; with no id, or an id the list
   does not have, every outpost is listed.
+
+## Customize › Memory and routines
+
+What the team knows, and making and removing its routines, for their owner (`src/runtime/http/memory.ts` for the facts, `host.ts` for
+the routines, beside pause and resume; the routes are `docs/pilot-api.md`, "Memory" and "Routines"; the page is
+`src/pages/CustomizePage.tsx`, its rules `memory.ts` and `routines.ts` there). The ops are in `src/runtime/memory.ts` and
+`src/runtime/routines.ts`: `memory.list`, `memory.remember`, `memory.confirm`, `memory.correct`, `memory.forget`, `routine.list`,
+`routine.create`, `routine.pause`, `routine.resume` and `routine.remove` (new: the page, the store and Practice had no way to
+remove a routine).
+
+- **Which session.** `memory.list` and `routine.list` read the shop the switcher shows, with that shop's own owner session, and say
+  which shop they read (`shop`; null for a person in no shops). Each change names the shop its list was read for and goes with that
+  shop's session, never the one the switcher shows by then. An op that names none is refused, never read as the shop viewed. The
+  page reads both halves again when the switcher shows another shop, and does not put a change's answer on a page that shows
+  another shop by then (the change itself went to the shop it named).
+- **Owner only.** A shop the person only helps at is refused `owner_only` with nothing sent, for the lists as well as the changes,
+  as the API refuses a helper's session ("Only Noi can see and change the team at Ran Pa Noi."; for what the team knows, "Only the
+  shop's owner sees and changes what the team knows."); the page says so in place of the list, so a helper is not offered a form it
+  could only be refused. A shop that is not theirs is `not_found`. A person in no shops has none: the API answers their own
+  sign-in 404, so `memory.list`, a fact's four changes, `routine.create` and `routine.remove` say `no_shop` ("No shop is linked to
+  your account yet, ...") and send nothing. Their own sign-in's schedules are still listed as routines, shown and never changed:
+  pausing one is still "not yet".
+- **While offline.** With only a kept read shown, nothing is sent: every change is refused `offline`, and so is `memory.list`,
+  since the kept read holds none of what the team knows. `routine.list` still lists the kept read's routines.
+- **What a fact's change sends.** Exactly what each route reads and nothing more: `{ text }` to `POST /v1/memory/remember`, `{ id }` to
+  `/confirm`, `{ id, text }` to `/correct`, `{ id }` to `/forget`, with the words trimmed. Never a `shop`, `tenant` or `role`, which
+  the API refuses. What the API would refuse is refused here first, by rules said once beside the protocol (`src/runtime/memory.ts`):
+  words that cannot be a fact (empty, only spaces, over 280 characters, Thai counted as letters) are `invalid_text`, said by
+  asking `@manut/shop-memory` itself (its `remember` on an empty memory), and an id that is not 1 to 64 characters is a fact that is
+  gone (`not_found`). The answer is read field by field: it must be a whole fact, and the one asked about, or the change is
+  `unavailable`, never taken as done. Forget's answer names the fact and holds none of it.
+- **What a routine's change sends.** `POST /v1/routines` with exactly `{ name, action, trigger }` (the name trimmed, the timing with
+  only the fields of its kind), and `asksFirst` only when it was said. It sends no time zone and no member: the API's own apply, the
+  shop's Asia/Bangkok, Nam for a reply and Ton for the rest. The shape is checked first, with nothing sent, by `newRoutineRefusal`
+  (`src/runtime/routines.ts`), which asks `@manut/routine-rules` itself (a routine that replies, sends, pays or deletes and says it
+  need not ask is `must_ask_first`, never quietly changed), and refuses an `asksFirst` that is not true or false as the API does
+  (`invalid_request`). `POST /v1/routines/remove` is exactly `{ routineId }`, only for a routine the read lists for that shop, never
+  for a schedule of the shop's own. A new routine is listed at once, switched on, and the shop is read again.
+- **Refusals in words** (en, ko, ja and zh; Thai waits):
+
+  | The API answered | Words |
+  | --- | --- |
+  | 409 `already_known` | "Your team already knows this." |
+  | 400 `invalid_text` | "Say it in 1 to 280 characters." |
+  | 409 `full` (memory) | "Your team already holds 200 facts. Forget one first." |
+  | 404 `not_found` (a fact) | "That fact is gone already." |
+  | 403 `owner_only` | the owner-only words above |
+  | 400 `invalid_name`, `invalid_weekdays`, `invalid_time`, `invalid_day`, `invalid_window`, `invalid_threshold` | the form's own words ("Say what it does in a short sentence.", "Pick at least one day.", ...) |
+  | 400 `invalid_action`, `invalid_trigger`, `invalid_time_zone` | "That kind of work is not something a routine can do.", "Say when it should run.", "That is not a time zone this app knows." |
+  | 400 `must_ask_first` | "A routine like this always asks you first, so it cannot be set to run without asking." |
+  | 400 `unknown_member`, `wrong_member` | "That team member does not do this kind of work." |
+  | 409 `full` (routines) | "Your team already has 50 routines, the most it keeps. Remove one first." |
+  | 404 `not_found` (a routine, or a shop the API has no record of) | "That is not in this shop any more." |
+  | 400 `invalid_request`, `invalid_json`, 413 `body_too_large`, 405, `forgotten`, `invalid_source`, any other code | "The API did not make this change, so nothing changed." |
+  | no answer, a 5xx (`memory_unavailable`, `routines_unavailable`, `clock_unavailable`, `shop_unavailable`) | "No reply from the API. Checking whether it changed." |
+  | 200 with an answer this build cannot read | "The answer was not one this version of the app can read, so it is not shown as done. Checking whether it changed." |
+
+  A read that failed says "What your team knows did not load. Try again." or, for an answer it cannot read whole, "The answer was not
+  one this version of the app can read, so nothing is shown.": one fact it cannot read makes the whole list unreadable, since half of
+  what the team knows is never shown as all of it.
+- **A change that got no answer** (offline, too slow, a 5xx) is never sent again from here, as for pause: the API may have it. The
+  host waits for the read that follows before it says so, and the page then reads its list again (without blanking it), so the list
+  the owner sees is how things stand. A 401 is the one case that is sent again, as for every shop request: the API answers it
+  from the session before it reads the body.
+- **What the form offers.** The New routine form offers the kinds of work brief, draft, reply and send (the API also takes pay and
+  delete, which the form has never offered), at every kind of time the API takes: every day, chosen days, a day of the month, a window,
+  and stock. Each is taken by the API's own rules; a test makes every pair through the fake API and reads `apps/api/src/routine-setup.ts`
+  as text to pin who does which kind of work. The API takes a stock routine but gives it no clock, since there is no stock feed (the
+  routine says `waitsFor: "stock_feed"`), so it waits and never runs. The form says so plainly, under the stock number: "Stock levels
+  are not connected yet, so this routine waits and does not run." The same test fails when the API stops saying it, so the note goes
+  with the missing feed. The form sends no time zone, so a time of day means the shop's own (Asia/Bangkok), and a routine's next run
+  is read in its own zone.
+- **Nothing is kept.** What the team knows is read when the page asks and held in the page's state only: not in the shop's read, the
+  offline cache (a plain file; what the team knows can hold the owner's costs and suppliers), an event or an error's words. Routines
+  are read with the shop as before, and a created or removed one is shown at once and read again.
+- **Practice** answers the same ten ops with `@manut/shop-memory` and `@manut/routine-rules` themselves (`src/runtime/mock/host.ts`):
+  the shop its ops name must be the person's own sample shop or one they made (a made shop shows the demo team), Ran Pa Noi, where
+  they help, is refused `owner_only` in words, a team keeps at most 50 routines, and it removes a routine for good.
+- **Tests.** `src/runtime/http/memory.test.ts` and `routines.test.ts` (each op's request, every refusal and its words, a helper's shop,
+  offline, the shop a change names, no resend after no answer, an answer it cannot read), `owned.test.ts` (pause and resume naming
+  their shop), `src/runtime/rules.test.ts` (the shared rules), the Practice tests, the pages' tests (the Remove question, the stock
+  note, the shop each call names), and `e2e/memory-routines.spec.ts` (Practice, and Connected over a stubbed shell, in four languages
+  and three sizes).
 
 ## Settings › People
 
@@ -657,6 +748,14 @@ and the nullable `keptMonths` in `src/runtime/mission.ts` with the pages' uses o
 `TeamPage.tsx`, `job.ts`, `teamLine.ts`, `ActivityPage.tsx`), `serveShops`' work in `testkit.ts`, and the `rt.taskDraft`,
 `rt.ownerOnly`, `rt.change.*`, `rt.ev.*`, `pause.r.*`, `job.step.drafted` and `act.st.drafted` keys; and give `rt.notYet`
 its earlier words.
+
+To take only Customize › Memory and routines out: make `memory.*`, `routine.create` and `routine.remove` `notYet` in `host.ts` (and
+`memory.list` `notYetShow`), remove `src/runtime/http/memory.ts` with `memory.test.ts` and `routines.test.ts`, `makeRoutine`,
+`removeRoutine`, `noTeam`, `routineWords` and the routine paths in `host.ts`, `routine.create` and `routine.remove` from `TEAM_CHANGES`,
+the memory and routine routes in `testkit.ts`; give `rt.notYet` its earlier words; and, in the page, the shop each call names
+(`memoryCallsFor`, `routineCallsFor`, the `shop` of every op in `src/runtime/memory.ts` and `routines.ts`), the Remove question
+(`ask`, `removing` and `RoutineRow.removable`, with the `routines.remove*`, `routines.keep` and `routines.err.*` keys), the stock note
+(`routines.form.stockNote`) and the reload on a shop switch in `CustomizePage.tsx`.
 
 To read the export again in place of the task list (December item 44): read `GET /v1/tenant/export` in `readShop`
 (`shop.ts`) and in `ShopSessions.readShop` (`shops.ts`) instead of `readTaskList`, `SHOP_SCHEDULES` and `SHOP_ATTENTION`,

@@ -20,11 +20,13 @@
 // settles each request once with the role the session carries (`answer`; never a second way round, CLAUDE.md). The
 // answer names the option by what it does and the revision the card showed, nothing else; the card is marked answered
 // only when the API says so; and after any answer the shop is read again, so the card closes in the API's words
-// ("Already decided by Mint at 19:42"). The owner's other everyday writes are the team's: pausing and resuming one of its
-// routines, and Pause everyone, each through apps/api's own routines routes with the viewed shop's own owner session
-// (`change`). None of them sends, posts, pays or deletes anything. Every other write answers `not_yet`, Buddy's chat
-// included, which would need a model. While only a kept read is shown every write answers `offline` instead (an ask
-// from it: "Connect to answer this"), and none is queued.
+// ("Already decided by Mint at 19:42"). The owner's other everyday writes are the team's: making, pausing, resuming and removing
+// one of its routines, and Pause everyone, each through apps/api's own routines routes with the owner session of the shop the
+// change names (`change`; the shop its list was read for, never the one viewed by then). What the team knows has its own ops,
+// with the same session and rules (memory.ts). None of them sends, posts or pays, the only deletions are the owner's own (a
+// routine, a fact), which the page asks about once more first, and a request still settles only through the decide route. Every
+// other write answers `not_yet`, Buddy's chat included, which would need a model. While only a kept read is shown every write
+// answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
 //
 // Several shops (docs/several-shops.md). Each read starts with the person's shops (`GET /v1/shops`, with the sign-in).
 // When they are in none, the signed-in tenant is read as above, as before shops. When they are in some, each shop is read
@@ -56,12 +58,13 @@ import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
+import { memoryHandlers } from "./memory";
 import { peopleHandlers } from "./people";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
 import type { TeamState } from "../mission";
-import type { RoutineRow } from "../routines";
+import { MAX_ROUTINES, newRoutineRefusal, problemWords, triggerBody, type RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
-import { decodeTeam, decodeTeamRoutines, readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type TeamRoutine } from "./shop";
+import { decodeTeam, decodeTeamRoutines, readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type ShopWork, type TeamRoutine } from "./shop";
 import { departureOf, listShops, ShopSessions, type Departure, type Left, type ShopAnswer } from "./shops";
 import { attentionRows, automationRows, memberName, onTeam, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
 import { activityOf, jobOf, jobRows, teamStateOf } from "./work";
@@ -119,6 +122,10 @@ const notFound = () => new OpError("not_found", t("rt.notFound"));
 const notYet = (): never => {
   throw new OpError("not_yet", t("rt.notYet"));
 };
+/** Throws `error`, for a place that must return a value of another type. */
+const failWith = (error: OpError): never => {
+  throw error;
+};
 /** A read the API cannot serve yet. It is not `notYet`'s words, which say what Connected does so far. */
 const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
@@ -134,6 +141,12 @@ const ownerOnly = (shop: ShopRow) => new OpError("owner_only", t("rt.ownerOnly",
  *  (MAX_NOTE_LENGTH); the API checks it again. */
 const MAX_NOTE = 500;
 const PASS_ON_PATH = (requestId: string) => `/v1/approvals/${encodeURIComponent(requestId)}/pass-on`;
+/** The team's routines: `POST` makes one (`GET` lists them, with the shop's read), and `/remove` takes one away. */
+const ROUTINES_PATH = "/v1/routines";
+const REMOVE_ROUTINE_PATH = "/v1/routines/remove";
+/** What the API's refusals of a new routine say in words of their own: its limit, and the package's and the API's own reasons for
+ *  what is wrong with one. Any other is "did not make this change" (`not_found` is the generic 404's). */
+const routineWords = (code: string): string | null => (code === "full" ? t("routines.err.full", { max: MAX_ROUTINES }) : problemWords(code));
 
 /** The shop a read names by id, among its shops. */
 const partOf = (s: ShopSnapshot | null, shop: string): ShopPart | undefined => s?.shops?.find((p) => p.shop.id === shop);
@@ -180,9 +193,8 @@ const scheduleSig = (s: ShopSnapshot) =>
 /** The signature of what the team shows: who is on it, and each one's status, work and pause. */
 const teamSig = (s: ShopSnapshot | null) => JSON.stringify(team(s).map((b) => [b.name, b.status, b.running, b.paused ?? false]));
 
-/** The writes the owner makes to the viewed shop's team (`change`): refused while only a kept read is shown, as every
- *  write is. */
-const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.pause", "routine.resume", "automations.pause", "automations.resume"]);
+/** The writes the owner makes to a shop's team (`change`): refused while only a kept read is shown, as every write is. */
+const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.create", "routine.pause", "routine.resume", "routine.remove", "automations.pause", "automations.resume"]);
 
 export class HttpHost {
   readonly session: ApiSession;
@@ -740,31 +752,36 @@ export class HttpHost {
 
   // ---- the owner's changes to the team ---------------------------------------------------------------------------
 
-  /** The viewed shop, when the person owns it and its team was read: the one shop whose routines and team the owner's
-   *  writes change, always with its own session. Refused here, with nothing sent, for the signed-in tenant (the API knows
-   *  no team for it: not yet) and for a shop the person helps at (the team there is its owner's). */
-  private ownedTeam(): { shop: ShopRow; snapshot: ShopSnapshot } {
+  /** The shop a change to the team is for, when the person owns it and its team was read: the shop the op names (the shop its list
+   *  was read for, never the one the switcher shows by now). An op that names none is refused, never read as the shop viewed.
+   *  Always sent with that shop's own session. Refused here, with nothing sent, for a shop that is not the person's
+   *  (`not_found`) and for a shop they help at (the team there is its owner's), and `not_yet` for the signed-in tenant (the API
+   *  knows no team for it). */
+  private ownedTeam(named: unknown): { shop: ShopRow; snapshot: ShopSnapshot; work: ShopWork } {
     const snapshot = this.snapshot;
-    const part = snapshot?.viewing ? partOf(snapshot, snapshot.viewing) : undefined;
-    if (!snapshot || !part) return notYet();
+    // A person in no shop has no team: only their own sign-in's schedules, which no session changes.
+    if (!snapshot?.shops) return named === null || named === undefined ? notYet() : failWith(notFound());
+    const part = typeof named === "string" ? partOf(snapshot, named) : undefined;
+    if (!part) return failWith(notFound());
     if (part.shop.role !== "owner") throw ownerOnly(part.shop);
-    if (!part.work || !snapshot.team) return notYet();
-    return { shop: part.shop, snapshot };
+    if (!part.work) return notYet();
+    return { shop: part.shop, snapshot, work: part.work };
   }
 
-  /** Sends one change to the viewed shop's team, as exactly `body`, with that shop's own session, and reads the shop again
-   *  whatever came back, so every page shows what the API holds. The API's answer when it made the change; else the
-   *  refusal, in words. A change that got no answer is never sent again from here: the API may have it, and the read that
-   *  follows says. */
-  private async change(path: string, body: Record<string, unknown>): Promise<unknown> {
-    const { shop } = this.ownedTeam();
+  /** Sends one change to `shop`'s team, as exactly `body`, with that shop's own session, and reads the shop again whatever came
+   *  back, so every page shows what the API holds. The API's answer when it made the change; else the refusal, in words. A change
+   *  that got no answer is never sent again from here: the API may have it. The read that follows says whether it did, and it is
+   *  waited for before the refusal is thrown, so the list the page asks for next is that read (`words` says a refusal the API
+   *  gave that has words of its own). */
+  private async change(shop: ShopRow, path: string, body: Record<string, unknown>, words?: (code: string) => string | null): Promise<unknown> {
     const answer = await this.shopSessions.write(shop.id, path, body);
-    void this.refresh().catch(() => undefined);
+    const follow = this.refresh().catch(() => undefined);
     if (answer.kind === "ok") return answer.json;
-    throw this.changeRefused(shop, answer);
+    if (answer.kind === "unavailable" || answer.kind === "offline") await follow;
+    throw this.changeRefused(shop, answer, words);
   }
 
-  private changeRefused(shop: ShopRow, answer: Exclude<ShopAnswer, { kind: "ok" }>): OpError {
+  private changeRefused(shop: ShopRow, answer: Exclude<ShopAnswer, { kind: "ok" }>, words?: (code: string) => string | null): OpError {
     if (answer.kind === "left") {
       this.depart([{ shop: shop.id, departure: answer.departure }]);
       return new OpError(answer.departure.why, this.departedWords(shop.id) ?? t("rt.notFound"));
@@ -773,50 +790,95 @@ export class HttpHost {
     if (answer.kind === "offline") return new OpError("offline", t("rt.offline"));
     if (answer.kind === "unavailable") return new OpError("unavailable", t("rt.change.noReply"));
     if (answer.status === 403 && answer.code === "owner_only") return ownerOnly(shop);
+    const said = words?.(answer.code);
+    if (said) return new OpError(answer.code, said);
     if (answer.status === 404) return new OpError("not_found", t("rt.notFound"));
     return new OpError(answer.code || "refused", t("rt.change.refused"));
   }
 
-  /** Pause everyone, or Resume everyone: `POST /v1/team/pause` or `/v1/team/resume` with exactly `{}`. apps/api's pause
-   *  holds the team's routines and nothing else, and its answer is the team as it now stands, shown at once. */
+  /** Pause everyone, or Resume everyone: `POST /v1/team/pause` or `/v1/team/resume` with exactly `{}`, for the shop viewed.
+   *  apps/api's pause holds the team's routines and nothing else, and its answer is the team as it now stands, shown at once. */
   private async pauseTeam(paused: boolean): Promise<TeamState> {
-    const answered = decodeTeam(await this.change(paused ? "/v1/team/pause" : "/v1/team/resume", {}));
+    const { shop } = this.ownedTeam(this.snapshot?.viewing);
+    const answered = decodeTeam(await this.change(shop, paused ? "/v1/team/pause" : "/v1/team/resume", {}));
     if (!answered) throw new OpError("unavailable", t("rt.change.noReply"));
-    this.showTeam((s) => ({ ...s, team: answered }));
+    this.showTeam(shop.id, (w) => ({ ...w, team: answered }));
     const state = this.snapshot && teamStateOf(this.snapshot);
     if (!state) throw new OpError("unavailable", t("rt.change.noReply"));
     return state;
   }
 
-  /** Pauses or resumes one of the viewed shop's routines: `POST /v1/routines/pause` or `/v1/routines/resume` with exactly
-   *  `{ routineId }`. Only a routine the read lists is sent. Its answer is the routine as it now stands, shown at once. */
-  private async switchRoutine(routineId: unknown, on: boolean): Promise<RoutineRow> {
-    const { snapshot } = this.ownedTeam();
-    if (typeof routineId !== "string" || !snapshot.routines?.some((r) => r.id === routineId)) throw notFound();
-    const json = (await this.change(on ? "/v1/routines/resume" : "/v1/routines/pause", { routineId })) as { routine?: unknown } | null;
+  /** Pauses or resumes one of `shop`'s routines (the shop its list was read for): `POST /v1/routines/pause` or `/v1/routines/resume`
+   *  with exactly `{ routineId }`. Only a routine the read lists for that shop is sent. Its answer is the routine as it now stands,
+   *  shown at once. */
+  private async switchRoutine(named: unknown, routineId: unknown, on: boolean): Promise<RoutineRow> {
+    const { shop, work } = this.ownedTeam(named);
+    if (typeof routineId !== "string" || !work.routines.some((r) => r.id === routineId)) throw notFound();
+    const json = (await this.change(shop, on ? "/v1/routines/resume" : "/v1/routines/pause", { routineId })) as { routine?: unknown } | null;
     const [routine] = decodeTeamRoutines({ routines: [json?.routine ?? null] }, []);
     if (!routine || routine.id !== routineId) throw new OpError("unavailable", t("rt.change.noReply"));
-    this.showTeam((s) => ({ ...s, routines: s.routines.map((r) => (r.id === routine.id ? routine : r)) }));
+    this.showTeam(shop.id, (w) => ({ ...w, routines: w.routines.map((r) => (r.id === routine.id ? routine : r)) }));
     return teamRoutineRow(routine);
   }
 
-  /** The Automations page pausing or resuming a row: one of the team's routines goes the same way as from Customize. A
-   *  schedule of the shop's own is not the owner's to change from a session (the API answers it 401), so it is not yet. */
+  /** A person in no shops has no team to give routines to: only their own sign-in's schedules, which no session changes. The API
+   *  answers a person's own sign-in 404, so nothing is sent for it. */
+  private noTeam(named: unknown): void {
+    if (named === null && this.snapshot && !this.snapshot.shops) throw new OpError("no_shop", t("routines.err.noShop"));
+  }
+
+  /** Makes a routine for `shop` (the shop its list was read for): `POST /v1/routines` with exactly `{ name, action, trigger }` and
+   *  `asksFirst` only when it was given, never a time zone or a member, so the API's own apply: the shop's time zone, and Nam for a
+   *  reply and Ton for the rest. What the API would refuse for the routine's shape is refused here first, with nothing sent, by the
+   *  rule said once beside the protocol; its limit of 50 and anything else it says it refuses in words. Its answer is the routine as
+   *  it now stands, listed at once, switched on. */
+  private async makeRoutine(p: OpMap["routine.create"]["params"]): Promise<{ routine: RoutineRow }> {
+    this.noTeam(p.shop);
+    const { shop } = this.ownedTeam(p.shop);
+    const refused = newRoutineRefusal(p);
+    if (refused) throw new OpError(refused, problemWords(refused) ?? t("rt.change.refused"));
+    const body = { name: p.name.trim(), action: p.action, trigger: triggerBody(p.trigger), ...(p.asksFirst === undefined ? {} : { asksFirst: p.asksFirst }) };
+    const json = (await this.change(shop, ROUTINES_PATH, body, routineWords)) as { routine?: unknown } | null;
+    // An answer that is no routine is never taken as one made: the read that follows says what the API holds.
+    const [routine] = decodeTeamRoutines({ routines: [json?.routine ?? null] }, []);
+    if (!routine) throw new OpError("unavailable", t("rt.change.unreadable"));
+    this.showTeam(shop.id, (w) => ({ ...w, routines: [...w.routines.filter((r) => r.id !== routine.id), routine] }));
+    return { routine: teamRoutineRow(routine) };
+  }
+
+  /** Takes one of `shop`'s routines away, with its runs and its clock: `POST /v1/routines/remove` with exactly `{ routineId }`. Only a
+   *  routine the read lists for that shop is sent. Its answer names the routine that went and holds none of it. */
+  private async removeRoutine(p: OpMap["routine.remove"]["params"]): Promise<{ routine: string }> {
+    this.noTeam(p.shop);
+    const { shop, work } = this.ownedTeam(p.shop);
+    const routineId = p.routine;
+    if (typeof routineId !== "string" || !work.routines.some((r) => r.id === routineId)) throw notFound();
+    const json = (await this.change(shop, REMOVE_ROUTINE_PATH, { routineId }, routineWords)) as { removed?: unknown } | null;
+    if (!json || json.removed !== routineId) throw new OpError("unavailable", t("rt.change.unreadable"));
+    this.showTeam(shop.id, (w) => ({ ...w, routines: w.routines.filter((r) => r.id !== routineId) }));
+    return { routine: routineId };
+  }
+
+  /** The Automations page pausing or resuming a row: one of the team's routines goes the same way as from Customize, for the shop
+   *  viewed. A schedule of the shop's own is not the owner's to change from a session (the API answers it 401), so it is not yet. */
   private async switchAutomation(p: { bot?: unknown; job?: unknown }, on: boolean): Promise<{ job: string }> {
     const routine = this.snapshot?.routines?.find((r) => r.id === p.job && r.member === p.bot);
     if (!routine) return notYet();
-    await this.switchRoutine(routine.id, on);
+    await this.switchRoutine(this.snapshot?.viewing, routine.id, on);
     return { job: routine.id };
   }
 
-  /** Shows the viewed shop's team and routines as the API just answered a change, until the read that follows replaces
-   *  them, and tells the screens what moved. */
-  private showTeam(edit: (w: { team: ShopTeam; routines: TeamRoutine[] }) => { team: ShopTeam; routines: TeamRoutine[] }): void {
+  /** Shows `shop`'s team and routines as the API just answered a change, until the read that follows replaces them. When it is the
+   *  shop viewed, the screens are told what moved. */
+  private showTeam(shop: string, edit: (w: { team: ShopTeam; routines: TeamRoutine[] }) => { team: ShopTeam; routines: TeamRoutine[] }): void {
     const was = this.snapshot;
-    if (!was?.team || !was.viewing) return;
-    const next = edit({ team: was.team, routines: was.routines ?? [] });
-    const shops = was.shops?.map((p) => (p.shop.id === was.viewing && p.work ? { ...p, work: { ...p.work, ...next } } : p));
-    this.snapshot = { ...was, ...next, ...(shops ? { shops } : {}) };
+    const part = partOf(was, shop);
+    if (!was || !part?.work) return;
+    const next = edit({ team: part.work.team, routines: part.work.routines });
+    const shops = was.shops?.map((p) => (p.shop.id === shop && p.work ? { ...p, work: { ...p.work, ...next } } : p));
+    const viewed = was.viewing === shop;
+    this.snapshot = { ...was, ...(viewed ? next : {}), ...(shops ? { shops } : {}) };
+    if (!viewed) return;
     if (teamSig(was) !== teamSig(this.snapshot)) this.emit({ event: "bots.update", bot: TEAM });
     if (scheduleSig(was) !== scheduleSig(this.snapshot)) this.emit({ event: "routines.update", bot: TEAM });
   }
@@ -1004,19 +1066,22 @@ export class HttpHost {
       },
       "team.pause": () => this.pauseTeam(true),
       "team.resume": () => this.pauseTeam(false),
-      // What the team knows: the API serves a shop's memory to operators only (admin routes), so no session can read or
-      // change it. Nothing the owner types is sent anywhere.
-      "memory.list": notYetShow,
-      "memory.remember": notYet,
-      "memory.confirm": notYet,
-      "memory.correct": notYet,
-      "memory.forget": notYet,
-      // The team's routines, then the shop's other schedules. The owner pauses and resumes a routine through the API's
-      // routines routes; making one waits for a later slice, and a schedule no session may change.
-      "routine.list": async () => ({ routines: shopRoutines(await this.current()) }),
-      "routine.create": notYet,
-      "routine.pause": async (p) => ({ routine: await this.switchRoutine(p.routine, false) }),
-      "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.routine, true) }),
+      // What the team knows: the shop's facts, read and changed with the owner's session (memory.ts). Held in the page that asked,
+      // and in no read of the shop that is kept.
+      ...memoryHandlers(this.ownerLink()),
+      // The team's routines, then the shop's other schedules, for the shop viewed (its owner's to see: a shop the person helps at
+      // is refused). The owner makes, pauses, resumes and removes a routine through the API's routines routes, for the shop its list
+      // was read for; a schedule no session may change.
+      "routine.list": async () => {
+        const snapshot = await this.current();
+        const viewed = snapshot.viewing ? partOf(snapshot, snapshot.viewing) : undefined;
+        if (viewed && viewed.shop.role !== "owner") throw ownerOnly(viewed.shop);
+        return { shop: viewed?.shop.id ?? null, routines: shopRoutines(snapshot) };
+      },
+      "routine.create": (p) => this.makeRoutine(p),
+      "routine.pause": async (p) => ({ routine: await this.switchRoutine(p.shop, p.routine, false) }),
+      "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.shop, p.routine, true) }),
+      "routine.remove": (p) => this.removeRoutine(p),
       // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
       ...connectionHandlers(this.ownerLink()),
       // Customize › Connections: the shop's Google Sheet for Ton's books, with the owner's session (google.ts). A month Ton asked

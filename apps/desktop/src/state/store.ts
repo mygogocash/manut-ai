@@ -6,7 +6,7 @@ import type { BridgeStatus } from "../lib/bridge";
 import { createRuntime, type RuntimeAdapter } from "../runtime";
 import type { MemoryFact } from "../runtime/memory";
 import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
-import type { RoutineRow } from "../runtime/routines";
+import type { NewRoutine, RoutineRow } from "../runtime/routines";
 import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showNewDevice, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
 import { noteAsk } from "../chat/cards/askNote";
 import { settleApproval } from "../chat/cards/respond";
@@ -2117,17 +2117,19 @@ export interface Actions {
   teamPause(): Promise<TeamState>;
   teamResume(): Promise<TeamState>;
   /** Customize: what the team knows and its routines, straight from the runtime and never cached in the store (the page keeps
-   *  its own copy). They reject with the runtime's own error: a refusal from the rules (`already_known`, `must_ask_first`),
-   *  or "not yet" for what the connected runtime cannot do. */
-  memoryList(): Promise<{ facts: MemoryFact[] }>;
-  memoryRemember(text: string): Promise<{ fact: MemoryFact }>;
-  memoryConfirm(fact: string): Promise<{ fact: MemoryFact }>;
-  memoryCorrect(fact: string, text: string): Promise<{ fact: MemoryFact }>;
-  memoryForget(fact: string): Promise<{ fact: string }>;
-  routineList(): Promise<{ routines: RoutineRow[] }>;
-  routineCreate(params: OpMap["routine.create"]["params"]): Promise<{ routine: RoutineRow }>;
-  routinePause(routine: string): Promise<{ routine: RoutineRow }>;
-  routineResume(routine: string): Promise<{ routine: RoutineRow }>;
+   *  its own copy). A list says the shop it was read for, and each change names that shop, so it never lands on another one
+   *  because the switcher moved meanwhile. They reject with the runtime's own error: a refusal from the rules (`already_known`,
+   *  `must_ask_first`), `owner_only` for a shop the person only helps at, or "not yet" for what the connected runtime cannot do. */
+  memoryList(): Promise<{ shop: string | null; facts: MemoryFact[] }>;
+  memoryRemember(shop: string | null, text: string): Promise<{ fact: MemoryFact }>;
+  memoryConfirm(shop: string | null, fact: string): Promise<{ fact: MemoryFact }>;
+  memoryCorrect(shop: string | null, fact: string, text: string): Promise<{ fact: MemoryFact }>;
+  memoryForget(shop: string | null, fact: string): Promise<{ fact: string }>;
+  routineList(): Promise<{ shop: string | null; routines: RoutineRow[] }>;
+  routineCreate(shop: string | null, params: NewRoutine): Promise<{ routine: RoutineRow }>;
+  routinePause(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineResume(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineRemove(shop: string | null, routine: string): Promise<{ routine: string }>;
   /** Tasks › Linear: whether `bot`'s config names a Linear MCP server (bridge `tasks.linear`, config only). */
   tasksLinear(bot: string): Promise<{ configured: boolean; server: string }>;
   /** Tasks › Start in thread: a new thread under `bot` titled `title`, opened, whose first message is `text`. */
@@ -3059,14 +3061,15 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     teamPause: () => bridge.request("team.pause", {}),
     teamResume: () => bridge.request("team.resume", {}),
     memoryList: () => bridge.request("memory.list", {}),
-    memoryRemember: (text) => bridge.request("memory.remember", { text }),
-    memoryConfirm: (fact) => bridge.request("memory.confirm", { fact }),
-    memoryCorrect: (fact, text) => bridge.request("memory.correct", { fact, text }),
-    memoryForget: (fact) => bridge.request("memory.forget", { fact }),
+    memoryRemember: (shop, text) => bridge.request("memory.remember", { shop, text }),
+    memoryConfirm: (shop, fact) => bridge.request("memory.confirm", { shop, fact }),
+    memoryCorrect: (shop, fact, text) => bridge.request("memory.correct", { shop, fact, text }),
+    memoryForget: (shop, fact) => bridge.request("memory.forget", { shop, fact }),
     routineList: () => bridge.request("routine.list", {}),
-    routineCreate: (params) => bridge.request("routine.create", params),
-    routinePause: (routine) => bridge.request("routine.pause", { routine }),
-    routineResume: (routine) => bridge.request("routine.resume", { routine }),
+    routineCreate: (shop, params) => bridge.request("routine.create", { shop, ...params }),
+    routinePause: (shop, routine) => bridge.request("routine.pause", { shop, routine }),
+    routineResume: (shop, routine) => bridge.request("routine.resume", { shop, routine }),
+    routineRemove: (shop, routine) => bridge.request("routine.remove", { shop, routine }),
     tasksLinear: (bot) => (bridge.request as unknown as (op: string, p: unknown) => Promise<{ configured: boolean; server: string }>)("tasks.linear", { bot }),
     async startTaskThread(bot, title, text) {
       try {

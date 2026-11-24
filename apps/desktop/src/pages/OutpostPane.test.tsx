@@ -131,7 +131,7 @@ describe("the Outposts box", () => {
 
 describe("Customize's tabs", () => {
   const memory: MemoryPaneProps = { state: LOADING, ui: MEMORY_START, nowMs: 0, dispatch: () => {}, onRemember: () => {}, onConfirm: () => {}, onCorrect: () => {}, onForget: () => {} };
-  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {} };
+  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {}, onRemove: () => {} };
 
   it("draws Memory and routines first, and Connections with the Outposts box in place of memory", () => {
     const onTab = vi.fn();

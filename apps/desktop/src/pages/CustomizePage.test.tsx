@@ -11,11 +11,12 @@ import { LANGS, setLang, t } from "../i18n";
 import type { MemoryFact } from "../runtime/memory";
 import type { RoutineRow } from "../runtime/routines";
 import { MockHost, MockRuntime } from "../runtime/mock";
+import { HELPED_SHOP, OWN_SHOP } from "../runtime/mock/shops";
 import { CustomizeView, type MemoryPaneProps, type RoutinesPaneProps } from "./CustomizePage";
 import { LOADING, type Load } from "./load";
 import { createStore } from "../state/store";
-import { MEMORY_START, memoryDo, memoryReduce, type MemoryUi } from "./memory";
-import { FORM_START, formProblem, ROUTINES_START, routineDo, routinesReduce, type RoutineForm, type RoutinesUi } from "./routines";
+import { MEMORY_START, memoryCallsFor, memoryDo, memoryReduce, type MemoryUi } from "./memory";
+import { FORM_START, formProblem, ROUTINES_START, routineCallsFor, routineDo, routinesReduce, type RoutineForm, type RoutinesUi } from "./routines";
 
 const NOW = Date.UTC(2026, 10, 22, 3, 0);
 const BOOT = NOW / 1000;
@@ -67,6 +68,7 @@ const routinesPane = (state: Load<RoutineRow[]>, over: Partial<RoutinesPaneProps
   dispatch: noop,
   onAdd: noop,
   onSwitch: noop,
+  onRemove: noop,
   ...over,
 });
 const form = (over: Partial<RoutineForm> = {}): RoutineForm => ({ ...FORM_START, weekdays: [...FORM_START.weekdays], ...over });
@@ -204,7 +206,7 @@ describe("a waiting fact is never shown as used", () => {
   it("moves a fact into what the team knows once the owner says It's true, and drops the part that waited", async () => {
     const rt = await demo();
     const waiting = (await factsOf(rt)).find((f) => f.status === "waiting") as MemoryFact;
-    await rt.request("memory.confirm", { fact: waiting.id });
+    await rt.request("memory.confirm", { shop: OWN_SHOP, fact: waiting.id });
     const html = await drawDemo({}, {}, rt);
     expect(words(between(html, "memory-known", "remember-form"))).toContain("Closed on Mondays");
     expect(html).not.toContain('data-testid="memory-waiting"');
@@ -226,7 +228,7 @@ describe("Forget leaves none of the words", () => {
     const rt = await demo();
     const target = (await factsOf(rt))[2];
     expect(target.text).toBe("Jasmine is the best seller");
-    await rt.request("memory.forget", { fact: target.id });
+    await rt.request("memory.forget", { shop: OWN_SHOP, fact: target.id });
     // The question about it was open; a page that kept it would draw the fact's words once more.
     const html = await drawDemo({ ask: null }, {}, rt);
     expect(html).not.toContain("Jasmine is the best seller");
@@ -238,7 +240,7 @@ describe("Forget leaves none of the words", () => {
   it("forgets a waiting fact as readily: nothing of it is drawn, and the part that waited goes", async () => {
     const rt = await demo();
     const waiting = (await factsOf(rt)).find((f) => f.status === "waiting") as MemoryFact;
-    await rt.request("memory.forget", { fact: waiting.id });
+    await rt.request("memory.forget", { shop: OWN_SHOP, fact: waiting.id });
     const html = await drawDemo({}, {}, rt);
     expect(html).not.toContain("Closed on Mondays");
     expect(html).not.toContain('data-testid="memory-waiting"');
@@ -246,7 +248,7 @@ describe("Forget leaves none of the words", () => {
 
   it("draws no note of the forgetting either: no undo, no 'forgot ...' line with the words", async () => {
     const rt = await demo();
-    await rt.request("memory.forget", { fact: (await factsOf(rt))[0].id });
+    await rt.request("memory.forget", { shop: OWN_SHOP, fact: (await factsOf(rt))[0].id });
     const text = words(await drawDemo({}, {}, rt));
     expect(text).not.toContain("Free shipping");
     expect(text).not.toMatch(/undo/i);
@@ -337,7 +339,7 @@ describe("a corrected fact", () => {
   it("says it was corrected, and when, instead of where it first came from", async () => {
     const rt = await demo();
     const [first] = await factsOf(rt);
-    await rt.request("memory.correct", { fact: first.id, text: "Free shipping on orders over ฿1,000" });
+    await rt.request("memory.correct", { shop: OWN_SHOP, fact: first.id, text: "Free shipping on orders over ฿1,000" });
     const known = words(between(await drawDemo({}, {}, rt), "memory-known", "memory-waiting"));
     expect(known).toContain("Free shipping on orders over ฿1,000 Corrected by you, 22 November");
     expect(known).not.toContain("From your price list");
@@ -397,7 +399,7 @@ describe("the routines when they cannot be shown as a list", () => {
   });
 
   it("shows each half on its own, since the connected runtime shows routines but not memory", () => {
-    const rows: RoutineRow[] = [{ id: "s1", name: "Morning brief", when: "Every Monday at 08:30", action: null, asksFirst: null, enabled: true, next: BOOT + 3600, timeZone: "Asia/Bangkok" }];
+    const rows: RoutineRow[] = [{ id: "s1", name: "Morning brief", when: "Every Monday at 08:30", action: null, asksFirst: null, enabled: true, next: BOOT + 3600, timeZone: "Asia/Bangkok", removable: false }];
     const html = draw(memoryPane({ kind: "unavailable", code: "not_yet", message: "Not yet: nothing to show." }), routinesPane(ready(rows)));
     expect(html).toContain('data-testid="memory-unavailable"');
     expect(words(between(html, "routines"))).toContain("Every Monday at 08:30 Morning brief Next: Today 11:00");
@@ -405,7 +407,7 @@ describe("the routines when they cannot be shown as a list", () => {
 });
 
 describe("a routine as the runtime says it", () => {
-  const base: RoutineRow = { id: "r1", name: "Morning brief", when: "Every day at 08:00", action: "brief", asksFirst: false, enabled: true, next: BOOT + 86_400 - 7200, timeZone: "Asia/Bangkok" };
+  const base: RoutineRow = { id: "r1", name: "Morning brief", when: "Every day at 08:00", action: "brief", asksFirst: false, enabled: true, next: BOOT + 86_400 - 7200, timeZone: "Asia/Bangkok", removable: true };
   const one = (over: Partial<RoutineRow>) => draw(memoryPane(ready([])), routinesPane(ready([{ ...base, ...over }])));
 
   it("shows a paused routine as paused, with its switch off and no next run", () => {
@@ -683,7 +685,7 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     expect(words(asked)).toContain("Forget this?");
     expect(words(asked)).toContain("Jasmine is the best seller");
     ui = memoryReduce(ui, { type: "begin" });
-    const step = await memoryDo(actions, facts, { what: "forget", fact: target.id });
+    const step = await memoryDo(memoryCallsFor(actions, OWN_SHOP), facts, { what: "forget", fact: target.id });
     facts = step.facts;
     ui = memoryReduce(ui, step.action);
     expect(ui).toEqual(MEMORY_START);
@@ -701,7 +703,7 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     ui = memoryReduce(ui, { type: "draft", text: "Free shipping on orders over ฿900" });
     expect(draw(memoryPane(ready(facts), {}, ui), routinesPane(ready([])))).toMatch(/value="Free shipping on orders over ฿900"/);
     ui = memoryReduce(ui, { type: "begin" });
-    const step = await memoryDo(actions, facts, { what: "correct", fact: first.id, text: "Free shipping on orders over ฿900" });
+    const step = await memoryDo(memoryCallsFor(actions, OWN_SHOP), facts, { what: "correct", fact: first.id, text: "Free shipping on orders over ฿900" });
     facts = step.facts;
     ui = memoryReduce(ui, step.action);
     const known = words(between(draw(memoryPane(ready(facts), {}, ui), routinesPane(ready([]))), "memory-known", "memory-waiting"));
@@ -713,8 +715,8 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     const actions = await demoStore();
     let facts = (await actions.memoryList()).facts;
     const waiting = facts.find((f) => f.status === "waiting") as MemoryFact;
-    facts = (await memoryDo(actions, facts, { what: "confirm", fact: waiting.id })).facts;
-    facts = (await memoryDo(actions, facts, { what: "remember", text: "We ship on weekdays" })).facts;
+    facts = (await memoryDo(memoryCallsFor(actions, OWN_SHOP), facts, { what: "confirm", fact: waiting.id })).facts;
+    facts = (await memoryDo(memoryCallsFor(actions, OWN_SHOP), facts, { what: "remember", text: "We ship on weekdays" })).facts;
     const html = draw(memoryPane(ready(facts)), routinesPane(ready([])));
     const known = words(between(html, "memory-known", "remember-form"));
     expect(known).toContain("Closed on Mondays");
@@ -727,7 +729,7 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     const facts = (await actions.memoryList()).facts;
     let ui = memoryReduce(MEMORY_START, { type: "add", text: "jasmine is the best seller" });
     ui = memoryReduce(ui, { type: "begin" });
-    const step = await memoryDo(actions, facts, { what: "remember", text: ui.add });
+    const step = await memoryDo(memoryCallsFor(actions, OWN_SHOP), facts, { what: "remember", text: ui.add });
     ui = memoryReduce(ui, step.action);
     const html = draw(memoryPane(ready(step.facts), {}, ui), routinesPane(ready([])));
     expect(words(between(html, "memory-error"))).toContain("Your team already knows this.");
@@ -745,7 +747,7 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     const form = ui.form as RoutineForm;
     expect(formProblem(form)).toBeNull();
     ui = routinesReduce(ui, { type: "begin", what: "save" });
-    const step = await routineDo(actions, rows, { what: "save", form });
+    const step = await routineDo(routineCallsFor(actions, OWN_SHOP), rows, { what: "save", form });
     rows = step.rows;
     ui = routinesReduce(ui, step.action);
     expect(ui).toEqual(ROUTINES_START);
@@ -768,13 +770,13 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
     const actions = await demoStore();
     let rows = (await actions.routineList()).routines;
     let ui = routinesReduce(ROUTINES_START, { type: "begin", what: "switch", routine: rows[0].id });
-    const paused = await routineDo(actions, rows, { what: "switch", row: rows[0] });
+    const paused = await routineDo(routineCallsFor(actions, OWN_SHOP), rows, { what: "switch", row: rows[0] });
     rows = paused.rows;
     ui = routinesReduce(ui, paused.action);
     const first = words(between(draw(memoryPane(ready([])), routinesPane(ready(rows), {}, ui)), "routine", "routine-switch"));
     expect(first).toContain("Every day at 08:00 Morning brief Paused");
     expect(first).not.toContain("Next:");
-    const resumed = await routineDo(actions, rows, { what: "switch", row: rows[0] });
+    const resumed = await routineDo(routineCallsFor(actions, OWN_SHOP), rows, { what: "switch", row: rows[0] });
     expect(words(between(draw(memoryPane(ready([])), routinesPane(ready(resumed.rows))), "routine", "routine-switch"))).toContain("Morning brief Next: Monday 08:00");
   });
 });
@@ -782,7 +784,7 @@ describe("the owner's journey, through the page's own steps on the demo runtime"
 describe("the connected runtime's page", () => {
   it("shows memory as not yet and the shop's schedules as routines, and a switch says not yet in the runtime's words", async () => {
     const memoryNotYet = { kind: "unavailable", code: "not_yet", message: t("rt.notYetShow") } as const;
-    const rows: RoutineRow[] = [{ id: "sched-1", name: "Morning brief", when: "Every Monday at 08:30", action: null, asksFirst: null, enabled: true, next: BOOT + 3600, timeZone: "Asia/Bangkok" }];
+    const rows: RoutineRow[] = [{ id: "sched-1", name: "Morning brief", when: "Every Monday at 08:30", action: null, asksFirst: null, enabled: true, next: BOOT + 3600, timeZone: "Asia/Bangkok", removable: false }];
     const calls = {
       routineCreate: async (): Promise<never> => {
         throw { code: "not_yet", message: t("rt.notYet") };
@@ -791,6 +793,9 @@ describe("the connected runtime's page", () => {
         throw { code: "not_yet", message: t("rt.notYet") };
       },
       routineResume: async (): Promise<never> => {
+        throw { code: "not_yet", message: t("rt.notYet") };
+      },
+      routineRemove: async (): Promise<never> => {
         throw { code: "not_yet", message: t("rt.notYet") };
       },
     };
@@ -804,5 +809,150 @@ describe("the connected runtime's page", () => {
     // the schedule is still on: nothing was changed, and nothing is said about whether it asks first
     expect(html).toMatch(/role="switch"[^>]*aria-checked="true"/);
     expect(words(between(html, "routine", "routine-switch"))).not.toMatch(/ask/i);
+  });
+});
+
+describe("removing a routine, as the page draws it", () => {
+  const byTestId = (view: ReactElement, id: string, routine?: string) =>
+    drawn(view).filter((e) => e.props["data-testid"] === id && (routine === undefined || e.props["data-routine"] === routine));
+
+  async function view(routinesUi: Partial<RoutinesUi>, over: Partial<RoutinesPaneProps> = {}, rows?: RoutineRow[]) {
+    const rt = await demo();
+    return <CustomizeView memory={memoryPane(ready([]))} routines={routinesPane(ready(rows ?? (await routinesOf(rt))), over, routinesUi)} />;
+  }
+
+  it("offers Remove on each of the team's routines, named for the routine, and on nothing the runtime cannot remove", async () => {
+    const rt = await demo();
+    const team = await routinesOf(rt);
+    const schedule: RoutineRow = { id: "sched-1", name: "Stock check", when: "Every day at 18:00", action: null, asksFirst: null, enabled: true, next: BOOT + 3600, timeZone: "Asia/Bangkok", removable: false };
+    const html = draw(memoryPane(ready([])), routinesPane(ready([...team, schedule])));
+    expect(count(html, 'data-testid="routine-remove"')).toBe(5);
+    expect(count(html, 'data-testid="routine"')).toBe(6);
+    expect(html).toContain('aria-label="Remove: Morning brief"');
+    // the schedule's own row has its switch and no Remove: no session may change it
+    const row = between(html.slice(html.indexOf('data-routine="sched-1"')), "routine");
+    expect(row).not.toContain('data-testid="routine-remove"');
+  });
+
+  it("says Remove in each language, and nothing in the row is an untranslated key", async () => {
+    const rt = await demo();
+    const rows = await routinesOf(rt);
+    for (const l of LANGS) {
+      setLang(l);
+      const html = draw(memoryPane(ready([])), routinesPane(ready(rows)));
+      expect(words(between(html, "routine-remove")), l).toContain(t("routines.remove"));
+      expect(html, l).toContain(`aria-label="${t("routines.remove")}: Morning brief"`);
+    }
+  });
+
+  it("asks in the routine's row, with the routine still shown, what goes and that it cannot be undone, and the safe answer first", async () => {
+    const rt = await demo();
+    const rows = await routinesOf(rt);
+    const html = draw(memoryPane(ready([])), routinesPane(ready(rows), {}, { ask: rows[1].id }));
+    const q = words(between(html, "routine-remove-question"));
+    expect(q).toContain("Remove this routine?");
+    expect(q).toContain("It stops running and its past runs are deleted.");
+    expect(q).toContain("This cannot be undone.");
+    expect(html).toMatch(/<button[^>]*data-testid="routine-remove-yes"[^>]*>Remove it<\/button>/);
+    expect(html).toMatch(/<button[^>]*data-testid="routine-remove-keep"[^>]*>Keep it<\/button>/);
+    // the routine is still there, with its words, until the owner answers; the question is in its row alone
+    expect(words(html)).toContain("Weekly growth brief");
+    expect(count(html, 'data-testid="routine-remove-question"')).toBe(1);
+    expect(count(html, 'data-testid="routine-remove"')).toBe(4);
+    expect(count(html, 'data-testid="routine-switch"')).toBe(4);
+  });
+
+  it("holds both answers, the other Remove links and every switch while a request is on its way", async () => {
+    const rt = await demo();
+    const rows = await routinesOf(rt);
+    const html = draw(memoryPane(ready([])), routinesPane(ready(rows), {}, { ask: rows[1].id, removing: rows[1].id }));
+    const disabled = (id: string) => new RegExp(`<button[^>]*disabled=""[^>]*data-testid="${id}"|<button[^>]*data-testid="${id}"[^>]*disabled=""`);
+    expect(html).toMatch(disabled("routine-remove-yes"));
+    expect(html).toMatch(disabled("routine-remove-keep"));
+    expect(html).toMatch(disabled("routine-remove"));
+    expect(html).toMatch(disabled("routine-switch"));
+    expect(words(html)).not.toContain("Add routine");
+  });
+
+  it("says why the last request did not go, and keeps the question open to try again", async () => {
+    const rt = await demo();
+    const rows = await routinesOf(rt);
+    const html = draw(memoryPane(ready([])), routinesPane(ready(rows), {}, { ask: rows[1].id, error: t("rt.change.noReply") }));
+    expect(words(between(html, "routines-error"))).toContain(t("rt.change.noReply"));
+    expect(html).toContain('data-testid="routine-remove-question"');
+  });
+
+  it("opens the question from Remove, answers it from Remove it, and closes it from Keep it or Escape", async () => {
+    const rt = await demo();
+    const rows = await routinesOf(rt);
+    const dispatch = vi.fn();
+    const onRemove = vi.fn();
+    const closed = await view({}, { dispatch, onRemove });
+    // the first row's Remove, named for its routine
+    const [link] = byTestId(closed, "routine-remove");
+    expect(link.props["aria-label"]).toBe(`Remove: ${rows[0].name}`);
+    (link.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenCalledWith({ type: "remove", routine: rows[0].id });
+
+    const asked = await view({ ask: rows[0].id }, { dispatch, onRemove });
+    const [yes] = byTestId(asked, "routine-remove-yes");
+    (yes.props.onClick as () => void)();
+    expect(onRemove).toHaveBeenCalledWith(rows[0]);
+    const [keep] = byTestId(asked, "routine-remove-keep");
+    expect(keep.props.autoFocus).toBe(true);
+    dispatch.mockClear();
+    (keep.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenCalledWith({ type: "keep" });
+
+    // Escape closes it, unless the key only cancels a composition
+    const [row] = byTestId(asked, "routine", rows[0].id);
+    const press = (k: string, over: { isComposing?: boolean; keyCode?: number } = {}) => (row.props.onKeyDown as (e: unknown) => void)({ key: k, preventDefault: vi.fn(), ...over });
+    dispatch.mockClear();
+    press("Escape", { isComposing: true });
+    press("Escape", { keyCode: 229 });
+    expect(dispatch).not.toHaveBeenCalled();
+    press("Escape");
+    expect(dispatch).toHaveBeenCalledWith({ type: "keep" });
+  });
+
+  it("says in the New routine form, under the stock number, that no stock levels are connected so the routine waits and does not run", async () => {
+    const ui = routinesReduce(routinesReduce(ROUTINES_START, { type: "open" }), { type: "set", patch: { when: "stock" } });
+    const html = draw(memoryPane(ready([])), routinesPane(ready([]), {}, ui));
+    expect(words(between(html, "routine-stock-note"))).toContain("Stock levels are not connected yet, so this routine waits and does not run.");
+    // the other times of day say nothing of it
+    for (const when of ["daily", "weekly", "monthly", "window"] as const) {
+      const other = routinesReduce(routinesReduce(ROUTINES_START, { type: "open" }), { type: "set", patch: { when } });
+      expect(draw(memoryPane(ready([])), routinesPane(ready([]), {}, other)), when).not.toContain("routine-stock-note");
+    }
+  });
+
+  it("says the stock note in every language", async () => {
+    const ui = routinesReduce(routinesReduce(ROUTINES_START, { type: "open" }), { type: "set", patch: { when: "stock" } });
+    for (const l of LANGS) {
+      setLang(l);
+      const html = draw(memoryPane(ready([])), routinesPane(ready([]), {}, ui));
+      expect(words(between(html, "routine-stock-note")), l).toContain(t("routines.form.stockNote"));
+    }
+  });
+});
+
+describe("the page names the shop its lists were read for", () => {
+  it("changes the shop it is told of, and refuses a helped shop in place of a list, through the page's own steps", async () => {
+    const store = createStore(new MockRuntime(new MockHost({ now: () => BOOT })), { firstRoster: "all", hiddenBots: () => [], resume: () => null });
+    await store.actions.init();
+    store.actions.firstRunEnd();
+    const { actions } = store;
+    const listed = await actions.routineList();
+    const calls = routineCallsFor(actions, listed.shop);
+    const step = await routineDo(calls, listed.routines, { what: "remove", row: listed.routines[0] });
+    expect(step.rows.map((r) => r.id)).toEqual(listed.routines.slice(1).map((r) => r.id));
+    // the same calls for a shop that is not the person's change nothing there, and the page says it in the runtime's words
+    const elsewhere = await routineDo(routineCallsFor(actions, "practice:someone-elses"), step.rows, { what: "remove", row: step.rows[0] });
+    expect(elsewhere.action).toEqual({ type: "failed", message: t("rt.notFound") });
+    // a shop the person only helps at is its owner's: the page shows the runtime's words in place of the list
+    await actions.switchShop(HELPED_SHOP);
+    const refused = await routineDo(routineCallsFor(actions, HELPED_SHOP), step.rows, { what: "save", form: { ...FORM_START, name: "Remind me" } });
+    expect(refused.action).toMatchObject({ type: "failed" });
+    expect(refused.rows).toEqual(step.rows);
   });
 });
