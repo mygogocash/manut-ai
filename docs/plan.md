@@ -482,3 +482,5 @@ and should read what a project needs from its `.env.example` as well as from Kit
 
 Done when: each line form above and each secret rule is tested, with Thai text in a comment and a value, CRLF line
 endings, a repeated name, an empty file and a file of only comments.
+
+Done on cloud/env-example, 24 Nov 2026: `packages/env-example` with `readEnvExample`, `looksSecret` and `sampleEnv` (44 tests).
