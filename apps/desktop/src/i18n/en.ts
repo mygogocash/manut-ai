@@ -1755,6 +1755,7 @@ export const en = {
   "kit.ask.no": "No",
   "kit.ask.always": "Always allow in this project",
   "kit.ask.key": "This change holds a key ({files}). Move it out before it is saved.",
+  "kit.done.reads": "Kit did it alone · it changes nothing",
   "kit.done.dial": "Kit did it alone · {level}",
   "kit.done.rule": "Kit did it alone · always allowed in this project",
   "kit.done.blocked": "Blocked: outside {project}",

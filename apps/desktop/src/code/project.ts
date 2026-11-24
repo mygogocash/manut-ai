@@ -156,10 +156,14 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
+/** Every project's settings, read again when they change. */
+export function useKitProjects(): Projects {
+  return useSyncExternalStore(subscribe, kitProjects, kitProjects);
+}
+
 /** One project's settings, read again when they change. */
 export function useKitProject(root: string): KitProject {
-  const all = useSyncExternalStore(subscribe, kitProjects, kitProjects);
-  return projectOf(all, root);
+  return projectOf(useKitProjects(), root);
 }
 
 /** Forgets the cached record, so the next read is from storage again (tests). */

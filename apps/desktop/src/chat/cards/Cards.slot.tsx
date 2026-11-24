@@ -19,6 +19,9 @@ import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
 import { composing, holdImeEnter } from "../../lib/ime";
+import { maskSecrets } from "../../lib/secrets";
+import { KitSays, kitButtons, kitDoneText, useKitCard } from "../../code/KitCardParts";
+import { addRule, updateKitProjects } from "../../code/project";
 
 export const slot = "cards";
 
@@ -84,16 +87,20 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const noted = useAskNote(item.request_id);
   const ref = useRef<HTMLDivElement>(null);
   useFocusRequest(bot, item.id, ref, open);
+  // a coding session's ask, read as one of Kit's steps (src/code/): its words, and Always allow in this project
+  const kit = useKitCard(bot, item);
 
   if (item.resolved) {
     const denied = item.resolved === "deny";
-    return <Line icon={denied ? "✕" : "✓"} text={t(ALLOW_LABEL[item.resolved])} detail={item.command || item.title} testid="card-line" />;
+    // an ask Kit's dial answered by itself says how; a key in the command is never shown
+    return <Line icon={denied ? "✕" : "✓"} text={kitDoneText(bot, item.request_id) ?? t(ALLOW_LABEL[item.resolved])} detail={maskSecrets(item.command || item.title)} testid="card-line" />;
   }
   // the runtime's own words for why it stopped waiting ("Already decided by Mint at 19:42"), when it gave them
-  if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={item.command || item.title} testid="card-line" />;
-  if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={item.command || item.title} testid="card-line" />;
+  if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={maskSecrets(item.command || item.title)} testid="card-line" />;
+  if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={maskSecrets(item.command || item.title)} testid="card-line" />;
 
-  const pick = async (choice: ApprovalChoice) => {
+  /** `keep`: Always allow in this project, which allows this one ask once and then keeps the project's rule. */
+  const pick = async (choice: ApprovalChoice, keep = false) => {
     if (busy || kept || outdated) return;
     setBusy(choice);
     setErr(null);
@@ -101,16 +108,19 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     // Home's Approve, and Approve on a notification, settle through this same call (respond.ts), so there is one way an
     // approval is answered.
     const e = await settleApproval(getStore(), bot, item, choice);
+    // the rule is kept only once the ask itself was taken: an approval covers this one ask, the rule the next ones
+    const rule = keep && !e ? kit?.always : null;
+    if (kit && rule) updateKitProjects((p) => addRule(p, kit.root, rule));
     setErr(e);
     setBusy(null);
   };
-  const shown = BUTTONS.filter((b) => item.choices.includes(b.choice));
+  const shown: { choice: ApprovalChoice; label: Key; key: string; keep?: true }[] = kit ? kitButtons(kit, item.choices) : BUTTONS.filter((b) => item.choices.includes(b.choice));
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     const b = shown.find((x) => x.key === e.key);
     if (!b) return;
     e.preventDefault();
-    void pick(b.choice);
+    void pick(b.choice, !!b.keep);
   };
 
   const risks = riskOf(item.command || "");
@@ -135,7 +145,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
           {risks.join(" · ")}
         </div>
       )}
-      {item.command && <pre className="card-cmd">{item.command}</pre>}
+      {item.command && <pre className="card-cmd">{maskSecrets(item.command)}</pre>}
+      {kit && <KitSays card={kit} />}
       {/* plan mode's plan: the agent's markdown as an answer reads, whole, scrolling inside the card */}
       {item.plan && (
         <div className="card-plan md" data-testid="card-plan">
@@ -149,7 +160,7 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       )}
       <div className="card-acts">
         {shown.map((b) => (
-          <button key={b.choice} type="button" className={`card-btn soft ${b.choice}`} data-choice={b.choice} disabled={!!busy || kept} onClick={() => void pick(b.choice)}>
+          <button key={b.key} type="button" className={`card-btn soft ${b.keep ? "always" : b.choice}`} data-choice={b.keep ? "always" : b.choice} disabled={!!busy || kept} onClick={() => void pick(b.choice, !!b.keep)}>
             {t(b.label)}
           </button>
         ))}

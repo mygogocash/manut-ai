@@ -1,0 +1,111 @@
+/* Kit on the Code page (KitPanel.tsx) and on a coding session's asks (KitCardParts.tsx): the design canvas's
+   StatesCodeDev board. The canvas's rules from packages/ui-kit/app.css (.dial, .banner, .lk, .mono) are copied and
+   scoped under the panel's root class, as mission.css scopes the job page's; menuPages.css gives the bands, rows and
+   tags under .mpage. The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is
+   --aui-surface, --mut is --aui-muted. Lines that are the desktop's own rather than the canvas's say so. */
+
+.kitp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* The desktop's own: the panel stands apart from the sessions under it. */
+  margin-bottom: 18px;
+}
+.kitp .mut {
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* The desktop's own: the level's line and the line under it start where the rows' words do. */
+.kitp .lv,
+.kitp > .mut {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.kitp .mono {
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.kitp .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.kitp .lk:hover {
+  color: var(--ink);
+}
+
+/* How much Kit does alone: one stop pressed. */
+.kitp .dial {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--soft);
+}
+.kitp .dial button {
+  flex: 1 1 110px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-align: center;
+}
+.kitp .dial button[aria-pressed="true"] {
+  background: var(--aui-surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.kitp .dial button:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+
+.kitp .banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.kitp .banner.warn {
+  border-color: transparent;
+  background: var(--warnbg);
+}
+
+/* The desktop's own: the project picker beside the dial's band, as quiet as the band's words. */
+.kitp .band select {
+  max-width: 50%;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+}
+
+/* A coding session's ask: what the step does in words, under the command, and a key in the change. */
+.card-kit-say {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--body);
+}
+.card-kit-key {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--danger);
+}

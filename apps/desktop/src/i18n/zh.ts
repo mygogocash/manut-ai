@@ -1752,6 +1752,7 @@ export const zh: Record<Key, string> = {
   "kit.ask.no": "不",
   "kit.ask.always": "在本项目中始终允许",
   "kit.ask.key": "这个改动中有密钥（{files}）。请在保存前把它移出去。",
+  "kit.done.reads": "Kit 独自完成了 · 不做任何改动",
   "kit.done.dial": "Kit 独自完成了 · {level}",
   "kit.done.rule": "Kit 独自完成了 · 在本项目中始终允许",
   "kit.done.blocked": "已拦下：在 {project} 之外",
