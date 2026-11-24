@@ -20,8 +20,9 @@ fake and need no backend) and opens the pages in real browser engines on four sc
 
 Each has touch input, its own pixel density and its own user agent, taken from Playwright's device list.
 
-**Every state, 27 of them.** Each demo link on the practice home page (`/`), and the states an owner only reaches by
-pressing a button, reached by pressing it.
+**Every state, 46 of them.** Each demo link on the practice home page (`/`), and the states an owner only reaches by
+pressing a button, reached by pressing it. The page an invite link opens and the owner's web app (`docs/web-app.md`) were
+added after the first pass, with signing in reached by typing the practice code.
 
 - Approval page: a reply waits; the one-time permission step; a send under way; a send that failed; a send nobody can
   confirm; already sent; already declined; nobody answered in time; a link that expired; a link that does not work; a
@@ -29,6 +30,12 @@ pressing a button, reached by pressing it.
   one-word name, each on the waiting card, the permission step and a send under way.
 - Deletion page: waiting; being deleted; deleted; kept; nobody answered in time; a link that expired; a link that does
   not work; a request that cannot be loaded; a shop with a long Thai name and counts in the millions.
+- Join page: an invite asks the person to sign in; a wrong code; joined; the invite is for another email, or for a LINE
+  account; expired; already used; cancelled; a link that does not work; signing in by email is off.
+- The owner's web app (`/app/`): signing in; a wrong code; Today with Buddy's brief and the oldest requests; Needs you
+  across a shop the person owns and one they help at, with a request only the owner may answer; answers sent, refused
+  by LINE and answered first from the LINE link; offline, with nothing answerable; Chat; the person's shops; signing in
+  by email is off.
 
 `apps/web/e2e/states.ts` is the list. A spec fails when a demo link on the home page is not in it, so a new state cannot
 ship without being opened on a phone.
@@ -43,7 +50,8 @@ names the state, the screen and the text size, and says what it found:
   would press.
 
 **Tapping.** Buttons are pressed with touch events (`taps.spec.ts`): Approve; the permission step (Not now goes back,
-Allow sends); No; Keep my data; Delete everything; Try again. Each ends on the words it promises.
+Allow sends); No; Keep my data; Delete everything; Try again; in the owner's app, Approve, Decline and Sign out, with a
+helper's request for the owner offering nothing; on the join page, Switch account. Each ends on the words it promises.
 
 **On its side, with a notch.** `landscape.spec.ts` turns the two Chromium phones on their side and gives them a notch's
 insets (60px at each side, through the DevTools protocol). The waiting reply, the long Thai reply and the deletion

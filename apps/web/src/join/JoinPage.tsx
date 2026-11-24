@@ -3,7 +3,7 @@ import { ApiError, useApiSetup, type JoinAnswer } from "../api";
 import { CodeStep, EmailStep } from "../signin/CodeSteps";
 import { useCodeSignIn } from "../signin/useCodeSignIn";
 import { BrandMark, BrokenLinkIcon, CheckIcon, ClockIcon, CloudOffIcon, PeopleIcon, useColorScheme } from "../ui/marks";
-import { Loading, Notice, OWNER_CARD as CARD } from "../ui/owner";
+import { Loading, Notice, OWNER_CARD as CARD, OWNER_MAIN } from "../ui/owner";
 import { visitDeviceId } from "./code";
 import { joinStrings, type JoinStrings } from "./strings";
 
@@ -155,7 +155,7 @@ export function JoinPage({ token }: { token: string }) {
   const shopName = step.name === "answered" && "shop" in step.answer ? step.answer.shop.name : null;
   return (
     <div className="r" data-t={scheme} style={{ minHeight: "100vh" }}>
-      <main className="col" style={{ maxWidth: 560, padding: "16px 16px 40px", gap: 16 }}>
+      <main className="col" style={OWNER_MAIN}>
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BrandMark />
           <div style={{ minWidth: 0, lineHeight: 1.3 }}>

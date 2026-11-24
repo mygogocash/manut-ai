@@ -202,15 +202,18 @@ export function OwnerApp() {
     inFlight.current = true;
     const id = askId(ask.approval);
     setBusy({ ask: id, effect });
+    let outcome: Outcome;
     try {
-      const outcome = await decideAsk(api, ask, effect);
+      outcome = await decideAsk(api, ask, effect);
       const words = outcomeWords(s, outcome, ask);
       setAnswered((current) => new Map(current).set(id, { ask, outcome, ...words }));
-      if (isOver(outcome) || outcome.kind === "unclear" || outcome.kind === "session_ended") await read();
     } finally {
       inFlight.current = false;
       setBusy(null);
     }
+    // The other requests can be answered again as soon as this one has its answer; reading the shops again does not
+    // hold them.
+    if (isOver(outcome) || outcome.kind === "unclear" || outcome.kind === "session_ended") await read();
   }
 
   async function signOut(): Promise<void> {
@@ -286,6 +289,8 @@ export function OwnerApp() {
           maxWidth: 560,
           padding: "max(16px, env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom))",
           gap: 14,
+          // As the owner's other pages (OWNER_MAIN): a word with nowhere to break breaks at its card's edge.
+          overflowWrap: "anywhere",
         }}
       >
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -511,12 +516,7 @@ function RecentRow({ s, ask }: { s: AppStrings; ask: Ask }) {
       <span className="mut" style={{ fontSize: 12.5 }}>
         {ask.shop.name}
       </span>
-      {words && (
-        <span style={{ overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-          overflow: "hidden" }}>
-          {words}
-        </span>
-      )}
+      {words && <span style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{words}</span>}
       <span className="hint" style={{ margin: 0 }}>
         {answeredWords(s, ask)}
       </span>

@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { CODE_LENGTH, normalizeEmail } from "../api/email";
 import { PRACTICE_SIGN_IN_CODE } from "../api/fake";
 import { maskEmail, waitText, waitWords } from "../join/code";
@@ -9,6 +9,10 @@ import type { CodeSignIn } from "./useCodeSignIn";
 /// The two steps of signing in with a code sent by email, as the canvas draws them ("States: sign-in, files and forms"):
 /// the address, then the code. The join page and the owner's app show them alike; each gives the first step its own
 /// title and words, and its own ids for the titles and fields.
+
+/// A button drawn as a link is still pressed with a thumb: 44px tall, as every button on the owner's phone pages
+/// (apps/web/e2e/layout.ts).
+const LINK_BUTTON: CSSProperties = { minHeight: 44 };
 
 export function EmailStep({
   s,
@@ -202,13 +206,13 @@ export function CodeStep({
       {waiting ??
         (!ended && (
           <div>
-            <button type="button" className="lk" disabled={busy !== null} onClick={() => void flow.resend()}>
+            <button type="button" className="lk" style={LINK_BUTTON} disabled={busy !== null} onClick={() => void flow.resend()}>
               {busy === "resend" ? s.resending : s.resend}
             </button>
           </div>
         ))}
       <div>
-        <button type="button" className="lk" disabled={busy !== null} onClick={flow.anotherEmail}>
+        <button type="button" className="lk" style={LINK_BUTTON} disabled={busy !== null} onClick={flow.anotherEmail}>
           {s.anotherEmail}
         </button>
       </div>
