@@ -79,7 +79,9 @@ behind, find it with `lsof -nP -iTCP:5417 -sTCP:LISTEN` and stop it. A failing t
 `apps/web/test-results/`. In CI the job summary lists the failing states with the phones they failed on, and the job keeps
 the JSON report (artifact `web-phones-results`) and, when something failed, those screenshots (`web-phones-failures`) for
 seven days. The first run on one of GitHub's runners took 6 minutes 41 seconds in all, 5 minutes of it the specs (300
-tests at two workers: 294 passed and 6 skipped, the iPhones' landscape ones), so it stays one job.
+tests at two workers: 294 passed and 6 skipped, the iPhones' landscape ones), so it stays one job. The browser install
+downloads from Ubuntu's package mirror, and once it crawled for 25 minutes; its step has a limit of 10 minutes, and the
+job can be run again.
 
 ## What it cannot cover
 
@@ -93,8 +95,8 @@ tests at two workers: 294 passed and 6 skipped, the iPhones' landscape ones), so
   approximate them by scaling the page's px text. Whether a system setting reaches a page inside LINE's browser at all is
   something only the real phone can tell.
 - **A slow or lost network.** Practice mode never touches the network. The page for a request that cannot be loaded is
-  measured, but the real wait, the loading skeleton on a slow connection, a first paint that waits on the web fonts and a
-  send that stops answering are not.
+  measured, but the real wait, the loading skeleton on a slow connection, web fonts that arrive late (the page links them
+  after it appears, and they swap in) and a send that stops answering are not.
 - **The notch on an iPhone, and LINE's bars.** Chromium is given a notch's insets on its side (above); WebKit cannot be.
   Where LINE's browser draws the page under its own top or bottom bar, and what a portrait iPhone's top and bottom insets
   do there, only the real phone shows.

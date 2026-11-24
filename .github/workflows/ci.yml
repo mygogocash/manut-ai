@@ -78,7 +78,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       # Both engines, with the system libraries and fonts they need: Thai among them, which the long Thai messages use.
+      # It takes under a minute, but it downloads from Ubuntu's mirror: one run saw it crawl (an 8 MB package took 90
+      # seconds) and use up the job's whole 25 minutes. A limit of its own fails that fast, and the job can be run again.
       - name: Install Chromium and WebKit
+        timeout-minutes: 10
         working-directory: apps/web
         run: pnpm exec playwright install --with-deps chromium webkit
       # Playwright starts the vite dev server itself (apps/web/playwright.config.ts). --retries=1 lets one slow start
