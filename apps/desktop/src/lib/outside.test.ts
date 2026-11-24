@@ -31,6 +31,7 @@ const ask = (kind: string, over: Partial<RequestInfo> = {}): Outside => ({
   approval: kind,
   member: "Nam",
   summary: "Send on LINE: “Thanks, Mali!”",
+  action: "Send on LINE: “Thanks, Mali!”",
   canApprove: true,
   ...over,
 });
@@ -62,10 +63,19 @@ describe("a request waiting for the owner", () => {
     expect(ids(presentOutside(ask("reply", { canApprove: false }), ctx()))).toEqual(["look_first"]);
   });
 
+  it("drops Approve when the body is not the exact action shown whole: cut to fit, changed, or with no action to compare", () => {
+    expect(ids(presentOutside(ask("reply", { summary: "Send on LINE: “Thanks, Ma…" }), ctx()))).toEqual(["look_first"]);
+    expect(ids(presentOutside(ask("reply", { action: undefined }), ctx()))).toEqual(["look_first"]);
+    const long = `Send on LINE: “${"Thanks again for your order. ".repeat(3)}”`;
+    expect(ids(presentOutside(ask("reply", { summary: long, action: long }), ctx()))).toEqual(["look_first"]);
+    // the body still says what it said
+    expect(presentOutside(ask("reply", { summary: long, action: long }), ctx())?.body).toBe(long);
+  });
+
   it("is what notify-rules says, in the app's words: the same in English", () => {
     for (const kind of [...KNOWN_KINDS, "wire_transfer"]) {
       for (const hideDetails of [false, true]) {
-        const event: NotifyEvent = { type: "request", kind, member: "Nam", summary: "Send on LINE: “Thanks, Mali!”" };
+        const event: NotifyEvent = { type: "request", kind, member: "Nam", summary: "Send on LINE: “Thanks, Mali!”", action: "Send on LINE: “Thanks, Mali!”" };
         const rule = notificationFor(event, { hideDetails, waitingCount: 3 }, at("12:00"));
         const shown = presentOutside(ask(kind), ctx({ hideDetails, waiting: 3 }))!;
         expect({ title: shown.title, body: shown.body, sound: shown.sound }, `${kind} ${hideDetails}`).toEqual({ title: rule.title, body: rule.body, sound: rule.sound });

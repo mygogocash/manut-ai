@@ -8,7 +8,16 @@ export const KNOWN_KINDS = ["message", "reply", "money", "public_post", "payment
 const APPROVABLE_FROM_NOTIFICATION: readonly string[] = ["message", "reply"];
 
 export type NotifyEvent =
-  | { readonly type: "request"; readonly kind: string; readonly member: string; readonly summary: string }
+  | {
+      readonly type: "request";
+      readonly kind: string;
+      readonly member: string;
+      /** What the body says. */
+      readonly summary: string;
+      /** The exact action, whole, as the request's card shows it. Approve is offered only when the body is this text,
+       *  unchanged, and the system can show it whole (`shownWhole`): an owner must not approve what they cannot read. */
+      readonly action?: string;
+    }
   /** News that asks nothing of the owner: an answer, a program that ended, low disk space. Silent, never approvable. */
   | { readonly type: "notice"; readonly title: string; readonly body: string }
   | { readonly type: "page_down"; readonly page?: string }
@@ -113,11 +122,46 @@ export function canApproveFromNotification(kind: unknown): boolean {
   return typeof kind === "string" && APPROVABLE_FROM_NOTIFICATION.includes(kind);
 }
 
+/**
+ * The most a notification's body shows whole, in columns: two lines of a macOS banner, some 40 columns each, less room
+ * for where the words wrap. Past it the system may cut the body short, and the owner would approve words they never saw.
+ * The number errs short: a request that does not fit is opened in the app, which shows every word.
+ */
+export const WHOLE_COLUMNS = 72;
+
+/** Marks that sit on the letter before them (Thai vowels above and below, tone marks) and invisible format characters,
+ *  which take no column of their own. */
+const NO_COLUMN = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
+/** Letters set twice as wide as a Latin one: Chinese, Japanese and Korean, the full-width forms and CJK punctuation, and
+ *  emoji. Counting a narrow one as wide only errs short. */
+const TWO_COLUMNS = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}　-〿！-｠￠-￦]$/u;
+/** A line break, a tab or any other control character: the body would not be the one line this length is measured as. */
+const BREAKS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/** How many columns `text` takes in a notification: a wide letter two, a mark on a letter none, any other character one. */
+export function columns(text: string): number {
+  let n = 0;
+  for (const c of text) n += NO_COLUMN.test(c) ? 0 : TWO_COLUMNS.test(c) ? 2 : 1;
+  return n;
+}
+
+/** Whether a notification shows `text` whole: some words, on one line, in at most `WHOLE_COLUMNS` columns. */
+export function shownWhole(text: unknown): boolean {
+  return typeof text === "string" && text.trim() !== "" && !BREAKS.test(text) && columns(text) <= WHOLE_COLUMNS;
+}
+
+/** Whether a request's body shows its exact action whole: the body is that text, unchanged, and short enough to be seen. */
+function showsAction(event: { readonly summary: string; readonly action?: unknown }): boolean {
+  return typeof event.action === "string" && event.summary === event.action && shownWhole(event.action);
+}
+
 const unreadable: Notification = { show: false, sound: false, title: "", body: "", buttons: [], reason: "unreadable" };
 
 /**
  * What to show for one event. Money never moves from a notification: only a `message` or `reply` request carries
- * "Approve", and not even that while details are hidden, because an owner must not approve what they cannot read.
+ * "Approve", and not even that while details are hidden, because an owner must not approve what they cannot read. For
+ * the same reason a body that is not the request's exact action shown whole (cut to fit, changed on the way, or too long
+ * for the system to show) is a hidden detail too: Look first, and nothing that approves.
  */
 export function notificationFor(event: NotifyEvent, settings: NotifySettings, now: number): Notification {
   if (typeof event !== "object" || event === null) return unreadable;
@@ -129,7 +173,8 @@ export function notificationFor(event: NotifyEvent, settings: NotifySettings, no
     case "request": {
       if (typeof event.kind !== "string" || typeof event.summary !== "string") return unreadable;
       const member = nonEmpty(event.member, "Your team");
-      const buttons = canApproveFromNotification(event.kind) && !hidden ? [APPROVE, LOOK] : canApproveFromNotification(event.kind) ? [LOOK] : [LOOK, LATER];
+      const seen = !hidden && showsAction(event);
+      const buttons = canApproveFromNotification(event.kind) && seen ? [APPROVE, LOOK] : canApproveFromNotification(event.kind) ? [LOOK] : [LOOK, LATER];
       return {
         show: !quiet,
         sound: !quiet,

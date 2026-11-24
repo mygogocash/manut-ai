@@ -722,6 +722,10 @@ export type BridgeEvent =
       request_id: string;
       title: string;
       command: string;
+      /** `command` must be read whole before it is approved (a browser write's sentence, naming the site, the page, the form
+       *  and every value): every surface shows it with nothing cut or scrolled away, and a notification approves it only when
+       *  its body is that text, shown whole (notify-rules' `shownWhole`). */
+      whole?: boolean;
       choices: ApprovalChoice[];
       /** Asked inside a subagent: which one (its id and name or task). */
       subagent?: AskSubagent;

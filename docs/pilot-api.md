@@ -1204,10 +1204,10 @@ that quotes, line breaks and spaces at either end show: `Make a refund on Shopee
 "500.00", set select[name="reason"] to "damaged", then submit form#refund.` A write with no values reads `On {url},
 submit {form}.`
 
-The desktop does not show a browser write's `text` yet: it reads a request's words from a LINE reply's fields or the
-task's action, so a browser write reads "browser.submit on {origin}". It must show `text` on its cards and
-notifications, and offer Approve in a notification only when it shows the text whole, before any outpost runs a write
-step (`docs/browser-control.md`, "Next slices").
+The desktop shows a browser write's `text` as it came, in every language, on the chat's card, on Home and on Needs you,
+whole: never cut, and never in a block that scrolls. A notification offers Approve only when its body is that text,
+unchanged and short enough to be seen whole, which a sentence holding links never is (`docs/browser-control.md`,
+"The desktop showing a browser write").
 
 ## One origin
 

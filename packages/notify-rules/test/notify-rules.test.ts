@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { KNOWN_KINDS, badgeCount, canApproveFromNotification, inQuietHours, notificationFor, type NotifyEvent } from "../src/index";
+import {
+  KNOWN_KINDS,
+  WHOLE_COLUMNS,
+  badgeCount,
+  canApproveFromNotification,
+  columns,
+  inQuietHours,
+  notificationFor,
+  shownWhole,
+  type NotifyEvent,
+} from "../src/index";
 
 // 2026-11-23 in Bangkok (UTC+7) at the given local time.
 const at = (hhmm: string, day = 23) => Date.parse(`2026-11-${String(day).padStart(2, "0")}T${hhmm}:00+07:00`);
-const req = (kind: string, summary = "Reply to Mali about the candle set"): NotifyEvent => ({ type: "request", kind, member: "Nam", summary });
+/** A request whose body is its exact action, unchanged, as a card shows it. */
+const req = (kind: string, summary = "Reply to Mali about the candle set"): NotifyEvent => ({ type: "request", kind, member: "Nam", summary, action: summary });
 const ids = (n: { buttons: readonly { id: string }[] }) => n.buttons.map((b) => b.id);
 
 describe("request events", () => {
@@ -32,6 +43,63 @@ describe("request events", () => {
     expect(notificationFor(null as never, {}, 0).reason).toBe("unreadable");
     expect(notificationFor({ type: "bogus" } as never, {}, 0).show).toBe(false);
     expect(notificationFor({ type: "request", kind: 5 } as never, {}, 0).reason).toBe("unreadable");
+  });
+});
+
+// An owner must not approve what they cannot read, so Approve needs the request's whole exact action in the body. A body
+// cut to fit, or changed on the way (a link shortened to its host, marks dropped), is a hidden detail: Look first only.
+describe("a body shown whole", () => {
+  const reply = (summary: string, action: string | undefined): NotifyEvent => ({ type: "request", kind: "reply", member: "Nam", summary, ...(action === undefined ? {} : { action }) });
+
+  it("offers Approve only when the body is the exact action, unchanged", () => {
+    const words = "Send on LINE: “Your order ships tomorrow.”";
+    expect(ids(notificationFor(reply(words, words), {}, at("12:00")))).toEqual(["approve", "look_first"]);
+    // no exact action to compare: nothing says the body is all of it
+    expect(ids(notificationFor(reply(words, undefined), {}, at("12:00")))).toEqual(["look_first"]);
+    // cut to fit, or changed on the way
+    expect(ids(notificationFor(reply("Send on LINE: “Your order ships…", words), {}, at("12:00")))).toEqual(["look_first"]);
+    expect(ids(notificationFor(reply("Send on LINE: “See baanmali.shop”", "Send on LINE: “See https://baanmali.shop/track?o=7”"), {}, at("12:00")))).toEqual(["look_first"]);
+    // the body still says what it says; only the button goes
+    expect(notificationFor(reply("Send on LINE: “Your order ships…", words), {}, at("12:00")).body).toBe("Send on LINE: “Your order ships…");
+  });
+
+  it("offers Approve only for an action short enough for the system to show whole, on one line", () => {
+    const fits = "a".repeat(WHOLE_COLUMNS);
+    const over = "a".repeat(WHOLE_COLUMNS + 1);
+    expect(ids(notificationFor(reply(fits, fits), {}, at("12:00")))).toEqual(["approve", "look_first"]);
+    expect(ids(notificationFor(reply(over, over), {}, at("12:00")))).toEqual(["look_first"]);
+    for (const broken of ["Hi\nthere", "Hi\tthere", "Hi\u2028there", "Hi\rthere"]) {
+      expect(ids(notificationFor(reply(broken, broken), {}, at("12:00"))), JSON.stringify(broken)).toEqual(["look_first"]);
+    }
+    expect(ids(notificationFor(reply(" ", " "), {}, at("12:00")))).toEqual(["look_first"]);
+  });
+
+  it("counts a wide letter as two columns and a mark on a letter as none", () => {
+    expect(columns("abc")).toBe(3);
+    // Chinese, Japanese and Korean letters, full-width forms and emoji take two
+    expect(columns("出荷")).toBe(4);
+    expect(columns("ひらカタ")).toBe(8);
+    expect(columns("배송")).toBe(4);
+    expect(columns("ＡＢ")).toBe(4);
+    expect(columns("🔑")).toBe(2);
+    // Thai vowels above and below and tone marks sit on their letter: "ที่" is one column
+    expect(columns("ที่")).toBe(1);
+    expect(columns("ขอบคุณค่ะ")).toBe(7);
+    const han = "出".repeat(WHOLE_COLUMNS / 2);
+    expect(shownWhole(han)).toBe(true);
+    expect(shownWhole(`${han}出`)).toBe(false);
+    expect(shownWhole("ขอบคุณค่ะ".repeat(10))).toBe(true);
+  });
+
+  it("never offers Approve for money, even shown whole", () => {
+    const words = "Refund ฿120 for order RP-118";
+    expect(ids(notificationFor({ type: "request", kind: "money", member: "Ton", summary: words, action: words }, {}, at("12:00")))).toEqual(["look_first", "later"]);
+  });
+
+  it("is not fooled by something that is not text", () => {
+    expect(shownWhole(5 as never)).toBe(false);
+    expect(shownWhole(undefined as never)).toBe(false);
+    expect(ids(notificationFor({ type: "request", kind: "reply", member: "Nam", summary: "Hi", action: 5 } as never, {}, at("12:00")))).toEqual(["look_first"]);
   });
 });
 

@@ -284,6 +284,22 @@ The outpost in the desktop shell, this Mac (24 Nov 2026):
 - **Customize › Connections** (`OutpostPane.tsx`): the canvas's Outposts box for this Mac, Online or Asleep, how many
   steps it holds, and Register this Mac, Stop or Start, in all four of the app's languages.
 
+The desktop showing a browser write word for word (24 Nov 2026):
+
+- **The ask's words** (`src/runtime/http/view.ts`): a browser write's ask is its request's `detail.text`, the control
+  plane's sentence naming the site, the page, the form and every value, shown as it came in every language, since no
+  dictionary may change a selector or a value. Every other request keeps the words it had.
+- **Whole, never cut**: the chat's card, Home and Needs you show the sentence in a block that grows with it, with no
+  height it is cut at and nothing scrolled out of sight (the ask's `whole`, and `.whole` in `cards.css`, `home.css` and
+  `menuPages.css`). Every other ask keeps its 160px block that scrolls.
+- **Notifications** (`@manut/notify-rules`, `shownWhole`): Approve only when the body is the request's exact action,
+  unchanged, on one line of at most 72 columns. A body cut to fit or changed on the way is a hidden detail, as Hide
+  details is, for every request, a LINE reply included. A browser write's sentence holds links, which a notification
+  shortens to their hosts, so its notification never carries Approve: the owner opens the card.
+- **The test** (`src/runtime/http/browserWrite.test.tsx`): builds a browser write from the API's record, runs it through
+  the app's own store over a fake API, and fails if the chat's card, Home, Needs you or a notification lets it be approved
+  without its whole sentence shown.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -387,14 +403,18 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   refusal.
 - Connections counts steps, not the canvas's jobs, and names the outpost "This Mac" in the app's language.
 
+The desktop showing a browser write's (24 Nov 2026), each in `docs/decisions.md`:
+
+- The sentence is the control plane's, shown as it came, in English in every language: it quotes selectors and values,
+  which a dictionary could only change.
+- Whole means a block with no height it is cut at, on all three surfaces, for a browser write only; every other ask
+  keeps its block that scrolls past 160px.
+- A notification shows a request whole when its body is the exact action, unchanged, on one line of at most 72
+  columns; anything else is a hidden detail, for every kind of request.
+
 ## Next slices
 
-1. **The desktop showing a browser write word for word, then its outpost running write steps.** Today the desktop puts a
-   request into words from a LINE reply's fields or from the task's action, so a browser write reads only
-   "browser.submit on https://seller.shopee.co.th", and a `send_reply` write, kind `reply`, may be approved from a
-   notification. Before any outpost runs a write step, the desktop's cards and notifications must show the request's
-   `detail.text`, which names the site, the page, the form and every value, and a notification may offer Approve only
-   when it shows that text whole (one clipped to a line is a hidden detail, as notify-rules treats one). Then the
+1. **The outpost running write steps.** The desktop now shows a browser write word for word (above). Next the
    outpost runs a `submit` step: be on its page, check that the form and every field are there before typing anything
    (`selector_not_found` otherwise), set each value in order, submit the form or press its button, and report `done`, or
    `submit_refused` when the site kept the form with an error.

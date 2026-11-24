@@ -161,6 +161,11 @@ asks carry it in the protocol event's `kind`; any other ask has none and is owne
 - A `message` or a `reply` carries Look first and Approve. Money, public posts, payments, commands and any kind this build
   does not know carry Look first and Later, and nothing that could approve. No notification carries Approve while
   Settings' Hide details is on, or for an ask the card itself offers no Allow once (Update the app to answer this).
+- **Approve needs the exact action, whole.** A body that is not the card's exact action, unchanged (cut to fit, a link
+  shortened to its host, marks dropped), or that is too long for the system to show whole, is a hidden detail, so it
+  carries Look first only: an owner must not approve words they never saw. notify-rules measures it: one line of at most
+  72 columns (`WHOLE_COLUMNS`), a wide letter counting two and a mark on a letter none. A browser write's sentence
+  (`docs/browser-control.md`) always holds links, so its notification never carries Approve.
 - **Approve is the card's own Allow once.** `approveFromNotification` (`store.ts`) calls `settleApproval`, the one path every
   button uses, so the host's `answer` sends exactly `{ optionId, seenRevision }` for the revision the notification named,
   through the decide route, and never a role. If the request is not waiting any more, or the answer is refused, or no word

@@ -135,11 +135,29 @@ export function taskOpen(task: ShopTask, readAt = Date.now()): ThreadOpenResult 
   return { thread: task.id, session_id: task.id, title: titleOf(task), cwd: "", messages, running: false, model: "", provider: "", reasoning: "" };
 }
 
-/** The exact action a request asks for, in words: a reply's own words, as its request carries them; else the action of
- *  its task it decides, which carries a worker's words; else what the request names, as the API wrote it. */
+/** A browser write's operation (the API's `BROWSER_SUBMIT`, apps/api/src/browser-writes.ts). */
+const BROWSER_SUBMIT = "browser.submit";
+
+/** A browser write's own sentence, as its request carries it (`detail.text`), or null for any other request. The control
+ *  plane writes it: the site, the page, the form and every value exactly as the outpost will type it, each value quoted as
+ *  JSON. It is shown as it came, in every language, since no dictionary may change a selector or a value. */
+function submitSentence(a: ShopApproval): string | null {
+  const detail = detailOf(a.record.request);
+  return detail.operationType === BROWSER_SUBMIT && detail.text !== undefined && detail.text.trim() !== "" ? detail.text : null;
+}
+
+/** Whether an ask must be read whole before it is approved: a browser write, whose sentence every surface shows with
+ *  nothing cut or scrolled away (the card, Home, Needs you), and which a notification approves only shown whole. */
+const wholeOf = (a: ShopApproval) => (submitSentence(a) === null ? {} : { whole: true });
+
+/** The exact action a request asks for, in words: a browser write's sentence, or a reply's own words, as its request
+ *  carries them; else the action of its task it decides, which carries a worker's words; else what the request names, as
+ *  the API wrote it. */
 export function askText(a: ShopApproval, task: ShopTask | undefined): string {
   const request = a.record.request;
   const detail = detailOf(request);
+  const sentence = submitSentence(a);
+  if (sentence !== null) return sentence;
   if (detail.operationType === "line.message.push" && detail.text !== undefined) return t("rt.op.linePush", { text: detail.text });
   const action = task?.actions.find((x) => x.id === (detail.actionId ?? request.id));
   if (action) return actionText(action);
@@ -167,6 +185,7 @@ function shopAsks(part: ShopPart): EventOf<"approval.request">[] {
       request_id: shopAskId(shop.id, a),
       title: "",
       command: askText(a, undefined),
+      ...wholeOf(a),
       choices: decides ? choicesOf(a) : [],
       ...(request ? {} : { outdated: true }),
       kind: isUnknown(kind) ? kind.raw : kind,
@@ -198,6 +217,7 @@ export function pendingAsks(snapshot: ShopSnapshot): EventOf<"approval.request">
         request_id: askId(a),
         title: task ? titleOf(task) : "",
         command: askText(a, task),
+        ...wholeOf(a),
         choices,
         ...(choices.length ? {} : { outdated: true }),
         // a kind this build does not know is the text the API sent, and a notification offers no Approve for it
