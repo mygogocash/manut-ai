@@ -106,15 +106,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 26, rewinding a turn, files and chat together (`feat/rewind-files`, Opus; a Rust build);
    - item 31, sign-in by a code sent by email, built and off (`feat/email-code-sign-in`, Opus);
    - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet);
-   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus).
-   Next: item 33, the sign-in screens, once item 31 merges.
-   Merged: 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
+   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus);
+   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet).
+   Next: item 33, the sign-in screens, once item 31 merges; then item 36, self-serve onboarding.
+   Merged: 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
+   `refs/manut/snapshots` or an owner-only copy, and never writes through a link; a lane now says when the files went
+   back), 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
    the app's own sessions, and Stop checks each process again by its start time before each signal), 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
    the shell's `git_moved.rs` only reads), 27 (Kit's lanes on their own branches, with Checked, Tests failed and
-   Reverted; `lane.rs` is the one place the shell changes a repository), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
+   Reverted; `lane.rs` makes a lane's branch with `git checkout -b`), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a

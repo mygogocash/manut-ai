@@ -126,8 +126,9 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `src-tauri/src/agent_chat.rs`: a command's step hands on the end of what it printed with its `tool.end` (Claude Code
   and Codex), or says `declined` when the person said no and it never ran.
 - `apps/desktop/src-tauri/src/git_moved.rs`: the main branch moving, read with the person's own `git`: the folder's
-  branch, the branch it started from, and the files each side changed since. It only reads; `lane.rs` is the one place
-  the shell changes a repository (it makes a lane's branch).
+  branch, the branch it started from, and the files each side changed since. It only reads. The shell changes a
+  repository in two places only: `lane.rs` makes a lane's branch, and `turn_files.rs` keeps Rewind's snapshots under
+  refs of the app's own and puts a turn's files back.
 - `apps/desktop/src/code/moved.ts`: what that means. The files both sides changed, the shell's answer checked before it is
   believed, one side's diff as the diff view draws it, and the ask Let Kit merge sends. `useMoved.ts` reads it again while
   the page is open, `askKit.ts` sends the ask, `MainMoved.tsx` draws it.
@@ -207,9 +208,10 @@ list (`{a,b}`, `{1..3}`) makes a command unreadable, so it asks at every level (
 
 ### How the main branch moving is read
 
-Before the lanes and this note the shell ran no `git`: `git_branch.rs` reads `.git/HEAD` as a file and `tasks.rs` runs `gh`.
-Now two places run the person's own `git`: `lane.rs` makes a lane's branch (`git checkout -b`), and `git_moved.rs` only
-reads. Which files changed on both sides needs git's own object store, so `session_main_moved` runs `git` through the runner
+Before the lanes, Rewind and this note the shell ran no `git`: `git_branch.rs` reads `.git/HEAD` as a file and `tasks.rs`
+runs `gh`. Now three places run the person's own `git`: `lane.rs` makes a lane's branch (`git checkout -b`),
+`turn_files.rs` keeps each turn's files under refs of the app's own (see Rewind to before a turn), and `git_moved.rs`
+only reads. Which files changed on both sides needs git's own object store, so `session_main_moved` runs `git` through the runner
 Tasks already uses for `gh` (`tasks::run_env`: no shell, nothing on stdin, 20 seconds, a cap on the output). Every call only
 reads (`symbolic-ref`, `rev-parse`, `merge-base`, `diff`, `ls-files`), none takes the index lock (`GIT_OPTIONAL_LOCKS=0`, so
 Kit's own `git commit` never meets it), a path is never a pathspec (`GIT_LITERAL_PATHSPECS=1`), and a branch name from the
