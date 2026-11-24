@@ -15,7 +15,7 @@ import { ROUTINES_START } from "./routines";
 
 afterEach(() => setLang("en"));
 
-const view = (over: Partial<OutpostView> = {}): OutpostView => ({ state: "running", online: true, steps: 0, name: "This Mac", ...over });
+const view = (over: Partial<OutpostView> = {}): OutpostView => ({ state: "running", online: true, steps: 0, name: "This Mac", id: null, ...over });
 const signedIn = (over: Partial<OutpostView> = {}): OutpostContext => ({ kind: "signed_in", view: view(over) });
 const pane = (context: OutpostContext, over: Partial<OutpostPaneProps> = {}): OutpostPaneProps => ({
   row: outpostRow(context),
@@ -58,8 +58,12 @@ describe("the Outposts box", () => {
     const cases: [OutpostContext, string, string | null, string | null][] = [
       [{ kind: "practice" }, "This Mac can be an outpost once Manut AI is connected to your shop.", null, null],
       [{ kind: "signed_out" }, "Sign in to your shop to use this Mac as an outpost.", null, null],
+      // A shop the person helps at: only its owner may have this Mac run for it, so there is nothing to press.
+      [{ kind: "helper" }, "Only the shop's owner can use this Mac as its outpost.", null, null],
       [signedIn({ state: "unavailable" }), "This computer cannot be an outpost yet.", null, null],
       [signedIn({ state: "unregistered" }), "Not set up. Your team can read your shop's own sites in a browser on this Mac.", null, "Register this Mac"],
+      // Another shop's outpost: one keychain item, so registering it here moves it, and the row says so first.
+      [signedIn({ state: "elsewhere" }), "This Mac works for another shop. Register it here and it works for this shop instead.", null, "Register this Mac"],
       [signedIn({ state: "refused" }), "This Mac is no longer one of your shop's outposts. Register it again to use it.", "Asleep", "Register this Mac"],
       [signedIn({ state: "stopped" }), "Stopped. Your team cannot use this Mac's browser until you start it again.", "Asleep", "Start"],
       [signedIn({ state: "idle" }), "Not running", "Asleep", "Start"],
@@ -76,7 +80,7 @@ describe("the Outposts box", () => {
   });
 
   it("does what its button says, and offers nothing while a click is under way", () => {
-    for (const [state, action] of [["unregistered", "register"], ["refused", "register"], ["running", "stop"], ["stopped", "start"], ["idle", "start"]] as const) {
+    for (const [state, action] of [["unregistered", "register"], ["elsewhere", "register"], ["refused", "register"], ["running", "stop"], ["stopped", "start"], ["idle", "start"]] as const) {
       const onAction = vi.fn();
       const buttons = drawn(OutpostPane(pane(signedIn({ state }), { onAction }))).filter((e) => e.type === "button");
       expect(buttons.map((b) => b.props["data-testid"])).toEqual([`outpost-${action}`]);
@@ -94,16 +98,21 @@ describe("the Outposts box", () => {
     expect(registeredError("too_many")).toBe("Your shop already has 20 outposts. Ask your operator to remove one.");
     expect(registeredError("offline")).toBe("Offline: the Manut AI API cannot be reached.");
     expect(registeredError("keychain")).toBe("This Mac's key could not be kept in the keychain, so it is not set up. Try again.");
+    expect(registeredError("left")).toBe("You no longer have access to this shop, so this Mac was not added.");
     const html = draw(pane(signedIn({ state: "unregistered" }), { error: registeredError("owner_only") }));
     expect(html).toContain('role="alert"');
     expect(words(html)).toContain("Only the shop's owner can add this Mac.");
   });
 
   it("has its words in every language", () => {
-    const states = ["unregistered", "refused", "stopped", "idle", "unavailable"] as const;
+    const states = ["unregistered", "elsewhere", "refused", "stopped", "idle", "unavailable"] as const;
     const english = states.map((state) => outpostRow(signedIn({ state })).line);
+    const helper = outpostRow({ kind: "helper" }).line;
+    const left = registeredError("left");
     for (const lang of LANGS.filter((l) => l !== "en")) {
       setLang(lang);
+      expect(outpostRow({ kind: "helper" }).line, lang).not.toBe(helper);
+      expect(registeredError("left"), lang).not.toBe(left);
       expect(draw(pane(signedIn({ steps: 3 })))).toContain(t("outpost.title"));
       expect(stepsLine(3)).toContain("3");
       expect(stepsLine(3)).not.toBe("Running 3 steps");

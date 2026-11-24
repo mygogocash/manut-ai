@@ -17,8 +17,9 @@
 //   or the screen.
 import type { ShopRole, ShopRow } from "../../lib/protocol";
 import { decodeApprovals } from "./approvals";
-import type { ReadFailure, ShopPart } from "./shop";
+import { decodeWork, type ReadFailure, type ShopPart, type ShopWork } from "./shop";
 import type { Answer, ApiSession, ShopSessionRecord } from "./session";
+import type { FetchLike } from "./shell";
 
 export type { ShopRole, ShopRow } from "../../lib/protocol";
 
@@ -48,6 +49,32 @@ export type ShopsRead = { ok: true; parts: ShopPart[]; unreadable: unknown[]; le
 
 /** What `GET /v1/approvals?state=open` reads for one shop: its asks. */
 export const OPEN_ASKS = "/v1/approvals?state=open";
+/** What an owner's session also reads of a shop (docs/several-shops.md, slice 4): its export, which holds its tasks with
+ *  each member's runs and drafts, its schedules and its attention items, and its team with its routines. */
+export const SHOP_EXPORT = "/v1/tenant/export";
+export const TEAM_ROUTINES = "/v1/routines";
+
+/** One shop's answers in a read: its asks, and for a shop the person owns its export and its routines. */
+interface ShopAnswers {
+  asks: ShopAnswer;
+  exported: ShopAnswer | null;
+  routines: ShopAnswer | null;
+}
+
+/** What an owner's work read came to: the work, none (the session may not read it: a helper's session answers 403
+ *  `owner_only`), or the reason the read failed. A deleted shop's export (404 `tenant_deleted`) has no tasks. */
+function workOf(a: ShopAnswers, unreadable: unknown[]): ShopWork | null | ReadFailure {
+  if (!a.exported || !a.routines) return null;
+  const answers = [a.exported, a.routines];
+  for (const worst of ["signed_out", "offline", "unavailable"] as const) if (answers.some((x) => x.kind === worst)) return worst;
+  if (a.routines.kind === "refused") return a.routines.status === 403 ? null : "unavailable";
+  if (a.exported.kind === "refused") {
+    if (a.exported.status === 403) return null;
+    if (!(a.exported.status === 404 && a.exported.code === "tenant_deleted")) return "unavailable";
+  }
+  const exported = a.exported.kind === "ok" ? a.exported.json : { tasks: [] };
+  return a.routines.kind === "ok" ? decodeWork(exported, a.routines.json, unreadable) : "unavailable";
+}
 
 /** A shop session is opened again this long before it ends, so an ending one is never sent. */
 export const SHOP_EARLY_MS = 60_000;
@@ -119,24 +146,43 @@ export class ShopSessions {
   }
 
   /** Reads what waits at each listed shop, each with its own session, at once (docs/several-shops.md, "One Needs you across
-   *  the shops"). A shop whose place ended in this read is left out and said in `left`, and so is each shop this computer
+   *  the shops"), and of each shop the person owns its export and its routines as well, so its pages show its tasks, its
+   *  team and its routines (`ShopPart.work`). A shop they help at is read for its asks only: what a helper sees is the
+   *  owner's call. A shop whose place ended in this read is left out and said in `left`, and so is each shop this computer
    *  holds a session for that the list no longer has. Any other failure fails the whole read with the worst reason (signed
-   *  out, then offline, then unavailable), so one shop's asks never vanish because its read did not answer. */
+   *  out, then offline, then unavailable), so one shop's asks never vanish because its read did not answer, and half a
+   *  shop is never shown as the whole one. */
   async readAll(listed: readonly ShopRow[]): Promise<ShopsRead> {
-    const [answers, gone] = await Promise.all([Promise.all(listed.map((shop) => this.read(shop.id, OPEN_ASKS))), this.leaving(listed.map((s) => s.id))]);
+    const [answers, gone] = await Promise.all([Promise.all(listed.map((shop) => this.readShop(shop))), this.leaving(listed.map((s) => s.id))]);
     const left = [...gone];
     const parts: ShopPart[] = [];
     const failures: ReadFailure[] = [];
     const unreadable: unknown[] = [];
     answers.forEach((answer, i) => {
       const shop = listed[i];
-      if (answer.kind === "left") left.push({ shop: shop.id, departure: answer.departure });
-      else if (answer.kind === "ok") parts.push({ shop: { ...shop, role: this.roleAt(shop) }, approvals: decodeApprovals(answer.json, unreadable) });
+      const ended = [answer.asks, answer.exported, answer.routines].find((a): a is Extract<ShopAnswer, { kind: "left" }> => a?.kind === "left");
+      if (ended) return void left.push({ shop: shop.id, departure: ended.departure });
       // Nothing that waits is ever read as "nothing waits": the API answers 503 rather than leave a request out.
-      else failures.push(answer.kind === "refused" ? "unavailable" : answer.kind);
+      if (answer.asks.kind !== "ok") return void failures.push(answer.asks.kind === "refused" || answer.asks.kind === "left" ? "unavailable" : answer.asks.kind);
+      const work = workOf(answer, unreadable);
+      if (typeof work === "string") return void failures.push(work);
+      const role = this.roleAt(shop);
+      parts.push({ shop: { ...shop, role }, approvals: decodeApprovals(answer.asks.json, unreadable), ...(work && role === "owner" ? { work } : {}) });
     });
     for (const worst of ["signed_out", "offline", "unavailable"] as const) if (failures.includes(worst)) return { ok: false, failure: worst, left };
     return { ok: true, parts, unreadable, left };
+  }
+
+  /** One shop's requests, made together with its own session: what waits there, and while the person acts there as its
+   *  owner (the session held, else the list, says so) its export and its routines. */
+  private async readShop(shop: ShopRow): Promise<ShopAnswers> {
+    const owner = this.roleAt(shop) === "owner";
+    const [asks, exported, routines] = await Promise.all([
+      this.read(shop.id, OPEN_ASKS),
+      owner ? this.read(shop.id, SHOP_EXPORT) : null,
+      owner ? this.read(shop.id, TEAM_ROUTINES) : null,
+    ]);
+    return { asks, exported, routines };
   }
 
   /** The shops this computer holds a session for that `listed` no longer has: each one's session is looked at once, with
@@ -167,13 +213,20 @@ export class ShopSessions {
     return this.request(shop, "POST", path, body);
   }
 
+  /** `write`, with the same rules, sent through `through` instead of the session's own `fetch`, as `ApiSession.writeVia` is
+   *  for the sign-in: registering this Mac for a shop goes through the shell's own command, which keeps the credential its
+   *  answer holds (outpost.ts). Opening the shop still goes the usual way, since its answer is a session the page keeps. */
+  writeVia(shop: string, path: string, body: unknown, through: FetchLike): Promise<ShopAnswer> {
+    return this.request(shop, "POST", path, body, through);
+  }
+
   /** Forgets these shops' sessions here: they left the person's list. Nothing is sent: a shop the person was removed from
    *  or unlinked from, or that was deleted, holds no session to end. */
   drop(shops: readonly string[]): Promise<void> {
     return this.session.dropShopSessions(shops);
   }
 
-  private async request(shop: string, method: "GET" | "POST", path: string, body?: unknown): Promise<ShopAnswer> {
+  private async request(shop: string, method: "GET" | "POST", path: string, body?: unknown, through?: FetchLike): Promise<ShopAnswer> {
     await this.session.load();
     let held = this.session.shopSession(shop);
     let reopened = false;
@@ -183,13 +236,13 @@ export class ShopSessions {
       held = opened.held;
       reopened = true;
     }
-    let answer = await this.session.sendAs(held.accessToken, method, path, body);
+    let answer = await this.session.sendAs(held.accessToken, method, path, body, through);
     let ended = departureOf(answer);
     if (!ended && !reopened && answer.kind === "refused" && answer.status === 401) {
       // The session ended (its 30 days, or this device signed out of the shop elsewhere): open the shop again once.
       const opened = await this.open(shop, held.accessToken);
       if (opened.kind !== "open") return opened;
-      answer = await this.session.sendAs(opened.held.accessToken, method, path, body);
+      answer = await this.session.sendAs(opened.held.accessToken, method, path, body, through);
       ended = departureOf(answer);
     }
     if (ended) {

@@ -716,6 +716,11 @@ Under the admin gate, as an exact `ADMIN_METHODS` entry. The body is `{ tenant, 
 A reply is Nam's job, a post Pim's and a summary Ton's. A job asked of another member is passed to the member whose job
 it is, and the answer says who did it.
 
+While the shop's team is paused (Pause everyone), nothing new starts: 409 `team_paused`. A member the shop's template
+did not turn on takes no job: 409 `member_off`. These are the same rules, with the same reasons, as a routine's run
+that will not start, so "Starts nothing new" holds whoever starts the job. A team that cannot be read answers 503
+`unavailable`, and nothing starts.
+
 ```ts
 type WorkerRun = {
   taskId: string;                      // the job's own task: in the shop's export, gone with the shop's deletion
@@ -1960,6 +1965,12 @@ tenant, and the operator key and no credential answer 401 there as before.
   the method (405 `method_not_allowed`), then the query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and
   the body (not exactly `{ enabled }` with a boolean: 400 `invalid_request`; not JSON: 400 `invalid_json`). 503
   `consent_unavailable` when the shop's consent cannot be read or written.
+- **Schedules and attention stay closed to a shop session.** `GET /v1/schedules` and `GET /v1/inbound/attention` answer a
+  shop session 401, owner's and helper's alike, as every lifted session route does. An owner has both through the export,
+  which carries the shop's schedules (the team's routine clocks among them, each naming its `routineId`) and its attention
+  items, so opening those two lifted routes would add a second way to the same lists, and the schedules path also takes
+  writes that must stay closed (`docs/decisions.md`). The desktop reads an owned shop's export and `GET /v1/routines`
+  together, with its owner session, each minute (`docs/runtime-adapter.md`, "A shop the person owns").
 
 ### Ending a shop session
 

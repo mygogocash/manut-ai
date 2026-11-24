@@ -10,7 +10,9 @@ Status on 23 Nov 2026: built and tested on `feat/desktop-runtime-adapter`, behin
 demo) stays the default, so a fresh install still reaches no network. The offline cache (see Offline, below) is built and
 tested on `feat/desktop-offline-cache`, on top of it. Answering approvals (below) is built and tested on
 `feat/desktop-answers-approvals`, 24 Nov 2026, with fakes of the API and no real sign-in yet. Several shops (below) is
-built and tested on `feat/desktop-shop-switcher`, 24 Nov 2026, the same way.
+built and tested on `feat/desktop-shop-switcher`, 24 Nov 2026, the same way. A shop the person owns, whole (below), is
+built and tested on `feat/connected-whole-shop`, 24 Nov 2026, the same way: its tasks, its team, Mission Control's jobs
+and activity log, and the owner's routine and pause writes.
 
 ## Choosing it
 
@@ -49,17 +51,19 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | Op | Answer |
 | --- | --- |
 | `hello` | the runtime itself (`bridge: "real"`) |
-| `bots.list` | Buddy alone, standing for the shop's team (the API has no members yet): online once the shop has been read, working while any task is `running`, `verifying` or `recovering` |
-| `thread.list` (Buddy) | every task as one of Buddy's threads, newest activity first; `needs` marks a task with a request waiting for an answer. History and Recent list them. |
-| `thread.open` | the task as Buddy's notes: what it is for, each action it asked for and how that settled, and where it stands now, in the app's language |
+| `bots.list` | for a shop the person owns, Buddy and the members it has on (A shop the person owns, below); otherwise Buddy alone, standing for the team: online once the shop has been read, working while any task is `running`, `verifying` or `recovering`, or its newest run can still act |
+| `thread.list` (Buddy) | every task as one of Buddy's threads, newest activity first; `needs` marks a task with a request waiting for an answer. History and Recent list them. A member has none: their work is their jobs. |
+| `thread.open` | the task as Buddy's notes: what it is for, each action it asked for and how that settled, the draft a member wrote on it (saying nothing was sent), and where it stands now, in the app's language |
 | `chat.open` (Buddy) | the attention items as notes ("A Linear issue was changed (ISS-9)"), then, as a runtime replays asks, one approval ask per request still open, oldest first, naming the exact action ("Send on LINE: “…”"). The answers offered are yes once and no. Needs you and Home show them. |
-| `routines.list`, `automations.list` | the schedules, under Buddy, their days and time as cron and their next run exact; a schedule that is off shows as paused |
+| `routines.list`, `automations.list` | the schedules, under Buddy, their days and time as cron and their next run exact; a schedule that is off shows as paused. For a shop the person owns, also each team routine under its member |
 | `bots.info` | counts from the read |
+| `jobs.list`, `jobs.get`, `activity.list`, `team.state` | Mission Control from the read (A shop the person owns, below): every task as a job, the activity log, and for a shop the person owns its team's state |
 | every other read the screens make | empty (`elsewhere.list`, `plugins.list`, `runs.*`, …), or `not_found` for one thing asked by name |
 | `approval.respond` | the person's answer, through the decide route (Answering approvals, below) |
+| `routine.pause`, `routine.resume`, `team.pause`, `team.resume`, and `automations.pause` and `.resume` of a team routine | for a shop the person owns, through apps/api's routines routes with that shop's session (A shop the person owns, below) |
 | `connections.list` | the shop's site sign-ins and outposts, `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts`, for Customize › Connections (below) |
 | `connections.password`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins/password`, `/v1/vault/outposts/rename` or `/remove` (below) |
-| every other write (`chat.send`, `automations.pause`, …) | refused with `not_yet` and a translated "Not yet: Connected mode reads and answers approvals for now." Nothing is sent to the API. |
+| every other write (`chat.send`, `routine.create`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, pauses your team's routines and looks after Connections for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
 
 The runtime's capabilities are `automations` only, so the Automations page shows and the screens that need a runtime on
 this computer (other places, plugins, restarts, coding-CLI logins) stay hidden.
@@ -70,12 +74,12 @@ waiting request is an `approval.request` (one per revision); one that left is a 
 action expired, `cancelled` when its task is gone or the request was asked again at a new revision, `resolved` when it
 was decided, with the API's own words in `note` when the person's answer here was refused); a new or vanished task is
 `thread.added` or `thread.removed`; a
-new attention item is a `message` in Buddy's chat; a schedule change is `routines.update`; Buddy starting or stopping
-work is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
+new attention item is a `message` in Buddy's chat; a schedule or team routine change is `routines.update`; the team
+changing (a member starting or stopping work, Pause everyone, a member switched on or off) is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
 restart); following tasks live is the streaming slice below.
 
 Not read in this slice: `/v1/consent/cloud`, `/v1/tasks/:id` and its events and actions one by one, `/v1/companies/*`,
-`/v1/health`.
+`/v1/health`. A shop the person owns is read differently: below.
 
 ## Answering approvals
 
@@ -225,11 +229,12 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   its 30 days is opened again before it is sent; one the API answers 401 for any reason but `removed` or `unlinked` is
   opened again once and the request sent once more, a decision too, since the API answers 401 from the credential before
   it reads the body. Two requests that find it ended open it once.
-- **What a shop reads.** `GET /v1/approvals?state=open`, with its own session, and nothing else but its helpers' devices
-  for a shop the person owns (A helper's new device, below): the API answers a shop session 401 on the export, the
-  schedules and the attention feed. So the shop being viewed shows Buddy, its asks, no tasks (History is empty), no
-  schedules and no notes. Every listed shop is read each time, at once; one shop that fails (offline, 5xx) fails the whole
-  read, and the kept read stands in for all of them.
+- **What a shop reads.** `GET /v1/approvals?state=open`, with its own session. A shop the person owns is read whole as
+  well (A shop the person owns, below): its export and its routines, with the same session, and its helpers' devices (A
+  helper's new device, below). A shop they help at is read for its asks and nothing else: what a helper sees is the
+  owner's call, so it shows Buddy, its asks, no tasks (History is empty), no schedules and no notes. Every listed shop is
+  read each time, at once; one shop that fails (offline, 5xx) fails the whole read, and the kept read stands in for all of
+  them.
 - **One Needs you.** Every shop's open requests are asks in Buddy's chat, sorted by when each was asked (the protocol
   event's new `asked_at`, which the card keeps as its time). An ask's id is `<shop>/<requestId>@<revision>`, the shop
   written as `encodeURIComponent` writes it, so two shops' asks never share a card and an answer finds its shop from the
@@ -266,6 +271,76 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
   says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same
   way, without waiting.
+- **This Mac's outpost** (`outpost.ts`; `docs/browser-control.md`, "This Mac for the shop the switcher shows"). Register
+  this Mac goes with the owner session of the shop the switcher shows, through the host's owner link
+  (`HttpHost.ownerLink`, `ShopSessions.writeVia`) and the shell's own command, or with the sign-in while the person is in
+  no shops; a shop they help at is refused here with nothing sent. `followSignIn` hears the sign-in and the shop sessions
+  held (`ApiSession.onShops`, which also fires as a sign-out lets the sign-in go) and tells the shell every tenant the
+  person acts for as owner (`outpost_signed_in` with `tenants`): the signed-in tenant and each shop whose owner session is
+  held and has not ended. The shell runs the outpost while the shop its keychain item is for is among them. Calls go one
+  at a time, the latest, never twice the same, and the follower looks again when the first of those sessions ends.
+
+## A shop the person owns
+
+Built on `feat/connected-whole-shop` (`src/runtime/http/shop.ts`, `shops.ts`, `view.ts`, `work.ts`, `customize.ts`,
+`host.ts`, `cache.ts`), the desktop's half of `docs/several-shops.md`, slice 4. Before it a pilot shop showed only its
+asks, Mission Control showed Buddy alone, and every write but an answer was "not yet".
+
+- **What it reads.** Each read asks a shop the person owns, with its own owner session (`mos1.`) and at once, for what
+  waits there (`GET /v1/approvals?state=open`), its export (`GET /v1/tenant/export`: its tasks, each with its event log,
+  its actions, each member's run and the drafts they wrote; its schedules; its attention items) and its team with its
+  routines (`GET /v1/routines`). The API answers a shop session 401 on `GET /v1/schedules` and
+  `GET /v1/inbound/attention`, and the export carries both, so those two are never sent with one (`docs/decisions.md`). A
+  schedule that names a `routineId` is that routine's clock and is not listed twice. A shop the person helps at is read for
+  its asks only, and the export and the routines answer a helper's session 403 `owner_only`, which reads as "asks only"
+  rather than a failure. Anything else that fails (offline, a 5xx, `export_incomplete`) fails the whole read, as before:
+  half a shop is never shown as the whole one. A deleted shop's export (404 `tenant_deleted`) reads as no tasks.
+- **Its pages.** The shop being viewed shows its tasks as Buddy's threads in History and Recent, as the signed-in tenant's
+  are; opening one shows Buddy's notes, now with the draft a member wrote on it ("Nam's draft, for you to read. Nothing was
+  sent."). Buddy's chat shows its attention items and every shop's asks.
+- **Its team.** `bots.list` is Buddy, who leads, and then the members `GET /v1/routines` says the shop has on, in
+  `@manut/member-grants`' order (Nam, Pim, Ton), each with what they do in the onboarding's words. Kit is not listed: the
+  API's team has no Kit, who works on this computer. A member is working while a job of theirs runs (its newest run can
+  still act, as apps/api's `endingOf` reads it), and while Pause everyone is on every member but Buddy is `paused`. A
+  member's chat is empty and they have no threads: the API keeps no chat with a member, and each task is listed once, as
+  Buddy's thread. A member's Schedule tab lists their routines, the timing as cron where the tab can say it in the app's
+  language (every day, weekdays, one weekday, one day of the month) and the API's own words otherwise.
+- **Mission Control.** A job is a task (`work.ts`): its member is the one whose run has it now (the newest claimed; a job
+  passed on is the member it went to), else Buddy. Where it stands: waiting for the owner first; then the member's run
+  (running, drafted, checked when a run found nothing to write, failed, cancelled; a run that stopped to ask, once its
+  request is over, stands where its action settled); then its actions (sent, approved, failed, or cancelled when every one
+  was declined or ran out of time); then the task's own state. Its timeline is each run's claim and each action's
+  proposal, approval and send, at the times the API kept. A job's page shows the goal (the task's objective), the draft as
+  what happened, the cost its runs reported in whole satang, how long the runs took (none while one runs or a time is
+  missing), and one trace step per run in the API's own codes. No recipient is listed: the API names a customer only by a
+  LINE id. The activity log is each draft a member wrote (`drafted`, a new status; a reply's words private), each action
+  waiting for the owner (`needs_you`) and each one that went out (`sent`, with who approved it), newest first, and it
+  claims no span (`keptMonths: null`), since the tasks are kept until the shop deletes them. `team.state` is the team, the
+  routines a pause would hold and the jobs running now, with `holds: "routines"`; for a shop the person helps at it is
+  refused, "Only Noi can see and change the team at Ran Pa Noi.", and for the signed-in tenant it is still "not yet".
+- **The owner's writes.** Pausing and resuming one of the team's routines (Customize's routines, and the Automations
+  page's pause for a team routine) is `POST /v1/routines/pause` or `/resume` with exactly `{ routineId }`; Pause everyone
+  and Resume everyone are `POST /v1/team/pause` and `/resume` with exactly `{}`. Each goes with the viewed shop's own owner
+  session, only for a routine the read lists, and is refused here with nothing sent for a shop the person helps at and for
+  the signed-in tenant. The API's answer is shown at once and the shop is read again. A refusal is said in words ("The API
+  did not make this change, so nothing changed."), and a change that got no answer is never sent again from here ("No reply
+  from the API. Checking whether it changed."): the read that follows says. None of these sends, posts, pays or deletes
+  anything, and approvals still settle only through the decide route. Making a routine, a schedule of the shop's own,
+  memory, Buddy's chat (which needs a model, the owner's key) and every other write stay "not yet".
+- **Pause everyone's words.** apps/api's pause holds the team's routines and nothing else: a job already running finishes
+  and a request keeps its own expiry. The page's canvas words ("stop at the next safe point", "Nothing expires while the
+  team is paused") would promise the owner what the API does not do, so `TeamState.holds` says which pause it is and the
+  page says "Nam, Pim and Ton run no routines until you resume.", "Jobs already running are not stopped." and "Requests in
+  Needs you keep waiting until they expire." for the API's (`pause.ts` `pauseWords`). Practice keeps the canvas's.
+- **Offline.** Each shop's record in the kept read holds that shop's own read under its id: its asks, and for a shop the
+  person owns its tasks (with each run and the newest draft), schedules, attention items, team and routines, copied field
+  by field (version 4 of the file; files of 3 and 2 are still read, a task from them with no runs or draft and a shop with
+  no work). The viewed shop's work is its record's alone. A record of a shop the person helps at that claims any work, or
+  work that is not whole, makes the whole file ignored.
+- **Tests.** `owned.test.ts` (the shop whole, its team, its routines, Mission Control, the writes and their refusals, a
+  helper's view, offline, and under the app's own store), `work.test.ts` (how a task reads as a job), `mission.test.ts`
+  (the signed-in tenant's Mission Control), `cache.test.ts` (version 4), and `serveShops` in `testkit.ts`, which answers an
+  owner's export, routines and team writes, and a helper's 403, as apps/api does.
 
 ## Customize › Connections
 
@@ -283,6 +358,10 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
 - **What the tab is shown.** Each sign-in without its account or its sites' addresses, and each outpost, times in
   seconds; an entry this build cannot read is left out. The page keeps none of it in the store or the kept read: the tab
   asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
+- **This Mac's own record.** The shell's view of this Mac for the shop shown (`outpost_status`) carries the id its outpost
+  has on the shop's list, only when this Mac is that shop's outpost, and never its credential. The tab folds that record
+  into this Mac's row (its name, Rename and Remove) and leaves it out of the shop's list; with no id, or an id the list
+  does not have, every outpost is listed.
 
 ## Signing in
 
@@ -361,7 +440,8 @@ desktop cannot read a pilot shop's work until the API links an owner's identity 
   item without asking and asks the person before any other program reads it. Ad-hoc signed development builds change
   signature on each build, so macOS may ask once after a rebuild. A second item beside it (account `outpost`) holds this
   Mac's outpost and its credential (`docs/browser-control.md`); only the shell reads it, and no command gives it to the
-  page.
+  page. The page does not even learn which shop it is for: it tells the shell which shops it acts for as owner, and the
+  shell decides (Several shops, above). It learns only the outpost's id, for the shop it asks about.
 - In memory, in the page's one `ApiSession` per origin, while the app runs.
 - Never in localStorage (which holds only `manut.runtime`), a log, an address, or a command line. A session is never
   sent to any origin but its own.
@@ -416,7 +496,7 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
   alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
 - **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one sign-in. With several shops (version 3 of the file),
   every shop's record in it is under that shop's id, with its name, owner and the person's role, so a shop's asks are only
-  ever read back as that shop's; the shell needs no change, since it keeps one file per sign-in and removes any other. A
+  ever read back as that shop's (version 4 adds each owned shop's work, A shop the person owns, above); the shell needs no change, since it keeps one file per sign-in and removes any other. A
   file of version 2 is read as the signed-in tenant's own. The key is the SHA-256, in hex, of the
   origin and the tenant, made by the page (`cacheKey`, with a small synchronous SHA-256 in `sha256.ts`, because the Web
   Crypto digest is asynchronous and exists only in a secure context); the shell accepts nothing but 64 hex digits as a
@@ -456,9 +536,10 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
 2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
    shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
    re-read and lets a task's row change live.
-3. **Asks of the API**, none built here: owner sessions on the export, schedules and attention feed, so a pilot shop's
-   pages show more than what waits (`docs/several-shops.md`, slice 4); a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
-   replace the export; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
+3. **Asks of the API**, none built here: a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
+   replace the export, which an owned shop is now read through every minute (A shop the person owns, above); a way for
+   Pause everyone to stop a job already running, and for a request to wait while the team is paused, if the owner wants
+   the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
    provider; a tenant-wide event feed; a helper's name with a decision (so "Already decided by Mint" does not depend on
    a note she passed on), and a way to say how a request that left on its own was decided (reading
    `GET /v1/approvals?state=recent` when an ask leaves would do it, at one more request).
@@ -483,6 +564,17 @@ of a read and of the cache file (version 2 again), the shop asks in `view.ts` an
 `shops`, the switcher (`ShopSwitcher.tsx` and its place in `Sidebar.tsx`), the card's shop lines, the Practice shops
 (`src/runtime/mock/shops.ts`), and the `shops.`, `card.pass*`, `card.askOwner`, `rt.only.*`, `rt.pass.*` and
 `note.atShop` keys.
+
+To take only the whole owned shop out (A shop the person owns): drop the export and routines reads in `shops.ts`
+(`readShop`, `workOf`, `SHOP_EXPORT`, `TEAM_ROUTINES`) so a shop reads its asks only, `decodeWork`, `decodeTeam`,
+`decodeTeamRoutines` and the attempts and draft of a task in `shop.ts`, the `work`, `team` and `routines` of a part and a
+read, `src/runtime/http/work.ts` with `owned.test.ts` and `work.test.ts`, the members in `view.ts` (`team` is Buddy alone
+again), the team writes in `host.ts` (`ownedTeam`, `change`, `pauseTeam`, `switchRoutine`, `switchAutomation`,
+`showTeam`; the ops answer `not_yet` and `notYetShow` again), version 4 of the cache (3 again), `drafted` and `holds`
+and the nullable `keptMonths` in `src/runtime/mission.ts` with the pages' uses of them (`pause.ts` `pauseWords`,
+`TeamPage.tsx`, `job.ts`, `teamLine.ts`, `ActivityPage.tsx`), `serveShops`' work in `testkit.ts`, and the `rt.taskDraft`,
+`rt.ownerOnly`, `rt.change.*`, `rt.ev.*`, `pause.r.*`, `job.step.drafted` and `act.st.drafted` keys; and give `rt.notYet`
+its earlier words.
 
 To take only the buttons out of notifications: pass no `approve` handler in `notifySessionEvent` (`store.ts`) and remove
 `approveFromNotification`, `src/chat/cards/askNote.ts` and its use in `Cards.slot.tsx`; notifications then carry Look first and

@@ -5,9 +5,10 @@
 import { t, type Key } from "../i18n";
 import type { OutpostView, Registered } from "../runtime/http/outpost";
 
-/** Where the page stands before the shell is asked: Practice (or a test bridge), Connected with nobody signed in, or
- *  signed in to a shop, with what the shell said (null until it has). */
-export type OutpostContext = { kind: "practice" } | { kind: "signed_out" } | { kind: "signed_in"; view: OutpostView | null };
+/** Where the page stands before the shell is asked: Practice (or a test bridge), Connected with nobody signed in, showing
+ *  a shop the person helps at (only its owner may have an outpost run for it), or showing a shop they own (their signed-in
+ *  tenant while they are in no shops), with what the shell said about this Mac and that shop (null until it has). */
+export type OutpostContext = { kind: "practice" } | { kind: "signed_out" } | { kind: "helper" } | { kind: "signed_in"; view: OutpostView | null };
 
 export type OutpostAction = "register" | "stop" | "start";
 
@@ -29,6 +30,7 @@ export function stepsLine(steps: number): string {
 export function outpostRow(context: OutpostContext): OutpostRow {
   if (context.kind === "practice") return { line: t("outpost.practice"), tag: null, action: null };
   if (context.kind === "signed_out") return { line: t("outpost.signedOut"), tag: null, action: null };
+  if (context.kind === "helper") return { line: t("outpost.helper"), tag: null, action: null };
   const view = context.view;
   if (!view) return { line: "", tag: null, action: null };
   switch (view.state) {
@@ -36,6 +38,8 @@ export function outpostRow(context: OutpostContext): OutpostRow {
       return { line: t("outpost.unavailable"), tag: null, action: null };
     case "unregistered":
       return { line: t("outpost.notSetUp"), tag: null, action: "register" };
+    case "elsewhere":
+      return { line: t("outpost.elsewhere"), tag: null, action: "register" };
     case "refused":
       return { line: t("outpost.refused"), tag: "asleep", action: "register" };
     case "stopped":
@@ -53,6 +57,7 @@ const REGISTER_ERRORS: Record<Exclude<Registered, "registered">, Key> = {
   signed_out: "outpost.err.signedOut",
   offline: "outpost.err.offline",
   keychain: "outpost.err.keychain",
+  left: "outpost.err.left",
   failed: "outpost.err.failed",
 };
 

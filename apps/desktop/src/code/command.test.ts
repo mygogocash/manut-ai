@@ -48,7 +48,8 @@ describe("what a step does", () => {
     // `find . -{true,exec} rm {} \;` is `find . -true -exec rm {} ;` once the shell has expanded it: it deletes, though
     // nothing in it says -exec. A pattern can become an option the same way, from a file named like one.
     for (const line of ["find . -{true,exec} rm {} \\;", "find . -name x -e{xec,} rm {} \\;", "echo {a,b}", "touch f{1..3}",
-      "ls *.ts", "grep -rn foo src/*.ts", "cat src/?.ts", "ls [ab].ts", "find . -name x *"])
+      "ls *.ts", "grep -rn foo src/*.ts", "cat src/?.ts", "ls [ab].ts", "find . -name x *",
+      "find . $'\\x2dexec' rm {} \\;", "echo $\"hello\""])
       expect([line, action(line)]).toEqual([line, "unknown"]);
     // Quoted or escaped, each is only itself, and find's `{}` holds no list.
     for (const line of ["find . -name '*.ts'", "grep -rn \"a*b\" src", "echo '{a,b}'", "cat file\\{a,b\\}", "ls src"])
