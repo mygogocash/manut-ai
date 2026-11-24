@@ -491,6 +491,9 @@ rewind.
   20 of its repository shows no counts until Remove reads them.
 - A kept folder whose repository moved on disk: its record names the old place, so it is no longer listed; it stays under
   `~/.manut/lanes` until removed by hand.
+- A closed lane's conversation: Claude Code and Codex keep it for the folder they ran in, the lane's own, so the + menu's
+  past conversations of the project do not list it. And closing a lane says nothing at that moment about its folder being
+  kept: the kept list on the Code page is where it shows.
 - Test output from OpenCode and the other ACP agents, and from pi: their steps hand on none, so their runs are Not
   confirmed. More runners than the six (mocha, Playwright, `unittest`).
 - Open pull request and Ask Kit to fix it on a lane, a tests view beside it, the effort word and New lane. A pull request
