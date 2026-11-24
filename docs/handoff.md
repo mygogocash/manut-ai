@@ -161,16 +161,19 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 48, approvals found without reading every task: a per-shop lookup of which task holds each request
-     (`feat/approval-index`, Opus), started when item 46 finished. `GET /v1/approvals` and deciding walk the whole
-     task index one task at a time today, which a busy shop would take past Cloudflare's per-request call limit.
    - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
      buttons, select menus and editors, settings pages that keep their form, and frames told from the page
      (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
+   - item 50, the console's Connections page for a shop's sign-ins and outposts, from the admin routes, with no
+     password typed in the console (`feat/console-connections`, Sonnet), started when item 48 finished.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 47 (each coding lane in a git worktree of its own under `~/.manut/lanes`, on a branch made from the
+   Merged: 48 (a per-shop approval lookup in the TenantObject, written by the task object before a request opens,
+   so `GET /v1/approvals` reads only the tasks it names and deciding finds its task in one read; approval-core's
+   records stay the only truth; old shops build the lookup 25 tasks per read, walking every task until it is done;
+   deploy dev plainly, never as a gradual rollout, so no old task object opens a request without an entry),
+   47 (each coding lane in a git worktree of its own under `~/.manut/lanes`, on a branch made from the
    developer's, so lanes work at once and the developer's folder never moves; a folder goes only when its record, its
    path and git's own list agree it is the app's, never pruned, and forced only after the person's yes to what goes;
    Kit no longer sees the developer's uncommitted changes, and the chat says how many stayed behind), 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
