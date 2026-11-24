@@ -6,6 +6,9 @@
 //! (`api_link::request_sealed`), and the username and password are taken out of it straight into buffers of their
 //! own that are wiped too, never through a copy that is not: serde reads them as raw JSON borrowed from the answer,
 //! and `unescape` writes each one once, into a buffer sized for it.
+//!
+//! A write step's values are not secrets, but they go nowhere but the page either: the steps' answer is read the same
+//! way, each value is written once into a buffer that is wiped when the step is dropped, and no step prints them.
 
 use crate::api_link::{self, LinkError};
 use serde::Deserialize;
@@ -17,22 +20,52 @@ use zeroize::Zeroizing;
 /// The most a read's text may be, once written as JSON in UTF-8 (the API's `MAX_READ_TEXT_BYTES`).
 pub const MAX_READ_TEXT_BYTES: usize = 4096;
 
-/// A browser step as its outpost is handed it (`OutpostStep`).
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+/// A browser step as its outpost is handed it (`OutpostStep`). Its Debug leaves a write's values out.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct OutpostStep {
     pub step_id: String,
-    /// `open`, `read` or `sign_in`; any other is failed as one this outpost cannot run.
+    /// `open`, `read`, `sign_in` or `submit`; any other is not run (`not_run`).
     pub kind: String,
-    #[serde(default)]
+    /// `open`: the page; `submit`: the approved write's page.
     pub url: Option<String>,
-    #[serde(default)]
     pub selector: Option<String>,
-    #[serde(default)]
     pub grant_id: Option<String>,
+    /// `submit`: the form it submits, or the control (a button) it presses, as a selector.
+    pub form: Option<String>,
+    /// `submit`: each field and exactly what goes in it, in order: the approved copy's, as the API handed it out. None
+    /// when the step carries none, or none that reads as a list of fields and text.
+    pub values: Option<Vec<SubmitValue>>,
     /// The origins its browser may be on for this step; anywhere else stops it.
-    #[serde(default)]
     pub origins: Vec<String>,
+}
+
+impl fmt::Debug for OutpostStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OutpostStep")
+            .field("step_id", &self.step_id)
+            .field("kind", &self.kind)
+            .field("url", &self.url)
+            .field("selector", &self.selector)
+            .field("grant_id", &self.grant_id)
+            .field("form", &self.form)
+            .field("values", &self.values)
+            .field("origins", &self.origins)
+            .finish()
+    }
+}
+
+/// One value a write step types or chooses: the field it goes into, as a selector, and exactly what goes there. The
+/// value is wiped when dropped, and never printed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SubmitValue {
+    pub field: String,
+    pub value: Zeroizing<String>,
+}
+
+impl fmt::Debug for SubmitValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubmitValue").field("field", &self.field).finish_non_exhaustive()
+    }
 }
 
 /// Why a step failed, from the API's fixed list (`STEP_FAILURES`): never free text.
@@ -43,6 +76,11 @@ pub enum Failure {
     SelectorNotFound,
     SignInRefused,
     GrantRefused,
+    /// A write step's site refused what was submitted and kept the form, or would not let it be submitted as typed.
+    SubmitRefused,
+    /// The outpost did not do what the step asks: a kind it does not know, a step missing what its kind needs, or a
+    /// stop before the step began or, for a write, before anything was typed. The API reads it as nothing submitted.
+    NotRun,
     TimedOut,
     BrowserError,
 }
@@ -55,6 +93,8 @@ impl Failure {
             Failure::SelectorNotFound => "selector_not_found",
             Failure::SignInRefused => "sign_in_refused",
             Failure::GrantRefused => "grant_refused",
+            Failure::SubmitRefused => "submit_refused",
+            Failure::NotRun => "not_run",
             Failure::TimedOut => "timed_out",
             Failure::BrowserError => "browser_error",
         }
@@ -156,8 +196,63 @@ fn status_of(status: u16) -> Result<(), ApiError> {
 }
 
 #[derive(Deserialize)]
-struct StepsWire {
-    steps: Vec<OutpostStep>,
+struct StepsWire<'a> {
+    #[serde(borrow)]
+    steps: Vec<StepWire<'a>>,
+}
+
+/// A step as the answer holds it. A write step's values stay raw JSON borrowed from the answer until each is written
+/// once into a buffer that is wiped (`values_of`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StepWire<'a> {
+    step_id: String,
+    kind: String,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    selector: Option<String>,
+    #[serde(default)]
+    grant_id: Option<String>,
+    #[serde(default)]
+    form: Option<String>,
+    #[serde(default, borrow)]
+    values: Option<&'a RawValue>,
+    #[serde(default)]
+    origins: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ValueWire<'a> {
+    field: String,
+    #[serde(borrow)]
+    value: &'a RawValue,
+}
+
+/// The steps an answer to `POST /v1/outposts/steps` holds. A write step whose values do not read as a list of fields
+/// and text is still read, with no values, so it is reported (not run) rather than lost with the rest of the batch.
+pub fn steps_of(answer: &str) -> Result<Vec<OutpostStep>, ApiError> {
+    let wire: StepsWire = serde_json::from_str(answer).map_err(|_| ApiError::Unavailable)?;
+    Ok(wire
+        .steps
+        .into_iter()
+        .map(|step| OutpostStep {
+            step_id: step.step_id,
+            kind: step.kind,
+            url: step.url,
+            selector: step.selector,
+            grant_id: step.grant_id,
+            form: step.form,
+            values: step.values.and_then(values_of),
+            origins: step.origins,
+        })
+        .collect())
+}
+
+/// A write's values, each written once from its raw JSON into a buffer that is wiped, or None for anything else.
+fn values_of(raw: &RawValue) -> Option<Vec<SubmitValue>> {
+    let wire: Vec<ValueWire> = serde_json::from_str(raw.get()).ok()?;
+    wire.into_iter().map(|v| Some(SubmitValue { field: v.field, value: unescape(v.value.get())? })).collect()
 }
 
 #[derive(Deserialize)]
@@ -175,8 +270,16 @@ impl OutpostApi for HttpApi {
     }
 
     fn steps(&self) -> Result<Vec<OutpostStep>, ApiError> {
-        let body = self.post("/v1/outposts/steps", json!({ "tenant": self.tenant, "outpostId": self.outpost_id }))?;
-        serde_json::from_str::<StepsWire>(&body).map(|wire| wire.steps).map_err(|_| ApiError::Unavailable)
+        // Read as the redeem is: a write step's values are in this answer, and the buffer that holds it is wiped.
+        let body = json!({ "tenant": self.tenant, "outpostId": self.outpost_id }).to_string();
+        let (status, answer) = match api_link::request_sealed(&format!("{}/v1/outposts/steps", self.origin), "POST",
+            Some(&self.credential), Some(&body)) {
+            Ok(answer) => answer,
+            Err(LinkError::Offline) => return Err(ApiError::Offline),
+            Err(LinkError::Failed(_)) => return Err(ApiError::Unavailable),
+        };
+        status_of(status)?;
+        steps_of(&answer)
     }
 
     fn redeem(&self, grant_id: &str) -> Result<Redeemed, ApiError> {
@@ -295,24 +398,62 @@ mod tests {
             json!({ "tenant": "pilot:shop", "outpostId": "op-1", "stepId": "s-1", "outcome": "done", "text": "Shipped" }));
         assert_eq!(api.report_body("s-1", &Outcome::Failed(Failure::SignInRefused)),
             json!({ "tenant": "pilot:shop", "outpostId": "op-1", "stepId": "s-1", "outcome": "failed", "code": "sign_in_refused" }));
+        assert_eq!(api.report_body("s-1", &Outcome::Failed(Failure::NotRun)),
+            json!({ "tenant": "pilot:shop", "outpostId": "op-1", "stepId": "s-1", "outcome": "failed", "code": "not_run" }));
         let codes: Vec<&str> = [Failure::OriginNotAllowed, Failure::PageUnavailable, Failure::SelectorNotFound, Failure::SignInRefused,
-            Failure::GrantRefused, Failure::TimedOut, Failure::BrowserError].iter().map(|f| f.code()).collect();
+            Failure::GrantRefused, Failure::SubmitRefused, Failure::NotRun, Failure::TimedOut, Failure::BrowserError].iter().map(|f| f.code()).collect();
         // the API's STEP_FAILURES, in its order
         assert_eq!(codes, ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused", "grant_refused",
-            "timed_out", "browser_error"]);
+            "submit_refused", "not_run", "timed_out", "browser_error"]);
     }
 
     #[test]
     fn reads_steps_as_the_api_hands_them_out() {
         let wire = r#"{"steps":[{"stepId":"s-1","kind":"open","url":"https://seller.shopee.co.th/","origins":["https://seller.shopee.co.th"],"expiresAt":"2026-11-24T10:00:00.000Z"},
             {"stepId":"s-2","kind":"read","selector":".status","origins":[]},{"stepId":"s-3","kind":"sign_in","grantId":"g-1","origins":["https://a.example"]},
-            {"stepId":"s-4","kind":"submit","origins":[]}]}"#;
-        let steps = serde_json::from_str::<StepsWire>(wire).unwrap().steps;
-        assert_eq!(steps.len(), 4);
+            {"stepId":"s-4","kind":"submit","action":"refund","url":"https://seller.shopee.co.th/portal/sale/return/2291","form":"form#refund",
+             "values":[{"field":"input[name=\"amount\"]","value":"500.00"},{"field":"textarea","value":"ร้าน \"มะลิ\"\n🔑\u00e9\t"}],
+             "origins":["https://seller.shopee.co.th"],"expiresAt":"2026-11-24T10:00:00.000Z"},
+            {"stepId":"s-5","kind":"upload","origins":[]}]}"#;
+        let steps = steps_of(wire).unwrap();
+        assert_eq!(steps.len(), 5);
         assert_eq!(steps[0].url.as_deref(), Some("https://seller.shopee.co.th/"));
         assert_eq!(steps[1].selector.as_deref(), Some(".status"));
         assert_eq!(steps[2].grant_id.as_deref(), Some("g-1"));
-        assert_eq!(steps[3].kind, "submit");
+        // A write step: its page, its form, and every value exactly as the JSON says it, in order.
+        let write = &steps[3];
+        assert_eq!((write.kind.as_str(), write.form.as_deref()), ("submit", Some("form#refund")));
+        let values = write.values.as_ref().unwrap();
+        assert_eq!(values.iter().map(|v| (v.field.as_str(), v.value.as_str())).collect::<Vec<_>>(),
+            [("input[name=\"amount\"]", "500.00"), ("textarea", "ร้าน \"มะลิ\"\n🔑é\t")]);
+        // A kind this outpost does not know is still read, so it can be reported.
+        assert_eq!(steps[4].kind, "upload");
+        assert!(steps[0].values.is_none() && steps[0].form.is_none());
+        assert!(steps_of("not json").is_err());
+    }
+
+    #[test]
+    fn reads_a_write_step_whose_values_are_not_text_with_none_rather_than_losing_the_batch() {
+        for values in [r#"[{"field":"input","value":500}]"#, r#""500""#, r#"[{"field":"input"}]"#, "null"] {
+            let wire = format!(r#"{{"steps":[{{"stepId":"s-1","kind":"submit","form":"form","values":{values},"origins":[]}},{{"stepId":"s-2","kind":"read","origins":[]}}]}}"#);
+            let steps = steps_of(&wire).unwrap();
+            assert_eq!(steps.len(), 2, "{values}");
+            assert!(steps[0].values.is_none(), "{values}");
+        }
+    }
+
+    #[test]
+    fn never_prints_a_write_steps_values() {
+        let step = OutpostStep {
+            step_id: "s-1".into(),
+            kind: "submit".into(),
+            form: Some("form#refund".into()),
+            values: Some(vec![SubmitValue { field: "input[name=amount]".into(), value: Zeroizing::new("Known-7731".into()) }]),
+            ..Default::default()
+        };
+        let printed = format!("{step:?} {step:#?} {:?}", step.values);
+        assert!(printed.contains("input[name=amount]") && printed.contains("form#refund"), "{printed}");
+        assert!(!printed.contains("Known-7731"), "{printed}");
     }
 
     #[test]

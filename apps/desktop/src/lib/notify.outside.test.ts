@@ -57,7 +57,7 @@ const ask = (kind: string, over: Partial<NonNullable<Note["ask"]>> = {}, id = "r
   body: "Send on LINE: “Thanks, Mali!”",
   bot: "buddy",
   tag: "buddy:approval",
-  ask: { id, approval: kind, member: "Nam", canApprove: true, waiting: 1, ...over },
+  ask: { id, approval: kind, member: "Nam", canApprove: true, action: "Send on LINE: “Thanks, Mali!”", waiting: 1, ...over },
 });
 const news: Note = { title: "Buddy", body: "Replied to Mali.", bot: "buddy", tag: "buddy:message" };
 const performed = (actionId: string, id: unknown) => h.listener!({ actionId, inputValue: null, notification: { id } });

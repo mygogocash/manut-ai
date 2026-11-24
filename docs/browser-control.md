@@ -275,14 +275,58 @@ The outpost in the desktop shell, this Mac (24 Nov 2026):
 - **Steps** (`step.rs`): `open` goes only to an address on the step's origins and waits for the page; `read` answers
   the page's or a selector's text, cut to the API's 4 KB as JSON; `sign_in` checks for a sign-in form on the step's
   origins first, redeems the grant from Rust, types only if the page is on one of the sign-in's own origins, checks that
-  again inside the script that types, and submits the form. Pages are read through WKWebView's `callAsyncJavaScript`,
-  in a content world of the outpost's own, with the arguments passed as values: no channel from the page to the app.
+  again inside the script that types, and submits the form; `submit` makes an approved write (below). Pages are read
+  through WKWebView's `callAsyncJavaScript`, in a content world of the outpost's own, with the arguments passed as
+  values: no channel from the page to the app.
 - **The password's path**: the redeem's answer is read into a buffer that is wiped when dropped, the username and
   password are written out of it into wiped buffers of their own, moved without a copy into the call that types them,
   and wiped there once WebKit has its own copies. Nothing logs, stores or reports them; a test puts a known password
   through a fake redeem and finds it in no request the outpost sent, nothing it noted and nothing the page is shown.
 - **Customize › Connections** (`OutpostPane.tsx`): the canvas's Outposts box for this Mac, Online or Asleep, how many
   steps it holds, and Register this Mac, Stop or Start, in all four of the app's languages.
+
+The desktop showing a browser write word for word (24 Nov 2026):
+
+- **The ask's words** (`src/runtime/http/view.ts`): a browser write's ask is its request's `detail.text`, the control
+  plane's sentence naming the site, the page, the form and every value, shown as it came in every language, since no
+  dictionary may change a selector or a value. Every other request keeps the words it had.
+- **Whole, never cut**: the chat's card, Home and Needs you show the sentence in a block that grows with it, with no
+  height it is cut at and nothing scrolled out of sight (the ask's `whole`, and `.whole` in `cards.css`, `home.css` and
+  `menuPages.css`). Every other ask keeps its 160px block that scrolls.
+- **Notifications** (`@manut/notify-rules`, `shownWhole`): Approve only when the body is the request's exact action,
+  unchanged, on one line of at most 72 columns. A body cut to fit or changed on the way is a hidden detail, as Hide
+  details is, for every request, a LINE reply included. A browser write's sentence holds links, which a notification
+  shortens to their hosts, so its notification never carries Approve: the owner opens the card.
+- **The test** (`src/runtime/http/browserWrite.test.tsx`): builds a browser write from the API's record, runs it through
+  the app's own store over a fake API, and fails if the chat's card, Home, Needs you or a notification lets it be approved
+  without its whole sentence shown.
+
+The outpost running write steps, this Mac (24 Nov 2026):
+
+- **A `submit` step** (`src-tauri/src/outpost/step.rs`), with the values the API handed out from the approved copy and
+  nothing else. It opens the approved page fresh, so the form holds only what the site put there, and types nothing if
+  the guard refused any navigation on the way. One script then checks, before anything is typed, that the form (or the
+  button it presses) and every field are on the page and that each value can go into its field (`selector_not_found`
+  otherwise); and sets each value in order, as typing does: through the field's own setter, with the events typing fires.
+- **Pressed once.** A form is submitted as its own submit does (`requestSubmit`, which runs the page's checks); a button
+  is clicked once the page turns it on, waited for up to 10 seconds. Nothing is pressed while a field holds anything
+  but its approved value, the page marks one as wrong, or the form holds a field the browser itself would refuse to send
+  (`submit_refused`), and a press whose answer did not come back is never made again.
+- **The site's answer** must hold for 3 seconds: the page moved, the form or button went, or every field given words was
+  emptied (as a chat empties its box) is `done`; the form kept with every value as typed and a field marked wrong is
+  `submit_refused`; anything else at the end of the step's 45 seconds is `timed_out`, never a guess.
+- **Not run**: a kind the outpost does not know, a step missing what its kind needs, and a step it held but had not begun
+  when it stopped are reported `not_run`, which the API reads as nothing submitted; so is a write it stopped under before
+  anything was typed. A page that did not load before anything was typed is `page_unavailable`.
+- **The values' path**: the steps' answer is read into a buffer that is wiped (as the redeem's is), each value is written
+  once into a buffer of its own that is wiped with the step, and goes to the page only, as an argument of the scripts
+  that type and check it. No step prints a value, and no report, note or log holds one; a test puts a known value
+  through a fake browser and a fake API and finds it nowhere else.
+- **The scripts themselves** run against test pages the spec serves (`e2e/outpost-scripts.spec.ts` in Chromium, as CI
+  runs the suite, and `e2e/outpost-scripts-webkit.spec.ts` in WebKit, the macOS webview's engine, on a Mac): nothing is
+  typed until every field is found, every value goes in exactly, a button the page turns on later is waited for, nothing
+  is pressed that the page or the browser would refuse, and the site's answer reads as sent, kept with an error, or
+  pending. They run in the page's own world there, not the outpost's content world.
 
 ## Choices made so far
 
@@ -364,8 +408,9 @@ Submitting's (24 Nov 2026):
   write.
 - A write settles from its step's report even when the report cannot land in the attempt (an attempt that ended, consent
   withdrawn): what was done on the site is a fact, and the action's record says what was done. The failures that mean
-  nothing was submitted are the ones an outpost finds before it submits; `origin_not_allowed`, `timed_out` and
-  `browser_error` may come after, so they settle unknown.
+  nothing was submitted are the ones an outpost finds before it submits, and `not_run`, a step it did not run at all (a
+  kind it does not know, a step missing what its kind needs, or a stop before anything was typed); `origin_not_allowed`,
+  `timed_out` and `browser_error` may come after, so they settle unknown.
 - A write's proposal names its sign-in as both its connection and its account, its page's origin as its target, and a
   grant revision of 1: a sign-in has no grant revisions.
 - No new audit actions, so the console's Audit page has words for every entry without a change to it.
@@ -378,8 +423,9 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   stops the loop; it runs again only for a sign-in to that same shop, unless the owner pressed Stop.
 - A heartbeat every 30 seconds on its own thread; steps asked for every 3 seconds (what the ingress limit is sized
   for), at once again after an ask that brought five; asks spaced out to a minute while the API cannot be reached.
-  Budgets: open 30 seconds, read 15, sign-in 40. A report that got no answer is sent again, the same, at most three
-  times; a step held when the outpost stops is reported `browser_error`.
+  Budgets: open 30 seconds, read 15, sign-in 40, a write 45. A report that got no answer is sent again, the same, at
+  most three times; a step held when the outpost stops is reported `not_run` if it had not begun (`browser_error` until
+  the write steps), and `browser_error` if it was running.
 - The window is visible, without taking focus, and incognito. The navigation hook cannot tell a page's frames from the
   page, so any navigation it refuses during a step fails the step, a frame from another origin included.
 - A sign-in submits the form it typed into. The site's answer must hold for 3 seconds: no password field left is done,
@@ -387,17 +433,35 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   refusal.
 - Connections counts steps, not the canvas's jobs, and names the outpost "This Mac" in the app's language.
 
+The desktop showing a browser write's (24 Nov 2026), each in `docs/decisions.md`:
+
+- The sentence is the control plane's, shown as it came, in English in every language: it quotes selectors and values,
+  which a dictionary could only change.
+- Whole means a block with no height it is cut at, on all three surfaces, for a browser write only; every other ask
+  keeps its block that scrolls past 160px.
+- A notification shows a request whole when its body is the exact action, unchanged, on one line of at most 72
+  columns; anything else is a hidden detail, for every kind of request.
+
+The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
+
+- A write fills only what a person types into or chooses one item from: an input of a text kind, a text area, a list.
+  Never a password field (passwords come only from the vault), a hidden one, a check box, a radio button, a file or an
+  editor that is not a form field; a write naming one is `selector_not_found`, with nothing typed.
+- What goes is exactly what was approved: a page that changes a value once it is typed (formatting an amount, say) is not
+  pressed. A text area's line break is compared as the one character it keeps.
+- `done` and `submit_refused` are taken only from what the page shows, held for 3 seconds; a site that keeps the form
+  and says nothing (a settings page) ends `timed_out`, and its write settles as not known.
+- Not run covers a step the outpost did nothing for: a kind it does not know, a step missing what its kind needs (no
+  origin it may be on included), a step held but not begun when it stops (before, `browser_error`), and a write it
+  stopped under before typing.
+
 ## Next slices
 
-1. **The desktop showing a browser write word for word, then its outpost running write steps.** Today the desktop puts a
-   request into words from a LINE reply's fields or from the task's action, so a browser write reads only
-   "browser.submit on https://seller.shopee.co.th", and a `send_reply` write, kind `reply`, may be approved from a
-   notification. Before any outpost runs a write step, the desktop's cards and notifications must show the request's
-   `detail.text`, which names the site, the page, the form and every value, and a notification may offer Approve only
-   when it shows that text whole (one clipped to a line is a hidden detail, as notify-rules treats one). Then the
-   outpost runs a `submit` step: be on its page, check that the form and every field are there before typing anything
-   (`selector_not_found` otherwise), set each value in order, submit the form or press its button, and report `done`, or
-   `submit_refused` when the site kept the form with an error.
+1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
+   site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), telling a
+   page's frames from the page in the navigation hook (a refused frame from another origin fails a write step, and after
+   the press it settles the write as not known), fields inside frames or a page's shadow DOM, check boxes, radio buttons
+   and editors that are not form fields, and a way to know a settings page took a change when it keeps the form.
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
@@ -408,6 +472,5 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
    as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
    page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
-   (the username first), a failure code of its own for a step held when the outpost stopped, the outpost on Windows
-   and Linux (no keychain support there yet), and the shop sessions of the several-shops switcher (the outpost follows
+   (the username first), the outpost on Windows and Linux (no keychain support there yet), and the shop sessions of the several-shops switcher (the outpost follows
    the session the page holds, which is the shop's own signed-in session today).

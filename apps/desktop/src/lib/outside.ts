@@ -6,7 +6,9 @@
 // come into `presentOutside`. Only the two settings below are read from this computer's storage.
 //
 // - Money and public posts never get Approve, and neither does anything this build does not know: notify-rules decides
-//   that from the request's approval-core kind. Approve is also dropped when the card itself offers no Allow once.
+//   that from the request's approval-core kind. Approve is also dropped when the card itself offers no Allow once, and
+//   when the body is not the request's exact action shown whole (cut to fit, changed on the way, or too long to be seen):
+//   notify-rules treats that as a hidden detail.
 // - macOS folds two or more buttons into an "Options" menu and reports the FIRST button for a click on the menu button
 //   itself (tauri-plugin-notification, desktop.rs), so the system gets the buttons with Approve last: a stray click can
 //   only look, never approve.
@@ -38,8 +40,11 @@ export interface RequestInfo {
   approval: string;
   /** Who asks. */
   member: string;
-  /** The exact action, in one line. */
+  /** The exact action, in one line, as the body says it. */
   summary: string;
+  /** The exact action, whole, as the card shows it. Approve is offered only when `summary` is this text, unchanged, and
+   *  notify-rules finds it short enough to be shown whole: an owner must not approve what they cannot read. */
+  action?: string;
   /** The card offers Allow once: this build can answer the request. */
   canApprove: boolean;
 }
@@ -61,7 +66,7 @@ export type Outside =
 export function eventOf(src: Outside): NotifyEvent | null {
   switch (src?.kind) {
     case "request":
-      return { type: "request", kind: src.approval, member: src.member, summary: src.summary };
+      return { type: "request", kind: src.approval, member: src.member, summary: src.summary, ...(src.action === undefined ? {} : { action: src.action }) };
     case "notice":
       return { type: "notice", title: src.title, body: src.body };
     case "page_down":

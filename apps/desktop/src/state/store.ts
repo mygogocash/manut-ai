@@ -225,6 +225,8 @@ export type ApprovalItem = {
   request_id: string;
   title: string;
   command: string;
+  /** `command` is read whole before it is approved (a browser write's sentence): shown with nothing cut or scrolled away. */
+  whole?: boolean;
   choices: ApprovalChoice[];
   /** The folder the command runs in, when the agent says. */
   cwd?: string;
@@ -1271,6 +1273,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
             request_id: ev.request_id,
             title: ev.title,
             command: ev.command,
+            ...(ev.whole ? { whole: true } : {}),
             choices: ev.choices,
             ...(ev.cwd ? { cwd: ev.cwd } : {}),
             ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),

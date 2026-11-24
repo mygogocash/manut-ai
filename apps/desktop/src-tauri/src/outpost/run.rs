@@ -12,8 +12,8 @@
 //! one minute and a step's two. Asking faster would crowd the limit for little; slower would eat into the grant.
 //!
 //! Nothing stops silently. A stop (the owner's Stop, signing out, quitting) wakes both threads at once; a step that is
-//! running ends as a browser error, and each step still held is reported failed (`browser_error`) rather than left to
-//! run out of time. A credential the API no longer takes (the outpost was removed, or given a new credential) ends the
+//! running ends as a browser error, and each step still held and not begun is reported not run (`not_run`) rather than
+//! left to run out of time: the outpost did nothing for it, so a write it held settles as nothing submitted. A credential the API no longer takes (the outpost was removed, or given a new credential) ends the
 //! loop, and the Connections page says so. While the API cannot be reached, the asks space out, doubling up to a
 //! minute, and an ask over the limit waits out the minute the API names.
 
@@ -196,14 +196,14 @@ fn ask(api: &dyn OutpostApi, browser: &dyn Browser, shared: &Shared, timing: &Ti
     }
 }
 
-/// Runs and reports each step in turn. Once the loop is stopping, a step not yet begun is reported failed at once
+/// Runs and reports each step in turn. Once the loop is stopping, a step not yet begun is reported not run at once
 /// instead of being run. Answers false when the API refused the credential.
 fn run_steps(steps: Vec<OutpostStep>, api: &dyn OutpostApi, browser: &dyn Browser, shared: &Shared, timing: &Timing, pace: &Pace)
     -> bool {
     shared.held.store(steps.len() as u32, Ordering::SeqCst);
     for step in steps {
         let outcome = if shared.stopping() {
-            Outcome::Failed(Failure::BrowserError)
+            Outcome::Failed(Failure::NotRun)
         } else {
             step::run_step(&step, browser, api, shared.stop_flag(), pace)
         };
@@ -240,7 +240,7 @@ fn report(api: &dyn OutpostApi, shared: &Shared, timing: &Timing, step_id: &str,
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::outpost::api::Redeemed;
+    use crate::outpost::api::{Redeemed, SubmitValue};
     use crate::outpost::step::fake::FakeBrowser;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
@@ -257,6 +257,8 @@ pub mod tests {
         open: Duration::from_millis(300),
         read: Duration::from_millis(300),
         sign_in: Duration::from_millis(300),
+        submit: Duration::from_millis(300),
+        press: Duration::from_millis(30),
         poll: Duration::from_millis(1),
         settled: Duration::from_millis(3),
     };
@@ -309,8 +311,7 @@ pub mod tests {
     const SHOP: &str = "https://seller.shopee.co.th";
 
     fn open(id: &str) -> OutpostStep {
-        OutpostStep { step_id: id.into(), kind: "open".into(), url: Some(format!("{SHOP}/{id}")), selector: None, grant_id: None,
-            origins: vec![SHOP.into()] }
+        OutpostStep { step_id: id.into(), kind: "open".into(), url: Some(format!("{SHOP}/{id}")), origins: vec![SHOP.into()], ..Default::default() }
     }
 
     fn page() -> FakeBrowser {
@@ -404,7 +405,8 @@ pub mod tests {
         let browser = page();
         let took = run_until(&api, &browser, &shared, || shared.stopping());
         assert!(took < Duration::from_secs(1), "{took:?}");
-        let failed = Outcome::Failed(Failure::BrowserError);
+        // The outpost did nothing for them: not run, which the API reads as nothing submitted, were one a write.
+        let failed = Outcome::Failed(Failure::NotRun);
         assert_eq!(*api.reports.lock().unwrap(), [("s-1".into(), failed.clone()), ("s-2".into(), failed.clone()), ("s-3".into(), failed)]);
         assert!(browser.opened.lock().unwrap().is_empty(), "nothing was run once it was stopping");
         assert_eq!(api.asks.load(Ordering::SeqCst), 1);
@@ -463,6 +465,42 @@ pub mod tests {
         assert_eq!(next_wait(Some(ApiError::Refused), ask * 4, &FAST), ask);
         assert_eq!(TIMING.ask, Duration::from_secs(3));
         assert_eq!(TIMING.beat, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn a_write_steps_values_reach_the_page_and_nothing_else() {
+        // A write step the API hands out, carrying a value nothing but the page may ever be given.
+        const KNOWN: &str = "Refund-ค่า-7731 \"exact\"";
+        let write = OutpostStep {
+            step_id: "s-w".into(),
+            kind: "submit".into(),
+            url: Some(format!("{SHOP}/portal/sale/return/2291")),
+            form: Some("form#refund".into()),
+            values: Some(vec![SubmitValue { field: "input[name=\"amount\"]".into(), value: zeroize::Zeroizing::new(KNOWN.into()) }]),
+            origins: vec![SHOP.into()],
+            ..Default::default()
+        };
+        let api = Api::default();
+        api.batches.lock().unwrap().push(vec![write, open("s-2")]);
+        let browser = FakeBrowser::at(None, Box::new(|name, _| match name {
+            "set" => Ok(r#"{"r":"set"}"#.into()),
+            "press" => Ok(format!(r#"{{"r":"pressed","a":"{SHOP}/portal/sale/return/2291"}}"#)),
+            "sent" => Ok(r#"{"s":"sent"}"#.into()),
+            _ => unreachable!("{name}"),
+        }));
+        let shared = Shared::default();
+        run_until(&api, &browser, &shared, || api.reports.lock().unwrap().len() >= 2);
+        // Done, reported with a code or nothing: no report the outpost sent holds the value, and neither does anything it
+        // noted or what it says it holds.
+        let reports = api.reports.lock().unwrap();
+        assert_eq!(*reports, [("s-w".to_string(), Outcome::Done(None)), ("s-2".to_string(), Outcome::Done(None))]);
+        assert!(!format!("{reports:?}").contains("7731"));
+        assert!(shared.notes().iter().all(|note| !note.contains("7731")));
+        assert_eq!(shared.held(), 0);
+        // The page was handed it, by the scripts that type and check it, and by nothing else.
+        for (name, args) in browser.calls.lock().unwrap().iter() {
+            assert_eq!(args.values().any(|v| v.contains("7731")), ["set", "press", "sent"].contains(name), "{name}");
+        }
     }
 
     #[test]

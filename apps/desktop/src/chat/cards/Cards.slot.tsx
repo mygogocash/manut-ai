@@ -164,7 +164,8 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
           {risks.join(" · ")}
         </div>
       )}
-      {item.command && <pre className="card-cmd">{item.command}</pre>}
+      {/* a browser write's sentence is read whole before it is approved: its block grows with it (cards.css .whole) */}
+      {item.command && <pre className={item.whole ? "card-cmd whole" : "card-cmd"}>{item.command}</pre>}
       {/* plan mode's plan: the agent's markdown as an answer reads, whole, scrolling inside the card */}
       {item.plan && (
         <div className="card-plan md" data-testid="card-plan">

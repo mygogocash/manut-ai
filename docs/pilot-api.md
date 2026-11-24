@@ -1082,12 +1082,18 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
 - `outcome: "failed"` with `code`, one of `origin_not_allowed` (a page was, or went, off the step's origins, and the
   outpost stopped there), `page_unavailable`, `selector_not_found`, `sign_in_refused` (the site refused the saved
   password), `grant_refused` (the redeem was refused), `submit_refused` (a write step's site refused what was submitted
-  and kept the form), `timed_out`, `browser_error`; and no text.
+  and kept the form), `not_run` (the outpost did not do what the step asks: a kind it does not know, a step missing what
+  its kind needs, or a stop before the step began or, for a write, before anything was typed), `timed_out`,
+  `browser_error`; and no text.
+
+This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
+nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the
+page shows, or `not_run` for a step it did nothing for.
 
 A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
 id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
-`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`) is `failed`, and any other is `unknown`,
-since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
+`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`, `not_run`) is `failed`, and any other is
+`unknown`, since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
 attempt (the step then reads refused, as below). A write step brings back no text.
 
 The outcome lands in the attempt's events as two agent events, a tool call in the agent event contract:
@@ -1264,10 +1270,10 @@ that quotes, line breaks and spaces at either end show: `Make a refund on Shopee
 "500.00", set select[name="reason"] to "damaged", then submit form#refund.` A write with no values reads `On {url},
 submit {form}.`
 
-The desktop does not show a browser write's `text` yet: it reads a request's words from a LINE reply's fields or the
-task's action, so a browser write reads "browser.submit on {origin}". It must show `text` on its cards and
-notifications, and offer Approve in a notification only when it shows the text whole, before any outpost runs a write
-step (`docs/browser-control.md`, "Next slices").
+The desktop shows a browser write's `text` as it came, in every language, on the chat's card, on Home and on Needs you,
+whole: never cut, and never in a block that scrolls. A notification offers Approve only when its body is that text,
+unchanged and short enough to be seen whole, which a sentence holding links never is (`docs/browser-control.md`,
+"The desktop showing a browser write").
 
 ## One origin
 

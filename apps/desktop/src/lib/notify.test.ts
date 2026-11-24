@@ -59,7 +59,11 @@ describe("noteFor: only what needs the person", () => {
 describe("noteFor: what notify-rules needs to know of a request", () => {
   const approval = (over: Record<string, unknown> = {}) => ev({ event: "approval.request", request_id: "req-5@1", title: "Refund", command: "Send on LINE: “Thanks!”", choices: ["once", "deny"], kind: "reply", ...over });
   it("carries the ask's id, its approval-core kind, who asks and how many wait, and says whether the card offers Allow once", () => {
-    expect(noteFor(approval(), { ...ctx(), waiting: () => 3 })?.ask).toEqual({ id: "req-5@1", approval: "reply", member: "Kami", canApprove: true, waiting: 3 });
+    expect(noteFor(approval(), { ...ctx(), waiting: () => 3 })?.ask).toEqual({ id: "req-5@1", approval: "reply", member: "Kami", canApprove: true, action: "Send on LINE: “Thanks!”", waiting: 3 });
+    // the exact action is the command as the card shows it, never the body cut or shortened for the notification
+    const long = noteFor(approval({ command: `Send on LINE: “See https://baanmali.shop/track?o=7 ${"and thanks ".repeat(20)}”` }), ctx());
+    expect(long?.ask?.action).toBe(`Send on LINE: “See https://baanmali.shop/track?o=7 ${"and thanks ".repeat(20)}”`);
+    expect(long?.body).not.toBe(long?.ask?.action);
     // the member is the bot's name as the app shows it
     expect(noteFor(approval(), { ...ctx(), name: () => "Nam" })?.ask?.member).toBe("Nam");
   });
