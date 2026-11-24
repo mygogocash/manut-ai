@@ -16,11 +16,14 @@ import {
   type DeletionRequest,
   type DeletionState,
   type DeletionView,
+  type EmailCodeSent,
+  type EmailSignIn,
   type Fact,
   type HelperRemoval,
   type Identity,
   type InboundMessage,
   type InviteView,
+  type JoinAnswer,
   type LinkedOwner,
   type Payment,
   type People,
@@ -33,6 +36,7 @@ import {
   type WorkerJobEntry,
 } from "./types";
 import { pilotGate } from "./gate";
+import { isCode, normalizeEmail } from "./email";
 import { endOfShopDay, formatIsoDate } from "../format";
 import * as peopleRules from "@manut/people-rules";
 import type { Away, Invite, PeopleState } from "@manut/people-rules";
@@ -102,6 +106,14 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// entry per job, oldest first as the shop's task index keeps them, read newest first by a job's task id. Baan Mali has
 /// seven jobs, one for each way a job can end here, and Sabai Tea none. Nothing in practice starts a job, so they are the
 /// sample's own; they are deleted with the shop, and the practice export does not carry them.
+///
+/// Joining a shop from an invite link (docs/people.md, "Invites") is answered as the API answers it: a code by email first,
+/// with the API's limits (one a minute, ten a day, ten minutes, five wrong tries), then the accept. Practice sends no email,
+/// so every code is `PRACTICE_SIGN_IN_CODE`, which the join page says aloud. The codes, the sign-ins and the helper sessions
+/// they give are kept in memory only, never with the saved world, so a practice sign-in never reaches the browser's storage.
+/// The demo links (`DEMO_JOIN_TOKENS`) answer as their names say, about Khao Soi Nimman, so they change nothing; a practice
+/// invite's own link from a People page is answered by that shop's people, so joining with the address it names makes a
+/// helper the People page then lists.
 
 export type FakeApiOptions = {
   /// Read on every admin call, like the real client. Any non-empty key is accepted.
@@ -117,6 +129,10 @@ export type FakeApiOptions = {
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined;
   /// What the model gateway reads from the Worker's settings, and whether its meter is up (meter.ts).
   modelGateway?: FakeModelGateway;
+  /// The path of the page open now, read on each sign-in call: while the join page's sign-in-off demo link is open
+  /// (`DEMO_JOIN_TOKENS.signInOff`), both sign-in routes answer `email_not_configured`, as every real environment does
+  /// today. Defaults to this page's own path.
+  pagePath?: () => string;
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
@@ -183,6 +199,12 @@ type FakeOwnerAccount = { id: string; subject: string; linkedAt: number };
 type FakeOwnerCode = { code: string; subject: string; ranOut?: boolean };
 /// A job with the shop it belongs to, which the API finds through the shop's own task index.
 type FakeWorkerJob = WorkerJobEntry & { tenant: string };
+/// One address's sign-in codes, as the API's auth object keeps them: the live code's end and its wrong tries while there is
+/// one, and when each code of the last 24 hours was sent, oldest first. Practice's code is always `PRACTICE_SIGN_IN_CODE`.
+type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: number[] };
+/// A helper session a practice join gave, by its token: the shop whose people record it, or null for a demo link's, which
+/// is recorded nowhere else.
+type FakeHelperSession = { tenant: string | null; helperId: string; sessionId: string };
 type FakeDb = {
   version: 10;
   seq: number;
@@ -218,8 +240,47 @@ const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
+/// The API's limits for signing in by email (apps/api/src/email-code.ts): a code works for ten minutes, an address gets
+/// one a minute and ten in any 24 hours, and five wrong tries end a code.
+const CODE_LIFE_MS = 10 * MINUTE_MS;
+const RESEND_MS = MINUTE_MS;
+const DAILY_CODES = 10;
+const MAX_WRONG_TRIES = 5;
+/// The longest device id an exchange takes.
+const DEVICE_ID_MAX = 128;
+/// A helper session lasts 30 days, with no refresh.
+const HELPER_SESSION_MS = 30 * DAY_MS;
 
 export const PRACTICE_CHANNEL_SECRET = "practice-channel-secret";
+
+/// The code every practice sign-in by email takes. Practice sends no email, so the join page says it aloud. It is the code
+/// the desktop's Practice sign-in says (apps/desktop/src/settings/emailFlow.ts), so both apps' practice reads the same.
+export const PRACTICE_SIGN_IN_CODE = "123456";
+
+/// The join page's demo links (`/join/{token}`). Each is about Khao Soi Nimman, a shop that is not on the console's list,
+/// and answers as its name says whoever signs in, so practising one changes nothing anywhere. `signInOff` stands for an
+/// environment where signing in by email is off, which every real one is today. Any other token is an unknown invite, but
+/// a practice invite's own link from a People page (`practice-<invite id>`), which that shop's people answer.
+export const DEMO_JOIN_TOKENS = {
+  joined: "demo-join",
+  wrongEmail: "demo-join-wrong",
+  wrongLine: "demo-join-line",
+  expired: "demo-join-expired",
+  used: "demo-join-used",
+  revoked: "demo-join-revoked",
+  signInOff: "demo-join-off",
+} as const;
+
+/// The shop the join page's demo links are about, its owner, and the name its owner gave the invite.
+export const DEMO_JOIN_SHOP = {
+  id: "pilot:practice-khao-soi-nimman",
+  name: "Khao Soi Nimman",
+  ownerName: "Lek",
+  helperName: "Noi",
+} as const;
+
+/// The join page's sign-in-off demo link, wherever it is open.
+const SIGN_IN_OFF_PATH = new RegExp(`^/join/${DEMO_JOIN_TOKENS.signInOff}/?$`);
 
 /// The link codes the practice world holds, as an owner's app shows them (`XXXX-XXXX`). Each works once, and a code goes the first
 /// time it is tried, whatever the answer. The sample world's accounts are Fon's, whom Baan Mali already has, Dao's and a guest's.
@@ -261,8 +322,17 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const storage = options.storage;
   const webOrigin =
     options.webOrigin ?? (typeof location !== "undefined" ? location.origin : "http://localhost:5173");
+  const pagePath = options.pagePath ?? (() => (typeof location !== "undefined" ? location.pathname : "/"));
 
   let db = load() ?? seed(now());
+
+  // Signing in by email and joining. The codes, the sign-ins (access token to address) and the helper sessions a join gave
+  // live in this closure and never in `db`, so nothing of a practice sign-in is ever saved to the browser's storage, and a
+  // reload forgets it, as the join page forgets a real one.
+  const emailCodes = new Map<string, FakeEmailCode>();
+  const signIns = new Map<string, string>();
+  const helperSessions = new Map<string, FakeHelperSession>();
+  let tokenSeq = 0;
 
   function load(): FakeDb | null {
     if (!storage) return null;
@@ -299,6 +369,88 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     const result = work();
     save();
     return JSON.parse(JSON.stringify(result)) as T;
+  }
+
+  /// A call that reads and writes nothing of the saved world: the same wait as every answer, and nothing saved.
+  async function quiet<T>(work: () => T): Promise<T> {
+    if (latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, latencyMs));
+    else await Promise.resolve();
+    return work();
+  }
+
+  /// Signing in by email is off while the sign-in-off demo link is open, as it is in every real environment today.
+  function signInOff(): boolean {
+    return SIGN_IN_OFF_PATH.test(pagePath());
+  }
+
+  /// The API's 429 for an address that had a code in the last minute or ten in the last day: whole seconds, rounded up.
+  function tooManyCodes(waitMs: number): ApiError {
+    return new ApiError(429, "too_many_codes", undefined, { retryAfter: Math.max(1, Math.ceil(waitMs / 1000)) });
+  }
+
+  /// What a demo link answers (`DEMO_JOIN_TOKENS`), or null for a token that is not one. The joined demo gives a helper
+  /// session as any join does, kept here only, so ending it works as ending a real one would.
+  function demoJoin(token: string): JoinAnswer | null {
+    const shop = { name: DEMO_JOIN_SHOP.name, ownerName: DEMO_JOIN_SHOP.ownerName };
+    switch (token) {
+      case DEMO_JOIN_TOKENS.joined: {
+        tokenSeq += 1;
+        const helperId = `helper-demo-${tokenSeq}`;
+        const accessToken = `mhs1.practice-demo-${tokenSeq}`;
+        helperSessions.set(accessToken, { tenant: null, helperId, sessionId: `hs-demo-${tokenSeq}` });
+        return {
+          answer: "joined",
+          shop: { id: DEMO_JOIN_SHOP.id, ...shop },
+          helper: { id: helperId, name: DEMO_JOIN_SHOP.helperName },
+          session: { accessToken, expiresAt: iso(now() + HELPER_SESSION_MS) },
+        };
+      }
+      case DEMO_JOIN_TOKENS.wrongEmail:
+        return { answer: "wrong_account", shop, invitedOn: "email" };
+      case DEMO_JOIN_TOKENS.wrongLine:
+        return { answer: "wrong_account", shop, invitedOn: "line" };
+      case DEMO_JOIN_TOKENS.expired:
+        return { answer: "expired" };
+      case DEMO_JOIN_TOKENS.used:
+        return { answer: "already_used" };
+      case DEMO_JOIN_TOKENS.revoked:
+        return { answer: "revoked" };
+      default:
+        return null;
+    }
+  }
+
+  /// A practice invite's own link (`practice-<invite id>`): the shop that holds the invite answers it by
+  /// `@manut/people-rules`' `acceptInvite`, as the API's people record does, with the address the code went to as the
+  /// account. Joining records the helper, the name the owner gave the invite and their first session, and the shop's log
+  /// says `helper.joined` by the helper; every other answer writes nothing.
+  function joinPractice(inviteId: string, address: string): JoinAnswer {
+    const tenant = Object.keys(db.people).find((key) => db.people[key]!.state.invites.some((invite) => invite.id === inviteId));
+    const shop = tenant === undefined ? undefined : db.shops.find((s) => s.tenant === tenant);
+    if (tenant === undefined || !shop) return { answer: "unknown" };
+    const record = peopleOf(tenant);
+    const n = db.seq + 1;
+    const helperId = `helper-${n}`;
+    const sessionId = `hs-${n}`;
+    const answered = peopleRules.acceptInvite(record.state, inviteId, { kind: "email", address }, helperId, sessionId, now());
+    if (answered.answer === "wrong_account") {
+      const invited = record.state.invites.find((invite) => invite.id === inviteId)!;
+      return { answer: "wrong_account", shop: { name: shop.name, ownerName: shop.ownerName }, invitedOn: invited.identity.kind };
+    }
+    if (answered.answer !== "joined") return { answer: answered.answer };
+    db.seq = n;
+    const name = record.names[inviteId] ?? "";
+    db.people[tenant] = { ...record, state: answered.state, names: { ...record.names, [helperId]: name } };
+    audit(tenant, { kind: "helper", id: helperId }, "helper.joined", { inviteId, helperId });
+    tokenSeq += 1;
+    const accessToken = `mhs1.practice-${tokenSeq}`;
+    helperSessions.set(accessToken, { tenant, helperId, sessionId });
+    return {
+      answer: "joined",
+      shop: { id: tenant, name: shop.name, ownerName: shop.ownerName },
+      helper: { id: helperId, name },
+      session: { accessToken, expiresAt: iso(now() + HELPER_SESSION_MS) },
+    };
   }
 
   function admin(): void {
@@ -597,8 +749,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return id;
   }
 
-  /// The link for an invite, the same each time it is shown while the invite waits. Nothing sends it, and a practice link
-  /// opens nothing: it only has the shape of the API's `${WEB_ORIGIN}/join/{token}`.
+  /// The link for an invite, the same each time it is shown while the invite waits. Nothing sends it. It has the shape of
+  /// the API's `${WEB_ORIGIN}/join/{token}`, and in practice it opens the join page, where `acceptInvite` answers it from
+  /// this shop's people.
   function inviteLink(invite: Invite): string {
     return `${webOrigin.replace(/\/+$/, "")}/join/practice-${invite.id}`;
   }
@@ -652,6 +805,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     reset() {
       db = seed(now());
       save();
+      emailCodes.clear();
+      signIns.clear();
+      helperSessions.clear();
     },
 
     async deliverLineWebhook(connectionId, rawBody, signature) {
@@ -1285,6 +1441,91 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           next: more && last ? last.taskId : null,
         };
       }),
+
+    // Signing in by email, as the API answers it, with practice's one code. The body is checked before the switch, as the
+    // API's Worker checks it. A new code replaces the one before, and a wait is whole seconds, rounded up.
+    requestEmailCode: (email) =>
+      quiet((): EmailCodeSent => {
+        const address = typeof email === "string" ? normalizeEmail(email) : null;
+        if (!address) throw new ApiError(400, "invalid_request");
+        if (signInOff()) throw new ApiError(400, "email_not_configured");
+        const at = now();
+        const sent = (emailCodes.get(address)?.sent ?? []).filter((time) => at - time < DAY_MS);
+        const newest = sent[sent.length - 1];
+        if (newest !== undefined && at - newest < RESEND_MS) throw tooManyCodes(newest + RESEND_MS - at);
+        if (sent.length >= DAILY_CODES) throw tooManyCodes(sent[0]! + DAY_MS - at);
+        emailCodes.set(address, { live: { expiresAt: at + CODE_LIFE_MS, wrong: 0 }, sent: [...sent, at] });
+        return { sent: true, expiresIn: CODE_LIFE_MS / 1000, resendIn: RESEND_MS / 1000 };
+      }),
+
+    // A code that is not six digits is not a try at all; a wrong one takes a try, and the fifth ends the code; the right one
+    // is used up as the session is made, so it signs in once.
+    exchangeEmailCode: (input) =>
+      quiet((): EmailSignIn => {
+        const address = typeof input.email === "string" ? normalizeEmail(input.email) : null;
+        const { code, deviceId } = input;
+        if (!address || typeof code !== "string" || !isCode(code) || typeof deviceId !== "string" || deviceId.length < 1 ||
+          deviceId.length > DEVICE_ID_MAX) {
+          throw new ApiError(400, "invalid_request");
+        }
+        if (signInOff()) throw new ApiError(400, "email_not_configured");
+        const record = emailCodes.get(address);
+        const live = record?.live;
+        if (!record || !live || now() >= live.expiresAt) throw new ApiError(401, "code_ended");
+        if (code !== PRACTICE_SIGN_IN_CODE) {
+          const wrong = live.wrong + 1;
+          const triesLeft = Math.max(0, MAX_WRONG_TRIES - wrong);
+          emailCodes.set(address, { ...record, live: triesLeft > 0 ? { ...live, wrong } : null });
+          throw new ApiError(401, "wrong_code", undefined, { triesLeft });
+        }
+        emailCodes.set(address, { ...record, live: null });
+        tokenSeq += 1;
+        const accessToken = `practice-access-${tokenSeq}`;
+        signIns.set(accessToken, address);
+        return {
+          accessToken,
+          refreshToken: `practice-refresh-${tokenSeq}`,
+          csrf: `practice-csrf-${tokenSeq}`,
+          expiresIn: 3600,
+          tenant: `email:practice-${tokenSeq}`,
+        };
+      }),
+
+    // The session first (401 for none), then the body, then the invite: a demo link's answer, a practice invite's by its
+    // shop's people, and `unknown` for anything else.
+    acceptInvite: (input) =>
+      run((): JoinAnswer => {
+        const address = signIns.get(input.accessToken);
+        if (!address) throw new ApiError(401, "unauthorized");
+        if (typeof input.inviteToken !== "string") throw new ApiError(400, "invalid_request");
+        const demo = demoJoin(input.inviteToken);
+        if (demo) return demo;
+        const practice = /^practice-(.+)$/.exec(input.inviteToken);
+        return practice?.[1] ? joinPractice(practice[1], address) : { answer: "unknown" };
+      }),
+
+    // Ends exactly the one helper session, as the API's sign-out of a device does: it leaves the helper's open sessions and
+    // the log says `helper.session_ended`; the helper stays a helper. A token no shop holds is 401.
+    endShopSession: async (accessToken) => {
+      await run(() => {
+        const held = helperSessions.get(accessToken);
+        if (!held) throw new ApiError(401, "unauthorized");
+        helperSessions.delete(accessToken);
+        const record = held.tenant === null ? undefined : db.people[held.tenant];
+        if (held.tenant === null || !record) return true;
+        const ended = peopleRules.endSession(record.state, held.helperId, held.sessionId);
+        if (!ended.ok) return true;
+        db.people[held.tenant] = { ...record, state: ended.state };
+        audit(held.tenant, { kind: "helper", id: held.helperId }, "helper.session_ended", { helperId: held.helperId });
+        return true;
+      });
+    },
+
+    signOut: async (accessToken) => {
+      await quiet(() => {
+        if (!signIns.delete(accessToken)) throw new ApiError(401, "invalid_session");
+      });
+    },
   };
 
 }

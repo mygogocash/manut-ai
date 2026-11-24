@@ -21,7 +21,8 @@ describe("default roster", () => {
     expect(ids("buddy")).toEqual(["route_work"]);
     expect(ids("nam")).toEqual(["read_orders", "order_status", "reply_customers", "place_orders", "change_orders"]);
     expect(ids("pim")).toEqual(["draft_posts", "publish_posts"]);
-    expect(ids("ton")).toEqual(["read_payments", "check_slips", "draft_books", "confirm_payment", "send_books", "ask_refund"]);
+    expect(ids("ton")).toEqual(["read_payments", "check_slips", "draft_books", "confirm_payment", "send_books", "ask_refund",
+      "append_books"]);
     expect(ids("kit")).toEqual(["run_command"]);
   });
   it("maps writes to the approval kinds", () => {
@@ -37,6 +38,8 @@ describe("default roster", () => {
     // An order placed or changed may spend, charge or refund the shop's money, so it asks as money: the owner's only.
     expect(kind("place_orders")).toBe("money");
     expect(kind("change_orders")).toBe("money");
+    // A month of the books into the owner's Google Sheet changes the shop's records, and its sales are the owner's alone.
+    expect(kind("append_books")).toBe("command");
   });
 });
 

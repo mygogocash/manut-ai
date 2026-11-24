@@ -1,19 +1,33 @@
 import { appendAudit } from "./audit-log";
+import { SHEETS_APPEND } from "./books-detail";
+import { sendBooks } from "./books-sheet";
 import { readConnectionSecret } from "./cred-broker";
+import type { GoogleEnv } from "./google";
+import { GOOGLE_PROVIDER } from "./google-vault";
 import { LINE_PUSH_OPERATION, lineReplyText, openLineCredentials, pushLineMessage } from "./connectors/line";
 import { checkGrant, ConnectorError } from "./connectors/types";
 import { readReplyBinding } from "./pilot-store";
 import type { ActionProposalJSON } from "./task-object";
 
-type ActionEnv = {
+type ActionEnv = GoogleEnv & {
   TASK: DurableObjectNamespace;
   CRED: DurableObjectNamespace;
   /// Holds the pilot's reply records, which a LINE push is checked against.
-  /// Without it no LINE push is ever sent.
+  /// Without it no LINE push is ever sent. It also holds the shop's audit log, and an append of Ton's books
+  /// (books-sheet.ts) needs it to mark a refused Google connection broken there; without it none is sent.
   TENANT?: DurableObjectNamespace;
 };
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+/// The provider each operation the broker sends is for. An action goes out only through a connection of that provider,
+/// so a connection's secret is only ever sent to the service it was given for: a Google token never reaches Linear,
+/// whatever connection id a proposal names. An operation not listed here is sent through no connection.
+const OPERATION_PROVIDERS: Readonly<Record<string, string>> = {
+  "linear.issue.create": "linear",
+  [LINE_PUSH_OPERATION]: "line",
+  [SHEETS_APPEND]: GOOGLE_PROVIDER,
+};
 
 /// A provider fault the broker classifies: permanent failures settle the
 /// action as failed, ambiguous ones as unknown. Unknown never retries
@@ -241,14 +255,24 @@ export async function finishDispatchAction(
   ).json()) as {
     connections?: {
       id?: string;
+      provider?: string;
       accountId?: string;
       resourceIds?: string[];
       allowsActions?: boolean;
       grantRevision?: number;
+      brokenAt?: string;
     }[];
   };
   const connection = (listing.connections ?? []).find((entry) => entry.id === proposal.connectionId);
   if (!connection) {
+    return settle("failed");
+  }
+  if (!Object.hasOwn(OPERATION_PROVIDERS, proposal.operationType) ||
+      connection.provider !== OPERATION_PROVIDERS[proposal.operationType]) {
+    return settle("failed");
+  }
+  // A connection its provider refused (google-vault.ts) sends nothing until the owner connects again.
+  if (connection.brokenAt !== undefined) {
     return settle("failed");
   }
   // The stored grant is authoritative: the approved account and target must
@@ -277,6 +301,24 @@ export async function finishDispatchAction(
     if (error instanceof ConnectorError) return settle("failed");
     throw error;
   }
+
+  if (proposal.operationType === SHEETS_APPEND) {
+    // A month of Ton's books into the owner's Google Sheet (books-sheet.ts). The refresh token goes from the vault to
+    // Google's token endpoint inside `sendBooks`; the access token it gets lives for this one append. The rows are the
+    // approved payload's, sent once. The shop's log gets `google.appended` with how it settled, ids only.
+    if (!env.TENANT) return settle("failed");
+    const sent = await sendBooks({ ...env, TENANT: env.TENANT }, proposal, opts.fetchImpl ?? fetch);
+    const settled = sent.outcome === "confirmed"
+      ? await settle("confirmed", { providerOperationId: sent.providerOperationId, receipt: sent.receipt })
+      : await settle(sent.outcome);
+    if (settled.ok && proposal.tenant) {
+      await appendAudit({ TENANT: env.TENANT }, proposal.tenant, { actor: { kind: "system" }, action: "google.appended",
+        subject: { taskId, actionId, connectionId: proposal.connectionId }, outcome: sent.outcome,
+        ...(sent.outcome === "confirmed" ? {} : { reason: sent.reason }) });
+    }
+    return settled;
+  }
+
   let secret: string;
   try {
     secret = await readConnectionSecret(

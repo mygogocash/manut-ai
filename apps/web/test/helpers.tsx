@@ -48,6 +48,11 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     getModelUsage: missing("getModelUsage"),
     setModelCap: missing("setModelCap"),
     listWorkerJobs: missing("listWorkerJobs"),
+    requestEmailCode: missing("requestEmailCode"),
+    exchangeEmailCode: missing("exchangeEmailCode"),
+    acceptInvite: missing("acceptInvite"),
+    endShopSession: missing("endShopSession"),
+    signOut: missing("signOut"),
     ...overrides,
   };
 }

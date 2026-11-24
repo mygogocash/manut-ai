@@ -44,6 +44,12 @@
   // the route is limited before it answers even while it is off.
   // TEST_EMAIL_OUTBOX, like TEST_JWKS_JSON, belongs in wrangler.test.json
   // only: the dev deploy check refuses any config that sets a TEST_ var.
+  // Google Sheets for Ton's books (docs/connectors.md, 4b): the owner's own
+  // OAuth client, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, two Wrangler
+  // secrets (`wrangler secret put GOOGLE_CLIENT_ID`, then the secret). No
+  // environment sets them yet, so every /v1/google route answers 503
+  // google_not_configured and nothing reaches Google. The client's redirect
+  // URI is PUBLIC_API_ORIGIN followed by /v1/google/callback.
   // Making a shop of one's own (docs/pilot-api.md, "Making a shop of your
   // own") is built and off: POST /v1/shops/new answers sign_ups_closed, and
   // reads nothing, until the var SELF_SERVE_SHOPS is "on". No environment sets
@@ -178,6 +184,14 @@
             "period": 60
           }
         },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112338",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
         // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
         // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
         {
@@ -281,6 +295,14 @@
           "namespace_id": "2026112331",
           "simple": {
             "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112339",
+          "simple": {
+            "limit": 30,
             "period": 60
           }
         },
@@ -390,6 +412,14 @@
             "period": 60
           }
         },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112340",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
+        },
         // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
         // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
         {
@@ -416,6 +446,9 @@
   // here, 34, 35 and 36 in dev, staging and prod): on 24 Nov 2026 the ids
   // 2026112301 to 32 clashed with nothing in the account, whose other
   // limiters use only 1001 and 1002 (docs/handoff.md).
+  // The Google callback's limiter comes next (2026112337 here, 38, 39 and 40
+  // in dev, staging and prod; google-connect.ts), keyed per source address;
+  // its ids have not been checked against the account's limiters yet.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -493,6 +526,14 @@
       "namespace_id": "2026112329",
       "simple": {
         "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "GOOGLE_CALLBACK_LIMITER",
+      "namespace_id": "2026112337",
+      "simple": {
+        "limit": 30,
         "period": 60
       }
     }

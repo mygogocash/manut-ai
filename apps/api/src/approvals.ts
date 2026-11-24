@@ -24,6 +24,7 @@
 
 import { decodeRecord, encodeRecord, encodeStanding, type ApprovalRecord, type Standing } from "@manut/approval-core";
 import { readJsonBody } from "./body";
+import { helperBooksDetail, isBooksDetail } from "./books-detail";
 import { decideRequest, type JobFlags, type JobFlowEnv } from "./job-flow";
 import {
   callerOf,
@@ -69,7 +70,7 @@ export async function approvalsRoute(request: Request, url: URL, env: ApprovalsE
     // The session names the shop and the role. A query naming either is refused, so it never even looks as if it were
     // read.
     if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
-    return listApprovals(env, caller.shop, url);
+    return listApprovals(env, caller.shop, url, caller.role);
   }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   let requestId: string;
@@ -172,8 +173,12 @@ async function findRequest(env: Pick<TenantDataEnv, "TASK" | "TENANT">, shop: st
 /// the newest `limit` of those that left it: decided, expired, or superseded. Both list the newest asked first. An
 /// index or a task that cannot be read fails the whole answer rather than leaving its approvals out: an approval
 /// missing from the list would read as nobody having asked.
-export async function listApprovals(env: Pick<TenantDataEnv, "TASK" | "TENANT">, tenant: string, url: URL):
-  Promise<Response> {
+///
+/// A helper is listed every approval too, so they can pass on what they may not decide, but an append of Ton's books
+/// (books-detail.ts) shows them only that it waits, for which month and which sheet: a month's books are sales, which
+/// helpers do not see (the design canvas's People board). Its rows and totals stay the owner's.
+export async function listApprovals(env: Pick<TenantDataEnv, "TASK" | "TENANT">, tenant: string, url: URL,
+  role: Caller["role"] = "owner"): Promise<Response> {
   const state = url.searchParams.get("state");
   if (state !== "open" && state !== "recent") return json({ error: "invalid_state" }, 400);
   const limitText = url.searchParams.get("limit");
@@ -210,9 +215,13 @@ export async function listApprovals(env: Pick<TenantDataEnv, "TASK" | "TENANT">,
     state,
     approvals: listed.map((entry) => {
       const note = notes.get(entry.record.request.id);
+      const detail = entry.record.request.detail;
+      const shown: ApprovalRecord = role === "helper" && isBooksDetail(detail)
+        ? { ...entry.record, request: { ...entry.record.request, detail: helperBooksDetail(detail) } }
+        : entry.record;
       return {
         taskId: entry.taskId,
-        record: encodeRecord(decodeRecord(entry.record)),
+        record: encodeRecord(decodeRecord(shown)),
         standing: encodeStanding(entry.standing),
         ...(note ? { passedOn: note } : {}),
       };

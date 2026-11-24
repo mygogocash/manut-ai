@@ -43,7 +43,7 @@ const MAX_BODY_BYTES = 256 * 1024;
 /// Lists the console reads. Export always reads everything.
 const MAX_LISTED_MESSAGES = 500;
 const MAX_LISTED_REPLIES = 200;
-const MAX_LISTED_PAYMENTS = 500;
+export const MAX_LISTED_PAYMENTS = 500;
 /// Durable Object storage takes at most 128 keys per put or delete call.
 const STORAGE_BATCH = 128;
 /// Events one delivery may carry. LINE batches a handful; the body limit

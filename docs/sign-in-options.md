@@ -14,7 +14,7 @@ in the backend and off until the owner turns them on (below); nothing is bought.
 | Who it suits | Owners and helpers with an Apple ID | Everyone with an email address | Everyone with LINE, most of Thailand |
 | What it needs | The Apple Developer Program, as an organization; the app signed by that team; `APPLE_CLIENT_ID` on the Worker | Sending email from the Worker: Cloudflare Email Service, in public beta since 16 April 2026, on the Workers Paid plan | A LINE Login channel on the owner's LINE account |
 | What it costs | $99 a year [A1] (one report of ฿3,590 in Thailand [A2]) | About 3,000 emails a month with the plan, then $0.35 a thousand [C1, C2]; a code per sign-in, so a pilot's use is free | Free |
-| Built today | Yes, with a test key | Built, off until the owner turns it on: the route for a code, its check and its limits, and the desktop's screen for it (24 Nov 2026); the web's pages are not | No |
+| Built today | Yes, with a test key | Built, off until the owner turns it on: the route for a code, its check and its limits, the desktop's screen for it, and the web's join page (24 Nov 2026) | No |
 | What it unblocks | The Mac app signed in; helpers whose Apple ID verifies the invited email | Every person on every device, the phone included, and email invites as the canvas draws them | Invites to a LINE account, as the canvas draws them ("sign in with their own LINE or email") |
 | What holds it back | A helper who hides their email from Apple cannot accept an email invite | Emails may land in spam until the sending domain is set up; Email Service is a beta | The owner parked LINE work |
 
@@ -41,7 +41,8 @@ hours: `POST /v1/auth/email/code`, and `POST /v1/auth/exchange` with `provider: 
   which owners see.
 
 Then the environment gets the Email Service binding and `EMAIL_SIGN_IN: "on"`. The desktop's screen for it is built (the
-next section); the web's pages are still to build, and the email is in English until the owner's writer does the Thai.
+next section), and so is the web's join page (`docs/people.md`, "Invites"); the email is in English until the owner's
+writer does the Thai.
 
 ## The desktop
 
@@ -51,7 +52,7 @@ it says "not on yet" wherever the API has the sign-in off, which is every enviro
 
 - **Where.** Under Sign-in, above Apple's rows (the identity token and its nonce), which are as they were. Practice has no
   API, so it shows only this, on a pretend code (below). The first run does not sign in at all (its Welcome says signing in
-  comes later), so it has no screen for this; the web's join page will have its own (December item 10).
+  comes later), so it has no screen for this; the web's join page has its own (`docs/people.md`, "Invites").
 - **Type an email, then Send code.** The address is read as the API reads it (trimmed, lower-cased), and a box that holds
   no address says so before anything is asked. The code box then takes six digits: typed, pasted (a paste of the whole line
   from the email is read as the six digits in it), or filled in by the system's one-time-code autofill where the webview

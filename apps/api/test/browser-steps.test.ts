@@ -779,6 +779,10 @@ describe("a worker's list of the shop's sign-ins", () => {
   it("lists every sign-in a member is named on, oldest first, a broken one as broken and a removed one not at all", async () => {
     const s = await shop();
     const shopee = await addSignIn(s.tenant, { members: ["ton"] });
+    // "Oldest first" is by the time a sign-in was made, to the millisecond, and two sign-ins made in the same one fall
+    // back to their random ids. A Worker's clock moves only between requests, so two adds in a row can share a
+    // millisecond; the second waits a few so the order this test checks is the order they were made.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     const lazada = await addSignIn(s.tenant, { members: ["ton"], site: "Lazada Seller Center",
       origins: ["https://sellercenter.lazada.co.th"] });
     const removed = await addSignIn(s.tenant, { members: ["ton"], site: "Old shop" });
