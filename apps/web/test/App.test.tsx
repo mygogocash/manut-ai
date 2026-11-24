@@ -1,15 +1,27 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+// The page every path is served, read as text: what it loads before the app runs.
+import indexHtml from "../index.html?raw";
 import { createApi } from "../src/api";
-import { createFakeApi, PRACTICE_OWNER_CODES } from "../src/api/fake";
+import { createFakeApi, DEMO_JOIN_TOKENS, PRACTICE_OWNER_CODES } from "../src/api/fake";
 import { App } from "../src/App";
+import { BRAND_FONTS_URL } from "../src/fonts";
 import { matchRoute } from "../src/router";
 
+/// The links that ask another origin for something, in the page's head.
+function foreignLinks(): string[] {
+  return [...document.head.querySelectorAll("link[href]")]
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((href) => new URL(href, window.location.href).origin !== window.location.origin);
+}
+
 describe("routing", () => {
-  it("matches the four pages and nothing else", () => {
+  it("matches the five pages and nothing else", () => {
     expect(matchRoute("/approve/abc_DEF-123")).toEqual({ name: "approve", token: "abc_DEF-123" });
     expect(matchRoute("/approve/abc/")).toEqual({ name: "approve", token: "abc" });
     expect(matchRoute("/delete/abc_DEF-123.mac")).toEqual({ name: "delete", token: "abc_DEF-123.mac" });
+    expect(matchRoute("/join/inv1.cGlsb3Q.4f2a")).toEqual({ name: "join", token: "inv1.cGlsb3Q.4f2a" });
+    expect(matchRoute("/join/abc/")).toEqual({ name: "join", token: "abc" });
     expect(matchRoute("/ops")).toEqual({ name: "ops" });
     expect(matchRoute("/")).toEqual({ name: "home" });
     expect(matchRoute("/approve/")).toEqual({ name: "notFound" });
@@ -17,6 +29,45 @@ describe("routing", () => {
     expect(matchRoute("/approve/%E0%A4%A")).toEqual({ name: "notFound" });
     expect(matchRoute("/delete/")).toEqual({ name: "notFound" });
     expect(matchRoute("/delete/a/b")).toEqual({ name: "notFound" });
+    expect(matchRoute("/join/")).toEqual({ name: "notFound" });
+    expect(matchRoute("/join/a/b")).toEqual({ name: "notFound" });
+    expect(matchRoute("/join/%E0%A4%A")).toEqual({ name: "notFound" });
+  });
+
+  it("opens the join page from its path, with a practice link for each answer and for signing in turned off", async () => {
+    window.history.replaceState(null, "", "/");
+    render(<App setup={{ api: createFakeApi(), mode: "fake" }} />);
+    const links = screen.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]);
+    expect(links.filter(([, href]) => href?.startsWith("/join/"))).toEqual([
+      ["Join a shop: the invite works", `/join/${DEMO_JOIN_TOKENS.joined}`],
+      ["Join a shop: the invite is for another email", `/join/${DEMO_JOIN_TOKENS.wrongEmail}`],
+      ["Join a shop: the invite is for a LINE account", `/join/${DEMO_JOIN_TOKENS.wrongLine}`],
+      ["Join a shop: invite expired", `/join/${DEMO_JOIN_TOKENS.expired}`],
+      ["Join a shop: invite already used", `/join/${DEMO_JOIN_TOKENS.used}`],
+      ["Join a shop: invite cancelled", `/join/${DEMO_JOIN_TOKENS.revoked}`],
+      ["Join a shop: invite link that does not work", "/join/not-a-real-invite"],
+      ["Join a shop: signing in by email is off", `/join/${DEMO_JOIN_TOKENS.signInOff}`],
+    ]);
+    fireEvent.click(screen.getByRole("link", { name: "Join a shop: the invite works" }));
+    expect(window.location.pathname).toBe("/join/demo-join");
+    expect(await screen.findByRole("heading", { name: "You've been invited to help with a shop on Manut AI" })).toBeTruthy();
+    expect(document.title).toBe("Join a shop");
+  });
+
+  it("links the brand's fonts on every page but the join page, which asks no other origin for anything", () => {
+    for (const link of document.head.querySelectorAll("link")) link.remove();
+    window.history.replaceState(null, "", "/join/inv1.cGlsb3Q.4f2a");
+    const { unmount } = render(<App setup={{ api: createFakeApi(), mode: "live" }} />);
+    expect(foreignLinks()).toEqual([]);
+    unmount();
+    window.history.replaceState(null, "", "/");
+    render(<App setup={{ api: createFakeApi(), mode: "live" }} />);
+    expect(foreignLinks()).toEqual(["https://fonts.googleapis.com", "https://fonts.gstatic.com", BRAND_FONTS_URL]);
+  });
+
+  it("serves a page that loads nothing from another origin and sends no Referer", () => {
+    expect(indexHtml).toContain('<meta name="referrer" content="no-referrer">');
+    expect(indexHtml).not.toMatch(/(?:href|src)="(?:https?:)?\/\//);
   });
 
   it("opens the owner's deletion page from its path, with a practice link for each state", async () => {

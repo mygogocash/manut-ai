@@ -66,7 +66,7 @@ describe("the pages Worker", () => {
   }
 
   it("serves the web app's files with headers that keep pages out of frames and tokens out of Referers", async () => {
-    for (const path of ["/", "/ops", "/approve/tok_123", "/assets/index-abc.js"]) {
+    for (const path of ["/", "/ops", "/approve/tok_123", "/join/inv_123", "/assets/index-abc.js"]) {
       const { response, seen } = await page(path);
       expect(seen.map((entry) => new URL(entry.url).pathname), path).toEqual([path]);
       expect(response.status, path).toBe(200);
@@ -79,10 +79,12 @@ describe("the pages Worker", () => {
     }
   });
 
-  it("never lets a browser or proxy store the page an approval or deletion link opens", async () => {
+  it("never lets a browser or proxy store the page an approval, deletion or invite link opens", async () => {
     expect((await page("/approve/tok_123")).response.headers.get("cache-control")).toBe("no-store");
     expect((await page("/delete/tok_123")).response.headers.get("cache-control")).toBe("no-store");
+    expect((await page("/join/inv_123")).response.headers.get("cache-control")).toBe("no-store");
     expect((await page("/ops")).response.headers.get("cache-control")).toBeNull();
+    expect((await page("/joined")).response.headers.get("cache-control")).toBeNull();
   });
 
   it("keeps the asset answer's status and body", async () => {
