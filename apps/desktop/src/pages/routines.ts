@@ -5,8 +5,8 @@
 // (src/runtime/routines.ts); the form asks the package itself whether what the owner chose is a routine, so it cannot
 // disagree with the runtime, and nothing here runs a routine.
 import { createRoutine, mustAskFirst, type RoutineRefusal, type Trigger } from "@manut/routine-rules";
-import { lang, locale, t, type Key } from "../i18n";
-import { MAX_ROUTINES, type NewRoutine, type RoutineRow } from "../runtime/routines";
+import { lang, locale, t } from "../i18n";
+import { MAX_ROUTINES, problemWords, type NewRoutine, type RoutineRow } from "../runtime/routines";
 import { unavailable } from "./load";
 
 /** A routine put in its place after it changed: where it stood, or last when the list did not have it. */
@@ -125,26 +125,9 @@ export function formProblem(f: RoutineForm): RoutineRefusal | null {
 /** Whether a routine of this kind always asks first, which the form shows before it is added. */
 export const formAsksFirst = (f: RoutineForm): boolean => mustAskFirst(f.action);
 
-/** Every refusal a new routine can get, the package's and the API's (`unknown_member` and `wrong_member` are the API's alone, and
- *  the form sends no member), in the owner's words. `invalid_id` and `invalid_request` are a call that went wrong, not a form that
- *  did, and say so in general words. */
-const PROBLEMS = new Map<string, Key>([
-  ["invalid_name", "routines.problem.name"],
-  ["invalid_action", "routines.problem.action"],
-  ["invalid_trigger", "routines.problem.trigger"],
-  ["invalid_time_zone", "routines.problem.zone"],
-  ["invalid_weekdays", "routines.problem.weekdays"],
-  ["invalid_time", "routines.problem.time"],
-  ["invalid_day", "routines.problem.day"],
-  ["invalid_window", "routines.problem.window"],
-  ["invalid_threshold", "routines.problem.threshold"],
-  ["must_ask_first", "routines.problem.mustAsk"],
-  ["unknown_member", "routines.problem.member"],
-  ["wrong_member", "routines.problem.member"],
-]);
-
-/** What is wrong with the form, in the owner's words. A reason the form cannot cause says so in general words. */
-export const problemText = (reason: string): string => t(PROBLEMS.get(reason) ?? "routines.problem.other");
+/** What is wrong with the form, in the owner's words (src/runtime/routines.ts says them once, for the connected runtime too). A reason
+ *  the form cannot cause says so in general words. */
+export const problemText = (reason: string): string => problemWords(reason) ?? t("routines.problem.other");
 
 // ---- how the page moves -------------------------------------------------------------------------------------------------
 
@@ -229,7 +212,7 @@ export function routinesReduce(s: RoutinesUi, a: RoutinesAction): RoutinesUi {
 export function refusalText(code: string, message: string): string {
   if (code === "full") return t("routines.err.full", { max: MAX_ROUTINES });
   if (code === "not_found") return t("rt.notFound");
-  return PROBLEMS.has(code) ? problemText(code) : message;
+  return problemWords(code) ?? message;
 }
 
 export type RoutineResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };

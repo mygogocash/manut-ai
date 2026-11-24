@@ -2425,7 +2425,7 @@ export const ko: Record<Key, string> = {
   "rt.pass.helpersOnly": "요청은 도우미만 넘길 수 있어요",
   "rt.pass.yours": "이 일은 직접 정할 수 있어요",
   "note.atShop": "{shop}의 {bot}",
-  "rt.notYet": "아직 안 돼요. 연결 모드는 지금은 승인 요청에 답하고, 팀의 루틴을 일시중지하고, 연결을 관리하는 일만 해요. 다른 변경은 다음 버전에 나와요.",
+  "rt.notYet": "아직 안 돼요. 연결 모드는 지금은 승인 요청에 답하고, 팀이 알고 있는 것과 루틴을 다루고, 연결과 사람을 관리하는 일만 해요. 다른 변경은 다음 버전에 나와요.",
   "rt.offline": "오프라인: Manut AI API에 연결할 수 없어요.",
   "rt.unavailable": "지금은 Manut AI API가 응답하지 않아요.",
   "rt.signedOut": "로그아웃됐어요. 설정 › 개발자에서 로그인하세요.",

@@ -299,8 +299,6 @@ describe("the owner's everyday writes", () => {
     for (const [op, params] of [
       ["chat.send", { bot: "buddy", text: "Hello" }],
       ["chat.send", { bot: "nam", text: "Hello" }],
-      ["routine.create", { shop: SHOP_A.id, name: "x", action: "brief", trigger: { kind: "daily", at: "08:00" } }],
-      ["routine.remove", { shop: SHOP_A.id, routine: "rt-0001-brief" }],
       ["automations.remove", { bot: "ton", job: "rt-0001-brief" }],
     ] as const)
       expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });

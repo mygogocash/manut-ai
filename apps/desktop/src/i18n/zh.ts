@@ -2425,7 +2425,7 @@ export const zh: Record<Key, string> = {
   "rt.pass.helpersOnly": "只有帮手才能转交请求",
   "rt.pass.yours": "这件事你可以自己决定",
   "note.atShop": "{shop} 的 {bot}",
-  "rt.notYet": "暂时还不行：连接模式目前只能回复审批、暂停团队的定时任务和管理连接。其他修改会在之后的版本中提供。",
+  "rt.notYet": "暂时还不行：连接模式目前只能回复审批、管理团队知道的事和定时任务，以及管理连接和人员。其他修改会在之后的版本中提供。",
   "rt.offline": "离线：无法连接 Manut AI API。",
   "rt.unavailable": "Manut AI API 暂时没有响应。",
   "rt.signedOut": "已退出登录。请在 设置 › 开发者 中登录。",

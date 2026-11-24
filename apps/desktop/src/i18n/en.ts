@@ -2447,7 +2447,7 @@ export const en = {
   "rt.pass.yours": "You can decide this one yourself",
   "note.atShop": "{bot} at {shop}",
   // the connected runtime (src/runtime/http): its refusals, and a shop's task told as Buddy's notes
-  "rt.notYet": "Not yet: Connected mode answers approvals, pauses your team’s routines and looks after Connections for now. Other changes come in a later version.",
+  "rt.notYet": "Not yet: Connected mode answers approvals, looks after what your team knows and its routines, and manages Connections and People for now. Other changes come in a later version.",
   "rt.offline": "Offline: the Manut AI API cannot be reached.",
   "rt.unavailable": "The Manut AI API is not answering right now.",
   "rt.signedOut": "Signed out. Sign in under Settings › Developer.",

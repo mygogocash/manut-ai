@@ -60,7 +60,7 @@ import { memoryHandlers } from "./memory";
 import { peopleHandlers } from "./people";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
 import type { TeamState } from "../mission";
-import type { RoutineRow } from "../routines";
+import { MAX_ROUTINES, newRoutineRefusal, problemWords, triggerBody, type RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
 import { decodeTeam, decodeTeamRoutines, readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot, type ShopTeam, type ShopWork, type TeamRoutine } from "./shop";
 import { departureOf, listShops, ShopSessions, type Departure, type Left, type ShopAnswer } from "./shops";
@@ -139,6 +139,12 @@ const ownerOnly = (shop: ShopRow) => new OpError("owner_only", t("rt.ownerOnly",
  *  (MAX_NOTE_LENGTH); the API checks it again. */
 const MAX_NOTE = 500;
 const PASS_ON_PATH = (requestId: string) => `/v1/approvals/${encodeURIComponent(requestId)}/pass-on`;
+/** The team's routines: `POST` makes one (`GET` lists them, with the shop's read), and `/remove` takes one away. */
+const ROUTINES_PATH = "/v1/routines";
+const REMOVE_ROUTINE_PATH = "/v1/routines/remove";
+/** What the API's refusals of a new routine say in words of their own: its limit, and the package's and the API's own reasons for
+ *  what is wrong with one. Any other is "did not make this change" (`not_found` is the generic 404's). */
+const routineWords = (code: string): string | null => (code === "full" ? t("routines.err.full", { max: MAX_ROUTINES }) : problemWords(code));
 
 /** The shop a read names by id, among its shops. */
 const partOf = (s: ShopSnapshot | null, shop: string): ShopPart | undefined => s?.shops?.find((p) => p.shop.id === shop);
@@ -185,9 +191,8 @@ const scheduleSig = (s: ShopSnapshot) =>
 /** The signature of what the team shows: who is on it, and each one's status, work and pause. */
 const teamSig = (s: ShopSnapshot | null) => JSON.stringify(team(s).map((b) => [b.name, b.status, b.running, b.paused ?? false]));
 
-/** The writes the owner makes to the viewed shop's team (`change`): refused while only a kept read is shown, as every
- *  write is. */
-const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.pause", "routine.resume", "automations.pause", "automations.resume"]);
+/** The writes the owner makes to a shop's team (`change`): refused while only a kept read is shown, as every write is. */
+const TEAM_CHANGES = new Set(["team.pause", "team.resume", "routine.create", "routine.pause", "routine.resume", "routine.remove", "automations.pause", "automations.resume"]);
 
 export class HttpHost {
   readonly session: ApiSession;
@@ -814,6 +819,44 @@ export class HttpHost {
     return teamRoutineRow(routine);
   }
 
+  /** A person in no shops has no team to give routines to: only their own sign-in's schedules, which no session changes. The API
+   *  answers a person's own sign-in 404, so nothing is sent for it. */
+  private noTeam(named: unknown): void {
+    if (named === null && this.snapshot && !this.snapshot.shops) throw new OpError("no_shop", t("routines.err.noShop"));
+  }
+
+  /** Makes a routine for `shop` (the shop its list was read for): `POST /v1/routines` with exactly `{ name, action, trigger }` and
+   *  `asksFirst` only when it was given, never a time zone or a member, so the API's own apply: the shop's time zone, and Nam for a
+   *  reply and Ton for the rest. What the API would refuse for the routine's shape is refused here first, with nothing sent, by the
+   *  rule said once beside the protocol; its limit of 50 and anything else it says it refuses in words. Its answer is the routine as
+   *  it now stands, listed at once, switched on. */
+  private async makeRoutine(p: OpMap["routine.create"]["params"]): Promise<{ routine: RoutineRow }> {
+    this.noTeam(p.shop);
+    const { shop } = this.ownedTeam(p.shop);
+    const refused = newRoutineRefusal(p);
+    if (refused) throw new OpError(refused, problemWords(refused) ?? t("rt.change.refused"));
+    const body = { name: p.name.trim(), action: p.action, trigger: triggerBody(p.trigger), ...(p.asksFirst === undefined ? {} : { asksFirst: p.asksFirst }) };
+    const json = (await this.change(shop, ROUTINES_PATH, body, routineWords)) as { routine?: unknown } | null;
+    // An answer that is no routine is never taken as one made: the read that follows says what the API holds.
+    const [routine] = decodeTeamRoutines({ routines: [json?.routine ?? null] }, []);
+    if (!routine) throw new OpError("unavailable", t("rt.change.unreadable"));
+    this.showTeam(shop.id, (w) => ({ ...w, routines: [...w.routines.filter((r) => r.id !== routine.id), routine] }));
+    return { routine: teamRoutineRow(routine) };
+  }
+
+  /** Takes one of `shop`'s routines away, with its runs and its clock: `POST /v1/routines/remove` with exactly `{ routineId }`. Only a
+   *  routine the read lists for that shop is sent. Its answer names the routine that went and holds none of it. */
+  private async removeRoutine(p: OpMap["routine.remove"]["params"]): Promise<{ routine: string }> {
+    this.noTeam(p.shop);
+    const { shop, work } = this.ownedTeam(p.shop);
+    const routineId = p.routine;
+    if (typeof routineId !== "string" || !work.routines.some((r) => r.id === routineId)) throw notFound();
+    const json = (await this.change(shop, REMOVE_ROUTINE_PATH, { routineId }, routineWords)) as { removed?: unknown } | null;
+    if (!json || json.removed !== routineId) throw new OpError("unavailable", t("rt.change.unreadable"));
+    this.showTeam(shop.id, (w) => ({ ...w, routines: w.routines.filter((r) => r.id !== routineId) }));
+    return { routine: routineId };
+  }
+
   /** The Automations page pausing or resuming a row: one of the team's routines goes the same way as from Customize, for the shop
    *  viewed. A schedule of the shop's own is not the owner's to change from a session (the API answers it 401), so it is not yet. */
   private async switchAutomation(p: { bot?: unknown; job?: unknown }, on: boolean): Promise<{ job: string }> {
@@ -1025,18 +1068,18 @@ export class HttpHost {
       // and in no read of the shop that is kept.
       ...memoryHandlers(this.ownerLink()),
       // The team's routines, then the shop's other schedules, for the shop viewed (its owner's to see: a shop the person helps at
-      // is refused). The owner pauses and resumes a routine through the API's routines routes, for the shop its list was read
-      // for; making and removing one wait for a later slice, and a schedule no session may change.
+      // is refused). The owner makes, pauses, resumes and removes a routine through the API's routines routes, for the shop its list
+      // was read for; a schedule no session may change.
       "routine.list": async () => {
         const snapshot = await this.current();
         const viewed = snapshot.viewing ? partOf(snapshot, snapshot.viewing) : undefined;
         if (viewed && viewed.shop.role !== "owner") throw ownerOnly(viewed.shop);
         return { shop: viewed?.shop.id ?? null, routines: shopRoutines(snapshot) };
       },
-      "routine.create": notYet,
+      "routine.create": (p) => this.makeRoutine(p),
       "routine.pause": async (p) => ({ routine: await this.switchRoutine(p.shop, p.routine, false) }),
       "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.shop, p.routine, true) }),
-      "routine.remove": notYet,
+      "routine.remove": (p) => this.removeRoutine(p),
       // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
       ...connectionHandlers(this.ownerLink()),
       // Customize › Connections: the shop's Google Sheet for Ton's books, with the owner's session (google.ts). A month Ton asked

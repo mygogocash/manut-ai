@@ -150,15 +150,15 @@ describe("the team's routines on the connected runtime", () => {
     expect(list[0]).toMatchObject({ timeZone: "Europe/London", next: (T0 + 86_400_000) / 1000 });
   });
 
-  it("cannot add, pause or resume a routine yet, and says so as every other write does", async () => {
+  it("has no team to give a routine to, and cannot change a schedule: it says so for each", async () => {
     const { req } = await connected();
     for (const [op, params] of [
       ["routine.create", { shop: null, name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
-      ["routine.pause", { shop: null, routine: "sched-1" }],
-      ["routine.resume", { shop: null, routine: "sched-1" }],
       ["routine.remove", { shop: null, routine: "sched-1" }],
     ] as const)
-      expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
+      expect(await refusal(req(op, params)), op).toEqual({ code: "no_shop", message: t("routines.err.noShop") });
+    // a schedule of the tenant's own is shown and never changed from a session, so it is not yet
+    for (const op of ["routine.pause", "routine.resume"] as const) expect(await refusal(req(op, { shop: null, routine: "sched-1" })), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
   });
 
   it("sends nothing to the API for a write, so a schedule is never changed from here", async () => {

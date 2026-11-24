@@ -21,6 +21,7 @@
 // says `null`, and the page then shows nothing about it, never a claim either way. Times are seconds since the epoch, as
 // everywhere in the protocol, although the package counts milliseconds: each runtime converts at its own edge.
 import { createRoutine, type ActionKind, type RoutineRefusal, type Trigger } from "@manut/routine-rules";
+import { t, type Key } from "../i18n";
 
 /** A routine as the Routines list shows it. */
 export interface RoutineRow {
@@ -79,6 +80,32 @@ export function newRoutineRefusal(p: { name: unknown; action: unknown; trigger: 
   });
   return made.ok ? null : made.reason;
 }
+
+/** Every refusal a new routine can get, the package's and the API's (`unknown_member` and `wrong_member` are the API's alone, and the
+ *  form sends no member), in words of the owner's. Said once, here: the New routine form says what is wrong with what the owner chose
+ *  by it, and the connected runtime says what the API refused by it. `invalid_id` and `invalid_request` are a call that went wrong, not
+ *  a form that did, so they have none of their own. */
+const PROBLEMS = new Map<string, Key>([
+  ["invalid_name", "routines.problem.name"],
+  ["invalid_action", "routines.problem.action"],
+  ["invalid_trigger", "routines.problem.trigger"],
+  ["invalid_time_zone", "routines.problem.zone"],
+  ["invalid_weekdays", "routines.problem.weekdays"],
+  ["invalid_time", "routines.problem.time"],
+  ["invalid_day", "routines.problem.day"],
+  ["invalid_window", "routines.problem.window"],
+  ["invalid_threshold", "routines.problem.threshold"],
+  ["must_ask_first", "routines.problem.mustAsk"],
+  ["unknown_member", "routines.problem.member"],
+  ["wrong_member", "routines.problem.member"],
+]);
+
+/** What is wrong with a new routine, in the owner's words, by the reason the package or the API gave; null for a reason with no
+ *  words of its own. */
+export const problemWords = (reason: string): string | null => {
+  const key = PROBLEMS.get(reason);
+  return key ? t(key) : null;
+};
 
 /** The timing as the API reads it, with only the fields its kind has, so nothing a caller left on the object goes with it. Only
  *  for a timing `newRoutineRefusal` took. */
