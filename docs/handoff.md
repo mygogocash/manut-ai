@@ -161,15 +161,19 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 47, each coding lane in a git worktree of its own (`feat/lane-worktrees`, Opus), started when item 44
-     finished. Two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
    - item 48, approvals found without reading every task: a per-shop lookup of which task holds each request
      (`feat/approval-index`, Opus), started when item 46 finished. `GET /v1/approvals` and deciding walk the whole
      task index one task at a time today, which a busy shop would take past Cloudflare's per-request call limit.
+   - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
+     buttons, select menus and editors, settings pages that keep their form, and frames told from the page
+     (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
+   Merged: 47 (each coding lane in a git worktree of its own under `~/.manut/lanes`, on a branch made from the
+   developer's, so lanes work at once and the developer's folder never moves; a folder goes only when its record, its
+   path and git's own list agree it is the app's, never pruned, and forced only after the person's yes to what goes;
+   Kit no longer sees the developer's uncommitted changes, and the chat says how many stayed behind), 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
    fact, make and remove a team routine, each change bound to the shop its list was read for; it also fixed the
    Connected Playwright stubs item 44 had left serving only the export, which failed nine `google-sheets` specs and one
    `make-shop` spec in CI on `d74eaf1`. The root gate runs no Playwright: when a merge changes what Connected reads, run
