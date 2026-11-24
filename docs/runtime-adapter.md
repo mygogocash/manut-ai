@@ -363,18 +363,28 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
   here with nothing sent, and nothing is sent while only a kept read is shown (`offline`). The API answers a person's own
   sign-in 404 `not_found` on the vault routes (24 Nov 2026: a vault is a pilot shop's), which these ops read as
   `no_shop` (`conn.err.noShop`), and `registerThisMac` as `no_shop` (`outpost.err.noShop`).
-- **The password** crosses once, a new sign-in's (`connections.add`) as a new password: the same session reads the
-  sign-ins first, so it is one that works, the shop still has the sign-in a new password is for (`sign_in_not_found`
-  otherwise, with nothing sent), and the vault has room for a new one (`too_many_sign_ins` at 50, with nothing sent); then
-  one send with no second try after a 401 (`ApiSession.writeOnce`, or the shop's session as it is held), which answers
-  `not_saved` and asks the owner to type it again. What the vault would not take is refused here first: a password empty
-  or over 1,024 characters, and for a new sign-in its name, its addresses, its account or its members, by the vault's own
-  rules said once in `src/runtime/connections.ts` (`newSignInRefusal`), which Practice keeps too.
+- **The password** crosses once, a new sign-in's (`connections.add`) as a new password, and as one typed again with a
+  change (`connections.change`): the same session reads the sign-ins first, so it is one that works, the shop still has
+  the sign-in a new password or a change is for (`sign_in_not_found` otherwise, with nothing sent), and the vault has room
+  for a new one (`too_many_sign_ins` at 50, with nothing sent); then one send with no second try after a 401
+  (`ApiSession.writeOnce`, or the shop's session as it is held), which answers `not_saved` and asks the owner to type it
+  again. What the vault would not take is refused here first: a password empty or over 1,024 characters, and for a new
+  sign-in its name, its addresses, its account or its members, by the vault's own rules said once in
+  `src/runtime/connections.ts` (`newSignInRefusal`), which Practice keeps too.
 - **Who may use a sign-in** (`connections.members`) carries no secret, so it goes as every other change does; members the
   vault would not take (none, a repeat, anyone but Nam, Pim, Ton and Kit) are refused here first.
-- **What the tab is shown.** Each sign-in without its account or its sites' addresses, and each outpost, times in
-  seconds; an entry this build cannot read is left out. The page keeps none of it in the store or the kept read: the tab
-  asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
+- **A sign-in's account or addresses** (`connections.change`) sends exactly `{ signInId, origins, username, password }`, the
+  password typed again or null. The vault's rule is said once in `src/runtime/connections.ts` (`signInChangeRefusal`) and
+  kept here and in Practice: the values by adding's rules first, with nothing read; then, against the account and
+  addresses the read lists, `no_change` for the same ones and `password_required` for anything but addresses taken away
+  with no password typed, each with nothing sent. A change with no password carries no secret and goes as every other
+  change does. The page sends a new password alone, with the account and addresses as they were, as `connections.password`.
+- **Removing a sign-in** (`connections.removeSignIn`) carries no secret and goes as every other change does, after the
+  page asked the owner in the sign-in's row; it answers the id removed, and `sign_in_not_found` for one already gone.
+- **What the tab is shown.** Each sign-in with its account and its sites' addresses (for Remove's question and Change's
+  fields; the row itself shows the canvas's lines only), and each outpost, times in seconds; an entry this build cannot
+  read whole, an account or an address included, is left out. The page keeps none of it in the store or the kept read: the
+  tab asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
 - **This Mac's own record.** The shell's view of this Mac for the shop shown (`outpost_status`) carries the id its outpost
   has on the shop's list, only when this Mac is that shop's outpost, and never its credential. The tab folds that record
   into this Mac's row (its name, Rename and Remove) and leaves it out of the shop's list; with no id, or an id the list
