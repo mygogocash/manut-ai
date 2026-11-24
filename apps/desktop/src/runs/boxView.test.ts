@@ -1120,7 +1120,9 @@ describe("the layout", () => {
           expect(faults(l), what).toEqual([]);
         }
     }
-  }, 30_000);
+    // As long as its neighbours above: about 6 seconds on an idle Mac, and five times that while other work loads it, which
+    // timed it out in the gate more than once at 30 seconds without anything being wrong.
+  }, 120_000);
 
   // the generator of the check that found two lines on one place in 54-60-node runs at 428px and 460px (its runs
   // 11, 13, 27 and 47): one column of boxes at the comfortable width left the lines too little room beside them.

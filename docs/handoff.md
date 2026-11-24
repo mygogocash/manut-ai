@@ -213,7 +213,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 ## Known flaky tests (they fail only under heavy load)
 
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
-- `apps/desktop` `src/runs/boxView.test.ts`: can pass 30 seconds when the machine is saturated.
+- `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
+  (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
+- `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
+  `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
+  alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
 
 ## Practical notes for this Mac
