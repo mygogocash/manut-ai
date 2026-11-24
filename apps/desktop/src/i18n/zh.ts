@@ -467,6 +467,8 @@ export const zh: Record<Key, string> = {
   "out.newDeviceTitle": "新的登录",
   "out.newDeviceBody": "有人在 {device} 上登录。是你本人吗？",
   "out.aNewDevice": "一台新设备",
+  "out.helperDeviceTitle": "{helper} 在新设备上登录了",
+  "out.helperDeviceBody": "{shop}，{when}。如果不是 {helper} 本人，请移除其访问权限。",
   "out.sleptTitle": "Mac 休眠期间",
   "out.sleptOne": "有 1 项任务在等你。",
   "out.sleptMany": "有 {n} 项任务在等你。",

@@ -467,6 +467,8 @@ export const ja: Record<Key, string> = {
   "out.newDeviceTitle": "新しいサインイン",
   "out.newDeviceBody": "{device} からサインインがありました。ご本人ですか？",
   "out.aNewDevice": "新しいデバイス",
+  "out.helperDeviceTitle": "{helper} さんが新しいデバイスでサインインしました",
+  "out.helperDeviceBody": "{shop}、{when}。{helper} さんでなければ、アクセスを外してください。",
   "out.sleptTitle": "Mac のスリープ中に",
   "out.sleptOne": "1 件の作業が待っていました。",
   "out.sleptMany": "{n} 件の作業が待っていました。",

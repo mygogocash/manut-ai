@@ -467,6 +467,8 @@ export const ko: Record<Key, string> = {
   "out.newDeviceTitle": "새 기기에서 로그인",
   "out.newDeviceBody": "{device}에서 로그인했어요. 본인이 맞나요?",
   "out.aNewDevice": "새 기기",
+  "out.helperDeviceTitle": "{helper} 님이 새 기기에서 로그인했어요",
+  "out.helperDeviceBody": "{shop}, {when}. {helper} 님이 아니라면 접근 권한을 없애세요.",
   "out.sleptTitle": "Mac이 잠든 동안",
   "out.sleptOne": "작업 1건이 기다렸어요.",
   "out.sleptMany": "작업 {n}건이 기다렸어요.",

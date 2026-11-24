@@ -1523,6 +1523,29 @@ no `tenant`. Each makes its change through the same operation of the shop's reco
   subject, an email or a name. No session, or the operator key, answers 401 `unauthorized`; an unlinked owner's session
   401 `unlinked`; 503 `people_unavailable` when the session or the shop's record cannot be read.
 
+**`GET /v1/people/devices`** with no body: the sign-ins helpers made lately, for the owner's app to tell them once of a
+new device (`docs/people.md`, "A helper's new device"). It is one entry for each helper session opened, a join included,
+newest first. It is not part of `People`, so the console reads what it read before.
+
+```ts
+type Devices = { devices: { id: string; helperId: string; name: string; openedAt: string }[] };
+```
+
+- **What it says.** `id` is the session's own id, stable, which the app keeps to know it has already said so. It is no
+  credential: a session is its token, which only its device holds, and the shop keeps only the token's hash. `helperId`
+  is the helper's id, `name` the name the owner gave them, and `openedAt` when the session was opened, by the shop's
+  clock. Nothing else: never a token, a hash, an email, a LINE id or the account a helper signed in with.
+- **Still signed in or not.** A sign-in stays listed after its device signs out, so an owner whose app was closed still
+  hears of it. It is dropped when it is older than a session lasts (30 days) and beyond the newest 50. The sign-ins of a
+  helper the owner removed are not listed. A shop whose record was written before sign-ins were kept lists none, and
+  starts at the next one.
+- **Who.** The same as the rest of this section: an owner session and the shop's own session. A helper's session answers
+  403 `owner_only`, a person's own sign-in 404 `not_found`, no session or the operator key 401 `unauthorized`, an
+  unlinked owner's session 401 `unlinked` and a removed helper's 401 `removed`. It has one method (405
+  `method_not_allowed`), takes no `shop`, `tenant` or `role` in the query (400 `invalid_request`), and answers 503
+  `people_unavailable` when the session or the shop's record cannot be read, never a shorter list.
+- Reading it writes nothing, not even to the audit log.
+
 ### A helper's own routes
 
 **`POST /v1/people/accept`** with `{ token }` (the invite link's last segment, in the body, never in a URL) and a

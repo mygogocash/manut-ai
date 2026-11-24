@@ -7,7 +7,7 @@ import { createRuntime, type RuntimeAdapter } from "../runtime";
 import type { MemoryFact } from "../runtime/memory";
 import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
 import type { RoutineRow } from "../runtime/routines";
-import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
+import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showNewDevice, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
 import { noteAsk } from "../chat/cards/askNote";
 import { settleApproval } from "../chat/cards/respond";
 import { appSounds, soundFor, type SoundBoard } from "../lib/sounds";
@@ -3496,6 +3496,12 @@ const noteGate = createNoteGate();
  *  waits for a texted one (8 s); an error notifies only with "Also notify on errors". */
 export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pick<Store, "getState" | "actions">): void {
   if (!notifyEnabled()) return;
+  // A helper signed in on a new device at a shop the person owns: Look first shows that shop (notify.ts `showNewDevice`)
+  if (ev.event === "device.new") {
+    const shop = ev.shop.id;
+    void showNewDevice({ id: ev.id, helper: ev.helper, shop: ev.shop.name, at: ev.at * 1000 }, () => void (store ?? singleton)?.actions.switchShop(shop));
+    return;
+  }
   const watching = (bot: string) => watchingChat(state, bot);
   const name = (bot: string) => chatRoute(bot)?.label ?? state.bots.find((b) => b.name === bot)?.display_name ?? bot;
   const note = noteFor(ev, { name, watching, errors: notifyErrorsEnabled(), waiting: () => selectAsks(state).length });

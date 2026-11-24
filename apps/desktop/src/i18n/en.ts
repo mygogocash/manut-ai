@@ -469,6 +469,9 @@ export const en = {
   "out.newDeviceTitle": "New sign-in",
   "out.newDeviceBody": "Someone signed in from {device}. Was it you?",
   "out.aNewDevice": "a new device",
+  // a helper signed in on a new device at a shop the person owns (the People board's "A new device")
+  "out.helperDeviceTitle": "{helper} signed in on a new device",
+  "out.helperDeviceBody": "{shop}, {when}. If this was not {helper}, remove access.",
   "out.sleptTitle": "While your Mac slept",
   "out.sleptOne": "1 job waited for you.",
   "out.sleptMany": "{n} jobs waited for you.",
