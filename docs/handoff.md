@@ -121,6 +121,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - item 19 (the outpost following the shop sessions), after 21, which changes the same outpost code; the cloud
      outpost after that (it may cost money).
+   - items 25 to 29, the code editor's states left for later that need no owner (`docs/code-editor.md`), as slots
+     free; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
