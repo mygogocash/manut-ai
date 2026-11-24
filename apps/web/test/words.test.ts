@@ -45,6 +45,8 @@ import {
   moneyText,
   monthName,
   monthsBack,
+  peopleChangedBy,
+  peopleChangesOf,
   peopleErrorText,
   peopleWords,
   percentUsed,
@@ -618,8 +620,60 @@ describe("the People page's words for the owner's linked account", () => {
   it("says on the owner's row whether an account is linked, in plain words", () => {
     expect(peopleWords.ownerLinked("2026-11-12T03:00:00.000Z")).toBe("Linked to the owner's account on 12 November");
     expect(peopleWords.ownerNotLinked).toBe("Not linked to an account yet");
-    expect(peopleWords.intro("Fon")).toBe(
-      "Who can use Manut AI for this shop. Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to.");
+    // Since the owner's own routes (slice 4) a linked owner can change the list too; without a linked account only an operator can.
+    expect(peopleWords.intro("Fon", true)).toBe(
+      "Who can use Manut AI for this shop. Fon can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs. Make a change here when Fon asks you to.");
+    expect(peopleWords.intro("Fon", false)).toBe(
+      "Who can use Manut AI for this shop. Fon has no account linked yet, so only an operator can change this list. Make a change here when Fon asks you to.");
+    expect(peopleWords.intro("Fon", true)).not.toMatch(/cannot change/);
+  });
+
+  it("says which of the owner and an operator made each change to the list, from the audit log's own entries", () => {
+    const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+      at: "2026-11-24T03:00:00.000Z", actor: { kind: "operator", email: "ops@manut.test" }, action: "invite.created", subject: {},
+      outcome: "ok", ...overrides });
+    // Only the changes an owner or an operator makes to who can use Manut AI, never a reply, a helper joining or a payment.
+    const log = [
+      entry({ action: "reply.proposed" }),
+      entry({ action: "invite.created" }),
+      entry({ action: "helper.joined", actor: { kind: "helper", id: "h1" } }),
+      entry({ action: "invite.revoked", actor: { kind: "owner", id: "owner-fon" } }),
+      entry({ action: "helper.removed", actor: { kind: "owner", id: "owner-session" } }),
+      entry({ action: "away.set" }),
+      entry({ action: "away.cleared", actor: { kind: "owner", id: "owner-fon" } }),
+      entry({ action: "owner.linked" }),
+      entry({ action: "owner.unlinked" }),
+      entry({ action: "payment.recorded" }),
+    ];
+    const all = peopleChangesOf(log, 10);
+    expect(all.shown.map((one) => one.action)).toEqual(["invite.created", "invite.revoked", "helper.removed", "away.set",
+      "away.cleared", "owner.linked", "owner.unlinked"]);
+    expect(all.more).toBe(false);
+    const few = peopleChangesOf(log, 3);
+    expect(few.shown.map((one) => one.action)).toEqual(["invite.created", "invite.revoked", "helper.removed"]);
+    expect(few.more).toBe(true);
+    expect(peopleChangesOf([], 10)).toEqual({ shown: [], more: false });
+
+    expect(peopleChangedBy({ kind: "owner", id: "owner-fon" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "owner", id: "owner-session" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "owner" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "operator", email: "ops@manut.test" }, "Fon")).toEqual({ label: "By an operator", className: "tag" });
+    expect(peopleChangedBy({ kind: "operator", email: null }, "Fon")).toEqual({ label: "By an operator", className: "tag" });
+    // Anyone else is named by the sentence alone.
+    expect(peopleChangedBy({ kind: "helper", id: "h1" }, "Fon")).toBeNull();
+    expect(peopleChangedBy({ kind: "system" }, "Fon")).toBeNull();
+  });
+
+  it("words the list of who changed it, and what it says when there is nothing to show", () => {
+    expect(peopleWords.changesTitle).toBe("Who changed this list");
+    expect(peopleWords.changesNote).toBe("Newest first");
+    expect(peopleWords.changesLabel("Baan Mali")).toBe("Changes to Baan Mali's people");
+    expect(peopleWords.changesNone).toBe("No change to the list is recorded yet.");
+    expect(peopleWords.changesNoneNewest(200)).toBe(
+      "No change to the list in the newest 200 audit entries. The Audit page has older ones.");
+    expect(peopleWords.changesMore(10)).toBe("Showing the newest 10. The Audit page has the rest.");
+    expect(peopleWords.changesUnavailable).toBe(
+      "The API could not read the audit log, so who changed the list is not shown. Press Refresh to try again.");
   });
 
   it("takes the code only from the owner, and says how it is written and what Link does", () => {

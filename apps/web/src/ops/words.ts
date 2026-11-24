@@ -504,6 +504,39 @@ function stepWords(entry: AuditEntry, words: { write: string; signIn: string; ot
   return entry.subject.requestId ? words.write : entry.subject.grantId ? words.signIn : words.other;
 }
 
+/// The audit actions that change who can use Manut AI for a shop, whoever makes them: an operator in the console, or the owner
+/// from their own session (docs/pilot-api.md, "Helpers" and "The owner's own routes"). A helper joining is the helper's own
+/// doing, and a helper's sign-in is no change to the list, so neither is one.
+const PEOPLE_CHANGE_ACTIONS: ReadonlySet<string> = new Set([
+  "invite.created",
+  "invite.revoked",
+  "helper.removed",
+  "away.set",
+  "away.cleared",
+  "owner.linked",
+  "owner.unlinked",
+]);
+
+/// The changes to a shop's people in a page of its audit log, in the page's order (newest first), at most `limit` of them, and
+/// whether there were more than that.
+export function peopleChangesOf(entries: readonly AuditEntry[], limit: number): { shown: AuditEntry[]; more: boolean } {
+  const changes = entries.filter((entry) => PEOPLE_CHANGE_ACTIONS.has(entry.action));
+  return { shown: changes.slice(0, limit), more: changes.length > limit };
+}
+
+/// Who made a change to the list, as a tag: the owner (however they acted: their linked account, the shop's own session or a
+/// link) or an operator. Anyone else is named by the sentence alone, so there is no tag.
+export function peopleChangedBy(actor: AuditActor, ownerName: string): { label: string; className: string } | null {
+  switch (actor.kind) {
+    case "owner":
+      return { label: peopleWords.changedByOwner(ownerName), className: "tag" };
+    case "operator":
+      return { label: peopleWords.changedByOperator, className: "tag" };
+    default:
+      return null;
+  }
+}
+
 /// The actions the Audit page has words for. A test holds this list against the API's own (`AUDIT_ACTIONS` in
 /// apps/api/src/audit-log.ts), so an action the API gains cannot reach the page as "did something.new".
 export function auditActionsWithWords(): string[] {
@@ -1017,15 +1050,20 @@ const KIND_TAGS = {
 } as const satisfies Record<ApprovalKind, string>;
 
 /// The People page: who can use Manut AI for one shop, laid out from the design canvas's "Settings: people" and "States:
-/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts for the owner, who
-/// cannot yet change the list from the app (and may have no account linked at all), so the words name the owner and say what a
-/// helper may and may not approve. What each role may approve is read from approval-core's `mayDecide`, and only named here.
-/// Sentences that hold a name or a date are functions.
+/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts on the owner's word,
+/// and since the owner's own routes (docs/several-shops.md, slice 4) the owner can change the list too, from the account linked
+/// as theirs, so the words say which of the two can, name the owner, and say what a helper may and may not approve. What each
+/// role may approve is read from approval-core's `mayDecide`, and only named here. Sentences that hold a name or a date are
+/// functions.
 export const peopleWords = {
   nav: "People",
   title: "People",
-  intro: (owner: string) =>
-    `Who can use Manut AI for this shop. ${owner} cannot change this list from the app yet, so invite, cancel, remove and set cover only when ${owner} asks you to.`,
+  /// Whether the owner can change the list themselves is whether an account is linked as theirs (`owner.account` of the people
+  /// list): the API lets the linked account invite, cancel, remove and set cover as an operator does, and nothing else can.
+  intro: (owner: string, linked: boolean) =>
+    linked
+      ? `Who can use Manut AI for this shop. ${owner} can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs. Make a change here when ${owner} asks you to.`
+      : `Who can use Manut AI for this shop. ${owner} has no account linked yet, so only an operator can change this list. Make a change here when ${owner} asks you to.`,
   shopLabel: "Shop",
   refresh: "Refresh",
   tryAgain: "Try again",
@@ -1185,6 +1223,21 @@ export const peopleWords = {
   noteRequest: (requestId: string) => `request ${requestId}`,
   noNotes: (owner: string) =>
     `No notes yet. When a helper cannot approve a request, they can pass it to ${owner} with a note, and it shows here.`,
+
+  // Who changed the list: the shop's audit log, read for the changes to its people. The people list itself does not say who made
+  // a change, and the log does, for the owner's changes as well as an operator's (docs/pilot-api.md, "Audit log").
+  changesTitle: "Who changed this list",
+  changesNote: "Newest first",
+  changesLabel: (shop: string) => `Changes to ${shop}'s people`,
+  changesLoading: "Loading who changed the list",
+  changesNone: "No change to the list is recorded yet.",
+  /// The page reads the newest entries only, so when it found no change and the log goes back further, it does not say there was none.
+  changesNoneNewest: (entries: number) =>
+    `No change to the list in the newest ${entries.toLocaleString("en-US")} audit entries. The Audit page has older ones.`,
+  changesMore: (shown: number) => `Showing the newest ${shown}. The Audit page has the rest.`,
+  changesUnavailable: "The API could not read the audit log, so who changed the list is not shown. Press Refresh to try again.",
+  changedByOwner: (owner: string) => `By ${owner}`,
+  changedByOperator: "By an operator",
 } as const;
 
 /// What the API said to a change of the people that changed nothing: its own refusals in the page's words, and the console's

@@ -1,8 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ApiError, type CreatedInvite, type HelperRemoval, type LinkedOwner, type OwnerAccountView, type People, type PilotApi,
-  type Shop, type UnlinkedOwner,
+  ApiError, type AuditEntry, type AuditPage, type CreatedInvite, type HelperRemoval, type LinkedOwner, type OwnerAccountView,
+  type People, type PilotApi, type Shop, type UnlinkedOwner,
 } from "../src/api";
 import { createFakeApi, PRACTICE_OWNER_CODES } from "../src/api/fake";
 import { OpsConsole } from "../src/ops/OpsConsole";
@@ -73,8 +73,10 @@ describe("the People page", () => {
       expect(screen.getByRole("heading", { level: 2, name: title })).toBeTruthy();
     }
     expect(within(who()).getByText("2 people, 1 invited")).toBeTruthy();
-    expect(screen.getByText(/Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to\./))
+    // Fon's account is linked in the practice world, so the owner can change the list too, and the page does not say they cannot.
+    expect(screen.getByText(/Fon can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs\. Make a change here when Fon asks you to\./))
       .toBeTruthy();
+    expect(screen.queryByText(/cannot change this list/)).toBeNull();
 
     // Going back to a shop leaves the People page.
     fireEvent.click(screen.getByRole("button", { name: "Sabai Tea" }));
@@ -980,5 +982,135 @@ describe("unlinking the owner's account", () => {
     expect(unlinkOwner).toHaveBeenCalledTimes(1);
     pending.resolve(UNLINKED);
     await screen.findByRole("status");
+  });
+});
+
+// Who changed the list. The owner can invite, cancel, remove and set cover from their own session since slice 4, so the page
+// reads the shop's audit log for those changes and says which the owner made and which an operator did. The People answer itself
+// does not say, and the log does: each entry names its actor (docs/pilot-api.md, "Audit log").
+describe("the People page: who changed the list", () => {
+  const CHANGES = "Changes to Baan Mali's people";
+  const operator = { kind: "operator" as const, email: "ops@manut.test" };
+  const fonsAccount = { kind: "owner" as const, id: "owner-fon" };
+  const shopsOwnSession = { kind: "owner" as const, id: "owner-session" };
+  const logEntry = (n: number, overrides: Partial<AuditEntry> = {}): AuditEntry => ({
+    id: `aud-mi8x2k4c0-${n.toString(36).padStart(3, "0")}-0a1b2c3d`, at: "2026-11-23T02:00:00.000Z", actor: operator,
+    action: "invite.created", subject: {}, outcome: "ok", ...overrides });
+  const auditPage = (entries: AuditEntry[], next: string | null = null): AuditPage => ({ tenant: "t1", entries, next, missed: null });
+  const BEAM = { id: "inv-beam", name: "Beam", identity: { kind: "line", id: "beam.baanmali" } as const, status: "pending" as const,
+    createdAt: "2026-11-23T01:00:00.000Z", expiresAt: "2026-11-30T01:00:00.000Z" };
+  const known = () => emptyPeople({ helpers: [MINT], invites: [BEAM], removed: [{ id: "helper-kai", name: "Kai" }] });
+  const changeRows = () => rowsOf(CHANGES).map((row) => row.textContent ?? "");
+
+  it("says what the owner can change when their account is linked, and that only an operator can when none is", async () => {
+    peopleView(stubApi({ getPeople: async () => withAccount(ACCOUNT), listAudit: async () => auditPage([]) }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    expect(screen.getByText(/Fon can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs\./))
+      .toBeTruthy();
+    expect(screen.queryByText(/has no account linked yet/)).toBeNull();
+  });
+
+  it("says only an operator can change the list while no account is linked", async () => {
+    peopleView(stubApi({ getPeople: async () => emptyPeople(), listAudit: async () => auditPage([]) }), T1, "t1");
+    await screen.findByRole("list", { name: PEOPLE });
+    expect(screen.getByText("Who can use Manut AI for this shop. Fon has no account linked yet, so only an operator can change this list. Make a change here when Fon asks you to."))
+      .toBeTruthy();
+    expect(screen.queryByText(/from their own sign-in too/)).toBeNull();
+  });
+
+  it("shows which changes the owner made and which an operator made, newest first, and leaves out everything else", async () => {
+    const listAudit = vi.fn(async () => auditPage([
+      logEntry(9, { action: "reply.proposed" }),
+      logEntry(8, { actor: shopsOwnSession, action: "away.cleared", subject: { helperId: "helper-mint" } }),
+      logEntry(7, { actor: operator, action: "invite.created", subject: { inviteId: "inv-beam" } }),
+      logEntry(6, { actor: { kind: "helper", id: "helper-mint" }, action: "helper.session_opened", subject: { helperId: "helper-mint" } }),
+      logEntry(5, { actor: fonsAccount, action: "helper.removed", subject: { helperId: "helper-kai" } }),
+      logEntry(4, { actor: fonsAccount, action: "invite.revoked", subject: { inviteId: "inv-beam" } }),
+      logEntry(3, { actor: operator, action: "owner.linked", subject: { ownerAccountId: "owner-fon" } }),
+      logEntry(2, { actor: operator, action: "payment.recorded", subject: { paymentId: "pay_1" } }),
+    ]));
+    peopleView(stubApi({ getPeople: async () => known(), listAudit }), T1, "t1");
+    await screen.findByRole("list", { name: CHANGES });
+    expect(listAudit).toHaveBeenCalledWith("t1", { limit: 200 });
+    const read = changeRows();
+    expect(read).toHaveLength(5);
+    expect(read[0]).toContain("Fon (the shop's own session) ended Mint's cover.");
+    expect(read[0]).toContain("By Fon");
+    expect(read[1]).toContain("ops@manut.test invited Beam.");
+    expect(read[1]).toContain("By an operator");
+    expect(read[2]).toContain("Fon (linked account owner-fon) removed Kai.");
+    expect(read[2]).toContain("By Fon");
+    expect(read[3]).toContain("Fon (linked account owner-fon) cancelled Beam's invite.");
+    expect(read[3]).toContain("By Fon");
+    expect(read[4]).toContain("ops@manut.test linked Fon's account to the shop.");
+    expect(read[4]).toContain("By an operator");
+    // When each happened, as the Audit page says it (a clock time; the date part depends on the day the test runs).
+    for (const text of read) expect(text).toMatch(/\d{2}:\d{2}/);
+    // A reply, a helper signing in and a payment are not changes to the list.
+    for (const text of read) expect(text).not.toMatch(/proposed|signed in|payment/);
+    expect(within(screen.getByRole("region", { name: "Who changed this list" })).getByText("Newest first")).toBeTruthy();
+  });
+
+  it("keeps the newest ten and says the rest are on the Audit page", async () => {
+    const many = Array.from({ length: 12 }, (_, i) => logEntry(40 - i, { subject: { inviteId: "inv-beam" } }));
+    peopleView(stubApi({ getPeople: async () => known(), listAudit: async () => auditPage(many) }), T1, "t1");
+    await screen.findByRole("list", { name: CHANGES });
+    expect(changeRows()).toHaveLength(10);
+    expect(screen.getByText("Showing the newest 10. The Audit page has the rest.")).toBeTruthy();
+  });
+
+  it("says when nothing is recorded, and that older entries may hold a change when the newest ones do not", async () => {
+    const quiet = [logEntry(9, { action: "reply.proposed" })];
+    peopleView(stubApi({ getPeople: async () => known(), listAudit: async () => auditPage(quiet) }), T1, "t1");
+    expect(await screen.findByText("No change to the list is recorded yet.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: CHANGES })).toBeNull();
+  });
+
+  it("does not claim there is no change when the log has older entries it did not read", async () => {
+    // A page that has an older one behind it is a full page: the API's largest, 200 entries, none of them a change to the list.
+    const quiet = Array.from({ length: 200 }, (_, i) => logEntry(400 - i, { action: "reply.proposed" }));
+    peopleView(stubApi({ getPeople: async () => known(),
+      listAudit: async () => auditPage(quiet, "aud-mi8x2k4c0-009-0a1b2c3d") }), T1, "t1");
+    expect(await screen.findByText("No change to the list in the newest 200 audit entries. The Audit page has older ones.")).toBeTruthy();
+    expect(screen.queryByText("No change to the list is recorded yet.")).toBeNull();
+  });
+
+  it("says the log could not be read, quietly, and still shows the people", async () => {
+    const listAudit = vi.fn(async (): Promise<AuditPage> => { throw new ApiError(503, "audit_unavailable"); });
+    peopleView(stubApi({ getPeople: async () => known(), listAudit }), T1, "t1");
+    expect(await screen.findByText("The API could not read the audit log, so who changed the list is not shown. Press Refresh to try again."))
+      .toBeTruthy();
+    expect(screen.getByRole("list", { name: PEOPLE })).toBeTruthy();
+    // Not an alert: the people on the page are fine, and a banner would read as if they were not.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("list", { name: CHANGES })).toBeNull();
+  });
+
+  it("reads the log again on Refresh, and after a change an operator makes here", async () => {
+    const api = fakeApi();
+    const listAudit = vi.spyOn(api, "listAudit");
+    peopleView(api);
+    await screen.findByRole("list", { name: CHANGES });
+    expect(changeRows().some((text) => text.includes("cancelled Beam's invite"))).toBe(false);
+    const before = listAudit.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(listAudit.mock.calls.length).toBeGreaterThan(before));
+
+    fireEvent.click(within(rowWith("Beam")).getByRole("button", { name: "Cancel invite" }));
+    await waitFor(() => expect(changeRows()[0]).toContain("An operator (no Access identity) cancelled Beam's invite."));
+    expect(changeRows()[0]).toContain("By an operator");
+  });
+
+  it("shows another shop's changes under that shop, never the last one's", async () => {
+    const listAudit = vi.fn(async (tenant: string) => auditPage(tenant === "t1"
+      ? [logEntry(2, { actor: fonsAccount, action: "invite.created", subject: { inviteId: "inv-beam" } })]
+      : [logEntry(1, { actor: operator, action: "away.cleared", subject: { helperId: "helper-mint" } })]));
+    const shops: Shop[] = [...T1, { tenant: "t2", name: "Sabai Tea", ownerName: "Dao", consent: false }];
+    peopleView(stubApi({ getPeople: async (tenant) => emptyPeople({ tenant, owner: { name: tenant === "t1" ? "Fon" : "Dao", account: null },
+      helpers: [MINT], invites: [BEAM] }), listAudit }), shops, "t1");
+    await screen.findByText(/Fon \(linked account owner-fon\) invited Beam\./);
+    fireEvent.change(screen.getByLabelText("Shop"), { target: { value: "t2" } });
+    await screen.findByText(/ops@manut\.test ended Mint's cover\./);
+    expect(screen.queryByText(/Fon \(linked account owner-fon\) invited Beam\./)).toBeNull();
   });
 });
