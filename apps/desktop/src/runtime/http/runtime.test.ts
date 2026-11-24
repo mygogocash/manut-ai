@@ -65,7 +65,8 @@ describe("connecting", () => {
     expect(rt.status).toBe("open");
     expect(host.link).toBe("open");
     expect(statuses).toEqual(["connecting", "open"]);
-    expect(gets(api).sort()).toEqual(["/v1/approvals", "/v1/inbound/attention", "/v1/schedules", "/v1/tenant/export"]);
+    // the person's shops first (none here), then the signed-in tenant's four reads, as before shops
+    expect(gets(api).sort()).toEqual(["/v1/approvals", "/v1/inbound/attention", "/v1/schedules", "/v1/shops", "/v1/tenant/export"]);
     for (const call of api.calls) expect(call.bearer).toBe("access-1");
   });
 
@@ -85,7 +86,7 @@ describe("connecting", () => {
     const a = new HttpRuntime(host);
     const b = new HttpRuntime(host);
     await Promise.all([a.connect(), b.connect()]);
-    expect(gets(api)).toHaveLength(4);
+    expect(gets(api)).toHaveLength(5);
   });
 
   it("waits signed out, closed, until someone signs in, then reads and opens", async () => {
@@ -257,10 +258,10 @@ describe("reading", () => {
     serveShop(api);
     await rt.connect();
     await rt.request("automations.list", {});
-    expect(gets(api)).toHaveLength(4);
+    expect(gets(api)).toHaveLength(5);
     await vi.advanceTimersByTimeAsync(20_000);
     await rt.request("automations.list", {});
-    expect(gets(api)).toHaveLength(8);
+    expect(gets(api)).toHaveLength(10);
   });
 });
 

@@ -47,6 +47,13 @@ describe("noteFor: only what needs the person", () => {
     const n = noteFor(ev({ event: "approval.request", request_id: "a", title: "Run", command: "curl https://api.example.com/v1/x -o /tmp/a/b/out.json", choices: [] }), ctx());
     expect(n).toMatchObject({ title: "Kami needs your approval", body: "curl api.example.com -o out.json" });
   });
+  it("an approval from one of several shops says whose it is, and offers no Approve where the person's role may not decide", () => {
+    const shop = { id: "pilot:b", name: "Ran Pa Noi", owner: "Noi", role: "helper" as const };
+    const reply = noteFor(ev({ event: "approval.request", request_id: "pilot%3Ab/r@1", title: "", command: "Send on LINE: “Hi”", choices: ["once", "deny"], kind: "reply", shop }), ctx());
+    expect(reply).toMatchObject({ title: "Kami at Ran Pa Noi needs your approval", ask: { canApprove: true } });
+    const money = noteFor(ev({ event: "approval.request", request_id: "pilot%3Ab/m@1", title: "", command: "Refund ฿120", choices: [], kind: "money", shop, pass_on: true }), ctx());
+    expect(money).toMatchObject({ title: "Kami at Ran Pa Noi needs your approval", ask: { canApprove: false } });
+  });
 });
 
 describe("noteFor: what notify-rules needs to know of a request", () => {

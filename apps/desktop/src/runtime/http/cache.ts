@@ -8,9 +8,11 @@
 //   whole objects (`raw`) and the entries it could not read are left out: the screens do not need them, and copying by
 //   name means nothing the API happened to carry beyond the decoded fields reaches the file. Nothing from the session is
 //   ever passed in here: no token, no refresh token, no keychain value.
-// - The file is named by a hash of the origin and the tenant, so each signed-in shop has its own and the name says
-//   neither. It holds no identity of its own: the name is the only link, and the desktop shell keeps only the one file
-//   of the one signed-in shop (src-tauri/src/shop_cache.rs).
+// - The file is named by a hash of the origin and the signed-in tenant, so each sign-in has its own and the name says
+//   neither, and the desktop shell keeps only the one file of the one sign-in (src-tauri/src/shop_cache.rs). With several
+//   shops (docs/several-shops.md), every shop's record in it is kept under that shop's id, so a shop's asks are only ever
+//   read back as that shop's, and a shop that leaves is dropped the next time the file is written. Writing the one file
+//   for all of them needs no change to the shell, which removes any other file when it writes one.
 // - A kept read is shown for 7 days from the moment it was read and never after. One that is damaged, from another
 //   version of the app or dated ahead of this computer's clock is not believed: it reads as nothing kept. Half a shop
 //   is never shown as the whole one, so a single bad entry ignores the whole file.
@@ -21,11 +23,11 @@
 import { encodeRecord, encodeStanding } from "@manut/approval-core";
 import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
 import { sha256Hex } from "./sha256";
-import type { Attention, ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+import type { Attention, ShopAction, ShopPart, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
 
-/** 2 since the asks are approval-core's records. A file of 1 holds none, so it is not read: what waits for the owner
- *  would be missing from it. */
-export const CACHE_VERSION = 2;
+/** 3 since it keeps several shops, each under its id. A file of 2 (the signed-in tenant's own read, as before shops) is
+ *  still read. A file of 1 holds no requests, so it is not read: what waits for the owner would be missing from it. */
+export const CACHE_VERSION = 3;
 /** A kept read is shown for this long after it was read. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
@@ -85,17 +87,29 @@ export function encodeSnapshot(s: ShopSnapshot): string {
         nextFire: x.nextFire,
         createdAt: x.createdAt,
       })),
-      approvals: s.approvals.map((a) => ({
-        taskId: a.taskId,
-        record: encodeRecord(shownRecord(a.record)),
-        standing: encodeStanding(a.standing),
-        passedOn: a.passedOn && { by: a.passedOn.by, name: a.passedOn.name, note: a.passedOn.note, at: a.passedOn.at },
-      })),
+      approvals: s.shops ? [] : s.approvals.map(approvalOf),
       attention: s.attention.map((x) => ({ id: x.id, connectionId: x.connectionId, eventType: x.eventType, issueId: x.issueId, receivedAt: x.receivedAt })),
       attentionOff: s.attentionOff,
       readAt: s.readAt,
+      // each shop under its own id, with what waits there; the viewed shop's own asks are its record's, not kept twice
+      ...(s.shops
+        ? {
+            shops: s.shops.map((p) => ({ id: p.shop.id, name: p.shop.name, owner: p.shop.owner, role: p.shop.role, approvals: p.approvals.map(approvalOf) })),
+            viewing: s.viewing ?? null,
+          }
+        : {}),
     },
   });
+}
+
+/** A request as the file keeps it: approval-core's wire JSON, its detail cut to the card's words, with any note passed on. */
+function approvalOf(a: ShopApproval) {
+  return {
+    taskId: a.taskId,
+    record: encodeRecord(shownRecord(a.record)),
+    standing: encodeStanding(a.standing),
+    passedOn: a.passedOn && { by: a.passedOn.by, name: a.passedOn.name, note: a.passedOn.note, at: a.passedOn.at },
+  };
 }
 
 type Obj = Record<string, unknown>;
@@ -156,6 +170,15 @@ function readAttention(v: unknown): Attention | null {
   return { id, connectionId, eventType, issueId, receivedAt, raw: null };
 }
 
+/** One shop of the file, whole: its id, name, owner, the person's role there, and its requests. */
+function readPart(v: unknown): ShopPart | null {
+  if (!isObj(v)) return null;
+  const { id, name, owner, role, approvals } = v;
+  if (!isId(id) || !isStr(name) || !isStr(owner) || (role !== "owner" && role !== "helper")) return null;
+  const read = every(approvals, readApproval);
+  return read ? { shop: { id, name, owner, role }, approvals: read } : null;
+}
+
 /** `list` read entry by entry, or null when it is not a list or any entry is not one. */
 function every<T>(list: unknown, read: (v: unknown) => T | null): T[] | null {
   if (!Array.isArray(list)) return null;
@@ -172,17 +195,25 @@ export function decodeCached(text: string | null, now: number): CachedRead {
   } catch {
     return NONE;
   }
-  if (!isObj(file) || file.v !== CACHE_VERSION || !isObj(file.snapshot)) return NONE;
+  if (!isObj(file) || (file.v !== CACHE_VERSION && file.v !== 2) || !isObj(file.snapshot)) return NONE;
   const s = file.snapshot;
   const tasks = every(s.tasks, readTask);
   const approvals = every(s.approvals, readApproval);
   const schedules = every(s.schedules, readSchedule);
   const attention = every(s.attention, readAttention);
   if (!tasks || !approvals || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
+  // Several shops, each under its id; a file of 2, or one written while the person was in no shop, has none.
+  const several = file.v === CACHE_VERSION && s.shops !== undefined;
+  const shops = several ? every(s.shops, readPart) : null;
+  if (several && (!shops || new Set(shops.map((p) => p.shop.id)).size !== shops.length)) return NONE;
   const readAt = s.readAt;
   if (readAt > now + CLOCK_SLACK_MS) return NONE;
   if (now - readAt > CACHE_MAX_AGE_MS) return { kind: "too_old", at: readAt };
-  return { kind: "usable", snapshot: { tasks, approvals, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt } };
+  const snapshot: ShopSnapshot = { tasks, approvals, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt };
+  if (!shops) return { kind: "usable", snapshot };
+  // The viewed shop is the one the file names while it holds it, else the first; its asks are its own record's.
+  const viewed = shops.find((p) => p.shop.id === s.viewing) ?? shops[0];
+  return { kind: "usable", snapshot: { ...snapshot, approvals: viewed ? viewed.approvals : [], shops, ...(viewed ? { viewing: viewed.shop.id } : {}) } };
 }
 
 // ---- the name ---------------------------------------------------------------------------------------------------------

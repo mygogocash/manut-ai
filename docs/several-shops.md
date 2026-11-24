@@ -6,7 +6,8 @@ pilot shop the operator created; and the slices that follow. This is the roadmap
 view" (`docs/plan.md`, December item 7). The first slice is built in `apps/api`: `shops.ts` and `shops-store.ts`, with
 the owner's account kept beside the helpers in `people.ts` and `people-store.ts`. The routes are in
 `docs/pilot-api.md`, "Several shops". The console's owner link (slice 3) and ending a shop session (slice 5) are built
-too.
+too, and so is the desktop (slice 2, 24 Nov 2026): the switcher, one Needs you across the shops, and each shop kept apart
+offline, on `feat/desktop-shop-switcher`.
 
 ## Where things stood
 
@@ -109,28 +110,51 @@ chat."; with one, Unlink asks once more ("{owner}'s app will be signed out of th
 sessions it ended. That line says where a code may come from and no more: how operators confirm a code is not settled by the
 owner (`docs/decisions.md`).
 
-## How the desktop shows them (the next slice)
+## How the desktop shows them
 
-- **One switcher, in the account row.** The account row at the bottom of the side menu shows who is signed in and the
-  shop being viewed. Opening it lists `GET /v1/shops`, the shops the person owns first, each with its role ("Owner",
-  "Helper"). Choosing one switches every page to that shop and its session. A person with one shop sees no switcher.
-- **One "Needs you" across the shops.** The app reads `GET /v1/approvals?state=open` once per shop, each with that
-  shop's own session, and merges them newest first. Each card names its shop and offers only what the person's role
-  there allows: a helper sees "Pass on" where the owner would see "Approve". A decision is always sent with the session
-  of the card's shop, never the shop the switcher shows.
-- **Each shop's data kept apart offline.** The offline cache keys every record by the shop's id, and each shop
-  session's token is stored under its shop. Switching shops never shows one shop's cached data under another's name.
-  Signing out ends every shop session with `POST /v1/shops/session/end` and clears every shop's cache and session. A
-  shop that leaves the list (unlinked, removed, deleted) has its cache and session dropped at the next refresh, and an
-  answer of 401 `unlinked` or `removed` drops them at once.
+Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `cache.ts`; the switcher in
+`src/sidebar/ShopSwitcher.tsx`). `docs/runtime-adapter.md`, "Several shops", says how each part reaches the API.
+
+- **A session per shop, kept with the sign-in.** After sign-in the app reads `GET /v1/shops` and opens each shop with
+  `POST /v1/shops/session` and exactly `{ shop }`. Each shop session (its token, its role, its end) is kept in the one
+  keychain item that holds the sign-in, under the shop's id, and nowhere else; every write to that item takes its turn
+  with the sign-in's refreshes. A session that ended, or that answers 401 for any reason but `unlinked` or `removed`, is
+  opened again once with the sign-in.
+- **What a shop shows.** A shop session reads only that shop's approvals (the API answers it 401 everywhere else), so a
+  pilot shop shows Buddy, with its requests and nothing more: History, Automations and Buddy's notes are empty until
+  owner sessions reach more routes (slice 4 below). A person in no shop sees their own signed-in tenant, as before shops.
+- **One switcher, in the account row.** The account row still opens Settings, and names the person and the shop being
+  viewed. With two or more shops a small button at the row's end (two chevrons, "Switch shop") opens the list above it:
+  the shops the person owns first, each with "Owner" or "Helper" and a tick on the one shown. Choosing one switches every
+  page to that shop and reads them again. A person with one shop sees no button. The shop viewed is not remembered between
+  starts: the app opens on the first one listed.
+- **One "Needs you" across the shops.** Each shop's `GET /v1/approvals?state=open` is read with that shop's own session,
+  and every shop's asks are one list, newest first by when each was asked. Each card, row and notification names its shop
+  ("Buddy at Ran Pa Noi needs your approval"). Each card offers only what the person's role there allows, as approval-core's
+  `mayDecide` says: where a helper may not decide (money, a public post, a payment, a command), the card says "Only Noi can
+  approve money" and offers "Ask Noi", the canvas's words for passing it on, which sends `POST
+  /v1/approvals/{id}/pass-on` with exactly `{ note }` (1 to 500 characters). A note passed on shows on the card: "Passed
+  on by Mint" and "Mint: <note>" for the owner, "Passed on to Noi" for the helper. A decision is always sent with the
+  session of the card's own shop, which the ask's id names, never the shop the switcher shows; the card's buttons, Home's
+  Approve and Approve on a notification all take that one path (`src/runtime/http/several.test.ts` fails if any does not).
+- **Each shop's data kept apart offline.** The kept read is one file per sign-in, as before, and every shop's record in it
+  is under that shop's id; a shop that leaves is dropped the next time the file is written. Signing out ends every shop
+  session with `POST /v1/shops/session/end` (the session itself as the bearer, exactly `{}`), then clears every shop's
+  session and kept read; a sign-out that cannot reach the API still clears this computer.
+- **A shop the person's place in ended.** An answer of 401 `removed` or `unlinked` drops that shop's session and kept read
+  at once. A shop that leaves the list is looked at once with its own session, so the app can say why and when, and then
+  dropped. Its asks close in those words, and a notice above the account row says them until dismissed: "You no longer
+  have access to Ran Pa Noi. Noi removed you on Sunday, November 22. Ask Noi if this is a mistake".
+- **Practice** lists two sample shops: the person's own (the demo team's, named as the first-run setup named it) and Ran
+  Pa Noi, where they help Noi. Typing `/shops` in a chat puts both shops' requests in Needs you; viewing Ran Pa Noi shows
+  Buddy alone with them, as a helper's shop shows when connected.
 
 ## The slices that follow
 
 1. **Done here (API):** the owner's linked account, the identity index, link codes, `GET /v1/shops`,
    `POST /v1/shops/session`, owner sessions on the approval routes and the team's routines, the operator's link and
    unlink, and the link in People.
-2. **Desktop:** the switcher, the combined "Needs you" and the per-shop offline cache, after the desktop's answering
-   slice lands.
+2. **Done here (desktop):** the switcher, the combined "Needs you" and the per-shop offline cache (24 Nov 2026), above.
 3. **Done here (console):** the shop's People page shows the owner's linked account on the owner's row, with a box for the
    link code and an Unlink that asks first (24 Nov 2026). The Audit page has words for `owner.linked`, `owner.unlinked` and
    the shop sessions' entries, and the practice mode answers both routes as the API does, with sample codes on its home
@@ -139,8 +163,8 @@ owner (`docs/decisions.md`).
    session reaches the approval routes and the team's routines. Whether the owner manages helpers from their own
    session belongs here too (`docs/people.md`, "Not built yet").
 5. **Done here (API):** ending a shop session from the app, `POST /v1/shops/session/end` (24 Nov 2026). It ends the one
-   session it is called with, an owner's or a helper's, and the desktop calls it on sign-out once its switcher is built. A
-   sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
+   session it is called with, an owner's or a helper's, and the desktop calls it on sign-out for each shop session it holds.
+   A sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
 6. **Co-owners:** more than one linked owner account per shop, if the owner wants it.
 7. **LINE Login as an identity**, parked with the rest of LINE.
 
@@ -154,3 +178,14 @@ owner (`docs/decisions.md`).
   unlinking or removal. Their pending link code is deleted with their data.
 - A person's index has no cap on its rows. Only an operator's link or an invite an operator made adds a row, so nothing
   a person does alone can grow it.
+
+## Known limits of the desktop slice
+
+- A pilot shop's pages show only what waits there, since a shop session reads nothing else. Its tasks, schedules and
+  attention items need owner sessions on more routes (slice 4), and a helper's view of them is the owner's to decide.
+- A request that leaves a shop's open list with no answer from this computer closes as "Answered elsewhere", or as timed
+  out once past its expiry: a shop session reads no tasks, so the app cannot tell a decision from a withdrawal there.
+  Reading `GET /v1/approvals?state=recent` when an ask leaves would tell, at one more request.
+- The shop viewed and the dismissed notices are not kept between starts.
+- One shop whose read fails (offline, or the API answering 5xx) fails the whole read, so the kept read stands in for every
+  shop until it answers again: one shop's asks never vanish because its read did not answer.

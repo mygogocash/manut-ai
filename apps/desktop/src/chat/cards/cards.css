@@ -462,3 +462,40 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* An ask from one of several shops (docs/several-shops.md): its shop's name above its title, quiet, so the card says
+   whose it is first; a note a helper passed on with it, set off as a quote; and the note a helper writes for the owner. */
+.card-shop {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+.card-passed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 9px;
+  border-left: 2px solid var(--line-strong);
+  font-size: 11.5px;
+}
+.card-passed-h {
+  font-weight: 600;
+  color: var(--ink);
+}
+.card-passed-n {
+  color: var(--body);
+  overflow-wrap: anywhere;
+}
+.card-pass {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.card-pass-in {
+  height: auto;
+  min-height: 44px;
+  padding: 5px 8px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
+}

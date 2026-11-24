@@ -111,7 +111,8 @@ export function noteFor(
       return ev.text.trim() ? { title: who, body: say(ev.text), bot, tag: `${bot}:message` } : null;
     case "approval.request":
       return {
-        title: t("note.approval", { bot: who }),
+        // an ask from one of several shops says whose it is: "Buddy at Ran Pa Noi needs your approval"
+        title: t("note.approval", { bot: ev.shop?.name ? t("note.atShop", { bot: who, shop: ev.shop.name }) : who }),
         body: clip(shortenRefs(ev.command || ev.title || t("ask.allowThis"))),
         bot,
         tag: `${bot}:approval`,

@@ -1,6 +1,8 @@
 // The side menu, as the design canvas draws it (`<nav class="sb">` in Approvals.dc.html): the brand mark and Search,
 // then New, Needs you (with the count of open asks), Team, Code, Artifacts, Customize and History, a Recent list of the
-// three newest threads, and the account row that opens Settings. New and the brand mark open Home. It replaces the
+// three newest threads, and the account row that opens Settings. New and the brand mark open Home. A person in two or
+// more shops also has the shop switcher at the end of the account row (ShopSwitcher.tsx), and is told above the row when
+// their place in a shop ended (docs/several-shops.md). It replaces the
 // sidebar the fork took from Oh My Hermes (a search box, a tasks bar, a needs strip, the BOTS and TERMINALS lists and a
 // foot of icon buttons), and each of those now lives on one of the menu's pages (src/pages). The canvas's budget pill
 // waits until the runtime has a budget to show, and hiding the menu is not built yet.
@@ -14,14 +16,17 @@ import "./sidebar.css";
 import "../sessions/sessions.css";
 import "./menu.css";
 import { t, type Key } from "../i18n";
+import type { ShopRow } from "../lib/protocol";
+import { leftWords } from "../lib/shops";
 import { can } from "../runtime";
-import { selectAsks, selectSidebarBots, useStore } from "../state/store";
+import { selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type ShopsState } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentThreads, rowPage, type MenuRow } from "./menu";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
+import { ShopSwitcher } from "./ShopSwitcher";
 import { UpdateButton } from "./UpdateButton";
 import { Usage } from "./Usage";
 
@@ -48,6 +53,8 @@ export function SideMenu({
   recent,
   settings,
   account = accountLabel(EMPTY_SHOP),
+  shops,
+  notice,
   onRow,
   onSearch,
   onAccount,
@@ -62,6 +69,10 @@ export function SideMenu({
   settings: boolean;
   /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
   account?: { name: string; initial: string };
+  /** the person's shops, for the switcher at the end of the account row; it shows only with two or more */
+  shops?: { list: readonly ShopRow[]; current: string | null; onSwitch: (id: string) => void };
+  /** that the person's place in a shop ended, said above the account row until dismissed */
+  notice?: { text: string; dismiss: () => void } | null;
   onRow: (row: MenuRow) => void;
   onSearch: () => void;
   onAccount: () => void;
@@ -118,16 +129,33 @@ export function SideMenu({
         {/* Who uses the app, and their settings. The canvas names the owner and the shop here ("Fon, Baan Mali"): the
             row names them as the first-run setup took them on this computer, and says "You" for what it was not told,
             never anything made up. */}
-        <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
-          <span className="av" aria-hidden="true">
-            {account.initial}
-          </span>
-          <span className="acct-n">{account.name}</span>
-          <span className="vh">, {t("nav.settings")}</span>
-        </button>
+        {notice && (
+          <div className="sb-shop-note" role="status" data-testid="shop-notice">
+            <span className="sb-shop-note-t">{notice.text}</span>
+            <button type="button" className="ib" aria-label={t("shops.dismiss")} title={t("shops.dismiss")} onClick={notice.dismiss} data-testid="shop-notice-dismiss">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        )}
+        <div className="acct-row">
+          <button type="button" className="acct" aria-current={settings ? "page" : undefined} title={t("nav.settings")} onClick={onAccount} data-testid="nav-settings">
+            <span className="av" aria-hidden="true">
+              {account.initial}
+            </span>
+            <span className="acct-n">{account.name}</span>
+            <span className="vh">, {t("nav.settings")}</span>
+          </button>
+          {shops && <ShopSwitcher list={shops.list} current={shops.current} onSwitch={shops.onSwitch} />}
+        </div>
       </div>
     </nav>
   );
+}
+
+/** The newest shop the person's place in ended and that they have not dismissed, in words, or null. */
+export function shopNotice(shops: Pick<ShopsState, "left" | "dismissed">, dismiss: (id: string) => void): { text: string; dismiss: () => void } | null {
+  const left = shops.left.find((l) => !shops.dismissed.includes(l.id));
+  return left ? { text: leftWords(left), dismiss: () => dismiss(left.id) } : null;
 }
 
 export function Sidebar() {
@@ -147,7 +175,9 @@ export function Sidebar() {
       needs={selectAsks(s).length}
       recent={recent}
       settings={s.ui.view === "settings"}
-      account={accountLabel(s.ui.shop)}
+      account={accountLabel({ person: s.ui.shop.person, shop: viewedShopName(s) })}
+      shops={{ list: s.shops.list.map((r) => ({ ...r, name: shopName(s, r) })), current: s.shops.current, onSwitch: (id) => void s.switchShop(id) }}
+      notice={shopNotice(s.shops, s.dismissShopNotice)}
       onRow={go}
       onSearch={() => s.openPage("history", { find: true })}
       onAccount={() => s.openSettings()}

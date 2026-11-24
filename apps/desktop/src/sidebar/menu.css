@@ -215,3 +215,89 @@
   font-size: 11px;
   font-weight: 600;
 }
+
+/* The desktop's own (the canvas draws no switcher; docs/several-shops.md): the account row with the shop switcher at its
+   end, the list of shops that opens above it, and the notice that a shop's place ended. The row keeps the canvas's look;
+   the switcher is a quiet icon button like Search, and the list a small menu on the overlay ground. */
+.sb .acct-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sb .acct-row .acct {
+  flex: 1;
+  min-width: 0;
+}
+.sb .acct-switch {
+  flex: none;
+  margin-left: 0;
+}
+.sb .shop-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--rad-lg);
+  background: var(--pop);
+  box-shadow: var(--pop-shadow);
+}
+.sb .shop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: var(--rad);
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+}
+.sb .shop-item:hover,
+.sb .shop-item:focus-visible {
+  background: var(--hov);
+}
+.sb .shop-item[aria-checked="true"] {
+  font-weight: 600;
+}
+.sb .shop-n {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb .shop-r {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--aui-muted);
+}
+.sb .shop-tick {
+  flex: none;
+  width: 12px;
+  text-align: center;
+}
+.sb .sb-shop-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 4px 6px 10px;
+  border-radius: var(--rad);
+  background: var(--warnbg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.sb .sb-shop-note-t {
+  flex: 1;
+  min-width: 0;
+}
+.sb .sb-shop-note .ib {
+  width: 24px;
+  height: 24px;
+}

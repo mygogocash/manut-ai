@@ -168,6 +168,45 @@ export interface Routine {
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny";
 
+/** The person's role at a shop: its owner, or a helper the owner invited (docs/people.md). */
+export type ShopRole = "owner" | "helper";
+
+/** One shop the person is in, as the runtime lists them for the switcher in the account row (`shops.list`). */
+export interface ShopRow {
+  id: string;
+  name: string;
+  /** the owner's name, as the shop's record gives it */
+  owner: string;
+  role: ShopRole;
+}
+
+/** A shop the person's place in ended while the app ran, so the app can say so: removed as its helper, unlinked as its
+ *  owner's account (each with when, in seconds, when the API said), or gone from their list with nothing said. */
+export interface ShopLeft {
+  id: string;
+  name: string;
+  owner: string;
+  why: "removed" | "unlinked" | "gone";
+  at: number | null;
+}
+
+/** The shop an ask comes from, and what the person is there, which says what the ask's card offers. */
+export interface AskShop {
+  id: string;
+  name: string;
+  owner: string;
+  role: ShopRole;
+}
+
+/** A note a helper passed on to the owner with a request (docs/people.md, "Passing a request on"). */
+export interface PassedOnNote {
+  /** the helper's name, as the owner gave it; "" when the app was not told it */
+  name: string;
+  note: string;
+  /** seconds, when it was passed on, when known */
+  at?: number;
+}
+
 /** One cron job of a bot for the Automations page (`automations.list`), read from its `cron/jobs.json`. */
 export interface Automation extends Routine {
   bot: string;
@@ -340,6 +379,17 @@ export interface OpMap extends MissionOps, MemoryOps, RoutineOps {
     params: { bot: string; request_id: string; choice: ApprovalChoice; session?: string };
     result: Record<string, never>;
   };
+  /** A helper hands the shop's owner an ask they may not decide, with a note (1 to 500 characters once trimmed). It decides
+   *  nothing: the ask keeps waiting for the owner. Only an ask whose event offered `pass_on` takes it. */
+  "approval.pass_on": {
+    params: { bot: string; request_id: string; note: string };
+    result: { passed_on: PassedOnNote };
+  };
+  /** The shops the person is in, the ones they own first, the one being viewed, and any the person's place in ended while
+   *  the app ran. A runtime that is not one person's view of several shops lists none. */
+  "shops.list": { params: Record<string, never>; result: { shops: ShopRow[]; current: string | null; left: ShopLeft[] } };
+  /** Shows `shop` on every page from now on. Asks keep coming from every shop: they are one Needs you across the shops. */
+  "shops.switch": { params: { shop: string }; result: Record<string, never> };
   /** One answer (`answer`) for a single question, or every answer of an interview at once (`answers`). */
   "clarify.respond": {
     params: { bot: string; request_id: string; answer?: string; answers?: ClarifyAnswers; session?: string };
@@ -688,6 +738,16 @@ export type BridgeEvent =
        *  text the API sent): what a notification may offer depends on it (notify-rules). Only the connected runtime's asks
        *  carry one; any other ask has none, which a notification reads as owner-only. */
       kind?: string;
+      /** The shop it comes from, when the runtime is one person's view of several shops: the card names it, and what the
+       *  card offers follows the person's role there. */
+      shop?: AskShop;
+      /** Seconds, when it was asked, when the runtime knows: the card keeps it, so asks from several shops sort by it. */
+      asked_at?: number;
+      /** The person may not decide it at that shop (a helper, and money, a public post, a payment or a command), but may
+       *  pass it on to the owner with a note (`approval.pass_on`). */
+      pass_on?: boolean;
+      /** A note a helper passed on with it, shown with the ask. */
+      passed_on?: PassedOnNote;
     })
   | (EventBase & {
       event: "clarify.request";
@@ -708,6 +768,8 @@ export type BridgeEvent =
   | (EventBase & { event: "bot.status"; status: BotStatus; running: boolean })
   | (EventBase & { event: "elsewhere.update" })
   | (EventBase & { event: "bots.update" })
+  /** The person's shops changed: one was added, left, or is now the one viewed. `shops.list` says how they stand. */
+  | (EventBase & { event: "shops.update" })
   /** After `bots.restart` said ok: the bot is attached again (`ok`), or did not come back in time. Also `ok` when a
    *  bot whose gateway went away without manut restarting it (an update, a relaunch) is attached again. */
   | (EventBase & { event: "bot.restarted"; ok: boolean })

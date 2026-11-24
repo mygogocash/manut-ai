@@ -54,6 +54,7 @@ import {
   SKILL_SEED,
   type BotSeed,
 } from "./seed";
+import { HELPED_INTRO, HELPED_REFUSAL, HELPED_SHOP, OWN_SHOP, sampleAsks, sampleShops, SHOPS_SAID, type WaitingAsk } from "./shops";
 
 /** A refusal, as the protocol's reply frame carries it. */
 export class OpError extends Error {
@@ -185,6 +186,9 @@ export class MockHost {
   private memory: MemoryState = emptyState();
   /** The team's routines, in the order they were made. */
   private routines: StoredRoutine[] = [];
+  /** Practice's sample shops (shops.ts): the one every page shows, and their requests still waiting, by request id. */
+  private shop = OWN_SHOP;
+  private shopAsks = new Map<string, WaitingAsk>();
 
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
@@ -237,6 +241,8 @@ export class MockHost {
       if (!learned.ok) throw new Error(`the staged fact "${s.text}" was refused: ${learned.reason}`);
       return learned.state;
     }, emptyState());
+    this.shop = OWN_SHOP;
+    this.shopAsks = new Map();
     this.routines = ROUTINE_SEED.map((input) => {
       const made = createRoutine(input);
       if (!made.ok) throw new Error(`the staged routine "${input.name}" was refused: ${made.reason}`);
@@ -254,7 +260,98 @@ export class MockHost {
   /** Answer one request, or throw the `OpError` that refuses it. */
   handle(op: string, params: Record<string, unknown> = {}): unknown {
     if (!Object.prototype.hasOwnProperty.call(this.ops, op)) throw new OpError("unknown_op", `no such op: ${op}`);
+    if (this.shop === HELPED_SHOP) {
+      const shown = this.helpedView(op, params);
+      if (shown !== undefined) return shown;
+    }
     return (this.ops[op as keyof AllOps] as (p: unknown) => unknown)(params);
+  }
+
+  /** While the person views Ran Pa Noi, the sample shop they help at: Buddy alone, with the requests, as a helper's shop
+   *  shows on the connected runtime (its session reads only what waits there); the demo team's lists are empty, and its
+   *  writes are refused in words. Undefined for an op answered as usual. */
+  private helpedView(op: string, p: Record<string, unknown>): unknown {
+    switch (op) {
+      case "bots.list":
+        return { bots: [this.publicBot(this.bots.buddy)] };
+      case "chat.open": {
+        if (p.bot !== "buddy") throw new OpError("unknown_bot", `no bot named ${String(p.bot)}`);
+        const m = this.models.buddy;
+        this.replayShopAsks();
+        return { session_id: "main-buddy-ran-pa-noi", messages: [{ id: "ran-pa-noi-intro", role: "assistant", text: HELPED_INTRO, ts: this.now() }], running: false, model: m.model, provider: m.provider, reasoning: m.reasoning };
+      }
+      case "thread.list":
+        return { threads: [] };
+      case "routines.list":
+      case "routine.list":
+        return { routines: [] };
+      case "automations.list":
+        return { automations: [] };
+      case "jobs.list":
+        return { jobs: [] };
+      case "activity.list":
+        return { events: [], keptMonths: ACTIVITY_KEPT_MONTHS };
+      case "memory.list":
+        return { facts: [] };
+      case "chat.send":
+      case "chat.steer":
+      case "thread.create":
+      case "automations.add":
+      case "routine.create":
+      case "memory.remember":
+      case "team.pause":
+        throw new OpError("not_yet", HELPED_REFUSAL);
+    }
+    return undefined;
+  }
+
+  /** The sample shops' requests still waiting go out again after a reply, as a runtime replays its asks. */
+  private replayShopAsks(): void {
+    const waiting = [...this.shopAsks.values()].map((a) => a.ev);
+    if (waiting.length) this.soon(() => waiting.forEach((e) => this.broadcast(e)));
+  }
+
+  /** /shops: the sample shops' requests arrive in Buddy's chat, and Needs you shows them, each naming its shop. */
+  private scriptShops(key: string): void {
+    this.schedule(key, [
+      [
+        150,
+        () => {
+          for (const a of sampleAsks("buddy", this.now())) {
+            this.shopAsks.set(a.ev.request_id, a);
+            this.broadcast(a.ev);
+          }
+        },
+      ],
+      [250, () => this.say(key, SHOPS_SAID)],
+      [350, () => this.endTurn(key, "done")],
+    ]);
+  }
+
+  /** An answer to a sample shop's request: taken once when the person's role there may decide its kind, as approval-core
+   *  decides on the connected runtime; otherwise refused in the words its card says. */
+  private answerShopAsk(id: string, choice: ApprovalChoice): Record<string, never> {
+    const waiting = this.shopAsks.get(id);
+    if (!waiting) throw new OpError("not_found", `no pending approval ${id}`);
+    if (!waiting.ev.choices.includes(choice)) throw new OpError("not_permitted", `Only ${waiting.shop.owner} can decide this`);
+    this.shopAsks.delete(id);
+    return {};
+  }
+
+  /** A helper passing a sample request on to its owner, with a note: once, for a request only the owner decides. */
+  private passOnShopAsk(id: string, note: unknown): { passed_on: { name: string; note: string; at: number } } {
+    const waiting = this.shopAsks.get(id);
+    if (!waiting) throw new OpError("not_found", `no pending approval ${id}`);
+    // in the order the API refuses: only a helper passes a request on, one they may decide stays theirs, and once only
+    if (waiting.shop.role !== "helper") throw new OpError("not_a_helper", "Only a helper passes a request on");
+    if (waiting.ev.passed_on) throw new OpError("already_passed", `Already passed on to ${waiting.shop.owner}`);
+    if (!waiting.ev.pass_on) throw new OpError("decide_yourself", "You can decide this one yourself");
+    const text = typeof note === "string" ? note.trim() : "";
+    if (!text || [...text].length > 500) throw new OpError("bad_note", "Write a note of 1 to 500 characters");
+    const passed = { name: "", note: text, at: this.now() };
+    const { pass_on: _gone, ...ev } = waiting.ev;
+    this.shopAsks.set(id, { ...waiting, ev: { ...ev, passed_on: passed } });
+    return { passed_on: passed };
   }
 
   // ---- helpers ----------------------------------------------------------------------------------------------
@@ -470,6 +567,7 @@ export class MockHost {
     if (text.startsWith("/clarify")) return this.scriptClarify(key);
     if (text.startsWith("/interview")) return this.scriptInterview(key);
     if (text.startsWith("/delegate")) return this.scriptDelegate(key);
+    if (text.startsWith("/shops")) return this.scriptShops(key);
     if (session !== undefined) return this.scriptThread(key, text);
     this.scriptNormal(key);
   }
@@ -628,6 +726,7 @@ export class MockHost {
       // asks still waiting on the person go out again after the reply
       const waiting = [...this.pending.keys()].map((id) => this.asked.get(id)).filter((e): e is MockEvent => !!e && e.bot === b.name && !("session" in e && e.session));
       if (waiting.length) this.soon(() => waiting.forEach((e) => this.broadcast(e)));
+      if (b.name === "buddy") this.replayShopAsks();
       return { session_id: `main-${b.name}`, messages: [...this.history[b.name]], running: !!this.turns[b.name], model: m.model, provider: m.provider, reasoning: m.reasoning };
     },
     "chat.send": (p) => {
@@ -670,6 +769,7 @@ export class MockHost {
     },
     // An approval settles once: the first answer takes it out of `pending`, and any later answer is `not_found`.
     "approval.respond": (p) => {
+      if (typeof p.request_id === "string" && this.shopAsks.has(p.request_id)) return this.answerShopAsk(p.request_id, p.choice);
       const key = this.target(p);
       this.refusePaused(splitKey(key)[0]);
       const id = this.needText(p.request_id, "request_id");
@@ -678,6 +778,16 @@ export class MockHost {
       if (!wait || wait.key !== key || wait.kind !== "approval") throw new OpError("not_found", `no pending approval ${id}`);
       this.pending.delete(id);
       this.resumeApproval(key, p.choice);
+      return {};
+    },
+    "approval.pass_on": (p) => (this.needBot(p), this.passOnShopAsk(this.needText(p.request_id, "request_id"), p.note)),
+    "shops.list": () => ({ shops: sampleShops(), current: this.shop, left: [] }),
+    "shops.switch": (p) => {
+      if (p.shop !== OWN_SHOP && p.shop !== HELPED_SHOP) throw new OpError("not_found", "no such shop");
+      if (p.shop !== this.shop) {
+        this.shop = p.shop;
+        this.soon(() => this.broadcast({ event: "shops.update", bot: "buddy" }));
+      }
       return {};
     },
     "clarify.respond": (p) => {

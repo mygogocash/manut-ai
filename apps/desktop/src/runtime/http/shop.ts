@@ -13,6 +13,7 @@
 // Decoding never throws. A record keeps the API's whole object in `raw`, so a field this app does not know yet is
 // still there for a later slice; a state, an operation or an event kind it does not know is kept as written; and an
 // entry it cannot read at all (no id) goes to `unreadable` instead of vanishing.
+import type { ShopRow } from "../../lib/protocol";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import type { ApiSession, Answer } from "./session";
 
@@ -73,6 +74,13 @@ export interface Attention {
   raw: unknown;
 }
 
+/** One of the person's shops in a read (docs/several-shops.md): who it is, the role the person acts as there (the one its
+ *  session holds, which is what the API decides with), and what waits there, read with that shop's own session. */
+export interface ShopPart {
+  shop: ShopRow;
+  approvals: ShopApproval[];
+}
+
 export interface ShopSnapshot {
   tasks: ShopTask[];
   /** approval-core's requests still waiting for an answer, as the API listed them */
@@ -85,6 +93,12 @@ export interface ShopSnapshot {
   unreadable: unknown[];
   /** ms, when this read finished */
   readAt: number;
+  /** Several shops: every shop the person is in, the ones they own first, each with what waits there. Absent when they are
+   *  in none: the read is then the signed-in tenant's own, as it was before shops. */
+  shops?: ShopPart[];
+  /** The shop being viewed, one of `shops`: `approvals` are its own. Its tasks, schedules and attention items would be the
+   *  read's, but a shop session reads only approvals (the API answers it 401 on every other route), so those are empty. */
+  viewing?: string;
 }
 
 export type ReadFailure = "signed_out" | "offline" | "unavailable";

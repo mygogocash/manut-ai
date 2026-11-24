@@ -160,6 +160,27 @@ export function askId(a: ShopApproval): string {
   return `${a.record.request.id}@${a.record.request.revision}`;
 }
 
+/** The id of an ask from one of several shops: the shop, then the ask's own id, `pilot%3Ashop-a/action-1@1`. The shop is
+ *  written as `encodeURIComponent` writes it, which never writes a "/", so the first "/" always ends it: two shops' asks
+ *  never share an id, and an answer always goes to the shop its card came from. */
+export function shopAskId(shop: string, a: ShopApproval): string {
+  return `${encodeURIComponent(shop)}/${askId(a)}`;
+}
+
+/** The shop, request id and revision a shop ask's id names, or null for an id `shopAskId` did not make. */
+export function parseShopAskId(ask: string): { shop: string; id: string; revision: number } | null {
+  const slash = ask.indexOf("/");
+  if (slash <= 0) return null;
+  let shop: string;
+  try {
+    shop = decodeURIComponent(ask.slice(0, slash));
+  } catch {
+    return null;
+  }
+  const rest = parseAskId(ask.slice(slash + 1));
+  return rest ? { shop, ...rest } : null;
+}
+
 /** The request id and the revision an ask's id names, or null for an id `askId` did not make. */
 export function parseAskId(ask: string): { id: string; revision: number } | null {
   const at = ask.lastIndexOf("@");

@@ -439,7 +439,8 @@ describe("through the desktop shell", () => {
     // Settings moved the saved choice to Practice: this page runs on, reading as before, but keeps nothing more
     saved.set(RUNTIME_KEY, JSON.stringify({ mode: "practice" }));
     await vi.advanceTimersByTimeAsync(POLL_MS);
-    await vi.waitFor(() => expect(shell.answered()).toBe(8), PATIENT);
+    // two reads of five requests each: the person's shops (none), then the signed-in tenant's four
+    await vi.waitFor(() => expect(shell.answered()).toBe(10), PATIENT);
     await settle();
     expect(keep).toHaveBeenCalledTimes(1);
     // back to this shop: it is kept again from the next read

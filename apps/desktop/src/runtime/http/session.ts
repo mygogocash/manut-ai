@@ -15,6 +15,10 @@
 // - Refreshes are one at a time. Each rotates both tokens, so two at once would spend the same refresh token twice and
 //   the second would end the session.
 // - A 401 gets one refresh and one retry. A second 401, or a refresh the API refuses, ends the session here.
+// - The same keychain item keeps the shop sessions (docs/several-shops.md): one token per shop the person acts for, by
+//   shop id (shops.ts opens and uses them). Every change to the item, a refresh's new tokens or a shop session kept or
+//   dropped, is written in turn and writes everything held at that moment, so no write ever puts back what a later one
+//   replaced. Signing out ends every shop session on the API too, and forgets them here whatever the API said.
 import { LinkDown, VaultUnavailable, type FetchLike, type SessionVault } from "./shell";
 
 /** How long before expiry the access token is replaced. */
@@ -22,10 +26,23 @@ export const REFRESH_EARLY_MS = 5 * 60_000;
 /** An identity token or nonce longer than these is not one; the API's own body limit is far above both. */
 const MAX_IDENTITY = 16 * 1024;
 const MAX_NONCE = 1024;
+/** The longest shop id the API makes or takes (`isValidTenant` in apps/api). */
+const MAX_SHOP_ID = 256;
+
+/** One shop session as the keychain keeps it: the bearer token the API gave for that one shop, the role that shop's record
+ *  gives this person there, and when it ends. It lasts 30 days and has no refresh; the app opens the shop again with the
+ *  sign-in after that (shops.ts). */
+export interface ShopSessionRecord {
+  role: "owner" | "helper";
+  accessToken: string;
+  /** ms since epoch, on this computer's clock */
+  expiresAt: number;
+}
 
 /** The keychain's copy of the session. Times are ms since epoch on this computer's clock. */
 export interface StoredSession {
-  v: 1;
+  /** 2 since the item keeps the shop sessions too. A value of 1, which keeps none, is still read: as one with none. */
+  v: 1 | 2;
   /** the API it belongs to; it is never sent anywhere else */
   origin: string;
   /** the backend's tenant for this identity (`apple:<subject>`) */
@@ -38,6 +55,8 @@ export interface StoredSession {
   accessExpiresAt: number;
   /** when this computer signed in; the API ends the whole chain 90 days after it */
   signedInAt: number;
+  /** the shop sessions this computer holds, by shop id; absent in a value of version 1 */
+  shops?: Record<string, ShopSessionRecord>;
 }
 
 export type SignInFailure = "invalid_identity" | "not_configured" | "rate_limited" | "offline" | "unavailable" | "keychain";
@@ -97,14 +116,28 @@ function decodePair(body: string): { accessToken: string; refreshToken: string; 
   return { accessToken, refreshToken, tenant, expiresIn };
 }
 
-/** The keychain's value as a session, or null when it is not one this version wrote. */
+/** The shop sessions of a stored value, each one whole. An entry that is not one is left out rather than failing the whole
+ *  value: that shop is opened again with the sign-in, while a value read as nothing would sign the person out. */
+function decodeShops(v: unknown): Record<string, ShopSessionRecord> {
+  const out: Record<string, ShopSessionRecord> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [shop, s] of Object.entries(v as Record<string, unknown>)) {
+    if (!text(shop, MAX_SHOP_ID) || !s || typeof s !== "object") continue;
+    const { role, accessToken, expiresAt } = s as Partial<ShopSessionRecord>;
+    if ((role !== "owner" && role !== "helper") || !text(accessToken) || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) continue;
+    out[shop] = { role, accessToken, expiresAt };
+  }
+  return out;
+}
+
+/** The keychain's value as a session, or null when it is not one this version or the one before it wrote. */
 function decodeStored(raw: string | null): StoredSession | null {
   const v = raw ? (parse(raw) as Partial<StoredSession> | undefined) : undefined;
-  if (!v || typeof v !== "object" || v.v !== 1) return null;
+  if (!v || typeof v !== "object" || (v.v !== 1 && v.v !== 2)) return null;
   const { origin, tenant, deviceId, accessToken, refreshToken, accessExpiresAt, signedInAt } = v;
   if (!text(origin) || !text(tenant, 512) || !text(deviceId, 128) || !text(accessToken) || !text(refreshToken)) return null;
   if (typeof accessExpiresAt !== "number" || typeof signedInAt !== "number") return null;
-  return { v: 1, origin, tenant, deviceId, accessToken, refreshToken, accessExpiresAt, signedInAt };
+  return { v: 2, origin, tenant, deviceId, accessToken, refreshToken, accessExpiresAt, signedInAt, shops: v.v === 2 ? decodeShops(v.shops) : {} };
 }
 
 /** Why `/v1/auth/exchange` said no, in the words Settings shows. */
@@ -124,13 +157,21 @@ export class ApiSession {
   private readonly now: () => number;
   private readonly newDeviceId: () => string;
   private readonly onEnd: (() => unknown) | undefined;
+  /** The sign-in this computer holds; its shop sessions are kept apart, in `shops`. */
   private record: StoredSession | null = null;
+  /** The shop sessions held with the sign-in, by shop id. Only while signed in: a sign-out or an ended sign-in clears it. */
+  private shops = new Map<string, ShopSessionRecord>();
+  /** Moves on with every sign-in and every end of one, so an answer that arrives later can tell it is for a sign-in that
+   *  is over (`keepShopSession`). */
+  private chain = 0;
   /** Another origin's session found in the keychain item, which holds one session at a time. It is never sent here;
    *  a sign-in here ends it on its own API first, so overwriting the item never leaves it live there. */
   private foreign: StoredSession | null = null;
   private loading: Promise<void> | null = null;
   private refreshing: Promise<Refreshed> | null = null;
   private signingIn: Promise<SignInState> | null = null;
+  /** The keychain item's changes, one after another in the order they were asked (`inTurn`). */
+  private vaultTail: Promise<unknown> = Promise.resolve();
   private listeners = new Set<(s: SignInState) => void>();
 
   constructor(opts: SessionOptions) {
@@ -171,8 +212,9 @@ export class ApiSession {
     return this.signingIn;
   }
 
-  /** Ends the session on the API, then forgets it here whatever the API said. `revoked` is false when the API could
-   *  not be told; the tokens are gone from this computer either way. */
+  /** Ends the session on the API, with every shop session held with it, then forgets them all here whatever the API
+   *  said. `revoked` is false when the API could not be told of one of them; the tokens are gone from this computer
+   *  either way. */
   async signOut(): Promise<{ revoked: boolean }> {
     await this.load();
     const rec = this.record;
@@ -182,19 +224,70 @@ export class ApiSession {
       await this.ended();
       return { revoked: false };
     }
-    // Nothing uses the session from here on, so a refresh answering late cannot bring it back (see `rotate`).
-    this.record = null;
+    // Nothing uses the session from here on, so a refresh answering late cannot bring it back (see `rotate`), and a shop
+    // opened while this runs is not kept with it (`keepShopSession`).
+    const shops = this.letGo();
     // What was read with the session goes first, without waiting on the API, which may be slow or out of reach.
     await this.ended();
-    const res = await this.send("DELETE", "/v1/auth/session", rec.accessToken);
-    const revoked = res.kind === "answer" && res.status === 200;
+    // The sign-in and each shop session end on the API together (docs/pilot-api.md, "Ending a shop session"): a shop
+    // session does not end with the sign-in there, so leaving one out would leave it working for up to 30 days.
+    const [res, ...shopsEnded] = await Promise.all([
+      this.send("DELETE", "/v1/auth/session", rec.accessToken),
+      ...shops.map((s) => this.endShopSession(s.accessToken)),
+    ]);
+    const revoked = res.kind === "answer" && res.status === 200 && shopsEnded.every(Boolean);
     try {
-      await this.vault.clear();
+      await this.wipe();
       this.set({ kind: "signed_out" });
     } catch {
       this.set({ kind: "signed_out", failure: "keychain" });
     }
     return { revoked };
+  }
+
+  /** The shop session this computer holds for `shop`, or null. */
+  shopSession(shop: string): ShopSessionRecord | null {
+    return this.record ? (this.shops.get(shop) ?? null) : null;
+  }
+
+  /** The shops this computer holds a session for. */
+  heldShops(): string[] {
+    return this.record ? [...this.shops.keys()] : [];
+  }
+
+  /** Where the sign-in stands now: `keepShopSession` takes it, so a shop session opened under a sign-in that has ended since
+   *  is never kept under the next one. */
+  get signInChain(): number {
+    return this.chain;
+  }
+
+  /** Keeps a shop session with the sign-in, in the keychain item, when the sign-in it was opened under (`chain`) is still
+   *  the one held. Otherwise the person signed out, or someone else signed in, while it was being opened: it is ended on
+   *  the API at once, so none is left working, and false says it was not kept. A keychain that refuses the write leaves it
+   *  working for this run; the next start opens the shop again. */
+  async keepShopSession(shop: string, s: ShopSessionRecord, chain: number): Promise<boolean> {
+    await this.load();
+    if (!this.record || chain !== this.chain) {
+      void this.endShopSession(s.accessToken);
+      return false;
+    }
+    this.shops.set(shop, s);
+    await this.save().catch(() => undefined);
+    return true;
+  }
+
+  /** Forgets the sessions of these shops here: the shop left the person's list, or the API ended its session. */
+  async dropShopSessions(shops: readonly string[]): Promise<void> {
+    let changed = false;
+    for (const shop of shops) changed = this.shops.delete(shop) || changed;
+    if (changed) await this.save().catch(() => undefined);
+  }
+
+  /** A request with `bearer`, a shop session's token, in place of the sign-in's, and with none of the sign-in's rules: a
+   *  shop session has no refresh, and what a 401 from it means is shops.ts's to say. The token is sent only as the
+   *  bearer, to this session's own origin. */
+  async sendAs(bearer: string, method: "GET" | "POST", path: string, body?: unknown): Promise<Answer> {
+    return answerOf(await this.send(method, path, bearer, body));
   }
 
   /** An authorised GET of `path` (`/v1/...`). */
@@ -263,7 +356,9 @@ export class ApiSession {
     }
     const rec = decodeStored(raw);
     if (rec && rec.origin === this.origin) {
-      this.record = rec;
+      const { shops, ...signIn } = rec;
+      this.record = signIn;
+      this.shops = new Map(Object.entries(shops ?? {}));
       this.set({ kind: "signed_in", tenant: rec.tenant, signedInAt: rec.signedInAt });
     } else {
       this.foreign = rec;
@@ -281,7 +376,7 @@ export class ApiSession {
     if (!pair) return this.set({ kind: "signed_out", failure: "unavailable" });
     const now = this.now();
     const rec: StoredSession = {
-      v: 1,
+      v: 2,
       origin: this.origin,
       tenant: pair.tenant,
       deviceId,
@@ -291,7 +386,8 @@ export class ApiSession {
       signedInAt: now,
     };
     try {
-      await this.vault.write(JSON.stringify(rec));
+      // A new sign-in holds no shop session yet: the ones of the session it replaced were ended with it.
+      await this.inTurn(() => this.vault.write(JSON.stringify({ ...rec, shops: {} })));
     } catch {
       // A session this computer cannot keep would be lost at the next start while staying live on the API for up to
       // 30 days, so it is ended at once.
@@ -299,14 +395,56 @@ export class ApiSession {
       return this.set({ kind: "signed_out", failure: "keychain" });
     }
     this.record = rec;
+    this.shops = new Map();
+    this.chain += 1;
     return this.set({ kind: "signed_in", tenant: rec.tenant, signedInAt: rec.signedInAt });
   }
 
-  /** Ends another origin's session on that origin's own API (best effort: the item is overwritten either way). */
+  /** Ends another origin's session, and each shop session held with it, on that origin's own API (best effort: the item
+   *  is overwritten either way). */
   private async endForeign(rec: StoredSession): Promise<void> {
     this.foreign = null;
     await this.ended();
-    await this.send("DELETE", "/v1/auth/session", rec.accessToken, undefined, rec.origin);
+    await Promise.all([
+      this.send("DELETE", "/v1/auth/session", rec.accessToken, undefined, rec.origin),
+      ...Object.values(rec.shops ?? {}).map((s) => this.endShopSession(s.accessToken, rec.origin)),
+    ]);
+  }
+
+  /** Ends one shop session on the API (`POST /v1/shops/session/end`, the session itself as the bearer, exactly `{}`).
+   *  True when it is over there: ended now, or already refused (a 401 says no shop takes it any more). */
+  private async endShopSession(token: string, origin = this.origin): Promise<boolean> {
+    const res = await this.send("POST", "/v1/shops/session/end", token, {}, origin);
+    return res.kind === "answer" && (res.status === 200 || res.status === 401);
+  }
+
+  /** Stops holding the sign-in and its shop sessions, in memory, and answers the shop sessions it held. */
+  private letGo(): ShopSessionRecord[] {
+    const shops = [...this.shops.values()];
+    this.record = null;
+    this.shops = new Map();
+    this.chain += 1;
+    return shops;
+  }
+
+  /** One change to the keychain item at a time, in the order asked. A change that fails never stops the ones after it. */
+  private inTurn<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.vaultTail.then(job, job);
+    this.vaultTail = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Writes what is held when the write's turn comes: the sign-in and its shop sessions. Nothing is written once nothing
+   *  is held, so a write asked before a sign-out never puts the item back after the sign-out cleared it. */
+  private save(): Promise<void> {
+    return this.inTurn(async () => {
+      if (!this.record) return;
+      await this.vault.write(JSON.stringify({ ...this.record, v: 2, shops: Object.fromEntries(this.shops) }));
+    });
+  }
+
+  private wipe(): Promise<void> {
+    return this.inTurn(() => this.vault.clear());
   }
 
   /** Refreshes unless the token a request used was already replaced (another request's refresh got there first). */
@@ -343,20 +481,22 @@ export class ApiSession {
       return "signed_out";
     }
     this.record = next;
-    try {
-      await this.vault.write(JSON.stringify(next));
-    } catch {
+    // In turn with every other change to the item, and with the shop sessions held by then, so a shop kept while this
+    // refresh was on its way is written too.
+    await this.save().catch(() => {
       // The old pair in the keychain is spent now. The new one keeps this run working; the next start will find the
       // old pair refused and sign in again. Nothing better can be done without a keychain that takes writes.
-    }
+    });
     return "ok";
   }
 
-  /** The API ended the session: forget it here. */
+  /** The API ended the session: forget it here, with the shop sessions held with it. Those do not end with the sign-in on
+   *  the API, so they are ended there as a sign-out ends them; nothing waits on that. */
   private async end(): Promise<void> {
-    this.record = null;
+    const shops = this.letGo();
     await this.ended();
-    await this.vault.clear().catch(() => undefined);
+    for (const s of shops) void this.endShopSession(s.accessToken);
+    await this.wipe().catch(() => undefined);
     this.set({ kind: "signed_out", ended: "expired" });
   }
 
