@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { GOOGLE_PROVIDER, googleFlowKeys, googleVaultRoute, isGoogleVaultPath, type GoogleFields } from "./google-vault";
 import { resealStore, sameSeal, type ResealStore } from "./reseal";
 import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";
 
@@ -14,9 +15,13 @@ type CredEnv = {
 /// secret (connectors/line.ts), so both stay encrypted at rest and neither is
 /// returned by any route; its account is the channel id and its one granted
 /// resource the bot's user id.
-export type ConnectionProviders = "gmail" | "gcal" | "linear" | "line";
+///
+/// `gsheets` is the shop owner's own Google account, connected with the `drive.file` scope only, for the Google Sheet
+/// Ton appends each month's books to (google-vault.ts, docs/connectors.md 4b). Its sealed secret is the refresh token
+/// Google gave the sign-in, its one granted resource the spreadsheet the app made, and it is made only by that sign-in.
+export type ConnectionProviders = "gmail" | "gcal" | "linear" | "line" | "gsheets";
 
-type ConnectionRec = {
+type ConnectionRec = GoogleFields & {
   id: string;
   tenant: string;
   provider: string;
@@ -49,7 +54,13 @@ export type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsAct
   grantRevision?: number;
 };
 
-const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear", "line"]);
+/// `gsheets` is known so it is listed, read for the broker, revoked, re-keyed and wiped like every connection, and so
+/// the practice clock can read when the shop first connected it (`/first-connection`).
+const KNOWN_PROVIDERS = new Set(["gmail", "gcal", "linear", "line", GOOGLE_PROVIDER]);
+/// Providers whose connections only their own sign-in makes. The generic store refuses them, so no session or operator
+/// route can put a token in by another way: a Google connection always comes from Google's answer to a sign-in the
+/// owner started, with its state and PKCE checked, and replaces the shop's earlier one (google-vault.ts).
+const SIGN_IN_ONLY_PROVIDERS: ReadonlySet<string> = new Set([GOOGLE_PROVIDER]);
 const REFRESH_LEASE_SECONDS = 60;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESOURCE_IDS = 100;
@@ -82,6 +93,8 @@ export class CredObject extends DurableObject {
     const url = new URL(request.url);
     // The shop's site sign-ins for browser control (sign-in-vault.ts), sealed with the same keys as connections.
     if (isSignInVaultPath(url.pathname)) return signInVaultRoute(this.ctx.storage, this.credEnv, request, url);
+    // The owner's Google connection and its sign-in in flight (google-vault.ts), sealed with the same keys.
+    if (isGoogleVaultPath(url.pathname)) return googleVaultRoute(this.ctx.storage, this.credEnv, request, url);
     if (request.method === "POST" && url.pathname === "/connections") {
       return this.store(request);
     }
@@ -168,6 +181,7 @@ export class CredObject extends DurableObject {
       (headerTenant && body.tenant !== headerTenant) ||
       typeof body.provider !== "string" ||
       !KNOWN_PROVIDERS.has(body.provider) ||
+      SIGN_IN_ONLY_PROVIDERS.has(body.provider) ||
       typeof body.accountId !== "string" ||
       body.accountId.length === 0 ||
       body.accountId.length > 256 ||
@@ -378,7 +392,10 @@ export class CredObject extends DurableObject {
     for (const [key] of await this.ctx.storage.list({ prefix: "conn:" })) {
       keys.push(key);
     }
-    await this.ctx.storage.delete(keys);
+    // A Google sign-in still in flight holds a sealed PKCE verifier, so it goes too. Storage deletes at most 128 keys
+    // a call.
+    const doomed = [...keys, ...(await googleFlowKeys(this.ctx.storage))];
+    for (let i = 0; i < doomed.length; i += 128) await this.ctx.storage.delete(doomed.slice(i, i + 128));
     const signIns = await wipeSignInVault(this.ctx.storage);
     return Response.json({ connectionsWiped: keys.length, ...signIns });
   }
@@ -393,6 +410,11 @@ export class CredObject extends DurableObject {
       allowsActions: record.allowsActions ?? false,
       grantRevision: record.grantRevision ?? 1,
       createdAt: record.createdAt,
+      // A Google connection's sheet (its id, title and tab, never what is in it) and, once Google refused it, when and
+      // why it broke. The listing is what the broker and the job flow read, and a broken connection is sent through
+      // by neither.
+      ...(record.sheet ? { sheet: record.sheet } : {}),
+      ...(record.brokenAt ? { brokenAt: record.brokenAt, brokenReason: record.brokenReason ?? "refused" } : {}),
     };
   }
 }

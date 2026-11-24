@@ -74,6 +74,8 @@ const API_AUDIT_ACTIONS = [
   "browser_step.queued",
   "browser_step.fetched",
   "browser_step.reported",
+  "google.connected",
+  "google.disconnected",
 ];
 
 const NOW = "2026-11-24T03:00:00.000Z";

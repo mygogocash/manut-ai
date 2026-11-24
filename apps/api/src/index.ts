@@ -11,6 +11,7 @@ import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
 import { readLinear } from "./connectors/linear";
 import { CredObject } from "./cred-object";
+import { googleRoute } from "./google-connect";
 import { receiveLinearWebhook } from "./inbound";
 import { memoryRoute } from "./memory";
 import { modelAdminRoute } from "./model-gateway";
@@ -95,6 +96,15 @@ export interface Env {
   MODEL_SATANG_PER_USD?: string;
   MODEL_DEFAULT_CAP_SATANG?: string;
   MODEL_PROVIDER?: string;
+  /// Google Sheets for Ton's books (google-connect.ts, docs/connectors.md 4b): the owner's own OAuth client, two
+  /// Wrangler secrets (`wrangler secret put GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`). Never in config; until both
+  /// are set every Google route answers 503 google_not_configured and nothing reaches Google. No environment sets them
+  /// yet. GOOGLE_TEST_ORIGIN is test-only, set in wrangler.test.json alone (google.ts).
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_TEST_ORIGIN?: string;
+  /// The Google callback, which the owner's browser reaches with no session: one bucket per address.
+  GOOGLE_CALLBACK_LIMITER?: RateLimit;
 }
 
 /// The paths this Worker answers itself. Everything else is a page of the web app.
@@ -127,6 +137,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   }
   // An outpost's heartbeat, redeem and steps carry its credential, so every try counts, before the credential is read.
   else if (isOutpostRoute(request.method, pathname)) binding = env.OUTPOST_LIMITER;
+  // Google's redirect back to the owner's browser carries no session, only a state: every try counts, any method, before
+  // the state is read.
+  else if (pathname === "/v1/google/callback") binding = env.GOOGLE_CALLBACK_LIMITER;
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
@@ -689,6 +702,10 @@ export default {
     // the owner's session (browser-control.ts).
     const ownerVault = await ownerVaultRoute(request, url, env);
     if (ownerVault) return ownerVault;
+    // Google Sheets for Ton's books (google-connect.ts): the owner's own routes from their session, and Google's callback,
+    // whose ingress limit ran above. Off, every one answers google_not_configured.
+    const google = await googleRoute(request, url, env, { flags: () => featureFlags(env) });
+    if (google) return google;
 
     // The team's routines, Pause everyone, shop templates and their first-week questions (routines.ts): the
     // operator's routes, under the admin gate above, and the shop's own session's routes. Making or changing a routine

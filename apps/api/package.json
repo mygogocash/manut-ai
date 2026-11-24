@@ -28,6 +28,7 @@
     "@manut/people-rules": "workspace:*",
     "@manut/routine-rules": "workspace:*",
     "@manut/shop-memory": "workspace:*",
+    "@manut/sheets-rows": "workspace:*",
     "@manut/shop-templates": "workspace:*"
   }
 }

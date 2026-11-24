@@ -33,6 +33,12 @@
   // optional vars, both the owner's decision: MODEL_SATANG_PER_USD (whole
   // satang per US dollar, 3500 when unset) and MODEL_DEFAULT_CAP_SATANG (each
   // shop's monthly cap in satang, 20000 when unset). None is set here yet.
+  // Google Sheets for Ton's books (docs/connectors.md, 4b): the owner's own
+  // OAuth client, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, two Wrangler
+  // secrets (`wrangler secret put GOOGLE_CLIENT_ID`, then the secret). No
+  // environment sets them yet, so every /v1/google route answers 503
+  // google_not_configured and nothing reaches Google. The client's redirect
+  // URI is PUBLIC_API_ORIGIN followed by /v1/google/callback.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front
@@ -152,6 +158,14 @@
             "limit": 300,
             "period": 60
           }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112338",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     },
@@ -237,6 +251,14 @@
           "namespace_id": "2026112331",
           "simple": {
             "limit": 300,
+            "period": 60
+          }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112339",
+          "simple": {
+            "limit": 30,
             "period": 60
           }
         }
@@ -326,6 +348,14 @@
             "limit": 300,
             "period": 60
           }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112340",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     }
@@ -339,7 +369,9 @@
   // in dev, staging and prod), and the outposts' limiter (2026112329 here,
   // 30, 31 and 32 in dev, staging and prod), which covers an outpost's
   // heartbeat, redeem and browser steps (browser-control.ts), keyed per
-  // source address.
+  // source address. So is the Google callback's limiter (2026112337 here, 38,
+  // 39 and 40 in dev, staging and prod; google-connect.ts), keyed per source
+  // address, after the email sign-in's 2026112333 to 36.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -408,6 +440,14 @@
       "namespace_id": "2026112329",
       "simple": {
         "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "GOOGLE_CALLBACK_LIMITER",
+      "namespace_id": "2026112337",
+      "simple": {
+        "limit": 30,
         "period": 60
       }
     }

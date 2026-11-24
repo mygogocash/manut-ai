@@ -498,6 +498,12 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
     signIn: "reported how signing in went",
     other: "reported how a browser step went",
   }),
+  // Google Sheets for Ton's books (docs/connectors.md, 4b). The log holds ids only, never a token.
+  "google.connected": (entry) =>
+    entry.outcome === "declined" ? "chose not to connect a Google account on Google's page"
+      : entry.subject.previousConnectionId ? "connected a Google account in place of the old one"
+        : "connected a Google account for the books sheet",
+  "google.disconnected": () => "disconnected the shop's Google account",
 };
 
 /// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the

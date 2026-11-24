@@ -109,6 +109,10 @@ export const AUDIT_ACTIONS = [
   "browser_step.queued",
   "browser_step.fetched",
   "browser_step.reported",
+  // Google Sheets for Ton's books (google-connect.ts): the owner connecting their Google account (or saying no on
+  // Google's page) and disconnecting it. Each names the connection by its id, never a token.
+  "google.connected",
+  "google.disconnected",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
