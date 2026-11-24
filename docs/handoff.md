@@ -85,6 +85,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 07:32 from `e6d8f5a`, with the deletion follow-up in the API and the console
   (pages `0f73ff1f`, API `9c50074a`); smoke-tested: the console and the admin routes are behind Access, the owner's
   routes answer 401 without a session, the approval page loads, and the served bundle is the one just built.
+- Dev's API was redeployed on 24 Nov at 07:57 from `df6094b`, with the new-device route and the outpost's `not_run`
+  (API `8ec35ae7`); smoke-tested: the devices route answers 401 without a session.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -94,25 +96,26 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 18, the code editor's states for developers: a gap list, then the states that need no owner
      (`feat/code-editor-states`, Opus);
-   - item 12, the desktop showing a browser write word for word, then its outpost submitting it
-     (`feat/outpost-submits`, Opus; a Rust build in the shared target folder);
-   - item 15, a helper's new device as an alert to the owner (`feat/new-device-alert`, Sonnet);
    - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
-     Opus).
+     Opus);
+   - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
+     jobs from the API, routines' pause and Pause everyone (`feat/connected-whole-shop`, Opus);
+   - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
    (the outpost's step channel), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 11 (the Playwright follow-up, #17: every spec runs, in six
+   9 (desktop leftovers), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
+   device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - item 19, the outpost following the shop sessions, after 12; the cloud outpost after that.
-   - item 20, a pilot shop's full pages for its owner on the desktop, now that an owner's shop session reaches more.
+   - items 19 (the outpost following the shop sessions) and 23 (re-sealing sign-ins, listing them to workers), after
+     21, which changes the same outpost and vault code; the cloud outpost after that (it may cost money).
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
@@ -176,6 +179,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   Approve and Look first buttons; the new window and badge permissions take effect at the next Tauri build. Quiet
   hours are on from the first run, 22:00 to 08:00 Bangkok time, with no time zone picker; say if they should start
   off. The Dock number now counts only what waits for an answer, not unread automation answers.
+- **From items 12 and 15:** the first real browser write on a real site (a Shopee chat reply, say) reaches a real
+  customer, so it needs the owner's go-ahead and a supervised trial. A long LINE reply no longer offers Approve in a
+  notification (only one line of at most 72 columns does). A browser write's sentence is the API's English in every
+  language, since translating it would make the app's words what gets approved. The new-device alert says "remove
+  access", but the app has no People screen yet, and "Notify me" off silences it: say if a security alert should ring
+  regardless.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
