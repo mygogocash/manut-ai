@@ -1883,6 +1883,7 @@ export const en = {
   "lane.line.failedN": "{n} tests failed. Nothing is live.",
   "lane.line.failedSome": "The tests failed. Nothing is live.",
   "lane.line.reverted": "You reverted this turn at {time}. The files stay as they are.",
+  "lane.line.revertedFiles": "You rewound this turn at {time}. The files are back as they were.",
   "lane.line.unconfirmed": "Kit ran the tests, but the result could not be read. Nothing is marked as passed.",
   "lane.line.stale": "Kit changed the code after the last test run.",
   "lane.answer": "Answer Kit",

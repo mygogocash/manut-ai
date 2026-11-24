@@ -1873,6 +1873,7 @@ export const ko: Record<Key, string> = {
   "lane.line.failedN": "테스트 {n}개가 실패했어요. 공개된 것은 없어요.",
   "lane.line.failedSome": "테스트가 실패했어요. 공개된 것은 없어요.",
   "lane.line.reverted": "{time}에 이번 턴을 되돌렸어요. 파일은 그대로예요.",
+  "lane.line.revertedFiles": "{time}에 이번 턴을 되돌렸어요. 파일도 이전대로 돌아갔어요.",
   "lane.line.unconfirmed": "Kit이 테스트를 실행했지만 결과를 읽을 수 없었어요. 통과로 표시한 것은 없어요.",
   "lane.line.stale": "마지막 테스트 실행 뒤에 Kit이 코드를 바꿨어요.",
   "lane.answer": "Kit에게 답하기",

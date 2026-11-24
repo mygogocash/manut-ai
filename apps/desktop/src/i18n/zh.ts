@@ -1873,6 +1873,7 @@ export const zh: Record<Key, string> = {
   "lane.line.failedN": "{n} 个测试未通过。没有任何内容上线。",
   "lane.line.failedSome": "测试未通过。没有任何内容上线。",
   "lane.line.reverted": "你在 {time} 撤回了这一轮。文件保持原样。",
+  "lane.line.revertedFiles": "你在 {time} 回退了这一轮。文件也已恢复原样。",
   "lane.line.unconfirmed": "Kit 运行了测试，但无法读取结果。没有任何内容被标为通过。",
   "lane.line.stale": "上次运行测试之后，Kit 又改了代码。",
   "lane.answer": "回复 Kit",

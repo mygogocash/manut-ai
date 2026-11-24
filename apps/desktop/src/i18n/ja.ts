@@ -1873,6 +1873,7 @@ export const ja: Record<Key, string> = {
   "lane.line.failedN": "テスト {n} 件が失敗しました。公開されたものはありません。",
   "lane.line.failedSome": "テストが失敗しました。公開されたものはありません。",
   "lane.line.reverted": "{time} にこのターンを元に戻しました。ファイルはそのままです。",
+  "lane.line.revertedFiles": "{time} にこのターンを巻き戻しました。ファイルも元に戻りました。",
   "lane.line.unconfirmed": "Kit はテストを実行しましたが、結果を読み取れませんでした。成功としたものはありません。",
   "lane.line.stale": "最後のテスト実行のあとに、Kit がコードを変更しました。",
   "lane.answer": "Kit に答える",

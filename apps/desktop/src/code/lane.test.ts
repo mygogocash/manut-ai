@@ -134,6 +134,19 @@ describe("what a lane learns from its events", () => {
     expect(feed([{ event: "turn.start" }], rewound).revertedAt).toBeUndefined();
   });
 
+  it("knows a Rewind put the files back, and the agent's own rewind of the last message did not", () => {
+    const own = feed([...ran("pnpm test", true, out("vitest-pass")), { event: "rewound" }]);
+    expect(own.revertedFiles).toBeUndefined();
+    const rewind = feed([...ran("pnpm test", true, out("vitest-pass")), { event: "rewound", id: "m-2", text: "Thai date format" }]);
+    expect(rewind.revertedFiles).toBe(true);
+    expect(rewind.revertedAt).toBe(1_000 + 2);
+    expect(testState(rewind)).toBe("none");
+    expect(feed([{ event: "rewound", id: "" }]).revertedFiles).toBeUndefined();
+    const next = feed([{ event: "turn.start" }], rewind);
+    expect(next.revertedAt).toBeUndefined();
+    expect(next.revertedFiles).toBeUndefined();
+  });
+
   it("leaves the record as it was for an event it does not use", () => {
     const lane = feed(ran("pnpm test", true, out("vitest-pass")));
     for (const ev of [{ event: "delta", text: "hi" }, { event: "message", id: "m", text: "done" }, { event: "approval.request", request_id: "r" }, { event: "turn.start" }, { event: "turn.end", outcome: "done" }, { event: "session.info" }]) {
@@ -239,12 +252,17 @@ describe("the line under a lane's row", () => {
     expect(line("reverted", emptyLane(), { time: "09:40" })).toEqual({ key: "lane.line.reverted", vars: { time: "09:40" } });
   });
 
+  it("says the files are back after a Rewind that put them back", () => {
+    const lane = { ...emptyLane(), revertedAt: 1, revertedFiles: true };
+    expect(line("reverted", lane, { time: "09:40" })).toEqual({ key: "lane.line.revertedFiles", vars: { time: "09:40" } });
+  });
+
   it("leaves a failed session's own words to the row", () => {
     expect(line("failed", emptyLane(), { error: "boom" })).toBeNull();
   });
 
   it("is in every language, with the same slots", () => {
-    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.shared", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.moreNames"] as const;
+    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.shared", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.moreNames"] as const;
     for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
   });
 });
