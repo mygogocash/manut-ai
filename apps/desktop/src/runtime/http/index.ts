@@ -18,7 +18,7 @@ import { readRuntimeSetting } from "../setting";
 import { ShopCache } from "./cache";
 import type { OwnerLink } from "./connections";
 import { HttpHost, type HostEvent, type LinkState } from "./host";
-import { followSignIn, shellOutpost, stopOnEnd } from "./outpost";
+import { followSignIn, shellOutpost } from "./outpost";
 import { ApiSession } from "./session";
 import { shellCacheStore, shellFetch, shellVault } from "./shell";
 
@@ -157,14 +157,14 @@ function stillConnectedTo(origin: string): boolean {
 
 /** The page's one session with the API at `origin`, over the desktop shell's request command and keychain. Settings
  *  signs in and out through it, and the runtime reads through it, so both always agree. When it ends, what was read
- *  with it is forgotten. This Mac's outpost follows it: it runs while someone is signed in to the shop it is
- *  registered for, and stops when they sign out or the API ends the session (outpost.ts). */
+ *  with it is forgotten. This Mac's outpost follows it and the shop sessions it holds: it runs while the person is
+ *  signed in to the shop it is registered for, or holds that shop's owner session, and stops as they sign out, the API
+ *  ends the session, or their place in the shop ends (outpost.ts). */
 export function sessionFor(origin: string): ApiSession {
   let session = sessions.get(origin);
   if (!session) {
-    const outpost = shellOutpost();
-    sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault(), onEnd: stopOnEnd(outpost, forgetShop) })));
-    followSignIn(session, outpost, () => t("outpost.windowTitle"));
+    sessions.set(origin, (session = new ApiSession({ origin, fetch: shellFetch(), vault: shellVault(), onEnd: forgetShop })));
+    followSignIn(session, shellOutpost(), () => t("outpost.windowTitle"));
   }
   return session;
 }

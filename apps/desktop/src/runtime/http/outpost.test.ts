@@ -7,8 +7,20 @@ import type { BridgeEvent } from "../../lib/protocol";
 import { OpError } from "../mock/host";
 import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
-import { decodeView, followSignIn, registerThisMac, REGISTER_PATH, stopOnEnd, UNAVAILABLE, type OutpostShell, type OutpostView, type RegisterLink } from "./outpost";
+import {
+  decodeView,
+  followSignIn,
+  LOOK_AGAIN_MS,
+  ownedTenants,
+  registerThisMac,
+  REGISTER_PATH,
+  UNAVAILABLE,
+  type OutpostShell,
+  type OutpostView,
+  type RegisterLink,
+} from "./outpost";
 import { ApiSession } from "./session";
+import { ShopSessions } from "./shops";
 import {
   clock,
   fakeApi,
@@ -33,9 +45,8 @@ function fakeShell(shell: FakeApi, said?: "keychain" | "unavailable") {
   const told: string[] = [];
   const outpost: OutpostShell = {
     status: async () => UNAVAILABLE,
-    signedIn: async (origin, tenant, title) => {
-      told.push(`in ${origin} ${tenant} ${title}`);
-      return UNAVAILABLE;
+    signedIn: async (origin, tenants, title) => {
+      told.push(`in ${origin} ${tenants.join(",")} ${title}`);
     },
     signedOut: async () => {
       told.push("out");
@@ -125,14 +136,15 @@ const OWNER_A = shopToken(SHOP_A.id, "owner");
 
 /** The API's register route as the shell's command reaches it, by the bearer, as apps/api answers it: the sign-in registers
  *  the signed-in tenant; a shop session its own shop when it is the owner's and `owner_only` when a helper's; a session the
- *  shop no longer takes 401. The shell passes on a refusal's code alone (`refusal_of` in outpost/mod.rs). */
+ *  shop no longer takes 401. The shell passes on a refusal's code, and for an ended place when it ended, and nothing else
+ *  (`refusal_of` in outpost/mod.rs). */
 function serveRegister(shell: FakeApi, served: ServedShops | null): FakeApi {
   return shell.on("POST", REGISTER_PATH, (req) => {
     if (req.bearer?.startsWith("access-")) return { status: 200, json: { tenant: "apple:owner-1", outpost: { name: "This Mac" } } };
     const held = req.bearer ? served?.tokens.get(req.bearer) : undefined;
     if (!held || served?.refused.has(req.bearer!)) return { status: 401, json: { error: "unauthorized" } };
     const ended = served?.ended[held.shop];
-    if (ended) return { status: 401, json: { error: ended.error } };
+    if (ended) return { status: 401, json: { error: ended.error, [`${ended.error}At`]: ended.at } };
     if (held.role !== "owner") return { status: 403, json: { error: "owner_only" } };
     return { status: 200, json: { tenant: held.shop, outpost: { name: "This Mac" } } };
   });
@@ -219,7 +231,7 @@ describe("registering this Mac for the shop the switcher shows", () => {
     expect(session.shopSession(SHOP_A.id)).toBeNull();
     expect(events.some((e) => e.event === "shops.update")).toBe(true);
     const listed = await rt.request("shops.list", {});
-    expect(listed.left).toEqual([expect.objectContaining({ id: SHOP_A.id, why: "unlinked" })]);
+    expect(listed.left).toEqual([expect.objectContaining({ id: SHOP_A.id, why: "unlinked", at: (NOW - 60_000) / 1000 })]);
     rt.close();
   });
 });
@@ -268,13 +280,14 @@ describe("the outpost follows the sign-in", () => {
       fetch: api.fetch,
       vault: memoryVault(storedSession(c.now())),
       now: c.now,
-      onEnd: stopOnEnd(outpost, () => {
+      onEnd: () => {
         forgotten += 1;
-      }),
+      },
     });
+    followSignIn(session, outpost, () => "t", c.now);
     await session.load();
     await session.signOut();
-    expect(toldWhenAsked).toEqual(["out"]);
+    expect(toldWhenAsked).toEqual([`in ${ORIGIN} apple:owner-1 t`, "out"]);
     expect(forgotten).toBe(1);
   });
 
@@ -285,8 +298,168 @@ describe("the outpost follows the sign-in", () => {
     const c = clock();
     const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(c.now())), now: c.now });
     const { outpost, told } = fakeShell(fakeApi());
-    followSignIn(session, outpost, () => "t");
+    followSignIn(session, outpost, () => "t", c.now);
     expect(await session.read("/v1/schedules")).toEqual({ kind: "signed_out" });
     expect(told).toEqual([`in ${ORIGIN} apple:owner-1 t`, "out"]);
+  });
+});
+
+describe("the outpost follows the shops the person owns", () => {
+  const DAY = 86_400_000;
+  /** A sign-in kept with an owner session of Baan Mali (SHOP_A) and a helper session of Ran Pa Noi (SHOP_B). */
+  function holding(c: ReturnType<typeof clock>, expiresIn = 30 * DAY) {
+    const api = fakeApi();
+    const served = serveShops(api, [SHOP_A, SHOP_B], {}, c.now);
+    const shops = {
+      [SHOP_A.id]: { role: "owner", accessToken: OWNER_A, expiresAt: c.now() + expiresIn },
+      [SHOP_B.id]: { role: "helper", accessToken: shopToken(SHOP_B.id, "helper"), expiresAt: c.now() + 30 * DAY },
+    };
+    served.tokens.set(OWNER_A, { shop: SHOP_A.id, role: "owner" });
+    const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(c.now(), { v: 2, shops })), now: c.now });
+    return { api, served, session, shops: new ShopSessions(session, c.now) };
+  }
+
+  it("runs for a shop while its owner session is held, never for a shop the person helps at", async () => {
+    const c = clock();
+    const { session } = holding(c);
+    const { outpost, told } = fakeShell(fakeApi());
+    followSignIn(session, outpost, () => "t", c.now);
+    await session.load();
+    // The sign-in's own tenant first, then each shop owned; Ran Pa Noi, where they help, is not one.
+    expect(told).toEqual([`in ${ORIGIN} apple:owner-1,${SHOP_A.id} t`]);
+    expect(ownedTenants(session, c.now())).toEqual({ tenants: ["apple:owner-1", SHOP_A.id], until: c.now() + 30 * DAY });
+  });
+
+  it("adds a shop when its owner session is opened, and says nothing new for a helper's", async () => {
+    const c = clock();
+    const api = fakeApi();
+    serveShops(api, [SHOP_A, SHOP_B], {}, c.now);
+    const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(c.now())), now: c.now });
+    const shops = new ShopSessions(session, c.now);
+    const { outpost, told } = fakeShell(fakeApi());
+    followSignIn(session, outpost, () => "t", c.now);
+    await session.load();
+    await shops.read(SHOP_B.id, "/v1/approvals?state=open");
+    await shops.read(SHOP_A.id, "/v1/approvals?state=open");
+    expect(told).toEqual([`in ${ORIGIN} apple:owner-1 t`, `in ${ORIGIN} apple:owner-1,${SHOP_A.id} t`]);
+  });
+
+  it("stops running for a shop when the person's place in it ends, and when the shop leaves their list", async () => {
+    const c = clock();
+    const { served, session, shops } = holding(c);
+    const { outpost, told } = fakeShell(fakeApi());
+    followSignIn(session, outpost, () => "t", c.now);
+    await session.load();
+    served.ended[SHOP_A.id] = { error: "unlinked", at: new Date(c.now()).toISOString() };
+    expect((await shops.read(SHOP_A.id, "/v1/approvals?state=open")).kind).toBe("left");
+    expect(told.at(-1)).toBe(`in ${ORIGIN} apple:owner-1 t`);
+
+    // A shop that leaves the list goes the same way, with its session dropped as the list is read.
+    const again = holding(c);
+    const second = fakeShell(fakeApi());
+    followSignIn(again.session, second.outpost, () => "t", c.now);
+    await again.session.load();
+    again.served.list = [SHOP_B];
+    await again.shops.readAll([{ id: SHOP_B.id, name: SHOP_B.name, owner: SHOP_B.ownerName, role: "helper" }]);
+    expect(second.told).toEqual([`in ${ORIGIN} apple:owner-1,${SHOP_A.id} t`, `in ${ORIGIN} apple:owner-1 t`]);
+  });
+
+  it("stops running for a shop when its owner session's 30 days end and nothing opened it again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const c = clock();
+      const { session } = holding(c, 60_000);
+      const { outpost, told } = fakeShell(fakeApi());
+      followSignIn(session, outpost, () => "t", c.now);
+      await session.load();
+      expect(told).toEqual([`in ${ORIGIN} apple:owner-1,${SHOP_A.id} t`]);
+      c.pass(59_999);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(told).toHaveLength(1);
+      c.pass(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(told).toEqual([`in ${ORIGIN} apple:owner-1,${SHOP_A.id} t`, `in ${ORIGIN} apple:owner-1 t`]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits at most a day before it looks again, since a timer cannot wait out 30 days", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const c = clock();
+      const { session } = holding(c);
+      const { outpost, told } = fakeShell(fakeApi());
+      followSignIn(session, outpost, () => "t", c.now);
+      await session.load();
+      expect(vi.getTimerCount()).toBe(1);
+      // A day on, it looks again: nothing changed, so nothing is told, and it waits once more.
+      c.pass(LOOK_AGAIN_MS);
+      await vi.advanceTimersByTimeAsync(LOOK_AGAIN_MS);
+      expect(told).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells the shell one thing at a time, the latest, and never the same twice", async () => {
+    const c = clock();
+    const { session } = holding(c);
+    const calls: string[] = [];
+    let open = 0;
+    let most = 0;
+    let release: () => void = () => {};
+    const outpost: OutpostShell = {
+      ...fakeShell(fakeApi()).outpost,
+      signedIn: async (_origin, tenants) => {
+        open += 1;
+        most = Math.max(most, open);
+        calls.push(tenants.join(","));
+        await new Promise<void>((resolve) => (release = resolve));
+        open -= 1;
+      },
+    };
+    followSignIn(session, outpost, () => "t", c.now);
+    await session.load();
+    // While the shell still has the first, the shop is dropped and kept again: when the first is done, the latest is the
+    // same as what it took, so nothing more is sent.
+    await session.dropShopSessions([SHOP_A.id]);
+    await session.keepShopSession(SHOP_A.id, { role: "owner", accessToken: OWNER_A, expiresAt: c.now() + DAY }, session.signInChain);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual([`apple:owner-1,${SHOP_A.id}`]);
+    // A change while one is under way is sent once that one is done, and never beside it.
+    await session.dropShopSessions([SHOP_A.id]);
+    await session.keepShopSession(SHOP_B.id, { role: "owner", accessToken: "mos1.b", expiresAt: c.now() + DAY }, session.signInChain);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual([`apple:owner-1,${SHOP_A.id}`, "apple:owner-1", `apple:owner-1,${SHOP_B.id}`]);
+    expect(most).toBe(1);
+  });
+
+  it("tells it again after the shell did not take it, and stops for good once it stops following", async () => {
+    const c = clock();
+    const { session } = holding(c);
+    let fail = true;
+    const told: string[] = [];
+    const outpost: OutpostShell = {
+      ...fakeShell(fakeApi()).outpost,
+      signedIn: async (_origin, tenants) => {
+        if (fail) throw new Error("unavailable");
+        told.push(tenants.join(","));
+      },
+    };
+    const stop = followSignIn(session, outpost, () => "t", c.now);
+    await session.load();
+    expect(told).toEqual([]);
+    fail = false;
+    await session.dropShopSessions([SHOP_B.id]);
+    expect(told).toEqual([`apple:owner-1,${SHOP_A.id}`]);
+    stop();
+    await session.dropShopSessions([SHOP_A.id]);
+    expect(told).toHaveLength(1);
   });
 });

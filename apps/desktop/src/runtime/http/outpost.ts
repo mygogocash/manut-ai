@@ -1,7 +1,8 @@
 // This Mac as one of the shop's outposts, as the page sees it (src-tauri/src/outpost/, docs/browser-control.md). The shell
 // runs the outpost: its heartbeat, its steps, its browser and every call they make, with a credential the page never
-// holds. The page only tells the shell who is signed in, registers this Mac through its own session, presses Start and
-// Stop, and reads where the outpost stands.
+// holds. The page only tells the shell which shops the person acts for as owner (the one the sign-in is for, and each one
+// whose owner session it holds), registers this Mac through a session, presses Start and Stop, and reads where the
+// outpost stands. It never learns which shop the keychain's item is for: the shell, which alone reads it, decides.
 //
 // Registering is the one request whose answer the page must not see: it holds the outpost's credential. So the session
 // sends it (refreshing first, and once more after a 401, as for every write), but through the shell's own command
@@ -47,9 +48,10 @@ export function decodeView(value: unknown): OutpostView {
 /** What the page asks of the shell about the outpost. */
 export interface OutpostShell {
   status(origin: string, tenant: string): Promise<OutpostView>;
-  /** someone is signed in to `tenant` at `origin`: the outpost runs if this Mac is that shop's and is not stopped */
-  signedIn(origin: string, tenant: string, title: string): Promise<OutpostView>;
-  /** nobody is: the outpost stops and its window closes */
+  /** Someone is signed in at `origin` and acts as owner for `tenants`: the outpost runs if this Mac is one of those
+   *  shops' and is not stopped, and stops if it no longer is. Rejects when the shell did not take it. */
+  signedIn(origin: string, tenants: readonly string[], title: string): Promise<void>;
+  /** nobody is: the outpost stops and its window closes. Rejects when the shell did not take it. */
   signedOut(): Promise<void>;
   /** the owner's Start (`on`) and Stop */
   run(origin: string, tenant: string, on: boolean): Promise<OutpostView>;
@@ -83,9 +85,11 @@ export function shellOutpost(): OutpostShell {
   };
   return {
     status: (origin, tenant) => view("outpost_status", { origin, tenant }),
-    signedIn: (origin, tenant, title) => view("outpost_signed_in", { origin, tenant, title }),
+    signedIn: async (origin, tenants, title) => {
+      await invoke<void>("outpost_signed_in", { origin, tenants, title });
+    },
     signedOut: async () => {
-      await invoke<void>("outpost_signed_out").catch(() => undefined);
+      await invoke<void>("outpost_signed_out");
     },
     run: async (origin, tenant, on) => decodeView(await invoke<unknown>("outpost_run", { origin, tenant, on })),
     registerFetch: (refused) => async (url, init) => {
@@ -173,19 +177,79 @@ export async function registerThisMac(link: RegisterLink, shop: string | null, s
   }
 }
 
-/** A session's `onEnd` that also stops this Mac's outpost. A sign-out calls it before it waits on the API to end the
- *  session (which can take as long as the API takes to answer), so the outpost stops as the person signs out, not after;
- *  `also` is what the session forgot at its end before (the saved read of the shop). */
-export function stopOnEnd(shell: OutpostShell, also: () => unknown): () => Promise<unknown> {
-  return () => Promise.all([also(), shell.signedOut()]);
+/** The tenants this Mac's outpost may run for now: the one the sign-in is for, which is the person's own, and each shop they
+ *  hold an owner session for that has not ended (its 30 days), with when the first of those ends (null when none will).
+ *  Null while nobody is signed in. A helper's session never counts: only a shop's owner may have an outpost run for it, as
+ *  only its owner may register one. The page never learns which of them the keychain's item is for; the shell decides. */
+export function ownedTenants(session: ApiSession, now: number): { tenants: string[]; until: number | null } | null {
+  const own = session.signedInTenant;
+  if (own === null) return null;
+  const owned = session
+    .heldShops()
+    .map((shop) => ({ shop, held: session.shopSession(shop) }))
+    .filter(({ shop, held }) => shop !== own && held?.role === "owner" && held.expiresAt > now)
+    .sort((a, b) => (a.shop < b.shop ? -1 : 1));
+  const until = owned.reduce<number | null>((first, { held }) => (first === null || held!.expiresAt < first ? held!.expiresAt : first), null);
+  return { tenants: [own, ...owned.map(({ shop }) => shop)], until };
 }
 
-/** The outpost follows `session`: while it is signed in to a shop the shell is told who, so this Mac's outpost runs if
- *  it is that shop's; when it signs out, or the API ends it, the outpost stops. `title` is the outpost's window title in
- *  the page's language, read each time it is sent. Answers how to stop following. */
-export function followSignIn(session: ApiSession, shell: OutpostShell, title: () => string): () => void {
-  return session.subscribe((state) => {
-    if (state.kind === "signed_in") void shell.signedIn(session.origin, state.tenant, title()).catch(() => undefined);
-    else if (state.kind === "signed_out" || state.kind === "no_keychain") void shell.signedOut().catch(() => undefined);
-  });
+/** How long the follower waits at most before it looks at the shop sessions again: a timer cannot wait out 30 days, and a
+ *  day is soon enough to find one that ended while nothing else changed. */
+export const LOOK_AGAIN_MS = 24 * 3_600_000;
+
+/** The outpost follows `session` and the shop sessions it holds: the shell is told every tenant the person acts for as owner
+ *  (`ownedTenants`) whenever that changes, so this Mac's outpost runs while one of them is the shop it is registered for,
+ *  and stops when none is: at sign-out, when the API ends the session, when the person's place in the shop ends (an
+ *  unlinking, a shop gone from their list), or when the shop's owner session ends and is not opened again. The shell's
+ *  commands run side by side, so what is told goes one call at a time, in order, each the latest, and never twice the
+ *  same. `title` is the outpost's window title in the page's language, read each time it is sent. Answers how to stop. */
+export function followSignIn(session: ApiSession, shell: OutpostShell, title: () => string, now: () => number = Date.now): () => void {
+  let following = true;
+  let telling = false;
+  let again = false;
+  /** what the shell last took: the origin and the tenants, or "out"; undefined before it took anything */
+  let told: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const tell = async (): Promise<void> => {
+    if (telling) {
+      again = true;
+      return;
+    }
+    telling = true;
+    try {
+      do {
+        again = false;
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+        if (!following) return;
+        const owned = ownedTenants(session, now());
+        // An owner session that ends with nothing else changing must still stop the outpost, so the follower looks again
+        // then; a shop session opened again before its end replaces it, which it hears.
+        if (owned?.until != null) timer = setTimeout(() => void tell(), Math.min(Math.max(owned.until - now(), 0), LOOK_AGAIN_MS));
+        const say = owned ? JSON.stringify([session.origin, owned.tenants]) : "out";
+        if (say === told) continue;
+        try {
+          if (owned) await shell.signedIn(session.origin, owned.tenants, title());
+          else await shell.signedOut();
+          told = say;
+        } catch {
+          // The shell did not take it: the next change tells it again.
+        }
+      } while (again && following);
+    } finally {
+      telling = false;
+    }
+  };
+
+  const offState = session.subscribe(() => void tell());
+  const offShops = session.onShops(() => void tell());
+  if (session.state.kind !== "loading") void tell();
+  return () => {
+    following = false;
+    offState();
+    offShops();
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
 }

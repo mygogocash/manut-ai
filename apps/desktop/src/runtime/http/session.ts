@@ -173,6 +173,7 @@ export class ApiSession {
   /** The keychain item's changes, one after another in the order they were asked (`inTurn`). */
   private vaultTail: Promise<unknown> = Promise.resolve();
   private listeners = new Set<(s: SignInState) => void>();
+  private shopListeners = new Set<() => void>();
 
   constructor(opts: SessionOptions) {
     this.origin = opts.origin;
@@ -186,6 +187,20 @@ export class ApiSession {
   subscribe(fn: (s: SignInState) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Called whenever the shop sessions held here change: one kept or dropped, or all of them let go with the sign-in (a
+   *  sign-out, or a session the API ended), at once and before anything waits on the API. This Mac's outpost follows them
+   *  (outpost.ts): it runs for a shop only while that shop's owner session is held. */
+  onShops(fn: () => void): () => void {
+    this.shopListeners.add(fn);
+    return () => this.shopListeners.delete(fn);
+  }
+
+  /** The tenant of the sign-in this computer holds now, or null. A sign-out lets the sign-in go before `state` says so,
+   *  so this is what a follower that must stop at once reads. */
+  get signedInTenant(): string | null {
+    return this.record?.tenant ?? null;
   }
 
   /** Reads the keychain once. A session for another origin reads as signed out here and is never sent here. */
@@ -272,6 +287,7 @@ export class ApiSession {
       return false;
     }
     this.shops.set(shop, s);
+    this.shopsChanged();
     await this.save().catch(() => undefined);
     return true;
   }
@@ -280,7 +296,9 @@ export class ApiSession {
   async dropShopSessions(shops: readonly string[]): Promise<void> {
     let changed = false;
     for (const shop of shops) changed = this.shops.delete(shop) || changed;
-    if (changed) await this.save().catch(() => undefined);
+    if (!changed) return;
+    this.shopsChanged();
+    await this.save().catch(() => undefined);
   }
 
   /** A request with `bearer`, a shop session's token, in place of the sign-in's, and with none of the sign-in's rules: a
@@ -427,13 +445,25 @@ export class ApiSession {
     return res.kind === "answer" && (res.status === 200 || res.status === 401);
   }
 
-  /** Stops holding the sign-in and its shop sessions, in memory, and answers the shop sessions it held. */
+  /** Stops holding the sign-in and its shop sessions, in memory, and answers the shop sessions it held. Whoever follows
+   *  them hears it at once, so this Mac's outpost stops as the person signs out, not once the API has answered. */
   private letGo(): ShopSessionRecord[] {
     const shops = [...this.shops.values()];
     this.record = null;
     this.shops = new Map();
     this.chain += 1;
+    this.shopsChanged();
     return shops;
+  }
+
+  private shopsChanged(): void {
+    for (const fn of [...this.shopListeners]) {
+      try {
+        fn();
+      } catch {
+        // A follower that fails never stops a sign-out, or a shop session being kept or dropped.
+      }
+    }
   }
 
   /** One change to the keychain item at a time, in the order asked. A change that fails never stops the ones after it. */
