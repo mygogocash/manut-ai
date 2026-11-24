@@ -1,10 +1,18 @@
 import { DurableObject } from "cloudflare:workers";
+import { macEmailCode } from "./approval-link";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
+import {
+  CODE_KEY_PREFIX, CODE_TTL_SECONDS, codeEmail, codeKey, codeRequestAddress, emailAccount, emailExchange, emailSignIn,
+  emailTenant, EMAIL_TENANT_PREFIX, purgeAt, readCodeRecord, RESEND_SECONDS, sendCode, sixDigitCode, tryCode,
+  type EmailSignInEnv,
+} from "./email-code";
+import { deliver } from "./email-sender";
+import { timingSafeEqual } from "./people";
 import { pilotDeletionRoute, pilotRegistryRoute } from "./pilot-store";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 
-type AuthEnv = {
+type AuthEnv = EmailSignInEnv & {
   APPLE_CLIENT_ID?: string;
   APPLE_JWKS_URL?: string;
   /// Test-only JWKS. Production never sets it, so the Apple endpoint is the
@@ -22,8 +30,9 @@ type SessionRec = {
   csrfHash?: string | undefined;
   /// Absent legacy records belong to generation zero. A tenant wipe advances it.
   wipeGeneration?: number | undefined;
-  /// The email Apple verified when this session's chain was signed in (auth.ts), carried through every refresh. An
-  /// email invite checks it (docs/people.md); nothing else reads it, and it never names the tenant.
+  /// The email this session's chain was signed in with, carried through every refresh: the one Apple verified (auth.ts),
+  /// or the address a sign-in code went to (email-code.ts). An email invite checks it (docs/people.md); nothing else
+  /// reads it, and it never names the tenant.
   email?: string | undefined;
 };
 
@@ -84,11 +93,56 @@ function randomToken(): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/// Device sessions for cloud identity. Sign in with Apple mints them;
+/// A new device session before it is stored: the tokens the device gets, and the records that keep only their hashes.
+/// Every sign-in mints through here, Apple's and a code's by email alike, so a session is the same whatever proved who
+/// the person is: the same tokens, lifetimes, refresh chain and answer.
+type Minted = { access: string; refresh: string; csrf: string; session: SessionRec; grant: RefreshRec };
+
+async function mintSession(tenant: string, deviceId: string, email: string | undefined): Promise<Minted> {
+  const now = Date.now() / 1000;
+  const access = randomToken();
+  const refresh = randomToken();
+  const csrf = randomToken();
+  const kept = email ? { email } : {};
+  return {
+    access, refresh, csrf,
+    session: { tenant, deviceId, exp: now + ACCESS_TTL_SECONDS, refreshHash: await sha256Hex(refresh),
+      csrfHash: await sha256Hex(csrf), ...kept },
+    grant: { accessHash: await sha256Hex(access), tenant, deviceId, exp: now + REFRESH_TTL_SECONDS, born: now, ...kept },
+  };
+}
+
+/// The storage writes that make a minted session real, at the tenant's wipe generation read in the same transaction.
+function sessionWrites(minted: Minted, generation: number): Record<string, SessionRec | RefreshRec> {
+  return {
+    [`sat:${minted.grant.accessHash}`]: { ...minted.session, wipeGeneration: generation },
+    [`srt:${minted.session.refreshHash}`]: { ...minted.grant, wipeGeneration: generation },
+  };
+}
+
+function sessionAnswer(minted: Minted): Response {
+  return Response.json({
+    accessToken: minted.access,
+    refreshToken: minted.refresh,
+    csrf: minted.csrf,
+    expiresIn: ACCESS_TTL_SECONDS,
+    tenant: minted.session.tenant,
+  });
+}
+
+/// Brings the object's one alarm forward to `seconds` (since the epoch) when it is set later, or not at all.
+async function alarmBy(storage: DurableObjectTransaction, seconds: number): Promise<void> {
+  const alarm = await storage.getAlarm();
+  const at = Math.ceil(seconds * 1_000);
+  if (alarm === null || at < alarm) await storage.setAlarm(at);
+}
+
+/// Device sessions for cloud identity. Sign in with Apple mints them, and so
+/// does a code sent by email once the owner turns that on (email-code.ts);
 /// refresh rotates them; revoke ends them. Every method takes its inputs
 /// from the worker, which only forwards allowlisted fields, so a client can
 /// never declare its own tenant: the tenant always comes from a verified
-/// provider subject.
+/// provider subject, or from an address a code proved.
 export class AuthObject extends DurableObject {
   private get authEnv(): AuthEnv {
     return this.env as unknown as AuthEnv;
@@ -98,6 +152,10 @@ export class AuthObject extends DurableObject {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/exchange") {
       return this.exchange(request);
+    }
+    // Signing in by email: a code sent to an address (email-code.ts). Its exchange is `/exchange` above.
+    if (request.method === "POST" && url.pathname === "/email-code") {
+      return this.emailCode(request);
     }
     if (request.method === "POST" && url.pathname === "/refresh") {
       return this.refresh(request);
@@ -175,6 +233,7 @@ export class AuthObject extends DurableObject {
     const exchanged = await readJsonBody<typeof body>(request, MAX_BODY_BYTES);
     if (!exchanged.ok) return Response.json({ error: exchanged.error }, { status: exchanged.status });
     body = exchanged.value;
+    if (body !== null && typeof body === "object" && body.provider === "email") return this.exchangeEmail(body);
     if (
       body.provider !== "apple" ||
       typeof body.identityToken !== "string" ||
@@ -203,26 +262,7 @@ export class AuthObject extends DurableObject {
     } catch {
       return Response.json({ error: "invalid_identity" }, { status: 401 });
     }
-    const now = Date.now() / 1000;
-    const access = randomToken();
-    const refresh = randomToken();
-    const csrf = randomToken();
-    const session: SessionRec = {
-      tenant,
-      deviceId: body.deviceId,
-      exp: now + ACCESS_TTL_SECONDS,
-      refreshHash: await sha256Hex(refresh),
-      csrfHash: await sha256Hex(csrf),
-      ...(email ? { email } : {}),
-    };
-    const grant: RefreshRec = {
-      accessHash: await sha256Hex(access),
-      tenant,
-      deviceId: body.deviceId,
-      exp: now + REFRESH_TTL_SECONDS,
-      born: now,
-      ...(email ? { email } : {}),
-    };
+    const minted = await mintSession(tenant, body.deviceId, email);
     const usedKey = `used:${await sha256Hex(body.identityToken)}`;
     // Verification can suspend; consuming the token and issuing its session are one
     // transaction, so concurrent devices cannot both exchange the same signed identity.
@@ -230,28 +270,81 @@ export class AuthObject extends DurableObject {
       if (await storage.get(usedKey) !== undefined) return false;
       const generation = wipeGeneration(await storage.get(`wiped:${tenant}`));
       if (identityExpiry <= Date.now() / 1_000) return false;
-      await storage.put({
-        [`sat:${grant.accessHash}`]: { ...session, wipeGeneration: generation },
-        [`srt:${session.refreshHash}`]: { ...grant, wipeGeneration: generation },
-        [usedKey]: identityExpiry,
-      });
-      const alarm = await storage.getAlarm();
-      const expiry = Math.ceil(identityExpiry * 1_000);
-      if (alarm === null || expiry < alarm) await storage.setAlarm(expiry);
+      await storage.put({ ...sessionWrites(minted, generation), [usedKey]: identityExpiry });
+      await alarmBy(storage, identityExpiry);
       return true;
     });
     if (!issued) return Response.json({ error: "invalid_identity" }, { status: 401 });
-    return Response.json({
-      accessToken: access,
-      refreshToken: refresh,
-      csrf,
-      expiresIn: ACCESS_TTL_SECONDS,
-      tenant,
-    });
+    return sessionAnswer(minted);
   }
 
-  /// One alarm covers consumed identities together; no token or claim body is stored.
-  /// Unknown records stay fail-closed rather than forgetting an unexpired consumption.
+  /// Sends a sign-in code to an address (email-code.ts; docs/pilot-api.md, "Signing in by email"). Only the code's HMAC
+  /// is kept, never the code, and the address names nothing stored: the record is keyed by its SHA-256. The answer is
+  /// the same for every address, whether or not Manut AI or any shop knows it, since nothing here looks the address up,
+  /// and it does not wait for the email: the object stays up while the send is pending, and whatever the email service
+  /// says goes to the log as an error code alone (email-sender.ts).
+  private async emailCode(request: Request): Promise<Response> {
+    const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const address = codeRequestAddress(parsed.value);
+    if (!address) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const sender = emailSignIn(this.authEnv);
+    if (!sender) return Response.json({ error: "email_not_configured" }, { status: 400 });
+    const account = await emailAccount(address);
+    const code = sixDigitCode();
+    const mac = await macEmailCode(this.authEnv.APPROVAL_LINK_SECRET, account, code);
+    const key = codeKey(account);
+    // The limits are read and the new code stored in one transaction, so two requests for one address at once send one
+    // code. A new code replaces the one before it.
+    const decided = await this.ctx.storage.transaction(async (storage) => {
+      const decision = sendCode(readCodeRecord(await storage.get(key)), mac, Date.now() / 1_000);
+      if (!decision.ok) return decision;
+      await storage.put(key, decision.record);
+      await alarmBy(storage, purgeAt(decision.record));
+      return decision;
+    });
+    if (!decided.ok) {
+      return Response.json({ error: "too_many_codes", retryAfter: decided.retryAfter },
+        { status: 429, headers: { "retry-after": String(decided.retryAfter) } });
+    }
+    this.ctx.waitUntil(deliver(sender, codeEmail(address, code)));
+    return Response.json({ sent: true, expiresIn: CODE_TTL_SECONDS, resendIn: RESEND_SECONDS });
+  }
+
+  /// Signs in with a code sent by email (email-code.ts). The tenant is `email:` and the SHA-256 of the address, and the
+  /// session is minted, stored and answered by the same code as Apple's, with the address as its email, so an email
+  /// invite matches it (docs/people.md). The try's HMAC is made before the transaction, which compares it with the
+  /// stored one with no await between the read and the write: a right code is used up in the same transaction that
+  /// stores the session, so of two devices racing with one code, exactly one is signed in.
+  private async exchangeEmail(body: unknown): Promise<Response> {
+    const asked = emailExchange(body);
+    if (!asked) return Response.json({ error: "invalid_request" }, { status: 400 });
+    if (!emailSignIn(this.authEnv)) return Response.json({ error: "email_not_configured" }, { status: 400 });
+    const account = await emailAccount(asked.address);
+    const tenant = emailTenant(account);
+    const tried = await macEmailCode(this.authEnv.APPROVAL_LINK_SECRET, account, asked.code);
+    const minted = await mintSession(tenant, asked.deviceId, asked.address);
+    const key = codeKey(account);
+    const outcome = await this.ctx.storage.transaction(async (storage) => {
+      const result = tryCode(readCodeRecord(await storage.get(key)), (mac) => timingSafeEqual(mac, tried),
+        Date.now() / 1_000);
+      if (result.kind === "wrong") await storage.put(key, result.record);
+      if (result.kind !== "right") return result;
+      const generation = wipeGeneration(await storage.get(`wiped:${tenant}`));
+      await storage.put({ [key]: result.record, ...sessionWrites(minted, generation) });
+      return result;
+    });
+    if (outcome.kind === "right") return sessionAnswer(minted);
+    if (outcome.kind === "wrong") {
+      return Response.json({ error: "wrong_code", triesLeft: outcome.triesLeft }, { status: 401 });
+    }
+    return Response.json({ error: "code_ended" }, { status: 401 });
+  }
+
+  /// One alarm covers consumed identities and email sign-in records together; no token, code or claim body is stored.
+  /// Unknown consumption records stay fail-closed rather than forgetting an unexpired consumption. An email sign-in
+  /// record goes a day after its last send (email-code.ts, `purgeAt`); one this code did not write holds no code anyone
+  /// can use, so it goes at once.
   override async alarm(): Promise<void> {
     const now = Date.now() / 1_000;
     await this.ctx.storage.transaction(async (storage) => {
@@ -271,6 +364,21 @@ export class AuthObject extends DurableObject {
         }
         if (expired.length) await storage.delete(expired);
         if (consumed.size < 128) break;
+      }
+      startAfter = undefined;
+      while (true) {
+        const records: Map<string, unknown> = await storage.list({ prefix: CODE_KEY_PREFIX, limit: 128,
+          ...(startAfter === undefined ? {} : { startAfter }) });
+        const done: string[] = [];
+        for (const [key, value] of records) {
+          startAfter = key;
+          const record = readCodeRecord(value);
+          const until = record ? purgeAt(record) : -Infinity;
+          if (until <= now) done.push(key);
+          else next = Math.min(next, until);
+        }
+        if (done.length) await storage.delete(done);
+        if (records.size < 128) break;
       }
       if (Number.isFinite(next)) await storage.setAlarm(Math.ceil(next * 1_000));
       else await storage.deleteAlarm();
@@ -543,6 +651,11 @@ export class AuthObject extends DurableObject {
     // so a deletion that stops part way never takes the shop off the
     // operator console's list while data is left.
     await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`]);
+    // An email identity's sign-in record (email-code.ts) is keyed by the same hash its tenant carries, so it goes with
+    // the sessions: a live code, and when codes were sent.
+    if (tenant.startsWith(EMAIL_TENANT_PREFIX)) {
+      await this.ctx.storage.delete(codeKey(tenant.slice(EMAIL_TENANT_PREFIX.length)));
+    }
     // Inbound routes name the tenant, so they go too. The index is keyed by
     // provider account, not tenant, so this scans it; it holds one row per
     // connected workspace and stays small.

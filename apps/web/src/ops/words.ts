@@ -498,6 +498,19 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
     signIn: "reported how signing in went",
     other: "reported how a browser step went",
   }),
+  // Google Sheets for Ton's books (docs/connectors.md, 4b). The log holds ids only, never a token, a sheet or a row.
+  "google.connected": (entry) =>
+    entry.outcome === "declined" ? "chose not to connect a Google account on Google's page"
+      : entry.subject.previousConnectionId ? "connected a Google account in place of the old one"
+        : "connected a Google account for the books sheet",
+  "google.disconnected": () => "disconnected the shop's Google account",
+  "google.broken": () => "found that Google no longer accepts the shop's Google connection",
+  "google.sheet_created": (_entry, { ownerName }) => `made the books sheet in ${ownerName}'s Google Drive`,
+  "google.appended": (entry, { ownerName }) =>
+    entry.outcome === "failed" ? `could not append a month of the books to ${ownerName}'s Google Sheet`
+      : entry.outcome === "unknown"
+        ? `sent a month of the books to ${ownerName}'s Google Sheet without learning whether it landed`
+        : `appended a month of the books to ${ownerName}'s Google Sheet`,
 };
 
 /// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the
@@ -590,6 +603,30 @@ export function auditOutcomeTag(outcome: string, ownerName: string): { label: st
 
 /// Why, for an attempt that ended or a decision that was refused.
 const AUDIT_REASONS: Readonly<Record<string, string>> = {
+  // Google Sheets for Ton's books (docs/connectors.md, 4b): why the owner's Google connection, an ask or an append went
+  // as it did.
+  access_denied: "The owner said no on Google's page.",
+  not_revoked: "Google could not be reached to end the access; the owner can remove it in their Google account.",
+  invalid_grant: "Google no longer accepts the access the owner gave.",
+  google_broken: "Google no longer accepts the shop's Google connection.",
+  google_unavailable: "Google did not answer.",
+  google_not_configured: "Google is not set up for Manut AI yet.",
+  no_answer: "Google's answer was lost, so nobody can say whether the rows landed.",
+  google_400: "Google refused the request, so nothing was written.",
+  google_401: "Google refused the access token, so nothing was written.",
+  google_403: "Google refused access to the sheet, so nothing was written.",
+  google_404: "Google could not find the sheet, so nothing was written.",
+  google_429: "Google asked for fewer requests, so nothing was written.",
+  google_500: "Google failed while answering, so nobody can say whether the rows landed.",
+  google_502: "Google failed while answering, so nobody can say whether the rows landed.",
+  google_503: "Google was not available, so nobody can say whether the rows landed.",
+  google_504: "Google took too long to answer, so nobody can say whether the rows landed.",
+  month_not_over: "That month has not ended yet.",
+  month_incomplete: "The payments Ton can read do not reach back to the start of that month.",
+  nothing_to_append: "No payments were recorded that month.",
+  sheet_in_progress: "The books sheet was still being made.",
+  sheet_not_made: "Google did not make the books sheet.",
+  sheet_tab_missing: "The books sheet no longer has its Books tab.",
   budget: "The shop's model budget ran out.",
   silent: "The worker stopped reporting.",
   deadline: "The attempt ran out of time.",
@@ -713,7 +750,8 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["actionId", "action"],
   ["messageId", "message"],
   ["paymentId", "payment"],
-  ["connectionId", "LINE connection"],
+  // A LINE account or the owner's Google account: the action says which.
+  ["connectionId", "connection"],
   ["previousConnectionId", "replacing"],
   ["confirmationId", "confirmation"],
   ["factId", "fact"],
@@ -1470,6 +1508,7 @@ const JOB_KINDS: Readonly<Record<string, string>> = {
   reply: "Reply to a customer",
   post: "Post",
   daily_summary: "Sales summary",
+  books_sheet: "Books to Google Sheets",
 };
 
 export function jobKindText(kind: string): string {

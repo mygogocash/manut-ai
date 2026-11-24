@@ -45,6 +45,11 @@ jobs:
       - run: pnpm --filter @manut/api test
         env:
           WRANGLER_SEND_METRICS: "false"
+      # The Deploy dev workflow's config check refuses a non-dev Worker and any TEST_ var; its test runs it on this
+      # repository's configs and on refused ones, with apps/api's Wrangler, reading files only.
+      - run: node --test .github/scripts/check-dev-deploys.test.mjs
+        env:
+          WRANGLER_SEND_METRICS: "false"
 
   web:
     name: Web tests

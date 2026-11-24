@@ -15,8 +15,9 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   signs in with to the shop, and that account then decides with an owner session, and with it manages what the team
   knows, the shop's consent and export, and its helpers ("Several shops", below).
 - **Helper**: someone the owner trusts with conversations (the canvas's Mint). Invited by the operator on the owner's
-  word, signs in with Apple, and approves private messages and replies with a helper session, never money, public
-  posts, payment confirmations or commands ("Helpers", below; `docs/people.md`).
+  word, signs in with Apple (or with a code sent by email, once the owner turns that on: "Signing in by email", below),
+  and approves private messages and replies with a helper session, never money, public posts, payment confirmations or
+  commands ("Helpers", below; `docs/people.md`).
 - **Shop**: one tenant in the backend. `tenant` is its id. A shop is **live** once its owner has answered about consent
   (`cloudWork`), giving it or withdrawing it from their session later, or a LINE connection exists.
 
@@ -33,6 +34,9 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   confirmation's id and its expiry. It names exactly one confirmation and expires after 24 hours, with it. Each
   kind of link is signed under its own domain tag (`manut-ai/pilot-approval/v1.`, `manut-ai/pilot-deletion/v1.`),
   so a reply link can never delete a shop and a deletion link can never approve a reply or record consent.
+- A sign-in code sent by email, once the owner turns that on, is kept only as an HMAC-SHA256 with the same secret under
+  a domain tag of its own (`manut-ai/email-code/v1.`), never as the code, so no code's MAC can pass as a link's
+  ("Signing in by email", below).
 - Deleting a live shop's data needs its owner's yes through the deletion link (owner's decision, 23 Nov 2026). The
   confirmation runs through `packages/approval-core`: an owner-only kind (`command`), opened and decided by its
   transitions in one AuthObject storage transaction each, so it settles once however many answers arrive, and
@@ -477,7 +481,7 @@ What is written, and by whom:
 | `dispatch.settled` | system | `taskId`, `actionId` | `confirmed`, `failed` or `unknown`; a browser write's from its step's report, or `failed` when it was begun but could not be handed out |
 | `attempt.started` | system | `taskId`, `attemptId` | `ok` |
 | `attempt.ended` | the worker (its own finish), the system (`budget`, `silent`, `deadline`), or whoever cancelled it | `taskId`, `attemptId` | `done`, `failed` with a `reason`, or `cancelled` |
-| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId`; a browser write's `signInId`, and no `requestId` or `actionId` when none was opened | `ok`; for a browser write also `refused` with why (`not_my_job`, `not_connected`, `unknown_member`, `invalid_write`, `member_not_allowed` and so on), or `skipped` with `draft_only` in practice mode |
+| `approval.requested` | worker | `taskId`, `attemptId`, `requestId`, `actionId`; a browser write's `signInId`, and no `requestId` or `actionId` when none was opened | `ok`; for a browser write or an append of Ton's books also `refused` with why (`not_my_job`, `not_connected`, `unknown_member`, `invalid_write`, `member_not_allowed`, `month_not_over`, `google_broken` and so on), or `skipped` with `draft_only` in practice mode |
 | `approval.decided` | owner or helper, with the id they decided as (`owner-session` for the shop's own session, the linked account's id for an owner session, the helper's id for a helper session) | the same | `approved`, `declined`, or `refused` with approval-core's refusal as the `reason` (`already_decided`, `not_permitted`, `attempt_ended`, `expired` and so on) |
 | `approval.superseded` | system | the same | `superseded`, reason `attempt_ended` |
 | `memory.remembered`, `memory.confirmed`, `memory.corrected`, `memory.forgotten` | operator, or the owner from a session (the linked account's id; `owner-session` for the shop's own session) | `factId` | `ok` |
@@ -499,6 +503,11 @@ What is written, and by whom:
 | `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok`, or `refused` with the refusal as the `reason` |
 | `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
 | `browser_step.reported` | outpost | `outpostId`; for a step the vault found, also `stepId`, `taskId`, `attemptId`, and a sign-in step's `signInId` and `grantId` | `done`, `failed` with the outpost's code (or `text_withheld`) as the `reason`, or `refused` with the refusal |
+| `google.connected` | owner, by the linked account's id (`owner-session` for the shop's own session) that started the sign-in | `connectionId`, and `previousConnectionId` when it replaced one; none when the owner said no | `ok`, or `declined` with `access_denied` |
+| `google.disconnected` | owner, as above | `connectionId` | `ok`, with `not_revoked` when Google could not be reached to revoke the token |
+| `google.broken` | system | `connectionId` | `refused`, reason `invalid_grant`; once, for the call that broke it |
+| `google.sheet_created` | system | `connectionId` | `ok` |
+| `google.appended` | system | `taskId`, `actionId`, `connectionId` | `confirmed`, or `failed` or `unknown` with a code (`google_404`, `google_503`, `no_answer`, `google_broken` and so on) |
 
 The job flow's entries (`attempt.*`, `approval.*`) come from the worker adapter contract (`docs/phase-0-spikes.md`,
 section 3); a pilot shop has none until a worker runs for it. A reply decided through the owner's link keeps its
@@ -700,7 +709,9 @@ wait, and it replaces a practice world saved before memory existed.
 
 Nam (sales chat), Pim (content) and Ton (books) are workers on the job flow (`apps/api/src/workers.ts`; how they run
 is `docs/phase-0-spikes.md`, section 4). An operator starts one member's job for a shop, and the result is a draft on
-the job's own task for the owner to read. No worker sends, posts, pays or refunds, and none asks for an external write.
+the job's own task for the owner to read. No worker sends, posts, pays or refunds by itself. The one job that asks for
+an external write is Ton's append of a month's books to the owner's Google Sheet ("Google Sheets for Ton's books",
+below): it asks through approval-core with the exact rows, and only the owner's decision sends them.
 
 ### `POST /v1/admin/workers/run`
 
@@ -712,8 +723,11 @@ Under the admin gate, as an exact `ADMIN_METHODS` entry. The body is `{ tenant, 
   - `{ kind: "post", topic }`: a post about the topic, 1 to 500 characters once trimmed.
   - `{ kind: "daily_summary" }`: yesterday's sales in Bangkok, from the order payments the shop has recorded
     (`POST /v1/admin/pilot/payments`), each counted as a LINE sale at the time it was confirmed.
+  - `{ kind: "books_sheet", month }`: a month (`YYYY-MM`) of the shop's books appended to the owner's Google Sheet, asked
+    first ("Google Sheets for Ton's books", below). The owner starts the same job from their session
+    (`POST /v1/google/books`).
 
-A reply is Nam's job, a post Pim's and a summary Ton's. A job asked of another member is passed to the member whose job
+A reply is Nam's job, a post Pim's, and a summary and an append Ton's. A job asked of another member is passed to the member whose job
 it is, and the answer says who did it.
 
 While the shop's team is paused (Pause everyone), nothing new starts: 409 `team_paused`. A member the shop's template
@@ -726,18 +740,21 @@ type WorkerRun = {
   taskId: string;                      // the job's own task: in the shop's export, gone with the shop's deletion
   member: "nam" | "pim" | "ton";       // who did the job
   passedFrom?: "nam" | "pim" | "ton";  // who passed it on, when it was not theirs
-  outcome: "done" | "failed";
+  outcome: "done" | "failed" | "asked";
   reason?: string;                     // why it failed, as a code (below)
   draft?: Draft;                       // when done
+  requestId?: string;                  // when asked: the approval-core request the owner decides
+  kind?: string;                       // when asked: the request's kind ("command" for an append)
 };
 
 type Draft = {
   attemptId: string;                   // the attempt that wrote it: one draft per attempt
   member: string;                      // "nam", "pim" or "ton"
-  job: string;                         // "reply", "post" or "daily_summary"
+  job: string;                         // "reply", "post", "daily_summary" or "books_sheet"
   text: string;                        // the words, for the owner to read
-  about?: { messageId?: string; date?: string };  // the message a reply answers; the day a summary covers
-  send?: { answer: "draft_only" | "ask"; kind: "reply" };  // what sending a reply would take (below)
+  about?: { messageId?: string; date?: string; month?: string };  // the message a reply answers; the day a summary
+                                       // or the month an append covers
+  send?: { answer: "draft_only" | "ask"; kind: "reply" | "command" };  // what sending would take (below)
   at: string;
 };
 ```
@@ -749,7 +766,7 @@ job's task behind with no attempt on it, which holds nothing.
 | --- | --- | --- |
 | 400 | `tenant_required` | No valid tenant |
 | 400 | `unknown_member` | `member` is not `nam`, `pim` or `ton` |
-| 400 | `invalid_job` | `job` is missing, of another kind, has a field its kind does not, or its topic or message id is blank or too long |
+| 400 | `invalid_job` | `job` is missing, of another kind, has a field its kind does not, its topic or message id is blank or too long, or its month is not `YYYY-MM` |
 | 400 | `invalid_request`, `invalid_json` | The body is not a JSON object |
 | 403 | `feature_disabled` with `feature: "officeCloud"` | The cloud-work kill switch is off |
 | 403 | `consent_required` | The owner has not consented to cloud work |
@@ -761,7 +778,8 @@ job's task behind with no attempt on it, which holds nothing.
 A job that started answers 200, also when it failed, because its task and the audit log record it. `reason` is then
 `not_connected` (the LINE connection the customer wrote to is gone), `budget` (the shop's model cap is spent),
 `not_configured` (no model key yet), `provider_error`, `memory_unavailable`, `payments_unavailable`,
-`vault_unavailable`, `empty_draft`, or a code of the job flow's own.
+`vault_unavailable`, `empty_draft`, an append's own codes ("Google Sheets for Ton's books", below), or a code of the job
+flow's own.
 
 **Rules**
 
@@ -1361,13 +1379,13 @@ covers the console and the operator routes. They are two Workers, both deployed 
   it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
 - **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
   matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`,
-  `/delete/{token}`, `/ops`).
+  `/delete/{token}`, `/join/{token}`, `/ops`).
   `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
   call the API that served them and a deploy never ships a missing or stale web app.
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
-  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval and deletion pages also
-  `Cache-Control: no-store`. They never apply to the API's answers.
+  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
+  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
@@ -1409,7 +1427,12 @@ shop it was given for. It only reads: deciding is the next section.
 - **Kinds.** The task object sets each request's kind from the operation it decides, never from whoever proposed it:
   a LINE reply (`line.message.push`) is `reply`; a worker's `linear.issue.create` is `command`; a worker's browser
   write (`browser.submit`) takes the kind its action has in the control plane's table ("Submitting through a browser",
-  above). Its detail is a `SubmitDetail`, which names the site, the page, the form and every value.
+  above). Its detail is a `SubmitDetail`, which names the site, the page, the form and every value. An append of Ton's
+  books (`google.sheets.append`) is `command`, the owner's only; its detail is a `BooksDetail` ("Google Sheets for
+  Ton's books", below).
+- **A helper sees no books.** A helper's session lists every approval too, so a helper can pass on what they may not
+  decide, but an append's detail is replaced for them by a `HelperBooksDetail`: that it waits for the owner, for which
+  month and which sheet's title, and none of its rows or totals. A month's books are sales, which helpers do not see.
 - **`state`**, required: `open` lists every record whose standing is `open`, still waiting for a decision; `recent`
   lists the newest `limit` of the others: decided, expired or superseded. Both are newest first by when they were asked
   (`request.createdAt`), then by id.
@@ -1511,6 +1534,88 @@ Answers:
 
 `result` is approval-core's `DecideResult` as the task object answered it. Every refusal of approval-core's also
 carries `action`, where the action stands, so a second decision can show what happened to it.
+
+## Signing in by email
+
+Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an
+address and gives it back to `POST /v1/auth/exchange`, which signs them in with the lifted auth's own session, as Sign
+in with Apple does (`apps/api/src/email-code.ts`, `email-sender.ts`, `auth-object.ts`). The desktop's screen for it is
+Settings › Developer (`docs/sign-in-options.md`, "The desktop"); the web's is the join page an invite link opens
+(`docs/people.md`, "Invites"), which signs in for one visit and accepts the invite with that sign-in.
+
+**Off unless configured.** Both routes answer 400 `{ error: "email_not_configured" }`, as Apple's exchange answers
+`identity_not_configured` without a client id, unless all three hold: the var `EMAIL_SIGN_IN` is exactly `"on"`; a
+sender is bound, which is Cloudflare Email Service's `send_email` binding named `EMAIL` and the var `EMAIL_FROM_ADDRESS`
+(an address on the sending domain), with `EMAIL_FROM_NAME`, "Manut AI" when unset; and `APPROVAL_LINK_SECRET` is set.
+No environment sets any of them. A body that is not the route's is answered 400 `invalid_request` first, as Apple's
+exchange checks its body before its configuration. The Worker answers both without waking the auth object, which
+checks both again.
+
+Turning it on needs the owner's yes, the Workers Paid plan, and a sending domain the owner controls, onboarded to Email
+Service. Then the environment's block in `wrangler.jsonc` gets `"send_email": [{ "name": "EMAIL" }]`, `EMAIL_FROM_ADDRESS`,
+`EMAIL_FROM_NAME` and `EMAIL_SIGN_IN: "on"`.
+
+### `POST /v1/auth/email/code`
+
+Body exactly `{ email }`. It is limited per source IP before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed
+and configured as the exchange's limiter): 429 `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable`
+without the binding. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
+characters, one `@` between two parts with no spaces.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ sent: true, expiresIn: 600, resendIn: 60 }` | A code went to the email service for the address. The same for every address: nothing here looks the address up, so the answer cannot say whether Manut AI or any shop knows it, and it never waits for the email or says what the service did with it |
+| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours. `retryAfter` is whole seconds until it may have another |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ email }` with an address |
+| 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+| 411, 413 | `length_required`, `body_too_large` | As the exchange |
+
+A new code replaces the one before, which stops working. The email is plain English: the subject "Your Manut AI sign-in
+code", never with the code in it, so a lock screen does not show it; the body gives the code, says it works for 10
+minutes and not to share it, and that the person can ignore the email if they did not ask. Thai waits for the owner's
+writer.
+
+### `POST /v1/auth/exchange` with `provider: "email"`
+
+Body exactly `{ provider: "email", email, code, deviceId }`: `code` is six digits as a string, and `deviceId` 1 to 128
+characters, as Apple's.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ accessToken, refreshToken, csrf, expiresIn: 3600, tenant }` | The right code within its 10 minutes. The session is Apple's in every way: the same tokens, lifetimes, refresh (`POST /v1/auth/refresh`), sign-out (`DELETE /v1/auth/session`) and tenant wipe |
+| 401 | `{ error: "wrong_code", triesLeft }` | A wrong code. `triesLeft` is how many more tries this code takes; at 0 it has ended |
+| 401 | `{ error: "code_ended" }` | No code to try: none was asked for, it was used, its 10 minutes passed, or five wrong tries ended it. Ask for a new one |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly that, or the code is not six digits, which does not count as a try |
+| 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+
+- **The identity.** The tenant is `email:` and the SHA-256, in hex, of the normalized address, so it never equals an
+  Apple tenant (`apple:<sub>`) and the address itself names nothing that is stored. The session's email is the
+  address, carried through every refresh, so an email invite matches it (`POST /v1/people/accept`, below).
+- **One code, one session.** A right code is used up in the same storage transaction that stores the session, so of
+  several devices racing with one code, one is signed in and the others are answered `code_ended`.
+- **Apple and email are two identities, even for one address** (`docs/decisions.md`, 24 Nov 2026), as two Apple
+  accounts are never joined by an email. What the owner sees: their own shop answers to the one account the operator
+  linked, so signing in the other way opens no owner session and lists none of their shops. A helper is known in a shop
+  by the address the owner invited, so either sign-in that verified it opens their helper sessions: the owner sees one
+  helper, the other sign-in arrives as a new device ("Mint signed in on a new device"), and removing the helper ends
+  both. The helper's own list of shops (`GET /v1/shops`) is per sign-in until they open the shop with the other.
+- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows.
+  What they do show is whether someone asked for a code for the address lately (a 429, or `wrong_code` rather than
+  `code_ended`), whoever asked.
+
+### What is kept, and where the code never is
+
+- In the auth object, under `email-code:<SHA-256 of the address>`: the live code's HMAC-SHA256 under
+  `APPROVAL_LINK_SECRET`, in a domain tag of its own (`manut-ai/email-code/v1.`, over the address's hash and the code),
+  when it ends and its wrong tries; and when each code of the last 24 hours was sent. Never the code, never the address.
+  The alarm deletes the record a day after its last send, and a tenant wipe of the email identity deletes it with the
+  sessions. Changing `APPROVAL_LINK_SECRET` ends every live code, as it ends every link.
+- The code is never in a log, the audit log, an error, an answer or a URL: it goes only into the email. A send the email
+  service refuses is logged as the service's error code alone (`E_RECIPIENT_SUPPRESSED` and the like), never its
+  message, which may name the address.
+- The test configuration sends to an in-memory outbox instead (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`), as the test
+  Apple key stands in for Apple's. The dev deploy check refuses any config that sets a `TEST_` var
+  (`.github/scripts/check-dev-deploys.mjs`).
 
 ## Helpers
 
@@ -1631,8 +1736,10 @@ type Devices = { devices: { id: string; helperId: string; name: string; openedAt
 
 **`POST /v1/people/accept`** with `{ token }` (the invite link's last segment, in the body, never in a URL) and a
 signed-in session of the lifted auth. Today that is Sign in with Apple (`POST /v1/auth/exchange`): the session keeps
-the email Apple verified, and that email is the account the invite is checked against. Nothing signs in as a LINE
-account yet, so a LINE invite answers `wrong_account` to every session until a LINE sign-in exists.
+the email Apple verified, and that email is the account the invite is checked against. A code sent by email does the
+same once the owner turns it on: its session keeps the address the code went to ("Signing in by email", above).
+Nothing signs in as a LINE account yet, so a LINE invite answers `wrong_account` to every session until a LINE sign-in
+exists.
 
 | Status | Body | When |
 | --- | --- | --- |
@@ -2043,3 +2150,153 @@ type OwnerAccountView = { id: string; linkedAt: string; devices: number };   // 
   `null`, where `subject` is the account's verified Apple subject; never a session's hash. Deleting the shop wipes the
   link and every owner session with the rest of its people, and takes the shop out of every person's index. A person who
   deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet.
+
+## Google Sheets for Ton's books
+
+The owner connects their own Google account, and Ton appends a month of the shop's books to a Google Sheet in the
+owner's Drive, each append asked first with its exact rows (`apps/api/src/google.ts`, `google-vault.ts`,
+`google-connection.ts`, `google-connect.ts`, `books-sheet.ts`, `books-detail.ts`; why and what the owner must set up:
+`docs/connectors.md`, 4b). Google is asked for `https://www.googleapis.com/auth/drive.file` alone, which reaches only the
+files the app makes, and which needs no Google review.
+
+**Off until the owner's OAuth client exists.** Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are both Wrangler
+secrets, and `PUBLIC_API_ORIGIN` is set, every route below answers 503 `{ "error": "google_not_configured" }` before it
+reads anything else, the callback included, and Ton's append fails with `google_not_configured`. No environment sets
+them yet. Tests use a fake Google at `TEST_GOOGLE_ORIGIN`, a setting only `wrangler.test.json` has and that is ignored
+unless it is an `https://…test` origin, so even a value set by mistake can send nothing anywhere real.
+
+### The owner's routes
+
+From the owner's own session for the session's own shop (an owner session, or the shop's own session), with no `tenant`,
+as on the owner's other routes ("The owner's own routes", above).
+
+| Method and path | Body | Answer |
+| --- | --- | --- |
+| `GET /v1/google` | none | `GoogleStatus` |
+| `POST /v1/google/connect` | `{}` | `{ url, expiresAt }`: Google's consent page for the owner's browser, good once until `expiresAt` |
+| `GET /v1/google/callback` | none: Google's redirect, `?state&code` or `?state&error` | a short HTML page |
+| `POST /v1/google/disconnect` | `{}` | `{ disconnected: true, revoked }` |
+| `POST /v1/google/books` | `{ month }`, `YYYY-MM` | a `WorkerRun` ("Workers", above): `asked` with the request, `done` with a draft, or `failed` with why |
+
+```ts
+type GoogleStatus = {
+  connected: boolean;
+  connection: null | {
+    id: string;
+    connectedAt: string;
+    state: "working" | "broken";
+    broken?: { at: string; reason: string; words: string };  // words the owner reads, e.g. "… Connect Google again."
+    sheet: null | { id: string; title: string; tab: string; url: string | null };  // the sheet Ton appends to
+  };
+};
+```
+
+- **Who and in what order.** Configuration first (503 `google_not_configured`), then who is asking (401 `unauthorized`,
+  `unlinked` or `removed`; 503 `people_unavailable`), then the role (a helper's session: 403 `owner_only`), the method
+  (405 `method_not_allowed`), the query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and the body (not
+  exactly the fields above: 400 `invalid_request`; not JSON: 400 `invalid_json`). A person's own sign-in acts for their
+  own tenant, which is no pilot shop: `connect` answers 404 `not_found`.
+- **Connecting.** `connect` makes a `state` (`mgs1.<shop, base64url>.<64 hex characters>`) and a PKCE pair, and the
+  shop's vault keeps the state's SHA-256, the verifier sealed under `CRED_KEY`, and which owner session started it, for
+  ten minutes. A shop has one sign-in in flight: a new `connect` replaces an unfinished one. The answer is the address of
+  Google's consent page: `client_id`, `redirect_uri` (`PUBLIC_API_ORIGIN` + `/v1/google/callback`), `response_type=code`,
+  `scope` = `drive.file` only, `access_type=offline`, `prompt=consent` (so a second connect gets a refresh token too),
+  the `state`, and `code_challenge` with `code_challenge_method=S256`. Nothing else, and never the client's secret.
+- **The callback** is public: the browser Google sends back carries no session, so its ingress limit (30 a minute per
+  address, `GOOGLE_CALLBACK_LIMITER`) runs first, and the state is its credential. The vault hands the state's sign-in
+  back once and deletes it in the same step: 400 for a state it never made or already used (a replayed callback), 410
+  for one past its ten minutes. For an owner session, that session must still hold (401 when the account was unlinked
+  meanwhile). `error=access_denied` (the owner said no) connects nothing. Otherwise the code is exchanged at Google's
+  token endpoint with the verifier and the client's secret, in the request's body; a token without the `drive.file`
+  scope is not kept (400). The refresh token is sealed in the vault as the shop's Google connection (`gsheets`), and any
+  earlier one is forgotten in the same write. The earlier one is not revoked at Google: revoking ends the whole grant
+  the account gave, and when the same account connects again that would end the new token too. Its sheet is carried
+  over, so the books stay in one spreadsheet. The page says what happened in a sentence or two, sends no referrer, runs
+  no script and is never cached; it is in English for now.
+- **Disconnecting** revokes the refresh token at Google (`POST /revoke`, the token in the body) and then forgets it in
+  the vault, whatever Google answered: `revoked: false` means Google could not be reached, and the owner can remove
+  Manut AI in their Google account's settings. 404 `not_connected` when there is nothing to disconnect. It is the only
+  way to remove a Google connection: the generic `DELETE /v1/connections/:id` answers 409 `disconnect_required` for one,
+  since it would forget the token without telling Google.
+- **Tokens.** An access token is asked for, from the sealed refresh token, each time an ask or a send needs one, used
+  for that ask or send, and never stored. No token is in any answer, page, log, URL or audit entry. The broker sends an
+  action only through a connection of its operation's own provider, so the Google token never goes anywhere but Google,
+  whatever connection a proposal names (a LINE reply only through a LINE connection, a Linear issue only through a
+  Linear one).
+- **Broken.** When Google refuses the grant (`invalid_grant`: the access was removed, or ran out), the connection is
+  marked broken, `google.broken` is written once, and nothing is asked or sent through it again; the owner connects
+  again to mend it. Any other trouble reaching Google changes nothing and fails only that ask or send.
+
+### Asking for a month, and sending it
+
+`POST /v1/google/books` runs Ton's job (`{ kind: "books_sheet", month }`) as the operator's `POST
+/v1/admin/workers/run` does, with the same rules for Pause everyone (409 `team_paused`) and a member left off (409
+`member_off`), and the owner named as starting it. Ton names only the month; the control plane does the rest:
+
+1. The switches (with `officeExternalWrites`) and consent, then `@manut/member-grants`' `decide` for Ton's job
+   `append_books` through the Google connection. Its practice days run from the shop's first Google connection, so
+   connecting again does not start them over; in them, Ton keeps a draft of the append (`send: { answer:
+   "draft_only", kind: "command" }`) and nothing reaches Google.
+2. The month must have ended in Bangkok (`month_not_over`). The rows are `@manut/books`' `monthBooks` over the same
+   entries the daily summary counts: each confirmed payment a LINE sale at the time it was confirmed. A month the newest
+   500 payments do not reach back past is refused (`month_incomplete`) rather than appended short, and a month with
+   nothing in it ends done with a draft that says so.
+3. A fresh access token, then the sheet. On first use a new spreadsheet, "Manut AI books: {shop}", is made in the owner's
+   Drive with one tab, `Books`, and no rows. One claim on the connection at a time may make it, and only that claim's
+   sheet is kept, as the connection's one granted resource under a new grant revision; an ask while another makes it is
+   refused (`sheet_in_progress`). A sheet the connection already has is read first (its title as it is now, and that
+   its `Books` tab is still there, else `sheet_tab_missing`); one that is gone for this account is made again.
+4. The task object stores the month's exact rows and the sheet as an immutable proposal (`google.sheets.append`) and
+   opens its approval-core request, of kind `command`, which only the owner may decide, expiring after a day.
+
+The owner decides it from their session (`POST /v1/approvals/{requestId}/decision`, "Deciding from a session"). An
+approval goes to the broker's one-use begin gate, as every write does, which sends it once: the live grant is checked
+(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, and the approved rows go to
+`spreadsheets.values.append` exactly as `@manut/sheets-rows` builds them, `valueInputOption=RAW` (no cell runs as a
+formula) and `insertDataOption=INSERT_ROWS`, after a header row. It settles `confirmed` on Google's success, `failed` only
+when Google refused it before applying it (400, 401, 403, 404, 429) or when it was never sent, and `unknown` for any
+other end (no answer, a timeout, a server error), which is never sent again. `google.appended` records how it settled.
+
+```ts
+// What an append's request names, in `record.request.detail`. Its id is the append's action id.
+type BooksDetail = {
+  actionId: string;
+  operationType: "google.sheets.append";
+  sheet: { id: string; title: string; tab: string };
+  month: string;                 // YYYY-MM
+  rows: number;                  // rows after the header row
+  totals: {                      // text from integer satang, e.g. "฿1,290.33"
+    sales: string; salesCount: number;
+    refunds: string; refundsCount: number;
+    expenses: string; expensesCount: number;
+    net: string;                 // sales less refunds
+    beforeVat?: string; vat?: string;  // a VAT-registered shop's only
+  };
+  flags: number;                 // entries Ton flagged for the owner to check
+  lines: { date: string; ref: string; kind: "sale" | "refund" | "expense"; channelOrCategory: string;
+    amountSatang: number; beforeVatSatang: number | null; vatSatang: number | null }[];  // the exact rows
+  text: string;                  // the control plane's sentence naming all of the above
+  payloadHash: string;
+};
+
+// What a helper is shown of it instead ("Approvals for a session", above).
+type HelperBooksDetail = {
+  actionId: string;
+  operationType: "google.sheets.append";
+  month: string;
+  sheet: { title: string };
+  ownerOnly: true;
+  text: string;                  // "Ton asks to append the books for 2026-10 to the owner's Google Sheet. …"
+};
+```
+
+An append's job ends `failed` with one of these, besides the job flow's own: `google_not_configured`, `invalid_month`,
+`not_connected`, `google_broken`, `kind_mismatch`, `month_not_over`, `month_incomplete`, `month_too_long`,
+`shop_unavailable`, `shop_not_found`, `payments_unavailable`, `vault_unavailable`, `google_unavailable`,
+`sheet_in_progress`, `sheet_not_made`, `sheet_tab_missing`. The owner's route answers 400 `invalid_month` before
+anything starts.
+
+**Not built yet.** The desktop's and the web's screens (Customize › Connections gets a Google row); the Google Picker,
+for the owner to choose an existing sheet; a monthly schedule for the append; refusing a month already appended (each
+request names its month, and the owner may approve the same month twice); and revoking the token at Google when the
+shop's data is deleted (deletion forgets it).

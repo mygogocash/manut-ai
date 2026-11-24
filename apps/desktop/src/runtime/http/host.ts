@@ -55,6 +55,7 @@ import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
+import { peopleHandlers } from "./people";
 import type { TeamState } from "../mission";
 import type { RoutineRow } from "../routines";
 import type { ApiSession, SignInState } from "./session";
@@ -989,6 +990,8 @@ export class HttpHost {
       "routine.resume": async (p) => ({ routine: await this.switchRoutine(p.routine, true) }),
       // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
       ...connectionHandlers(this.ownerLink()),
+      // Settings › People: who can use Manut AI for the shop, invites, removal and cover, with the owner's session (people.ts).
+      ...peopleHandlers(this.ownerLink()),
     };
   })();
 }

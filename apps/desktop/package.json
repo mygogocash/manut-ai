@@ -16,6 +16,7 @@
     "@manut/approval-core": "workspace:*",
     "@manut/member-grants": "workspace:*",
     "@manut/notify-rules": "workspace:*",
+    "@manut/people-rules": "workspace:*",
     "@manut/routine-rules": "workspace:*",
     "@manut/shop-memory": "workspace:*",
     "@tauri-apps/api": "^2",

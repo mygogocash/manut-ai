@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { ApiProvider, createApi, type ApiSetup } from "./api";
-import { DEMO_DELETION_TOKENS, DEMO_TOKENS, PRACTICE_OWNER_CODES } from "./api/fake";
+import { DEMO_DELETION_TOKENS, DEMO_JOIN_TOKENS, DEMO_TOKENS, PRACTICE_OWNER_CODES } from "./api/fake";
 import { ApprovePage } from "./approve/ApprovePage";
 import { DeletePage } from "./delete/DeletePage";
+import { loadBrandFonts } from "./fonts";
+import { JoinPage } from "./join/JoinPage";
 import { OpsConsole } from "./ops/OpsConsole";
 import { Link, matchRoute, usePathname } from "./router";
 import { BrandMark, useColorScheme } from "./ui/marks";
@@ -10,12 +12,19 @@ import { BrandMark, useColorScheme } from "./ui/marks";
 export function App({ setup }: { setup?: ApiSetup }) {
   const api = useMemo(() => setup ?? createApi(), [setup]);
   const route = matchRoute(usePathname());
+  // The join page asks no other origin for anything, its fonts included (fonts.ts); every other page has the brand's.
+  const joining = route.name === "join";
+  useEffect(() => {
+    if (!joining) loadBrandFonts();
+  }, [joining]);
   return (
     <ApiProvider value={api}>
       {route.name === "approve" ? (
         <ApprovePage key={route.token} token={route.token} />
       ) : route.name === "delete" ? (
         <DeletePage key={route.token} token={route.token} />
+      ) : route.name === "join" ? (
+        <JoinPage key={route.token} token={route.token} />
       ) : route.name === "ops" ? (
         <OpsConsole />
       ) : (
@@ -45,6 +54,14 @@ const DEMO_LINKS: { href: string; label: string }[] = [
   { href: `/delete/${DEMO_DELETION_TOKENS.expiredLink}`, label: "Delete a shop's data: link expired" },
   { href: `/delete/${DEMO_DELETION_TOKENS.longName}`, label: "Delete a shop's data: a long Thai shop name and counts in the millions" },
   { href: `/delete/${DEMO_DELETION_TOKENS.offline}`, label: "Delete a shop's data: no connection, the request cannot be loaded" },
+  { href: `/join/${DEMO_JOIN_TOKENS.joined}`, label: "Join a shop: the invite works" },
+  { href: `/join/${DEMO_JOIN_TOKENS.wrongEmail}`, label: "Join a shop: the invite is for another email" },
+  { href: `/join/${DEMO_JOIN_TOKENS.wrongLine}`, label: "Join a shop: the invite is for a LINE account" },
+  { href: `/join/${DEMO_JOIN_TOKENS.expired}`, label: "Join a shop: invite expired" },
+  { href: `/join/${DEMO_JOIN_TOKENS.used}`, label: "Join a shop: invite already used" },
+  { href: `/join/${DEMO_JOIN_TOKENS.revoked}`, label: "Join a shop: invite cancelled" },
+  { href: "/join/not-a-real-invite", label: "Join a shop: invite link that does not work" },
+  { href: `/join/${DEMO_JOIN_TOKENS.signInOff}`, label: "Join a shop: signing in by email is off" },
 ];
 
 /// The codes an owner's app might show, for linking an owner's account on a shop's People page in practice mode: what each one does.
@@ -88,6 +105,10 @@ function Home({ setup, notFound }: { setup: ApiSetup; notFound: boolean }) {
                 </li>
               ))}
             </ul>
+            <p className="hint" style={{ margin: 0 }}>
+              A join page sends no email in practice: it shows the code to type once you ask for one. An invite link from a
+              shop's People page works there too, for the email it names.
+            </p>
             <h3 className="h2">Owner link codes</h3>
             <p className="hint" style={{ margin: 0 }}>
               On a shop's People page in the console, type one of these to link an owner's account. Each code works once, and is

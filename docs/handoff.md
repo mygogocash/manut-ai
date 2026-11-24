@@ -96,22 +96,37 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   smoke-tested: the console is behind Access and the approval page loads.
 - Dev's API was redeployed on 24 Nov at 10:41 from `edd9ae4`, with the operator's start keeping Pause everyone (API
   `0316e338`); the admin route is behind Access.
+- Dev's API was redeployed on 24 Nov at 12:12 from `fb889a2`, with sign-in by email code built and off, and its
+  `AUTH_CODE_LIMITER` (API `48d340ac`); smoke-tested: both email routes answer 400 `email_not_configured`, a malformed
+  body 400 `invalid_request`, Apple's exchange still refuses a bad token, and the console and admin routes are behind
+  Access. The pages are unchanged since 10:22.
+- Dev's API was redeployed on 24 Nov at 13:38 from `fe23fbe`, with Google Sheets for Ton's books built and off, and its
+  `GOOGLE_CALLBACK_LIMITER` (API `c8f3f5b0`); smoke-tested: `/v1/google`, `/v1/google/connect` and the callback answer
+  503 `google_not_configured`, email sign-in still answers `email_not_configured`, and the console and admin routes are
+  behind Access. The pages are unchanged since 10:22.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
-   and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. A
+1. Three helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
+   and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. At
+   13:02 items 10, 34, 35 and 36 stopped at the limit ("resets 4:10pm"); 35, 34 and 10 were sent on at 13:16 to 13:20
+   and ran, and 36's follow-up stayed queued so that three work at a time; it was sent on once 34 finished. A
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 31, sign-in by a code sent by email, built and off (`feat/email-code-sign-in`, Opus);
-   - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet);
-   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus);
-   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet).
-   Next: item 33, the sign-in screens, once item 31 merges; then item 36, self-serve onboarding.
-   Merged: 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
+   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
+   - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus);
+   - item 17, the owner's pages as an installable web app (`feat/owner-web-app`, Opus).
+   Merged: 10 (the join page at `/join/{token}`, with the web's sign-in by email code kept in the page's memory
+   only, `no-referrer` and `no-store`, and no request to another origin), 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
+   append asked as an owner-only command and sent once; the broker now sends an operation only through a connection of
+   its own provider; turning it on is in `docs/connectors.md` 4b), 33 (the desktop's sign-in by email code in Settings › Developer, kept and refreshed as Apple's is), 32
+   (Settings › People for the owner: helpers, invite links to copy, Cancel, Remove, cover dates; the
+   new-device notification opens it), 31 (sign-in by a code sent by email, built and off: both routes answer `email_not_configured` until
+   `EMAIL_SIGN_IN` is on, a sender is bound and `APPROVAL_LINK_SECRET` is set; the dev deploy check now refuses any `TEST_`
+   var), 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
    `refs/manut/snapshots` or an owner-only copy, and never writes through a link; a lane now says when the files went
    back), 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
    the app's own sessions, and Stop checks each process again by its start time before each signal), 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;

@@ -195,6 +195,9 @@ importers:
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules
+      '@manut/sheets-rows':
+        specifier: workspace:*
+        version: link:../../packages/sheets-rows
       '@manut/shop-memory':
         specifier: workspace:*
         version: link:../../packages/shop-memory
@@ -229,6 +232,9 @@ importers:
       '@manut/notify-rules':
         specifier: workspace:*
         version: link:../../packages/notify-rules
+      '@manut/people-rules':
+        specifier: workspace:*
+        version: link:../../packages/people-rules
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules

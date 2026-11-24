@@ -9,11 +9,14 @@ import {
   type CreatedShop,
   type DeletedShop,
   type DeletionView,
+  type EmailCodeSent,
+  type EmailSignIn,
   type Fact,
   type HelperRemoval,
   type Identity,
   type InboundMessage,
   type InviteView,
+  type JoinAnswer,
   type LinkedOwner,
   type Memory,
   type ModelCap,
@@ -51,7 +54,7 @@ export type HttpApiOptions = {
 };
 
 type Request = {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query?: Record<string, string>;
   body?: unknown;
@@ -63,12 +66,15 @@ type Request = {
 
 /// The real client. Admin routes carry `Authorization: Bearer <operator key>` and send cookies, so a
 /// Cloudflare Access session for the API host travels with them. The owner's routes carry neither: the
-/// token in the path is their only credential.
+/// token in the path is their only credential. The join page's routes carry neither too: their credential is the
+/// session the page passes in, which the page holds in memory and this client never keeps.
 export function createHttpApi(options: HttpApiOptions): PilotApi {
   const origin = options.origin.replace(/\/+$/, "");
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
 
-  async function request<T>(req: Request): Promise<T> {
+  /// One request, answered with the response it got, whatever its status; one that never got an answer is ApiError 0
+  /// `network`. Every route goes through here, so the key, the cookies and the body are decided in one place.
+  async function send(req: Request): Promise<Response> {
     const headers: Record<string, string> = { accept: "application/json", ...req.headers };
     if (req.admin) {
       const key = options.operatorKey();
@@ -90,12 +96,15 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
     };
     if (body !== undefined) init.body = body;
 
-    let response: Response;
     try {
-      response = await doFetch(`${origin}${req.path}${query}`, init);
+      return await doFetch(`${origin}${req.path}${query}`, init);
     } catch {
       throw new ApiError(0, "network");
     }
+  }
+
+  async function request<T>(req: Request): Promise<T> {
+    const response = await send(req);
     if (!response.ok) throw await errorOf(response);
     if (req.empty) return undefined as T;
     try {
@@ -308,7 +317,93 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
         },
         admin: true,
       }),
+
+    // The join page's routes. Each body is built field by field, as the API takes exactly these fields, and the invite
+    // token goes in one place only: the accept's body. No path or query ever carries a token or an address.
+    requestEmailCode: (email) =>
+      request<EmailCodeSent>({ method: "POST", path: "/v1/auth/email/code", body: { email } }),
+    exchangeEmailCode: (input) =>
+      request<EmailSignIn>({
+        method: "POST",
+        path: "/v1/auth/exchange",
+        body: { provider: "email", email: input.email, code: input.code, deviceId: input.deviceId },
+      }),
+    // A refusal of the invite (used, expired, revoked, unknown, another account) is an answer the page shows, so it
+    // resolves whatever its status; only an answer that is not one of these is an error.
+    acceptInvite: async (input) => {
+      const response = await send({
+        method: "POST",
+        path: "/v1/people/accept",
+        body: { token: input.inviteToken },
+        headers: { authorization: `Bearer ${input.accessToken}` },
+      });
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch {
+        parsed = undefined;
+      }
+      const answer = joinAnswerOf(parsed);
+      if (answer) return answer;
+      if (response.ok || (isRecord(parsed) && typeof parsed.answer === "string")) {
+        throw new ApiError(response.status, "bad_response");
+      }
+      throw errorFrom(response, parsed);
+    },
+    endShopSession: async (accessToken) => {
+      await request<unknown>({
+        method: "POST",
+        path: "/v1/shops/session/end",
+        body: {},
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    },
+    signOut: async (accessToken) => {
+      await request<unknown>({ method: "DELETE", path: "/v1/auth/session", headers: { authorization: `Bearer ${accessToken}` } });
+    },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+/// An accept's answer, read field by field so the page only ever shows what the contract says each answer carries, or
+/// null when the body is not one of them. A `wrong_account` keeps only the shop and the kind of account: anything else the
+/// body held, an invited address above all, is dropped, so it can never reach the screen.
+function joinAnswerOf(body: unknown): JoinAnswer | null {
+  if (!isRecord(body)) return null;
+  switch (body.answer) {
+    case "joined": {
+      const { shop, helper, session } = body;
+      if (!isRecord(shop) || !isText(shop.id) || !isText(shop.name) || !isText(shop.ownerName)) return null;
+      if (!isRecord(helper) || !isText(helper.id) || !isText(helper.name)) return null;
+      if (!isRecord(session) || !isText(session.accessToken) || !isText(session.expiresAt)) return null;
+      return {
+        answer: "joined",
+        shop: { id: shop.id, name: shop.name, ownerName: shop.ownerName },
+        helper: { id: helper.id, name: helper.name },
+        session: { accessToken: session.accessToken, expiresAt: session.expiresAt },
+      };
+    }
+    case "wrong_account": {
+      const { shop, invitedOn } = body;
+      if (!isRecord(shop) || !isText(shop.name) || !isText(shop.ownerName)) return null;
+      if (invitedOn !== "line" && invitedOn !== "email") return null;
+      return { answer: "wrong_account", shop: { name: shop.name, ownerName: shop.ownerName }, invitedOn };
+    }
+    case "already_used":
+    case "expired":
+    case "revoked":
+    case "unknown":
+      return { answer: body.answer };
+    default:
+      return null;
+  }
 }
 
 /// An identity with only the fields its kind has, so nothing else can ride along into an invite.
@@ -316,9 +411,6 @@ function identityBody(identity: Identity): Identity {
   return identity.kind === "line" ? { kind: "line", id: identity.id } : { kind: "email", address: identity.address };
 }
 
-/// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
-/// wipe left, when and by whom a deleted shop was deleted, and the setting a `not_configured` answer names. Fields of
-/// the wrong type are dropped, not guessed.
 async function errorOf(response: Response): Promise<ApiError> {
   let parsed: unknown;
   try {
@@ -326,7 +418,23 @@ async function errorOf(response: Response): Promise<ApiError> {
   } catch {
     parsed = undefined;
   }
+  return errorFrom(response, parsed);
+}
+
+/// Whole seconds, as a wait is given: a whole number from 0, in the body as a number or in a header as digits.
+function wholeSeconds(value: unknown): number | undefined {
+  const n = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value;
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+}
+
+/// Everything the contract puts in an error answer is kept: the settled page on a second decision, what a partial
+/// wipe left, when and by whom a deleted shop was deleted, the setting a `not_configured` answer names, how long to wait
+/// before another sign-in code (the body's `retryAfter`, else the `retry-after` header) and how many tries a code has
+/// left. Fields of the wrong type are dropped, not guessed.
+function errorFrom(response: Response, parsed: unknown): ApiError {
   const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const retryAfter = wholeSeconds(record.retryAfter) ?? wholeSeconds(response.headers.get("retry-after"));
+  const triesLeft = wholeSeconds(record.triesLeft);
   const code = typeof record.error === "string" && record.error ? record.error : `http_${response.status}`;
   const view = isApprovalView(record.view) ? record.view : undefined;
   const failed = Array.isArray(record.failed) && record.failed.every((part) => typeof part === "string")
@@ -338,6 +446,8 @@ async function errorOf(response: Response): Promise<ApiError> {
     ...(typeof record.deletedAt === "string" ? { deletedAt: record.deletedAt } : {}),
     ...(typeof record.deletedBy === "string" || record.deletedBy === null ? { deletedBy: record.deletedBy } : {}),
     ...(typeof record.setting === "string" && record.setting ? { setting: record.setting } : {}),
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
+    ...(triesLeft !== undefined ? { triesLeft } : {}),
   });
 }
 

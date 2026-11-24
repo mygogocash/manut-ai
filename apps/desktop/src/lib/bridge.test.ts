@@ -60,6 +60,16 @@ describe("reconnect after the bridge comes back", () => {
     await expect(resolveBridgeUrl()).resolves.toBe(OLD);
   });
 
+  it("starts on the in-process runtime when the page says so, whatever bridge is configured", () => {
+    win.window = { __MANUT_BRIDGE_URL__: async () => OLD, __MANUT_IN_PROCESS__: true };
+    expect(bridgeUrlConfigured()).toBe(false);
+    // only an exact true counts: a stray value never turns the bridge off
+    for (const value of [1, "true", {}, false, undefined]) {
+      win.window = { __MANUT_BRIDGE_URL__: async () => OLD, __MANUT_IN_PROCESS__: value };
+      expect(bridgeUrlConfigured(), String(value)).toBe(true);
+    }
+  });
+
   it("in the e2e page: asks the __MANUT_BRIDGE_URL__ stand-in again", async () => {
     let url = OLD;
     const standIn = vi.fn(async () => url);

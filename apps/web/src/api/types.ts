@@ -362,6 +362,41 @@ export type LinkedOwner = { tenant: string; ownerAccount: { id: string; linkedAt
 /// What unlinking did: the link that ended, and how many of the account's sessions ended with it.
 export type UnlinkedOwner = { tenant: string; unlinked: string; sessionsEnded: number };
 
+/// `POST /v1/auth/email/code` answered: a code of six digits went to the email service for the address. The answer is the
+/// same for every address, so it never says whether anyone knows it. `expiresIn` is how many seconds the code works (600),
+/// and `resendIn` how many seconds until the address may have another (60).
+export type EmailCodeSent = { sent: true; expiresIn: number; resendIn: number };
+
+/// `POST /v1/auth/exchange` with `provider: "email"`. `deviceId` is 1 to 128 characters; the code is six digits.
+export type EmailExchange = { email: string; code: string; deviceId: string };
+
+/// A signed-in session of the lifted auth, the same as Sign in with Apple's: the access token is sent as
+/// `Authorization: Bearer <accessToken>` and lasts `expiresIn` seconds (3600). `tenant` is the identity's own,
+/// `email:` and the address's SHA-256.
+export type EmailSignIn = { accessToken: string; refreshToken: string; csrf: string; expiresIn: number; tenant: string };
+
+/// A helper session for one shop (docs/people.md, "The helper's session"): `mhs1.` and the shop, 30 days, no refresh.
+export type HelperSession = { accessToken: string; expiresAt: string };
+
+/// What a signed-in accept of an invite may hear (docs/pilot-api.md, "A helper's own routes"). Only `joined` and
+/// `wrong_account` name the shop, and `wrong_account` says only which kind of account the invite is for, never its value.
+export type JoinAnswer =
+  | {
+    answer: "joined";
+    shop: { id: string; name: string; ownerName: string };
+    helper: { id: string; name: string };
+    session: HelperSession;
+  }
+  | { answer: "wrong_account"; shop: { name: string; ownerName: string }; invitedOn: "line" | "email" }
+  | { answer: "already_used" }
+  | { answer: "expired" }
+  | { answer: "revoked" }
+  | { answer: "unknown" };
+
+/// The two credentials an accept needs: the person's signed-in session, and the invite token from the link. The token
+/// travels only in the body, as `{ token }`, never in a URL.
+export type InviteAcceptance = { accessToken: string; inviteToken: string };
+
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
 export type ModelCapOverride = { capSatang: number; setAt: string; setBy: string | null };
@@ -425,8 +460,9 @@ export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
 /// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
 export type WorkerMember = "nam" | "pim" | "ton";
 
-/// What a job is: a reply to a customer's message, a post about a topic, or yesterday's sales summary.
-export type WorkerJobKind = "reply" | "post" | "daily_summary";
+/// What a job is: a reply to a customer's message, a post about a topic, yesterday's sales summary, or a month of the books
+/// appended to the owner's Google Sheet once the owner approves its rows.
+export type WorkerJobKind = "reply" | "post" | "daily_summary" | "books_sheet";
 
 /// How a worker's job stands. `failed` carries the code the job ended with, which this console puts in words and shows as it
 /// is when it does not know the code yet. `handed_over` is a job passed on to a member who has not taken it up; a job passed
@@ -594,6 +630,25 @@ export interface PilotApi {
   /// cursor that is not one of the shop's jobs or a size out of range, 404 `shop_not_found`, and 503 `shop_unavailable` or
   /// `drafts_unavailable`.
   listWorkerJobs(tenant: string, query?: WorkerJobsQuery): Promise<WorkerJobsPage>;
+
+  /// The join page's routes (docs/pilot-api.md, "Signing in by email" and "A helper's own routes"). None carries the
+  /// operator key or a cookie: the credentials are the ones passed in, held by the page in memory only.
+  /// `POST /v1/auth/email/code` with exactly `{ email }`. Rejects with 429 `too_many_codes` (`ApiError.retryAfter`, whole
+  /// seconds), 429 `rate_limited` (too many asks from one network; its wait is the `retry-after` header's), 400
+  /// `invalid_request`, 400 `email_not_configured` while signing in by email is off, and 503 `rate_limit_unavailable`.
+  requestEmailCode(email: string): Promise<EmailCodeSent>;
+  /// `POST /v1/auth/exchange` with exactly `{ provider: "email", email, code, deviceId }`. Rejects with 401 `wrong_code`
+  /// (`ApiError.triesLeft`; at 0 the code has ended), 401 `code_ended`, 400 `invalid_request`, 400 `email_not_configured`,
+  /// and 429 `rate_limited`.
+  exchangeEmailCode(input: EmailExchange): Promise<EmailSignIn>;
+  /// `POST /v1/people/accept` with exactly `{ token }` and the signed-in session. Every answer of the route's table resolves,
+  /// whatever its status (200, 403, 404, 409 or 410); it rejects only with what is not an answer: 401 `unauthorized` (no
+  /// session, or one that ended), 400 `invalid_request`, and 503 `people_unavailable`.
+  acceptInvite(input: InviteAcceptance): Promise<JoinAnswer>;
+  /// `POST /v1/shops/session/end` with exactly `{}` and the shop session itself: ends that one session.
+  endShopSession(accessToken: string): Promise<void>;
+  /// `DELETE /v1/auth/session` with the signed-in session: ends it, and its refresh with it.
+  signOut(accessToken: string): Promise<void>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.
@@ -607,6 +662,11 @@ export type ApiErrorDetails = {
   deletedBy?: string | null;
   /// The API setting that is missing or cannot be read, on a 503 `not_configured` from the model routes.
   setting?: string;
+  /// Whole seconds to wait before asking again: a 429 `too_many_codes` says it in its body, and a 429 `rate_limited` in
+  /// its `retry-after` header.
+  retryAfter?: number;
+  /// How many more tries a sign-in code takes, on a 401 `wrong_code`. At 0 the code has ended.
+  triesLeft?: number;
 };
 
 /// An answer other than success. `status` is 0 when the request never got an answer. `code` is the
@@ -621,6 +681,8 @@ export class ApiError extends Error {
   readonly deletedAt: string | undefined;
   readonly deletedBy: string | null | undefined;
   readonly setting: string | undefined;
+  readonly retryAfter: number | undefined;
+  readonly triesLeft: number | undefined;
 
   constructor(status: number, code: string, view?: ApprovalView, details: ApiErrorDetails = {}) {
     super(`${status} ${code}`);
@@ -633,5 +695,7 @@ export class ApiError extends Error {
     this.deletedAt = details.deletedAt;
     this.deletedBy = details.deletedBy;
     this.setting = details.setting;
+    this.retryAfter = details.retryAfter;
+    this.triesLeft = details.triesLeft;
   }
 }

@@ -109,6 +109,15 @@ export const AUDIT_ACTIONS = [
   "browser_step.queued",
   "browser_step.fetched",
   "browser_step.reported",
+  // Google Sheets for Ton's books (google-connect.ts, books-sheet.ts): the owner connecting their Google account (or
+  // saying no on Google's page) and disconnecting it, Google refusing the grant so the connection broke, the sheet made
+  // in the owner's Drive, and each approved month appended, with how it settled. Each names the connection, the task or
+  // the action by its id, never a token, a sheet's title, or a row.
+  "google.connected",
+  "google.disconnected",
+  "google.broken",
+  "google.sheet_created",
+  "google.appended",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

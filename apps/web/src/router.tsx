@@ -1,11 +1,12 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from "react";
 
-/// Four pages need no router package: the path is read from `location`, `navigate` pushes history, and
+/// Five pages need no router package: the path is read from `location`, `navigate` pushes history, and
 /// back and forward arrive as `popstate`.
 
 export type Route =
   | { name: "approve"; token: string }
   | { name: "delete"; token: string }
+  | { name: "join"; token: string }
   | { name: "ops" }
   | { name: "home" }
   | { name: "notFound" };
@@ -14,11 +15,13 @@ export function matchRoute(pathname: string): Route {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return { name: "home" };
   if (path === "/ops") return { name: "ops" };
-  // The owner's two kinds of link: one reply to approve, or one deletion of the shop's data to confirm.
-  const linked = /^\/(approve|delete)\/([^/]+)$/.exec(path);
+  // The three kinds of link with a token in their path: the owner's reply to approve, the owner's deletion of the
+  // shop's data to confirm, and an invite for a helper to join the shop.
+  const linked = /^\/(approve|delete|join)\/([^/]+)$/.exec(path);
   if (linked?.[1] && linked[2]) {
     try {
-      return { name: linked[1] === "approve" ? "approve" : "delete", token: decodeURIComponent(linked[2]) };
+      const name = linked[1] === "approve" ? "approve" : linked[1] === "delete" ? "delete" : "join";
+      return { name, token: decodeURIComponent(linked[2]) };
     } catch {
       return { name: "notFound" };
     }

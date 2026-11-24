@@ -33,7 +33,7 @@ answers it through `src/runtime`:
 | `src/runtime/setting.ts` | Settings › Developer's choice, kept in `manut.runtime`: Practice or Connected with an API origin |
 | `src/runtime/mock/` | The in-process runtime: Buddy and a small team, scripted turns, approvals that settle once. The default, called Practice |
 | `src/runtime/http/` | Connected: a read-only runtime over `apps/api` at one origin, signed in through the backend's own sign-in, with the session in the macOS keychain and requests through the shell's `api_request` command (`src-tauri/src/api_link.rs`). Every write answers "not yet". See `docs/runtime-adapter.md` |
-| `src/lib/bridge.ts` | The WebSocket adapter (omher's original transport). Used only when `VITE_MANUT_BRIDGE` or the page's `__MANUT_BRIDGE_URL__` names a URL, which is how the Playwright suite reaches `e2e/mock-bridge.mjs` |
+| `src/lib/bridge.ts` | The WebSocket adapter (omher's original transport). Used only when `VITE_MANUT_BRIDGE` or the page's `__MANUT_BRIDGE_URL__` names a URL, which is how the Playwright suite reaches `e2e/mock-bridge.mjs`. A page that sets `__MANUT_IN_PROCESS__` to `true` before it loads gets the in-process runtime whatever is configured, so a spec can walk Practice (`e2e/people.spec.ts`) |
 
 In the demo runtime, type anything for a sample answer, or `/approve`, `/clarify`, `/interview`, `/delegate`.
 

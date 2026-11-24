@@ -124,6 +124,32 @@ Checked 24 Nov 2026 on Google's pages [G1, G2]. `@manut/sheets-rows` already bui
 - **For Manut AI:** an OAuth client in a Google Cloud project of the owner's, with `drive.file` only, an OAuth consent
   screen naming Manut AI, and the Picker's API key. The token goes into the credential vault, as LINE's does.
 
+**Built, off until the owner's OAuth client exists** (December item 34; the routes are `docs/pilot-api.md`, "Google
+Sheets for Ton's books"). The owner connects their Google account from their own session (OAuth for web server apps,
+with PKCE and a one-use state), the refresh token is sealed in the vault, and on first use Ton makes one spreadsheet,
+"Manut AI books: {shop}" with a `Books` tab, which the app can reach under `drive.file`. Each month's append is asked
+through approval-core, owner-only, naming the sheet, the month, the rows and their totals, and sent once on approval.
+Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are Wrangler secrets every Google route answers
+`google_not_configured`; no environment sets them. The Picker (the owner choosing an existing sheet) comes later.
+
+What the owner makes to turn it on, in a Google Cloud project of their own [G3, G4, G5]:
+
+1. **The project**, with the Google Sheets API enabled in its API Library.
+2. **The consent screen** (the Branding page in the Cloud Console): app name "Manut AI", a support email, the privacy
+   policy and home page links, and the API's domain (`manut.xyz`), for External users. The app asks for the one scope
+   `https://www.googleapis.com/auth/drive.file`, which Google counts as non-sensitive, so no scope verification is
+   needed. Then **publish the app** out of Testing: while it is in Testing only listed test users can sign in, and their
+   refresh tokens end after 7 days, which would break the connection every week. Google shows "Manut AI" and its logo
+   on its consent page only after brand verification, a lighter check than the sensitive-scope review [G5].
+3. **The OAuth client** (the Clients page, Create client): type "Web application", with one authorised redirect URI,
+   exactly `https://<the API's host>/v1/google/callback` (for dev, `https://dev.manut.xyz/v1/google/callback`).
+4. **The two secrets**, per environment: `wrangler secret put GOOGLE_CLIENT_ID` and `wrangler secret put
+   GOOGLE_CLIENT_SECRET` in `apps/api`. Nothing else changes: the routes start answering, and nothing reaches Google
+   until an owner connects.
+
+A refresh token also stops working after six months unused, which a monthly append keeps from happening, or when the
+owner removes Manut AI in their Google account; the connection then reads as broken and the owner connects again [G4].
+
 ## 5. Comparison
 
 | Channel | Read | Send after a delay | Approval | Stated lead time | Cost per message | Biggest risk |
@@ -142,7 +168,8 @@ Checked 24 Nov 2026 on Google's pages [G1, G2]. `@manut/sheets-rows` already bui
 5. FlowAccount (form.flowaccount.com/request-openapi): ask for Open API access as an app partner, with the scope of use
    and the redirect URL, for the OpenID flow; a sandbox comes first, and each shop needs its own Pro Business plan.
 6. Google Cloud: a project of the owner's with an OAuth client and consent screen for `drive.file` only (no
-   verification needed for that scope), and the Google Picker's API key.
+   verification needed for that scope), published to production, with the redirect URI in 4b; then the two Wrangler
+   secrets. The Google Picker's API key is for the later step that lets the owner choose an existing sheet.
 
 ## Sources
 
@@ -198,3 +225,10 @@ Shopee and Lazada pages are JavaScript apps; their text was read from the data e
 - F4 https://flowaccount.com/en/developers and https://flowaccount.com/en/pricing
 - G1 https://developers.google.com/workspace/sheets/api/scopes
 - G2 https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification
+- G3 https://developers.google.com/identity/protocols/oauth2/web-server (checked 24 Nov 2026: the authorization,
+  token, refresh and revoke endpoints and parameters) and https://developers.google.com/identity/protocols/oauth2/native-app
+  (the PKCE S256 challenge)
+- G4 https://developers.google.com/identity/protocols/oauth2 ("Refresh token expiration": 7 days in Testing, six months
+  unused, 100 per account per client)
+- G5 https://developers.google.com/identity/protocols/oauth2/production-readiness/overview (publishing status and
+  verification)

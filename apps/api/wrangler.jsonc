@@ -33,6 +33,23 @@
   // optional vars, both the owner's decision: MODEL_SATANG_PER_USD (whole
   // satang per US dollar, 3500 when unset) and MODEL_DEFAULT_CAP_SATANG (each
   // shop's monthly cap in satang, 20000 when unset). None is set here yet.
+  // Signing in by email (docs/pilot-api.md, "Signing in by email") is built
+  // and off: both of its routes answer email_not_configured until the var
+  // EMAIL_SIGN_IN is "on", a sender is bound and APPROVAL_LINK_SECRET is set.
+  // The sender is Cloudflare Email Service's binding, "send_email" with the
+  // name EMAIL, and the vars EMAIL_FROM_ADDRESS and EMAIL_FROM_NAME, which
+  // owners see. None of them is set in any environment: turning it on needs
+  // the owner's yes, the Workers Paid plan and a sending domain the owner
+  // controls. Its limiter, AUTH_CODE_LIMITER, is bound everywhere already, so
+  // the route is limited before it answers even while it is off.
+  // TEST_EMAIL_OUTBOX, like TEST_JWKS_JSON, belongs in wrangler.test.json
+  // only: the dev deploy check refuses any config that sets a TEST_ var.
+  // Google Sheets for Ton's books (docs/connectors.md, 4b): the owner's own
+  // OAuth client, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, two Wrangler
+  // secrets (`wrangler secret put GOOGLE_CLIENT_ID`, then the secret). No
+  // environment sets them yet, so every /v1/google route answers 503
+  // google_not_configured and nothing reaches Google. The client's redirect
+  // URI is PUBLIC_API_ORIGIN followed by /v1/google/callback.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front
@@ -86,6 +103,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112306",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112334",
           "simple": {
             "limit": 10,
             "period": 60
@@ -152,6 +178,14 @@
             "limit": 300,
             "period": 60
           }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112338",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     },
@@ -173,6 +207,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112311",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112335",
           "simple": {
             "limit": 10,
             "period": 60
@@ -239,6 +282,14 @@
             "limit": 300,
             "period": 60
           }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112339",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     },
@@ -260,6 +311,15 @@
         {
           "name": "AUTH_EXCHANGE_LIMITER",
           "namespace_id": "2026112316",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
+        },
+        // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+        {
+          "name": "AUTH_CODE_LIMITER",
+          "namespace_id": "2026112336",
           "simple": {
             "limit": 10,
             "period": 60
@@ -326,6 +386,14 @@
             "limit": 300,
             "period": 60
           }
+        },
+        {
+          "name": "GOOGLE_CALLBACK_LIMITER",
+          "namespace_id": "2026112340",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     }
@@ -339,11 +407,26 @@
   // in dev, staging and prod), and the outposts' limiter (2026112329 here,
   // 30, 31 and 32 in dev, staging and prod), which covers an outpost's
   // heartbeat, redeem and browser steps (browser-control.ts), keyed per
-  // source address.
+  // source address. The email sign-in code limiter follows them (2026112333
+  // here, 34, 35 and 36 in dev, staging and prod): on 24 Nov 2026 the ids
+  // 2026112301 to 32 clashed with nothing in the account, whose other
+  // limiters use only 1001 and 1002 (docs/handoff.md).
+  // The Google callback's limiter comes next (2026112337 here, 38, 39 and 40
+  // in dev, staging and prod; google-connect.ts), keyed per source address;
+  // its ids have not been checked against the account's limiters yet.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
       "namespace_id": "2026112301",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    // Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's.
+    {
+      "name": "AUTH_CODE_LIMITER",
+      "namespace_id": "2026112333",
       "simple": {
         "limit": 10,
         "period": 60
@@ -408,6 +491,14 @@
       "namespace_id": "2026112329",
       "simple": {
         "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "GOOGLE_CALLBACK_LIMITER",
+      "namespace_id": "2026112337",
+      "simple": {
+        "limit": 30,
         "period": 60
       }
     }
