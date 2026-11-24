@@ -819,6 +819,29 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
    yet: a write naming one is `selector_not_found`). (Built 24 Nov 2026: telling a page's frames from the page in the
    navigation hook; fields in a page's open shadow DOM; check boxes, radio buttons and editors that are not form
    fields; knowing a settings page took a change when it keeps the form; above.)
+
+   **What the owner's first supervised write should check on the real site**, with the outpost's window in view:
+   - The window opens and loads pages as before, and Connections shows this Mac Online: the navigation delegate in
+     front of wry's was checked in a real WKWebView once, with a throwaway program, but not yet inside the app.
+   - The sign-in: one page or two; that the account's field is marked `autocomplete="username"` (or is the page's only
+     email field), else the outpost says there is no form; what the site shows when it wants a person check or a code
+     (`sign_in_interrupted`; the owner then signs in by hand in the outpost's window, whose session lasts while it is
+     open); and that the password is typed only on the sign-in's own addresses.
+   - Frames: whether the pages the team writes on hold frames from other sites (a chat widget, analytics, a payment
+     box). Any such frame stops every write on that page before the press (`navigation_refused`, nothing sent). If a
+     page needs one, the answer is a rule for which frames a write page may load, never adding the frame's address to
+     the sign-in, which would let the password be typed there.
+   - The fields: that each one the team will write is in the page or an open shadow root, not in a closed one or a
+     frame; that switches are check boxes, not `role="switch"` elements.
+   - **Fields that save as they change.** A box or a field the site saves the moment it changes makes typing itself a
+     write: if such a write then stopped before the press, the outpost would report nothing sent though the site had
+     saved. Find out which settings do this before the team writes them.
+   - The chat box: a text area or an editor; that a line break in a reply does not send it; that the reply reads back as
+     typed (an editor that rewrites spaces or emoji stops the press, `submit_refused`, with nothing sent).
+   - A settings page: how it answers a save (moves, clears, or keeps the form saying "Saved"); for the last, that the
+     page loaded anew shows the saved values, or the write ends not known; and that leaving it brings no "unsaved
+     changes" question, since the outpost loads an empty page before reading it back.
+   - Time: that pages load, forms draw (10 seconds), and answers come within a write's 60 seconds and a sign-in's 40.
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
