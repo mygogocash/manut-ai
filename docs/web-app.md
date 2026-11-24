@@ -60,7 +60,9 @@ itself in `localStorage` or IndexedDB, was weighed and not chosen:
   over the app is told `signed_out`, nothing is read or decided, and every shop cookie is cleared with the access cookie
   (`docs/pilot-api.md`, "A shop cookie needs the sign-in").
 - **The page's policy.** `/app/` runs only this origin's scripts (`apps/api/src/app-policy.ts`): no script written into
-  the page, from another site, or from a string. The console and the links' pages keep their own policy.
+  the page, from another site, or from a string. Every other page on the origin has one too (the console, the links'
+  pages, the practice home and the join page; `docs/pilot-api.md`, "One origin"), since a script on any of them could use
+  the app's cookies while it runs.
 - **Signing out** ends every shop session and the sign-in on the API, then clears every cookie. It needs the API: offline,
   the app says to sign out when back online, since a page cannot clear cookies it cannot read.
 - **Signing out everywhere** is not built, as the desktop has none: the lifted auth has no route that ends all of one

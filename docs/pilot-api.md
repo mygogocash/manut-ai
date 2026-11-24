@@ -1454,8 +1454,18 @@ covers the console and the operator routes. They are two Workers, both deployed 
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
   `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
-  `Cache-Control: no-store`, since each carries a token in its path. Everything under `/app/` gets a policy of its own
-  that runs only this origin's scripts (`src/app-policy.ts`). They never apply to the API's answers.
+  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
+- **Every page's script policy** (`src/app-policy.ts`). Any script running anywhere on the one origin could use what the
+  origin holds while it runs: the web app's cookies, and the operator key the console keeps in `sessionStorage`, on
+  pages that show what customers wrote. So every page has a Content-Security-Policy that runs only this origin's
+  scripts: none written into the page, from another site, or from a string (`eval`), and refuses every frame
+  (`frame-ancestors 'none'`); styles may be inline, images may be `data:`, and every request goes to this origin.
+  Three of them, by what each page loads: the owner's web app (`/app/`) adds its manifest and service worker and the
+  brand's fonts from Google's two hosts (`fonts.googleapis.com`, `fonts.gstatic.com`); the console at `/ops`, the
+  approval and deletion pages, the practice home and every other page add only those fonts; and the join page
+  (`/join/`), whose path carries an invite's token, names no other origin at all. Checked on both local Workers in
+  Chromium and WebKit on 24 Nov 2026: no page broke a rule, each drew, the console's fonts loaded, and an injected inline script, a
+  script from another site and a string timer were each refused.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
@@ -1768,7 +1778,8 @@ Every sign-in's session, Apple's and email's alike, lives in the one global auth
   A person's own deletion reads neither index: a person's tenant (`apple:` or `email:`) never names a shop, which the
   Worker always makes as `pilot:<uuid>`.
 - **A person's own deletion is limited per address.** `DELETE /v1/tenant/data` counts every try against
-  `TENANT_DELETE_LIMITER`, 10 a minute per source address, in the ingress gate before the session is read: 429
+  `TENANT_DELETE_LIMITER`, 10 a minute per source address (an IPv4 address or an IPv6 /64, as every ingress limit
+  counts), in the ingress gate before the session is read: 429
   `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding. Per address, not per person:
   the deletion ends every session of the person, so each try needs a sign-in of its own, and only an address is shared by
   tries from many accounts.
