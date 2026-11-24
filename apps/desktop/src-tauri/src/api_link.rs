@@ -13,7 +13,12 @@
 //! The keychain. One generic password item (service `xyz.manut.desktop.api`, account `session`) that these three
 //! commands read, replace and delete. The page names no item, so it can reach no other. The item is made by this app,
 //! so macOS lets this app read it without asking and asks the person before any other program reads it. macOS only
-//! for now: elsewhere the commands answer `unavailable` and Connected cannot sign in.
+//! for now: elsewhere the commands answer `unavailable` and Connected cannot sign in. One more item sits beside it,
+//! account `outpost`: this Mac's outpost and its credential (outpost/item.rs). The shell alone reads that one, and no
+//! command hands it to the page.
+//!
+//! An answer that holds a secret (an outpost redeeming a sign-in's password) is read with `request_sealed`, into a
+//! buffer sized up front and wiped when it is dropped.
 //!
 //! The page only ever learns `offline` or `failed` (or `unavailable` for the keychain), never curl's own words, which
 //! could carry an address.
@@ -257,6 +262,57 @@ pub fn request(url: &str, method: &str, bearer: Option<&str>, body: Option<&str>
     run_curl(&curl_program(), &config)
 }
 
+/// The largest answer `request_sealed` reads. A redeem's answer is a few hundred bytes: a username and a password of
+/// at most 1,024 characters, and five origins.
+const MAX_SEALED_ANSWER: usize = 64 * 1024;
+
+/// One request whose answer holds a secret, such as an outpost redeeming a sign-in (outpost/api.rs). The same checks
+/// and the same curl as `request`, but the answer is read into a buffer sized up front, so no reallocation leaves a
+/// copy of it behind, and it comes back in a buffer that is wiped when it is dropped. Only the status and the body
+/// come back, as from `request`.
+pub fn request_sealed(url: &str, method: &str, bearer: Option<&str>, body: Option<&str>) -> Result<(u16, Zeroizing<String>), LinkError> {
+    checked_url(url).map_err(LinkError::Failed)?;
+    if !matches!(method, "GET" | "POST" | "DELETE") {
+        return Err(LinkError::Failed("method"));
+    }
+    if let Some(token) = bearer {
+        checked_bearer(token).map_err(LinkError::Failed)?;
+    }
+    if let Some(body) = body {
+        checked_body(body).map_err(LinkError::Failed)?;
+    }
+    let config = curl_config(url, method, bearer, body);
+    // Room for the largest answer read, the status mark and more than std's read_to_end probes with, so the buffer is
+    // never full and never grows.
+    let mut out = Zeroizing::new(Vec::with_capacity(MAX_SEALED_ANSWER + STATUS_MARK.len() + 128));
+    match curl_into(&curl_program(), &config, &mut out, MAX_SEALED_ANSWER)? {
+        Some(0) => parse_sealed(out),
+        Some(code) if offline_exit(code) => Err(LinkError::Offline),
+        _ => Err(LinkError::Failed("curl")),
+    }
+}
+
+/// The status and the body from curl's output, as `parse_answer` reads them, moved rather than copied into a buffer
+/// that is wiped when dropped.
+fn parse_sealed(mut out: Zeroizing<Vec<u8>>) -> Result<(u16, Zeroizing<String>), LinkError> {
+    let mark = STATUS_MARK.as_bytes();
+    let at = out.windows(mark.len()).rposition(|w| w == mark).ok_or(LinkError::Failed("no status"))?;
+    let status: u16 = std::str::from_utf8(&out[at + mark.len()..])
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .ok_or(LinkError::Failed("no status"))?;
+    if status == 0 {
+        return Err(LinkError::Offline);
+    }
+    out.truncate(at);
+    if std::str::from_utf8(&out).is_err() {
+        return Err(LinkError::Failed("not text"));
+    }
+    // The bytes were just checked, so this moves the buffer into the String without copying it.
+    let text = String::from_utf8(std::mem::take(&mut *out)).map_err(|_| LinkError::Failed("not text"))?;
+    Ok((status, Zeroizing::new(text)))
+}
+
 /// curl's exit codes that mean the host was not reached (resolving, connecting, timing out, the connection dropping),
 /// as opposed to a request that was wrong.
 fn offline_exit(code: i32) -> bool {
@@ -264,6 +320,17 @@ fn offline_exit(code: i32) -> bool {
 }
 
 fn run_curl(program: &Path, config: &str) -> Result<ApiAnswer, LinkError> {
+    let mut out = Vec::new();
+    match curl_into(program, config, &mut out, MAX_ANSWER)? {
+        Some(0) => parse_answer(out),
+        Some(code) if offline_exit(code) => Err(LinkError::Offline),
+        _ => Err(LinkError::Failed("curl")),
+    }
+}
+
+/// Runs curl with `config` on its standard input and reads at most `max` bytes of answer (and curl's status mark) into
+/// `out`. Answers curl's exit code.
+fn curl_into(program: &Path, config: &str, out: &mut Vec<u8>, max: usize) -> Result<Option<i32>, LinkError> {
     let mut child = Command::new(program)
         .args(curl_args())
         .env_remove("SSLKEYLOGFILE")
@@ -283,12 +350,11 @@ fn run_curl(program: &Path, config: &str) -> Result<ApiAnswer, LinkError> {
         let _ = child.wait();
         return Err(LinkError::Failed("config"));
     }
-    let mut out = Vec::new();
     let read = match child.stdout.take() {
-        Some(stdout) => stdout.take((MAX_ANSWER + STATUS_MARK.len() + 8) as u64).read_to_end(&mut out).is_ok(),
+        Some(stdout) => stdout.take((max + STATUS_MARK.len() + 8) as u64).read_to_end(out).is_ok(),
         None => false,
     };
-    let too_large = out.len() > MAX_ANSWER + STATUS_MARK.len() + 4;
+    let too_large = out.len() > max + STATUS_MARK.len() + 4;
     if too_large || !read {
         let _ = child.kill();
     }
@@ -299,11 +365,7 @@ fn run_curl(program: &Path, config: &str) -> Result<ApiAnswer, LinkError> {
     if too_large {
         return Err(LinkError::Failed("answer too large"));
     }
-    match status.code() {
-        Some(0) => parse_answer(out),
-        Some(code) if offline_exit(code) => Err(LinkError::Offline),
-        _ => Err(LinkError::Failed("curl")),
-    }
+    Ok(status.code())
 }
 
 /// The body and the status from curl's output: the body is everything before the last status mark.
@@ -350,9 +412,10 @@ pub fn session_clear() -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-mod mac {
+pub(crate) mod mac {
     use super::{KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE};
     use security_framework::os::macos::keychain::SecKeychain;
+    use zeroize::Zeroizing;
 
     /// errSecItemNotFound
     const NOT_FOUND: i32 = -25300;
@@ -362,19 +425,36 @@ mod mac {
     }
 
     pub fn read(keychain: &SecKeychain) -> Result<Option<String>, &'static str> {
-        match keychain.find_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-            Ok((password, _item)) => String::from_utf8(password.to_vec()).map(Some).map_err(|_| "keychain"),
+        read_item(keychain, KEYCHAIN_ACCOUNT).map(|value| value.map(|v| v.as_str().to_owned()))
+    }
+
+    pub fn write(keychain: &SecKeychain, value: &str) -> Result<(), &'static str> {
+        write_item(keychain, KEYCHAIN_ACCOUNT, value)
+    }
+
+    pub fn clear(keychain: &SecKeychain) -> Result<(), &'static str> {
+        clear_item(keychain, KEYCHAIN_ACCOUNT)
+    }
+
+    /// One of this app's items by its account: `session`, or `outpost` (outpost/item.rs). What it holds comes back in a
+    /// buffer that is wiped when dropped.
+    pub fn read_item(keychain: &SecKeychain, account: &str) -> Result<Option<Zeroizing<String>>, &'static str> {
+        match keychain.find_generic_password(KEYCHAIN_SERVICE, account) {
+            Ok((password, _item)) => {
+                let bytes = Zeroizing::new(password.to_vec());
+                std::str::from_utf8(&bytes).map(|text| Some(Zeroizing::new(text.to_owned()))).map_err(|_| "keychain")
+            }
             Err(e) if e.code() == NOT_FOUND => Ok(None),
             Err(_) => Err("keychain"),
         }
     }
 
-    pub fn write(keychain: &SecKeychain, value: &str) -> Result<(), &'static str> {
-        keychain.set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, value.as_bytes()).map_err(|_| "keychain")
+    pub fn write_item(keychain: &SecKeychain, account: &str, value: &str) -> Result<(), &'static str> {
+        keychain.set_generic_password(KEYCHAIN_SERVICE, account, value.as_bytes()).map_err(|_| "keychain")
     }
 
-    pub fn clear(keychain: &SecKeychain) -> Result<(), &'static str> {
-        match keychain.find_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+    pub fn clear_item(keychain: &SecKeychain, account: &str) -> Result<(), &'static str> {
+        match keychain.find_generic_password(KEYCHAIN_SERVICE, account) {
             Ok((_, item)) => {
                 item.delete();
                 Ok(())
@@ -382,6 +462,46 @@ mod mac {
             Err(e) if e.code() == NOT_FOUND => Ok(()),
             Err(_) => Err("keychain"),
         }
+    }
+}
+
+/// A keychain of a test's own in a temporary folder, so the person's login keychain is never touched. It is deleted,
+/// and taken off the search list, when the test ends. Used by this file's tests and the outpost's (outpost/item.rs).
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) mod scratch_keychain {
+    use core_foundation::base::TCFType;
+    use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
+    use security_framework_sys::base::SecKeychainRef;
+    use std::path::PathBuf;
+
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        /// Takes a keychain off the user's search list and deletes its file (not in security-framework-sys).
+        fn SecKeychainDelete(keychain: SecKeychainRef) -> i32;
+    }
+
+    pub struct Scratch {
+        pub keychain: SecKeychain,
+        dir: PathBuf,
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            // SAFETY: the keychain reference is valid for as long as `self.keychain` lives, which outlasts the call.
+            unsafe {
+                SecKeychainDelete(self.keychain.as_concrete_TypeRef());
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    pub fn scratch(tag: &str) -> Scratch {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("manut-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut keychain = CreateOptions::new().password("test-only").create(dir.join("test.keychain")).unwrap();
+        keychain.unlock(Some("test-only")).unwrap();
+        Scratch { keychain, dir }
     }
 }
 
@@ -557,6 +677,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_sealed_answer_with_its_status_and_refuses_one_too_large() {
+        let (origin, server) = serve_once(200, r#"{"password":"p\"w é"}"#);
+        let (status, body) = request_sealed(&format!("{origin}/v1/outposts/redeem"), "POST", Some("mo1_tok"), Some("{}")).unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(body.as_str(), r#"{"password":"p\"w é"}"#);
+        let seen = server.join().unwrap();
+        assert!(seen.contains("\r\nAuthorization: Bearer mo1_tok\r\n"), "{seen}");
+        // a refusal comes back with its status, as from `request`
+        let (origin, server) = serve_once(409, r#"{"error":"grant_used"}"#);
+        let (status, body) = request_sealed(&format!("{origin}/v1/outposts/redeem"), "POST", Some("mo1_tok"), Some("{}")).unwrap();
+        assert_eq!((status, body.as_str()), (409, r#"{"error":"grant_used"}"#));
+        server.join().unwrap();
+        let large: &'static str = Box::leak("x".repeat(MAX_SEALED_ANSWER + 1024).into_boxed_str());
+        let (origin, server) = serve_once(200, large);
+        assert!(matches!(request_sealed(&format!("{origin}/v1/outposts/redeem"), "POST", None, None), Err(LinkError::Failed(_))));
+        let _ = server.join();
+        // the same address and token checks as `request`, before anything runs
+        assert!(matches!(request_sealed("https://evil.example/admin", "POST", None, None), Err(LinkError::Failed(_))));
+        assert!(matches!(parse_sealed(Zeroizing::new(format!("{}000", STATUS_MARK).into_bytes())), Err(LinkError::Offline)));
+    }
+
+    #[test]
     fn refuses_to_keep_an_empty_or_oversized_session() {
         assert_eq!(session_write(""), Err("refused".to_string()));
         assert_eq!(session_write(&"x".repeat(MAX_SESSION + 1)), Err("refused".to_string()));
@@ -573,46 +715,11 @@ mod tests {
     #[cfg(target_os = "macos")]
     mod keychain {
         use super::super::mac;
-        use core_foundation::base::TCFType;
-        use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
-        use security_framework_sys::base::SecKeychainRef;
-        use std::path::PathBuf;
-
-        #[link(name = "Security", kind = "framework")]
-        extern "C" {
-            /// Takes a keychain off the user's search list and deletes its file (not in security-framework-sys).
-            fn SecKeychainDelete(keychain: SecKeychainRef) -> i32;
-        }
-
-        /// A keychain of the test's own in a temporary folder, so the person's login keychain is never touched. It
-        /// is deleted, and taken off the search list, when the test ends.
-        struct Scratch {
-            keychain: SecKeychain,
-            dir: PathBuf,
-        }
-
-        impl Drop for Scratch {
-            fn drop(&mut self) {
-                // SAFETY: the keychain reference is valid for as long as `self.keychain` lives, which outlasts the call.
-                unsafe {
-                    SecKeychainDelete(self.keychain.as_concrete_TypeRef());
-                }
-                let _ = std::fs::remove_dir_all(&self.dir);
-            }
-        }
-
-        fn scratch() -> Scratch {
-            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let dir = std::env::temp_dir().join(format!("manut-api-link-{}-{nanos}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let mut keychain = CreateOptions::new().password("test-only").create(dir.join("test.keychain")).unwrap();
-            keychain.unlock(Some("test-only")).unwrap();
-            Scratch { keychain, dir }
-        }
+        use super::super::scratch_keychain::scratch;
 
         #[test]
         fn keeps_one_session_item_reads_replaces_and_clears_it() {
-            let s = scratch();
+            let s = scratch("api-link");
             assert_eq!(mac::read(&s.keychain), Ok(None));
             mac::write(&s.keychain, r#"{"v":1,"accessToken":"a-1"}"#).unwrap();
             assert_eq!(mac::read(&s.keychain), Ok(Some(r#"{"v":1,"accessToken":"a-1"}"#.into())));

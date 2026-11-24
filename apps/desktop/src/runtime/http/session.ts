@@ -209,9 +209,16 @@ export class ApiSession {
     return this.authorised("POST", path, body);
   }
 
+  /** `write`, with the same rules, sent through `through` instead of this session's own `fetch`. Registering this Mac as
+   *  an outpost goes through the shell's own command, which keeps the credential its answer holds and gives the page the
+   *  rest (outpost.ts). A refresh still goes the usual way. */
+  writeVia(path: string, body: unknown, through: FetchLike): Promise<Answer> {
+    return this.authorised("POST", path, body, through);
+  }
+
   // ---- inside ---------------------------------------------------------------------------------------------------
 
-  private async authorised(method: "GET" | "POST", path: string, body?: unknown): Promise<Answer> {
+  private async authorised(method: "GET" | "POST", path: string, body?: unknown, through: FetchLike = this.fetch): Promise<Answer> {
     await this.load();
     let rec = this.record;
     if (!rec) return { kind: "signed_out" };
@@ -222,13 +229,13 @@ export class ApiSession {
       if (!rec) return { kind: "signed_out" };
     }
     const used = rec.accessToken;
-    let res = await this.send(method, path, used, body);
+    let res = await this.send(method, path, used, body, this.origin, through);
     if (res.kind === "answer" && res.status === 401 && !removed(res)) {
       const refreshed = await this.refreshFor(used);
       if (refreshed !== "ok") return { kind: refreshed };
       const again = this.record;
       if (!again) return { kind: "signed_out" };
-      res = await this.send(method, path, again.accessToken, body);
+      res = await this.send(method, path, again.accessToken, body, this.origin, through);
       if (res.kind === "answer" && res.status === 401 && !removed(res)) {
         await this.end();
         return { kind: "signed_out" };
@@ -362,12 +369,19 @@ export class ApiSession {
     }
   }
 
-  private async send(method: "GET" | "POST" | "DELETE", path: string, bearer: string | null, body?: unknown, origin = this.origin): Promise<Raw> {
+  private async send(
+    method: "GET" | "POST" | "DELETE",
+    path: string,
+    bearer: string | null,
+    body?: unknown,
+    origin = this.origin,
+    through: FetchLike = this.fetch,
+  ): Promise<Raw> {
     const headers: Record<string, string> = { accept: "application/json" };
     if (bearer) headers.authorization = `Bearer ${bearer}`;
     if (body !== undefined) headers["content-type"] = "application/json";
     try {
-      const res = await this.fetch(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const res = await through(`${origin}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return { kind: "answer", status: res.status, text: await res.text() };
     } catch (e) {
       return { kind: e instanceof LinkDown && e.kind === "offline" ? "offline" : "unavailable" };

@@ -15,6 +15,7 @@ mod gh_me;
 mod git_branch;
 mod past_chats;
 mod platform;
+mod outpost;
 mod power;
 #[cfg(all(test, unix))]
 mod pty_bench;
@@ -937,79 +938,23 @@ pub fn run() {
                 let _ = app.emit(app_menu::CLOSE_EVENT, ());
             }
         })
-        // the window's close hides it while Settings › General says so (tray.rs)
-        .on_window_event(tray::window_event)
-        .invoke_handler(tauri::generate_handler![
-            open_external,
-            account_env,
-            account_clis,
-            account_status,
-            account_version,
-            account_login_start,
-            account_login_cancel,
-            sessions_agents,
-            custom_agents_list,
-            custom_agent_preview,
-            custom_agent_bot_preview,
-            custom_agent_confirm,
-            custom_agent_remove,
-            session_start,
-            shell_start,
-            shells_available,
-            session_write,
-            session_ack,
-            session_resize,
-            session_close,
-            session_close_all,
-            chat_start,
-            chat_input,
-            chat_close,
-            session_file_save,
-            session_file_read,
-            session_files_remove,
-            session_files_prune,
-            term_history_save,
-            term_history_read,
-            term_history_remove,
-            term_history_prune,
-            term_history_clear,
-            term_import_list,
-            term_import_read,
-            term_share_write,
-            term_share_remove,
-            term_share_prune,
-            term_share_take,
-            session_branch,
-            chat_close_all,
-            session_reveal,
-            session_open_terminal,
-            past_chats_list,
-            past_chat_messages,
-            conversation_state,
-            codex_conversation,
-            host_name,
-            asks_badge,
-            tasks_status,
-            tasks_list,
-            tasks_view,
-            tasks_remote,
-            gh_accounts,
-            tasks_me,
-            gh_login_start,
-            window_close,
-            power_busy,
-            window_prefs,
-            api_request,
-            api_session_read,
-            api_session_write,
-            api_session_clear,
-            shop_cache_write,
-            shop_cache_read,
-            shop_cache_clear,
-            term_link::term_link_take,
-            disk::disk_watch
-        ])
+        // the window's close hides it while Settings › General says so (tray.rs); a main window that is really gone
+        // stops this Mac's outpost and closes its window, so the app can end (outpost/mod.rs)
+        .on_window_event(|window, event| {
+            tray::window_event(window, event);
+            outpost::window_event(window, event);
+        })
+        // The outpost's window shows the shop's sites, never the app: every command from it is refused here, before
+        // Tauri's own check is even asked (outpost/browser.rs).
+        .invoke_handler(move |invoke| {
+            if outpost::is_outpost_webview(invoke.message.webview_ref().label()) {
+                invoke.resolver.reject("not allowed");
+                return true;
+            }
+            commands(invoke)
+        })
         .setup(|app| {
+            app.manage(outpost::Outposts::new(app.handle().clone()));
             app.manage(Arc::new(tasks::Tasks::default()));
             app.manage(Arc::new(gh_me::Me::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
@@ -1056,6 +1001,8 @@ pub fn run() {
             tray::show_main(handle);
         }
         if let RunEvent::Exit = event {
+            // this Mac's outpost stops, and its window closes
+            outpost::shutdown(handle);
             if let Some(power) = handle.try_state::<power::Power>() {
                 power.quit();
             }
@@ -1070,6 +1017,86 @@ pub fn run() {
             }
         }
     });
+}
+
+/// Every command the page may call (`invoke_handler` in `run` refuses them all to the outpost's window).
+fn commands(invoke: tauri::ipc::Invoke) -> bool {
+    let answer: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+        open_external,
+        account_env,
+        account_clis,
+        account_status,
+        account_version,
+        account_login_start,
+        account_login_cancel,
+        sessions_agents,
+        custom_agents_list,
+        custom_agent_preview,
+        custom_agent_bot_preview,
+        custom_agent_confirm,
+        custom_agent_remove,
+        session_start,
+        shell_start,
+        shells_available,
+        session_write,
+        session_ack,
+        session_resize,
+        session_close,
+        session_close_all,
+        chat_start,
+        chat_input,
+        chat_close,
+        session_file_save,
+        session_file_read,
+        session_files_remove,
+        session_files_prune,
+        term_history_save,
+        term_history_read,
+        term_history_remove,
+        term_history_prune,
+        term_history_clear,
+        term_import_list,
+        term_import_read,
+        term_share_write,
+        term_share_remove,
+        term_share_prune,
+        term_share_take,
+        session_branch,
+        chat_close_all,
+        session_reveal,
+        session_open_terminal,
+        past_chats_list,
+        past_chat_messages,
+        conversation_state,
+        codex_conversation,
+        host_name,
+        asks_badge,
+        tasks_status,
+        tasks_list,
+        tasks_view,
+        tasks_remote,
+        gh_accounts,
+        tasks_me,
+        gh_login_start,
+        window_close,
+        power_busy,
+        window_prefs,
+        api_request,
+        api_session_read,
+        api_session_write,
+        api_session_clear,
+        shop_cache_write,
+        shop_cache_read,
+        shop_cache_clear,
+        term_link::term_link_take,
+        disk::disk_watch,
+        outpost::outpost_status,
+        outpost::outpost_signed_in,
+        outpost::outpost_signed_out,
+        outpost::outpost_run,
+        outpost::outpost_register
+    ];
+    answer(invoke)
 }
 
 #[cfg(test)]

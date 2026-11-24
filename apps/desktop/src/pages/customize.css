@@ -221,6 +221,16 @@
   margin: 2px 0 8px;
   color: var(--aui-muted);
   font-size: 12.5px;
+  /* The desktop's own: the chat's pop-up hint is a global `.hint` rule (src/chat/chat.css) that floats it above its
+     parent and fades it, which hid every hint on this page once the chat had loaded its sheet. Its place and look are
+     undone here. */
+  position: static;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
 }
 /* A routine: its timing, what it does, and its switch. The canvas aligns them on the first line; with the 44px switch beside
    them the desktop centres them. */
@@ -365,4 +375,48 @@
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+
+/* ---- the tabs, and Connections ---------------------------------------------------------------------------------------- */
+
+/* The two tabs in the top bar, as History's are drawn (mission.css), for when this page is the first to draw them. */
+.mpage .tabs {
+  display: flex;
+  gap: 20px;
+  align-self: stretch;
+  margin: -8px 0;
+}
+.mpage .tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.mpage .tab.on {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The desktop's own: with nothing beside it yet, the Outposts box (OutpostPane.tsx) is a column of its own, without the
+   rule an aside has beside a pane. Its row is the canvas's: the name over a quiet line, then the tag and the button. */
+.brain.conn .side2 {
+  flex: 0 1 560px;
+  border-left: 0;
+}
+.brain .outposts .box {
+  padding: 2px 12px;
+}
+.brain .conn-name {
+  display: block;
+  font-weight: 500;
+}
+.brain .conn-line {
+  display: block;
+  color: var(--aui-muted);
+  font-size: 12.5px;
 }

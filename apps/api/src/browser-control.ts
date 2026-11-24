@@ -7,17 +7,22 @@
 ///   nothing else: neither an operator's key nor an owner's session opens them. Besides the heartbeat and the redeem,
 ///   the step channel: an outpost asks for the browser steps workers queued for it, and reports how each went, which
 ///   lands in the attempt's events.
+/// - One route for the owner: this Mac registering itself as an outpost through the desktop, with the owner's session
+///   (`POST /v1/outposts/register`). It is the only one under `/v1/outposts/` that a session opens, and the outposts'
+///   credentials do not open it.
 ///
 /// Every change is written to the shop's audit log with ids only, after it has happened (`appendAudit`): the record
 /// lives in the vault object and the log in the TenantObject, so the entry is best effort and never holds the change
 /// up. No entry, and no answer here but the redeem's, holds a password.
 
+import { OWNER_SESSION } from "./approvals";
 import { appendAudit, type AuditAction, type AuditOutcome, type AuditSubject } from "./audit-log";
 import { sha256Hex } from "./auth";
 import { readJsonBody } from "./body";
 import { handOutSubmit, settleSubmitReport, submitTitle } from "./browser-writes";
 import { isValidTenant } from "./companies";
 import { workGate, type JobFlags } from "./job-flow";
+import { callerOf, type PeopleEnv } from "./people";
 import { operatorIdentity } from "./pilot";
 import { base64url } from "./relay";
 import {
@@ -474,6 +479,43 @@ async function registerOutpost(request: Request, env: VaultEnv, ctx: ExecutionCo
   await appendAudit(env, tenant, { actor: { kind: "operator", email: await operatorIdentity(ctx) },
     action: "outpost.registered", subject: { outpostId: outpost.id }, outcome: "ok" });
   return credentialAnswer(outpost, credential);
+}
+
+/// `POST /v1/outposts/register` with `{ name, kind: "this_mac" }` and the owner's session: the desktop registers the
+/// Mac it runs on as one of the shop's outposts, and answers `{ tenant, outpost, credential }`, the credential this once
+/// and only its digest kept, as at the operator's registration. Answers null for any other method or path, so those
+/// answer the Worker's final not_found.
+///
+/// - **Who.** The shop and the role come from the session alone (`callerOf`, people.ts): an owner session of the shop's
+///   linked account, or the shop's own signed-in session. A helper's session is refused (`owner_only`): an outpost
+///   receives the shop's passwords, so only the owner may add one. A body that names a shop is refused rather than read
+///   as another shop.
+/// - **What.** `this_mac` only: a cloud outpost is a machine the operator runs, and registers.
+/// - **The log.** `outpost.registered` with the outpost's id, by the owner's linked account, or by the shop's own
+///   session (`owner-session`), as the owner's other changes are logged.
+///
+/// It is not behind the outposts' ingress limit, which is for routes that take an outpost's credential: like every
+/// session route it needs a session first, and a shop holds 20 outposts at most.
+export async function ownerOutpostRoute(request: Request, url: URL, env: VaultEnv & PeopleEnv):
+  Promise<Response | null> {
+  if (request.method !== "POST" || url.pathname !== "/v1/outposts/register") return null;
+  const caller = await callerOf(request, env);
+  if (caller instanceof Response) return caller;
+  if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value) || "tenant" in parsed.value) return json({ error: "invalid_request" }, 400);
+  if (parsed.value.kind !== "this_mac") return json({ error: "invalid_kind" }, 400);
+  const tenant = caller.shop;
+  const credential = mintCredential();
+  const answer = await askVault(env, tenant, "/outposts",
+    { name: parsed.value.name, kind: "this_mac", credentialHash: await sha256Hex(credential) });
+  if (!answer) return json({ error: "vault_unavailable" }, 503);
+  if (answer.status !== 200 || !isRecord(answer.body.outpost)) return json(answer.body, answer.status);
+  const outpost = answer.body.outpost as OutpostView;
+  await appendAudit(env, tenant, { actor: { kind: "owner", id: caller.accountId ?? OWNER_SESSION },
+    action: "outpost.registered", subject: { outpostId: outpost.id }, outcome: "ok" });
+  return Response.json({ tenant, outpost, credential }, { headers: { "cache-control": "no-store" } });
 }
 
 /// `POST /v1/admin/outposts/credential` with `{ tenant, outpostId }`: a new credential for the outpost, answered this

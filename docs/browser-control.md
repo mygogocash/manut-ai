@@ -13,11 +13,13 @@ The design canvas says it in the owner's words:
   stops work.
 
 Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault object),
-`apps/api/src/browser-control.ts` (the operator and outpost routes) and `apps/api/src/browser-writes.ts` (submitting:
-the write step, its table of kinds, and its hand-out and report). The worker's side is five methods on the job flow's
-port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
-`sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes are in `docs/pilot-api.md`,
-"Vault sign-ins and outposts".
+`apps/api/src/browser-control.ts` (the operator, owner and outpost routes) and `apps/api/src/browser-writes.ts`
+(submitting: the write step, its table of kinds, and its hand-out and report). The worker's side is five methods on
+the job flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
+`outpost-register.test.ts`, `sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes
+are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
+`apps/desktop/src-tauri/src/outpost/` (the shell runs it) and `apps/desktop/src/pages/OutpostPane.tsx`
+(Customize › Connections).
 
 ## The promises
 
@@ -55,7 +57,8 @@ connections, sealed with the same AES-GCM keys, `cred-crypto.ts`):
 
 A machine that runs the team's browser: **this Mac**, through the desktop app, or a **cloud outpost**, a machine
 that wakes when work arrives. An outpost has a name, a kind (`this_mac` or `cloud`) and a credential of its own,
-given once when it is registered and kept only as a SHA-256 digest. It sends a heartbeat while it is awake. It is
+given once when it is registered (by an operator, or for this Mac by the owner in the desktop app) and kept only as a
+SHA-256 digest. It sends a heartbeat while it is awake. It is
 `online` while its last heartbeat is under 90 seconds old (it beats every 30) and `asleep` otherwise, including
 before its first beat.
 
@@ -249,6 +252,38 @@ Submitting steps through approval-core, with member-grants' decide first (24 Nov
   well as `ok`); a write step's begin and settlement write `dispatch.started` and `dispatch.settled`, as the broker's
   do; `browser_step.*` name a write step's request.
 
+The outpost in the desktop shell, this Mac (24 Nov 2026):
+
+- **Registering through the owner's session**: `POST /v1/outposts/register` takes an owner session of the shop's
+  linked account or the shop's own signed-in session, and `{ name, kind: "this_mac" }`; a helper's session is refused
+  (`owner_only`). The credential is answered once and kept as its digest, and `outpost.registered` names the owner.
+  The page sends it through its session (refreshed as every request is), but through the shell's own command, which
+  keeps the credential in the login keychain (account `outpost`, beside the session's item) and gives the page only the
+  shop and the outpost's name. No command returns the credential to the page.
+- **The loop, in Rust** (`src-tauri/src/outpost/run.rs`), while the app is open and someone is signed in to that shop:
+  a heartbeat every 30 seconds on a thread of its own, steps asked for every 3 seconds, each run in the outpost's
+  browser and each outcome reported once. Every call goes from the shell with the outpost's credential. It stops at
+  sign-out, at the owner's Stop (kept in the keychain item, so it stays stopped) and when the app quits; a step it still
+  holds then is reported failed rather than left to run out. A credential the API refuses (removed, or given a new one)
+  ends the loop, and the page asks for a new registration.
+- **The outpost's browser** (`browser.rs`): a Tauri webview window of its own, never the main one. No capability names
+  it or any remote page, so its pages reach none of the app's commands (Tauri refuses any command from a remote page
+  without a `remote` capability), a test reads every capability to keep it so, and the app's command handler refuses
+  every command from its webview as well. Its navigation hook keeps it on the step's origins. It is incognito, refuses
+  pop-ups, saves no downloads and has no web inspector. It is visible while the outpost runs, opened without taking
+  focus, so the owner can watch.
+- **Steps** (`step.rs`): `open` goes only to an address on the step's origins and waits for the page; `read` answers
+  the page's or a selector's text, cut to the API's 4 KB as JSON; `sign_in` checks for a sign-in form on the step's
+  origins first, redeems the grant from Rust, types only if the page is on one of the sign-in's own origins, checks that
+  again inside the script that types, and submits the form. Pages are read through WKWebView's `callAsyncJavaScript`,
+  in a content world of the outpost's own, with the arguments passed as values: no channel from the page to the app.
+- **The password's path**: the redeem's answer is read into a buffer that is wiped when dropped, the username and
+  password are written out of it into wiped buffers of their own, moved without a copy into the call that types them,
+  and wiped there once WebKit has its own copies. Nothing logs, stores or reports them; a test puts a known password
+  through a fake redeem and finds it in no request the outpost sent, nothing it noted and nothing the page is shown.
+- **Customize › Connections** (`OutpostPane.tsx`): the canvas's Outposts box for this Mac, Online or Asleep, how many
+  steps it holds, and Register this Mac, Stop or Start, in all four of the app's languages.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -257,8 +292,7 @@ Each can be undone later; none is the owner's to make, so none waited.
   use up its grant in one step and the deletion wipes them with the vault.
 - No new kill switch: the grant and the redeem read `officeCloud` and the owner's consent, as every job flow step
   does. A heartbeat reads neither; it is not work.
-- An outpost is registered by an operator in this slice. The desktop will register this Mac through the owner's
-  signed-in session.
+- An outpost is registered by an operator, or, for this Mac, by the owner's session through the desktop (below).
 - Online means a heartbeat in the last 90 seconds. "Offline" (the canvas's third state: work waiting for an outpost
   that cannot be reached) needs work queued for outposts, which comes with the cloud outpost.
 - Heartbeats are not written to the audit log: they are frequent and change nothing but the time.
@@ -336,13 +370,26 @@ Submitting's (24 Nov 2026):
   grant revision of 1: a sign-in has no grant revisions.
 - No new audit actions, so the console's Audit page has words for every entry without a change to it.
 
+The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
+
+- Registering takes the owner's session only, `this_mac` only, and is not behind the outposts' ingress limit (it
+  needs a session, and a shop holds 20 outposts).
+- One keychain item, so a Mac is one outpost at a time. Signing out keeps it (the outpost is the shop's machine) and
+  stops the loop; it runs again only for a sign-in to that same shop, unless the owner pressed Stop.
+- A heartbeat every 30 seconds on its own thread; steps asked for every 3 seconds (what the ingress limit is sized
+  for), at once again after an ask that brought five; asks spaced out to a minute while the API cannot be reached.
+  Budgets: open 30 seconds, read 15, sign-in 40. A report that got no answer is sent again, the same, at most three
+  times; a step held when the outpost stops is reported `browser_error`.
+- The window is visible, without taking focus, and incognito. The navigation hook cannot tell a page's frames from the
+  page, so any navigation it refuses during a step fails the step, a frame from another origin included.
+- A sign-in submits the form it typed into. The site's answer must hold for 3 seconds: no password field left is done,
+  the same address with the password fields emptied is `sign_in_refused`, anything else is `timed_out`, never a guessed
+  refusal.
+- Connections counts steps, not the canvas's jobs, and names the outpost "This Mac" in the app's language.
+
 ## Next slices
 
-1. **The outpost in the desktop shell (this Mac).** It registers through the owner's session, beats every 30 seconds
-   while the app is open, asks for its steps every few seconds, redeems grants, types only into the sign-in's origins,
-   stays on each step's origins, and reports each step's outcome. The Connections page shows the sign-ins ("Change"
-   types a new password) and the outposts.
-2. **The desktop showing a browser write word for word, then its outpost running write steps.** Today the desktop puts a
+1. **The desktop showing a browser write word for word, then its outpost running write steps.** Today the desktop puts a
    request into words from a LINE reply's fields or from the task's action, so a browser write reads only
    "browser.submit on https://seller.shopee.co.th", and a `send_reply` write, kind `reply`, may be approved from a
    notification. Before any outpost runs a write step, the desktop's cards and notifications must show the request's
@@ -351,10 +398,16 @@ Submitting's (24 Nov 2026):
    outpost runs a `submit` step: be on its page, check that the form and every field are there before typing anything
    (`selector_not_found` otherwise), set each value in order, submit the form or press its button, and report `done`, or
    `submit_refused` when the site kept the form with an error.
-3. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
+2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
+3. **The rest of Customize › Connections on the desktop**: the shop's sign-ins ("Change" types a new password), the
+   cloud outpost's row, and an owner's route to remove or rename an outpost (today only an operator can remove one).
 4. **Smaller gaps**: re-sealing sign-ins after a vault key rotation (they open under the previous key until then);
    changing a sign-in's members; listing to a worker, by site name, the sign-ins its member may use; a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
-   as data, never as instructions, when it reaches a model.
+   as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
+   page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
+   (the username first), a failure code of its own for a step held when the outpost stopped, the outpost on Windows
+   and Linux (no keychain support there yet), and the shop sessions of the several-shops switcher (the outpost follows
+   the session the page holds, which is the shop's own signed-in session today).

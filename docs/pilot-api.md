@@ -792,7 +792,9 @@ query or the body. The outposts' routes are public paths that need the outpost's
 `Authorization: Bearer <credential>`, and nothing else opens them: not the operator's key, not an owner's session.
 They share one ingress limit per source address (`OUTPOST_LIMITER`, 300 a minute), checked before the credential or
 the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Retry-After: 60`, and without a working
-limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`.
+limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`. One route under `/v1/outposts/` is the
+owner's instead: the desktop registering this Mac (`POST /v1/outposts/register`), which takes the owner's session and
+no outpost's credential.
 
 ```ts
 type SignIn = {
@@ -916,6 +918,32 @@ credential. 400 `tenant_required`; 404 `outpost_not_found` (also another shop's,
 outpost is deleted, so its credential stops working at once; in the same step each of its steps still waiting or
 running is refused (`outpost_removed`), and each of its grants not yet redeemed and on time is used up. 400
 `tenant_required`; 404 `outpost_not_found`, also when it was already removed.
+
+### `POST /v1/outposts/register`
+
+The desktop registers the Mac it runs on, with the owner's session as `Authorization: Bearer`: an owner session of the
+shop's linked account (`mos1.`), or the shop's own signed-in session. `{ name, kind: "this_mac" }` answers, with
+`Cache-Control: no-store`:
+
+```ts
+type RegisteredMac = { tenant: string; outpost: Outpost; credential: string };
+```
+
+`tenant` is the shop the session acts for, which the outpost's own routes then name. The credential is in this answer
+and nowhere else, kept as its SHA-256 as at the operator's registration; the desktop keeps it in the login keychain and
+never shows it to its page. It writes `outpost.registered` with the outpost's id, by `{ kind: "owner", id }`: the linked
+account's id, or `owner-session` for the shop's own session. Unlike the outposts' own routes it is not behind their
+ingress limit: it needs a session, and a shop holds 20 outposts at most.
+
+| Status | `error` | When |
+| --- | --- | --- |
+| 401 | `unauthorized`, `unlinked` | No session, or not one (an operator's key and an outpost's credential are neither); an owner session whose account the operator unlinked |
+| 403 | `owner_only` | A helper's session: an outpost receives the shop's passwords, so only the owner adds one |
+| 400 | `invalid_request` | Not a JSON object, or one that names a `tenant`: the shop is the session's |
+| 400 | `invalid_kind` | Anything but `this_mac`: a cloud outpost is the operator's to register |
+| 400 | `invalid_name` | Blank once trimmed, over 80 characters, or holding a control character |
+| 409 | `too_many_outposts` | The shop already has 20 |
+| 503 | `people_unavailable` | The shop's record could not be read to check a shop session |
 
 ### `POST /v1/outposts/heartbeat`
 
