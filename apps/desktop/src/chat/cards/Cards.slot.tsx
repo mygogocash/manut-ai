@@ -5,16 +5,22 @@
 // session; on a question the digit of a numbered choice picks it ("Other…" is the last number, never while typing
 // in a field or composing) and Enter picks the focused choice or sends the text. The sidebar's Needs-you strip and ⌘J
 // scroll a card into view and focus it.
+//
+// An ask from one of several shops (docs/several-shops.md) names its shop at the top, and offers what the person's role
+// there allows: where a helper may not decide (money, a public post, a payment, a command) the card says who may, and
+// offers Ask <owner> instead, which passes the request on with a note, once; a note passed on shows on the card, in the
+// canvas's People board words ("Passed on by Mint", "Mint: <note>").
 import "./cards.css";
 import { useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref, type RefObject } from "react";
 import type { SlotProps } from "../../features";
 import type { ApprovalChoice, AskSubagent, ClarifyAnswers, ClarifyQuestion } from "../../lib/protocol";
 import { useShowingCache } from "../../runtime/link";
-import { askOpen, getStore, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
+import { askOpen, getStore, shopName, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
 import { answerOf, EMPTY, type Pick } from "./answers";
 import { clearAskNote, useAskNote } from "./askNote";
 import { choiceIndexForKey, parseChoice } from "./choices";
-import { ALLOW_LABEL, respond, settleApproval } from "./respond";
+import { ALLOW_LABEL, passOn, respond, settleApproval } from "./respond";
+import { shopAskLines } from "../../lib/shops";
 import { riskOf } from "./risk";
 import { t, type Key } from "../../i18n";
 import { Markdown } from "../parts/Markdown";
@@ -72,6 +78,8 @@ function useOpen(bot: string, item: ApprovalItem | ClarifyItem): boolean {
 
 function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const open = useOpen(bot, item);
+  const state = useStore();
+  const shop = item.shop ? shopName(state, item.shop) : "";
   // The runtime can show only a kept read of the shop while the API cannot be reached: the ask is there to read, but
   // answering needs the live record, so no answer is offered (the runtime refuses one too).
   const kept = useShowingCache();
@@ -80,18 +88,23 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   const outdated = !!item.outdated;
   const [busy, setBusy] = useState<ApprovalChoice | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // a helper writing the note that goes to the owner with the request (Ask <owner>), and whether it is on its way
+  const [note, setNote] = useState<string | null>(null);
+  const [passing, setPassing] = useState(false);
   // what became of an Approve pressed on a notification, which the app had no card on screen to show (askNote.ts)
   const noted = useAskNote(item.request_id);
   const ref = useRef<HTMLDivElement>(null);
   useFocusRequest(bot, item.id, ref, open);
+  // a closed card's line names the shop too, so a list of them from several shops still says whose each was
+  const detail = [shop, item.command || item.title].filter(Boolean).join(" · ");
 
   if (item.resolved) {
     const denied = item.resolved === "deny";
-    return <Line icon={denied ? "✕" : "✓"} text={t(ALLOW_LABEL[item.resolved])} detail={item.command || item.title} testid="card-line" />;
+    return <Line icon={denied ? "✕" : "✓"} text={t(ALLOW_LABEL[item.resolved])} detail={detail} testid="card-line" />;
   }
   // the runtime's own words for why it stopped waiting ("Already decided by Mint at 19:42"), when it gave them
-  if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={item.command || item.title} testid="card-line" />;
-  if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={item.command || item.title} testid="card-line" />;
+  if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
+  if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={detail} testid="card-line" />;
 
   const pick = async (choice: ApprovalChoice) => {
     if (busy || kept || outdated) return;
@@ -105,6 +118,17 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     setBusy(null);
   };
   const shown = BUTTONS.filter((b) => item.choices.includes(b.choice));
+  const { only, passed } = shopAskLines(item);
+  const owner = item.shop?.owner ?? "";
+  const sendNote = async () => {
+    if (passing || kept || note === null || !note.trim()) return;
+    setPassing(true);
+    setErr(null);
+    const e = await passOn(getStore(), bot, item, note);
+    setErr(e);
+    setPassing(false);
+    if (e === null) setNote(null);
+  };
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     const b = shown.find((x) => x.key === e.key);
@@ -128,6 +152,11 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       onKeyDown={onKey}
     >
       <AskedBy who={item.subagent} />
+      {shop && (
+        <div className="card-shop" data-testid="card-shop">
+          {shop}
+        </div>
+      )}
       <div className="card-title">{title}</div>
       {risks.length > 0 && (
         <div className="card-risk" data-testid="card-risk" role="note">
@@ -147,12 +176,63 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
           {t("card.inCwd", { cwd: item.cwd })}
         </div>
       )}
+      {passed && (
+        <div className="card-passed" data-testid="card-passed">
+          <div className="card-passed-h">{passed.title}</div>
+          <div className="card-passed-n">{passed.note}</div>
+        </div>
+      )}
+      {only && (
+        <div className="card-note card-only" data-testid="card-only">
+          {only}
+        </div>
+      )}
+      {note !== null && item.passOn && (
+        <form
+          className="card-pass"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendNote();
+          }}
+        >
+          <textarea
+            className="card-in card-pass-in"
+            value={note}
+            rows={2}
+            maxLength={500}
+            autoFocus
+            disabled={passing || kept}
+            aria-label={t("card.passNote", { owner })}
+            placeholder={t("card.passNote", { owner })}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              // the card's number keys are for its buttons, never for a note being written
+              e.stopPropagation();
+              if (e.key === "Escape" && !composing(e)) setNote(null);
+            }}
+            data-testid="card-pass-note"
+          />
+          <div className="card-acts">
+            <button type="submit" className="card-btn soft once" disabled={passing || kept || !note.trim()} data-testid="card-pass-send">
+              {t("card.passSend", { owner })}
+            </button>
+            <button type="button" className="card-btn soft" disabled={passing} onClick={() => setNote(null)}>
+              {t("card.passCancel")}
+            </button>
+          </div>
+        </form>
+      )}
       <div className="card-acts">
         {shown.map((b) => (
           <button key={b.choice} type="button" className={`card-btn soft ${b.choice}`} data-choice={b.choice} disabled={!!busy || kept} onClick={() => void pick(b.choice)}>
             {t(b.label)}
           </button>
         ))}
+        {item.passOn && note === null && (
+          <button type="button" className="card-btn soft" disabled={kept || passing} onClick={() => setNote("")} data-testid="card-ask-owner">
+            {t("card.askOwner", { owner })}
+          </button>
+        )}
         {outdated ? (
           <span className="card-note" data-testid="card-outdated">
             {t("rt.updateToAnswer")}

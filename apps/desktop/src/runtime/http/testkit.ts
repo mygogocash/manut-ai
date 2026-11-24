@@ -405,3 +405,83 @@ export async function savedRead(at: number, over: Parameters<typeof serveShop>[1
   if (!read.ok) throw new Error("the fixture's read failed");
   return { [cacheKey(ORIGIN, "apple:owner-1")]: encodeSnapshot(read.snapshot) };
 }
+
+// ---- several shops (docs/several-shops.md; docs/pilot-api.md, "Several shops") -------------------------------------
+
+/** A shop as `GET /v1/shops` lists it. */
+export interface ShopJson {
+  id: string;
+  name: string;
+  ownerName: string;
+  role: "owner" | "helper";
+}
+
+/** Two sample shops: one the signed-in person owns, one they help at. */
+export const SHOP_A: ShopJson = { id: "pilot:shop-a", name: "Baan Mali", ownerName: "Fon", role: "owner" };
+export const SHOP_B: ShopJson = { id: "pilot:shop-b", name: "Ran Pa Noi", ownerName: "Noi", role: "helper" };
+
+/** A plainly fake shop session token. A real one is `mos1.` (an owner's) or `mhs1.` (a helper's), the shop in base64url,
+ *  and 64 hex digits; `n` tells one opening from the next. */
+export function shopToken(shop: string, role: "owner" | "helper", n = 1): string {
+  return `${role === "owner" ? "mos1" : "mhs1"}.test-${shop.replace(/[^a-z0-9]/gi, "-")}.fake-${n}`;
+}
+
+export interface ServedShops {
+  /** the shops `GET /v1/shops` lists; change it to move a shop off the list */
+  list: ShopJson[];
+  /** each shop's open approvals, by shop id */
+  approvals: Record<string, unknown[]>;
+  /** shops whose sessions the API answers 401 `removed` or `unlinked` with this time, by shop id */
+  ended: Record<string, { error: "removed" | "unlinked"; at: string }>;
+  /** every token the fake gave, by token: its shop and role */
+  tokens: Map<string, { shop: string; role: "owner" | "helper" }>;
+  /** the tokens the fake no longer takes (ended, or refused on purpose), which answer 401 `unauthorized` */
+  refused: Set<string>;
+  /** how many times each shop was opened */
+  opened: Record<string, number>;
+}
+
+/** Serves the several-shops routes over `api`, as apps/api answers them: the list, opening a shop session (owned and
+ *  helped shops alike, 404 for a shop not listed), each shop's `GET /v1/approvals` and its decision and pass-on routes by
+ *  the shop session it is sent with, and ending a session. A request with any other bearer on those routes is the
+ *  sign-in's: `GET /v1/approvals` then answers what `serveShop` would (the signed-in tenant's own). */
+export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<string, unknown[]> = {}, now: () => number = Date.now): ServedShops {
+  const served: ServedShops = { list, approvals, ended: {}, tokens: new Map(), refused: new Set(), opened: {} };
+  /** The shop a shop-session request is for, or the 401 to answer; null when the bearer is not a shop session. */
+  const shopOf = (req: Recorded): { shop: string; role: "owner" | "helper" } | FakeAnswer | null => {
+    if (!req.bearer || !/^m[oh]s1\./.test(req.bearer)) return null;
+    const held = served.tokens.get(req.bearer);
+    if (!held || served.refused.has(req.bearer)) return { status: 401, json: { error: "unauthorized" } };
+    const ended = served.ended[held.shop];
+    if (ended) return { status: 401, json: ended.error === "removed" ? { error: "removed", removedAt: ended.at } : { error: "unlinked", unlinkedAt: ended.at } };
+    return held;
+  };
+  const isAnswer = (v: unknown): v is FakeAnswer => typeof v === "string" || (!!v && typeof v === "object" && "status" in v);
+  api
+    .on("GET", "/v1/shops", () => ({ status: 200, json: { shops: served.list } }))
+    .on("POST", "/v1/shops/session", (req) => {
+      const shop = served.list.find((s) => s.id === (req.body as { shop?: unknown })?.shop);
+      if (!shop) return { status: 404, json: { error: "not_found" } };
+      served.opened[shop.id] = (served.opened[shop.id] ?? 0) + 1;
+      const accessToken = shopToken(shop.id, shop.role, served.opened[shop.id]);
+      served.tokens.set(accessToken, { shop: shop.id, role: shop.role });
+      const named = { id: shop.id, name: shop.name, ownerName: shop.ownerName };
+      const session = { accessToken, expiresAt: iso(now() + 30 * 86_400_000) };
+      return { status: 200, json: shop.role === "owner" ? { shop: named, role: "owner", account: { id: "owner-account-1" }, session } : { shop: named, role: "helper", helper: { id: "helper-1", name: "Mint" }, session } };
+    })
+    .on("POST", "/v1/shops/session/end", (req) => {
+      const at = shopOf(req);
+      if (at === null) return { status: 403, json: { error: "not_a_shop_session" } };
+      if (isAnswer(at)) return at;
+      served.refused.add(req.bearer!);
+      return { status: 200, json: { ended: { shop: at.shop, role: at.role } } };
+    });
+  const listing = (req: Recorded): FakeAnswer => {
+    const at = shopOf(req);
+    if (at === null) return { status: 200, json: { state: "open", approvals: [] } };
+    if (isAnswer(at)) return at;
+    return { status: 200, json: { state: "open", approvals: served.approvals[at.shop] ?? [] } };
+  };
+  api.on("GET", "/v1/approvals", listing);
+  return served;
+}

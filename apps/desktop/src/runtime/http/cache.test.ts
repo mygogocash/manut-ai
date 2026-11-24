@@ -98,8 +98,8 @@ describe("what is kept", () => {
     const text = encodeSnapshot(snapshot());
     const file = JSON.parse(text);
     expect(Object.keys(file).sort()).toEqual(["snapshot", "v"]);
-    expect(file.v).toBe(2);
-    expect(CACHE_VERSION).toBe(2);
+    expect(file.v).toBe(3);
+    expect(CACHE_VERSION).toBe(3);
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
     expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "createdAt", "events", "id", "objective", "state", "title", "updatedAt"]);
     expect(Object.keys(file.snapshot.tasks[0].actions[0]).sort()).toEqual([

@@ -35,3 +35,18 @@ export function settleApproval(
 ): Promise<string | null> {
   return respond(store, bot, item.id, () => store.actions.respondApproval(item.request_id, choice, bot));
 }
+
+/** Passes approval `item` of chat `bot` on to its shop's owner with `note`, through the store's passOnApproval (a helper's
+ *  Ask button). It decides nothing. Null once the runtime took it, otherwise why not. */
+export async function passOn(
+  store: Pick<Store, "getState" | "actions">,
+  bot: string,
+  item: Pick<ApprovalItem, "id" | "request_id">,
+  note: string,
+): Promise<string | null> {
+  await store.actions.passOnApproval(item.request_id, note, bot);
+  const st = store.getState();
+  const it = st.chats[bot]?.items.find((i) => i.id === item.id);
+  const done = it?.kind === "approval" ? !!it.passedOn : true;
+  return done ? null : st.lastError || t("card.notTaken");
+}

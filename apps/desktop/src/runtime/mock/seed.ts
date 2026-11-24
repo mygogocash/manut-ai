@@ -66,6 +66,7 @@ export const COMMAND_SEED: readonly SlashCommand[] = [
   { name: "clarify", description: "Demo: the team asks one question", hint: "", kind: "command", prefix: "/" },
   { name: "interview", description: "Demo: the team asks several questions at once", hint: "", kind: "command", prefix: "/" },
   { name: "delegate", description: "Demo: two helpers work side by side", hint: "[fail]", kind: "command", prefix: "/" },
+  { name: "shops", description: "Demo: requests from both of your shops wait in Needs you", hint: "", kind: "command", prefix: "/" },
 ];
 
 /** What the scripted approval asks for: an outward-facing action, named exactly, as every real one will be. */

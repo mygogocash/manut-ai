@@ -22,17 +22,29 @@
 // marked answered only when the API says so; and after any answer the shop is read again, so the card closes in the
 // API's words ("Already decided by Mint at 19:42"). Every other write answers `not_yet`. While only a kept read is
 // shown every write answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
+//
+// Several shops (docs/several-shops.md). Each read starts with the person's shops (`GET /v1/shops`, with the sign-in).
+// When they are in none, the signed-in tenant is read as above, as before shops. When they are in some, each shop is read
+// with its own shop session (shops.ts): what waits there, which is all a shop session may read. Every shop's asks are one
+// Needs you, each naming its shop and offering what the person's role there allows; the shop being viewed, which the
+// switcher in the account row chooses (`shops.switch`), is what every other page shows. An answer, or a helper passing a
+// request on, always goes with the session of the ask's own shop, which its id names, and never with the shop being
+// viewed. A shop the person's place in ended (removed, unlinked, gone from the list) is said so, its asks close in those
+// words, and its session and kept read are dropped at once.
+import { mayDecide } from "@manut/approval-core";
 import { t } from "../../i18n";
-import type { ApprovalChoice, BridgeEvent, OpMap } from "../../lib/protocol";
+import type { ApprovalChoice, BridgeEvent, OpMap, PassedOnNote, ShopLeft, ShopRow } from "../../lib/protocol";
+import { leftWords, onlyOwnerWords } from "../../lib/shops";
 import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
 import { decisionPath, outcomeOf, type Closing } from "./answer";
-import { answerable, isAsk, optionFor, parseAskId } from "./approvals";
+import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { shopRoutines } from "./customize";
 import type { ApiSession, SignInState } from "./session";
-import { readShop, type ReadFailure, type ShopRead, type ShopSnapshot } from "./shop";
+import { readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot } from "./shop";
+import { listShops, ShopSessions, type Departure, type Left } from "./shops";
 import { attentionRows, automationRows, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
 
 /** A read of the shop while open, every minute. */
@@ -69,6 +81,8 @@ type Handlers = { [K in keyof AllOps]: (p: AllOps[K]["params"]) => AllOps[K]["re
 
 export interface HostOptions {
   session: ApiSession;
+  /** The shop sessions, over `session`; one of its own when absent. */
+  shops?: ShopSessions;
   now?: () => number;
   /** Where the last good read is kept between runs. Without one the host still shows the last read of this run when the
    *  API cannot be reached, but a restart starts from nothing. */
@@ -88,6 +102,38 @@ const notYetShow = (): never => {
   throw new OpError("not_yet", t("rt.notYetShow"));
 };
 const FAILURE_TEXT: Record<ReadFailure, Parameters<typeof t>[0]> = { signed_out: "rt.signedOut", offline: "rt.offline", unavailable: "rt.unavailable" };
+
+/** A note passed on is 1 to 500 characters once trimmed, counted by character, as `@manut/people-rules` counts it
+ *  (MAX_NOTE_LENGTH); the API checks it again. */
+const MAX_NOTE = 500;
+const PASS_ON_PATH = (requestId: string) => `/v1/approvals/${encodeURIComponent(requestId)}/pass-on`;
+
+/** The shop a read names by id, among its shops. */
+const partOf = (s: ShopSnapshot | null, shop: string): ShopPart | undefined => s?.shops?.find((p) => p.shop.id === shop);
+
+/** The signature of the shops a read lists and the one it views, so a read that changed none of them stays quiet. */
+const shopsSig = (s: ShopSnapshot | null) => JSON.stringify([s?.shops?.map((p) => [p.shop.id, p.shop.name, p.shop.owner, p.shop.role]) ?? null, s?.viewing ?? null]);
+
+/** What an ask from one of several shops shows beyond its id, so a read that changed it (a note passed on since, a role
+ *  that moved) sends the ask again and its card follows. */
+const askSig = (a: { choices: unknown; pass_on?: unknown; passed_on?: unknown; shop?: unknown; outdated?: unknown }) => JSON.stringify([a.choices, a.pass_on ?? null, a.passed_on ?? null, a.shop ?? null, a.outdated ?? null]);
+
+/** How an ask of one of several shops that left the open approvals closes: in the words of its shop's departure when the
+ *  person's place there ended; "changed" when the request is asked again at another revision; else, by its expiry, timed
+ *  out or answered elsewhere (a shop session reads no tasks, so nothing tells a decision from a withdrawal). */
+function leftShopHow(askRef: string, was: ShopSnapshot, now: ShopSnapshot, departed: (shop: string) => string | null, at: number): Closing {
+  const ref = parseShopAskId(askRef);
+  if (!ref) return { reason: "cancelled" };
+  const part = partOf(now, ref.shop);
+  if (!part) {
+    const words = departed(ref.shop);
+    return words ? { reason: "cancelled", note: words } : { reason: "cancelled" };
+  }
+  if (part.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { reason: "cancelled", note: t("rt.ask.changed") };
+  const before = partOf(was, ref.shop)?.approvals.find((a) => a.record.request.id === ref.id);
+  const expiresAt = before?.record.request.expiresAt;
+  return { reason: expiresAt !== undefined && expiresAt <= at ? "timeout" : "resolved" };
+}
 
 /** How an ask that left the open approvals with no answer from here closes, as `now` tells it. */
 function leftHow(askRef: string, now: ShopSnapshot): Closing {
@@ -109,8 +155,14 @@ export class HttpHost {
   private readonly now: () => number;
   private readonly disk: ShopCache | undefined;
   private readonly keeping: () => boolean;
+  private readonly shopSessions: ShopSessions;
   /** What the screens are answered from: the latest good read, or while the API cannot be reached the kept one. */
   private snapshot: ShopSnapshot | null = null;
+  /** The shop the person chose to view, when they are in several; the first one listed until they choose. */
+  private viewing: string | null = null;
+  /** The shops the person's place in ended while this ran, newest first: the account row says so until the app starts
+   *  again, and their asks close in these words. */
+  private departed: { shop: ShopRow; departure: Departure }[] = [];
   /** The read an earlier run kept, looked at once for the outage that is on, and for whom (a new sign-in is a new look). */
   private onDisk: { tenant: string; read: CachedRead } | null = null;
   private clients = 0;
@@ -130,6 +182,7 @@ export class HttpHost {
     this.now = opts.now ?? Date.now;
     this.disk = opts.cache;
     this.keeping = opts.keeping ?? (() => true);
+    this.shopSessions = opts.shops ?? new ShopSessions(opts.session, this.now);
   }
 
   /** Whether the screens can be answered: the API answered, or its last answer is shown because it cannot be reached. */
@@ -168,8 +221,9 @@ export class HttpHost {
     const handler = this.ops[op as keyof AllOps] as (p: unknown) => unknown;
     // Only a kept read answers while the API cannot be reached, so a write has nothing live to act on. It is refused, not
     // held to be sent later: an ask from the kept read needs the live record, and everything else the person says again.
-    const writes = handler === notYet || op === "approval.respond";
-    if (writes && this.cache.kind === "showing") throw new OpError("offline", t(op === "approval.respond" ? "rt.connectToAnswer" : "rt.offline"));
+    const asks = op === "approval.respond" || op === "approval.pass_on";
+    const writes = handler === notYet || asks;
+    if (writes && this.cache.kind === "showing") throw new OpError("offline", t(asks ? "rt.connectToAnswer" : "rt.offline"));
     return handler(params);
   }
 
@@ -192,6 +246,8 @@ export class HttpHost {
     this.snapshot = null;
     this.onDisk = null;
     this.closings.clear();
+    this.viewing = null;
+    this.departed = [];
     this.attempt = 0;
     this.show("connecting", NO_CACHE);
   }
@@ -206,6 +262,8 @@ export class HttpHost {
       this.snapshot = null;
       this.onDisk = null;
       this.closings.clear();
+      this.viewing = null;
+      this.departed = [];
       this.show("signed_out", NO_CACHE);
     }
   }
@@ -245,13 +303,66 @@ export class HttpHost {
     let r: ShopRead;
     let standIn: StandIn | null = null;
     try {
-      r = await readShop(this.session, this.now);
+      r = await this.readAll();
       if (!r.ok && r.failure !== "signed_out") standIn = await this.standIn();
     } finally {
       this.reading = null;
     }
     this.apply(r, standIn, ticket);
     return r;
+  }
+
+  /** One read of what the screens show: the person's shops first. In none, the signed-in tenant as before shops; in
+   *  some, each one's asks with its own session, and the one viewed as the pages' shop. A shop the person's place in
+   *  ended on the way is said so at once (`depart`), whatever else the read finds. */
+  private async readAll(): Promise<ShopRead> {
+    const listed = await listShops(this.session);
+    if (!listed.ok) return { ok: false, failure: listed.failure };
+    const read = await this.shopSessions.readAll(listed.shops);
+    this.depart(read.left, listed.shops);
+    if (!read.ok) return { ok: false, failure: read.failure };
+    if (read.parts.length) return { ok: true, snapshot: this.atShops(read.parts, read.unreadable, this.now()) };
+    // In no shop, or every one left in this very read: the signed-in tenant, as before shops.
+    return readShop(this.session, this.now);
+  }
+
+  /** A read of several shops, viewing the one the person chose while it is still theirs, else the first listed. A shop
+   *  session reads only what waits, so the viewed shop has no tasks, schedules or attention items to show. */
+  private atShops(parts: ShopPart[], unreadable: unknown[], readAt: number): ShopSnapshot {
+    const viewed = parts.find((p) => p.shop.id === this.viewing) ?? parts[0];
+    return { tasks: [], approvals: viewed.approvals, schedules: [], attention: [], attentionOff: true, unreadable, readAt, shops: parts, viewing: viewed.shop.id };
+  }
+
+  /** The person's place in these shops ended. Each is said so (the account row's notice, `shops.list`), its asks close in
+   *  those words, and what was read of it goes at once: from what the screens show, and from the kept read on disk, which
+   *  is written again without it. Its session already went (shops.ts). */
+  private depart(left: readonly Left[], listed: readonly ShopRow[] = []): void {
+    if (!left.length) return;
+    const was = this.snapshot;
+    for (const { shop, departure } of left) {
+      const row = partOf(was, shop)?.shop ?? listed.find((r) => r.id === shop) ?? { id: shop, name: "", owner: "", role: "helper" as const };
+      this.departed = [{ shop: row, departure }, ...this.departed.filter((d) => d.shop.id !== shop)];
+    }
+    if (was?.shops) {
+      const parts = was.shops.filter((p) => !left.some((l) => l.shop === p.shop.id));
+      if (parts.length !== was.shops.length) {
+        // With none left, the screens show no shop until the next read, which reads the signed-in tenant instead.
+        const now: ShopSnapshot = parts.length
+          ? this.atShops(parts, was.unreadable, was.readAt)
+          : { tasks: [], approvals: [], schedules: [], attention: [], attentionOff: true, unreadable: was.unreadable, readAt: was.readAt, shops: [] };
+        this.snapshot = now;
+        this.emitLeft(was, now);
+        const ticket = this.disk?.ticket();
+        if (this.cache.kind !== "showing") this.keep(now, ticket);
+      }
+    }
+    this.emit({ event: "shops.update", bot: TEAM });
+  }
+
+  /** What the app says about a shop the person's place in ended this run, or null when nothing was said of it. */
+  private departedWords(shop: string): string | null {
+    const d = this.departed.find((x) => x.shop.id === shop);
+    return d ? leftWords({ name: d.shop.name, owner: d.shop.owner, why: d.departure.why, at: d.departure.at === null ? null : d.departure.at / 1000 }) : null;
   }
 
   /** What stands in for the shop when a read failed because the API is offline or not answering: the last good read of
@@ -293,6 +404,7 @@ export class HttpHost {
     if (this.session.state.kind !== "signed_in") return;
     if (!r.ok) {
       this.snapshot = standIn?.snapshot ?? null;
+      if (standIn?.snapshot?.viewing) this.viewing = standIn.snapshot.viewing;
       this.show(r.failure, standIn?.view ?? NO_CACHE);
       this.schedule(this.backoff());
       return;
@@ -300,6 +412,7 @@ export class HttpHost {
     this.attempt = 0;
     const was = this.snapshot;
     this.snapshot = r.snapshot;
+    this.viewing = r.snapshot.viewing ?? null;
     this.onDisk = null;
     // Opening (the first read, or the first after an outage) replays nothing: the app reads everything on open. One thing
     // it cannot read again is an ask card it already holds: the store keeps those across a re-read, so an ask the read that
@@ -359,9 +472,10 @@ export class HttpHost {
    *  An action that ran out of time timed out, one that is gone with its task was cancelled, any other was decided. */
   private emitLeft(was: ShopSnapshot, now: ShopSnapshot): void {
     const still = new Set(pendingAsks(now).map((a) => a.request_id));
+    const shops = !!(was.shops || now.shops);
     for (const { request_id: id } of pendingAsks(was)) {
       if (still.has(id)) continue;
-      const closing = this.closings.get(id) ?? leftHow(id, now);
+      const closing = this.closings.get(id) ?? (shops ? leftShopHow(id, was, now, (shop) => this.departedWords(shop), this.now()) : leftHow(id, now));
       this.closings.delete(id);
       this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason: closing.reason, ...(closing.note ? { note: closing.note } : {}) });
     }
@@ -373,6 +487,7 @@ export class HttpHost {
    *  answer, and a choice the request does not offer. Taken only when the API says it was decided; after any answer sent,
    *  whatever came back, the shop is read again. */
   private async answer(askRef: string, choice: ApprovalChoice): Promise<Record<string, never>> {
+    if (this.snapshot?.shops) return this.answerAtShop(this.snapshot, askRef, choice);
     const ref = parseAskId(askRef);
     const snapshot = this.snapshot;
     const approval = ref && snapshot ? snapshot.approvals.find((a) => a.record.request.id === ref.id && isAsk(a)) : undefined;
@@ -391,11 +506,111 @@ export class HttpHost {
     return {};
   }
 
-  /** What changed between two reads, as the events the store already follows. */
+  /** The ask `askRef` names among the shops of `snapshot`, with its shop: the shop its id names, never the one viewed.
+   *  Refused, with nothing sent, for an ask no shop of the read holds now and for one the shop has moved to another
+   *  revision since its card showed it. */
+  private askAtShop(snapshot: ShopSnapshot, askRef: string): { part: ShopPart; approval: ShopApproval; revision: number } {
+    const ref = parseShopAskId(askRef);
+    const part = ref ? partOf(snapshot, ref.shop) : undefined;
+    const approval = ref && part ? part.approvals.find((a) => a.record.request.id === ref.id && isAsk(a)) : undefined;
+    if (!ref || !part || !approval) throw notFound();
+    if (approval.record.request.revision !== ref.revision) throw new OpError("changed", t("rt.ask.changed"));
+    return { part, approval, revision: ref.revision };
+  }
+
+  /** An answer to an ask of one of several shops: as `answer` is, but sent with that shop's own session (shops.ts), and
+   *  refused here, with nothing sent, when the person's role there may not decide the request's kind (approval-core's
+   *  `mayDecide`, the rule the API decides with). */
+  private async answerAtShop(snapshot: ShopSnapshot, askRef: string, choice: ApprovalChoice): Promise<Record<string, never>> {
+    const { part, approval, revision } = this.askAtShop(snapshot, askRef);
+    const request = answerable(approval);
+    if (!request) throw new OpError("update_app", t("rt.updateToAnswer"));
+    if (!mayDecide(part.shop.role, request.kind)) throw new OpError("not_permitted", onlyOwnerWords(request.kind, part.shop.owner));
+    const option = optionFor(request, choice);
+    if (!option) throw new OpError("not_offered", t("rt.ask.notOffered"));
+    const answered = await this.shopSessions.write(part.shop.id, decisionPath(request.id), { optionId: option.id, seenRevision: revision });
+    if (answered.kind === "left") {
+      this.depart([{ shop: part.shop.id, departure: answered.departure }]);
+      throw new OpError(answered.departure.why, this.departedWords(part.shop.id) ?? t("rt.notFound"));
+    }
+    const names = new Map(part.approvals.flatMap((a) => (a.passedOn?.name ? [[a.passedOn.by, a.passedOn.name] as const] : [])));
+    const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now() });
+    if (!outcome.ok && outcome.closing) this.closings.set(askRef, outcome.closing);
+    void this.refresh().catch(() => undefined);
+    if (!outcome.ok) throw new OpError(outcome.code, outcome.words);
+    return {};
+  }
+
+  /** A helper passing an ask of their shop on to its owner, with a note, through that shop's own session: exactly
+   *  `{ note }` (docs/pilot-api.md, "A helper's own routes"). It decides nothing; the ask keeps waiting for the owner.
+   *  Refused here, with nothing sent, for anything but a request the person may pass on: a helper's, of a kind only the
+   *  owner decides, not passed on yet, and a note of 1 to 500 characters. */
+  private async passOn(askRef: string, note: string): Promise<{ passed_on: PassedOnNote }> {
+    const snapshot = this.snapshot;
+    if (!snapshot?.shops) throw notFound();
+    const { part, approval } = this.askAtShop(snapshot, askRef);
+    const request = answerable(approval);
+    if (!request) throw new OpError("update_app", t("rt.updateToAnswer"));
+    if (part.shop.role !== "helper") throw new OpError("not_a_helper", t("rt.pass.helpersOnly"));
+    if (mayDecide("helper", request.kind)) throw new OpError("decide_yourself", t("rt.pass.yours"));
+    if (approval.passedOn) throw new OpError("already_passed", t("rt.pass.already", { owner: part.shop.owner }));
+    const text = typeof note === "string" ? note.trim() : "";
+    if (!text || [...text].length > MAX_NOTE) throw new OpError("bad_note", t("rt.pass.badNote"));
+    const answered = await this.shopSessions.write(part.shop.id, PASS_ON_PATH(request.id), { note: text });
+    void this.refresh().catch(() => undefined);
+    if (answered.kind === "left") {
+      this.depart([{ shop: part.shop.id, departure: answered.departure }]);
+      throw new OpError(answered.departure.why, this.departedWords(part.shop.id) ?? t("rt.notFound"));
+    }
+    if (answered.kind === "ok") return { passed_on: { name: "", note: text, at: this.now() / 1000 } };
+    if (answered.kind !== "refused") throw new OpError(answered.kind, t(answered.kind === "signed_out" ? "rt.signedOut" : "rt.ask.noReply"));
+    const words: Record<string, string> = {
+      bad_note: t("rt.pass.badNote"),
+      decide_yourself: t("rt.pass.yours"),
+      already_passed: t("rt.pass.already", { owner: part.shop.owner }),
+      not_a_helper: t("rt.pass.helpersOnly"),
+      not_found: t("rt.notFound"),
+    };
+    throw new OpError(answered.code || "refused", words[answered.code] ?? t("rt.ask.refused"));
+  }
+
+  /** Shows `shop` on every page from now on: one of the shops of the latest read (or of the kept one), and nothing is read
+   *  for it, since what a shop session may read of it, what waits there, is in every read already. */
+  private switchTo(shop: string): Record<string, never> {
+    const snapshot = this.snapshot;
+    const part = partOf(snapshot, shop);
+    if (!snapshot?.shops || !part) throw notFound();
+    if (snapshot.viewing === shop) return {};
+    this.viewing = shop;
+    this.snapshot = this.atShops(snapshot.shops, snapshot.unreadable, snapshot.readAt);
+    this.emit({ event: "shops.update", bot: TEAM });
+    return {};
+  }
+
+  /** The person's shops for the switcher: the ones they own first, the one viewed, and the ones whose place ended. */
+  private shopList(): OpMap["shops.list"]["result"] {
+    const snapshot = this.snapshot;
+    const left: ShopLeft[] = this.departed.map(({ shop, departure }) => ({
+      id: shop.id,
+      name: shop.name,
+      owner: shop.owner,
+      why: departure.why,
+      at: departure.at === null ? null : departure.at / 1000,
+    }));
+    return { shops: snapshot?.shops?.map((p) => ({ ...p.shop })) ?? [], current: snapshot?.shops ? (snapshot.viewing ?? null) : null, left };
+  }
+
+  /** What changed between two reads, as the events the store already follows. An ask of one of several shops that is
+   *  still waiting but shows otherwise now (a note passed on since, a role that moved) is sent again, and its card
+   *  follows; the shops listed, or the one viewed, changing is `shops.update`. */
   private emitChanges(was: ShopSnapshot, now: ShopSnapshot): void {
-    const before = new Set(pendingAsks(was).map((a) => a.request_id));
-    for (const ask of pendingAsks(now)) if (!before.has(ask.request_id)) this.emit(ask);
+    const before = new Map(pendingAsks(was).map((a) => [a.request_id, askSig(a)]));
+    for (const ask of pendingAsks(now)) {
+      const sig = before.get(ask.request_id);
+      if (sig === undefined || (ask.shop && sig !== askSig(ask))) this.emit(ask);
+    }
     this.emitLeft(was, now);
+    if (shopsSig(was) !== shopsSig(now)) this.emit({ event: "shops.update", bot: TEAM });
     const had = new Set(was.tasks.map((task) => task.id));
     const has = new Set(now.tasks.map((task) => task.id));
     for (const row of threadRows(now)) if (!had.has(row.thread)) this.emit({ event: "thread.added", bot: TEAM, thread: row.thread, title: row.title });
@@ -498,8 +713,11 @@ export class HttpHost {
       "media.read": () => {
         throw notFound();
       },
-      // Writes: answering an ask, through the decide route; nothing else yet.
+      // Writes: answering an ask, through the decide route, and a helper passing one on; nothing else yet.
       "approval.respond": (p) => (member(p), this.answer(p.request_id, p.choice)),
+      "approval.pass_on": (p) => (member(p), this.passOn(p.request_id, p.note)),
+      "shops.list": () => this.shopList(),
+      "shops.switch": (p) => this.switchTo(p.shop),
       "chat.send": notYet,
       "chat.steer": notYet,
       "chat.interrupt": notYet,

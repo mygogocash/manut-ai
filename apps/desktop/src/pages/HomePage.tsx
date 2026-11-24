@@ -10,7 +10,7 @@ import "./home.css";
 import { t } from "../i18n";
 import { can } from "../runtime";
 import { holdImeEnter } from "../lib/ime";
-import { askFrom, getStore, isSessionChat, selectAsks, selectSidebarBots, useStore, type Actions, type AppState, type Ask } from "../state/store";
+import { askFrom, getStore, isSessionChat, selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type Actions, type AppState, type Ask } from "../state/store";
 import { ALLOW_LABEL, settleApproval } from "../chat/cards/respond";
 import { useNow } from "../elsewhere/useNow";
 import { AskLine, age } from "../sidebar/Needs";
@@ -46,6 +46,8 @@ export interface HomeAskRow {
   action: string | null;
   /** who asks: the member's name, or a terminal session's folder and agent */
   who: string;
+  /** the shop the ask comes from, when the runtime shows several */
+  shop?: string;
   /** how long it has waited ("now", "3m") */
   age: string;
   face: ReactNode;
@@ -247,7 +249,7 @@ export function HomeView(p: HomeViewProps) {
                         <AskLine text={r.title} />
                       </span>
                       {r.action && <code className="act">{r.action}</code>}
-                      <span className="l2">{`${r.who} · ${r.age}`}</span>
+                      <span className="l2">{[r.who, r.shop, r.age].filter(Boolean).join(" · ")}</span>
                     </span>
                     {/* Approve sends the card's Allow once through the card's own path (respond.ts), and only where
                         the card would show nothing more than this row does. */}
@@ -358,6 +360,7 @@ export function needsYouRows(
       title,
       action,
       who: askFrom(s, a.bot),
+      ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       age: age(a.ts, nowMs),
       face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
       settled: a.settled && resolved ? t(ALLOW_LABEL[resolved]) : null,
@@ -459,7 +462,7 @@ export function HomePage() {
       working={workingRows(s, now)}
       onSeeTeam={() => s.openPage("team")}
       automations={can("automations") ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
-      shop={s.ui.shop.shop}
+      shop={viewedShopName(s)}
       recent={recentRows(jobs, { nameOf: (b) => s.bots.find((x) => x.name === b)?.display_name ?? b, nowMs: now, open: (id) => s.openJob(id) })}
       onSeeHistory={() => s.openPage("history")}
     />

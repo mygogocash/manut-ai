@@ -54,6 +54,15 @@ export function SearchGlyph() {
   );
 }
 
+/** Two chevrons, up and down: the account row's shop switcher, which opens a list above it. */
+export function SwitchGlyph() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5 6l3-3 3 3M5 10l3 3 3-3" />
+    </svg>
+  );
+}
+
 /** A chevron pointing on, at the end of a row that opens a page. */
 export function OnGlyph() {
   return (

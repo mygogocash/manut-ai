@@ -60,6 +60,10 @@ import type {
   DiffFile,
   PlanItem,
   Msg,
+  AskShop,
+  PassedOnNote,
+  ShopLeft,
+  ShopRow,
 } from "../lib/protocol";
 import type { AgentRunSummary, CliAgent, NodePr, RunDetail } from "../lib/runs";
 import { firstWords, hideSplitBlocks, threadEvent, threadKey, type ThreadOps, type ThreadRow } from "../threads/types";
@@ -238,6 +242,15 @@ export type ApprovalItem = {
   expired?: AskExpiry;
   /** Why it stopped waiting, in words, when the runtime said more than the reason ("Already decided by Mint at 19:42"). */
   expiredNote?: string;
+  /** The shop it comes from, when the runtime shows several (docs/several-shops.md): the card names it, and what it
+   *  offers follows the person's role there. */
+  shop?: AskShop;
+  /** The person may not decide it at that shop but may pass it on to the owner with a note (`approval.pass_on`). */
+  passOn?: boolean;
+  /** A note a helper passed on with it. */
+  passedOn?: PassedOnNote;
+  /** approval-core's kind, for an ask of one of several shops: what the card says only the owner may decide. */
+  approvalKind?: string;
 };
 export type ClarifyItem = {
   kind: "clarify";
@@ -441,6 +454,20 @@ export interface FocusAsk {
   seq: number;
 }
 
+/** The person's shops, as the runtime lists them for the switcher in the account row (`shops.list`). */
+export interface ShopsState {
+  /** the ones they own first; empty on a runtime that shows no shops, and the switcher shows only with two or more */
+  list: ShopRow[];
+  /** the shop every page shows */
+  current: string | null;
+  /** shops the person's place in ended while the app ran, newest first */
+  left: ShopLeft[];
+  /** the ids of `left` the person dismissed */
+  dismissed: string[];
+  /** whether the list was read once: a change of `current` after that is a switch, and the pages are read again */
+  loaded: boolean;
+}
+
 export interface AppState {
   conn: BridgeStatus;
   hello: HelloResult | null;
@@ -459,6 +486,7 @@ export interface AppState {
   replyTo: Record<string, ReplyChip | null>;
   /** Per bot: its threads (bridge `thread.list`), newest first; absent until read. */
   threads: Record<string, ThreadRow[]>;
+  shops: ShopsState;
   ui: Ui;
 }
 
@@ -663,6 +691,7 @@ export function initialState(): AppState {
     models: {},
     replyTo: {},
     threads: {},
+    shops: { list: [], current: null, left: [], dismissed: [], loaded: false },
     ui: {
       panelOpen: false,
       panelTab: "details",
@@ -687,6 +716,23 @@ export function initialState(): AppState {
       shop,
       firstRun: entry ? startFlow(entry, shop) : null,
     },
+  };
+}
+
+/** An ask card with how an ask of one of several shops shows: its shop, and what the person's role there lets them do (its
+ *  choices, passing it on) with any note passed on. An ask with no shop is left as it is. */
+function shopAskFields(item: ApprovalItem, ev: EventOf<"approval.request">): ApprovalItem {
+  if (!ev.shop) return item;
+  const { passOn: _p, passedOn: _n, outdated: _o, ...rest } = item;
+  return {
+    ...rest,
+    choices: ev.choices,
+    shop: ev.shop,
+    outside: true,
+    ...(ev.kind ? { approvalKind: ev.kind } : {}),
+    ...(ev.outdated ? { outdated: true } : {}),
+    ...(ev.pass_on ? { passOn: true } : {}),
+    ...(ev.passed_on ? { passedOn: ev.passed_on } : {}),
   };
 }
 
@@ -986,6 +1032,10 @@ export type Action =
   | { type: "send.ok"; bot: string; id: string; now: number }
   | { type: "event"; ev: BridgeEvent; now: number }
   | { type: "approval.resolved"; bot: string; request_id: string; choice: ApprovalChoice }
+  | { type: "approval.passed"; bot: string; request_id: string; passed: PassedOnNote }
+  | { type: "shops"; list: ShopRow[]; current: string | null; left: ShopLeft[] }
+  | { type: "shops.dismiss"; id: string }
+  | { type: "shop.switched" }
   | { type: "clarify.resolved"; bot: string; request_id: string; answer: string; answers?: ClarifyAnswers }
   | { type: "elsewhere"; bot: string; sessions: Away[] }
   | { type: "peek.loading"; id: string }
@@ -1206,23 +1256,30 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
     }
     case "approval.request":
       return touchChat(state, bot, (c) => {
-        // chat.open replays asks that are still waiting; the card is already there.
-        if (c.items.some((i) => i.kind === "approval" && i.request_id === ev.request_id)) return c;
-        const base = patchTurn(c, (t) => ({ ...t, status: tr("live.waitApproval") }));
-        const item: ApprovalItem = {
-          kind: "approval",
-          id: `approval-${ev.request_id}`,
-          ts: now / 1000,
-          request_id: ev.request_id,
-          title: ev.title,
-          command: ev.command,
-          choices: ev.choices,
-          ...(ev.cwd ? { cwd: ev.cwd } : {}),
-          ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),
-          ...(ev.subagent?.id ? { subagent: ev.subagent } : {}),
-          ...(c.turn || !bot.startsWith("agent:") ? {} : { outside: true }),
-          ...(ev.outdated ? { outdated: true } : {}),
-        };
+        // chat.open replays asks that are still waiting; the card is already there. An ask of one of several shops that
+        // comes again says how it shows now (a note passed on since, a role that moved), which its open card takes.
+        const known = c.items.find((i): i is ApprovalItem => i.kind === "approval" && i.request_id === ev.request_id);
+        if (known) return ev.shop && !known.resolved && !known.expired ? withItems(c, c.items.map((i) => (i === known ? shopAskFields(known, ev) : i))) : c;
+        // A shop's request is no turn's: it does not make a running turn wait, and no turn's end closes it.
+        const base = ev.shop ? c : patchTurn(c, (t) => ({ ...t, status: tr("live.waitApproval") }));
+        const asked = typeof ev.asked_at === "number" && Number.isFinite(ev.asked_at) && ev.asked_at > 0 ? ev.asked_at : null;
+        const item: ApprovalItem = shopAskFields(
+          {
+            kind: "approval",
+            id: `approval-${ev.request_id}`,
+            ts: asked ?? now / 1000,
+            request_id: ev.request_id,
+            title: ev.title,
+            command: ev.command,
+            choices: ev.choices,
+            ...(ev.cwd ? { cwd: ev.cwd } : {}),
+            ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),
+            ...(ev.subagent?.id ? { subagent: ev.subagent } : {}),
+            ...(c.turn || !bot.startsWith("agent:") ? {} : { outside: true }),
+            ...(ev.outdated ? { outdated: true } : {}),
+          },
+          ev,
+        );
         return withItems(base, [...base.items, item]);
       });
     case "clarify.request":
@@ -1511,6 +1568,30 @@ export function reduce(state: AppState, a: Action): AppState {
       return state.chats[a.bot] ? touchChat(state, a.bot, (c) => reduceQueue(c, a)) : state;
     case "event":
       return reduceEvent(state, a.ev, a.now);
+    case "approval.passed":
+      return touchChat(state, a.bot, (c) =>
+        withItems(
+          c,
+          c.items.map((i) => {
+            if (i.kind !== "approval" || i.request_id !== a.request_id) return i;
+            const { passOn: _passOn, ...rest } = i;
+            return { ...rest, passedOn: a.passed };
+          }),
+        ),
+      );
+    case "shops":
+      return { ...state, shops: { ...state.shops, list: a.list, current: a.current, left: a.left, loaded: true } };
+    case "shops.dismiss":
+      return state.shops.dismissed.includes(a.id) ? state : { ...state, shops: { ...state.shops, dismissed: [...state.shops.dismissed, a.id] } };
+    case "shop.switched": {
+      // Every page shows another shop now: what the last one's pages showed goes (its chats, threads, schedules, places),
+      // and is read again for the new one. Every shop's asks stay, since Needs you is one across the shops.
+      const chats = Object.fromEntries(
+        Object.entries(state.chats).map(([k, c]) => [k, withItems(emptyChat(), c.items.filter((i) => i.kind === "approval" && !!i.shop))]),
+      );
+      const ui = { ...state.ui, thread: null, ...(state.ui.view === "job" ? { view: "home" as const, job: null } : {}) };
+      return { ...state, chats, threads: {}, routines: {}, automations: null, elsewhere: {}, peeks: {}, unread: {}, replyTo: {}, ui };
+    }
     case "approval.resolved":
       return touchChat(state, a.bot, (c) =>
         doneWaiting(
@@ -1872,6 +1953,19 @@ export function selectTimeline(state: AppState, bot: string): TimelineItem[] {
 }
 const EMPTY_ITEMS: ChatItem[] = [];
 
+/** A shop's name as the app shows it: its own; or, for a shop the person owns that the runtime lists unnamed (Practice's
+ *  own shop, which is the demo team's), the name the first-run setup took on this computer. "" when neither names it. */
+export function shopName(state: Pick<AppState, "ui">, shop: Pick<ShopRow, "name" | "role">): string {
+  return shop.name || (shop.role === "owner" ? state.ui.shop.shop : "");
+}
+
+/** The shop every page shows, as the account row and Home name it: the one the runtime shows when it lists the person's
+ *  shops, else the shop the first-run setup took on this computer; "" when neither names one. */
+export function viewedShopName(state: Pick<AppState, "shops" | "ui">): string {
+  const current = state.shops.list.find((s) => s.id === state.shops.current);
+  return current ? shopName(state, current) : state.ui.shop.shop;
+}
+
 /** One approval or question still waiting on the person, in any bot's chat. */
 export interface Ask {
   bot: string;
@@ -1977,6 +2071,13 @@ export interface Actions {
   queueEdit(id: string, bot?: string): void;
   queueDelete(id: string, bot?: string): void;
   respondApproval(requestId: string, choice: ApprovalChoice, bot?: string): Promise<void>;
+  /** A helper passes an ask of their shop on to its owner with a note (`approval.pass_on`); the card shows the note once
+   *  the runtime took it. */
+  passOnApproval(requestId: string, note: string, bot?: string): Promise<void>;
+  /** Shows another of the person's shops on every page (`shops.switch`); its pages are read again. */
+  switchShop(shop: string): Promise<void>;
+  /** Hides the notice about a shop the person's place in ended. */
+  dismissShopNotice(id: string): void;
   /** A text answer for one question, or every answer of an interview at once (one `clarify.respond`). */
   respondClarify(requestId: string, answer: string | ClarifyAnswers, bot?: string): Promise<void>;
   loadElsewhere(bot?: string): Promise<void>;
@@ -2527,7 +2628,44 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     const names = new Set(state.bots.map((b) => b.name));
     const loaded = Object.entries(state.chats).filter(([n, c]) => c.loaded && names.has(n)).map(([n]) => n);
     const threaded = Object.keys(state.threads).filter((n) => names.has(n));
-    await Promise.allSettled([...loaded.map(loadChat), ...threaded.map(loadThreads), ...peekUnlisted(), loadElsewhere(), loadRoutines(), loadAutomations()]);
+    await Promise.allSettled([...loaded.map(loadChat), ...threaded.map(loadThreads), ...peekUnlisted(), loadElsewhere(), loadRoutines(), loadAutomations(), loadShops()]);
+  };
+
+  /** The person's shops (`shops.list`), for the switcher in the account row. A runtime with no shops to show (or one
+   *  that does not know the op) lists none. When the shop every page shows is not the one it was, every page is read
+   *  again for it (`shop.switched`), whoever moved it: the switcher, or a runtime whose viewed shop left. */
+  const loadShops = async (): Promise<void> => {
+    let r: OpMap["shops.list"]["result"];
+    try {
+      r = await bridge.request("shops.list", {});
+    } catch {
+      return;
+    }
+    const before = state.shops;
+    dispatch({ type: "shops", list: Array.isArray(r.shops) ? r.shops : [], current: r.current ?? null, left: Array.isArray(r.left) ? r.left : [] });
+    if (before.loaded && before.current !== state.shops.current) await showShop();
+  };
+
+  /** Reads every page again for the shop now shown, as the start reads them: the team, the chat open with its asks, the
+   *  other members' chats and threads, and the lists. */
+  const showShop = async (): Promise<void> => {
+    dispatch({ type: "shop.switched" });
+    try {
+      const { bots } = await bridge.request("bots.list", {});
+      dispatch({ type: "bots", bots });
+      ensureRoster();
+    } catch (e) {
+      return fail(e);
+    }
+    const listed = selectSidebarBots(state).map((b) => b.name);
+    const first = state.selectedBot && state.bots.some((b) => b.name === state.selectedBot) ? state.selectedBot : listed[0];
+    if (first) await selectBot(first).catch(fail);
+    await Promise.allSettled([
+      ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadChat(b.name)),
+      ...selectSidebarBots(state).filter((b) => b.name !== first && online(b)).map((b) => loadThreads(b.name)),
+      ...peekUnlisted(),
+      loadAutomations(),
+    ]);
   };
 
   // ---- threads under a bot (bridge `thread.*`) ----
@@ -2609,6 +2747,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         if (ev.event === "routine.ran" || ev.event === "routines.update" || ev.event === "routine.added" || ev.event === "brief.ready")
           void loadAutomations();
         if (ev.event === "bots.update") void reloadBots();
+        if (ev.event === "shops.update") void loadShops();
         const tev = threadEvent(ev);
         if (tev) {
           if (tev.event === "thread.removed") {
@@ -2694,6 +2833,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
           // has not attached yet, which is every one of these at start; chat.open attaches on demand, and one that
           // cannot start just fails and is skipped
           ...selectUnlisted(state).map((b) => peekAsks(b.name)),
+          loadShops(),
         ]);
       } catch (e) {
         fail(e);
@@ -2842,6 +2982,28 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       } catch (e) {
         fail(e);
       }
+    },
+    async passOnApproval(requestId, note, bot) {
+      const b = botArg(bot);
+      if (!b) return;
+      try {
+        const { passed_on } = await bridge.request("approval.pass_on", { bot: b, request_id: requestId, note });
+        dispatch({ type: "approval.passed", bot: b, request_id: requestId, passed: passed_on });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    async switchShop(shop) {
+      if (shop === state.shops.current) return;
+      try {
+        await bridge.request("shops.switch", { shop });
+      } catch (e) {
+        return fail(e);
+      }
+      await loadShops();
+    },
+    dismissShopNotice(id) {
+      dispatch({ type: "shops.dismiss", id });
     },
     async respondClarify(requestId, answer, bot) {
       const b = botArg(bot);

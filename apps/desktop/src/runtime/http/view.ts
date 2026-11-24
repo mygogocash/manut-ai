@@ -13,12 +13,12 @@
 //
 // Words a person reads come from the dictionaries. A state, an action or an event kind this app does not know is shown
 // as the API wrote it rather than hidden.
-import { isUnknown } from "@manut/approval-core";
+import { isUnknown, mayDecide } from "@manut/approval-core";
 import { t, type Key } from "../../i18n";
 import type { Automation, Bot, EventOf, Msg, Routine } from "../../lib/protocol";
 import type { ThreadOpenResult, ThreadRow } from "../../threads/types";
-import { askId, choicesOf, detailOf, isAsk, type ShopApproval } from "./approvals";
-import type { Attention, ShopAction, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+import { answerable, askId, choicesOf, detailOf, isAsk, shopAskId, type ShopApproval } from "./approvals";
+import type { Attention, ShopAction, ShopPart, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
 
 /** Buddy's profile name: the one member the connected runtime lists. */
 export const TEAM = "buddy";
@@ -150,10 +150,42 @@ export function askText(a: ShopApproval, task: ShopTask | undefined): string {
 const byAsked = (a: ShopApproval, b: ShopApproval) =>
   a.record.request.createdAt - b.record.request.createdAt || (a.record.request.id < b.record.request.id ? -1 : a.record.request.id > b.record.request.id ? 1 : 0);
 
+/** One shop's requests still waiting, as asks that name the shop (docs/several-shops.md, "One Needs you across the
+ *  shops"). What each offers is the person's role there, as approval-core's `mayDecide` says: a request they may decide
+ *  offers yes once and no; one they may not (a helper, and money, a public post, a payment or a command) offers none, and
+ *  a helper may pass it on to the owner with a note instead, once. A shop session reads no tasks, so an ask says the
+ *  exact action from its request alone. */
+function shopAsks(part: ShopPart): EventOf<"approval.request">[] {
+  const { shop } = part;
+  return part.approvals.filter(isAsk).map((a) => {
+    const request = answerable(a);
+    const decides = !!request && mayDecide(shop.role, request.kind);
+    const kind = a.record.request.kind;
+    return {
+      event: "approval.request",
+      bot: TEAM,
+      request_id: shopAskId(shop.id, a),
+      title: "",
+      command: askText(a, undefined),
+      choices: decides ? choicesOf(a) : [],
+      ...(request ? {} : { outdated: true }),
+      kind: isUnknown(kind) ? kind.raw : kind,
+      shop: { id: shop.id, name: shop.name, owner: shop.owner, role: shop.role },
+      asked_at: sec(a.record.request.createdAt),
+      ...(request && !decides && shop.role === "helper" && !a.passedOn ? { pass_on: true } : {}),
+      ...(a.passedOn ? { passed_on: { name: a.passedOn.name, note: a.passedOn.note, ...(a.passedOn.at === null ? {} : { at: sec(a.passedOn.at) }) } } : {}),
+    };
+  });
+}
+
 /** Every request still waiting for an answer, oldest first, as the ask Needs you and Home show. The only answers are yes
  *  once and no: an exact action is approved for itself, never for a session or for always. One this build cannot answer
- *  offers neither and is marked `outdated`. */
+ *  offers neither and is marked `outdated`. With several shops, every shop's asks, each naming its shop. */
 export function pendingAsks(snapshot: ShopSnapshot): EventOf<"approval.request">[] {
+  if (snapshot.shops) {
+    const asks = snapshot.shops.flatMap(shopAsks);
+    return asks.sort((a, b) => (a.asked_at ?? 0) - (b.asked_at ?? 0) || (a.request_id < b.request_id ? -1 : a.request_id > b.request_id ? 1 : 0));
+  }
   return snapshot.approvals
     .filter(isAsk)
     .sort(byAsked)

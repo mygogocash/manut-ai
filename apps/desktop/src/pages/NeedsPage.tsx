@@ -3,11 +3,11 @@
 // (src/sidebar/Needs.tsx). Each row is the design canvas's ask (Approvals.dc.html): who asks and what they do, what is
 // asked in its card's words with the exact action under it, which kind it is, and since when it waits, with Look first,
 // which opens that chat with the ask scrolled into view and focused, as the strip did and ⌘J still does. So does the row
-// itself. Nothing is approved from this list: an ask settles on its card in the chat, its one place (Home alone offers
+// itself. With several shops, every shop's asks are here together, and each row names its shop (docs/several-shops.md). Nothing is approved from this list: an ask settles on its card in the chat, its one place (Home alone offers
 // Approve, for a plain command, through the same path).
 import type { ReactNode } from "react";
 import { t } from "../i18n";
-import { askFrom, askText, chatTarget, isSessionChat, selectAsks, useStore, type Actions, type AppState, type Ask } from "../state/store";
+import { askFrom, askText, chatTarget, isSessionChat, selectAsks, shopName, useStore, type Actions, type AppState, type Ask } from "../state/store";
 import { useNow } from "../elsewhere/useNow";
 import { AskLine, age } from "../sidebar/Needs";
 import { MenuIcon } from "../sidebar/menuIcons";
@@ -31,6 +31,8 @@ export interface NeedRow {
   open: () => void;
   /** what the member who asks does ("Sales chat"); none for a terminal session */
   role?: string;
+  /** the shop the ask comes from, when the runtime shows several */
+  shop?: string;
   /** the ask in its card's words (an approval's title, or the question) */
   title?: string;
   /** the exact action an approval names, as its card shows it */
@@ -58,6 +60,7 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
       face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
       open: () => void s.jumpToAsk(a.bot, a.item.id),
       ...(role ? { role } : {}),
+      ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       title,
       action,
       asked: whenText(a.ts, nowMs),
@@ -82,7 +85,7 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
                       </span>
                       {r.action && <code className="act">{r.action}</code>}
                       <span className="l2">
-                        {[r.who, r.role].filter(Boolean).join(" · ")}
+                        {[r.who, r.shop, r.role].filter(Boolean).join(" · ")}
                         {r.asked && ` · ${t("needs.since", { when: r.asked })}`}
                       </span>
                     </span>

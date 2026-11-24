@@ -47,6 +47,8 @@ describe("an ask on Needs you", () => {
     expect(text).toContain("Send a reply to a customer");
     expect(html).toContain('<code class="act">Reply to Khun Mali on LINE: &quot;Your order ships tomorrow morning.&quot;</code>');
     expect(text).toContain("Nam · Sales chat · Waiting since 09:14");
+    // an ask from one of several shops names its shop beside who asks
+    expect(words(renderToString(<NeedsView rows={[{ ...full, who: "Buddy", role: undefined, shop: "Ran Pa Noi" }]} />))).toContain("Buddy · Ran Pa Noi · Waiting since 09:14");
     expect(text).toContain("Approve 3m");
   });
 
