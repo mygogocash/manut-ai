@@ -76,13 +76,26 @@ refresh. That email is the verified identity an email invite is checked against.
 is `TEST_JWKS_JSON` in `wrangler.test.json`, go through the real exchange, so the claims, including the email, are
 checked exactly as Apple's would be.
 
+**Built, off until the owner turns it on: a code sent by email** (`docs/pilot-api.md`, "Signing in by email"). A
+helper asks for a code at their address and gives it back to the same exchange. Their session is the lifted auth's, as
+Apple's is, and keeps the address as its email, so an email invite matches it. Turning it on needs the owner's yes, the
+Workers Paid plan and a sending domain the owner controls; until then both of its routes answer `email_not_configured`.
+
+- **Two identities, one helper.** Signing in by email gives a tenant of its own (`email:` and the address's SHA-256),
+  never the Apple one, even for the same address, as two Apple accounts are never joined. The shop knows its helper by
+  the address the owner invited, so whichever of the two verified it opens the helper's sessions: the owner sees one
+  helper, the other sign-in as a new device, and removal ends both. Each sign-in has its own list of shops until the
+  helper opens the shop with it.
+- **In tests:** the code goes to an in-memory outbox (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`) that the tests read,
+  as the test key stands in for Apple's.
+
 **What needs the owner: a real sign-in for helpers.** The canvas has helpers sign in "with their own LINE or email".
 
 - An invite to a LINE account can be made, but no one can accept it yet: nothing verifies a LINE account. That needs
   LINE Login (a LINE Login channel on the owner's LINE account), and LINE work is parked by the owner.
 - An email invite works only for a helper whose Apple ID verifies that same address. Someone who chose Apple's "Hide My
-  Email" signs in with a relay address and sees `wrong_account`. Signing in by email itself (a code or a link sent by
-  email) needs an email sending service, which may cost money.
+  Email" signs in with a relay address and sees `wrong_account`. Signing in by email itself is built, off until the
+  owner turns it on (above): it needs the owner's yes, the Workers Paid plan and a sending domain the owner controls.
 
 ## The helper's session
 
@@ -108,7 +121,8 @@ same signed-in identity, gives a new one.
 An invite is for one LINE account id (compared exactly) or one email (compared without case), works once, and lasts
 7 days. The owner makes it from their session, or the operator on the owner's word, with a name and that identity, and
 gets a link to copy: `${WEB_ORIGIN}/join/<token>`. The API never sends it: LINE and email sending are parked by the
-owner, so the owner sends the link themselves. The token is an HMAC-SHA256 under
+owner, so the owner sends the link themselves. (The only email the API can send is a sign-in code, and only once the
+owner turns signing in by email on.) The token is an HMAC-SHA256 under
 `APPROVAL_LINK_SECRET` in its own domain, `manut-ai/pilot-invite/v1.`, over the shop's tenant, the invite's id and its
 expiry, so no approval or deletion link can pass for an invite, and the reverse. Minting is deterministic, so the
 console shows the same link again for a pending invite.
