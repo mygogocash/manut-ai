@@ -45,6 +45,8 @@ import {
   moneyText,
   monthName,
   monthsBack,
+  peopleChangedBy,
+  peopleChangesOf,
   peopleErrorText,
   peopleWords,
   percentUsed,
@@ -181,7 +183,7 @@ describe("the audit log's words", () => {
     expect(auditActorText(op, "Fon")).toBe("ops@manut.test");
     expect(auditActorText({ kind: "operator", email: null }, "Fon")).toBe("An operator (no Access identity)");
     expect(auditActorText({ kind: "owner" }, "Fon")).toBe("Fon");
-    expect(auditActorText({ kind: "owner", id: "owner-phone-1" }, "Fon")).toBe("Fon (owner-phone-1)");
+    expect(auditActorText({ kind: "owner", id: "owner-phone-1" }, "Fon")).toBe("Fon (linked account owner-phone-1)");
     expect(auditActorText({ kind: "helper", id: "staff-2" }, "Fon")).toBe("Helper staff-2");
     expect(auditActorText({ kind: "worker", attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" }, "Fon"))
       .toBe("Worker attempt 6f9d1f0e");
@@ -618,8 +620,60 @@ describe("the People page's words for the owner's linked account", () => {
   it("says on the owner's row whether an account is linked, in plain words", () => {
     expect(peopleWords.ownerLinked("2026-11-12T03:00:00.000Z")).toBe("Linked to the owner's account on 12 November");
     expect(peopleWords.ownerNotLinked).toBe("Not linked to an account yet");
-    expect(peopleWords.intro("Fon")).toBe(
-      "Who can use Manut AI for this shop. Fon cannot change this list from the app yet, so invite, cancel, remove and set cover only when Fon asks you to.");
+    // Since the owner's own routes (slice 4) a linked owner can change the list too; without a linked account only an operator can.
+    expect(peopleWords.intro("Fon", true)).toBe(
+      "Who can use Manut AI for this shop. Fon can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs. Make a change here when Fon asks you to.");
+    expect(peopleWords.intro("Fon", false)).toBe(
+      "Who can use Manut AI for this shop. Fon has no account linked yet, so only an operator can change this list. Make a change here when Fon asks you to.");
+    expect(peopleWords.intro("Fon", true)).not.toMatch(/cannot change/);
+  });
+
+  it("says which of the owner and an operator made each change to the list, from the audit log's own entries", () => {
+    const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+      at: "2026-11-24T03:00:00.000Z", actor: { kind: "operator", email: "ops@manut.test" }, action: "invite.created", subject: {},
+      outcome: "ok", ...overrides });
+    // Only the changes an owner or an operator makes to who can use Manut AI, never a reply, a helper joining or a payment.
+    const log = [
+      entry({ action: "reply.proposed" }),
+      entry({ action: "invite.created" }),
+      entry({ action: "helper.joined", actor: { kind: "helper", id: "h1" } }),
+      entry({ action: "invite.revoked", actor: { kind: "owner", id: "owner-fon" } }),
+      entry({ action: "helper.removed", actor: { kind: "owner", id: "owner-session" } }),
+      entry({ action: "away.set" }),
+      entry({ action: "away.cleared", actor: { kind: "owner", id: "owner-fon" } }),
+      entry({ action: "owner.linked" }),
+      entry({ action: "owner.unlinked" }),
+      entry({ action: "payment.recorded" }),
+    ];
+    const all = peopleChangesOf(log, 10);
+    expect(all.shown.map((one) => one.action)).toEqual(["invite.created", "invite.revoked", "helper.removed", "away.set",
+      "away.cleared", "owner.linked", "owner.unlinked"]);
+    expect(all.more).toBe(false);
+    const few = peopleChangesOf(log, 3);
+    expect(few.shown.map((one) => one.action)).toEqual(["invite.created", "invite.revoked", "helper.removed"]);
+    expect(few.more).toBe(true);
+    expect(peopleChangesOf([], 10)).toEqual({ shown: [], more: false });
+
+    expect(peopleChangedBy({ kind: "owner", id: "owner-fon" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "owner", id: "owner-session" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "owner" }, "Fon")).toEqual({ label: "By Fon", className: "tag" });
+    expect(peopleChangedBy({ kind: "operator", email: "ops@manut.test" }, "Fon")).toEqual({ label: "By an operator", className: "tag" });
+    expect(peopleChangedBy({ kind: "operator", email: null }, "Fon")).toEqual({ label: "By an operator", className: "tag" });
+    // Anyone else is named by the sentence alone.
+    expect(peopleChangedBy({ kind: "helper", id: "h1" }, "Fon")).toBeNull();
+    expect(peopleChangedBy({ kind: "system" }, "Fon")).toBeNull();
+  });
+
+  it("words the list of who changed it, and what it says when there is nothing to show", () => {
+    expect(peopleWords.changesTitle).toBe("Who changed this list");
+    expect(peopleWords.changesNote).toBe("Newest first");
+    expect(peopleWords.changesLabel("Baan Mali")).toBe("Changes to Baan Mali's list of people");
+    expect(peopleWords.changesNone).toBe("No change to the list is recorded yet.");
+    expect(peopleWords.changesNoneNewest(200)).toBe(
+      "No change to the list in the newest 200 audit entries. The Audit page has older ones.");
+    expect(peopleWords.changesMore(10)).toBe("Showing the newest 10. The Audit page has the rest.");
+    expect(peopleWords.changesUnavailable).toBe(
+      "The API could not read the audit log, so who changed the list is not shown. Press Refresh to try again.");
   });
 
   it("takes the code only from the owner, and says how it is written and what Link does", () => {
@@ -827,7 +881,7 @@ describe("the audit log's words for the owner's people and for browser control",
     expect(auditSubjectText({ outpostId: "o1", stepId: "st1", attemptId: "a1", taskId: "t1" }))
       .toBe("task t1 · attempt a1 · outpost o1 · browser step st1");
     for (const [reason, words] of [
-      ["step_kind_not_allowed", "Only steps that read are allowed so far."],
+      ["step_kind_not_allowed", "That kind of step cannot be asked for this way. A form is submitted only as an approved write."],
       ["origin_not_allowed", "The page was not on a site that member may use."],
       ["step_expired", "The step had run out of its two minutes."],
       ["text_withheld", "What it read held a saved password, so it was kept nowhere."],
@@ -861,9 +915,9 @@ describe("the audit log's words for the owner's linked account", () => {
     expect(said({ actor: op, action: "owner.unlinked", subject: { ownerAccountId: "owner-1" } }))
       .toBe("ops@manut.test unlinked Fon's account from the shop.");
     expect(said({ actor: owner, action: "owner.session_opened", subject: { ownerAccountId: "owner-1" } }))
-      .toBe("Fon (owner-1) signed in to the shop on a device.");
+      .toBe("Fon (linked account owner-1) signed in to the shop on a device.");
     expect(said({ actor: owner, action: "owner.session_ended", subject: { ownerAccountId: "owner-1" } }))
-      .toBe("Fon (owner-1) signed out of the shop on a device.");
+      .toBe("Fon (linked account owner-1) signed out of the shop on a device.");
     expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }))
       .toBe("Helper helper-1 signed out on a device.");
     expect(said({ actor: helper, action: "helper.session_ended", subject: { helperId: "helper-1" } }, { "helper-1": "Mint" }))
@@ -883,6 +937,183 @@ describe("the audit log's words for the owner's linked account", () => {
   it("labels the link's id an entry is about", () => {
     expect(auditSubjectText({ ownerAccountId: "owner-1" })).toBe("owner account owner-1");
     expect(auditSubjectText({ helperId: "helper-1", ownerAccountId: "owner-1" })).toBe("helper helper-1 · owner account owner-1");
+  });
+});
+
+// Since the owner can change the shop's people, memory, consent and routines from their own session (docs/several-shops.md,
+// slice 4), the log names the owner three ways: the linked account's id (an owner session), `owner-session` (the shop's own
+// signed-in session) and no id at all (a signed link). The page says which, in words, never the raw `owner-session`.
+describe("the audit log says who acted: the operator, the owner's linked account, the shop's own session, a helper or an outpost", () => {
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>, names: Record<string, string> = {}) =>
+    auditSentence(entry(overrides), "Fon", names);
+
+  it("names the owner's linked account by its id, the shop's own session in words, and a link by the owner alone", () => {
+    expect(auditActorText({ kind: "owner", id: "owner-fon" }, "Fon")).toBe("Fon (linked account owner-fon)");
+    expect(auditActorText({ kind: "owner", id: "owner-session" }, "Fon")).toBe("Fon (the shop's own session)");
+    expect(auditActorText({ kind: "owner" }, "Fon")).toBe("Fon");
+    // `owner-link` is the name the owner's link gives in a decision's record; it is the link, not an account.
+    expect(auditActorText({ kind: "owner", id: "owner-link" }, "Fon")).toBe("Fon");
+    // An id that merely starts like the shop's own session is an account's.
+    expect(auditActorText({ kind: "owner", id: "owner-session-2" }, "Fon")).toBe("Fon (linked account owner-session-2)");
+  });
+
+  it("says so in the sentence of each change the owner can now make from their own session", () => {
+    const account = { kind: "owner" as const, id: "owner-fon" };
+    const own = { kind: "owner" as const, id: "owner-session" };
+    const names = { "inv-1": "Beam", "helper-1": "Mint" };
+    expect(said({ actor: account, action: "invite.created", subject: { inviteId: "inv-1" } }, names))
+      .toBe("Fon (linked account owner-fon) invited Beam.");
+    expect(said({ actor: own, action: "invite.revoked", subject: { inviteId: "inv-1" } }, names))
+      .toBe("Fon (the shop's own session) cancelled Beam's invite.");
+    expect(said({ actor: account, action: "helper.removed", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (linked account owner-fon) removed Mint.");
+    expect(said({ actor: own, action: "away.set", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (the shop's own session) set Mint to cover messages while Fon is away.");
+    expect(said({ actor: account, action: "away.cleared", subject: { helperId: "helper-1" } }, names))
+      .toBe("Fon (linked account owner-fon) ended Mint's cover.");
+    expect(said({ actor: account, action: "memory.confirmed", subject: { factId: "f1" } }))
+      .toBe("Fon (linked account owner-fon) confirmed a fact as true.");
+    expect(said({ actor: own, action: "consent.withdrawn" }))
+      .toBe("Fon (the shop's own session) withdrew permission to send for the shop.");
+    expect(said({ actor: account, action: "approval.decided", outcome: "approved" }))
+      .toBe("Fon (linked account owner-fon) decided an approval request.");
+  });
+
+  it("still names an operator by their Access identity, a helper by the owner's name for them, an outpost by its id", () => {
+    expect(said({ actor: { kind: "operator", email: "ops@manut.test" }, action: "away.cleared", subject: { helperId: "h" } }))
+      .toBe("ops@manut.test ended the cover.");
+    expect(said({ actor: { kind: "operator", email: null }, action: "away.cleared", subject: { helperId: "h" } }))
+      .toBe("An operator (no Access identity) ended the cover.");
+    expect(said({ actor: { kind: "helper", id: "helper-1" }, action: "helper.session_ended", subject: { helperId: "helper-1" } },
+      { "helper-1": "Mint" })).toBe("Mint signed out on a device.");
+    expect(said({ actor: { kind: "outpost", id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" }, action: "browser_step.fetched" }))
+      .toBe("Outpost b4c8d1e2 picked up a browser step.");
+  });
+});
+
+// A browser write (docs/pilot-api.md, "Submitting through a browser") adds no audit actions of its own: it is told by the
+// entries the job flow already writes, and by the ids they carry. A write's ask names a sign-in, and its steps name the request
+// it carries; a sign-in's steps name a grant instead. The words read those ids to say which, and what each outcome means.
+describe("the audit log's words for a browser write, from the ask to how it settled", () => {
+  const worker = { kind: "worker" as const, attemptId: "6f9d1f0e-9a7e-4a53-9a0b-2f5c1d1f7c11" };
+  const outpost = { kind: "outpost" as const, id: "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b" };
+  const op = { kind: "operator" as const, email: "ops@manut.test" };
+  const write = { taskId: "t1", attemptId: "a1", signInId: "s1", requestId: "req_1", actionId: "req_1" };
+  const entry = (overrides: Partial<AuditEntry>): AuditEntry => ({ id: "aud-mi8x2k4c0-000-0a1b2c3d",
+    at: "2026-11-24T03:00:00.000Z", actor: { kind: "system" }, action: "shop.created", subject: {}, outcome: "ok", ...overrides });
+  const said = (overrides: Partial<AuditEntry>) => auditSentence(entry(overrides), "Fon", {});
+
+  it("says a worker asked for approval to submit a form on a site, and tells that from any other approval request", () => {
+    expect(said({ actor: worker, action: "approval.requested", subject: write }))
+      .toBe("Worker attempt 6f9d1f0e asked for approval to submit a form on a site.");
+    // The same words whether the ask opened a request, was refused, or was only kept as a draft.
+    expect(said({ actor: worker, action: "approval.requested", subject: { taskId: "t1", attemptId: "a1", signInId: "s1" },
+      outcome: "refused", reason: "not_my_job" })).toBe("Worker attempt 6f9d1f0e asked for approval to submit a form on a site.");
+    expect(said({ actor: worker, action: "approval.requested", subject: { taskId: "t1", attemptId: "a1", signInId: "s1" },
+      outcome: "skipped", reason: "draft_only" })).toBe("Worker attempt 6f9d1f0e asked for approval to submit a form on a site.");
+    // An approval request with no sign-in is any other action's, and keeps its old words.
+    expect(said({ actor: worker, action: "approval.requested",
+      subject: { taskId: "t1", attemptId: "a1", requestId: "req_2", actionId: "req_2" } }))
+      .toBe("Worker attempt 6f9d1f0e asked for approval of an action.");
+  });
+
+  it("tells a write's steps from a sign-in's and a read's, by the request, the grant or neither", () => {
+    const step = { stepId: "st1", outpostId: "o1" };
+    const forWrite = { ...write, ...step };
+    const forSignIn = { stepId: "st2", outpostId: "o1", taskId: "t1", attemptId: "a1", signInId: "s1", grantId: "g1" };
+    const forRead = { stepId: "st3", outpostId: "o1", taskId: "t1", attemptId: "a1" };
+    expect(said({ actor: worker, action: "browser_step.queued", subject: forWrite }))
+      .toBe("Worker attempt 6f9d1f0e asked an outpost to submit the approved form.");
+    expect(said({ actor: worker, action: "browser_step.queued", subject: forSignIn }))
+      .toBe("Worker attempt 6f9d1f0e asked an outpost to sign in to a site.");
+    expect(said({ actor: worker, action: "browser_step.queued", subject: forRead }))
+      .toBe("Worker attempt 6f9d1f0e asked an outpost to run a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.fetched", subject: forWrite }))
+      .toBe("Outpost b4c8d1e2 picked up the approved form to submit.");
+    expect(said({ actor: outpost, action: "browser_step.fetched", subject: forSignIn }))
+      .toBe("Outpost b4c8d1e2 picked up a sign-in step.");
+    expect(said({ actor: outpost, action: "browser_step.fetched", subject: forRead }))
+      .toBe("Outpost b4c8d1e2 picked up a browser step.");
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: forWrite, outcome: "done" }))
+      .toBe("Outpost b4c8d1e2 reported how submitting the form went.");
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: forSignIn, outcome: "done" }))
+      .toBe("Outpost b4c8d1e2 reported how signing in went.");
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: forRead, outcome: "done" }))
+      .toBe("Outpost b4c8d1e2 reported how a browser step went.");
+    // A report whose step the vault did not find names the outpost alone, so it can only be said in general.
+    expect(said({ actor: outpost, action: "browser_step.reported", subject: { outpostId: "o1" }, outcome: "refused",
+      reason: "step_not_found" })).toBe("Outpost b4c8d1e2 reported how a browser step went.");
+  });
+
+  it("says an outpost that was refused a step was not handed it, rather than that it picked it up", () => {
+    const refused = (subject: Record<string, string>) =>
+      said({ actor: outpost, action: "browser_step.fetched", subject, outcome: "refused", reason: "payload_changed" });
+    expect(refused({ ...write, stepId: "st1", outpostId: "o1" })).toBe("Outpost b4c8d1e2 was not handed the approved form to submit.");
+    expect(refused({ stepId: "st2", outpostId: "o1", signInId: "s1", grantId: "g1" }))
+      .toBe("Outpost b4c8d1e2 was not handed a sign-in step.");
+    expect(refused({ stepId: "st3", outpostId: "o1" })).toBe("Outpost b4c8d1e2 was not handed a browser step.");
+  });
+
+  it("names an outpost the owner registered from their Mac, and an operator's as an outpost only", () => {
+    expect(said({ actor: { kind: "owner", id: "owner-fon" }, action: "outpost.registered", subject: { outpostId: "o1" } }))
+      .toBe("Fon (linked account owner-fon) registered their Mac as an outpost.");
+    expect(said({ actor: { kind: "owner", id: "owner-session" }, action: "outpost.registered", subject: { outpostId: "o1" } }))
+      .toBe("Fon (the shop's own session) registered their Mac as an outpost.");
+    expect(said({ actor: op, action: "outpost.registered", subject: { outpostId: "o1" } }))
+      .toBe("ops@manut.test registered an outpost.");
+  });
+
+  it("has plain words for each reason a write can stop at, none shown as its code", () => {
+    const codes = ["not_my_job", "not_connected", "kind_mismatch", "unknown_member", "unknown_capability", "unknown_kind",
+      "unknown_action", "invalid_write", "draft_only", "invalid_request", "request_not_found", "not_approved", "request_changed",
+      "already_begun", "action_expired", "request_queued", "already_settled", "dispatch_in_flight", "action_unknown",
+      "payload_changed", "grant_changed", "task_settled"];
+    for (const code of codes) {
+      const words = auditReasonText(code);
+      expect(words, code).not.toContain(code);
+      expect(words, code).not.toMatch(/^Reason:/);
+      expect(words.endsWith("."), code).toBe(true);
+    }
+    expect(auditReasonText("draft_only")).toBe("The job is in practice mode, so the form was kept as a draft and nobody was asked to approve it.");
+    expect(auditReasonText("not_approved")).toBe("The write had not been approved.");
+    expect(auditReasonText("request_changed")).toBe("The request had changed since it was approved.");
+    expect(auditReasonText("payload_changed"))
+      .toBe("What was approved no longer matched what would be submitted, so nothing was submitted.");
+    expect(auditReasonText("action_expired")).toBe("The approved write had run out of time.");
+    // Words the Drafts page already had for its own jobs stay its own.
+    expect(jobReasonText("not_my_job")).toBe("It was not this member's job, and it could not be passed on.");
+    expect(jobReasonText("not_connected")).toBe("The shop's LINE connection to that customer is gone.");
+  });
+
+  it("says what a write's report means for the form: not submitted, not known, or settled all the same", () => {
+    const report = (outcome: string, reason: string) => entry({ actor: outpost, action: "browser_step.reported",
+      subject: { ...write, stepId: "st1", outpostId: "o1" }, outcome, reason });
+    const read = (reason: string) => auditReasonText(reason, report("failed", reason));
+    // The two codes that are about writes keep their words, which already say that nothing was submitted.
+    expect(read("submit_refused")).toBe("The site refused what was submitted and kept the form.");
+    expect(read("not_run")).toBe("The outpost did not run the step, so nothing was submitted.");
+    // Every other code an outpost reports before it types anything says so for a form.
+    expect(read("page_unavailable")).toBe("The page did not load, so nothing was submitted.");
+    expect(read("selector_not_found")).toBe("A field or the form was not on the page, so nothing was submitted.");
+    expect(read("sign_in_refused")).toBe("The site refused the saved password, so nothing was submitted.");
+    expect(read("grant_refused")).toBe("There was no sign-in to type, so nothing was submitted.");
+    // After these nobody can say the site did not take it.
+    expect(read("timed_out")).toBe("The step took too long. It is not known whether the site took the form.");
+    expect(read("browser_error")).toBe("The browser stopped part way. It is not known whether the site took the form.");
+    expect(read("origin_not_allowed")).toBe("The browser went off the page's site. It is not known whether the site took the form.");
+    // A report the attempt could not take back leaves the write as the outpost said it went.
+    for (const reason of ["attempt_ended", "consent_required", "feature_disabled", "task_unavailable"]) {
+      expect(auditReasonText(reason, report("refused", reason)), reason)
+        .toBe(`${auditReasonText(reason)} The form itself stands as the outpost reported it.`);
+    }
+    // A report the vault itself refused settled nothing, so it says nothing more than the reason.
+    expect(auditReasonText("step_expired", report("refused", "step_expired"))).toBe(auditReasonText("step_expired"));
+    // Other entries, and a read step's report, read the reason as before.
+    expect(auditReasonText("timed_out", entry({ actor: outpost, action: "browser_step.reported",
+      subject: { stepId: "st3", outpostId: "o1" }, outcome: "failed", reason: "timed_out" }))).toBe("The step took too long.");
+    expect(auditReasonText("timed_out")).toBe("The step took too long.");
   });
 });
 
@@ -1026,11 +1257,11 @@ describe("the audit log's words for the owner's Connections", () => {
 
   it("says what the owner's password, rename and removal did, by the owner, and never by a raw name", () => {
     expect(said({ actor: owner, action: "signin.password_replaced", subject: { signInId: "s1" } }))
-      .toBe("Fon (owner-1) replaced a site sign-in's password.");
+      .toBe("Fon (linked account owner-1) replaced a site sign-in's password.");
     expect(said({ actor: owner, action: "outpost.renamed", subject: { outpostId: "o1" } }))
-      .toBe("Fon (owner-1) renamed an outpost.");
+      .toBe("Fon (linked account owner-1) renamed an outpost.");
     expect(said({ actor: shopSession, action: "outpost.removed", subject: { outpostId: "o1" } }))
-      .toBe("Fon (owner-session) removed an outpost.");
+      .toBe("Fon (the shop's own session) removed an outpost.");
     const sentence = said({ actor: owner, action: "outpost.renamed" });
     expect(sentence).not.toContain("outpost.renamed");
     expect(sentence).not.toMatch(/\bdid\b/);

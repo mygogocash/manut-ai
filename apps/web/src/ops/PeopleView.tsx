@@ -1,13 +1,24 @@
 import { APPROVAL_KINDS, mayDecide } from "@manut/approval-core";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  ApiError, useApi, type Identity, type InviteView, type OwnerAccountView, type People, type PeopleHelper, type Shop,
+  ApiError, useApi, type AuditPage, type Identity, type InviteView, type OwnerAccountView, type People, type PeopleHelper,
+  type Shop,
 } from "../api";
-import { endOfShopDay, langOf } from "../format";
+import { endOfShopDay, formatStamp, langOf } from "../format";
 import { CheckIcon } from "../ui/marks";
 import { CopyButton } from "./CopyButton";
-import { useLoad } from "./useLoad";
-import { errorText, isAuthError, ownerAccountErrorText, peopleErrorText, peopleWords as W } from "./words";
+import { useLoad, type Loaded } from "./useLoad";
+import {
+  auditNamesOf,
+  auditSentence,
+  errorText,
+  isAuthError,
+  ownerAccountErrorText,
+  peopleChangedBy,
+  peopleChangesOf,
+  peopleErrorText,
+  peopleWords as W,
+} from "./words";
 
 /// The People page: who can use Manut AI for one shop, as the API keeps it (`GET /v1/admin/people`), laid out from the
 /// design canvas's "Settings: people" and "States: people and roles" boards. "Who can use Manut AI" lists the owner, each
@@ -15,7 +26,10 @@ import { errorText, isAuthError, ownerAccountErrorText, peopleErrorText, peopleW
 /// approval-core's rule; "While you are away" says who covers messages and until when; and the notes helpers passed on
 /// come last, with the kind of request they were about.
 ///
-/// The owner cannot change the list from the app yet, so the operator relays the owner's word, and the page says so. The owner's
+/// The operator acts on the owner's word, and since the owner's own routes (docs/several-shops.md, slice 4) the owner can change
+/// the list too from the account linked as theirs, so the page says which of the two can (the intro) and, last, who changed it:
+/// the shop's audit log read for the changes to its people, each with the owner or an operator as its actor, because the people
+/// list does not say. The owner's
 /// row also says whether an account is linked as the owner's (docs/several-shops.md): with none, a box takes the code the owner
 /// reads out from their app, and with one, Unlink asks once more and signs that account out of the shop on every device. An invite
 /// makes a link for the operator to send, because Manut AI sends nothing (LINE and email sending are parked). Removing a helper
@@ -49,6 +63,11 @@ function identityOf(typed: string): Identity {
 /// The longest name the API keeps, in characters (its own count: whole characters, not code units).
 const MAX_NAME = 80;
 
+/// How much of the audit log the page reads to find who changed the list: the API's largest page, newest first. The changes it
+/// shows are the newest ten of those; when it finds none and the log goes back further, it says so rather than say there were none.
+const CHANGES_READ = 200;
+const CHANGES_SHOWN = 10;
+
 const listStyle = { listStyle: "none", margin: 0, padding: 0 } as const;
 const sectionStyle = { display: "flex", flexDirection: "column", gap: 10 } as const;
 const rowStyle = { borderTop: "1px solid var(--line)", flexWrap: "wrap", alignItems: "flex-start" } as const;
@@ -76,6 +95,14 @@ export function PeopleView({ shops, tenant: chosen, onForget }: {
   const [tenant, setTenant] = useState(() => chosen ?? shops?.[0]?.tenant ?? "");
   const shop = shops?.find((s) => s.tenant === tenant) ?? null;
   const people = useLoad(shop ? () => api.getPeople(shop.tenant) : null, `people:${shop?.tenant ?? ""}`);
+  // Who changed the list, read from the shop's audit log. A log that cannot be read leaves the people as they are: the page says
+  // so in its own section, and nothing else on it waits for the log.
+  const changes = useLoad(shop ? () => api.listAudit(shop.tenant, { limit: CHANGES_READ }) : null,
+    `people-changes:${shop?.tenant ?? ""}`);
+  const reloadAll = () => {
+    people.reload();
+    changes.reload();
+  };
 
   // Keeps the chosen shop while the list still has it; one deleted meanwhile gives way to the first.
   useEffect(() => {
@@ -102,7 +129,7 @@ export function PeopleView({ shops, tenant: chosen, onForget }: {
           </span>
         )}
         <div className="acts">
-          <button type="button" className="btn ghost" onClick={people.reload}>
+          <button type="button" className="btn ghost" onClick={reloadAll}>
             {W.refresh}
           </button>
         </div>
@@ -124,9 +151,10 @@ export function PeopleView({ shops, tenant: chosen, onForget }: {
         </div>
       ) : null}
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20, maxWidth: 880 }}>
-        {shop && (
+        {shop && people.data && (
+          // Whether the owner can change the list themselves is whether an account is linked as theirs.
           <p className="hint" style={{ margin: 0 }}>
-            {W.intro(shop.ownerName)}
+            {W.intro(shop.ownerName, (people.data.owner.account ?? null) !== null)}
           </p>
         )}
         {shops && shops.length === 0 ? (
@@ -137,14 +165,19 @@ export function PeopleView({ shops, tenant: chosen, onForget }: {
           <div className="skel" style={{ height: 120 }} aria-label={W.loading} />
         ) : people.data ? (
           // Keyed by the shop, so what one shop's page was doing is never carried over to another's.
-          <PeopleBoard key={shop.tenant} shop={shop} people={people.data} reload={people.reload} />
+          <PeopleBoard key={shop.tenant} shop={shop} people={people.data} reload={reloadAll} changes={changes} />
         ) : null}
       </div>
     </>
   );
 }
 
-function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; reload: () => void }) {
+function PeopleBoard({ shop, people, reload, changes }: {
+  shop: Shop;
+  people: People;
+  reload: () => void;
+  changes: Loaded<AuditPage>;
+}) {
   const api = useApi();
   // The change on its way, by what it is for, and a guard that holds even between two presses that arrive before the page
   // has drawn the first one's answer.
@@ -432,7 +465,68 @@ function PeopleBoard({ shop, people, reload }: { shop: Shop; people: People; rel
           </ul>
         )}
       </section>
+
+      <ChangesSection shop={shop} owner={owner} people={people} changes={changes} />
     </>
+  );
+}
+
+/// Who changed the list: the newest changes to the shop's people in its audit log, each as the Audit page says it, with whether
+/// the owner or an operator made it. It never takes the page over: a log that cannot be read is said in a line of its own, not as an
+/// alert, because the people above it are fine. The log is read newest first and a page at most, so "none" is claimed only when
+/// the log has nothing older to hold one.
+function ChangesSection({ shop, owner, people, changes }: {
+  shop: Shop;
+  owner: string;
+  people: People;
+  changes: Loaded<AuditPage>;
+}) {
+  const page = changes.data;
+  const names = auditNamesOf(people);
+  const now = Date.now();
+  const { shown, more } = page ? peopleChangesOf(page.entries, CHANGES_SHOWN) : { shown: [], more: false };
+  return (
+    <section aria-labelledby="people-changes" style={sectionStyle}>
+      <div className="band">
+        <h2 id="people-changes" className="h2" style={{ fontSize: 13, color: "inherit" }}>
+          {W.changesTitle}
+        </h2>
+        <span>{W.changesNote}</span>
+      </div>
+      {changes.error ? (
+        <p className="hint" style={{ margin: 0, padding: "0 10px" }}>
+          {W.changesUnavailable}
+        </p>
+      ) : !page ? (
+        <div className="skel" style={{ height: 48 }} aria-label={W.changesLoading} />
+      ) : shown.length === 0 ? (
+        <p className="hint" style={{ margin: 0, padding: "0 10px" }}>
+          {page.next ? W.changesNoneNewest(page.entries.length) : W.changesNone}
+        </p>
+      ) : (
+        <>
+          <ul aria-label={W.changesLabel(shop.name)} style={listStyle}>
+            {shown.map((entry) => {
+              const by = peopleChangedBy(entry.actor, owner);
+              return (
+                <li key={entry.id} className="rowl" style={rowStyle}>
+                  <span className="grow" style={lines}>
+                    <span>{auditSentence(entry, owner, names)}</span>
+                    <span className="mut" style={{ fontSize: 12.5 }}>{formatStamp(entry.at, now)}</span>
+                  </span>
+                  {by && <span className={by.className}>{by.label}</span>}
+                </li>
+              );
+            })}
+          </ul>
+          {more && (
+            <p className="hint" style={{ margin: 0, padding: "0 10px" }}>
+              {W.changesMore(shown.length)}
+            </p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

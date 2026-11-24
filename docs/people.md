@@ -43,6 +43,8 @@ People exist for pilot shops today: the routes need the shop's record, which giv
 its answers. The owner manages helpers from their own shop session once the operator has linked their account
 (`docs/several-shops.md`, slice 4): `GET /v1/people`, and inviting, revoking, removing and cover under it. The operator
 console does the same on the owner's word, for an owner with no account linked or one who asks, as it does for memory.
+The console's People page says which of the two can change the list (the owner can when an account is linked) and, last,
+shows who made each recent change, the owner or an operator, read from the audit log, because the people answer does not say.
 Both make each change through the same operation of the shop's record, so there is one way to make it, and the log says
 who: the owner's linked account by its id, or the operator's Access identity.
 

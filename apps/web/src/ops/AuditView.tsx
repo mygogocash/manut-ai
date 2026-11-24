@@ -211,7 +211,7 @@ function AuditRow({ entry, ownerName, names, now }: { entry: AuditEntry; ownerNa
         </span>
         {entry.reason && (
           <span className="mut" style={{ fontSize: 12.5 }}>
-            {auditReasonText(entry.reason)}
+            {auditReasonText(entry.reason, entry)}
           </span>
         )}
       </div>
