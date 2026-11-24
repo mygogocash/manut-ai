@@ -1,0 +1,15 @@
+{
+  "name": "@manut/preview-command",
+  "private": true,
+  "type": "module",
+  "description": "Chooses the command that starts a JavaScript project's preview from its package.json text and root file names.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
