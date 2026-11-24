@@ -588,7 +588,7 @@ describe("the page, drawn", () => {
     expect(words(renderToString(<PeopleView p={made} />))).toContain("Copied");
   });
 
-  it("keeps each person's colour when the list around them changes, and gives the owner the board's first", () => {
+  it("keeps each person's colour when the list around them changes, and keeps the owner's colour for the owner", () => {
     const colour = (html: string, initial: string) => new RegExp(`background:(#[0-9A-F]{6})[^>]*>${initial}<`).exec(html)?.[1];
     const before = view(props({ state: { kind: "ready", value: people({ helpers: [mint], invites: [beam, tum] }) } }));
     // Mint is removed and Tum's invite cancelled: Beam keeps the colour it had
@@ -597,11 +597,13 @@ describe("the page, drawn", () => {
     expect(colour(after, "B")).toBe(colour(before, "B"));
     expect(colour(before, "M")).toBe(colour(view(props()), "M"));
     expect(colour(before, "F")).toBe("#EFD3CC");
-    for (const id of ["a", "helper-mint", "inv-beam", "x".repeat(300), ""]) {
+    // nobody but the owner is drawn in the owner's pastel, whatever their id
+    for (const id of ["a", "helper-mint", "inv-beam", "practice-helper-mint", "practice-invite-beam", "x".repeat(300), ""]) {
       expect(toneOf(id), id).toBe(toneOf(id));
-      expect(toneOf(id)).toBeGreaterThanOrEqual(0);
-      expect(toneOf(id)).toBeLessThan(5);
+      expect(toneOf(id), id).toBeGreaterThanOrEqual(1);
+      expect(toneOf(id), id).toBeLessThan(5);
     }
+    for (let n = 0; n < 500; n += 1) expect(toneOf(`helper-${n}`), String(n)).not.toBe(0);
   });
 
   it("marks the helper who covers while the cover is in force, and not once it is over", () => {

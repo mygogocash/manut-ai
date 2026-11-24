@@ -69,9 +69,10 @@ export interface PeopleProps {
 /** The pastel behind a person's initial, as the board gives each person one of their own. */
 const TONES = ["#EFD3CC", "#EDE1B6", "#CDDDEB", "#CEDFCE", "#DBD6EC"] as const;
 
-/** A person's own pastel, from their id, so it stays theirs when the list around them changes (a removal or a cancelled invite
- *  must not recolour everyone below it). The owner is always the first, as the board has Fon. */
-export const toneOf = (id: string): number => [...id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % TONES.length;
+/** A helper's or an invite's own pastel, from their id, so it stays theirs when the list around them changes (a removal or a
+ *  cancelled invite must not recolour everyone below it). The first pastel is the owner's alone, as the board has Fon, so nobody
+ *  else is ever drawn in it. */
+export const toneOf = (id: string): number => 1 + ([...id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % (TONES.length - 1));
 
 function Avatar({ name, tone }: { name: string; tone: number }) {
   return (
