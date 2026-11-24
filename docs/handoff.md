@@ -190,6 +190,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   (the 16 November decision); the dial reaches only chat sessions today. Also: a real GitHub account (projects from
   GitHub, checks on a pull request), a real sign-in to Claude Code, where developers' secrets live (the shop's vault
   or this Mac's keychain), and a native speaker's check of the new Korean, Japanese and Chinese words.
+- **Connections for Ton's books (`docs/connectors.md`, 4a and 4b):** FlowAccount's Open API is by application
+  (form.flowaccount.com/request-openapi, as an app partner for the OpenID flow), a 30-day sandbox first, and each shop
+  needs its own Pro Business plan (฿457 a month, or ฿5,490 a year). Google Sheets needs a Google Cloud project of the
+  owner's with an OAuth client for the `drive.file` scope only, which needs no Google review.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
