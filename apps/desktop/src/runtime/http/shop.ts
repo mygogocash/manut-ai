@@ -309,7 +309,7 @@ function decodeDraft(v: Obj): ShopDraft | null {
 
 /** One task as the task list gives it (`{ task, events, actions, attempts, drafts, … }`: the shape of an export entry, with
  *  the entries of the log the screens read and its newest draft), as a task. */
-export function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
+function decodeTask(v: unknown, unreadable: unknown[]): ShopTask | null {
   const doc = isObj(v) && isObj(v.task) ? v.task : null;
   const taskId = doc ? id(doc.id) : null;
   if (!isObj(v) || !doc || !taskId) {

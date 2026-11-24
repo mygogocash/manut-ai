@@ -165,9 +165,9 @@ export class ShopSessions {
 
   /** Reads what waits at each listed shop, each with its own session, at once (docs/several-shops.md, "One Needs you across
    *  the shops"), and of each shop the person owns its tasks, routines, schedules and attention items as well, so its pages
-   *  show its tasks, its team and its routines (`ShopPart.work`). A shop they help at is read for its asks only: what a helper sees is the
-   *  owner's call. A shop whose place ended in this read is left out and said in `left`, and so is each shop this computer
-   *  holds a session for that the list no longer has. Any other failure fails the whole read with the worst reason (signed
+   *  show its tasks, its team and its routines (`ShopPart.work`). A shop they help at is read for its asks only: what a
+   *  helper sees is the owner's call. A shop whose place ended in this read is left out and said in `left`, and so is each
+   *  shop this computer holds a session for that the list no longer has. Any other failure fails the whole read with the worst reason (signed
    *  out, then offline, then unavailable), so one shop's asks never vanish because its read did not answer, and half a
    *  shop is never shown as the whole one. */
   async readAll(listed: readonly ShopRow[]): Promise<ShopsRead> {
