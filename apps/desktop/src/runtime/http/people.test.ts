@@ -505,6 +505,46 @@ describe("the cover while the owner is away", () => {
   });
 });
 
+describe("the API's own refusals, which the checks here should have kept from happening", () => {
+  it("says a 403 owner_only in words for a shop the person was thought to own, and a 404 for one that has no people list", async () => {
+    const { api, ask } = await setup({ shops: true });
+    api.on("GET", PEOPLE_PATH, { status: 403, json: { error: "owner_only" } });
+    expect(await refusal(ask("people.list", {}))).toEqual({ code: "owner_only", message: t("people.err.ownerOnly") });
+    // People exist for pilot shops: a shop the API holds no record of answers 404 not_found
+    api.on("GET", PEOPLE_PATH, { status: 404, json: { error: "not_found" } });
+    expect(await refusal(ask("people.list", {}))).toEqual({ code: "not_found", message: t("people.err.notFound") });
+  });
+
+  it("says a 400 invalid_request in words, for every change", async () => {
+    const { api, ask } = await setup({ shops: true });
+    for (const path of [INVITE_PATH, CANCEL_INVITE_PATH, REMOVE_HELPER_PATH, AWAY_PATH, CLEAR_AWAY_PATH]) api.on("POST", path, { status: 400, json: { error: "invalid_request" } });
+    const a = SHOP_A.id;
+    const words = { code: "invalid_request", message: t("people.err.invite") };
+    expect(await refusal(ask("people.invite", { shop: a, name: "Tum", identity: { kind: "line", id: "tum" } }))).toEqual(words);
+    expect(await refusal(ask("people.cancelInvite", { shop: a, invite: "inv-beam" }))).toEqual(words);
+    expect(await refusal(ask("people.remove", { shop: a, helper: "helper-mint" }))).toEqual(words);
+    expect(await refusal(ask("people.setAway", { shop: a, helper: "helper-mint", until: (NOW + 86_400_000) / 1000 }))).toEqual(words);
+    expect(await refusal(ask("people.clearAway", { shop: a }))).toEqual(words);
+  });
+
+  it("opens the shop's session again once after a 401, and says it did not work when the API still refuses", async () => {
+    const { api, served, ask } = await setup({ shops: true });
+    const opened = served!.opened[SHOP_A.id];
+    api.on("GET", PEOPLE_PATH, { status: 401, json: { error: "unauthorized" } });
+    expect(await refusal(ask("people.list", {}))).toEqual({ code: "unauthorized", message: t("people.err.failed") });
+    // the request went with the session held, then once more with a session opened again, and no more
+    expect(api.to("GET", PEOPLE_PATH).map((c) => c.bearer)).toEqual([OWNER_A, shopToken(SHOP_A.id, "owner", opened + 1)]);
+  });
+
+  it("says plainly that the person is signed out, and that the API cannot be reached", async () => {
+    const { api, ask } = await setup({ shops: true });
+    api.on("GET", PEOPLE_PATH, "offline");
+    expect(await refusal(ask("people.list", {}))).toEqual({ code: "offline", message: t("rt.offline") });
+    api.on("POST", INVITE_PATH, "offline");
+    expect(await refusal(ask("people.invite", { shop: SHOP_A.id, name: "Tum", identity: { kind: "line", id: "tum" } }))).toEqual({ code: "offline", message: t("rt.offline") });
+  });
+});
+
 describe("a change goes with the shop its list was read for", () => {
   it("sends each change with that shop's own session even after the switcher moved to another shop the person owns", async () => {
     const { api, ask, shops } = await setup({ shops: true });

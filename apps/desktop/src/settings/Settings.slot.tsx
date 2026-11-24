@@ -25,6 +25,7 @@ import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides
 import { AgentsPage } from "./agents/AgentsPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
 import { ShopSettings } from "../onboarding/ShopSettings";
+import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 
 export const slot = "settings";
@@ -48,7 +49,7 @@ export default function Settings({ page }: SlotProps["settings"]) {
   const bot = botName ? s.bots.find((b) => b.name === botName) : undefined;
   const current = bot
     ? `bot:${bot.name}`
-    : page === "bots" || (page === "accounts" && can("accounts")) || APP_PAGES.some((p) => p.id === page)
+    : page === "bots" || (page === "accounts" && can("accounts")) || (page === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === page)
       ? page
       : "general";
 
@@ -77,6 +78,15 @@ export default function Settings({ page }: SlotProps["settings"]) {
             <span className="st-nav-n">{b.display_name}</span>
           </NavItem>
         ))}
+        {/* who can use Manut AI for the shop the switcher shows: the shop's owner's, so it sits with the shop and not with the app */}
+        {peopleOffered() && (
+          <>
+            <div className="st-sh st-sh2">{t("set.shop")}</div>
+            <NavItem id="people" current={current} onPick={s.openSettings}>
+              {t("set.people")}
+            </NavItem>
+          </>
+        )}
         <div className="st-sh st-sh2">{t("set.app")}</div>
         {APP_PAGES.map((p) => (
           <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
@@ -99,6 +109,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <ComputerPage />
         ) : current === "developer" ? (
           <DeveloperPage />
+        ) : current === "people" ? (
+          <PeoplePage />
         ) : (
           <GeneralPage />
         )}
