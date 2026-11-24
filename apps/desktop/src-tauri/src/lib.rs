@@ -697,13 +697,38 @@ async fn session_branch(cwd: String) -> Result<String, String> {
     Ok(git_branch::branch(std::path::Path::new(&cwd)))
 }
 
-/// A lane's branch (src/code/laneBranch.ts): the first of `names` that no branch has, made from the branch `cwd` is on and
-/// switched to. The files stay as they are and nothing is pushed or merged. The page sends only names of the form
-/// `kit/<words>`; a refusal is a short code (`not_a_repository`, `no_commit`, `busy`, `taken`, `bad_name`, `git_missing`)
-/// or git's own last line.
+/// A lane's own working folder (src/code/laneBranch.ts): a git worktree under `~/.manut/lanes`, on the first of `names` that no
+/// branch has, made from the commit the folder `cwd` is on. The developer's folder is not touched (its branch, index, stash
+/// and HEAD stay as they are), and nothing is pushed or merged. The page sends only names of the form `kit/<words>`; a
+/// refusal is a short code (`not_a_repository`, `no_commit`, `not_committed`, `busy`, `taken`, `bad_name`, `git_missing`,
+/// `no_folder`) or git's own last line.
 #[tauri::command]
-async fn lane_branch(cwd: String, names: Vec<String>) -> Result<lane::Made, String> {
-    tauri::async_runtime::spawn_blocking(move || lane::make(std::path::Path::new(&cwd), &names)).await.map_err(|e| e.to_string())?
+async fn lane_worktree(cwd: String, names: Vec<String>) -> Result<lane::Made, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::make(&home, std::path::Path::new(&cwd), &names)).await.map_err(|e| e.to_string())?
+}
+
+/// The lanes' working folders the app made for the repository `cwd` is in, with what is in each (lane.rs). Only reads.
+#[tauri::command]
+async fn lane_list(cwd: String) -> Result<Vec<lane::Kept>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::list(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())?
+}
+
+/// The developer's folders the app's lanes were made from (lane.rs), so the Code page lists a project whose last session closed
+/// while its lane's folder was kept. Only reads.
+#[tauri::command]
+async fn lane_projects() -> Result<Vec<String>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::projects(&home)).await.map_err(|e| e.to_string())
+}
+
+/// Removes a lane's working folder the app made, and its branch when asked, once what is there is what the person saw
+/// (`ask`: the changed files and the commits they said may go; lane.rs). Refuses anything the app did not make.
+#[tauri::command]
+async fn lane_remove(worktree: String, ask: lane::RemoveAsk) -> Result<lane::Removed, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::remove(&home, &worktree, &ask)).await.map_err(|e| e.to_string())?
 }
 
 /// The main branch moving while Kit worked, for the Code page's lane (src/code/moved.ts): the folder's branch, the branch it
@@ -1105,7 +1130,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         term_share_prune,
         term_share_take,
         session_branch,
-        lane_branch,
+        lane_worktree,
+        lane_list,
+        lane_projects,
+        lane_remove,
         session_main_moved,
         chat_close_all,
         session_reveal,

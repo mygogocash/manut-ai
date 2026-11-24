@@ -757,6 +757,16 @@ pub fn run_env(exe: &Path, argv: &[String], keep: bool, env: &[(&str, &str)], un
 /// `run_env`, with `inherited` set first as if manut itself had been started with it (gh_me.rs's tests: an inherited
 /// token without touching this process's environment), so `unset` takes it out as it would the real one.
 pub(crate) fn run_full(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)], env: &[(&str, &str)], unset: &[&str]) -> Result<Ran, String> {
+    run_until(exe, argv, keep, inherited, env, unset, TIMEOUT)
+}
+
+/// `run_env` with a deadline of its own instead of `TIMEOUT`: lane.rs makes and removes a lane's working folder, which
+/// writes or deletes every file a project tracks and can take longer than a read on a large project.
+pub(crate) fn run_env_for(exe: &Path, argv: &[String], keep: bool, env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Result<Ran, String> {
+    run_until(exe, argv, keep, &[], env, unset, limit)
+}
+
+fn run_until(exe: &Path, argv: &[String], keep: bool, inherited: &[(&str, &str)], env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Result<Ran, String> {
     let out = || if keep { Stdio::piped() } else { Stdio::null() };
     let mut cmd = Command::new(exe);
     cmd.args(argv)
@@ -801,10 +811,10 @@ pub(crate) fn run_full(exe: &Path, argv: &[String], keep: bool, inherited: &[(&s
     let code = loop {
         match child.try_wait() {
             Ok(Some(st)) => break st.code(),
-            Ok(None) if start.elapsed() >= TIMEOUT => {
+            Ok(None) if start.elapsed() >= limit => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("{} did not answer within {} seconds", exe.file_name().unwrap_or_default().to_string_lossy(), TIMEOUT.as_secs()));
+                return Err(format!("{} did not answer within {} seconds", exe.file_name().unwrap_or_default().to_string_lossy(), limit.as_secs()));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(40)),
             Err(e) => return Err(e.to_string()),
