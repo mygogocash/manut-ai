@@ -607,8 +607,10 @@ mod tests {
         let shown = serde_json::to_string(&View { state: "running", online: shared.online(), steps: shared.held(), name: Some("This Mac".into()) }).unwrap();
         let notes = shared.notes().join("\n");
         for (what, text) in seen.iter().map(|r| ("a request", r.as_str())).chain([("the notes", notes.as_str()), ("the view", shown.as_str())]) {
-            for secret in [password, &escaped[1..escaped.len() - 1], "Kn0wn", username] {
-                assert!(!text.contains(secret), "{what} holds {secret:?}: {text}");
+            // The message names only where it leaked, never what: a failing run must not print the value it caught.
+            for (which, secret) in [("the password", password), ("the escaped password", &escaped[1..escaped.len() - 1]),
+                ("part of the password", "Kn0wn"), ("the username", username)] {
+                assert!(!text.contains(secret), "{what} holds {which}");
             }
         }
     }
