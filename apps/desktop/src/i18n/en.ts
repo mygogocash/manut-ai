@@ -1813,6 +1813,7 @@ export const en = {
   "outpost.refused": "This Mac is no longer one of your shop's outposts. Register it again to use it.",
   "outpost.practice": "This Mac can be an outpost once Manut AI is connected to your shop.",
   "outpost.signedOut": "Sign in to your shop to use this Mac as an outpost.",
+  "outpost.helper": "Only the shop's owner can use this Mac as its outpost.",
   "outpost.unavailable": "This computer cannot be an outpost yet.",
   "outpost.window": "While your team works here, its browser opens in a window of its own and goes only to your shop's own sites. The vault types passwords in. The AI never sees them.",
   "outpost.register": "Register this Mac",
@@ -1826,6 +1827,7 @@ export const en = {
   "outpost.err.offline": "Offline: the Manut AI API cannot be reached.",
   "outpost.err.keychain": "This Mac's key could not be kept in the keychain, so it is not set up. Try again.",
   "outpost.err.failed": "That did not work. Try again.",
+  "outpost.err.left": "You no longer have access to this shop, so this Mac was not added.",
   // Customize › Connections, for the shop's owner: the vault's sign-ins and the shop's outposts (src/pages/ConnectionsPane.tsx,
   // src/pages/connections.ts, src/runtime/http/connections.ts)
   "vault.title": "Vault",

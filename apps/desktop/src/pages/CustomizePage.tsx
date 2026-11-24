@@ -553,7 +553,7 @@ export function CustomizeView({
 export function CustomizePage() {
   const s = useStore();
   const [tab, setTab] = useState<CustomizeTab>("memory");
-  const outpost = useOutpost();
+  const outpost = useOutpost(s.shops.current, s.shops.list);
   const vault = useConnections(tab === "connections", s.shops.current);
   const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
   const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);

@@ -285,9 +285,10 @@ export class ApiSession {
 
   /** A request with `bearer`, a shop session's token, in place of the sign-in's, and with none of the sign-in's rules: a
    *  shop session has no refresh, and what a 401 from it means is shops.ts's to say. The token is sent only as the
-   *  bearer, to this session's own origin. */
-  async sendAs(bearer: string, method: "GET" | "POST", path: string, body?: unknown): Promise<Answer> {
-    return answerOf(await this.send(method, path, bearer, body));
+   *  bearer, to this session's own origin, through `through` when it is given (registering this Mac for a shop goes
+   *  through the shell's own command, as `writeVia` says) and this session's own `fetch` otherwise. */
+  async sendAs(bearer: string, method: "GET" | "POST", path: string, body?: unknown, through: FetchLike = this.fetch): Promise<Answer> {
+    return answerOf(await this.send(method, path, bearer, body, this.origin, through));
   }
 
   /** An authorised GET of `path` (`/v1/...`). */

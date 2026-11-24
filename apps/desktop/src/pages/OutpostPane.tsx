@@ -4,12 +4,14 @@
 // cloud outpost) are later slices, so the box stands alone here.
 //
 // The view uses no hooks, so a test can call it as a plain function and read its button's handler. `useOutpost` feeds it:
-// it reads where this Mac's outpost stands from the shell when the tab opens and every 3 seconds while it is open (the
-// shell answers from memory), and does what the button says. The page never sees the outpost's credential: registering
-// goes through the session but its answer stops in the shell (src/runtime/http/outpost.ts).
+// it reads where this Mac's outpost stands for the shop the switcher shows from the shell when the tab opens and every 3
+// seconds while it is open (the shell answers from memory), and does what the button says. The page never sees the
+// outpost's credential: registering goes through that shop's own owner session (or the sign-in while the person is in no
+// shops), but its answer stops in the shell (src/runtime/http/outpost.ts).
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import { sessionFor } from "../runtime/http";
+import type { ShopRow } from "../lib/protocol";
+import { ownerLinkFor } from "../runtime/http";
 import { registerThisMac, shellOutpost, type OutpostView } from "../runtime/http/outpost";
 import { runtimeKind, startedRuntime } from "../runtime";
 import { useSignIn } from "../runtime/link";
@@ -66,18 +68,23 @@ export function OutpostPane({ row, busy, error, onAction }: OutpostPaneProps) {
   );
 }
 
-/** The Outposts box's state and its button, for the runtime this page started with. */
-export function useOutpost(): OutpostPaneProps {
+/** The Outposts box's state and its button, for the runtime this page started with and the shop the switcher shows
+ *  (`viewing`, one of `shops`; null while the person is in no shops, when the box is about their signed-in tenant). */
+export function useOutpost(viewing: string | null = null, shops: readonly ShopRow[] = []): OutpostPaneProps {
   const setting = startedRuntime();
   const origin = runtimeKind(setting) === "http" && setting.mode === "connected" ? setting.origin : null;
   const signIn = useSignIn(origin);
-  const tenant = signIn?.kind === "signed_in" ? signIn.tenant : null;
+  const signedIn = signIn?.kind === "signed_in" ? signIn.tenant : null;
+  // The shop the box is about: the one the switcher shows, whose tenant is its id, or the signed-in tenant.
+  const tenant = signedIn === null ? null : (viewing ?? signedIn);
+  const helper = viewing !== null && shops.find((s) => s.id === viewing)?.role === "helper";
   const [view, setView] = useState<OutpostView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setView(null);
+    setError(null);
     if (!origin || !tenant) return;
     let live = true;
     const shell = shellOutpost();
@@ -96,7 +103,7 @@ export function useOutpost(): OutpostPaneProps {
     setError(null);
     const shell = shellOutpost();
     try {
-      if (action === "register") setError(registeredError(await registerThisMac(sessionFor(origin), shell, t("outpost.thisMac"))));
+      if (action === "register") setError(registeredError(await registerThisMac(ownerLinkFor(origin), viewing, shell, t("outpost.thisMac"))));
       else await shell.run(origin, tenant, action === "start");
     } catch {
       setError(t("outpost.err.failed"));
@@ -105,6 +112,6 @@ export function useOutpost(): OutpostPaneProps {
     setBusy(false);
   };
 
-  const context: OutpostContext = !origin ? { kind: "practice" } : !tenant ? { kind: "signed_out" } : { kind: "signed_in", view };
+  const context: OutpostContext = !origin ? { kind: "practice" } : !tenant ? { kind: "signed_out" } : helper ? { kind: "helper" } : { kind: "signed_in", view };
   return { row: outpostRow(context), busy, error, onAction: (action) => void act(action) };
 }

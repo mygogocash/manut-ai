@@ -19,6 +19,7 @@ import { t } from "../../i18n";
 import type { ShopRole } from "../../lib/protocol";
 import { MAX_OUTPOST_NAME, MAX_PASSWORD, type ConnectionOps, type ShopOutpost, type VaultSignIn } from "../connections";
 import { OpError } from "../mock/host";
+import type { FetchLike } from "./shell";
 import type { Departure, ShopAnswer } from "./shops";
 
 export const SIGN_INS_PATH = "/v1/vault/sign-ins";
@@ -97,6 +98,9 @@ export interface OwnerLink {
   /** A write whose body crosses at most once: with `shop`'s session as it is held now, or the sign-in's without its second
    *  try after a 401. */
   writeOnce(shop: string | null, path: string, body: unknown): Promise<ShopAnswer>;
+  /** `write`, sent through `through` rather than the page's request command: registering this Mac goes through the shell's
+   *  own command, which keeps the credential its answer holds (outpost.ts). */
+  writeVia(shop: string | null, path: string, body: unknown, through: FetchLike): Promise<ShopAnswer>;
   /** The person's place in `shop` ended: the host says so, and this is what the op is refused with. */
   departed(shop: string, departure: Departure): OpError;
 }

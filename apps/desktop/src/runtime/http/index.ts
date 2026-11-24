@@ -16,6 +16,7 @@ import type { RuntimeAdapter, RuntimeCapabilities, RuntimeStatus } from "../adap
 import { OpError } from "../mock/host";
 import { readRuntimeSetting } from "../setting";
 import { ShopCache } from "./cache";
+import type { OwnerLink } from "./connections";
 import { HttpHost, type HostEvent, type LinkState } from "./host";
 import { followSignIn, shellOutpost, stopOnEnd } from "./outpost";
 import { ApiSession } from "./session";
@@ -174,4 +175,10 @@ export function sharedHttpHost(origin: string): HttpHost {
   let host = hosts.get(origin);
   if (!host) hosts.set(origin, (host = new HttpHost({ session: sessionFor(origin), cache: shopCache(), keeping: () => stillConnectedTo(origin) })));
   return host;
+}
+
+/** The host's word on the person's shops at `origin` and each one's own session, which registering this Mac goes through
+ *  for the shop the page shows (outpost.ts), as the Connections ops do. */
+export function ownerLinkFor(origin: string): OwnerLink {
+  return sharedHttpHost(origin).ownerLink();
 }

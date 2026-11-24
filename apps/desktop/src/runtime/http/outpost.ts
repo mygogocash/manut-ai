@@ -6,7 +6,11 @@
 // Registering is the one request whose answer the page must not see: it holds the outpost's credential. So the session
 // sends it (refreshing first, and once more after a 401, as for every write), but through the shell's own command
 // rather than `api_request`: the shell keeps the credential in the keychain and hands back the status, the shop and the
-// outpost's name, or a refusal's code. Nothing the page can call ever returns the credential.
+// outpost's name, or a refusal's code. Nothing the page can call ever returns the credential. Which session sends it is
+// the shop the page shows: that shop's own owner session (shops.ts), or the sign-in while the person is in no shops, so a
+// pilot shop the operator made, which no sign-in carries, can have this Mac as its outpost (docs/several-shops.md).
+import { OpError } from "../mock/host";
+import type { OwnerLink } from "./connections";
 import { LinkDown, type FetchLike } from "./shell";
 import type { ApiSession } from "./session";
 
@@ -104,7 +108,7 @@ export function shellOutpost(): OutpostShell {
 /** How registering this Mac went, as the Connections page says it. */
 export type Registered =
   | "registered"
-  /** a helper's session: only the shop's owner adds an outpost */
+  /** a shop the person helps at, or a helper's session: only the shop's owner adds an outpost */
   | "owner_only"
   /** the shop already has the 20 outposts it may */
   | "too_many"
@@ -112,19 +116,49 @@ export type Registered =
   | "offline"
   /** registered on the API, but this Mac could not keep its credential (the keychain said no, or there is none) */
   | "keychain"
+  /** the person's place in the shop ended (their account unlinked from it, or the shop gone); the account row says how */
+  | "left"
   | "failed";
 
-/** Registers this Mac as one of the shop's outposts, named `name`, through `session`. The shell keeps the credential
- *  and starts the outpost; the page learns only how it went. */
-export async function registerThisMac(session: ApiSession, shell: OutpostShell, name: string): Promise<Registered> {
+/** The API's route for registering this Mac (`ownerOutpostRoute` in apps/api/src/browser-control.ts). */
+export const REGISTER_PATH = "/v1/outposts/register";
+
+/** What a registration needs of the host (`HttpHost.ownerLink`, as the Connections ops use it): its word on the person's
+ *  shops, each shop's own session, and where to say that the person's place in a shop ended. */
+export type RegisterLink = Pick<OwnerLink, "live" | "viewed" | "roleAt" | "writeVia" | "departed">;
+
+/** Registers this Mac as one of `shop`'s outposts, named `name`: the shop the page shows, or null for the signed-in tenant
+ *  while the person is in no shops. It goes with that shop's own owner session, or the sign-in, as a change to the shop's
+ *  vault does (connections.ts), and never to another shop because the switcher moved meanwhile. The shell keeps the
+ *  credential and starts the outpost; the page learns only how it went. */
+export async function registerThisMac(link: RegisterLink, shop: string | null, shell: OutpostShell, name: string): Promise<Registered> {
+  let viewed: Awaited<ReturnType<RegisterLink["viewed"]>>;
+  try {
+    // Nothing is sent while only a kept read of the shop is shown, and the person's shops are read first if they were not
+    // yet, so a person in shops never registers this Mac for their own signed-in tenant by mistake.
+    link.live();
+    viewed = await link.viewed();
+  } catch (e) {
+    const code = e instanceof OpError ? e.code : "";
+    return code === "offline" ? "offline" : code === "signed_out" ? "signed_out" : "failed";
+  }
+  // The signed-in tenant is the person's own, and theirs to register for, only while they are in no shops; a shop must be
+  // one of theirs, and theirs to own. A helper's session is never sent: the API would refuse it `owner_only` anyway.
+  const role = shop === null ? (viewed === null ? "owner" : undefined) : link.roleAt(shop);
+  if (role === undefined) return "failed";
+  if (role !== "owner") return "owner_only";
   const shellSaid: { why: "keychain" | "unavailable" | null } = { why: null };
   const through = shell.registerFetch((why) => {
     shellSaid.why = why;
   });
-  const answer = await session.writeVia("/v1/outposts/register", { name, kind: "this_mac" }, through);
+  const answer = await link.writeVia(shop, REGISTER_PATH, { name, kind: "this_mac" }, through);
   switch (answer.kind) {
     case "ok":
       return "registered";
+    case "left":
+      // The host says so in the account row, in the departure's words, as it does when a read finds it.
+      if (shop !== null) link.departed(shop, answer.departure);
+      return "left";
     case "signed_out":
       return "signed_out";
     case "offline":
