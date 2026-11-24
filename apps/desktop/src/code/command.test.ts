@@ -191,6 +191,20 @@ describe("what a step does", () => {
     expect(action("ls .git")).toBe("read");
   });
 
+  it("calls a reading program that writes a file a change", () => {
+    for (const line of ["uniq a.txt b.txt", "xxd -r dump.hex out.bin", "xxd a.bin a.hex", "less -o log.txt a.txt", "file -C -m magic"]) expect([line, action(line)]).toEqual([line, "change"]);
+    expect(action("uniq in.txt .git/hooks/pre-commit")).toBe("unknown");
+    expect(read("uniq a.txt /tmp/b.txt").outside).toEqual(["/tmp/b.txt"]);
+    for (const line of ["uniq a.txt", "xxd a.bin", "less a.txt", "file a.png"]) expect([line, action(line)]).toEqual([line, "read"]);
+    expect(action("history -w x")).toBe("unknown");
+  });
+
+  it("asks for a change to a tool's own settings, and reads them otherwise", () => {
+    for (const line of ["npm config set script-shell=./x", "pnpm config set registry https://example.com", "yarn config set npmRegistryServer x", "pnpm config delete registry", "npm config edit", "go env -w GOFLAGS=-x", "go env -u GOPROXY"])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    for (const line of ["npm config get registry", "pnpm config list", "yarn config", "go env GOPATH", "go env"]) expect([line, action(line)]).toEqual([line, "read"]);
+  });
+
   it("calls a command that writes its output into a file a change", () => {
     for (const line of ["echo gamma > c.txt", "echo hi >> notes.md", "pnpm test > out.txt", "git log &> log.txt", "printf x >| a.txt"]) expect([line, action(line)]).toEqual([line, "change"]);
     for (const line of ["pnpm test 2>/dev/null", "cat < package.json", "pnpm test 2>&1", "ls > /dev/null"]) expect([line, action(line)]).not.toEqual([line, "change"]);

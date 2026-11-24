@@ -381,7 +381,9 @@ function packageManager(words: string[], where: Where): Verdict {
   if (["exec", "x"].includes(sub)) return at$(tool(words.slice(head), where), head);
   if (["publish", "deploy"].includes(sub)) return live();
   if (sub === "pack") return v("change", say("kit.say.build"), head);
-  if (["ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor", "explain", "licenses", "config", "--version", "-v"].includes(sub))
+  // its settings can name the shell every script runs in, so only reading them is a read
+  if (sub === "config") return !rest.length || ["get", "list", "ls"].includes(rest[0]) ? v("read", say("kit.say.read")) : thisMac();
+  if (["ls", "list", "why", "outdated", "view", "info", "show", "root", "bin", "help", "doctor", "explain", "licenses", "--version", "-v"].includes(sub))
     return v("read", say("kit.say.read"));
   if (["create", "init", "link"].includes(sub)) return unknownProgram(pm);
   if (pm === "bun" && /[./]/.test(sub)) return unknownProgram(pm);
@@ -605,7 +607,7 @@ const READS = new Set([
   "cat", "head", "tail", "less", "more", "wc", "file", "stat", "du", "df", "ls", "tree", "pwd", "realpath", "readlink",
   "basename", "dirname", "diff", "cmp", "comm", "uniq", "cut", "tr", "nl", "od", "hexdump", "xxd", "strings", "column",
   "fold", "rev", "tac", "which", "type", "whereis", "true", "false", "test", "[", "date", "sleep", "whoami", "uname", "id",
-  "hostname", "sw_vers", "fd", "fdfind", "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "ps", "lsof", "uptime", "history",
+  "hostname", "sw_vers", "fd", "fdfind", "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "ps", "lsof", "uptime",
   "unset", "exit", "wait",
 ]);
 const ONLY_TEXT = new Set(["echo", "printf", "unset"]);
@@ -680,6 +682,7 @@ function lang(name: string, words: string[]): Verdict {
     if (sub === "fmt") return v("change", say("kit.say.format"), 2);
     if (sub === "get" || (sub === "mod" && ["tidy", "download", "vendor"].includes(third))) return v("install", say("kit.say.update"), sub === "mod" ? 3 : 2);
     if (sub === "install") return thisMac();
+    if (sub === "env" && has(words, "-w", "-u")) return thisMac();
     if (["version", "env", "list", "doc"].includes(sub)) return v("read", say("kit.say.read"));
     return unknownProgram(name);
   }
@@ -898,6 +901,10 @@ function classify(words: string[], where: Where): Verdict {
     return ops.every((i) => !words[i].includes("=") || SAFE_VAR.test(words[i])) ? v("read", say("kit.say.read"), undefined, { text: new Set(ops) }) : v("unknown", say("kit.say.opaque"));
   }
   if (name === "tree" && has(words, "-o")) return v("change", say("kit.say.change"), 1);
+  // programs that read, but write their output into a file named after the input (uniq, xxd) or by an option
+  if ((name === "uniq" || name === "xxd") && operands(words, 1, new Set(["-f", "-s", "-w", "-c", "-g", "-l", "-o", "-n"])).length > 1) return v("change", say("kit.say.change"), 1);
+  if (name === "less" && words.some((w) => /^(-o|-O|--log-file|--LOG-FILE)/.test(w))) return v("change", say("kit.say.change"), 1);
+  if (name === "file" && has(words, "-C", "--compile")) return v("change", say("kit.say.change"), 1);
   if (name === "hostname" && operands(words, 1).length) return thisMac();
   if (name === "jq" || name === "yq") {
     if (has(words, "-i", "--inplace")) return (v("change", say("kit.say.change"), 1));
@@ -1037,7 +1044,7 @@ export function readCommand(line: string, where: Where): ReadCommand {
     for (const r of c.redirects) check(r, true);
     // git's own folder holds its settings and hooks, which can make a later read run a program: a step that changes
     // anything there is not one the dial lets go alone
-    if (!reads && [...words.filter((w, i) => i > 0 && !verdict.text?.has(i)), ...c.writes].some((w) => IN_GIT_DIR.test(w))) gitOwn = true;
+    if (c.writes.some((w) => IN_GIT_DIR.test(w)) || (!reads && words.some((w, i) => i > 0 && !verdict.text?.has(i) && IN_GIT_DIR.test(w)))) gitOwn = true;
 
     if (verdict.cd !== undefined) {
       const to = verdict.cd === "~" ? (where.home ?? null) : resolve(verdict.cd, cwd, where.home);
