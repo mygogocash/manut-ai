@@ -96,6 +96,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   smoke-tested: the console is behind Access and the approval page loads.
 - Dev's API was redeployed on 24 Nov at 10:41 from `edd9ae4`, with the operator's start keeping Pause everyone (API
   `0316e338`); the admin route is behind Access.
+- Dev's API was redeployed on 24 Nov at 12:12 from `fb889a2`, with sign-in by email code built and off, and its
+  `AUTH_CODE_LIMITER` (API `48d340ac`); smoke-tested: both email routes answer 400 `email_not_configured`, a malformed
+  body 400 `invalid_request`, Apple's exchange still refuses a bad token, and the console and admin routes are behind
+  Access. The pages are unchanged since 10:22.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
