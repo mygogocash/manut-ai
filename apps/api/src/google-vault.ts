@@ -10,6 +10,12 @@
 ///   its one granted resource is that spreadsheet, so a proposal for any other is refused before Google is called. A new
 ///   sheet is made at most once at a time: whoever makes it first claims the connection (`/google/sheet-claim`), and only
 ///   that claim may then bind the sheet it made (`/google/sheet`), which moves the grant to a new revision.
+/// - **What was appended.** The sheet's record also keeps one small entry for each append of a month (which month, when,
+///   how many rows, and whether Google confirmed it), never the rows themselves, so the next ask for a month can say it
+///   was already sent, and an append whose outcome was never learnt counts as sent. It is written before the request
+///   leaves (`/google/append-begin`), so a send that is never heard of again is still on record, and finished when
+///   Google's answer is known (`/google/append-end`). It lives in the sheet's record, so it goes with the sheet when a
+///   second connect carries the sheet over, and starts empty for a new sheet.
 /// - **Broken.** When Google refuses the grant (`invalid_grant`), `/google/broken` marks the connection broken; nothing is
 ///   sent through it again, and the owner connects again to mend it.
 /// - **The sign-in in flight.** `/google/flows` keeps one pending sign-in per shop: the SHA-256 of its `state`, the PKCE
@@ -39,9 +45,31 @@ const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const SPREADSHEET_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
+/// How many appends the sheet's record keeps. A shop sends one a month, so this is ten years; past it the oldest go.
+export const MAX_APPENDS = 120;
+/// The most rows one append carries (books-detail.ts, `MAX_BOOK_LINES`).
+const MAX_APPEND_ROWS = 1000;
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/// One append of a month to the sheet, as the vault remembers it. `sending` is from the moment the send begins until
+/// Google's answer is known; `confirmed` is Google saying it applied the rows; `unknown` is every other end that left it
+/// open whether they landed. An append Google refused before applying it is not kept: it added nothing.
+export type AppendRec = {
+  /// The task's action id for the append. A second begin for the same action is refused, so an append is never begun
+  /// twice, and its end finds its own entry.
+  actionId: string;
+  /// `YYYY-MM`.
+  month: string;
+  /// When the send began, as an ISO time.
+  at: string;
+  /// The rows that went, after the header row.
+  rows: number;
+  outcome: "sending" | "confirmed" | "unknown";
+};
+
 /// The sheet a Google connection appends to. Its title and tab are as they were when it was made; an ask reads the title
-/// as it is now from Google.
-export type SheetRef = { id: string; title: string; tab: string; url: string | null; madeAt: string };
+/// as it is now from Google. `appends` is what was sent to it, oldest first; a new sheet has none.
+export type SheetRef = { id: string; title: string; tab: string; url: string | null; madeAt: string; appends?: AppendRec[] };
 
 /// What only a Google connection's record carries, beside the fields every connection has.
 export type GoogleFields = {
@@ -128,6 +156,10 @@ export async function googleVaultRoute(storage: DurableObjectStorage, keys: Vaul
       return bindSheet(storage, tenant, body);
     case "/google/sheet-release":
       return releaseSheet(storage, tenant, body);
+    case "/google/append-begin":
+      return beginAppend(storage, tenant, body);
+    case "/google/append-end":
+      return endAppend(storage, tenant, body);
     case "/google/broken":
       return markBroken(storage, tenant, body);
     default:
@@ -305,6 +337,71 @@ function releaseSheet(storage: DurableObjectStorage, tenant: string, body: Recor
       storage.kv.put(`${CONN_PREFIX}${record.id}`, rest);
     }
     return json({ released: true });
+  });
+}
+
+/// `POST /google/append-begin` with exactly `{ id, sheet, month, rows, actionId, known }`: an append of `month` is about to
+/// go to the connection's sheet. It is written down as `sending` before the request leaves, so a send that is never heard
+/// of again (the Worker stopped part way) still counts as sent when the month is asked for again.
+///
+/// `known` is how many earlier appends of the month the owner was told of when they approved this one. If the sheet's
+/// record holds any other number, a send of the month happened after the owner was asked (or at the same moment), and
+/// this one is refused as `month_changed` before anything is sent: two requests for the same month, both approved, never
+/// write its rows twice, and a request that did tell of an earlier send goes through, since the owner chose that. Also
+/// refused: a connection that broke (`connection_broken`), a sheet that is no longer the connection's (`sheet_changed`),
+/// and an action that already began (`already_begun`), so one action never sends twice even if its send were run twice.
+function beginAppend(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>): Response {
+  const { sheet, month, rows, actionId, known } = body;
+  if (!hasExactly(body, ["id", "sheet", "month", "rows", "actionId", "known"]) || typeof sheet !== "string" ||
+      !SPREADSHEET_ID.test(sheet) || typeof month !== "string" || !MONTH.test(month) || !Number.isSafeInteger(rows) ||
+      (rows as number) < 1 || (rows as number) > MAX_APPEND_ROWS || !text(actionId, 128) ||
+      !Number.isSafeInteger(known) || (known as number) < 0 || (known as number) > MAX_APPENDS) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  return storage.transactionSync(() => {
+    const record = connectionFor(storage, tenant, body.id);
+    if (record instanceof Response) return record;
+    if (record.brokenAt) return json({ error: "connection_broken" }, 409);
+    if (record.sheet?.id !== sheet) return json({ error: "sheet_changed" }, 409);
+    const appends = record.sheet.appends ?? [];
+    if (appends.some((append) => append.actionId === actionId)) return json({ error: "already_begun" }, 409);
+    const sent = appends.filter((append) => append.month === month).length;
+    if (sent !== known) return json({ error: "month_changed", sent }, 409);
+    const begun: AppendRec = { actionId: actionId as string, month, at: new Date().toISOString(), rows: rows as number,
+      outcome: "sending" };
+    storage.kv.put(`${CONN_PREFIX}${record.id}`, { ...record,
+      sheet: { ...record.sheet, appends: [...appends, begun].slice(-MAX_APPENDS) } });
+    return json({ begun: true });
+  });
+}
+
+const APPEND_ENDS = ["confirmed", "unknown", "failed"] as const;
+
+function isAppendEnd(value: unknown): value is (typeof APPEND_ENDS)[number] {
+  return APPEND_ENDS.some((end) => end === value);
+}
+
+/// `POST /google/append-end` with exactly `{ id, actionId, outcome }`: how an append begun above ended. `confirmed` and
+/// `unknown` are kept on its entry; `failed` (Google refused it before applying it, so the sheet got nothing) takes the
+/// entry out. Only a `sending` entry changes, so a second end changes nothing. 404 when the connection or the entry is no
+/// longer there (a sign-in that replaced the connection meanwhile), which the caller may ignore: its entry then stays
+/// `sending`, which the next ask reads as sent with no answer, the safe way to be wrong.
+function endAppend(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>): Response {
+  const { actionId, outcome } = body;
+  if (!hasExactly(body, ["id", "actionId", "outcome"]) || !text(actionId, 128) || !isAppendEnd(outcome)) {
+    return json({ error: "invalid_request" }, 400);
+  }
+  return storage.transactionSync(() => {
+    const record = connectionFor(storage, tenant, body.id);
+    if (record instanceof Response) return record;
+    const appends = record.sheet?.appends ?? [];
+    const at = appends.findIndex((append) => append.actionId === actionId);
+    if (!record.sheet || at < 0) return json({ error: "not_found" }, 404);
+    if (appends[at]?.outcome !== "sending") return json({ ended: false });
+    const next = outcome === "failed" ? appends.filter((_, index) => index !== at)
+      : appends.map((append, index) => (index === at ? { ...append, outcome } : append));
+    storage.kv.put(`${CONN_PREFIX}${record.id}`, { ...record, sheet: { ...record.sheet, appends: next } });
+    return json({ ended: true });
   });
 }
 

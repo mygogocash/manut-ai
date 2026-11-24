@@ -1,4 +1,3 @@
-import { runInDurableObject } from "cloudflare:test";
 import { monthBooks } from "@manut/books";
 import { appendRequest } from "@manut/sheets-rows";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,35 +7,38 @@ import { monthIsWhole, plainTitle, sheetTitle } from "../src/books-sheet";
 import { dispatchAction } from "../src/broker-actions";
 import { dispatchApproved } from "../src/job-flow";
 import { bangkokMonth } from "../src/model-price";
-import { sortableId, type Payment } from "../src/pilot-store";
+import { type Payment } from "../src/pilot-store";
 import type { ActionProposalJSON } from "../src/task-object";
 import { CLIENT_ID } from "./google-fake";
 import {
+  actionOf,
+  askBooks,
   auditOf,
   connect,
-  DAY_MS,
-  enc,
+  decide,
   googleEnv,
   holdsNoToken,
   installGoogle,
   lastMonth,
+  openApprovals,
   operator,
+  paidIn,
+  pastPractice,
+  readyShop,
   send,
   sendJson,
   status,
-  vault,
   vaultRecords,
   world,
 } from "./google-fixtures";
 import { tenantSession } from "./authenticated-fixtures";
-import { bindings, joinHelper, linkedOwner, setupShop, shopConsents, type Owner, type Shop } from "./people-fixtures";
+import { bindings, joinHelper, linkedOwner, setupShop, shopConsents } from "./people-fixtures";
 
 // Ton appends a month of the shop's books to the owner's Google Sheet (books-sheet.ts, books-detail.ts; docs/pilot-api.md,
 // "Google Sheets for Ton's books"), end to end in real workerd against the real objects: asked through approval-core
 // with the exact rows, owner-only, approved once and sent once through the broker's one-use begin gate. Google is the
 // fake in google-fake.ts; every other outbound call answers 599, and a test fails if one was tried.
 
-const BANGKOK_MS = 7 * 60 * 60 * 1000;
 const on = async () => ({ officeCloud: true, officeExternalWrites: true });
 
 beforeEach(() => installGoogle());
@@ -45,75 +47,6 @@ afterEach(() => {
   expect(world.google.elsewhere).toEqual([]);
   vi.restoreAllMocks();
 });
-
-/// Order payments confirmed on the 10th of `month`, an hour apart, kept in the shop's object as the operator's route keeps
-/// them, so the month is over by the time Ton reads it.
-async function paidIn(shop: Shop, month: string, payments: { orderRef: string; amountSatang: number }[]): Promise<void> {
-  const [year, number] = month.split("-").map(Number) as [number, number];
-  const start = Date.UTC(year, number - 1, 10, 12) - BANGKOK_MS;
-  const object = bindings.TENANT.get(bindings.TENANT.idFromName(`t:${shop.tenant}`));
-  await runInDurableObject(object, async (_instance, state) => {
-    for (const [index, payment] of payments.entries()) {
-      const at = start + index * 3600_000;
-      const id = sortableId("pay", at, index);
-      const record: Payment = { id, tenant: shop.tenant, orderRef: payment.orderRef, amountSatang: payment.amountSatang,
-        promptPayId: "0812345678", confirmedAt: new Date(at).toISOString() };
-      await state.storage.put(`pilot-pay:${enc(shop.tenant)}:${id}`, record);
-    }
-  });
-}
-
-/// The shop's Google connections were made four days ago, so their three days of practice are over.
-async function pastPractice(shop: Shop): Promise<void> {
-  await runInDurableObject(vault(shop), async (_instance, state) => {
-    for (const [key, record] of await state.storage.list<Record<string, unknown>>({ prefix: "conn:" })) {
-      if (record.provider !== "gsheets") continue;
-      await state.storage.put(key, { ...record, createdAt: new Date(Date.now() - 4 * DAY_MS).toISOString() });
-    }
-  });
-}
-
-/// A pilot shop with consent to cloud work, its owner signed in with an owner session, and Google connected and past
-/// practice.
-async function readyShop(name = "Baan Mali"): Promise<{ shop: Shop; owner: Owner; connectionId: string }> {
-  const shop = await setupShop(name);
-  await shopConsents(shop.tenant);
-  const owner = await linkedOwner(shop);
-  const connectionId = await connect(owner);
-  await pastPractice(shop);
-  return { shop, owner, connectionId };
-}
-
-type Asked = { taskId: string; member: string; outcome: string; requestId?: string; kind?: string; reason?: string;
-  draft?: { text: string; job: string; about?: Record<string, string>; send?: { answer: string; kind: string } };
-  error?: string };
-
-async function askBooks(owner: Owner, month: string, target?: Env) {
-  return sendJson<Asked>("/v1/google/books", { method: "POST", headers: owner.headers, body: { month },
-    ...(target ? { target } : {}) });
-}
-
-type Listed = { approvals: { taskId: string; record: { status: string; request: { id: string; kind: string;
-  revision: number; detail: Record<string, unknown> } } }[] };
-
-async function openApprovals(headers: { authorization?: string }): Promise<Listed["approvals"]> {
-  const listed = await sendJson<Listed>("/v1/approvals?state=open", { headers });
-  expect(listed.status).toBe(200);
-  return listed.body.approvals;
-}
-
-async function decide(headers: { authorization?: string }, requestId: string, optionId = "approve") {
-  return sendJson<{ result?: { ok: boolean; refused?: string }; action?: string; error?: string }>(
-    `/v1/approvals/${enc(requestId)}/decision`, { method: "POST", headers, body: { optionId, seenRevision: 1 } });
-}
-
-/// What the task object holds for an action.
-async function actionOf(shop: Shop, taskId: string, actionId: string): Promise<ActionProposalJSON> {
-  const response = await bindings.TASK.get(bindings.TASK.idFromName(taskId)).fetch(new Request(
-    `https://task/actions/${actionId}`, { headers: { "x-tenant": shop.tenant } }));
-  expect(response.status).toBe(200);
-  return (await response.json()) as ActionProposalJSON;
-}
 
 describe("off until the owner's OAuth client exists", () => {
   it("answers google_not_configured to the owner's ask, and fails Ton's append when an operator starts it", async () => {
@@ -181,7 +114,7 @@ describe("a month of the books, asked, approved once and sent once", () => {
     // The connection keeps the sheet's id, never its contents, as its one granted resource under a new revision.
     const now = await status(owner);
     expect(now.connection?.sheet).toEqual({ id: sheet!.id, title: "Manut AI books: Baan Mali", tab: "Books",
-      url: `https://docs.google.com/spreadsheets/d/${sheet!.id}/edit` });
+      url: `https://docs.google.com/spreadsheets/d/${sheet!.id}/edit`, appended: [] });
     expect((await vaultRecords(shop))[`conn:${now.connection!.id}`]).toMatchObject({ resourceIds: [sheet!.id],
       grantRevision: 2 });
     expect(world.google.appends()).toEqual([]);
@@ -448,7 +381,7 @@ describe("the words and the money", () => {
     const line = { date: "2026-10-01", ref: "SP-1", kind: "sale", channelOrCategory: "line", amountSatang: 100,
       beforeVatSatang: null, vatSatang: null };
     const payload = { sheet: { id: "abc_DEF-123", title: "Books", tab: "Books" }, month: "2026-10", vatRegistered: false,
-      lines: [line], flags: 0 };
+      lines: [line], flags: 0, earlier: null };
     expect(booksPayloadOf(payload)).toEqual(payload);
     for (const bad of [
       { ...payload, extra: 1 },

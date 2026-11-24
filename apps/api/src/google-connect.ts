@@ -58,6 +58,7 @@ import {
 import type { OwnerSessionCheck } from "./people-store";
 import { readRoutines } from "./routine-setup";
 import { memberOn } from "./routine-store";
+import type { SheetRef } from "./google-vault";
 import { credStub } from "./tenant-data";
 import { runWorker } from "./workers";
 
@@ -159,7 +160,11 @@ export async function googleRoute(request: Request, url: URL, env: GoogleRouteEn
 // Status
 // ---------------------------------------------------------------------------
 
-/// What the owner's app shows about the shop's Google connection.
+/// One month sent to the sheet, as the owner's app shows it: never the rows. An append whose answer was never learnt, or
+/// that is still on its way, reads as `unknown`.
+export type AppendedMonth = { month: string; at: string; rows: number; outcome: "confirmed" | "unknown" };
+
+/// What the owner's app shows about the shop's Google connection. `appended` is what was sent to the sheet, newest first.
 export type GoogleStatus = {
   connected: boolean;
   connection: null | {
@@ -167,9 +172,17 @@ export type GoogleStatus = {
     connectedAt: string;
     state: "working" | "broken";
     broken?: { at: string; reason: string; words: string };
-    sheet: null | { id: string; title: string; tab: string; url: string | null };
+    sheet: null | { id: string; title: string; tab: string; url: string | null; appended: AppendedMonth[] };
   };
 };
+
+/// The most months the status lists: two years' worth is what an owner picks from.
+const MAX_LISTED_APPENDS = 24;
+
+function appendedOf(sheet: SheetRef | null): AppendedMonth[] {
+  return [...(sheet?.appends ?? [])].reverse().slice(0, MAX_LISTED_APPENDS).map((append) => ({ month: append.month,
+    at: append.at, rows: append.rows, outcome: append.outcome === "confirmed" ? "confirmed" : "unknown" }));
+}
 
 async function status(env: GoogleRouteEnv, shop: string): Promise<Response> {
   const connection = await googleConnectionOf(env, shop);
@@ -184,7 +197,8 @@ async function status(env: GoogleRouteEnv, shop: string): Promise<Response> {
       state: connection.brokenAt ? "broken" : "working",
       ...(connection.brokenAt ? { broken: { at: connection.brokenAt, reason: connection.brokenReason ?? "refused",
         words: brokenWords(connection.brokenReason) } } : {}),
-      sheet: sheet ? { id: sheet.id, title: sheet.title, tab: sheet.tab, url: sheet.url ?? null } : null,
+      sheet: sheet ? { id: sheet.id, title: sheet.title, tab: sheet.tab, url: sheet.url ?? null,
+        appended: appendedOf(sheet) } : null,
     },
   } satisfies GoogleStatus);
 }

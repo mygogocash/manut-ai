@@ -15,12 +15,15 @@
 /// 4. The sheet: on first use a new spreadsheet is made in the owner's Drive, once, under a claim on the connection; a
 ///    sheet the connection names is checked to be still there for this account, with its tab, and its title is read as it
 ///    is now, so the request names it as the owner sees it. It holds no rows until an append is approved.
-/// 5. The task object stores the month's exact rows as an immutable proposal and opens the owner-only request.
+/// 5. The task object stores the month's exact rows as an immutable proposal and opens the owner-only request. When the
+///    sheet's record says the month was already sent to it, or was sent and never answered, the request says so first
+///    (`earlier`, books-detail.ts): a month is never asked for again silently.
 ///
 /// Sending, once the owner approved it, through the broker's one-use begin gate (broker-actions.ts): `sendBooks` takes a
-/// new access token and sends the approved rows exactly as `@manut/sheets-rows` builds them from the proposal, once. A
-/// Google answer that leaves it unknown whether the rows landed settles as unknown, never as done, and is never sent
-/// again.
+/// new access token, writes the append into the sheet's record in the vault as `sending` (refused when the month was sent
+/// since the owner was asked), sends the approved rows exactly as `@manut/sheets-rows` builds them from the proposal,
+/// once, and writes how it ended. A Google answer that leaves it unknown whether the rows landed settles as unknown,
+/// never as done, is never sent again, and counts as sent when the month is next asked for.
 ///
 /// No token is stored, logged, or returned: the refresh token leaves the vault only for a call to Google's token
 /// endpoint, and an access token lives for the calls of one ask or one send.
@@ -37,6 +40,7 @@ import {
   booksPayloadOf,
   isBooksMonth,
   MAX_BOOK_LINES,
+  type BooksEarlier,
   type BooksPayload,
   type BooksSheet,
 } from "./books-detail";
@@ -52,7 +56,7 @@ import {
   type GoogleEnv,
 } from "./google";
 import { googleConnectionOf, googleVaultCall, type GoogleConnection } from "./google-connection";
-import { GOOGLE_PROVIDER } from "./google-vault";
+import { GOOGLE_PROVIDER, type SheetRef } from "./google-vault";
 import { bangkokMonth } from "./model-price";
 import { MAX_LISTED_PAYMENTS, type Payment, type PilotShopRecord } from "./pilot-store";
 import type { AttemptRef } from "./sign-in-vault";
@@ -206,8 +210,9 @@ export async function accessFor(env: Pick<TenantDataEnv, "CRED" | "TENANT">, ten
 // Asking
 // ---------------------------------------------------------------------------
 
-/// The month's books ready to ask about, without the sheet yet.
-export type BooksToAsk = Omit<BooksPayload, "sheet">;
+/// The month's books ready to ask about, without the sheet yet and without what the sheet's record says of the month,
+/// which is read once the sheet is known.
+export type BooksToAsk = Omit<BooksPayload, "sheet" | "earlier">;
 
 /// What asking may come to before Google or the task object is asked anything.
 export type PreparedBooks =
@@ -324,6 +329,19 @@ async function sheetFor(env: BooksEnv, tenant: string, connection: GoogleConnect
   return { ok: true, sheet: { id: made.id, title: made.title, tab: made.tab }, grantRevision: bound.body.grantRevision };
 }
 
+/// What the sheet's record says of a month: null when the month was never sent to it, else how many times it was and how
+/// the latest ended. An append that is still `sending`, or that nobody heard the end of, reads as `unknown`. Only the
+/// record of the sheet the request will name counts: a sheet made anew (the old one was deleted) holds none of the
+/// rows, so it has no earlier send to tell of.
+export function earlierOf(sheet: SheetRef | null, sheetId: string, month: string): BooksEarlier | null {
+  if (!sheet || sheet.id !== sheetId) return null;
+  const sent = (sheet.appends ?? []).filter((append) => append.month === month);
+  const latest = sent[sent.length - 1];
+  if (!latest) return null;
+  return { count: sent.length, at: latest.at, rows: latest.rows,
+    outcome: latest.outcome === "confirmed" ? "confirmed" : "unknown" };
+}
+
 /// What the task object needs to ask: the month's exact rows with the sheet they go to, and the connection and grant
 /// revision the proposal is bound to.
 export type BooksAsk = { books: BooksPayload; connection: { id: string; accountId: string; grantRevision: number } };
@@ -339,7 +357,8 @@ export async function readyBooks(env: BooksEnv, tenant: string, prepared: Extrac
   const ready = await sheetFor(env, tenant, prepared.connection, prepared.shopName, config, access.accessToken, fetchImpl);
   if (!ready.ok) return ready;
   return { ok: true, ask: {
-    books: { sheet: ready.sheet, ...prepared.books },
+    books: { sheet: ready.sheet, ...prepared.books,
+      earlier: earlierOf(prepared.connection.sheet, ready.sheet.id, prepared.books.month) },
     connection: { id: prepared.connection.id, accountId: prepared.connection.accountId,
       grantRevision: ready.grantRevision },
   } };
@@ -352,6 +371,22 @@ export async function readyBooks(env: BooksEnv, tenant: string, prepared: Extrac
 export type BooksSent =
   | { outcome: "confirmed"; providerOperationId: string; receipt: { updatedRange: string | null; updatedRows: number | null } }
   | { outcome: "failed" | "unknown"; reason: string };
+
+/// Why the vault would not let an append begin, as the reason the send settles `failed` with.
+function beginRefusal(status: number, error: unknown): string {
+  if (status === 404) return "not_connected";
+  if (status !== 409) return "vault_unavailable";
+  switch (error) {
+    case "month_changed":
+      return "month_already_sent";
+    case "connection_broken":
+      return "google_broken";
+    case "sheet_changed":
+      return "sheet_changed";
+    default:
+      return "already_begun";
+  }
+}
 
 /// Sends one approved append, after the begin gate moved it to dispatching and the broker checked the live grant. The
 /// rows are the approved payload's, built into the request by `@manut/sheets-rows` exactly as it builds any month's.
@@ -368,7 +403,17 @@ export async function sendBooks(env: BooksEnv, proposal: ActionProposalJSON, fet
   const built = appendRequest({ ...monthBooks([], payload.month, { vatRegistered: payload.vatRegistered }),
     lines: payload.lines }, { spreadsheetId: payload.sheet.id, sheetName: payload.sheet.tab });
   if (!built.ok) return { outcome: "failed", reason: built.reason };
+  // The append goes into the sheet's record before the request leaves, and only if the month was sent no more often than
+  // the owner was told when they approved. Nothing has been sent if the vault refuses or cannot be reached.
+  const begun = await googleVaultCall(env, proposal.tenant, "/google/append-begin", { id: proposal.connectionId,
+    sheet: payload.sheet.id, month: payload.month, rows: payload.lines.length, actionId: proposal.id,
+    known: payload.earlier?.count ?? 0 });
+  if (!begun) return { outcome: "failed", reason: "vault_unavailable" };
+  if (begun.status !== 200) return { outcome: "failed", reason: beginRefusal(begun.status, begun.body.error) };
   const appended = await appendRows(fetchImpl, config, access.accessToken, built.request);
+  // How it ended, best effort: the entry stays `sending` if this is lost, which the next ask reads as sent and unheard of.
+  await googleVaultCall(env, proposal.tenant, "/google/append-end", { id: proposal.connectionId, actionId: proposal.id,
+    outcome: appended.outcome });
   if (appended.outcome === "confirmed") {
     return { outcome: "confirmed", providerOperationId: appended.updatedRange ?? `append:${proposal.id}`,
       receipt: { updatedRange: appended.updatedRange, updatedRows: appended.updatedRows } };

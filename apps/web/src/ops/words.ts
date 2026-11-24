@@ -627,6 +627,8 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   sheet_in_progress: "The books sheet was still being made.",
   sheet_not_made: "Google did not make the books sheet.",
   sheet_tab_missing: "The books sheet no longer has its Books tab.",
+  month_already_sent: "That month was sent to the sheet after this request was made, so nothing was written. Asked again, it says so first.",
+  sheet_changed: "The books sheet changed after this request was made, so nothing was written.",
   budget: "The shop's model budget ran out.",
   silent: "The worker stopped reporting.",
   deadline: "The attempt ran out of time.",
