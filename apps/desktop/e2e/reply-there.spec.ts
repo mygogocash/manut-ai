@@ -58,6 +58,9 @@ const ALLOWED = new Set([
   // Mission Control's jobs, for the open panel's "Recent work" (src/pages/RecentWork.tsx, MemberWork): a read of the
   // shop's job list that writes nothing. The mock bridge answers it with unknown_op, so the panel lists no jobs here.
   "jobs.list",
+  // the shops the signed-in person is in, for the account row's switcher (src/sidebar/ShopSwitcher.tsx): a read that
+  // writes nothing. The mock bridge lists no shops by default, so no switcher shows here.
+  "shops.list",
   // a remote machine saved in ~/.manut/peers.json comes back on boot: its bots join the list (rule 31)
   "peers.attach",
   "peers.detach",
