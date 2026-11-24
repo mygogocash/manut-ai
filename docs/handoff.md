@@ -157,14 +157,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 44, a task list route, so the desktop stops reading the whole export each minute (`feat/task-list`, Opus),
-     started when item 45 finished: two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon;
    - item 46, the owner's memory and routines writes on the connected desktop, through the API's existing owner routes
      (`feat/connected-memory-routines`, Sonnet), started when item 43 finished.
+   - item 47, each coding lane in a git worktree of its own (`feat/lane-worktrees`, Opus), started when item 44
+     finished. Two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 43 (the model gateway's sweep and alerts: the shop's TenantObject now has an alarm, a list of jobs, which
+   Merged: 44 (`GET /v1/tasks`, the session's own tasks newest first, 25 a page with a stable cursor, each task
+   answering for itself in its own object; an owner's shop session also reads `/v1/schedules` and
+   `/v1/inbound/attention`; the connected desktop reads the newest 50 tasks instead of the export, with cache version
+   5, and a screens test pinned from the export-based code), 43 (the model gateway's sweep and alerts: the shop's TenantObject now has an alarm, a list of jobs, which
    charges a reservation nothing settled a minute after it expires; each month notes 80% and 100% of its cap once, from
    charged spend only, with `model.cap_near` and `model.cap_reached` in the audit log; the console's Model spend page lists
    the shops near or at their caps from rows kept in AuthObject beside the registry, `GET /v1/admin/model/alerts`), 45 (the owner removes a sign-in, and changes its account or addresses, from the app: `POST /v1/vault/sign-ins/remove`
