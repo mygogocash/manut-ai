@@ -32,10 +32,12 @@ const openSession = (page: Page, id: string) =>
   }, id);
 const send = (page: Page, id: string, text: string) => page.evaluate(([i, t]) => (window as any).__manutSessions.send(i, t), [id, text]);
 const lane = (page: Page, id: string) => page.getByTestId(`lane-${id}`);
-/** The pretend folder the stand-in keeps the project's files in. */
-const files = (page: Page) => page.evaluate((root) => Object.keys((window as any).__manutMockFolders[root]).sort(), ROOT);
+/** The folder the lane works in: its own (a worktree of the project), where the stand-in keeps the lane's files. */
+const LANE = "/home/you/.manut/lanes/baanmali-preorder/add-promptpay-qr-checkout";
+/** The pretend folder the stand-in keeps the lane's files in. */
+const files = (page: Page) => page.evaluate((dir) => Object.keys((window as any).__manutMockFolders[dir]).sort(), LANE);
 /** The person changes the pretend folder by hand, as an editor would. */
-const byHand = (page: Page, path: string, text: string) => page.evaluate(([root, p, t]) => ((window as any).__manutMockFolders[root][p] = t), [ROOT, path, text]);
+const byHand = (page: Page, path: string, text: string) => page.evaluate(([dir, p, t]) => ((window as any).__manutMockFolders[dir][p] = t), [LANE, path, text]);
 
 /** Two turns, the second ending in a test run, then Rewind to before it through the panel under the box. Leaves the Code page open.
  *  The lane's state is read from its `data-status`, so this holds in any language. */

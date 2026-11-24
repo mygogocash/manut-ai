@@ -19,13 +19,20 @@ import { kitProjects, noteBlocked, projectOf, updateKitProjects } from "./projec
 import { keyFiles, keysAfter } from "./secrets";
 import type { KitLevel } from "@manut/member-grants";
 
-/** Where a session's ask is asked: its chat, its project (the folder it started in), the home folder and the branch. */
+/** Where a session's ask is asked: its chat, the folder the dial reads as inside (`root`: where the session works, a lane's own
+ *  folder), the project whose level, kept rules and allowed folders the dial uses (`project`: the folder the session started
+ *  in; none: `root`), the home folder and the branch. A lane's steps in the developer's folder, or in another lane's, are
+ *  outside its own. */
 export interface AskContext {
   chat: string;
   root: string;
+  project?: string;
   home: string | null;
   branch?: string;
 }
+
+/** The project's folder: where its settings are kept, which is also the folder Kit's panel names. */
+const projectRoot = (ctx: AskContext): string => ctx.project ?? ctx.root;
 
 /** How Kit's dial settled an ask by itself, for its card's settled line. */
 export type KitAnswer =
@@ -60,7 +67,7 @@ export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.r
 
 function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | null {
   if (ev.outdated) return null;
-  const project = projectOf(kitProjects(), ctx.root);
+  const project = projectOf(kitProjects(), projectRoot(ctx));
   return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
 }
 
@@ -69,7 +76,7 @@ function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | nul
 export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): { choice: ApprovalChoice; answer: KitAnswer } | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
-  const project = projectOf(kitProjects(), ctx.root);
+  const project = projectOf(kitProjects(), projectRoot(ctx));
   const d = decideAsk(read, project, keysIn(ctx.chat), now);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
@@ -77,8 +84,8 @@ export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now:
     const answer: KitAnswer = read.action === "read" || read.action === "check" ? { by: "reads" } : byLevel ? { by: "dial", level: project.level } : { by: "rule" };
     out = { choice: "once", answer };
   } else if (d.answer === "blocked" && ev.choices.includes("deny")) {
-    updateKitProjects((p) => noteBlocked(p, ctx.root, { what: read.what, path: read.outside[0] ?? "", folder: read.folder ?? "", at: now }));
-    out = { choice: "deny", answer: { by: "blocked", project: projectName(ctx.root) } };
+    updateKitProjects((p) => noteBlocked(p, projectRoot(ctx), { what: read.what, path: read.outside[0] ?? "", folder: read.folder ?? "", at: now, ...(ctx.project !== undefined && ctx.project !== ctx.root ? { lane: true as const } : {}) }));
+    out = { choice: "deny", answer: { by: "blocked", project: projectName(projectRoot(ctx)) } };
   }
   if (out) {
     answered.set(askKey(ctx.chat, ev.request_id), out.answer);
@@ -102,13 +109,13 @@ export interface KitCard {
 export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext): KitCard | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
-  const project = projectOf(kitProjects(), ctx.root);
+  const project = projectOf(kitProjects(), projectRoot(ctx));
   const keys = keysIn(ctx.chat);
   const d = decideAsk(read, project, keys);
   // a rule is matched against the line that was read, never the card's one-line command
   const kept = read.line !== undefined && project.rules.some((r) => ruleMatches(r, read.line!));
   const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !kept ? read.rule : null;
-  return { root: ctx.root, say: read.say, always, keys: read.saves ? keys : [] };
+  return { root: projectRoot(ctx), say: read.say, always, keys: read.saves ? keys : [] };
 }
 
 // ---- keys in each session's changes -------------------------------------------------------------------------------

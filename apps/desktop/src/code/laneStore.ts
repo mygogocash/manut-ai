@@ -2,7 +2,7 @@
 // runs. The sessions store hands every event of a coding session's chat to `noteLaneEvent`; the Code page reads the
 // records back. Nothing is saved: a lane's state is of this run, and a restart starts each lane's record again.
 import { useSyncExternalStore } from "react";
-import { emptyLane, noteLane, type LaneRecord } from "./lane";
+import { emptyLane, noteLane, type LaneRecord, type LaneWhere } from "./lane";
 
 const lanes = new Map<string, LaneRecord>();
 const listeners = new Set<() => void>();
@@ -15,11 +15,11 @@ const changed = () => {
   listeners.forEach((l) => l());
 };
 
-/** An event of the coding session whose chat has key `chat`. */
-export function noteLaneEvent(chat: string, ev: { event: string; [k: string]: unknown }, now: number = Date.now()): void {
+/** An event of the coding session whose chat has key `chat`, which works in `where` (its lane's own folder). */
+export function noteLaneEvent(chat: string, ev: { event: string; [k: string]: unknown }, now: number = Date.now(), where?: LaneWhere): void {
   if (!chat) return;
   const before = lanes.get(chat) ?? NONE;
-  const after = noteLane(before, ev, now);
+  const after = noteLane(before, ev, now, where);
   if (after === before) return;
   lanes.set(chat, after);
   changed();
@@ -41,6 +41,30 @@ const subscribe = (l: () => void) => {
 /** Re-renders when any lane learns something. */
 export function useLanesVersion(): number {
   return useSyncExternalStore(subscribe, () => version, () => version);
+}
+
+// ---- the lanes' folders kept on this computer ----------------------------------------------------------------------
+//
+// A lane's folder is kept when its session closes with changes in it (sessions.ts `letLaneGo`), and the Code page lists the
+// kept ones (KeptLanes.tsx). Whatever adds or removes one says so here, so the list is read again at once.
+
+const keptListeners = new Set<() => void>();
+let keptVersion = 0;
+
+/** A lane's folder was kept or removed: the Code page reads its list again. */
+export function keptLanesChanged(): void {
+  keptVersion++;
+  keptListeners.forEach((l) => l());
+}
+
+const subscribeKept = (l: () => void) => {
+  keptListeners.add(l);
+  return () => keptListeners.delete(l);
+};
+
+/** Changes when a lane's folder was kept or removed. */
+export function useKeptLanesVersion(): number {
+  return useSyncExternalStore(subscribeKept, () => keptVersion, () => keptVersion);
 }
 
 /** Forgets every lane (tests). */

@@ -12,6 +12,8 @@
 // a broken change. A failure is the other way round: it is read from what the output says, whatever the exit status
 // said, because a command such as `vitest run || true` hides its failure from the status and not from its output.
 
+import { insideProject } from "./command";
+
 /** What the output of a test run says. */
 export type TestRead =
   /** Tests ran and none failed; `passed` is how many, or null when the runner gives no count (`go test` without -v). */
@@ -459,6 +461,55 @@ const hitsOf = (line: string): Hit[] => commands(line).flatMap((w) => hitOf(w) ?
 
 /** Whether any command of `line` runs tests: `pnpm test`, `vitest run src/a.test.ts`, `cd app && go test ./...`. */
 export const runsTests = (line: string): boolean => hitsOf(line).length > 0;
+
+/** Words a shell would turn into something else before `cd` sees them: a variable, a pattern, a command's output. */
+const UNREADABLE = /[$`*?[\]{}]/;
+/** A package manager's options that name the folder it runs in. */
+const PM_FOLDER = new Set(["-C", "--dir", "--prefix", "--cwd"]);
+
+/** `word` as an absolute folder from `at`, or null when the words cannot say (`-`, `~` with no home, an unreadable word). */
+function folderFrom(word: string, at: string, home: string | null | undefined): string | null {
+  if (word === "-" || UNREADABLE.test(word)) return null;
+  if (word === "~" || word.startsWith("~/")) return home ? home + word.slice(1) : null;
+  if (word.startsWith("~")) return null;
+  if (word.startsWith("/") || /^[A-Za-z]:[\\/]/.test(word)) return word;
+  return `${at.replace(/[\\/]+$/, "")}/${word}`;
+}
+
+/** Whether a test run of `line` runs outside `root`, the folder a lane works in: after a `cd` or `pushd` to a folder outside
+ *  it, or with a package manager told another folder (`pnpm -C`, `npm --prefix`, `yarn --cwd`). A folder the words cannot say
+ *  counts as outside, and so does any run after a `popd`: a lane that read another folder's run as its own would say its
+ *  tests passed when nobody ran them on its work. A line that runs no tests runs none outside. */
+export function testsRunOutside(line: string, root: string, home?: string | null): boolean {
+  let at: string | null = root;
+  for (const words of commands(line)) {
+    let i = 0;
+    while (i < words.length && (ASSIGNMENT.test(words[i]) || WRAPPERS.has(words[i]))) i++;
+    const [head, ...rest] = words.slice(i);
+    if (!head) continue;
+    if (head === "cd" || head === "pushd") {
+      const to = rest.find((w) => !/^-[LPe@]+$/.test(w));
+      at = at === null ? null : to === undefined ? (home ?? null) : folderFrom(to, at, home);
+      continue;
+    }
+    if (head === "popd") {
+      at = null;
+      continue;
+    }
+    if (!hitOf(words)) continue;
+    let ran = at;
+    for (let k = 0; k < rest.length; k++) {
+      const w = rest[k];
+      const eq = w.indexOf("=");
+      const flag = eq > 0 ? w.slice(0, eq) : w;
+      if (!PM_FOLDER.has(flag)) continue;
+      const value = eq > 0 ? w.slice(eq + 1) : rest[k + 1];
+      ran = ran === null || value === undefined ? null : folderFrom(value, ran, home);
+    }
+    if (ran === null || !insideProject(ran, root, [])) return true;
+  }
+  return false;
+}
 
 /** The one runner `line`'s test runs name, or null when it names none or names more than one. A package's own `test`
  *  script names none: the output says which runner it was. */

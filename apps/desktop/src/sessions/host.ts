@@ -15,6 +15,7 @@ import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
+import { readKept, readMade, readRemoved, type KeptLane, type LaneMade, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -115,11 +116,21 @@ export interface SessionHost extends HistoryHost {
   /** The git branch checked out in `cwd` (read from its `.git/HEAD`; no program runs), "" when it is not a
    *  repository, a short commit id when detached. */
   branch(cwd: string): Promise<string>;
-  /** Make a branch of its own for a lane (src/code/laneBranch.ts): the first of `names` that no branch has yet, made from
-   *  the branch `cwd` is on, and switch the folder to it. The files stay as they are, and nothing is pushed or merged.
-   *  Rejects with a short code (`not_a_repository`, `no_commit`, `taken`, `git_missing`) or git's own words. Absent in a
-   *  shell that is older than lanes: the session then starts on the branch the folder is on. */
-  laneBranch?(cwd: string, names: string[]): Promise<{ branch: string; base: string }>;
+  /** Make a lane's own working folder (src/code/laneBranch.ts): a git worktree under `~/.manut/lanes`, on the first of
+   *  `names` that no branch has yet, made from the commit the folder `cwd` is on. The developer's folder is not touched (its
+   *  branch, index, stash and HEAD stay as they are), and nothing is pushed or merged. Rejects with a short code
+   *  (`not_a_repository`, `no_commit`, `not_committed`, `busy`, `taken`, `git_missing`) or git's own words. Absent in a shell
+   *  older than lanes' folders: the session then works in its own folder, with no lane of its own. */
+  laneWorktree?(cwd: string, names: string[]): Promise<LaneMade>;
+  /** The lanes' working folders the app made for the repository `cwd` is in, newest first (only reads). */
+  laneList?(cwd: string): Promise<KeptLane[]>;
+  /** The developer's folders the app's lanes were made from, so the Code page lists a project whose last session closed while
+   *  its lane's folder was kept (only reads). */
+  laneProjects?(): Promise<string[]>;
+  /** Remove a lane's working folder the app made, and its branch when `ask.branch` says so, once what is there is what the
+   *  person saw (`ask`); otherwise nothing is done and the answer says what is there now. Rejects `not_a_lane` for anything
+   *  the app did not make. */
+  laneRemove?(worktree: string, ask: LaneRemoveAsk): Promise<LaneRemoved>;
   /** The main branch moving while Kit worked (src/code/moved.ts): what the person's own `git` says of `cwd`, read-only
    *  (src-tauri/src/git_moved.rs): its branch, the branch it started from, and the files each side changed since. `show`
    *  are the paths whose two diffs are wanted; `base` names the branch it started from (none: `origin/HEAD`'s, else
@@ -269,9 +280,24 @@ export class TauriHost implements SessionHost {
     const { invoke } = await this.core();
     return invoke<string>("session_branch", { cwd });
   }
-  async laneBranch(cwd: string, names: string[]) {
+  async laneWorktree(cwd: string, names: string[]) {
     const { invoke } = await this.core();
-    return invoke<{ branch: string; base: string }>("lane_branch", { cwd, names });
+    const made = readMade(await invoke<unknown>("lane_worktree", { cwd, names }));
+    if (!made) throw new Error("no_folder");
+    return made;
+  }
+  async laneList(cwd: string) {
+    const { invoke } = await this.core();
+    return readKept(await invoke<unknown>("lane_list", { cwd }));
+  }
+  async laneProjects() {
+    const { invoke } = await this.core();
+    const got = await invoke<unknown>("lane_projects");
+    return Array.isArray(got) ? got.filter((p): p is string => typeof p === "string" && p !== "") : [];
+  }
+  async laneRemove(worktree: string, ask: LaneRemoveAsk) {
+    const { invoke } = await this.core();
+    return readRemoved(await invoke<unknown>("lane_remove", { worktree, ask }));
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     const { invoke } = await this.core();
@@ -415,7 +441,8 @@ export interface MockCall {
     | "custom.confirm"
     | "custom.remove"
     | "power.busy"
-    | "lane.branch";
+    | "lane.worktree"
+    | "lane.remove";
   id?: number;
   /** power.busy: the edge, and whether the shell lets go at once (the setting went off) */
   busy?: boolean;
@@ -437,7 +464,7 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
-  /** lane.branch: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
+  /** lane.worktree: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
   /** main.moved: the paths whose two diffs were asked for */
@@ -478,6 +505,17 @@ const utf8 = new TextEncoder();
  *  (`COALESCE_BYTES` in src-tauri/src/sessions.rs). */
 const FLOOD_MESSAGE = `${"build output ".repeat(5).slice(0, 62)}\r\n`.repeat(1024);
 
+/** A lane's working folder the mock shell made: its record, as lane.rs writes one. */
+export interface MockLane {
+  worktree: string;
+  dir: string;
+  branch: string;
+  base: string;
+  /** The developer's folder it was made from. */
+  project: string;
+  made: number;
+}
+
 type MockGlobals = MockTurnGlobals & {
   /** Free bytes the mock's disk watch reads (src/lib/disk.ts); unset = 100 GB. */
   __manutDiskFree?: number;
@@ -499,6 +537,14 @@ type MockGlobals = MockTurnGlobals & {
   __manutBranches?: Record<string, string>;
   /** e2e: the names of branches that exist already, so a lane's branch of that name is made with a number after it */
   __manutMockTaken?: string[];
+  /** e2e: the lanes' working folders the mock shell made (its records), as `lane_list` lists them */
+  __manutLanes?: MockLane[];
+  /** e2e: how many files are changed or new in each lane's folder, and how many commits on its branch are not on its base,
+   *  by the folder's worktree (none: 0) */
+  __manutLaneChanged?: Record<string, number>;
+  __manutLaneAhead?: Record<string, number>;
+  /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
+  __manutLeft?: Record<string, number>;
   /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
    *  lane whose main moved; a folder left out: nothing to say) */
   __manutMoved?: Record<string, GitView>;
@@ -935,28 +981,67 @@ export class MockHost implements SessionHost {
     const b = this.g.__manutBranches ?? { "/home/you/code/manut": "feat/session-controls" };
     return b[cwd] ?? "";
   }
-  /** As the shell does it: the first name no branch has, made from the branch the folder is on, which the folder then
-   *  is on. `__manutBranches` is where the folders' branches are (a folder with none is not a repository), and
-   *  `__manutMockTaken` the names that exist already. */
-  async laneBranch(cwd: string, names: string[]) {
+  /** As the shell does it (src-tauri/src/lane.rs): the first name no branch has, made from the branch the folder is on, in
+   *  a folder of its own under `~/.manut/lanes/<project>/<words>`, which is then on that branch; the developer's folder stays
+   *  on its own. `__manutBranches` is where the folders' branches are (a folder with none is not a repository),
+   *  `__manutMockTaken` the names that exist already, and `__manutLanes` the folders made, as the shell's records. */
+  async laneWorktree(cwd: string, names: string[]): Promise<LaneMade> {
     const folders = (this.g.__manutBranches ??= { "/home/you/code/manut": "feat/session-controls" });
     const base = folders[cwd];
     if (!base) throw new Error("not_a_repository");
     const taken = (this.g.__manutMockTaken ??= []);
     const branch = names.find((n) => !taken.includes(n));
     if (!branch) throw new Error("taken");
+    const lanes = (this.g.__manutLanes ??= []);
+    const project = (cwd.split("/").filter(Boolean).pop() ?? "project").replace(/[^A-Za-z0-9._-]+/g, "-");
+    const words = branch.slice("kit/".length);
+    let worktree = `/home/you/.manut/lanes/${project}/${words}`;
+    for (let n = 2; lanes.some((l) => l.worktree === worktree); n++) worktree = `/home/you/.manut/lanes/${project}/${words}-${n}`;
     taken.push(branch);
-    folders[cwd] = branch;
-    this.log({ op: "lane.branch", cwd, branch, base });
-    return { branch, base };
+    folders[worktree] = branch;
+    lanes.unshift({ worktree, dir: worktree, branch, base, project: cwd, made: Math.floor(Date.now() / 1000) });
+    this.log({ op: "lane.worktree", cwd, branch, base, path: worktree });
+    return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0 };
+  }
+  /** The mock lane whose folder `dir` is, or is in. */
+  private laneAt(dir: string): MockLane | undefined {
+    return (this.g.__manutLanes ?? []).find((l) => dir === l.worktree || dir.startsWith(`${l.worktree}/`));
+  }
+  /** The repository folder `cwd` reads as: a lane's folder is a worktree of the developer's folder it was made from. */
+  private repoOf(cwd: string): string {
+    return this.laneAt(cwd)?.project ?? cwd;
+  }
+  async laneList(cwd: string): Promise<KeptLane[]> {
+    const repo = this.repoOf(cwd);
+    return (this.g.__manutLanes ?? [])
+      .filter((l) => l.project === repo)
+      .map((l) => ({ worktree: l.worktree, dir: l.dir, branch: l.branch, base: l.base, made: l.made, exists: true, changed: this.g.__manutLaneChanged?.[l.worktree] ?? 0, ahead: this.g.__manutLaneAhead?.[l.worktree] ?? 0 }));
+  }
+  async laneProjects(): Promise<string[]> {
+    return [...new Set((this.g.__manutLanes ?? []).map((l) => l.project))].sort();
+  }
+  /** As the shell: a folder it made goes only once what is in it is what the person saw, and its branch only when asked. */
+  async laneRemove(worktree: string, ask: LaneRemoveAsk): Promise<LaneRemoved> {
+    const lanes = this.g.__manutLanes ?? [];
+    const lane = lanes.find((l) => l.worktree === worktree);
+    if (!lane) throw new Error("not_a_lane");
+    const changed = this.g.__manutLaneChanged?.[worktree] ?? 0;
+    const ahead = ask.branch ? (this.g.__manutLaneAhead?.[worktree] ?? 0) : null;
+    if ((changed > 0 && changed !== ask.changed) || (ask.branch && ahead !== ask.ahead && ahead !== 0)) return { removed: false, deleted: false, changed, ahead, error: null };
+    this.g.__manutLanes = lanes.filter((l) => l !== lane);
+    if (this.g.__manutBranches) delete this.g.__manutBranches[worktree];
+    if (ask.branch) this.g.__manutMockTaken = (this.g.__manutMockTaken ?? []).filter((b) => b !== lane.branch);
+    this.log({ op: "lane.remove", path: worktree, size: changed, ...(ask.branch ? { branch: lane.branch } : {}) });
+    return { removed: true, deleted: ask.branch, changed: null, ahead: null, error: null };
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     this.log({ op: "main.moved", cwd, show: o.show ?? [], ...(o.base ? { base: o.base } : {}) });
-    const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
+    // a lane's folder is a worktree of the developer's repository: the base moved there as it did for the developer
+    const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[this.repoOf(cwd)];
     if (!v) return null;
     // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
     const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
-    // as the shell reads it: the branch the folder has checked out now (a lane's own, once Kit made it), against the branch the
+    // as the shell reads it: the branch the folder has checked out now (a lane's own in its folder), against the branch the
     // page names as the base, else the answer's own
     const branch = this.g.__manutBranches?.[cwd] || v.branch;
     return { ...v, branch, base: o.base || v.base, both };

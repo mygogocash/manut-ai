@@ -4,7 +4,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
-import { KitPanelView, codeProjects, type KitPanelProps } from "./KitPanel";
+import { KitPanelView, codeProjects, onlyInOwnFolders, type KitPanelProps } from "./KitPanel";
 import { laneRowOf } from "./Lanes";
 import { emptyLane, noteLane } from "./lane";
 import { emptyProject } from "./project";
@@ -93,6 +93,15 @@ describe("what was stopped, and what is allowed", () => {
     expect(html(p)).toContain("Kit tried to run a command outside baanmali-preorder. It was stopped.");
   });
 
+  it("says a lane's stopped step was outside the lane's own folder", () => {
+    const p = props({ project: { ...emptyProject(), blocked: [{ what: "edit", path: `${root}/src/a.ts`, folder: `${root}/src`, at: 1, lane: true }] } });
+    expect(html(p)).toContain("Kit&#x27;s lane tried to change a file outside its own folder. It was stopped.");
+    // allowing a folder of the developer's lets a lane read there; a change still stays inside the lane's own folder
+    expect(byId(p, "kit-allow-folder")).toHaveLength(1);
+    // the developer's folder itself is the project: nothing to allow
+    expect(byId(props({ project: { ...emptyProject(), blocked: [{ what: "read", path: `${root}/a.ts`, folder: root, at: 1, lane: true }] } }), "kit-allow-folder")).toHaveLength(0);
+  });
+
   it("lists the rules and folders kept, each of which can be taken back", () => {
     const p = props({ project: { ...emptyProject(), rules: [{ words: ["pnpm", "add"] }], folders: ["/Users/fon/Documents"] } });
     const out = html(p);
@@ -128,6 +137,12 @@ describe("the projects the page lists", () => {
   it("are the folders sessions run in, newest first, then the added ones, each once", () => {
     expect(codeProjects([root, "/Users/fon/storefront", `${root}/`], ["/Users/fon/blog", root])).toEqual([root, "/Users/fon/storefront", "/Users/fon/blog"]);
     expect(codeProjects([], [])).toEqual([]);
+  });
+
+  it("include the folders lanes were made from whose folders are kept, last and once", () => {
+    expect(codeProjects([root], [], [`${root}/`, "/Users/fon/storefront"])).toEqual([root, "/Users/fon/storefront"]);
+    // its last session closed: the project stays for its kept folder
+    expect(codeProjects([], [], [root])).toEqual([root]);
   });
 });
 
@@ -167,5 +182,18 @@ describe("the lanes", () => {
     expect(onBack).toHaveBeenCalledWith("s1");
     // the panel's own words come from the page: with none given, the band is as it was
     expect(byId(props({ lanes: [reverted] }), "under")).toHaveLength(0);
+  });
+});
+
+describe("the main-moved note under the dial", () => {
+  const lane = (dir?: string) => ({ name: "kit/x", base: "main", ...(dir ? { dir, worktree: dir } : {}) });
+  it("stands down when every session of the project works in a lane's folder of its own", () => {
+    expect(onlyInOwnFolders([{ cwd: root, status: "running", lane: lane("/Users/fon/.manut/lanes/baanmali-preorder/x") }], root)).toBe(true);
+    // a session in the developer's folder: Kit works there, and the note reads it
+    expect(onlyInOwnFolders([{ cwd: root, status: "running", lane: lane("/l/x") }, { cwd: root, status: "running" }], root)).toBe(false);
+    expect(onlyInOwnFolders([{ cwd: root, status: "exited", lane: lane() }], root)).toBe(false);
+    // no session yet, or only a draft, or only another project's: as before
+    expect(onlyInOwnFolders([], root)).toBe(false);
+    expect(onlyInOwnFolders([{ cwd: root, status: "draft" }, { cwd: "/elsewhere", status: "running", lane: lane("/l/y") }], root)).toBe(false);
   });
 });

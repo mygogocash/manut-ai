@@ -112,6 +112,22 @@ describe("resume snapshot", () => {
     expect(parseResume(JSON.stringify({ ...raw, session: "s2" }))).toMatchObject({ view: "chat", session: null });
   });
 
+  it("keeps a lane's branch and its own folder, so it comes back working where it did", () => {
+    const lane = { name: "kit/promptpay-qr", base: "main", dir: "/h/.manut/lanes/web-app/promptpay-qr", worktree: "/h/.manut/lanes/web-app/promptpay-qr" };
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], lane }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].lane).toEqual(lane);
+    const back = (l: unknown) => parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], lane: l }] }))!.sessions[0].lane;
+    // a lane made before lanes had folders keeps its branch, and works in the session's folder
+    expect(back({ name: "kit/x", base: "main" })).toEqual({ name: "kit/x", base: "main" });
+    // a folder that is not absolute, or one without the other, is no folder: never a guess at where to work
+    expect(back({ ...lane, dir: "relative/x" })).toEqual({ name: "kit/promptpay-qr", base: "main" });
+    expect(back({ ...lane, worktree: undefined })).toEqual({ name: "kit/promptpay-qr", base: "main" });
+    // a branch Kit does not make, or no base, is no lane
+    expect(back({ ...lane, name: "main" })).toBeUndefined();
+    expect(back({ ...lane, base: "" })).toBeUndefined();
+    expect(back("kit/x")).toBeUndefined();
+  });
+
   it("keeps that an ended session's CLI could not continue its conversation, and only for an ended one", () => {
     const good = buildResume(input(), T);
     const raw = (resumeFailed: unknown, running: boolean) => JSON.stringify({ ...good, sessions: [{ ...good.sessions[2], running, resumeFailed }] });

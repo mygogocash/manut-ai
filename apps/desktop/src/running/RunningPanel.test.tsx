@@ -59,6 +59,21 @@ describe("the items", () => {
     expect(runningItems(state([a, b]), ctx({ project: ROOT })).map((i) => [i.row.pid, i.project])).toEqual([[1, null]]);
   });
 
+  it("list a lane's command with its project, though it runs in the lane's own folder, and name it by the project", () => {
+    const lane = row({ pid: 3, kind: "chat", session: 4, folder: "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr" });
+    const other = row({ pid: 2, folder: "/home/you/code/storefront/", started: NOW - 3_600_000 });
+    // the page knows the lane's session started in the project's folder
+    const projectOf = (r: RunningRow) => (r.kind === "chat" && r.session === 4 ? ROOT : r.folder);
+    expect(runningItems(state([lane]), ctx({ project: ROOT, projectOf })).map((i) => i.row.pid)).toEqual([3]);
+    expect(othersOf(state([lane, other]), ctx({ project: ROOT, projectOf }))).toBe(1);
+    expect(runningItems(state([lane, other]), ctx({ projectOf })).map((i) => [i.row.pid, i.project])).toEqual([
+      [2, "storefront"],
+      [3, "baanmali-preorder"],
+    ]);
+    // without the page's word, it is the lane folder's
+    expect(runningItems(state([lane]), ctx({ project: ROOT })).map((i) => i.row.pid)).toEqual([]);
+  });
+
   it("name the terminal a command runs in, only for a terminal", () => {
     const open = vi.fn();
     const lane = vi.fn((r: RunningRow) => (r.kind === "pty" && r.session === 1 ? { name: "PromptPay QR at checkout", open } : null));

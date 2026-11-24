@@ -926,14 +926,16 @@ impl<'a> Book<'a> {
     }
 
     /// The session's folder as its real path, when a snapshot of it may be kept: a folder that exists, and not the
-    /// disk's root, the home folder itself or the app's own data folder (each far too broad to keep each turn of).
+    /// disk's root, the home folder itself or the app's own data folder (each far too broad to keep each turn of). A
+    /// lane's working folder is in the app's data folder (lane.rs) but is a project's checkout like any other, so its
+    /// turns are kept; the folder that holds every lane is not one.
     fn check_root(&self, cwd: &Path) -> Result<PathBuf, String> {
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err(format!("not a folder: {}", cwd.display()));
         }
         let root = cwd.canonicalize().map_err(|e| e.to_string())?;
         let home = self.home.canonicalize().unwrap_or_else(|_| self.home.to_path_buf());
-        if root.parent().is_none() || root == home || root.starts_with(home.join(".manut")) {
+        if root.parent().is_none() || root == home || (root.starts_with(home.join(".manut")) && !crate::lane::in_a_lane(&home, &root)) {
             return Err("why:too_broad".into());
         }
         Ok(root)
@@ -1739,6 +1741,37 @@ mod tests {
         assert!(b.take("s9", Path::new("relative"), "local-s1").is_err());
         assert!(b.take("x9", &home.0, "local-s1").is_err(), "a session id is one plain word");
         assert!(b.take("s9", &home.0, "../x").is_err(), "a turn id too");
+    }
+
+    #[test]
+    fn a_lanes_own_folder_keeps_its_turns_and_the_folders_around_it_get_none() {
+        if git_program().is_none() {
+            return;
+        }
+        let home = Temp::new("home");
+        let dev = home.0.join("code").join("web-app");
+        fs::create_dir_all(&dev).unwrap();
+        git(&dev, &["init", "-q"]);
+        put(&dev, "a.txt", "one\n");
+        git(&dev, &["add", "-A"]);
+        git(&dev, &["commit", "-qm", "init"]);
+        let lane = crate::lane::make(&home.0, &dev, &["kit/x".to_string()]).unwrap();
+        let r = Path::new(&lane.dir);
+        let b = Book::with_limits(&home.0, SMALL);
+        // the lane's folder is in the app's data folder, and its turns are kept and rewound like any project's
+        assert_eq!(b.take("s21", r, "local-s1").unwrap().files, 1);
+        put(r, "a.txt", "agent\n");
+        b.end("s21").unwrap();
+        b.restore("s21", "local-s1", &[]).unwrap();
+        b.settle("s21", "local-s1", true).unwrap();
+        assert_eq!(read(r, "a.txt").as_deref(), Some("one\n"));
+        assert_eq!(git(r, &["cat-file", "-t", "refs/manut/snapshots/s21/back"]).trim(), "tree");
+        assert_eq!(git(&dev, &["symbolic-ref", "HEAD"]).trim(), "refs/heads/main");
+        // the folder that holds every lane, and one project's lanes, are not a project
+        for dir in [crate::lane::lanes_dir(&home.0), crate::lane::lanes_dir(&home.0).join("web-app")] {
+            assert_eq!(b.take("s22", &dir, "local-s1").unwrap_err(), "why:too_broad", "{}", dir.display());
+        }
+        b.forget("s21").unwrap();
     }
 
     #[test]

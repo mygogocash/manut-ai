@@ -10,13 +10,16 @@ import { insideProject, type Rule } from "./command";
 
 export const KIT_KEY = "manut.kit.projects";
 
-/** A step stopped outside the project: what it was, the path as Kit wrote it, and the folder allowing it would add. */
+/** A step stopped outside the project: what it was, the path as Kit wrote it, and the folder allowing it would add. `lane`:
+ *  a lane stopped it, which works in a folder of its own, so outside is outside that folder (the developer's own folder is
+ *  outside it too). */
 export interface Blocked {
   what: "read" | "edit" | "command";
   path: string;
   folder: string;
   /** ms since epoch */
   at: number;
+  lane?: true;
 }
 
 export interface KitProject {
@@ -92,7 +95,7 @@ function readBlocked(x: unknown): Blocked | null {
   if (!x || typeof x !== "object") return null;
   const b = x as Partial<Blocked>;
   if (!["read", "edit", "command"].includes(b.what as string) || typeof b.path !== "string" || typeof b.folder !== "string" || typeof b.at !== "number") return null;
-  return { what: b.what as Blocked["what"], path: b.path, folder: b.folder, at: b.at };
+  return { what: b.what as Blocked["what"], path: b.path, folder: b.folder, at: b.at, ...(b.lane === true ? { lane: true as const } : {}) };
 }
 
 /** The saved record, or nothing kept when it cannot be read. Each project's level, rules, folders and stopped steps are

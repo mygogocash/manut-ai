@@ -8,7 +8,7 @@
 import type { Key } from "../i18n";
 import { maskSecrets } from "../lib/secrets";
 import type { Say } from "./command";
-import { readTestOutput, runnerOf, runsTests, type TestRead } from "./testRun";
+import { readTestOutput, runnerOf, runsTests, testsRunOutside, type TestRead } from "./testRun";
 
 /** What a lane's events have shown. */
 export interface LaneRecord {
@@ -39,14 +39,25 @@ const changed = (lane: LaneRecord): LaneRecord => (lane.changed ? lane : { ...la
 /** A reading as the lane keeps it: its names without any key a test's own name may hold. */
 const kept = (read: TestRead): TestRead => (read.kind === "failed" ? { ...read, names: read.names.map(maskSecrets) } : read);
 
-/** `lane` after one event of its session. The same object when the event changes nothing, so a store can tell. */
-export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number): LaneRecord {
+/** Where a lane works (its own folder, else the session's), and the home folder for a `~` in a command. */
+export interface LaneWhere {
+  root: string;
+  home?: string | null;
+}
+
+/** Whether `command` runs the lane's own tests: it runs tests, and none of them in another folder than the lane's. */
+const ownRun = (command: string, where: LaneWhere | undefined): boolean => runsTests(command) && !(where && testsRunOutside(command, where.root, where.home));
+
+/** `lane` after one event of its session. The same object when the event changes nothing, so a store can tell. `where`:
+ *  the folder the lane works in, so a test run its words send elsewhere (the developer's own folder) is not read as the
+ *  lane's. */
+export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number, where?: LaneWhere): LaneRecord {
   switch (ev.event) {
     case "tool.start": {
       const id = text(ev.tool_id);
       const detail = text(ev.detail);
       // a step's `name` is the shell's own kind for it: a command is `terminal`, a file edit `patch`
-      if (ev.name === "terminal" && id && runsTests(detail)) return { ...lane, steps: { ...lane.steps, [id]: detail } };
+      if (ev.name === "terminal" && id && ownRun(detail, where)) return { ...lane, steps: { ...lane.steps, [id]: detail } };
       return ev.name === "patch" ? changed(lane) : lane;
     }
     case "tool.diff":
@@ -62,6 +73,8 @@ export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number): LaneReco
       const command = text(ev.command) || began;
       if (command === undefined || !runsTests(command)) return lane;
       const { [id]: _done, ...steps } = lane.steps;
+      // the whole command, read at the end, ran its tests in another folder: no run of the lane's
+      if (!ownRun(command, where)) return began === undefined ? lane : { ...lane, steps };
       // the person said no, so the command never ran: it is no test run, and an earlier result stands
       if (ev.declined === true) return { ...lane, steps };
       const read = readTestOutput(typeof ev.output === "string" ? ev.output : undefined, { ok: typeof ev.ok === "boolean" ? ev.ok : undefined, runner: runnerOf(command) });

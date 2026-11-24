@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MAX_NAMES, readTestOutput, runnerOf, runsTests, stripAnsi } from "./testRun";
+import { MAX_NAMES, readTestOutput, runnerOf, runsTests, stripAnsi, testsRunOutside } from "./testRun";
 
 const fixture = (name: string) => readFileSync(join(__dirname, "__fixtures__", "test-output", `${name}.txt`), "utf8");
 const read = (name: string, ok?: boolean) => readTestOutput(fixture(name), { ok });
@@ -344,4 +344,45 @@ describe("the runner a command names", () => {
     ["pnpm install", null],
   ];
   it.each(cases)("%s", (line, runner) => expect(runnerOf(line)).toBe(runner));
+});
+
+describe("where a command runs its tests, for a lane in a folder of its own", () => {
+  const LANE = "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr";
+  const HOME = "/Users/fon";
+  const outside = (line: string) => testsRunOutside(line, LANE, HOME);
+
+  it("runs them in the lane's folder, or one inside it", () => {
+    for (const line of ["pnpm test", "cd apps/web && pnpm test", `cd ${LANE}/apps/web && vitest run`, "cd apps && cd web && go test ./...", "pnpm -C apps/web test", "npm --prefix=apps/web test", "cd .. && cd promptpay-qr && pnpm test", "FOO=1 pnpm test", "pnpm build && ls"]) {
+      expect(outside(line), line).toBe(false);
+    }
+  });
+
+  it("runs them outside when the words send them to another folder: the developer's own, another lane's, up and out", () => {
+    for (const line of [
+      "cd /Users/fon/work/baanmali-preorder && pnpm test",
+      "cd ~/work/baanmali-preorder && pnpm test",
+      "cd ../other-lane && pnpm test",
+      "pushd /tmp && vitest run",
+      "pnpm -C /Users/fon/work/baanmali-preorder test",
+      "pnpm --dir ../.. test",
+      "yarn --cwd=/Users/fon/work/baanmali-preorder test",
+      "cd && pnpm test",
+    ]) {
+      expect(outside(line), line).toBe(true);
+    }
+  });
+
+  it("counts a folder the words cannot say as outside: a variable, a pattern, the last folder, after a popd", () => {
+    for (const line of ["cd $PROJECT && pnpm test", "cd \"$(git rev-parse --show-toplevel)\" && pnpm test", "cd app* && pnpm test", "cd - && pnpm test", "popd && pnpm test"]) {
+      expect(outside(line), line).toBe(true);
+    }
+    // `~` with no home folder known
+    expect(testsRunOutside("cd ~/x && pnpm test", LANE, null)).toBe(true);
+  });
+
+  it("runs none outside when it runs no tests, wherever it goes", () => {
+    expect(outside("cd /Users/fon/work/baanmali-preorder && pnpm build")).toBe(false);
+    // a quoted word is one word: no `cd` here
+    expect(outside('git commit -m "cd /tmp && pnpm test"')).toBe(false);
+  });
 });

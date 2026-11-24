@@ -41,8 +41,13 @@ describe("a lane's row", () => {
     expect(row().branch).toEqual({ name: "kit/promptpay-qr", kind: "own", base: "main" });
   });
 
-  it("shows a branch the lane shares with a lane that was already working", () => {
-    expect(row({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "main", shared: true } } }).branch).toEqual({ name: "kit/promptpay-qr", kind: "shared", base: "main" });
+  it("shows the folder of its own the lane works in, which its main-moved note reads", () => {
+    const dir = "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr";
+    const r = row({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "main", dir, worktree: dir } } });
+    expect(r.branch).toEqual({ name: "kit/promptpay-qr", kind: "own", base: "main", dir });
+    expect(r.dir).toBe(dir);
+    // a lane with no folder of its own works in the session's
+    expect(row().dir).toBeNull();
   });
 
   it("shows the branch the folder is on when that is no longer the lane's", () => {
@@ -173,10 +178,13 @@ describe("the Lanes band", () => {
     expect(onOpen.mock.calls.map((c) => c[0])).toEqual(["s1", "s2", "s3", "s3"]);
   });
 
-  it("says what its branch is: made from where, shared, moved, or the folder's own", () => {
+  it("says what its branch is: made from where and in which folder, moved, or the folder's own", () => {
     const title = (r: LaneRow) => byId([r], "lane-branch")[0].props.title as string;
     expect(title(laneRowOf(input()))).toBe("Made from main. Kit never pushes or merges from here.");
-    expect(title(laneRowOf(input({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "main", shared: true } } })))).toContain("one checkout");
+    const dir = "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr";
+    expect(title(laneRowOf(input({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "main", dir, worktree: dir } } })))).toBe(
+      `Made from main, in a folder of its own: ${dir}. Kit never pushes or merges from here.`,
+    );
     expect(title(laneRowOf(input({ live: { branch: "main" } })))).toBe("Kit made kit/promptpay-qr for this lane, but the folder is on main now.");
     expect(title(laneRowOf(input({ rec: { ...input().rec, lane: undefined }, live: { branch: "main" } })))).toContain("no branch of its own");
   });
@@ -197,8 +205,9 @@ describe("the Lanes band", () => {
 describe("the branch a lane's main-moved note reads", () => {
   it("is the lane's own branch and the one it was made from, while the folder is on it", () => {
     expect(laneBase(laneRowOf(input()))).toEqual({ branch: "kit/promptpay-qr", base: "main" });
-    // a lane that joined another's branch was made from the branch that lane was made from
-    expect(laneBase(laneRowOf(input({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "develop", shared: true } } })))).toEqual({ branch: "kit/promptpay-qr", base: "develop" });
+    // in its own folder, read for the branch it was made from
+    const dir = "/Users/fon/.manut/lanes/baanmali-preorder/promptpay-qr";
+    expect(laneBase(laneRowOf(input({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "develop", dir, worktree: dir } } })))).toEqual({ branch: "kit/promptpay-qr", base: "develop" });
   });
 
   it("is none for a lane with no branch of its own, and for one whose branch the folder has left", () => {

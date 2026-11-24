@@ -363,9 +363,10 @@ export interface SessionRec {
   /** A Shell row: the shell it runs, an id from the shell's `shells_available` list (none: the login shell). Kept
    *  across restarts, so it comes back as the same shell. */
   shell?: string;
-  /** A chat session's lane: the branch of its own that Kit made when the session started (src/code/laneBranch.ts), or
-   *  the branch it shares with a lane already working in the folder. None: it made none (no repository, or the shell
-   *  could not). Of this run only; a restart does not bring it back. */
+  /** A chat session's lane: the branch of its own that Kit made when the session started (src/code/laneBranch.ts), and the
+   *  folder of its own it works in (a git worktree), where its agent, Kit's dial, its test runs, Rewind and the main-moved
+   *  note read it. None: it made none (no repository, or the shell could not), and the session works in its folder. Saved
+   *  with the session, so a lane that comes back after a restart works where it did. */
   lane?: LaneBranch;
 }
 
