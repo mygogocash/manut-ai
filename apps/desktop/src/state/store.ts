@@ -46,6 +46,7 @@ import type {
   MediaFile,
   SubagentState,
   AskSubagent,
+  AskTool,
   AttachKind,
   AttachResult,
   AccountCli,
@@ -232,6 +233,9 @@ export type ApprovalItem = {
   cwd?: string;
   /** The plan the agent asks to start on (plan mode), as markdown. */
   plan?: string;
+  /** What the agent asked to do, as the shell read it from the agent's own message, for Kit's dial (src/code/ask.ts).
+   *  Never shown: its command line can hold a key. */
+  tool?: AskTool;
   /** Asked inside a subagent: which one. */
   subagent?: AskSubagent;
   /** Asked while no turn ran in a coding-agent session (a background subagent after the turn's end): no turn's end
@@ -1277,6 +1281,8 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
             choices: ev.choices,
             ...(ev.cwd ? { cwd: ev.cwd } : {}),
             ...(typeof ev.plan === "string" && ev.plan.trim() ? { plan: ev.plan } : {}),
+            // kept as it came, a broken one too: the dial reads an ask by its words only when it named nothing
+            ...(ev.tool !== undefined ? { tool: ev.tool } : {}),
             ...(ev.subagent?.id ? { subagent: ev.subagent } : {}),
             ...(c.turn || !bot.startsWith("agent:") ? {} : { outside: true }),
             ...(ev.outdated ? { outdated: true } : {}),

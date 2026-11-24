@@ -7,7 +7,7 @@ import { AGENTS, acpRow, agentDef, HERMES_LABEL, type AcpRow, type AgentId, type
 import { mockPtyOut, nextMockPty } from "./fg";
 import mockAcpAgents from "./mockAcpAgents.json";
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
-import type { ApprovalChoice, ClarifyAnswers } from "../lib/protocol";
+import type { ApprovalChoice, AskTool, ClarifyAnswers } from "../lib/protocol";
 import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
@@ -1269,13 +1269,16 @@ class MockChat {
           this.at(400, () => this.end("done"));
           return;
         }
-        const asks: Record<string, { title: string; command: string }> = {
-          install: { title: "Run this command?", command: "pnpm add qrcode" },
-          test: { title: "Run this command?", command: "pnpm test" },
-          commit: { title: "Run this command?", command: "git commit -m 'Add a PromptPay QR'" },
-          deploy: { title: "Run this command?", command: "wrangler deploy" },
-          edit: { title: "Allow Edit to change src/checkout.tsx?", command: "" },
-          outside: { title: "Allow Read?", command: "/home/you/Documents/tax-2026.xlsx" },
+        // each names what it is as the shell does from Claude Code's own request (`tool`, src-tauri/src/ask_tool.rs)
+        const cwd = this.cwd;
+        const run = (line: string) => ({ title: "Run this command?", command: line, tool: { kind: "command" as const, name: "Bash", line, cwd } });
+        const asks: Record<string, { title: string; command: string; tool: AskTool }> = {
+          install: run("pnpm add qrcode"),
+          test: run("pnpm test"),
+          commit: run("git commit -m 'Add a PromptPay QR'"),
+          deploy: run("wrangler deploy"),
+          edit: { title: "Allow Edit to change src/checkout.tsx?", command: "", tool: { kind: "edit", name: "Edit", paths: [`${cwd}/src/checkout.tsx`], cwd } },
+          outside: { title: "Allow Read?", command: "/home/you/Documents/tax-2026.xlsx", tool: { kind: "read", name: "Read", paths: ["/home/you/Documents/tax-2026.xlsx"], cwd } },
         };
         const a = asks[word];
         if (!a) {
@@ -1287,7 +1290,7 @@ class MockChat {
         this.at(60, () => {
           this.waiting = rid;
           this.kitAsk = a.command || a.title;
-          this.emit({ event: "approval.request", request_id: rid, title: a.title, command: a.command, cwd: this.cwd, choices: ["deny", "once", "session"] });
+          this.emit({ event: "approval.request", request_id: rid, title: a.title, command: a.command, cwd: this.cwd, choices: ["deny", "once", "session"], tool: a.tool });
         });
         return;
       }

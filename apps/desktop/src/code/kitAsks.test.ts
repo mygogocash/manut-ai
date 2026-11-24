@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSessions } from "../sessions/sessions";
 import type { ChatEvent, ChatInput, SessionHost } from "../sessions/host";
 import { createStore, type ApprovalItem, type BridgeLike } from "../state/store";
-import type { BridgeEvent, EventOf } from "../lib/protocol";
-import { kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
+import type { AskTool, BridgeEvent, EventOf } from "../lib/protocol";
+import { askOfItem, kitAnswered, kitCard, keysIn, resetKitAsks } from "./kitAsks";
 import { addRule, kitProjects, projectOf, resetKitProjects, setLevel, updateKitProjects } from "./project";
 
 const bridge: BridgeLike = { connect: async () => undefined, onAny: () => () => {}, onStatus: () => () => {}, request: (async () => ({})) as BridgeLike["request"] };
@@ -49,8 +49,8 @@ async function session() {
   const key = ss.chatKey(id)!;
   const emit = (e: ChatEvent) => sinks.get(1)!(e);
   const settle = () => new Promise((r) => setTimeout(r, 0));
-  const ask = async (request_id: string, title: string, command: string) => {
-    emit({ event: "approval.request", request_id, title, command, cwd: ROOT, choices: ["deny", "once", "session"] } as unknown as ChatEvent);
+  const ask = async (request_id: string, title: string, command: string, tool?: AskTool) => {
+    emit({ event: "approval.request", request_id, title, command, cwd: ROOT, choices: ["deny", "once", "session"], ...(tool ? { tool } : {}) } as unknown as ChatEvent);
     await settle();
     await settle();
     return store.getState().chats[key]!.items.find((i) => i.kind === "approval" && i.request_id === request_id) as ApprovalItem;
@@ -148,5 +148,62 @@ describe("Kit's dial on a coding session's asks", () => {
     const card = await s.ask("r9", "Allow WebFetch?", "https://example.com");
     expect(card.resolved).toBeUndefined();
     expect(kitCard(asked("r9", "Allow WebFetch?", "https://example.com"), { chat: s.key, root: ROOT, home: "/w" })).toBeNull();
+  });
+});
+
+describe("Kit's dial on what the shell names of an ask", () => {
+  beforeEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  afterEach(() => {
+    resetKitProjects();
+    resetKitAsks();
+  });
+  const ctx = (chat: string) => ({ chat, root: ROOT, home: "/w" });
+  const bash = (line: string): AskTool => ({ kind: "command", name: "Bash", line, cwd: ROOT });
+
+  it("runs the tests alone through the card, and the card keeps what the shell named", async () => {
+    const s = await session();
+    const card = await s.ask("t1", "Run this command?", "pnpm test", bash("pnpm test"));
+    expect(card.resolved).toBe("once");
+    expect(kitAnswered(s.key, "t1")).toEqual({ by: "reads" });
+    expect(card.tool).toEqual(bash("pnpm test"));
+  });
+
+  it("asks the person before a command on two lines that goes live, which its card shows as one line of tests", async () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+    const s = await session();
+    const card = await s.ask("t2", "Run this command?", "pnpm test git push origin main", bash("pnpm test\ngit push origin main"));
+    expect(card.resolved).toBeUndefined();
+    expect(s.answers()).toEqual([]);
+    // the open card is read from what the store kept of it
+    expect(kitCard(askOfItem(s.key, card), ctx(s.key))).toEqual({ root: ROOT, say: { key: "kit.say.live" }, always: null, keys: [] });
+  });
+
+  it("blocks a change outside the project that the title's cut list hid, and lists it", async () => {
+    updateKitProjects((p) => setLevel(p, ROOT, "everything_in_project"));
+    const s = await session();
+    const paths = [...Array.from({ length: 12 }, (_, i) => `${ROOT}/src/f${i}.ts`), "/w/elsewhere/z.ts"];
+    const card = await s.ask("t3", "Allow Codex to change src/f0.ts, src/f1.ts, src/f2.ts, src/f3.ts, src/f4.ts, src/f5.ts, src/f6.ts, s…?", "", { kind: "edit", paths, cwd: ROOT });
+    expect(card.resolved).toBe("deny");
+    expect(kitAnswered(s.key, "t3")).toEqual({ by: "blocked", project: "baanmali-preorder" });
+    expect(projectOf(kitProjects(), ROOT).blocked).toMatchObject([{ what: "edit", path: "/w/elsewhere/z.ts", folder: "/w/elsewhere" }]);
+  });
+
+  it("does not let a kept rule cover a second command on the next line", async () => {
+    updateKitProjects((p) => addRule(p, ROOT, { words: ["pnpm", "add"] }));
+    const s = await session();
+    expect((await s.ask("t4", "Run this command?", "pnpm add dayjs", bash("pnpm add dayjs"))).resolved).toBe("once");
+    const card = await s.ask("t5", "Run this command?", "pnpm add dayjs rm -rf src", bash("pnpm add dayjs\nrm -rf src"));
+    expect(card.resolved).toBeUndefined();
+    expect(kitCard(askOfItem(s.key, card), ctx(s.key))?.always).toBeNull();
+  });
+
+  it("leaves to the person an ask whose tool names no line, and never reads its words instead", async () => {
+    const s = await session();
+    const card = await s.ask("t6", "Run this command?", "pnpm test", { kind: "command", name: "Bash", cwd: ROOT });
+    expect(card.resolved).toBeUndefined();
+    expect(kitCard(askOfItem(s.key, card), ctx(s.key))).toBeNull();
   });
 });

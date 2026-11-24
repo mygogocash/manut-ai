@@ -136,7 +136,16 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "bbbc866f-ba86-44bf-8cc3-5e96a07b66ad",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d1",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/d1"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -161,7 +170,16 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "bde27dc3-270b-455b-93df-5d19479e1dad",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d2",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/d2"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -186,7 +204,16 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "32e2cbab-b3cd-4e96-801a-a0c9759c7ad5",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d3",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/d3"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -688,7 +715,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "79ccb023-3d46-4b1b-ab39-a2d702a91b80",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "definitely-not-a-command-xyz --flag; echo \"exit=$?\"",
+          "name": "Bash"
+        }
       },
       {
         "event": "tool.end",
@@ -919,7 +952,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "127b0367-255c-4f44-a902-f84ea6e3cd71",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "python3 -c \"import time; time.sleep(30); print('finished')\"",
+          "name": "Bash"
+        }
       },
       {
         "event": "tool.end",
@@ -2542,7 +2581,15 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "59f1836e-edfa-44c9-95da-3285979ad6f8",
-        "title": "Allow Read?"
+        "title": "Allow Read?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "read",
+          "name": "Read",
+          "paths": [
+            "/w/elsewhere/plan.txt"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -2847,7 +2894,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "4e2aeeee-a163-4b48-96ed-6f5f65c753f0",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "python3 -c \"import time; time.sleep(30); print('finished again')\"",
+          "name": "Bash"
+        }
       },
       {
         "event": "tool.end",
@@ -2996,7 +3049,16 @@
           "id": "toolu_01D7x4wmuhUBFnuUfs5h5t4r",
           "name": "Write gamma to c.txt"
         },
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "echo gamma > c.txt",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/c.txt"
+          ]
+        }
       },
       {
         "agent": "claude",
@@ -3175,7 +3237,16 @@
           "id": "toolu_01PjNxPpcdixv7tMY1cdcnXg",
           "name": "Write d.txt file"
         },
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "echo delta > d.txt",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/d.txt"
+          ]
+        }
       },
       {
         "event": "delta",
@@ -3367,7 +3438,16 @@
           "id": "toolu_01X4ibyYU7gga75eg53Nfr37",
           "name": "Write e.txt via echo"
         },
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "echo eps > e.txt",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/e.txt"
+          ]
+        }
       },
       {
         "event": "prompt.expired",
@@ -3462,7 +3542,16 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "1fa392fd-aefd-429f-9339-5459ec7eaf7d",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "sleep 45; echo late > y.txt",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/y.txt"
+          ]
+        }
       },
       {
         "background": 1,
@@ -3756,7 +3845,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-0",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d1"
+        }
       },
       {
         "event": "tool.end",
@@ -3781,7 +3875,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-1",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d2"
+        }
       },
       {
         "event": "tool.end",
@@ -3806,7 +3905,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-2",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d3"
+        }
       },
       {
         "event": "tool.end",
@@ -3831,7 +3935,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-3",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "mkdir -p d4"
+        }
       },
       {
         "event": "tool.end",
@@ -4010,7 +4119,14 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-4",
-        "title": "Allow Codex to change notes.txt?"
+        "title": "Allow Codex to change notes.txt?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "edit",
+          "paths": [
+            "/w/proj/notes.txt"
+          ]
+        }
       },
       {
         "event": "tool.diff",
@@ -4325,7 +4441,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-6",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "definitely-not-a-command-xyz --flag"
+        }
       },
       {
         "event": "tool.end",
@@ -4619,7 +4740,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "codex-5",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "sleep 30; echo finished"
+        }
       },
       {
         "event": "turn.end",
@@ -5182,7 +5308,16 @@
           "id": "toolu_016YS2cG1AUHFFq9nBfbkv9e",
           "name": "Write c.txt via echo"
         },
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "echo three > \"/w/proj/c.txt\"",
+          "name": "Bash",
+          "paths": [
+            "/w/proj/c.txt"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -6541,7 +6676,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "15c83d5cc8f4cc2c",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "ls -la",
+          "name": "bash"
+        }
       },
       {
         "event": "tool.end",
@@ -6566,7 +6707,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "15c83d5ccab4cc2d",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "echo hi",
+          "name": "bash"
+        }
       },
       {
         "event": "tool.end",
@@ -6591,7 +6738,13 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "15c83d5cdb74cc2e",
-        "title": "Run this command?"
+        "title": "Run this command?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "command",
+          "line": "pwd",
+          "name": "bash"
+        }
       },
       {
         "event": "tool.end",
@@ -6673,7 +6826,15 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "15c83d5cf3b4cc30",
-        "title": "Allow write to change notes.txt?"
+        "title": "Allow write to change notes.txt?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "write",
+          "name": "write",
+          "paths": [
+            "notes.txt"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -6698,7 +6859,12 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "15c83d5cf834cc31",
-        "title": "Allow edit to change files?"
+        "title": "Allow edit to change files?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "edit",
+          "name": "edit"
+        }
       },
       {
         "event": "tool.end",
@@ -10475,7 +10641,12 @@
         "event": "approval.request",
         "plan": "# Plan: calc.py에 mul(a, b) 추가\n\n1. `calc.py`의 `sub` 아래에 기존 스타일(빈 줄 2개 구분)로 `def mul(a, b): return a * b` 추가.\n2. `README.md`의 \"Tiny math helpers.\" 아래에 함수 목록(`add`, `sub`, `mul`)을 넣고 `mul`을 명시.\n",
         "request_id": "a0dac4aa-ea15-46df-aaf5-38c705d5beb6",
-        "title": "Start working on this plan?"
+        "title": "Start working on this plan?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "other",
+          "name": "ExitPlanMode"
+        }
       },
       {
         "event": "tool.end",
@@ -10661,7 +10832,12 @@
         "event": "approval.request",
         "plan": "# Plan: `mul(a, b)`를 calc.py에 추가하고 README.md에 등록\n\n1. **calc.py**: `sub` 아래에 기존 `add`/`sub`와 같은 형식(빈 줄 2개 구분)으로 `def mul(a, b): return a * b` 추가.\n2. **README.md**: \"Tiny math helpers.\" 아래에 함수 목록(`add`, `sub`, `mul`)을 넣고 `mul(a, b)`가 `a * b`를 반환한다고 명시.\n\n검증: `python3 -c \"from calc import mul; assert mul(3, 4) == 12\"` 실행 후 README 내용 확인.\n",
         "request_id": "e62b2700-e2e3-4093-a82b-ca57b6a1d66d",
-        "title": "Start working on this plan?"
+        "title": "Start working on this plan?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "other",
+          "name": "ExitPlanMode"
+        }
       },
       {
         "event": "session.info",
@@ -10741,7 +10917,15 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "3c95d6de-f9f9-4e60-bbaf-0828b28cffcf",
-        "title": "Allow Edit to change calc.py?"
+        "title": "Allow Edit to change calc.py?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "edit",
+          "name": "Edit",
+          "paths": [
+            "/w/proj/calc.py"
+          ]
+        }
       },
       {
         "event": "tool.end",
@@ -10788,7 +10972,15 @@
         "cwd": "/w/proj",
         "event": "approval.request",
         "request_id": "e8823451-c092-4c16-bc2f-1b06125f75af",
-        "title": "Allow Edit to change README.md?"
+        "title": "Allow Edit to change README.md?",
+        "tool": {
+          "cwd": "/w/proj",
+          "kind": "edit",
+          "name": "Edit",
+          "paths": [
+            "/w/proj/README.md"
+          ]
+        }
       },
       {
         "event": "tool.end",

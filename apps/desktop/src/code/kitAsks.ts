@@ -11,6 +11,7 @@
 import { useSyncExternalStore } from "react";
 import type { ApprovalChoice, DiffFile, EventOf } from "../lib/protocol";
 import { appSounds } from "../lib/sounds";
+import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
 import { ruleMatches, type Rule, type Say } from "./command";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects } from "./project";
@@ -41,27 +42,37 @@ export const kitAnswered = (chat: string, requestId: string): KitAnswer | undefi
 /** The project's name as the canvas writes it: its folder's last part. */
 export const projectName = (root: string): string => root.split(/[\\/]/).filter(Boolean).pop() ?? root;
 
-const wordsOf = (ev: EventOf<"approval.request">): AskWords => ({ title: ev.title, command: ev.command, cwd: ev.cwd, plan: ev.plan });
+const wordsOf = (ev: EventOf<"approval.request">): AskWords => ({ title: ev.title, command: ev.command, cwd: ev.cwd, plan: ev.plan, tool: ev.tool });
 
-function readIn(ev: EventOf<"approval.request">, ctx: AskContext): { read: AskRead; words: AskWords } | null {
+/** An open card of chat `chat` as the ask it came from, with what the shell named of it (`tool`), for Kit's reading. */
+export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.request"> => ({
+  event: "approval.request",
+  bot: chat,
+  request_id: item.request_id,
+  title: item.title,
+  command: item.command,
+  cwd: item.cwd,
+  plan: item.plan,
+  choices: item.choices,
+  tool: item.tool,
+});
+
+function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | null {
   if (ev.outdated) return null;
   const project = projectOf(kitProjects(), ctx.root);
-  const words = wordsOf(ev);
-  const read = readAsk(words, { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
-  return read ? { read, words } : null;
+  return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
 }
 
 /** The answer Kit's dial gives ask `ev` by itself, or null when it waits on the person. A step outside the project is
  *  noted on the Code page as it is denied. The answer never rings: the app gave it, nobody needs to look. */
 export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): { choice: ApprovalChoice; answer: KitAnswer } | null {
-  const it = readIn(ev, ctx);
-  if (!it) return null;
-  const { read, words } = it;
+  const read = readIn(ev, ctx);
+  if (!read) return null;
   const project = projectOf(kitProjects(), ctx.root);
-  const d = decideAsk(read, words, project, keysIn(ctx.chat), now);
+  const d = decideAsk(read, project, keysIn(ctx.chat), now);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
-    const byLevel = decideAsk(read, words, { ...project, rules: [] }, keysIn(ctx.chat), now).answer === "alone";
+    const byLevel = decideAsk(read, { ...project, rules: [] }, keysIn(ctx.chat), now).answer === "alone";
     const answer: KitAnswer = read.action === "read" || read.action === "check" ? { by: "reads" } : byLevel ? { by: "dial", level: project.level } : { by: "rule" };
     out = { choice: "once", answer };
   } else if (d.answer === "blocked" && ev.choices.includes("deny")) {
@@ -88,13 +99,14 @@ export interface KitCard {
 }
 
 export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext): KitCard | null {
-  const it = readIn(ev, ctx);
-  if (!it) return null;
-  const { read, words } = it;
+  const read = readIn(ev, ctx);
+  if (!read) return null;
   const project = projectOf(kitProjects(), ctx.root);
   const keys = keysIn(ctx.chat);
-  const d = decideAsk(read, words, project, keys);
-  const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !project.rules.some((r) => ruleMatches(r, words.command)) ? read.rule : null;
+  const d = decideAsk(read, project, keys);
+  // a rule is matched against the line that was read, never the card's one-line command
+  const kept = read.line !== undefined && project.rules.some((r) => ruleMatches(r, read.line!));
+  const always = d.answer === "ask" && d.mayAlwaysAllow && read.rule && !kept ? read.rule : null;
   return { root: ctx.root, say: read.say, always, keys: read.saves ? keys : [] };
 }
 
