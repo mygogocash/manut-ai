@@ -7,7 +7,7 @@ import { t, type Key } from "../i18n";
 import type { ApprovalChoice } from "../lib/protocol";
 import { getSessions } from "../sessions/sessions";
 import type { ApprovalItem } from "../state/store";
-import { kitAnswered, kitCard, useKeysVersion, type AskContext, type KitCard } from "./kitAsks";
+import { askOfItem, kitAnswered, kitCard, useKeysVersion, type AskContext, type KitCard } from "./kitAsks";
 import { useKitProjects } from "./project";
 
 /** Where a coding session's ask is asked, from its chat key (`agent:<id>`); null for any other chat. */
@@ -27,7 +27,7 @@ export function useKitCard(chat: string, item: ApprovalItem): KitCard | null {
   if (item.resolved || item.expired || item.outdated) return null;
   const ctx = sessionContext(chat);
   if (!ctx) return null;
-  return kitCard({ event: "approval.request", bot: chat, request_id: item.request_id, title: item.title, command: item.command, cwd: item.cwd, plan: item.plan, choices: item.choices }, ctx);
+  return kitCard(askOfItem(chat, item), ctx);
 }
 
 /** A button of Kit's card. "Always allow in this project" allows this one ask once, then keeps the rule. */

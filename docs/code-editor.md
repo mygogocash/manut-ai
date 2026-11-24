@@ -44,7 +44,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Kit asks to run a command: Allow once, Always allow in this project, No; "Adds 1 package to the project." | Has (this branch): a coding session's ask says what the step does, and offers No, Allow once and Always allow in this project, which keeps a rule for the project | `code/command.ts`, `code/ask.ts`, `code/KitCardParts.tsx`, `chat/cards/Cards.slot.tsx` |
+| Kit asks to run a command: Allow once, Always allow in this project, No; "Adds 1 package to the project." | Has (this branch): a coding session's ask says what the step does, and offers No, Allow once and Always allow in this project, which keeps a rule for the project. The shell names each ask's tool, command line, paths and folder from the agent's own message, and the dial reads those | `src-tauri/src/ask_tool.rs`, `code/command.ts`, `code/ask.ts`, `code/KitCardParts.tsx`, `chat/cards/Cards.slot.tsx` |
 | How much Kit does alone: Asks every time, Edits alone, Edits and safe commands, Everything in this project. "Going live always asks, at every level." | Has (this branch): the dial on the Code page, per project, and the asks it settles by itself | `packages/member-grants/src/kit.ts`, `code/KitPanel.tsx`, `code/kitAsks.ts` |
 | Outside the project: blocked and shown, with Allow this folder | Has (this branch): denied as it is asked, listed on the Code page, and Allow this folder lets Kit read there | `code/kitAsks.ts`, `code/KitPanel.tsx`, `code/project.ts` |
 
@@ -104,7 +104,10 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `packages/member-grants/src/kit.ts`: Kit's dial (`kitDecide`), on top of `decide`.
 - `apps/desktop/src/code/command.ts`: a command read before it runs: its kind of step, the paths outside the project,
   the rule "Always allow" would keep, and what it does in words.
-- `apps/desktop/src/code/ask.ts`: a session's ask read by the words the shell writes on it, and decided by the dial.
+- `apps/desktop/src-tauri/src/ask_tool.rs`: what each ask is, named by the shell from the agent's own message (`tool`
+  on the ask): the kind of step, a command's whole line, every path a file tool names, and the folder it runs in.
+- `apps/desktop/src/code/ask.ts`: a session's ask read by what the shell names, and decided by the dial. An ask that
+  names nothing is read by the words the shell writes on it.
 - `apps/desktop/src/code/project.ts`: each project's level, kept rules, folders Kit may read and stopped steps, on this
   computer.
 - `apps/desktop/src/code/secrets.ts`: keys in Kit's changes, counted with the app's one masker.
@@ -113,6 +116,27 @@ The states whose rules are pure functions, with their tests, then the screens th
   Code page.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `commit` and
   `deploy`, so each state can be seen in a browser; `e2e/kit-code.spec.ts` walks them.
+
+### How an ask is read
+
+An ask's title and command are for the person: the shell cuts them to one short line. So the shell also names what
+the agent asked, from the agent's own message, and the dial reads that:
+
+| Agent | Where it comes from | What is named |
+| --- | --- | --- |
+| Claude Code | its permission request (`can_use_tool`) | the tool, a command's line, a file tool's path, the path Claude Code found outside its folders (`blocked_path`). A command that asks to leave Claude Code's sandbox (`dangerouslyDisableSandbox`) is left to the person |
+| Codex | the request, and the file change it names | the script inside Codex's `zsh -lc '…'`, the folder Codex names, every changed file, where a move takes a file, the folder Codex asks to keep writing under |
+| OpenCode and the other ACP agents | the call's own `kind` and input (`rawInput`) | a command's line and the folder it names, a file tool's path |
+| oh-my-pi | the one running call of the tool its dialog names | a command's line, a file tool's path |
+
+A part the shell cannot read whole is left out: a line over 10,000 characters, more than 200 paths, a shell wrapper
+that is not one plainly quoted script. Then the dial does not decide: the card asks the person. It never falls back to
+the title's words for an ask that names its tool.
+
+What this changes: a command on two lines is read as two commands, not as the one line its card shows (`pnpm test`
+then `git push origin main` asks at every level; by its card it read as the tests, which run alone); a kept rule must
+match the whole line; a long list of files is read whole, with where a move takes a file; and a file change that
+deletes a file is a delete, which only Everything in this project lets Kit do alone.
 
 Kit's dial acts on the asks of a coding session that runs as a chat in the app, whose asks arrive as cards: the
 canvas's Code board draws Kit's lane that way ("Tell Kit what to change", Kit's note). Since 16 November the Code
@@ -132,6 +156,13 @@ does not reach those sessions yet. The Code page shows the dial for every projec
 - The main branch moving while Kit worked, with Let Kit merge and Show me both.
 - Something that keeps running: the commands still running, with their age, port and Stop.
 - A preview with sample values until the owner adds a real one.
-- The shell naming the tool and the path on an ask, so an ask is not read from its title's words.
+- Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
+  and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
+  session's folder. It does check the path Claude Code itself found outside. Starting Claude Code with
+  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` would start every command in the project; that changes how the
+  developer's own agent works, so it wants its own decision.
+- Asks that still name no path, so they ask the person: a search that names no folder, or a Glob whose pattern
+  reaches past its folder; oh-my-pi's own edit, which names its file inside its patch; and an ACP agent's search or
+  move.
 - Kit asking for a secret, kept in this Mac's keychain without Kit seeing it: a keychain item per project, written from
   a password field and handed only to the commands that need it. That is Rust, and real secrets need the owner.
