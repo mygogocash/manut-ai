@@ -11,6 +11,7 @@ import {
   correctionReady,
   groupFacts,
   MEMORY_START,
+  memoryCallsFor,
   memoryDo,
   memoryReduce,
   memoryStep,
@@ -288,13 +289,18 @@ describe("an action the owner takes, applied to the list the page shows", () => 
   async function demo(): Promise<{ calls: MemoryCalls; facts: MemoryFact[] }> {
     const rt = new MockRuntime(new MockHost({ now: () => 1_800_000_000 }));
     await rt.connect();
-    const calls: MemoryCalls = {
-      memoryRemember: (text) => rt.request("memory.remember", { text }),
-      memoryConfirm: (fact) => rt.request("memory.confirm", { fact }),
-      memoryCorrect: (fact, text) => rt.request("memory.correct", { fact, text }),
-      memoryForget: (fact) => rt.request("memory.forget", { fact }),
-    };
-    return { calls, facts: (await rt.request("memory.list", {})).facts };
+    const listed = await rt.request("memory.list", {});
+    // the page's calls are the store's actions bound to the shop the list was read for (`memoryCallsFor`)
+    const calls = memoryCallsFor(
+      {
+        memoryRemember: (shop, text) => rt.request("memory.remember", { shop, text }),
+        memoryConfirm: (shop, fact) => rt.request("memory.confirm", { shop, fact }),
+        memoryCorrect: (shop, fact, text) => rt.request("memory.correct", { shop, fact, text }),
+        memoryForget: (shop, fact) => rt.request("memory.forget", { shop, fact }),
+      },
+      listed.shop,
+    );
+    return { calls, facts: listed.facts };
   }
   const refuses = (code: string, message: string): MemoryCalls => {
     const no = async (): Promise<never> => {
@@ -382,5 +388,88 @@ describe("an action the owner takes, applied to the list the page shows", () => 
     await memoryDo(calls, facts, { what: "forget", fact: facts[0].id });
     await memoryDo(calls, facts, { what: "remember", text: "One more" });
     expect(JSON.stringify(facts)).toBe(before);
+  });
+});
+
+describe("the calls the page makes name the shop its list was read for", () => {
+  it("binds every change to that shop, and none to the shop the switcher shows by the time it is sent", async () => {
+    const sent: unknown[][] = [];
+    const record = (name: string, answer: unknown) => async (...args: unknown[]) => (sent.push([name, ...args]), answer as never);
+    const fact = { id: "f1" } as MemoryFact;
+    const calls = memoryCallsFor(
+      {
+        memoryRemember: record("remember", { fact }),
+        memoryConfirm: record("confirm", { fact }),
+        memoryCorrect: record("correct", { fact }),
+        memoryForget: record("forget", { fact: "f1" }),
+      },
+      "pilot:shop-a",
+    );
+    await calls.memoryRemember("We ship on weekdays");
+    await calls.memoryConfirm("f5");
+    await calls.memoryCorrect("f1", "New words");
+    await calls.memoryForget("f1");
+    expect(sent).toEqual([["remember", "pilot:shop-a", "We ship on weekdays"], ["confirm", "pilot:shop-a", "f5"], ["correct", "pilot:shop-a", "f1", "New words"], ["forget", "pilot:shop-a", "f1"]]);
+  });
+
+  it("names no shop for a person who is in none", async () => {
+    const sent: unknown[][] = [];
+    const calls = memoryCallsFor(
+      {
+        memoryRemember: async (...a) => (sent.push(a), { fact: {} as MemoryFact }),
+        memoryConfirm: async (...a) => (sent.push(a), { fact: {} as MemoryFact }),
+        memoryCorrect: async (...a) => (sent.push(a), { fact: {} as MemoryFact }),
+        memoryForget: async (...a) => (sent.push(a), { fact: "f1" }),
+      },
+      null,
+    );
+    await calls.memoryForget("f1");
+    expect(sent).toEqual([[null, "f1"]]);
+  });
+});
+
+describe("another shop is shown, and a change whose end the page cannot tell", () => {
+  const refuses = (code: string, message: string): MemoryCalls => {
+    const no = async (): Promise<never> => {
+      throw { code, message };
+    };
+    return { memoryRemember: no, memoryConfirm: no, memoryCorrect: no, memoryForget: no };
+  };
+  const facts = [{ id: "f1", text: "Free shipping", status: "confirmed", source: { kind: "owner" }, at: 1, correctedAt: null } as MemoryFact];
+
+  it("forgets what was asked or typed about the last shop", () => {
+    let ui = memoryReduce(MEMORY_START, { type: "add", text: "We ship on weekdays" });
+    ui = memoryReduce(ui, { type: "forget", fact: "f1" });
+    expect(memoryReduce(ui, { type: "reset" })).toEqual(MEMORY_START);
+  });
+
+  it("reads the list again after a change whose end it cannot tell, and never says it was done", async () => {
+    for (const what of ["remember", "confirm", "correct", "forget"] as const) {
+      const step = await memoryDo(refuses("unavailable", "No reply from the API. Checking whether it changed."), facts, { what, text: "x", fact: "f1" } as never);
+      expect(step.facts, what).toEqual(facts);
+      expect(step.action, what).toEqual({ type: "failed", message: "No reply from the API. Checking whether it changed." });
+      expect(step.reread, what).toBe(true);
+    }
+  });
+
+  it("reads the list again when it was told something it did not know, and not for a refusal about the shop", async () => {
+    expect((await memoryDo(refuses("already_known", "x"), facts, { what: "remember", text: "x" })).reread).toBe(true);
+    expect((await memoryDo(refuses("not_found", "x"), facts, { what: "confirm", fact: "f1" })).reread).toBe(true);
+    for (const code of ["owner_only", "invalid_text", "full", "offline"]) expect((await memoryDo(refuses(code, "x"), facts, { what: "remember", text: "x" })).reread, code).toBe(false);
+  });
+
+  it("says a fact is gone only of a fact: of a new one, `not_found` is the shop, in the runtime's own words", async () => {
+    const forgot = await memoryDo(refuses("not_found", "That is not in this shop any more."), facts, { what: "forget", fact: "f1" });
+    expect(forgot.action).toEqual({ type: "failed", message: t("memory.refuse.not_found") });
+    expect(forgot.facts).toEqual([]);
+    const told = await memoryDo(refuses("not_found", "That is not in this shop any more."), facts, { what: "remember", text: "x" });
+    expect(told.action).toEqual({ type: "failed", message: "That is not in this shop any more." });
+    expect(told.facts).toEqual(facts);
+    expect(refusalText("not_found", "words", false)).toBe("words");
+    expect(refusalText("not_found", "words")).toBe(t("memory.refuse.not_found"));
+  });
+
+  it("says each of the runtime's words in every language, none empty", () => {
+    for (const l of LANGS) for (const k of ["memory.err.ownerOnly", "memory.err.noShop", "memory.err.unavailable", "memory.err.unreadable", "rt.change.unreadable"] as const) expect(t(k, undefined, l).trim(), `${l} ${k}`).not.toBe("");
   });
 });

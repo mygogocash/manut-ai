@@ -76,7 +76,9 @@ export type MemoryAction =
   | { type: "cancel" }
   | { type: "begin" }
   | { type: "done"; what: "remember" | "confirm" | "correct" | "forget" }
-  | { type: "failed"; message: string };
+  | { type: "failed"; message: string }
+  /** another shop is shown: nothing asked or typed about the last one stays */
+  | { type: "reset" };
 
 /** Moves the page between asking, waiting on the runtime and done. While a request is on its way nothing else can be asked or
  *  typed, so the owner cannot ask twice and what they typed is not lost when it ends. */
@@ -104,6 +106,8 @@ export function memoryReduce(s: MemoryUi, a: MemoryAction): MemoryUi {
           : { ...s, ask: null, busy: false, error: null };
     case "failed":
       return { ...s, busy: false, error: a.message };
+    case "reset":
+      return MEMORY_START;
   }
 }
 
@@ -125,21 +129,23 @@ const REFUSALS = new Map<string, Key>([
   ["not_found", "memory.refuse.not_found"],
 ]);
 
-export function refusalText(code: string, message: string): string {
-  const key = REFUSALS.get(code);
+export function refusalText(code: string, message: string, aboutFact = true): string {
+  // `not_found` says a fact is gone only of a fact. Of a new one it is the shop that is not there, in the runtime's own words.
+  const key = code === "not_found" && !aboutFact ? undefined : REFUSALS.get(code);
   return key ? t(key, { max: code === "full" ? MAX_FACTS : MAX_TEXT }) : message;
 }
 
 export type MemoryResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
 /** Asks the runtime to act and says how the page moves on: what it answered, or the words to show when it would not, with
- *  the runtime's code so a caller can tell a fact that is gone from one that was refused. */
-export async function memoryStep<T>(call: () => Promise<T>): Promise<MemoryResult<T>> {
+ *  the runtime's code so a caller can tell a fact that is gone from one that was refused. `aboutFact` is false for a new fact,
+ *  which has none to be gone. */
+export async function memoryStep<T>(call: () => Promise<T>, aboutFact = true): Promise<MemoryResult<T>> {
   try {
     return { ok: true, value: await call() };
   } catch (e) {
     const why = unavailable(e);
-    return why.kind === "unavailable" ? { ok: false, code: why.code, message: refusalText(why.code, why.message) } : { ok: false, code: "internal", message: "" };
+    return why.kind === "unavailable" ? { ok: false, code: why.code, message: refusalText(why.code, why.message, aboutFact) } : { ok: false, code: "internal", message: "" };
   }
 }
 
@@ -151,6 +157,25 @@ export interface MemoryCalls {
   memoryForget(fact: string): Promise<{ fact: string }>;
 }
 
+/** The store's actions as the page calls them: each change names the shop (`memory.*` in src/runtime/memory.ts). */
+export interface MemoryActions {
+  memoryRemember(shop: string | null, text: string): Promise<{ fact: MemoryFact }>;
+  memoryConfirm(shop: string | null, fact: string): Promise<{ fact: MemoryFact }>;
+  memoryCorrect(shop: string | null, fact: string, text: string): Promise<{ fact: MemoryFact }>;
+  memoryForget(shop: string | null, fact: string): Promise<{ fact: string }>;
+}
+
+/** The actions for `shop`, the one the list on the page was read for. A change never goes to the shop the switcher shows by the
+ *  time it is sent: the runtime acts on the shop it is told, which is the list's. */
+export function memoryCallsFor(actions: MemoryActions, shop: string | null): MemoryCalls {
+  return {
+    memoryRemember: (text) => actions.memoryRemember(shop, text),
+    memoryConfirm: (fact) => actions.memoryConfirm(shop, fact),
+    memoryCorrect: (fact, text) => actions.memoryCorrect(shop, fact, text),
+    memoryForget: (fact) => actions.memoryForget(shop, fact),
+  };
+}
+
 /** What the owner did: said something to remember, said "It's true", corrected a fact's words, or forgot a fact. */
 export type MemoryDo =
   | { what: "remember"; text: string }
@@ -158,11 +183,23 @@ export type MemoryDo =
   | { what: "correct"; fact: string; text: string }
   | { what: "forget"; fact: string };
 
+/** The refusals that mean the list the owner is looking at may be out of date: the page reads it again, so what they see is how
+ *  things stand. A change whose outcome the page cannot tell (the API did not answer, or answered in a way this build cannot
+ *  read) is never said to be done either way: the list is read again to see. */
+const MOVED_ON = new Set(["unavailable", "not_found", "already_known"]);
+
+export interface MemoryStep {
+  facts: MemoryFact[];
+  action: MemoryAction;
+  /** the list the owner sees may be out of date: read it again */
+  reread: boolean;
+}
+
 /** Asks the runtime to do it, and says what the list is now and how the page moves on. The list is the runtime's answer put
  *  in its place, never a guess: a fact that was forgotten is gone from it, words and id, and one the runtime refused leaves
  *  the list as it was. A fact the runtime says is gone is dropped too, since the owner is looking at a list that went out of
  *  date. */
-export async function memoryDo(calls: MemoryCalls, facts: readonly MemoryFact[], todo: MemoryDo): Promise<{ facts: MemoryFact[]; action: MemoryAction }> {
+export async function memoryDo(calls: MemoryCalls, facts: readonly MemoryFact[], todo: MemoryDo): Promise<MemoryStep> {
   const done = await memoryStep(async () => {
     switch (todo.what) {
       case "remember":
@@ -174,8 +211,8 @@ export async function memoryDo(calls: MemoryCalls, facts: readonly MemoryFact[],
       case "forget":
         return withoutFact(facts, (await calls.memoryForget(todo.fact)).fact);
     }
-  });
-  if (done.ok) return { facts: done.value, action: { type: "done", what: todo.what } };
+  }, todo.what !== "remember");
+  if (done.ok) return { facts: done.value, action: { type: "done", what: todo.what }, reread: false };
   const gone = done.code === "not_found" && todo.what !== "remember";
-  return { facts: gone ? withoutFact(facts, todo.fact) : [...facts], action: { type: "failed", message: done.message } };
+  return { facts: gone ? withoutFact(facts, todo.fact) : [...facts], action: { type: "failed", message: done.message }, reread: MOVED_ON.has(done.code) };
 }

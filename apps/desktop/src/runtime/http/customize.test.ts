@@ -93,6 +93,8 @@ describe("the team's routines on the connected runtime", () => {
         enabled: true,
         next: (T0 + 3600_000) / 1000,
         timeZone: "Asia/Bangkok",
+        // no session may change a schedule, so it cannot be removed either
+        removable: false,
       },
     ]);
   });

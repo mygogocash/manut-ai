@@ -9,10 +9,12 @@
 //
 // The page never decides what the team knows or which routines there are: the runtime does, by `@manut/shop-memory`'s and
 // `@manut/routine-rules`' rules. The page shows its answers, asks it to act, and never shows a waiting fact as used or a
-// forgotten fact's words again. Correct and Forget ask once more, in place, before anything is done. The connected runtime
-// answers "not yet" to all of memory and to every routine write, which each half shows in the runtime's own words. The rules
-// and words are memory.ts and routines.ts; this file draws them.
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+// forgotten fact's words again. Correct, Forget and Remove ask once more, in place, before anything is done. What the team knows
+// and its routines are a shop's, and only its owner sees or changes them: each half is read for the shop the switcher shows, and
+// again when it shows another, and every change names the shop its list was read for, so it never lands on another shop
+// because the switcher moved meanwhile. A shop the person only helps at is refused in the runtime's own words, which each half
+// shows in place of its list. The rules and words are memory.ts and routines.ts; this file draws them.
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import "./customize.css";
 import { weekdayName } from "../app/time";
 import { t } from "../i18n";
@@ -28,7 +30,7 @@ import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } fr
 import { GooglePane, useGoogle, type GoogleProps } from "./GooglePane";
 import { thisMacRecord } from "./connections";
 import { OutpostPane, useOutpost, type OutpostPaneProps } from "./OutpostPane";
-import { correctionReady, groupFacts, MEMORY_START, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
+import { correctionReady, groupFacts, MEMORY_START, memoryCallsFor, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
 import {
   FORM_ACTIONS,
   FORM_WHENS,
@@ -38,6 +40,7 @@ import {
   nextLine,
   problemText,
   ROUTINES_START,
+  routineCallsFor,
   routineDo,
   routinesReduce,
   type RoutineDo,
@@ -253,6 +256,8 @@ export interface RoutinesPaneProps {
   onAdd: () => void;
   /** a routine's switch: pauses it when it is on and resumes it when it is off */
   onSwitch: (row: RoutineRow) => void;
+  /** Remove it, in the open question of this routine */
+  onRemove: (row: RoutineRow) => void;
 }
 
 /** Monday first, as a shop's week runs; a weekday is 0 for Sunday, as the package counts. */
@@ -347,6 +352,9 @@ function RoutineFormView({ p, f }: { p: RoutinesPaneProps; f: RoutineForm }) {
         <div className="field">
           <label htmlFor="routine-threshold">{t("routines.form.threshold")}</label>
           <input id="routine-threshold" className="input" type="number" min="1" step="1" value={f.threshold} disabled={busy} onChange={(e) => set({ threshold: e.target.value })} />
+          <p className="help" data-testid="routine-stock-note">
+            {t("routines.form.stockNote")}
+          </p>
         </div>
       )}
       {timeOfDay && (
@@ -374,6 +382,27 @@ function RoutineFormView({ p, f }: { p: RoutinesPaneProps; f: RoutineForm }) {
 
 function RoutineLine({ row, p }: { row: RoutineRow; p: RoutinesPaneProps }) {
   const next = nextLine(row, p.nowMs);
+  const busy = p.ui.saving || p.ui.switching !== null || p.ui.removing !== null;
+  const keep = () => p.dispatch({ type: "keep" });
+  // Remove: a question in its row, with the routine still shown and the safe answer holding the focus. Nothing is removed until
+  // the owner says so.
+  if (p.ui.ask === row.id)
+    return (
+      <div className="tr" data-testid="routine" data-routine={row.id} onKeyDown={formKeys(keep)}>
+        <div className="grow">
+          <div className="strong">{nameLine(row)}</div>
+          <p className="mut small" data-testid="routine-remove-question">
+            {t("routines.removeAsk")}
+          </p>
+        </div>
+        <button type="button" className="btn danger solid" disabled={busy} onClick={() => p.onRemove(row)} data-testid="routine-remove-yes">
+          {t("routines.removeYes")}
+        </button>
+        <button type="button" className="btn" autoFocus disabled={busy} onClick={keep} data-testid="routine-remove-keep">
+          {t("routines.keep")}
+        </button>
+      </div>
+    );
   return (
     <div className="tr" data-testid="routine" data-routine={row.id}>
       <div className="grow">
@@ -381,13 +410,18 @@ function RoutineLine({ row, p }: { row: RoutineRow; p: RoutinesPaneProps }) {
         <div className="strong">{nameLine(row)}</div>
         {!row.enabled ? <div className="mut small">{t("routines.paused")}</div> : next && <div className="mut small">{next}</div>}
       </div>
+      {row.removable && (
+        <button type="button" className="lk" disabled={busy} onClick={() => p.dispatch({ type: "remove", routine: row.id })} aria-label={`${t("routines.remove")}: ${row.name}`} data-testid="routine-remove">
+          {t("routines.remove")}
+        </button>
+      )}
       <button
         type="button"
         className="sw"
         role="switch"
         aria-checked={row.enabled}
         aria-label={row.name}
-        disabled={p.ui.saving || p.ui.switching !== null}
+        disabled={busy}
         onClick={() => p.onSwitch(row)}
         data-testid="routine-switch"
       />
@@ -559,43 +593,103 @@ export function CustomizeView({
   );
 }
 
+/** A list the runtime read, and the shop it read it for: every change names that shop (`memory.*` and `routine.*` in
+ *  src/runtime/). */
+interface Listed<T> {
+  shop: string | null;
+  items: T[];
+}
+
+/** The list as a half of the page draws it. */
+const itemsOf = <T,>(l: Load<Listed<T>>): Load<T[]> => (l.kind === "ready" ? { kind: "ready", value: l.value.items } : l);
+
 export function CustomizePage() {
   const s = useStore();
   const [tab, setTab] = useState<CustomizeTab>("memory");
   const outpost = useOutpost(s.shops.current, s.shops.list);
   const vault = useConnections(tab === "connections", s.shops.current);
   const google = useGoogle(tab === "connections", s.shops.current, () => s.openPage("needs"));
-  const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
-  const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);
+  const viewing = s.shops.current;
+  const viewingRef = useRef(viewing);
+  viewingRef.current = viewing;
+  /** Counts the changes made, so a list read again after one that was not answered is not put over what a later change left. */
+  const changes = useRef(0);
+  const [facts, setFacts] = useState<Load<Listed<MemoryFact>>>(LOADING);
+  const [rows, setRows] = useState<Load<Listed<RoutineRow>>>(LOADING);
   const [memoryUi, memoryDispatch] = useReducer(memoryReduce, MEMORY_START);
   const [routinesUi, routinesDispatch] = useReducer(routinesReduce, ROUTINES_START);
-  // Each half is read when the page opens, and on its own: the connected runtime shows routines but not memory.
+  /** The runtime's word on what the team knows, and on its routines, as the page keeps them: the list with the shop it was read for. */
+  const readFacts = () =>
+    load(async () => {
+      const r = await getStore().actions.memoryList();
+      return { shop: r.shop, items: r.facts };
+    });
+  const readRows = () =>
+    load(async () => {
+      const r = await getStore().actions.routineList();
+      return { shop: r.shop, items: r.routines };
+    });
+
+  // Each half is read when the page opens, and again when the switcher shows another shop, and on its own: one can be refused
+  // while the other shows (the connected runtime has no memory to show a person who is in no shop, but lists their schedules).
   useEffect(() => {
     let live = true;
-    void load(async () => (await getStore().actions.memoryList()).facts).then((r) => live && setFacts(r));
-    void load(async () => (await getStore().actions.routineList()).routines).then((r) => live && setRows(r));
+    setFacts(LOADING);
+    setRows(LOADING);
+    memoryDispatch({ type: "reset" });
+    routinesDispatch({ type: "reset" });
+    void readFacts().then((r) => live && setFacts(r));
+    void readRows().then((r) => live && setRows(r));
     return () => {
       live = false;
     };
-  }, []);
+    // `readFacts` and `readRows` only ask the store, which is the same whenever they are called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewing]);
+
+  /** Reads a list again without blanking it, so the owner sees how things stand after a change the page could not tell the end of.
+   *  A read that did not work leaves what is shown, and the change's words stay. Not after the owner switched shops, and not if
+   *  a change began meanwhile: its answer is newer. */
+  const rereadFacts = async (at: string | null) => {
+    const made = changes.current;
+    const again = await readFacts();
+    if (again.kind === "ready" && viewingRef.current === at && changes.current === made) setFacts(again);
+  };
+  const rereadRows = async (at: string | null) => {
+    const made = changes.current;
+    const again = await readRows();
+    if (again.kind === "ready" && viewingRef.current === at && changes.current === made) setRows(again);
+  };
 
   const remember = async (todo: MemoryDo) => {
     if (facts.kind !== "ready") return;
+    const { shop, items } = facts.value;
+    const at = viewingRef.current;
+    changes.current += 1;
     memoryDispatch({ type: "begin" });
-    const step = await memoryDo(s, facts.value, todo);
-    setFacts({ kind: "ready", value: step.facts });
+    const step = await memoryDo(memoryCallsFor(s, shop), items, todo);
+    // The owner switched shops while the change was on its way: it went to the shop its list was read for, so what it did is not
+    // put on the page that shows another one.
+    if (viewingRef.current !== at) return;
+    setFacts({ kind: "ready", value: { shop, items: step.facts } });
     memoryDispatch(step.action);
+    if (step.reread) void rereadFacts(at);
   };
   const routine = async (todo: RoutineDo) => {
     if (rows.kind !== "ready") return;
-    routinesDispatch(todo.what === "save" ? { type: "begin", what: "save" } : { type: "begin", what: "switch", routine: todo.row.id });
-    const step = await routineDo(s, rows.value, todo);
-    setRows({ kind: "ready", value: step.rows });
+    const { shop, items } = rows.value;
+    const at = viewingRef.current;
+    changes.current += 1;
+    routinesDispatch(todo.what === "save" ? { type: "begin", what: "save" } : { type: "begin", what: todo.what, routine: todo.row.id });
+    const step = await routineDo(routineCallsFor(s, shop), items, todo);
+    if (viewingRef.current !== at) return;
+    setRows({ kind: "ready", value: { shop, items: step.rows } });
     routinesDispatch(step.action);
+    if (step.reread) void rereadRows(at);
   };
 
   const memory: MemoryPaneProps = {
-    state: facts,
+    state: itemsOf(facts),
     ui: memoryUi,
     nowMs: Date.now(),
     dispatch: memoryDispatch,
@@ -608,7 +702,7 @@ export function CustomizePage() {
     onForget: (fact) => void remember({ what: "forget", fact }),
   };
   const routines: RoutinesPaneProps = {
-    state: rows,
+    state: itemsOf(rows),
     ui: routinesUi,
     nowMs: Date.now(),
     dispatch: routinesDispatch,
@@ -621,6 +715,9 @@ export function CustomizePage() {
       else void routine({ what: "save", form });
     },
     onSwitch: (row) => void routine({ what: "switch", row }),
+    onRemove: (row) => {
+      if (routinesUi.ask === row.id) void routine({ what: "remove", row });
+    },
   };
   return (
     <CustomizeView

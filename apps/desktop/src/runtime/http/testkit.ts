@@ -57,6 +57,7 @@ export const WRITE_OPS = [
   "routine.create",
   "routine.pause",
   "routine.resume",
+  "routine.remove",
 ] as const;
 
 

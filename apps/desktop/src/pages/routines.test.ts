@@ -18,7 +18,9 @@ import {
   nameLine,
   nextLine,
   problemText,
+  refusalText,
   ROUTINES_START,
+  routineCallsFor,
   routineDo,
   routineStep,
   routinesReduce,
@@ -42,6 +44,7 @@ const row = (over: Partial<RoutineRow> = {}): RoutineRow => ({
   enabled: true,
   next: bkk(23, 8),
   timeZone: "Asia/Bangkok",
+  removable: true,
   ...over,
 });
 
@@ -285,7 +288,7 @@ describe("how the form and the switches move", () => {
   const act = (s: RoutinesUi, ...as: Parameters<typeof routinesReduce>[1][]) => as.reduce(routinesReduce, s);
 
   it("starts with the form closed and nothing on its way", () => {
-    expect(start).toEqual({ form: null, problem: null, saving: false, switching: null, error: null });
+    expect(start).toEqual({ form: null, problem: null, saving: false, switching: null, ask: null, removing: null, error: null });
   });
 
   it("opens the form as a fresh one each time, and closes it", () => {
@@ -373,18 +376,24 @@ describe("an action the owner takes, applied to the routines the page shows", ()
   async function demo(): Promise<{ calls: RoutineCalls; rows: RoutineRow[] }> {
     const rt = new MockRuntime(new MockHost({ now: () => NOW / 1000 }));
     await rt.connect();
-    const calls: RoutineCalls = {
-      routineCreate: (params) => rt.request("routine.create", params),
-      routinePause: (routine) => rt.request("routine.pause", { routine }),
-      routineResume: (routine) => rt.request("routine.resume", { routine }),
-    };
-    return { calls, rows: (await rt.request("routine.list", {})).routines };
+    const listed = await rt.request("routine.list", {});
+    // the page's calls are the store's actions bound to the shop the list was read for (`routineCallsFor`)
+    const calls = routineCallsFor(
+      {
+        routineCreate: (shop, params) => rt.request("routine.create", { shop, ...params }),
+        routinePause: (shop, routine) => rt.request("routine.pause", { shop, routine }),
+        routineResume: (shop, routine) => rt.request("routine.resume", { shop, routine }),
+        routineRemove: (shop, routine) => rt.request("routine.remove", { shop, routine }),
+      },
+      listed.shop,
+    );
+    return { calls, rows: listed.routines };
   }
   const refuses = (code: string, message: string): RoutineCalls => {
     const no = async (): Promise<never> => {
       throw { code, message };
     };
-    return { routineCreate: no, routinePause: no, routineResume: no };
+    return { routineCreate: no, routinePause: no, routineResume: no, routineRemove: no };
   };
   const filled = (over: Partial<RoutineForm> = {}): RoutineForm => ({ ...FORM_START, name: "Remind me about parcels", ...over });
 
@@ -442,5 +451,150 @@ describe("an action the owner takes, applied to the routines the page shows", ()
     await routineDo(calls, rows, { what: "switch", row: rows[0] });
     await routineDo(calls, rows, { what: "save", form: filled() });
     expect(JSON.stringify(rows)).toBe(before);
+  });
+});
+
+describe("removing a routine, as the page asks it", () => {
+  const start = ROUTINES_START;
+  const act = (s: RoutinesUi, ...as: Parameters<typeof routinesReduce>[1][]) => as.reduce(routinesReduce, s);
+  const refuses = (code: string, message: string): RoutineCalls => {
+    const no = async (): Promise<never> => {
+      throw { code, message };
+    };
+    return { routineCreate: no, routinePause: no, routineResume: no, routineRemove: no };
+  };
+
+  it("asks in the routine's row first, closes the form for it, and keeps the routine until the owner says yes", () => {
+    const form = act(start, { type: "open" });
+    const asked = act(form, { type: "remove", routine: "r2" });
+    expect(asked).toMatchObject({ ask: "r2", form: null, removing: null, error: null });
+    // the safe answer closes the question and nothing else moves
+    expect(act(asked, { type: "keep" })).toMatchObject({ ask: null, removing: null });
+    // opening the form is another thing to decide: the question goes
+    expect(act(asked, { type: "open" })).toMatchObject({ ask: null, form: FORM_START });
+  });
+
+  it("puts a removal on its way, ends the question when it is done, and keeps it, with the words, when it was refused", () => {
+    const asked = act(start, { type: "remove", routine: "r2" });
+    const going = act(asked, { type: "begin", what: "remove", routine: "r2" });
+    expect(going).toMatchObject({ ask: "r2", removing: "r2" });
+    expect(act(going, { type: "done", what: "remove" })).toEqual(start);
+    expect(act(going, { type: "failed", message: "No reply" })).toMatchObject({ ask: "r2", removing: null, error: "No reply" });
+  });
+
+  it("holds still while a request is on its way, so a routine is not removed twice and nothing else is asked", () => {
+    const going = act(start, { type: "begin", what: "remove", routine: "r2" });
+    expect(act(going, { type: "remove", routine: "r3" })).toBe(going);
+    expect(act(going, { type: "keep" })).toBe(going);
+    expect(act(going, { type: "open" })).toBe(going);
+    expect(act(going, { type: "begin", what: "switch", routine: "r3" })).toBe(going);
+    const switching = act(start, { type: "begin", what: "switch", routine: "r1" });
+    expect(act(switching, { type: "remove", routine: "r2" })).toBe(switching);
+    expect(act(switching, { type: "begin", what: "remove", routine: "r2" })).toBe(switching);
+  });
+
+  it("forgets everything asked or typed when another shop is shown", () => {
+    const busy = act(start, { type: "open" }, { type: "set", patch: { name: "Remind me" } });
+    expect(act(busy, { type: "reset" })).toEqual(start);
+    expect(act(act(start, { type: "remove", routine: "r2" }), { type: "reset" })).toEqual(start);
+  });
+
+  it("removes the routine from the list when the runtime says it went, and reads nothing again", async () => {
+    const rows = [row({ id: "r1" }), row({ id: "r2", name: "Weekly" })];
+    const removed: string[] = [];
+    const calls: RoutineCalls = { ...refuses("x", "x"), routineRemove: async (id) => (removed.push(id), { routine: id }) };
+    const step = await routineDo(calls, rows, { what: "remove", row: rows[1] });
+    expect(removed).toEqual(["r2"]);
+    expect(step.rows.map((r) => r.id)).toEqual(["r1"]);
+    expect(step.action).toEqual({ type: "done", what: "remove" });
+    expect(step.reread).toBe(false);
+  });
+
+  it("drops a routine the runtime says is gone, and keeps the list for any other refusal", async () => {
+    const rows = [row({ id: "r1" }), row({ id: "r2", name: "Weekly" })];
+    const gone = await routineDo(refuses("not_found", "No such routine."), rows, { what: "remove", row: rows[1] });
+    expect(gone.rows.map((r) => r.id)).toEqual(["r1"]);
+    expect(gone.action).toEqual({ type: "failed", message: t("rt.notFound") });
+    const other = await routineDo(refuses("owner_only", "Only Noi can change the team."), rows, { what: "remove", row: rows[1] });
+    expect(other.rows).toEqual(rows);
+    expect(other.action).toEqual({ type: "failed", message: "Only Noi can change the team." });
+    expect(other.reread).toBe(false);
+  });
+
+  it("reads the list again after a change whose end it cannot tell, and never says it was done", async () => {
+    const rows = [row({ id: "r1" })];
+    for (const todo of [{ what: "remove", row: rows[0] }, { what: "switch", row: rows[0] }, { what: "save", form: { ...FORM_START, name: "Remind me" } }] as const) {
+      const step = await routineDo(refuses("unavailable", "No reply from the API. Checking whether it changed."), rows, todo);
+      expect(step.rows, todo.what).toEqual(rows);
+      expect(step.action, todo.what).toEqual({ type: "failed", message: "No reply from the API. Checking whether it changed." });
+      expect(step.reread, todo.what).toBe(true);
+    }
+  });
+});
+
+describe("the calls the page makes name the shop its list was read for", () => {
+  it("binds every change to that shop, and none to the shop the switcher shows by the time it is sent", async () => {
+    const sent: unknown[][] = [];
+    const record = (name: string) => async (...args: unknown[]) => {
+      sent.push([name, ...args]);
+      return { routine: row(), } as never;
+    };
+    const calls = routineCallsFor(
+      { routineCreate: record("create"), routinePause: record("pause"), routineResume: record("resume"), routineRemove: record("remove") },
+      "pilot:shop-a",
+    );
+    const make = { name: "Remind me", action: "draft", trigger: { kind: "daily", at: "15:00" } } as const;
+    await calls.routineCreate(make);
+    await calls.routinePause("r1");
+    await calls.routineResume("r1");
+    await calls.routineRemove("r1");
+    expect(sent).toEqual([["create", "pilot:shop-a", make], ["pause", "pilot:shop-a", "r1"], ["resume", "pilot:shop-a", "r1"], ["remove", "pilot:shop-a", "r1"]]);
+  });
+
+  it("names no shop for a person who is in none", async () => {
+    const sent: unknown[][] = [];
+    const calls = routineCallsFor(
+      {
+        routineCreate: async (...a) => (sent.push(a), { routine: row() }),
+        routinePause: async (...a) => (sent.push(a), { routine: row() }),
+        routineResume: async (...a) => (sent.push(a), { routine: row() }),
+        routineRemove: async (...a) => (sent.push(a), { routine: "r1" }),
+      },
+      null,
+    );
+    await calls.routineRemove("r1");
+    expect(sent).toEqual([[null, "r1"]]);
+  });
+});
+
+describe("what the page says when the runtime refuses a routine", () => {
+  beforeEach(() => setLang("en"));
+
+  it("says how many routines the team keeps, and that a routine is gone, in the page's words", () => {
+    expect(refusalText("full", "The team already has 50 routines.")).toBe("Your team already has 50 routines, the most it keeps. Remove one first.");
+    expect(refusalText("not_found", "No such routine.")).toBe(t("rt.notFound"));
+  });
+
+  it("says each refusal a new routine can get, from the package and from the API, in words of its own", () => {
+    const codes = ["invalid_name", "invalid_action", "invalid_trigger", "invalid_time_zone", "invalid_weekdays", "invalid_time", "invalid_day", "invalid_window", "invalid_threshold", "must_ask_first", "unknown_member", "wrong_member"];
+    for (const code of codes) {
+      expect(refusalText(code, "fallback"), code).not.toBe("fallback");
+      for (const l of LANGS) {
+        setLang(l);
+        expect(refusalText(code, "fallback").trim(), `${l} ${code}`).not.toBe("");
+      }
+    }
+    setLang("en");
+    // a call that went wrong, not a form, is general words; any other refusal is the runtime's own
+    expect(refusalText("invalid_request", "The call went wrong.")).toBe("The call went wrong.");
+    expect(refusalText("owner_only", "Only Noi can change the team.")).toBe("Only Noi can change the team.");
+  });
+
+  it("says the words it adds in every language, none empty and none the same as English's untranslated", () => {
+    for (const l of LANGS)
+      for (const k of ["routines.remove", "routines.removeAsk", "routines.removeYes", "routines.keep", "routines.err.noShop", "routines.err.full", "routines.problem.action", "routines.problem.trigger", "routines.problem.zone", "routines.problem.mustAsk", "routines.problem.member", "routines.form.stockNote"] as const) {
+        expect(t(k, { max: 50 }, l).trim(), `${l} ${k}`).not.toBe("");
+        if (l !== "en") expect(t(k, { max: 50 }, l), `${l} ${k}`).not.toBe(t(k, { max: 50 }, "en"));
+      }
   });
 });

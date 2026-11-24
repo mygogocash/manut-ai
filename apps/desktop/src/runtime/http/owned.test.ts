@@ -62,7 +62,7 @@ function work(over: Partial<ShopWorkJson> = {}): Partial<ShopWorkJson> {
   };
 }
 
-async function opened(over: Partial<ShopWorkJson> = {}, list = [SHOP_A, SHOP_B]) {
+async function opened(over: Partial<ShopWorkJson> = {}, list = [SHOP_A, SHOP_B], more: Record<string, Partial<ShopWorkJson>> = {}) {
   const api = fakeApi();
   const shops = serveShops(
     api,
@@ -72,7 +72,7 @@ async function opened(over: Partial<ShopWorkJson> = {}, list = [SHOP_A, SHOP_B])
       [SHOP_B.id]: [approvalJson({ id: "b-reply", createdAt: T0 + 200_000, detail: replyDetail("b-reply", "Yes, we deliver.") })],
     },
     () => NOW,
-    { [SHOP_A.id]: work(over) },
+    { [SHOP_A.id]: work(over), ...more },
   );
   const disk = memoryCacheStore();
   const cache = new ShopCache(disk);
@@ -170,7 +170,8 @@ describe("the team, as the API knows it", () => {
     expect((await req("bots.list", {})).bots.map((b: { name: string }) => b.name)).toEqual(["buddy"]);
     expect((await req("thread.list", { bot: "buddy" })).threads).toEqual([]);
     expect((await req("jobs.list", {})).jobs).toEqual([]);
-    expect((await req("routine.list", {})).routines).toEqual([]);
+    // the team is its owner's to see, so the routines say so in place of a list
+    expect(await refusal(req("routine.list", {}))).toEqual({ code: "owner_only", message: t("rt.ownerOnly", { owner: "Noi", shop: "Ran Pa Noi" }) });
     expect(await refusal(req("team.state", {}))).toEqual({ code: "owner_only", message: t("rt.ownerOnly", { owner: "Noi", shop: "Ran Pa Noi" }) });
   });
 });
@@ -178,12 +179,14 @@ describe("the team, as the API knows it", () => {
 describe("the team's routines", () => {
   it("lists the routines first, in the API's words, then the shop's own schedules, and never a routine's clock", async () => {
     const { req } = await opened();
-    const { routines } = await req("routine.list", {});
+    const { shop, routines } = await req("routine.list", {});
+    // the list says the shop it was read for, which every change names
+    expect(shop).toBe(SHOP_A.id);
     expect(routines.map((r: { id: string }) => r.id)).toEqual(["rt-0001-brief", "rt-0002-post", "rt-0003-books", "sched-own"]);
-    expect(routines[0]).toEqual({ id: "rt-0001-brief", name: "Morning brief", when: "Every day at 08:00", action: "brief", asksFirst: false, enabled: true, next: (T0 + 7 * 3600_000) / 1000, timeZone: "Asia/Bangkok" });
-    expect(routines[2]).toMatchObject({ id: "rt-0003-books", enabled: false, next: null, asksFirst: true, action: "send" });
-    // the shop's own schedule says nothing about the work, as before
-    expect(routines[3]).toMatchObject({ id: "sched-own", action: null, asksFirst: null });
+    expect(routines[0]).toEqual({ id: "rt-0001-brief", name: "Morning brief", when: "Every day at 08:00", action: "brief", asksFirst: false, enabled: true, next: (T0 + 7 * 3600_000) / 1000, timeZone: "Asia/Bangkok", removable: true });
+    expect(routines[2]).toMatchObject({ id: "rt-0003-books", enabled: false, next: null, asksFirst: true, action: "send", removable: true });
+    // the shop's own schedule says nothing about the work, as before, and is shown and never changed
+    expect(routines[3]).toMatchObject({ id: "sched-own", action: null, asksFirst: null, removable: false });
   });
 
   it("shows each member's routines on their Schedule tab, and the shop's own schedules on Buddy's", async () => {
@@ -276,11 +279,11 @@ describe("the owner's everyday writes", () => {
 
   it("pauses and resumes one routine through the routines routes with exactly { routineId }", async () => {
     const { api, req } = await opened();
-    const paused = await req("routine.pause", { routine: "rt-0001-brief" });
+    const paused = await req("routine.pause", { shop: SHOP_A.id, routine: "rt-0001-brief" });
     expect(writes(api).at(-1)).toEqual(["POST", "/v1/routines/pause", OWNER_A, { routineId: "rt-0001-brief" }]);
     expect(paused.routine).toMatchObject({ id: "rt-0001-brief", enabled: false, next: null });
     expect((await req("routine.list", {})).routines[0]).toMatchObject({ id: "rt-0001-brief", enabled: false });
-    const resumed = await req("routine.resume", { routine: "rt-0003-books" });
+    const resumed = await req("routine.resume", { shop: SHOP_A.id, routine: "rt-0003-books" });
     expect(writes(api).at(-1)).toEqual(["POST", "/v1/routines/resume", OWNER_A, { routineId: "rt-0003-books" }]);
     expect(resumed.routine).toMatchObject({ id: "rt-0003-books", enabled: true });
     // the Automations page's pause is the same change, for a routine of the member it lists it under
@@ -291,14 +294,15 @@ describe("the owner's everyday writes", () => {
   it("refuses here, sending nothing, a routine the read does not list, a schedule of the shop's own, and every other write", async () => {
     const { api, req } = await opened();
     const before = writes(api).length;
-    expect(await refusal(req("routine.pause", { routine: "rt-9999-none" }))).toMatchObject({ code: "not_found" });
+    expect(await refusal(req("routine.pause", { shop: SHOP_A.id, routine: "rt-9999-none" }))).toMatchObject({ code: "not_found" });
     expect(await refusal(req("automations.pause", { bot: "buddy", job: "sched-own" }))).toEqual({ code: "not_yet", message: t("rt.notYet") });
     for (const [op, params] of [
       ["chat.send", { bot: "buddy", text: "Hello" }],
       ["chat.send", { bot: "nam", text: "Hello" }],
-      ["routine.create", { name: "x", action: "brief", trigger: { kind: "daily", at: "08:00" } }],
+      ["routine.create", { shop: SHOP_A.id, name: "x", action: "brief", trigger: { kind: "daily", at: "08:00" } }],
+      ["routine.remove", { shop: SHOP_A.id, routine: "rt-0001-brief" }],
       ["automations.remove", { bot: "ton", job: "rt-0001-brief" }],
-      ["memory.remember", { text: "x" }],
+      ["memory.remember", { shop: SHOP_A.id, text: "x" }],
     ] as const)
       expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
     expect(writes(api).slice(before)).toEqual([]);
@@ -309,7 +313,7 @@ describe("the owner's everyday writes", () => {
     await req("shops.switch", { shop: SHOP_B.id });
     const before = writes(api).length;
     for (const op of ["team.pause", "team.resume"]) expect(await refusal(req(op, {})), op).toEqual({ code: "owner_only", message: t("rt.ownerOnly", { owner: "Noi", shop: "Ran Pa Noi" }) });
-    expect(await refusal(req("routine.pause", { routine: "rt-0001-brief" }))).toMatchObject({ code: "owner_only" });
+    expect(await refusal(req("routine.pause", { shop: SHOP_B.id, routine: "rt-0001-brief" }))).toMatchObject({ code: "owner_only" });
     expect(writes(api).slice(before)).toEqual([]);
   });
 
@@ -318,7 +322,7 @@ describe("the owner's everyday writes", () => {
     api.on("POST", "/v1/team/pause", { status: 503, json: { error: "routines_unavailable" } });
     expect(await refusal(req("team.pause", {}))).toEqual({ code: "unavailable", message: t("rt.change.noReply") });
     api.on("POST", "/v1/routines/pause", { status: 400, json: { error: "invalid_request" } });
-    expect(await refusal(req("routine.pause", { routine: "rt-0001-brief" }))).toEqual({ code: "invalid_request", message: t("rt.change.refused") });
+    expect(await refusal(req("routine.pause", { shop: SHOP_A.id, routine: "rt-0001-brief" }))).toEqual({ code: "invalid_request", message: t("rt.change.refused") });
     // nothing was taken as changed
     expect((await req("bots.list", {})).bots.some((b: { paused?: boolean }) => b.paused)).toBe(false);
   });
@@ -374,5 +378,86 @@ describe("under the app's own store", () => {
     await store.actions.teamPause();
     for (let i = 0; i < 12; i += 1) await vi.advanceTimersByTimeAsync(5);
     expect(store.getState().bots.filter((b) => b.paused).map((b) => b.name)).toEqual(["nam", "pim", "ton"]);
+  });
+});
+
+describe("a change names the shop its list was read for", () => {
+  /** A second shop the person owns, with a routine of its own. */
+  const SHOP_C = { id: "pilot:shop-c", name: "Baan Suk", ownerName: "Fon", role: "owner" as const };
+  const OWNER_C = shopToken(SHOP_C.id, "owner");
+  const brewC = routineJson({ id: "rt-c-0001", name: "Baan Suk brief" });
+
+  async function two() {
+    return opened({}, [SHOP_A, SHOP_B, SHOP_C], { [SHOP_C.id]: { routines: [brewC] } });
+  }
+
+  it("names the shop each list was read for, and the shop viewed is the one it names", async () => {
+    const { req } = await two();
+    expect((await req("routine.list", {})).shop).toBe(SHOP_A.id);
+    await req("shops.switch", { shop: SHOP_C.id });
+    const listed = await req("routine.list", {});
+    expect(listed.shop).toBe(SHOP_C.id);
+    expect(listed.routines.map((r: { id: string }) => r.id)).toEqual(["rt-c-0001"]);
+  });
+
+  it("sends a change to the shop it names, with that shop's own session, although the switcher shows another by now", async () => {
+    const { api, shops, req } = await two();
+    const listedForA = await req("routine.list", {});
+    // the person switches shops after the page read Baan Mali's routines, and then flips one of its switches
+    await req("shops.switch", { shop: SHOP_C.id });
+    const paused = await req("routine.pause", { shop: listedForA.shop, routine: "rt-0001-brief" });
+    expect(writes(api).at(-1)).toEqual(["POST", "/v1/routines/pause", OWNER_A, { routineId: "rt-0001-brief" }]);
+    expect(paused.routine).toMatchObject({ id: "rt-0001-brief", enabled: false });
+    expect(shops.work[SHOP_A.id].routines.find((r) => r.id === "rt-0001-brief")).toMatchObject({ paused: true });
+    // what the person is looking at is Baan Suk, which that change did not touch
+    const nowViewing = await req("routine.list", {});
+    expect(nowViewing.shop).toBe(SHOP_C.id);
+    expect(nowViewing.routines.map((r: { id: string; enabled: boolean }) => [r.id, r.enabled])).toEqual([["rt-c-0001", true]]);
+    expect(api.calls.filter((c) => c.path === "/v1/routines/pause").map((c) => c.bearer)).toEqual([OWNER_A]);
+    // and Baan Mali, once shown again, has the change
+    await req("shops.switch", { shop: SHOP_A.id });
+    expect((await req("routine.list", {})).routines.find((r: { id: string }) => r.id === "rt-0001-brief")).toMatchObject({ enabled: false });
+    expect(api.to("POST", "/v1/routines/pause").every((c) => c.bearer !== OWNER_C)).toBe(true);
+  });
+
+  it("refuses, sending nothing, a routine the named shop does not list, although another shop does", async () => {
+    const { api, req } = await two();
+    const before = writes(api).length;
+    // rt-c-0001 is Baan Suk's, so asked of Baan Mali it is not there
+    expect(await refusal(req("routine.pause", { shop: SHOP_A.id, routine: "rt-c-0001" }))).toMatchObject({ code: "not_found" });
+    expect(await refusal(req("routine.resume", { shop: SHOP_C.id, routine: "rt-0001-brief" }))).toMatchObject({ code: "not_found" });
+    expect(writes(api).slice(before)).toEqual([]);
+  });
+
+  it("refuses, sending nothing, a change that names no shop, one that is not the person's, and a person's own tenant", async () => {
+    const { api, req } = await two();
+    const before = writes(api).length;
+    for (const named of [{}, { shop: null }, { shop: "pilot:someone-elses" }, { shop: 7 }])
+      expect(await refusal(req("routine.pause", { ...named, routine: "rt-0001-brief" })), JSON.stringify(named)).toMatchObject({ code: "not_found" });
+    expect(writes(api).slice(before)).toEqual([]);
+  });
+
+  it("refuses a shop the person helps at with the owner's name, sending nothing, and says the same of its list", async () => {
+    const { api, req } = await two();
+    const before = writes(api).length;
+    for (const op of ["routine.pause", "routine.resume"])
+      expect(await refusal(req(op, { shop: SHOP_B.id, routine: "rt-0001-brief" })), op).toEqual({ code: "owner_only", message: t("rt.ownerOnly", { owner: "Noi", shop: "Ran Pa Noi" }) });
+    expect(writes(api).slice(before)).toEqual([]);
+  });
+
+  it("shows another shop's change at once only when it is the shop viewed, and tells the screens only then", async () => {
+    const { rt, req } = await two();
+    const heard: string[] = [];
+    rt.on("routines.update", () => heard.push("routines.update"));
+    // viewing Baan Mali: a change to Baan Suk leaves what is shown as it is
+    await req("routine.pause", { shop: SHOP_C.id, routine: "rt-c-0001" });
+    // the read that follows a change is waited for, so the next change is not read over by one made before it
+    await vi.advanceTimersByTimeAsync(5);
+    expect((await req("routine.list", {})).routines.find((r: { id: string }) => r.id === "rt-0001-brief")).toMatchObject({ enabled: true });
+    expect(heard).toEqual([]);
+    // a change to the shop viewed is shown and told
+    await req("routine.pause", { shop: SHOP_A.id, routine: "rt-0001-brief" });
+    await vi.advanceTimersByTimeAsync(5);
+    expect(heard).toEqual(["routines.update"]);
   });
 });

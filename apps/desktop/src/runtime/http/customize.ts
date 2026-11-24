@@ -44,6 +44,7 @@ export function teamRoutineRow(r: TeamRoutine): RoutineRow {
     enabled: !r.paused,
     next: !r.paused && r.next !== null ? r.next / 1000 : null,
     timeZone: r.timeZone,
+    removable: true,
   };
 }
 
@@ -64,5 +65,7 @@ function scheduleRows(snapshot: ShopSnapshot): RoutineRow[] {
     enabled: s.enabled,
     next: s.enabled && s.nextFire !== null ? s.nextFire / 1000 : null,
     timeZone: s.timeZone,
+    // no session may change a schedule, so the owner is not offered to remove one
+    removable: false,
   }));
 }

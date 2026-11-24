@@ -6,8 +6,7 @@
 // disagree with the runtime, and nothing here runs a routine.
 import { createRoutine, mustAskFirst, type RoutineRefusal, type Trigger } from "@manut/routine-rules";
 import { lang, locale, t, type Key } from "../i18n";
-import type { OpParams } from "../lib/protocol";
-import type { RoutineRow } from "../runtime/routines";
+import { MAX_ROUTINES, type NewRoutine, type RoutineRow } from "../runtime/routines";
 import { unavailable } from "./load";
 
 /** A routine put in its place after it changed: where it stood, or last when the list did not have it. */
@@ -113,8 +112,9 @@ export function formTrigger(f: RoutineForm): Trigger {
   }
 }
 
-/** What `routine.create` is sent. It never says whether to ask first: the package decides that from the kind of work. */
-export const formParams = (f: RoutineForm) => ({ name: f.name, action: f.action, trigger: formTrigger(f) });
+/** What `routine.create` is sent, besides the shop. It never says whether to ask first: the package decides that from the kind of
+ *  work. */
+export const formParams = (f: RoutineForm): NewRoutine => ({ name: f.name, action: f.action, trigger: formTrigger(f) });
 
 /** The first thing wrong with the form, in the package's own reason, or null. The package is asked, not copied. */
 export function formProblem(f: RoutineForm): RoutineRefusal | null {
@@ -125,17 +125,26 @@ export function formProblem(f: RoutineForm): RoutineRefusal | null {
 /** Whether a routine of this kind always asks first, which the form shows before it is added. */
 export const formAsksFirst = (f: RoutineForm): boolean => mustAskFirst(f.action);
 
-const PROBLEMS = new Map<RoutineRefusal, Key>([
+/** Every refusal a new routine can get, the package's and the API's (`unknown_member` and `wrong_member` are the API's alone, and
+ *  the form sends no member), in the owner's words. `invalid_id` and `invalid_request` are a call that went wrong, not a form that
+ *  did, and say so in general words. */
+const PROBLEMS = new Map<string, Key>([
   ["invalid_name", "routines.problem.name"],
+  ["invalid_action", "routines.problem.action"],
+  ["invalid_trigger", "routines.problem.trigger"],
+  ["invalid_time_zone", "routines.problem.zone"],
   ["invalid_weekdays", "routines.problem.weekdays"],
   ["invalid_time", "routines.problem.time"],
   ["invalid_day", "routines.problem.day"],
   ["invalid_window", "routines.problem.window"],
   ["invalid_threshold", "routines.problem.threshold"],
+  ["must_ask_first", "routines.problem.mustAsk"],
+  ["unknown_member", "routines.problem.member"],
+  ["wrong_member", "routines.problem.member"],
 ]);
 
 /** What is wrong with the form, in the owner's words. A reason the form cannot cause says so in general words. */
-export const problemText = (reason: RoutineRefusal): string => t(PROBLEMS.get(reason) ?? "routines.problem.other");
+export const problemText = (reason: string): string => t(PROBLEMS.get(reason) ?? "routines.problem.other");
 
 // ---- how the page moves -------------------------------------------------------------------------------------------------
 
@@ -147,10 +156,14 @@ export interface RoutinesUi {
   saving: boolean;
   /** the routine whose switch is on its way */
   switching: string | null;
+  /** the routine whose Remove question is open, in its row */
+  ask: string | null;
+  /** the routine whose removal is on its way */
+  removing: string | null;
   error: string | null;
 }
 
-export const ROUTINES_START: RoutinesUi = { form: null, problem: null, saving: false, switching: null, error: null };
+export const ROUTINES_START: RoutinesUi = { form: null, problem: null, saving: false, switching: null, ask: null, removing: null, error: null };
 
 export type RoutinesAction =
   | { type: "open" }
@@ -158,17 +171,26 @@ export type RoutinesAction =
   | { type: "set"; patch: Partial<RoutineForm> }
   | { type: "weekday"; day: number }
   | { type: "problem"; reason: RoutineRefusal }
+  /** ask whether to remove this routine, in its row */
+  | { type: "remove"; routine: string }
+  /** the answer that keeps it */
+  | { type: "keep" }
   | { type: "begin"; what: "save" }
-  | { type: "begin"; what: "switch"; routine: string }
-  | { type: "done"; what: "save" | "switch" }
-  | { type: "failed"; message: string };
+  | { type: "begin"; what: "switch" | "remove"; routine: string }
+  | { type: "done"; what: "save" | "switch" | "remove" }
+  | { type: "failed"; message: string }
+  /** another shop is shown: nothing asked or typed about the last one stays */
+  | { type: "reset" };
+
+/** Whether a request is on its way. */
+const busy = (s: RoutinesUi): boolean => s.saving || s.switching !== null || s.removing !== null;
 
 /** Moves the page between editing, waiting on the runtime and done. One request is on its way at a time, and while the form is
  *  being saved it holds still, so a routine is not added twice and what the owner typed is not lost. */
 export function routinesReduce(s: RoutinesUi, a: RoutinesAction): RoutinesUi {
   switch (a.type) {
     case "open":
-      return s.saving ? s : { ...s, form: { ...FORM_START, weekdays: [...FORM_START.weekdays] }, problem: null, error: null };
+      return busy(s) ? s : { ...s, form: { ...FORM_START, weekdays: [...FORM_START.weekdays] }, problem: null, ask: null, error: null };
     case "close":
       return s.saving ? s : { ...s, form: null, problem: null, error: null };
     case "set":
@@ -180,49 +202,104 @@ export function routinesReduce(s: RoutinesUi, a: RoutinesAction): RoutinesUi {
     }
     case "problem":
       return s.saving ? s : { ...s, problem: a.reason };
+    // One question at a time: asking about a routine closes the form, so what is on the page is one thing the owner is deciding.
+    case "remove":
+      return busy(s) ? s : { ...s, ask: a.routine, form: null, problem: null, error: null };
+    case "keep":
+      return busy(s) ? s : { ...s, ask: null, error: null };
     case "begin":
-      if (s.saving || s.switching !== null) return s;
-      return a.what === "save" ? { ...s, saving: true, error: null } : { ...s, switching: a.routine, error: null };
-    // A routine that was added ends the form; one that was refused keeps it, with its words, so the owner can try again.
+      if (busy(s)) return s;
+      if (a.what === "save") return { ...s, saving: true, error: null };
+      return a.what === "switch" ? { ...s, switching: a.routine, error: null } : { ...s, removing: a.routine, error: null };
+    // A routine that was added ends the form, and one that was removed ends its question; one that was refused keeps both, with its
+    // words, so the owner can try again.
     case "done":
-      return a.what === "save" ? { ...s, form: null, problem: null, saving: false, error: null } : { ...s, switching: null, error: null };
+      if (a.what === "save") return { ...s, form: null, problem: null, saving: false, error: null };
+      return a.what === "switch" ? { ...s, switching: null, error: null } : { ...s, ask: null, removing: null, error: null };
     case "failed":
-      return { ...s, saving: false, switching: null, error: a.message };
+      return { ...s, saving: false, switching: null, removing: null, error: a.message };
+    case "reset":
+      return ROUTINES_START;
   }
+}
+
+/** What the runtime's refusals say to the owner, by code: how many routines the team keeps, that a routine is gone, and the words a
+ *  new routine's own refusals have in the form. Any other refusal (the connected runtime's "Not yet", an owner-only shop, an API
+ *  that did not answer) is shown in the runtime's own words, which it says in the app's language. */
+export function refusalText(code: string, message: string): string {
+  if (code === "full") return t("routines.err.full", { max: MAX_ROUTINES });
+  if (code === "not_found") return t("rt.notFound");
+  return PROBLEMS.has(code) ? problemText(code) : message;
 }
 
 export type RoutineResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
-/** Asks the runtime to act and says how the page moves on: what it answered, or the runtime's own words when it would not
- *  (the connected runtime's "Not yet"), with its code. The form has already been checked against the package, so a refusal
+/** Asks the runtime to act and says how the page moves on: what it answered, or the words to show when it would not (the
+ *  connected runtime's "Not yet"), with the runtime's code. The form has already been checked against the package, so a refusal
  *  here is the runtime's, not the owner's. */
 export async function routineStep<T>(call: () => Promise<T>): Promise<RoutineResult<T>> {
   try {
     return { ok: true, value: await call() };
   } catch (e) {
     const why = unavailable(e);
-    return why.kind === "unavailable" ? { ok: false, code: why.code, message: why.message } : { ok: false, code: "internal", message: "" };
+    return why.kind === "unavailable" ? { ok: false, code: why.code, message: refusalText(why.code, why.message) } : { ok: false, code: "internal", message: "" };
   }
 }
 
 /** The store's own actions that reach the runtime, which is all the page's steps need of it. */
 export interface RoutineCalls {
-  routineCreate(params: OpParams<"routine.create">): Promise<{ routine: RoutineRow }>;
+  routineCreate(params: NewRoutine): Promise<{ routine: RoutineRow }>;
   routinePause(routine: string): Promise<{ routine: RoutineRow }>;
   routineResume(routine: string): Promise<{ routine: RoutineRow }>;
+  routineRemove(routine: string): Promise<{ routine: string }>;
 }
 
-/** What the owner did: added the routine the form describes, or flipped a routine's switch. */
-export type RoutineDo = { what: "save"; form: RoutineForm } | { what: "switch"; row: RoutineRow };
+/** The store's actions as the page calls them: each change names the shop (`routine.*` in src/runtime/routines.ts). */
+export interface RoutineActions {
+  routineCreate(shop: string | null, params: NewRoutine): Promise<{ routine: RoutineRow }>;
+  routinePause(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineResume(shop: string | null, routine: string): Promise<{ routine: RoutineRow }>;
+  routineRemove(shop: string | null, routine: string): Promise<{ routine: string }>;
+}
+
+/** The actions for `shop`, the one the list on the page was read for. A change never goes to the shop the switcher shows by the
+ *  time it is sent: the runtime acts on the shop it is told, which is the list's. */
+export function routineCallsFor(actions: RoutineActions, shop: string | null): RoutineCalls {
+  return {
+    routineCreate: (params) => actions.routineCreate(shop, params),
+    routinePause: (routine) => actions.routinePause(shop, routine),
+    routineResume: (routine) => actions.routineResume(shop, routine),
+    routineRemove: (routine) => actions.routineRemove(shop, routine),
+  };
+}
+
+/** What the owner did: added the routine the form describes, flipped a routine's switch, or removed one. */
+export type RoutineDo = { what: "save"; form: RoutineForm } | { what: "switch"; row: RoutineRow } | { what: "remove"; row: RoutineRow };
+
+export interface RoutineStep {
+  rows: RoutineRow[];
+  action: RoutinesAction;
+  /** the list the owner sees may be out of date: read it again */
+  reread: boolean;
+}
+
+/** The refusals that mean the owner cannot tell whether the change happened (the API did not answer, or answered in a way this
+ *  build cannot read): it is never said to be done, and the list is read again to see. */
+const MOVED_ON = new Set(["unavailable"]);
 
 /** Asks the runtime to do it, and says what the routines are now and how the page moves on. The list is the runtime's answer
  *  put in its place, never a guess; a refusal leaves it as it was, and a routine the runtime says is gone is dropped. */
-export async function routineDo(calls: RoutineCalls, rows: readonly RoutineRow[], todo: RoutineDo): Promise<{ rows: RoutineRow[]; action: RoutinesAction }> {
-  const done = await routineStep(async () => {
+export async function routineDo(calls: RoutineCalls, rows: readonly RoutineRow[], todo: RoutineDo): Promise<RoutineStep> {
+  const done = await routineStep<RoutineRow | string>(async () => {
     if (todo.what === "save") return (await calls.routineCreate(formParams(todo.form))).routine;
+    if (todo.what === "remove") return (await calls.routineRemove(todo.row.id)).routine;
     return (await (todo.row.enabled ? calls.routinePause(todo.row.id) : calls.routineResume(todo.row.id))).routine;
   });
-  if (done.ok) return { rows: withRoutine(rows, done.value), action: { type: "done", what: todo.what } };
-  const gone = done.code === "not_found" && todo.what === "switch";
-  return { rows: gone ? rows.filter((r) => r.id !== todo.row.id) : [...rows], action: { type: "failed", message: done.message } };
+  if (done.ok) {
+    // A removal answers which routine went, and holds none of it; the other answers are the routine as it now stands.
+    const next = typeof done.value === "string" ? rows.filter((r) => r.id !== done.value) : withRoutine(rows, done.value);
+    return { rows: next, action: { type: "done", what: todo.what }, reread: false };
+  }
+  const gone = done.code === "not_found" && todo.what !== "save";
+  return { rows: gone ? rows.filter((r) => r.id !== todo.row.id) : [...rows], action: { type: "failed", message: done.message }, reread: MOVED_ON.has(done.code) };
 }

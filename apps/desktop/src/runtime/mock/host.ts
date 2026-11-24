@@ -6,7 +6,7 @@
 // The handler table is typed against the protocol's own op map, so an op added to the protocol does not compile
 // until this runtime answers it. Features the runtime does not have (see `RuntimeCapabilities`) still answer: a read
 // comes back empty and a write is refused with `unsupported`, so a stray call can never hang a screen.
-import { createRoutine, describeTrigger, nextRun, type Routine, type RoutineRefusal } from "@manut/routine-rules";
+import { createRoutine, describeTrigger, nextRun, type Routine } from "@manut/routine-rules";
 import {
   MAX_FACTS,
   MAX_TEXT,
@@ -36,7 +36,7 @@ import type { NodeSessionResult } from "../../harness/session";
 import { firstWords, type ThreadEvent, type ThreadOps } from "../../threads/types";
 import type { MemoryFact, MemorySource } from "../memory";
 import type { ActivityEvent, Job, PausedJob, TeamState } from "../mission";
-import type { RoutineRow } from "../routines";
+import { MAX_ROUTINES, newRoutineRefusal, type NewRoutineRefusal, type RoutineRow } from "../routines";
 import {
   ACTIVITY_KEPT_MONTHS,
   ACTIVITY_SEED,
@@ -131,7 +131,8 @@ function sourceView(s: FactSource): MemorySource {
 
 /** The words a routine refusal carries for a caller with none of its own. The form on the Customize page stops most of
  *  these before they are sent, and says the rest itself; the code is the package's own reason. */
-const ROUTINE_REFUSAL: Record<RoutineRefusal, string> = {
+const ROUTINE_REFUSAL: Record<NewRoutineRefusal, string> = {
+  invalid_request: "A routine either asks first or does not: say which.",
   invalid_id: "A routine needs an id.",
   invalid_name: "A routine's name is 1 to 80 characters.",
   invalid_action: "That is not something a routine can do.",
@@ -301,7 +302,6 @@ export class MockHost {
       case "thread.list":
         return { threads: [] };
       case "routines.list":
-      case "routine.list":
         return { routines: [] };
       case "automations.list":
         return { automations: [] };
@@ -309,14 +309,10 @@ export class MockHost {
         return { jobs: [] };
       case "activity.list":
         return { events: [], keptMonths: ACTIVITY_KEPT_MONTHS };
-      case "memory.list":
-        return { facts: [] };
       case "chat.send":
       case "chat.steer":
       case "thread.create":
       case "automations.add":
-      case "routine.create":
-      case "memory.remember":
       case "team.pause":
         throw new OpError("not_yet", HELPED_REFUSAL);
     }
@@ -535,6 +531,7 @@ export class MockHost {
       enabled,
       next: next === null ? null : next / 1000,
       timeZone: routine.timeZone,
+      removable: true,
     };
   }
 
@@ -1080,32 +1077,48 @@ export class MockHost {
       return this.teamState();
     },
 
-    // ---- what the team knows: every answer is the package's, with the clock and the units changed at the edge
-    "memory.list": () => ({ facts: this.memory.facts.map((f) => this.factView(f)) }),
-    "memory.remember": (p) => ({ fact: this.applyMemory(rememberFact(this.memory, p.text, this.nowMs())) }),
-    "memory.confirm": (p) => ({ fact: this.applyMemory(confirmFact(this.memory, this.needText(p.fact, "fact"), this.nowMs())) }),
-    "memory.correct": (p) => ({ fact: this.applyMemory(correctFact(this.memory, this.needText(p.fact, "fact"), p.text, this.nowMs())) }),
-    "memory.forget": (p) => {
-      const id = this.needText(p.fact, "fact");
-      const forgotten = forgetFact(this.memory, id);
-      if (!forgotten.ok) throw new OpError(forgotten.reason, MEMORY_REFUSAL[forgotten.reason]);
-      this.memory = forgotten.state;
-      return { fact: id };
-    },
+    // ---- what the team knows: every answer is the package's, with the clock and the units changed at the edge. The list is
+    // the shop being viewed; a change acts on the shop its list was read for, as on the connected runtime.
+    "memory.list": () => this.atTeam(this.shop, MEMORY_WORDS, () => ({ shop: this.shop, facts: this.memory.facts.map((f) => this.factView(f)) })),
+    "memory.remember": (p) => this.atTeam(p.shop, MEMORY_WORDS, () => ({ fact: this.applyMemory(rememberFact(this.memory, p.text, this.nowMs())) })),
+    "memory.confirm": (p) => this.atTeam(p.shop, MEMORY_WORDS, () => ({ fact: this.applyMemory(confirmFact(this.memory, this.needText(p.fact, "fact"), this.nowMs())) })),
+    "memory.correct": (p) => this.atTeam(p.shop, MEMORY_WORDS, () => ({ fact: this.applyMemory(correctFact(this.memory, this.needText(p.fact, "fact"), p.text, this.nowMs())) })),
+    "memory.forget": (p) =>
+      this.atTeam(p.shop, MEMORY_WORDS, () => {
+        const id = this.needText(p.fact, "fact");
+        const forgotten = forgetFact(this.memory, id);
+        if (!forgotten.ok) throw new OpError(forgotten.reason, MEMORY_REFUSAL[forgotten.reason]);
+        this.memory = forgotten.state;
+        return { fact: id };
+      }),
 
-    // ---- the team's routines: the package makes each routine, says its timing and works out its next run
-    "routine.list": () => ({ routines: this.routines.map((r) => this.routineView(r)) }),
-    "routine.create": (p) => {
-      // The caller's own timing object is not kept: a routine made from it must not change when the caller later edits it.
-      const trigger = typeof p.trigger === "object" && p.trigger !== null ? copy(p.trigger) : p.trigger;
-      const made = createRoutine({ id: this.nextId("routine"), name: p.name, action: p.action, trigger, ...(p.asksFirst === undefined ? {} : { asksFirst: p.asksFirst }) });
-      if (!made.ok) throw new OpError(made.reason, ROUTINE_REFUSAL[made.reason]);
-      const stored: StoredRoutine = { routine: made.routine, enabled: true };
-      this.routines.push(stored);
-      return { routine: this.routineView(stored) };
-    },
-    "routine.pause": (p) => ({ routine: this.switchRoutine(p.routine, false) }),
-    "routine.resume": (p) => ({ routine: this.switchRoutine(p.routine, true) }),
+    // ---- the team's routines: the package makes each routine, says its timing and works out its next run. The list is the
+    // shop being viewed; a change acts on the shop its list was read for, as on the connected runtime.
+    "routine.list": () => this.atTeam(this.shop, ROUTINES_WORDS, () => ({ shop: this.shop, routines: this.routines.map((r) => this.routineView(r)) })),
+    "routine.create": (p) =>
+      this.atTeam(p.shop, ROUTINES_WORDS, () => {
+        // What the API would refuse for the routine's shape is refused first, by the same rule the connected runtime sends nothing for.
+        const refused = newRoutineRefusal(p);
+        if (refused) throw new OpError(refused, ROUTINE_REFUSAL[refused]);
+        if (this.routines.length >= MAX_ROUTINES) throw new OpError("full", `The team already has ${MAX_ROUTINES} routines. Remove one first.`);
+        // The caller's own timing object is not kept: a routine made from it must not change when the caller later edits it.
+        const trigger = typeof p.trigger === "object" && p.trigger !== null ? copy(p.trigger) : p.trigger;
+        const made = createRoutine({ id: this.nextId("routine"), name: p.name, action: p.action, trigger, ...(p.asksFirst === undefined ? {} : { asksFirst: p.asksFirst }) });
+        if (!made.ok) throw new OpError(made.reason, ROUTINE_REFUSAL[made.reason]);
+        const stored: StoredRoutine = { routine: made.routine, enabled: true };
+        this.routines.push(stored);
+        return { routine: this.routineView(stored) };
+      }),
+    "routine.pause": (p) => this.atTeam(p.shop, ROUTINES_WORDS, () => ({ routine: this.switchRoutine(p.routine, false) })),
+    "routine.resume": (p) => this.atTeam(p.shop, ROUTINES_WORDS, () => ({ routine: this.switchRoutine(p.routine, true) })),
+    "routine.remove": (p) =>
+      this.atTeam(p.shop, ROUTINES_WORDS, () => {
+        const key = this.needText(p.routine, "routine");
+        const at = this.routines.findIndex((r) => r.routine.id === key);
+        if (at < 0) throw new OpError("not_found", "No such routine.");
+        this.routines.splice(at, 1);
+        return { routine: key };
+      }),
 
     // ---- Customize › Connections: the sample vault and outposts, which only the person's own shop has. The list is the
     // shop being viewed; a change acts on the shop its row was read for, as on the connected runtime.
@@ -1229,10 +1242,23 @@ export class MockHost {
     return done.value;
   }
 
+  /** Runs an op of the team's memory or routines on `shop`: the person's own sample shop's, or a shop they made here, which has the
+   *  demo team as every page shows it. At Ran Pa Noi they are a helper, and only Noi, its owner, sees or changes what its team knows
+   *  and its routines, as the API answers a helper's session; any other shop is not theirs. `what` says which, for the words. */
+  private atTeam<T>(shop: unknown, what: string, run: () => T): T {
+    if (shop === HELPED_SHOP) throw new OpError("owner_only", `Only Noi, the shop's owner, sees or changes ${what} at Ran Pa Noi.`);
+    if (shop !== OWN_SHOP && !this.made.some((one) => one.id === shop)) throw new OpError("not_found", "no such shop");
+    return run();
+  }
+
   private unsupported(): never {
     throw new OpError("unsupported", UNSUPPORTED);
   }
 }
+
+/** What `atTeam` says about each half of the team's record in a shop the person only helps at. */
+const MEMORY_WORDS = "what the team knows";
+const ROUTINES_WORDS = "the team's routines";
 
 /** What People and Connections say about a shop made in Practice, which has no sample people or sign-ins of its own. */
 const MADE_NO_SHEET = "A shop you made in Practice has no sample Google Sheet. Switch back to your own shop to try it.";

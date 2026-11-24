@@ -2245,6 +2245,10 @@ export const en = {
   "memory.forgetYes": "Forget it",
   "memory.keep": "Keep it",
   "memory.loading": "Loading what your team knows…",
+  "memory.err.ownerOnly": "Only the shop's owner sees and changes what the team knows.",
+  "memory.err.noShop": "No shop is linked to your account yet, so there is nothing the team knows to show here.",
+  "memory.err.unavailable": "What your team knows did not load. Try again.",
+  "memory.err.unreadable": "The answer was not one this version of the app can read, so nothing is shown.",
   // Customize: the team's routines (src/pages/routines.ts, CustomizePage.tsx)
   "routines.title": "Routines",
   "routines.new": "New routine",
@@ -2281,6 +2285,7 @@ export const en = {
   "routines.form.to": "To",
   "routines.form.threshold": "Stock number",
   "routines.form.asks": "This one always asks you first.",
+  "routines.form.stockNote": "Stock levels are not connected yet, so this routine waits and does not run.",
   "routines.form.add": "Add routine",
   "routines.form.cancel": "Cancel",
   "routines.problem.name": "Say what it does in a short sentence.",
@@ -2290,6 +2295,17 @@ export const en = {
   "routines.problem.window": "The start and the end need to be different times.",
   "routines.problem.threshold": "Use a whole number from 1.",
   "routines.problem.other": "That routine cannot be added as it is.",
+  "routines.problem.action": "That kind of work is not something a routine can do.",
+  "routines.problem.trigger": "Say when it should run.",
+  "routines.problem.zone": "That is not a time zone this app knows.",
+  "routines.problem.mustAsk": "A routine like this always asks you first, so it cannot be set to run without asking.",
+  "routines.problem.member": "That team member does not do this kind of work.",
+  "routines.remove": "Remove",
+  "routines.removeAsk": "Remove this routine? It stops running and its past runs are deleted. This cannot be undone.",
+  "routines.removeYes": "Remove it",
+  "routines.keep": "Keep it",
+  "routines.err.noShop": "No shop is linked to your account yet, so there is no team to give routines to.",
+  "routines.err.full": "Your team already has {max} routines, the most it keeps. Remove one first.",
 
   // Home (src/pages/HomePage.tsx), the page New opens: the design canvas's Main.dc.html. Each mode's words, its
   // suggestions and the empty Needs you are the canvas's own (Main.dc.html and HomeEmpty.dc.html).
@@ -2443,6 +2459,7 @@ export const en = {
   "rt.ownerOnly": "Only {owner} can see and change the team at {shop}.",
   "rt.change.refused": "The API did not make this change, so nothing changed.",
   "rt.change.noReply": "No reply from the API. Checking whether it changed.",
+  "rt.change.unreadable": "The answer was not one this version of the app can read, so it is not shown as done. Checking whether it changed.",
   // Ton's request to append a month of the books to the owner's Google Sheet, as the card, Home and Needs you read it
   // (src/runtime/http/books.ts); the amounts are the API's own words from integer satang
   "rt.books.title": "Ton asks to add the books for {month} to Google Sheets",
