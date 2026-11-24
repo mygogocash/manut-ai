@@ -177,6 +177,8 @@ describe("every surface that can approve a browser write shows its whole text", 
     vi.unstubAllGlobals();
   });
 
+  // Its first imports of three whole pages (the chat's cards, Home and Needs you) take about two seconds alone, and went
+  // past the five-second default on gates with several helpers' tests running at once, so it has thirty.
   it("the chat's card, Home and Needs you, word for word and never cut or scrolled away", async () => {
     const { store, card } = await opened([write()]);
     expect(card).toMatchObject({ command: TEXT, whole: true, choices: ["once", "deny"] });
@@ -215,7 +217,7 @@ describe("every surface that can approve a browser write shows its whole text", 
       expect(body, selector).toMatch(/max-height:\s*none/);
       expect(body, selector).toMatch(/overflow(-y)?:\s*visible/);
     }
-  });
+  }, 30_000);
 
   it("a notification, which offers no Approve for a sentence it cannot show whole", async () => {
     await opened([write()]);
