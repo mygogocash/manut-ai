@@ -4,6 +4,7 @@ import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
 import {
   ApiError,
   MODEL_CAP_MAX_SATANG,
+  SIGN_IN_MEMBERS,
   type ApprovalState,
   type AuditActor,
   type AuditEntry,
@@ -18,6 +19,7 @@ import {
   type ModelCounts,
   type ModelCrossing,
   type ModelUsage,
+  type OutpostRemoval,
   type People,
   type PilotGate,
   type Shop,
@@ -1682,6 +1684,199 @@ export function draftsErrorText(error: unknown): string {
   return errorText(error);
 }
 
+/// The Connections page: one shop's site sign-ins and its outposts, as the vault lists them to an operator (`GET
+/// /v1/admin/vault/sign-ins`, `GET /v1/admin/outposts`). The words follow what the owner reads in the desktop app's Customize ›
+/// Connections where they say the same thing ("The site refused the saved password"), and say what an operator needs beyond it: who
+/// reported a sign-in broken and when, and whether an outpost is online and when it last beat. No password is ever shown, because the
+/// API never answers one. An action that changes something asks first, in the row, and the question names exactly what will happen.
+/// Sentences that hold a name or a time are functions.
+export const connectionsWords = {
+  nav: "Connections",
+  title: "Connections",
+  intro:
+    "Which sites this shop's team can sign in to, and which machines run its browser. No password is ever shown here: the API never answers one. An outpost's credential is shown once, when you give it a new one.",
+  /// The one line that says what this page cannot do, and who can.
+  passwordNote:
+    "To add a sign-in or give one a new password, the owner types it in their own app, under Customize › Connections. This console never takes a password.",
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading connections",
+  noShops: "No shops yet.",
+  /// The API could not reach the shop's vault: nothing is read, or a change may or may not have been made.
+  saveUnavailable: "The API could not reach this shop's vault, so nothing may have changed. Press Refresh to check, then try again.",
+
+  // The shop's site sign-ins
+  signInsTitle: (shop: string) => `Site sign-ins for ${shop}`,
+  signInsLabel: (shop: string) => `${shop}'s site sign-ins`,
+  signInsCount: (total: number, broken: number) =>
+    `${countOf(total, "sign-in", "sign-ins")}${broken > 0 ? `, ${broken} broken` : ""}`,
+  signInsLoading: "Loading the shop's sign-ins",
+  signInsEmpty: "No site sign-ins yet. The owner adds one in their own app, under Customize › Connections.",
+  signInsUnavailable: "The API could not read this shop's vault, so its sign-ins are not shown. Try again.",
+  account: (username: string) => `Account ${username}`,
+  addresses: (origins: string[]) => `Signs in only at ${listOf(origins)}.`,
+  members: (members: string[]) => `May be used by ${listOf(members.map(connectionMemberName))}.`,
+  /// A sign-in that is broken says so by whom and when, and what mends it. Only the owner can give the new password.
+  brokenText: (by: string | null, at: string | null, now: number = Date.now()) =>
+    `The site refused the saved password${at ? whenAfter(at, now) : ""}${by ? `, as ${connectionMemberName(by)} reported` : ""}. It works again once the owner gives a new password in their own app.`,
+  lastUsed: (at: string | null, by: string | null, now: number = Date.now()) =>
+    at === null ? "Never used." : `Last used${by ? ` by ${connectionMemberName(by)}` : ""}${whenAfter(at, now)}.`,
+  /// The only thing the API says about a password: that one is set, and when.
+  passwordSet: (at: string, now: number = Date.now()) => `Password set${whenAfter(at, now)}.`,
+  whoButton: "Who may use it",
+  whoLabel: (site: string) => `Change who may use ${site}`,
+  removeButton: "Remove",
+  removeSignInLabel: (site: string) => `Remove the sign-in to ${site}`,
+
+  // Who may use a sign-in
+  whoTitle: (site: string) => `Who may use ${site}?`,
+  whoLegend: "Members who may use it",
+  /// What saving would do, from who may use it now and who is ticked: said before anything is sent.
+  whoEffect: (site: string, before: readonly string[], after: readonly string[]) => {
+    if (after.length === 0) return "Choose at least one member. To stop everyone using it, remove the sign-in.";
+    const added = after.filter((member) => !before.includes(member)).map(connectionMemberName);
+    const removed = before.filter((member) => !after.includes(member)).map(connectionMemberName);
+    if (added.length === 0 && removed.length === 0) return "That is who may use it now.";
+    const parts: string[] = [];
+    if (added.length > 0) parts.push(`${listOf(added)} may use ${site} from now on.`);
+    if (removed.length > 0) {
+      parts.push(`${listOf(removed)} can no longer use it, and anything they asked for and have not used yet is refused.`);
+    }
+    return parts.join(" ");
+  },
+  whoSave: "Save who may use it",
+  whoYes: (members: readonly string[]) => `Let ${listOf(members.map(connectionMemberName))} use it`,
+  whoNo: "Keep it as it is",
+  whoSaving: "Saving",
+  whoSaved: (site: string, members: readonly string[]) =>
+    `Saved. ${listOf(members.map(connectionMemberName))} may use ${site} from now on.`,
+
+  // Removing a sign-in
+  removeSignInTitle: (site: string, username: string) => `Remove the sign-in to ${site} as ${username}?`,
+  removeSignInEffect: (site: string) =>
+    `The team can no longer sign in to ${site}. Its saved password is deleted from the vault, and a sign-in already asked for and not yet used is refused.`,
+  removeSignInNote: "This cannot be undone. To use it again, the owner adds it again with its password, in their own app.",
+  removeSignInYes: (site: string) => `Remove ${site}`,
+  removeSignInNo: "Keep it",
+  removing: "Removing",
+  signInRemoved: (site: string) => `Removed the sign-in to ${site}. The team can no longer sign in there.`,
+
+  // The shop's outposts
+  outpostsTitle: (shop: string) => `Outposts for ${shop}`,
+  outpostsLabel: (shop: string) => `${shop}'s outposts`,
+  outpostsCount: (total: number, online: number) =>
+    `${countOf(total, "outpost", "outposts")}${total > 0 ? `, ${online} online` : ""}`,
+  outpostsLoading: "Loading the shop's outposts",
+  outpostsEmpty:
+    "No outposts yet. The owner's desktop app registers their Mac as one. A cloud outpost is registered by an operator with POST /v1/admin/outposts.",
+  outpostsUnavailable: "The API could not read this shop's vault, so its outposts are not shown. Try again.",
+  /// What an outpost is, as the owner's app says it. A kind this console does not know yet is shown as it is.
+  kindOf: (kind: string) => (kind === "this_mac" ? "A Mac with the app" : kind === "cloud" ? "A cloud outpost" : kind),
+  registered: (at: string, now: number = Date.now()) => `Registered${whenAfter(at, now)}.`,
+  heartbeat: (at: string | null, now: number = Date.now()) =>
+    at === null ? "It has not sent a heartbeat yet." : `Last heartbeat${whenAfter(at, now)}.`,
+  asleepNote: "Work for it waits until it wakes.",
+  credentialButton: "New credential",
+  credentialLabel: (name: string) => `New credential for ${name}`,
+  removeOutpostLabel: (name: string) => `Remove the outpost ${name}`,
+
+  // Giving an outpost a new credential
+  credentialTitle: (name: string) => `Give ${name} a new credential?`,
+  credentialEffect: (name: string) =>
+    `The old credential stops working at once, and ${name} is asleep until whoever runs it starts it with the new one.`,
+  credentialNote: "The new credential is shown once. Nothing keeps it, so copy it before you leave this page.",
+  credentialYes: (name: string) => `Give ${name} a new credential`,
+  credentialNo: "Keep the old one",
+  credentialMaking: "Making it",
+  /// The box that shows it, once.
+  credentialReady: (name: string) => `The new credential for ${name}`,
+  credentialField: "Credential",
+  credentialCopy: "Copy",
+  credentialCopyWhat: "the new credential",
+  credentialOnce:
+    "Shown once. Copy it now and give it to whoever runs this outpost: nothing here keeps it, and it cannot be shown again. It is forgotten when you press Done or leave this page.",
+  credentialDone: "Done",
+  /// Said in the list, where a credential is never written: that one was made, not what it is.
+  credentialMade: (name: string) => `A new credential was made for ${name}. The old one no longer works.`,
+
+  // Removing an outpost
+  removeOutpostTitle: (name: string) => `Remove ${name}?`,
+  removeOutpostEffect: (name: string) =>
+    `${name} stops working for this shop at once: its credential no longer works, and any step waiting for it is refused.`,
+  removeOutpostNote: "It must be registered again to work.",
+  removeOutpostYes: (name: string) => `Remove ${name}`,
+  removeOutpostNo: "Keep it",
+  /// What the API's own answer says it did: the steps it refused and the permissions to sign in that it used up, said only when
+  /// there were any.
+  outpostRemoved: (name: string, shop: string, answer: Pick<OutpostRemoval, "stepsRefused" | "grantsRefused">) => {
+    const parts = [`Removed. ${name} no longer works for ${shop}.`];
+    const { stepsRefused: steps, grantsRefused: grants } = answer;
+    if (steps > 0) parts.push(`${countOf(steps, "step", "steps")} waiting for it ${steps === 1 ? "was" : "were"} refused.`);
+    if (grants > 0) {
+      parts.push(`${countOf(grants, "sign-in permission", "sign-in permissions")} it held, not yet used, ${grants === 1 ? "was" : "were"} cancelled.`);
+    }
+    return parts.join(" ");
+  },
+} as const;
+
+const CONNECTION_MEMBER_NAMES: Readonly<Record<string, string>> = { nam: "Nam", pim: "Pim", ton: "Ton", kit: "Kit" };
+
+/// A member who may use a sign-in, as people say them: "Nam". One this console does not know yet is shown as the API sent it.
+/// (`memberName` knows only the three who run as workers; a sign-in may also name Kit, who runs commands.)
+export function connectionMemberName(member: string): string {
+  return Object.hasOwn(CONNECTION_MEMBER_NAMES, member) ? CONNECTION_MEMBER_NAMES[member]! : member;
+}
+
+/// How a sign-in stands, as a tag. A state a newer API sends is shown as it is.
+export function signInTag(state: string): { label: string; className: string } {
+  switch (state) {
+    case "working":
+      return { label: "Working", className: "tag ok" };
+    case "broken":
+      return { label: "Broken", className: "tag err" };
+    default:
+      return { label: state, className: "tag" };
+  }
+}
+
+/// Whether an outpost is online, as a tag. It is online while its last heartbeat is under 90 seconds old, which the API decides.
+export function outpostTag(status: string): { label: string; className: string } {
+  switch (status) {
+    case "online":
+      return { label: "Online", className: "tag ok" };
+    case "asleep":
+      return { label: "Asleep", className: "tag warn" };
+    default:
+      return { label: status, className: "tag" };
+  }
+}
+
+/// The two vault refusals that mean the list this page shows is out of date: the sign-in or the outpost is already gone.
+export const CONNECTIONS_MOVED_ON: ReadonlySet<string> = new Set(["sign_in_not_found", "outpost_not_found"]);
+
+/// What went wrong with reading or changing a shop's vault, in the page's words, and the console's usual words for the rest. A 503
+/// `vault_unavailable` on a change does not say whether it was made, so the words say so. A refusal that says the list moved on is
+/// followed by the page reading the list again.
+export function connectionsErrorText(error: unknown, what: "sign-ins" | "outposts" | "change"): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "vault_unavailable":
+        return what === "sign-ins" ? connectionsWords.signInsUnavailable
+          : what === "outposts" ? connectionsWords.outpostsUnavailable
+            : connectionsWords.saveUnavailable;
+      case "sign_in_not_found":
+        return "That sign-in is already gone. The list was refreshed.";
+      case "outpost_not_found":
+        return "That outpost is already gone. The list was refreshed.";
+      case "invalid_members":
+        return `Choose who may use it: one or more of ${listOf(SIGN_IN_MEMBERS.map(connectionMemberName))}.`;
+    }
+  }
+  return errorText(error);
+}
+
 /// The Shops overview: every pilot shop on one page, from the routes the console already reads (the shop list, the pilot
 /// gate, each shop's model spend and its audit log), with a link to each of the shop's other pages. A part that could not
 /// be read is said so, with the shop it belongs to, and is never left out in silence.
@@ -1718,6 +1913,9 @@ export const shopsWords = {
   },
   spendOf: (spentSatang: number, capSatang: number) => `${moneyText(spentSatang)} of ${moneyText(capSatang)}`,
   /// The pages a shop's row opens, in the order its links are laid out.
-  open: { shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", people: "People", model: "Model spend" },
+  open: {
+    shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", people: "People", model: "Model spend",
+    connections: "Connections",
+  },
   openLabel: (page: string, shop: string) => `${page} for ${shop}`,
 } as const;

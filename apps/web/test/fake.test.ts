@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { isAwaitingOwner, type AuditEntry, type AwaitingOwner, type DeletedShop } from "../src/api";
 import { auditReasonText, auditSentence } from "../src/ops/words";
+// The API's own words for what a credential looks like, read as text: it cannot be imported (it runs in the Worker), and a
+// credential the console's practice world makes must be one the API would accept.
+import browserControlSource from "../../api/src/browser-control.ts?raw";
 import { apiList } from "./apiAuditLog";
 import {
   createFakeApi, DEMO_DELETION_TOKENS, DEMO_TOKENS, lineSignature, PRACTICE_CHANNEL_SECRET, PRACTICE_OWNER_CODES,
@@ -1854,7 +1857,7 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     const first = createFakeApi({ now: () => NOW, storage });
     await first.listShops();
     const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
-    expect(world.version).toBe(11);
+    expect(world.version).toBe(12);
     saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, version: 9, audit: [] }));
     const api = createFakeApi({ now: () => NOW, storage });
     const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
@@ -1885,5 +1888,281 @@ describe("the fake's pilot gate cohort", () => {
     const api = createFakeApi({ now: () => Date.parse("2026-11-24T03:00:00Z") });
     await expect(api.setGateCohort("shop_baanmali", true)).rejects.toMatchObject({ status: 409, code: "not_self_serve" });
     await expect(api.setGateCohort("shop_nobody", true)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+// The shop's vault in practice (docs/pilot-api.md, "Vault sign-ins and outposts"): what the operator reads, and the four things the
+// operator may do, answered as the API answers them.
+describe("the fake's vault, kept as the API keeps it", () => {
+  const NOW = Date.parse("2026-11-23T03:00:00Z"); // 10:00 in Bangkok, and a whole number of 30-second beats
+  const BAAN_MALI = "shop_baanmali";
+  const SABAI_TEA = "shop_sabaitea";
+  const SHOPEE = "5d0e7c3a-2b41-4f6e-9a1d-7e8f9a0b1c2d";
+  const CARRIER = "8a1b4c6d-3e52-4f70-b8c9-0d1e2f3a4b5c";
+  const MAC = "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b";
+  const CLOUD = "c0a1d2e3-7a81-4b92-9c03-1d2e3f4a5b6c";
+  const OLD_MAC = "d3e4f5a6-8b92-4c03-8d14-2e3f4a5b6c7d";
+  const CREDENTIAL = /^mo1_[A-Za-z0-9_-]{43}$/;
+  const operator = { kind: "operator", email: null };
+  const fresh = (now = () => NOW) => createFakeApi({ now, webOrigin: "https://web.test" });
+  const minutesAgo = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
+
+  /// A browser's storage for the saved world, with the saved text where a test can reach it.
+  function kept() {
+    const saved = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => void saved.set(key, value),
+      removeItem: (key: string) => void saved.delete(key),
+    };
+    return { saved, storage };
+  }
+
+  /// The newest entry of a shop's log, as what it says: no id and no time.
+  async function newest(api: ReturnType<typeof createFakeApi>, tenant: string) {
+    const { id: _id, at: _at, ...said } = (await api.listAudit(tenant, { limit: 1 })).entries[0]!;
+    return said;
+  }
+  const logLength = async (api: ReturnType<typeof createFakeApi>, tenant: string) =>
+    (await api.listAudit(tenant, { limit: 200 })).entries.length;
+
+  it("starts Baan Mali with the two sign-ins its log tells the story of, oldest first, and Sabai Tea with none", async () => {
+    const api = fresh();
+    expect(await api.listSignIns(BAAN_MALI)).toEqual([
+      {
+        id: SHOPEE, site: "Shopee Seller Centre", origins: ["https://seller.shopee.co.th"], username: "baanmali",
+        members: ["nam", "pim"], state: "working", passwordSet: true, passwordSetAt: minutesAgo(1050), brokenAt: null,
+        brokenBy: null, lastUsedAt: minutesAgo(1098.8), lastUsedBy: "nam", createdAt: minutesAgo(9 * 1440 - 10),
+      },
+      {
+        id: CARRIER, site: "Carrier portal", origins: ["https://portal.carrier.example"], username: "baanmali",
+        members: ["nam"], state: "broken", passwordSet: true, passwordSetAt: minutesAgo(3 * 1440), brokenAt: minutesAgo(2 * 1440 - 2),
+        brokenBy: "nam", lastUsedAt: minutesAgo(2 * 1440 - 1.2), lastUsedBy: "nam", createdAt: minutesAgo(3 * 1440),
+      },
+    ]);
+    expect(await api.listSignIns(SABAI_TEA)).toEqual([]);
+    // As the API's vault, which answers for any tenant that is one: a shop it was never given anything for has an empty list.
+    expect(await api.listSignIns("shop_nobody")).toEqual([]);
+  });
+
+  it("starts Baan Mali with a cloud outpost that never beat and Fon's Mac, which beats, and Sabai Tea with none", async () => {
+    const api = fresh();
+    expect(await api.listOutposts(BAAN_MALI)).toEqual([
+      { id: CLOUD, name: "Cloud outpost", kind: "cloud", status: "asleep", lastHeartbeatAt: null, createdAt: minutesAgo(9 * 1440 - 20) },
+      { id: MAC, name: "Fon's MacBook", kind: "this_mac", status: "online", lastHeartbeatAt: new Date(NOW).toISOString(),
+        createdAt: minutesAgo(2 * 1440 - 40) },
+    ]);
+    expect(await api.listOutposts(SABAI_TEA)).toEqual([]);
+    expect(await api.listOutposts("shop_nobody")).toEqual([]);
+  });
+
+  it("reads a beating Mac at its latest beat, never more than 30 seconds old, so it stays online while the page is open", async () => {
+    let now = NOW;
+    const api = fresh(() => now);
+    now = NOW + 17_000;
+    expect((await api.listOutposts(BAAN_MALI)).find((outpost) => outpost.id === MAC)).toMatchObject({
+      status: "online", lastHeartbeatAt: new Date(NOW).toISOString() });
+    // An hour later it is still beating: the sample world was made an hour ago, and its Mac does not read as gone.
+    now = NOW + 3_600_000 + 29_000;
+    expect((await api.listOutposts(BAAN_MALI)).find((outpost) => outpost.id === MAC)).toMatchObject({
+      status: "online", lastHeartbeatAt: new Date(NOW + 3_600_000).toISOString() });
+    // The cloud outpost never beat, so it is asleep however late it is.
+    expect((await api.listOutposts(BAAN_MALI)).find((outpost) => outpost.id === CLOUD)).toMatchObject({
+      status: "asleep", lastHeartbeatAt: null });
+  });
+
+  it("keeps the sample vault and the sample log telling one story, to the minute", async () => {
+    const api = fresh();
+    const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
+    const when = (action: string, signInId: string) => log.find((entry) => entry.action === action && entry.subject.signInId === signInId)?.at;
+    const [shopee, carrier] = await api.listSignIns(BAAN_MALI);
+    // Shopee broke, and Fon typed a new password: it works, and its password is as old as her change. It was last used by the redeem.
+    expect(when("signin.created", SHOPEE)).toBe(shopee!.createdAt);
+    expect(when("signin.password_replaced", SHOPEE)).toBe(shopee!.passwordSetAt);
+    expect(when("signin.redeemed", SHOPEE)).toBe(shopee!.lastUsedAt);
+    expect(shopee).toMatchObject({ state: "working", brokenAt: null, brokenBy: null });
+    // The carrier's portal broke when the worker said so, and nobody has typed a new password since.
+    expect(when("signin.created", CARRIER)).toBe(carrier!.createdAt);
+    expect(when("signin.broken", CARRIER)).toBe(carrier!.brokenAt);
+    expect(log.find((entry) => entry.action === "signin.redeemed" && entry.subject.signInId === CARRIER)?.at).toBe(carrier!.lastUsedAt);
+    expect(log.some((entry) => entry.action === "signin.password_replaced" && entry.subject.signInId === CARRIER)).toBe(false);
+    expect(carrier).toMatchObject({ state: "broken", brokenBy: "nam" });
+    // Every sign-in and outpost the log names is in the vault, or is the one older Mac that was removed.
+    const signIns = new Set((await api.listSignIns(BAAN_MALI)).map((one) => one.id));
+    const outposts = new Set((await api.listOutposts(BAAN_MALI)).map((one) => one.id));
+    for (const entry of log) {
+      if (entry.subject.signInId !== undefined) expect(signIns.has(entry.subject.signInId), `${entry.action} ${entry.subject.signInId}`).toBe(true);
+      const outpostId = entry.subject.outpostId;
+      if (outpostId !== undefined) expect(outposts.has(outpostId) || outpostId === OLD_MAC, `${entry.action} ${outpostId}`).toBe(true);
+    }
+  });
+
+  it("changes who may use a sign-in, in the order sent, changing nothing else about it, and records only its id", async () => {
+    const api = fresh();
+    const before = await logLength(api, BAAN_MALI);
+    const [, carrier] = await api.listSignIns(BAAN_MALI);
+    const answer = await api.setSignInMembers({ tenant: BAAN_MALI, signInId: CARRIER, members: ["ton", "nam", "kit"] });
+    // Still broken, with when it broke and was last used: who may use it is all that changed.
+    expect(answer).toEqual({ ...carrier, members: ["ton", "nam", "kit"] });
+    expect((await api.listSignIns(BAAN_MALI))[1]).toEqual(answer);
+    expect(await logLength(api, BAAN_MALI)).toBe(before + 1);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "signin.members_changed", subject: { signInId: CARRIER },
+      outcome: "ok" });
+    // The other sign-in is not touched.
+    expect((await api.listSignIns(BAAN_MALI))[0]!.members).toEqual(["nam", "pim"]);
+  });
+
+  it("refuses the members the vault refuses before it looks for the sign-in, and a sign-in that is not there after", async () => {
+    const api = fresh();
+    const before = await logLength(api, BAAN_MALI);
+    const bad: unknown[] = [[], ["nam", "nam"], ["buddy"], ["Nam"], ["nam", "pim", "ton", "kit", "nam"], "nam", null, [7], [["nam"]]];
+    for (const members of bad) {
+      for (const signInId of [SHOPEE, "no-such-sign-in"]) {
+        await expect(api.setSignInMembers({ tenant: BAAN_MALI, signInId, members: members as never }), JSON.stringify(members))
+          .rejects.toMatchObject({ status: 400, code: "invalid_members" });
+      }
+    }
+    await expect(api.setSignInMembers({ tenant: BAAN_MALI, signInId: "no-such-sign-in", members: ["nam"] })).rejects
+      .toMatchObject({ status: 404, code: "sign_in_not_found" });
+    // Another shop's sign-in is not this shop's.
+    await expect(api.setSignInMembers({ tenant: SABAI_TEA, signInId: SHOPEE, members: ["nam"] })).rejects
+      .toMatchObject({ status: 404, code: "sign_in_not_found" });
+    expect(await logLength(api, BAAN_MALI)).toBe(before);
+    expect((await api.listSignIns(BAAN_MALI)).map((one) => one.members)).toEqual([["nam", "pim"], ["nam"]]);
+  });
+
+  it("removes a sign-in, so it is not listed again, and says 404 when it is removed twice", async () => {
+    const api = fresh();
+    expect(await api.removeSignIn({ tenant: BAAN_MALI, signInId: CARRIER })).toEqual({ removed: true, signInId: CARRIER });
+    expect((await api.listSignIns(BAAN_MALI)).map((one) => one.id)).toEqual([SHOPEE]);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "signin.removed", subject: { signInId: CARRIER }, outcome: "ok" });
+    const after = await logLength(api, BAAN_MALI);
+    await expect(api.removeSignIn({ tenant: BAAN_MALI, signInId: CARRIER })).rejects.toMatchObject({ status: 404, code: "sign_in_not_found" });
+    await expect(api.setSignInMembers({ tenant: BAAN_MALI, signInId: CARRIER, members: ["nam"] })).rejects
+      .toMatchObject({ status: 404, code: "sign_in_not_found" });
+    await expect(api.removeSignIn({ tenant: SABAI_TEA, signInId: SHOPEE })).rejects.toMatchObject({ status: 404, code: "sign_in_not_found" });
+    expect(await logLength(api, BAAN_MALI)).toBe(after);
+  });
+
+  it("removes an outpost, so it is not listed again; the practice world queues no work, so it refuses none", async () => {
+    const api = fresh();
+    expect(await api.removeOutpost({ tenant: BAAN_MALI, outpostId: CLOUD })).toEqual({ removed: true, outpostId: CLOUD, stepsRefused: 0,
+      grantsRefused: 0 });
+    expect((await api.listOutposts(BAAN_MALI)).map((one) => one.id)).toEqual([MAC]);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "outpost.removed", subject: { outpostId: CLOUD }, outcome: "ok" });
+    const after = await logLength(api, BAAN_MALI);
+    await expect(api.removeOutpost({ tenant: BAAN_MALI, outpostId: CLOUD })).rejects.toMatchObject({ status: 404, code: "outpost_not_found" });
+    // An outpost that was removed earlier, in the sample's own story, and another shop's, are not there either.
+    await expect(api.removeOutpost({ tenant: BAAN_MALI, outpostId: OLD_MAC })).rejects.toMatchObject({ status: 404, code: "outpost_not_found" });
+    await expect(api.removeOutpost({ tenant: SABAI_TEA, outpostId: MAC })).rejects.toMatchObject({ status: 404, code: "outpost_not_found" });
+    expect(await logLength(api, BAAN_MALI)).toBe(after);
+  });
+
+  it("gives an outpost a new credential the API would accept, and puts it to sleep until its holder beats", async () => {
+    const api = fresh();
+    const answer = await api.replaceOutpostCredential({ tenant: BAAN_MALI, outpostId: MAC });
+    expect(answer.credential).toMatch(CREDENTIAL);
+    expect(answer.outpost).toEqual({ id: MAC, name: "Fon's MacBook", kind: "this_mac", status: "asleep", lastHeartbeatAt: null,
+      createdAt: minutesAgo(2 * 1440 - 40) });
+    // The Mac no longer beats: nobody in practice holds the new credential, so it stays asleep, now and later.
+    expect((await api.listOutposts(BAAN_MALI)).find((outpost) => outpost.id === MAC)).toEqual(answer.outpost);
+    expect(await newest(api, BAAN_MALI)).toEqual({ actor: operator, action: "outpost.credential_rotated", subject: { outpostId: MAC },
+      outcome: "ok" });
+    // Each is a new one, and the same outpost can be given another, which is also asleep.
+    const again = await api.replaceOutpostCredential({ tenant: BAAN_MALI, outpostId: MAC });
+    expect(again.credential).toMatch(CREDENTIAL);
+    expect(again.credential).not.toBe(answer.credential);
+    await expect(api.replaceOutpostCredential({ tenant: BAAN_MALI, outpostId: "no-such-outpost" })).rejects
+      .toMatchObject({ status: 404, code: "outpost_not_found" });
+    await expect(api.replaceOutpostCredential({ tenant: SABAI_TEA, outpostId: MAC })).rejects
+      .toMatchObject({ status: 404, code: "outpost_not_found" });
+  });
+
+  it("makes a credential of the shape the API checks one for, read from the API's own source", () => {
+    // If the API changes what an outpost's credential looks like, the practice world's must follow, and this says so.
+    expect(browserControlSource).toContain("const OUTPOST_CREDENTIAL = /^mo1_[A-Za-z0-9_-]{43}$/;");
+  });
+
+  it("never keeps a credential: not in the saved world, the export, the log, a later answer or what a reload reads", async () => {
+    const { saved, storage } = kept();
+    const api = createFakeApi({ now: () => NOW, storage });
+    const { credential } = await api.replaceOutpostCredential({ tenant: BAAN_MALI, outpostId: MAC });
+    expect(credential).toMatch(CREDENTIAL);
+    const everywhere = [
+      [...saved.values()].join("\n"),
+      JSON.stringify(await api.exportShop(BAAN_MALI)),
+      JSON.stringify(await api.listAudit(BAAN_MALI, { limit: 200 })),
+      JSON.stringify(await api.listOutposts(BAAN_MALI)),
+      JSON.stringify(await api.listSignIns(BAAN_MALI)),
+      JSON.stringify(await createFakeApi({ now: () => NOW, storage }).listOutposts(BAAN_MALI)),
+    ];
+    // Anything of the credential at all: the whole, and the part after its prefix, which is what a sloppy copy would keep.
+    for (const text of everywhere) {
+      expect(text).not.toContain(credential);
+      expect(text).not.toContain(credential.slice(4));
+      expect(text).not.toContain("mo1_");
+    }
+  });
+
+  it("carries the vault in the shop's export, with no password, credential or digest, and deletes it with the shop", async () => {
+    const api = fresh();
+    const exported = await api.exportShop(BAAN_MALI);
+    expect(exported.signIns).toEqual(await api.listSignIns(BAAN_MALI));
+    expect(exported.outposts).toEqual(await api.listOutposts(BAAN_MALI));
+    expect((await api.exportShop(SABAI_TEA)).signIns).toEqual([]);
+    expect((await api.exportShop(SABAI_TEA)).outposts).toEqual([]);
+    expect(JSON.stringify([exported.signIns, exported.outposts])).not.toMatch(/password"|credential|sealed|hash|digest|secret/i);
+    // Every key a sign-in has says nothing of the password but that it is set, and when.
+    for (const signIn of exported.signIns as object[]) {
+      expect(Object.keys(signIn).sort()).toEqual(["brokenAt", "brokenBy", "createdAt", "id", "lastUsedAt", "lastUsedBy", "members", "origins",
+        "passwordSet", "passwordSetAt", "site", "state", "username"]);
+    }
+    const link = asked(await api.deleteShop({ tenant: BAAN_MALI, confirmName: "Baan Mali" }));
+    await api.decideDeletion(deletionTokenOf(link.confirmUrl), true);
+    expect(await api.listSignIns(BAAN_MALI)).toEqual([]);
+    expect(await api.listOutposts(BAAN_MALI)).toEqual([]);
+  });
+
+  it("keeps a change across a reload, starts again on reset, and replaces a world saved before shops had a vault", async () => {
+    const { saved, storage } = kept();
+    const first = createFakeApi({ now: () => NOW, storage });
+    await first.removeSignIn({ tenant: BAAN_MALI, signInId: CARRIER });
+    await first.removeOutpost({ tenant: BAAN_MALI, outpostId: CLOUD });
+    const reloaded = createFakeApi({ now: () => NOW, storage });
+    expect((await reloaded.listSignIns(BAAN_MALI)).map((one) => one.id)).toEqual([SHOPEE]);
+    expect((await reloaded.listOutposts(BAAN_MALI)).map((one) => one.id)).toEqual([MAC]);
+    reloaded.reset();
+    expect((await reloaded.listSignIns(BAAN_MALI)).map((one) => one.id)).toEqual([SHOPEE, CARRIER]);
+    // Version 11 is a world saved with no vault; one that says it is version 12 but lacks the vault is read as the half it holds.
+    for (const change of [{ version: 11, vault: undefined }, { vault: undefined }]) {
+      const world = JSON.parse(saved.get("manut.pilot.fake.v1")!) as Record<string, unknown>;
+      saved.set("manut.pilot.fake.v1", JSON.stringify({ ...world, ...change }));
+      const api = createFakeApi({ now: () => NOW, storage });
+      expect((await api.listSignIns(BAAN_MALI)).map((one) => one.id)).toEqual([SHOPEE, CARRIER]);
+      expect((await api.listShops()).map((shop) => shop.name)).toEqual(["Baan Mali", "Sabai Tea"]);
+    }
+  });
+
+  it("refuses every vault route without an operator key, and without a tenant, as the API's admin gate and routes do", async () => {
+    const locked = createFakeApi({ operatorKey: () => null });
+    const calls: [string, (api: ReturnType<typeof createFakeApi>) => Promise<unknown>][] = [
+      ["listSignIns", (api) => api.listSignIns(BAAN_MALI)],
+      ["setSignInMembers", (api) => api.setSignInMembers({ tenant: BAAN_MALI, signInId: SHOPEE, members: ["nam"] })],
+      ["removeSignIn", (api) => api.removeSignIn({ tenant: BAAN_MALI, signInId: SHOPEE })],
+      ["listOutposts", (api) => api.listOutposts(BAAN_MALI)],
+      ["removeOutpost", (api) => api.removeOutpost({ tenant: BAAN_MALI, outpostId: MAC })],
+      ["replaceOutpostCredential", (api) => api.replaceOutpostCredential({ tenant: BAAN_MALI, outpostId: MAC })],
+    ];
+    for (const [name, call] of calls) await expect(call(locked), name).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    const api = fresh();
+    const nobody = [
+      () => api.listSignIns(""), () => api.listOutposts(""), () => api.listSignIns("x".repeat(257)),
+      () => api.setSignInMembers({ tenant: "", signInId: SHOPEE, members: ["nam"] }),
+      () => api.removeSignIn({ tenant: "", signInId: SHOPEE }),
+      () => api.removeOutpost({ tenant: "", outpostId: MAC }),
+      () => api.replaceOutpostCredential({ tenant: "", outpostId: MAC }),
+      () => api.removeSignIn({ tenant: 7 as never, signInId: SHOPEE }),
+    ];
+    for (const call of nobody) await expect(call()).rejects.toMatchObject({ status: 400, code: "tenant_required" });
   });
 });

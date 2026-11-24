@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { APPROVAL_KINDS, mayDecide } from "@manut/approval-core";
 import {
   ApiError,
+  SIGN_IN_MEMBERS,
   type AuditEntry,
   type DeletedShop,
   type Identity,
@@ -21,6 +22,10 @@ import {
   auditSubjectText,
   auditWords,
   callOutcomeTag,
+  CONNECTIONS_MOVED_ON,
+  connectionMemberName,
+  connectionsErrorText,
+  connectionsWords,
   deletedText,
   deleteRefusalText,
   deleteWhatText,
@@ -45,12 +50,14 @@ import {
   moneyText,
   monthName,
   monthsBack,
+  outpostTag,
   peopleChangedBy,
   peopleChangesOf,
   peopleErrorText,
   peopleWords,
   percentUsed,
   shopsWords,
+  signInTag,
   spendLevel,
   subscriptionErrorText,
   unfinishedText,
@@ -1298,7 +1305,7 @@ describe("the shops overview's words", () => {
     expect(shopsWords.spendOf(0, 20000)).toBe("฿0 of ฿200");
     expect(shopsWords.spendOf(5, 20000)).toBe("฿0.05 of ฿200");
     expect(shopsWords.openLabel("Audit", "Baan Mali")).toBe("Audit for Baan Mali");
-    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend"]);
+    expect(Object.values(shopsWords.open)).toEqual(["Messages", "Drafts", "Audit", "Memory", "People", "Model spend", "Connections"]);
   });
 
   it("says why nothing is shown for the trial, payment and activity when the gate could not be read", () => {
@@ -1339,5 +1346,146 @@ describe("the audit log's words for the owner's Connections", () => {
     expect(said({ actor: shopSession, action: "signin.members_changed", subject: { signInId: "s1" } }))
       .toBe("Fon (the shop's own session) changed who may use a site sign-in.");
     expect(said({ actor: owner, action: "signin.members_changed" })).not.toContain("signin.members_changed");
+  });
+});
+
+// The Connections page's words: one shop's site sign-ins and outposts, as an operator reads them. A sentence that holds a name or a
+// time is a function, a time is worded against the day it is read, and a state, kind or member the console does not know yet is
+// shown as the API sent it.
+describe("the Connections page's words", () => {
+  const W = connectionsWords;
+  // 11:00 on 23 November in Bangkok, and the same time a day later.
+  const TODAY = SAME_DAY;
+  const TOMORROW = NEXT_DAY;
+  const EARLIER_TODAY = "2026-11-23T01:00:00.000Z"; // 08:00 in Bangkok
+
+  it("names the four members who may use a sign-in, and shows any other as it was sent, whatever it is called", () => {
+    expect(SIGN_IN_MEMBERS.map(connectionMemberName)).toEqual(["Nam", "Pim", "Ton", "Kit"]);
+    expect(connectionMemberName("lin")).toBe("lin");
+    expect(connectionMemberName("constructor")).toBe("constructor");
+    expect(connectionMemberName("__proto__")).toBe("__proto__");
+    // The Drafts page's `memberName` knows only the three who run as workers, and still shows Kit as it was sent.
+    expect(memberName("kit")).toBe("kit");
+  });
+
+  it("tags a sign-in as working or broken, and an outpost as online or asleep, and shows any other state as it was sent", () => {
+    expect(signInTag("working")).toEqual({ label: "Working", className: "tag ok" });
+    expect(signInTag("broken")).toEqual({ label: "Broken", className: "tag err" });
+    expect(signInTag("retired")).toEqual({ label: "retired", className: "tag" });
+    expect(outpostTag("online")).toEqual({ label: "Online", className: "tag ok" });
+    expect(outpostTag("asleep")).toEqual({ label: "Asleep", className: "tag warn" });
+    expect(outpostTag("dozing")).toEqual({ label: "dozing", className: "tag" });
+  });
+
+  it("counts the sign-ins and says how many are broken, and counts the outposts and says how many are online", () => {
+    expect(W.signInsCount(0, 0)).toBe("0 sign-ins");
+    expect(W.signInsCount(1, 0)).toBe("1 sign-in");
+    expect(W.signInsCount(1, 1)).toBe("1 sign-in, 1 broken");
+    expect(W.signInsCount(3, 2)).toBe("3 sign-ins, 2 broken");
+    expect(W.outpostsCount(0, 0)).toBe("0 outposts");
+    expect(W.outpostsCount(1, 0)).toBe("1 outpost, 0 online");
+    expect(W.outpostsCount(2, 1)).toBe("2 outposts, 1 online");
+  });
+
+  it("words a time as 'at 08:00' on the day it is read, and as 'on 23 November at 08:00' on any other", () => {
+    expect(W.passwordSet(EARLIER_TODAY, TODAY)).toBe("Password set at 08:00.");
+    expect(W.passwordSet(EARLIER_TODAY, TOMORROW)).toBe("Password set on 23 November at 08:00.");
+    expect(W.lastUsed(EARLIER_TODAY, "nam", TODAY)).toBe("Last used by Nam at 08:00.");
+    expect(W.lastUsed(EARLIER_TODAY, "lin", TOMORROW)).toBe("Last used by lin on 23 November at 08:00.");
+    expect(W.lastUsed(EARLIER_TODAY, null, TODAY)).toBe("Last used at 08:00.");
+    expect(W.lastUsed(null, null, TODAY)).toBe("Never used.");
+    expect(W.lastUsed(null, "nam", TODAY)).toBe("Never used.");
+    expect(W.heartbeat(EARLIER_TODAY, TODAY)).toBe("Last heartbeat at 08:00.");
+    expect(W.heartbeat(EARLIER_TODAY, TOMORROW)).toBe("Last heartbeat on 23 November at 08:00.");
+    expect(W.heartbeat(null, TODAY)).toBe("It has not sent a heartbeat yet.");
+    expect(W.registered(EARLIER_TODAY, TOMORROW)).toBe("Registered on 23 November at 08:00.");
+    // A time that is not one is left out rather than shown wrong.
+    expect(W.passwordSet("not a time", TODAY)).toBe("Password set.");
+  });
+
+  it("says a broken sign-in is broken by whom and when, and what mends it, leaving out what the API did not say", () => {
+    const mend = "It works again once the owner gives a new password in their own app.";
+    expect(W.brokenText("nam", EARLIER_TODAY, TODAY)).toBe(`The site refused the saved password at 08:00, as Nam reported. ${mend}`);
+    expect(W.brokenText("ton", EARLIER_TODAY, TOMORROW))
+      .toBe(`The site refused the saved password on 23 November at 08:00, as Ton reported. ${mend}`);
+    expect(W.brokenText(null, EARLIER_TODAY, TODAY)).toBe(`The site refused the saved password at 08:00. ${mend}`);
+    expect(W.brokenText("nam", null, TODAY)).toBe(`The site refused the saved password, as Nam reported. ${mend}`);
+    expect(W.brokenText(null, null, TODAY)).toBe(`The site refused the saved password. ${mend}`);
+  });
+
+  it("lists addresses and members as people say a list, without the serial comma", () => {
+    expect(W.addresses(["https://a.example"])).toBe("Signs in only at https://a.example.");
+    expect(W.addresses(["https://a.example", "https://b.example", "https://c.example"]))
+      .toBe("Signs in only at https://a.example, https://b.example and https://c.example.");
+    expect(W.members(["nam"])).toBe("May be used by Nam.");
+    expect(W.members(["nam", "pim", "ton", "kit"])).toBe("May be used by Nam, Pim, Ton and Kit.");
+    expect(W.account("baanmali")).toBe("Account baanmali");
+    expect(W.kindOf("this_mac")).toBe("A Mac with the app");
+    expect(W.kindOf("cloud")).toBe("A cloud outpost");
+    expect(W.kindOf("edge")).toBe("edge");
+  });
+
+  it("says exactly what saving who may use a sign-in would do, before it is sent", () => {
+    const effect = (before: string[], after: string[]) => W.whoEffect("Shopee Seller Centre", before, after);
+    expect(effect(["nam", "pim"], ["nam", "pim"])).toBe("That is who may use it now.");
+    // The same members in another order are the same members.
+    expect(effect(["nam", "pim"], ["pim", "nam"])).toBe("That is who may use it now.");
+    expect(effect(["nam"], [])).toBe("Choose at least one member. To stop everyone using it, remove the sign-in.");
+    expect(effect([], [])).toBe("Choose at least one member. To stop everyone using it, remove the sign-in.");
+    expect(effect(["nam"], ["nam", "ton"])).toBe("Ton may use Shopee Seller Centre from now on.");
+    expect(effect(["nam", "pim"], ["nam"]))
+      .toBe("Pim can no longer use it, and anything they asked for and have not used yet is refused.");
+    expect(effect(["nam", "pim"], ["ton", "kit"])).toBe(
+      "Ton and Kit may use Shopee Seller Centre from now on. Nam and Pim can no longer use it, and anything they asked for and have not used yet is refused.");
+    expect(effect(["nam", "lin"], ["nam"])).toBe("lin can no longer use it, and anything they asked for and have not used yet is refused.");
+    expect(W.whoYes(["nam"])).toBe("Let Nam use it");
+    expect(W.whoYes(["nam", "ton", "kit"])).toBe("Let Nam, Ton and Kit use it");
+    expect(W.whoSaved("Shopee Seller Centre", ["ton", "nam"])).toBe("Saved. Ton and Nam may use Shopee Seller Centre from now on.");
+  });
+
+  it("names, in each question, what will be removed or changed, and that a removed sign-in cannot be got back by the console", () => {
+    expect(W.removeSignInTitle("Shopee Seller Centre", "baanmali")).toBe("Remove the sign-in to Shopee Seller Centre as baanmali?");
+    expect(W.removeSignInEffect("Shopee Seller Centre")).toBe("The team can no longer sign in to Shopee Seller Centre. Its saved password is deleted from the vault, and a sign-in already asked for and not yet used is refused.");
+    expect(W.removeSignInNote).toBe("This cannot be undone. To use it again, the owner adds it again with its password, in their own app.");
+    expect(W.credentialTitle("Fon's MacBook")).toBe("Give Fon's MacBook a new credential?");
+    expect(W.credentialEffect("Fon's MacBook")).toBe("The old credential stops working at once, and Fon's MacBook is asleep until whoever runs it starts it with the new one.");
+    expect(W.credentialNote).toBe("The new credential is shown once. Nothing keeps it, so copy it before you leave this page.");
+    expect(W.removeOutpostTitle("Fon's MacBook")).toBe("Remove Fon's MacBook?");
+    expect(W.removeOutpostEffect("Fon's MacBook")).toBe("Fon's MacBook stops working for this shop at once: its credential no longer works, and any step waiting for it is refused.");
+    // What is said afterwards never holds the credential, whatever the name.
+    expect(W.credentialMade("Fon's MacBook")).toBe("A new credential was made for Fon's MacBook. The old one no longer works.");
+  });
+
+  it("says what removing an outpost refused, only when it refused anything, in the singular and the plural", () => {
+    const said = (stepsRefused: number, grantsRefused: number) => W.outpostRemoved("Fon's MacBook", "Baan Mali", { stepsRefused, grantsRefused });
+    expect(said(0, 0)).toBe("Removed. Fon's MacBook no longer works for Baan Mali.");
+    expect(said(1, 0)).toBe("Removed. Fon's MacBook no longer works for Baan Mali. 1 step waiting for it was refused.");
+    expect(said(3, 0)).toBe("Removed. Fon's MacBook no longer works for Baan Mali. 3 steps waiting for it were refused.");
+    expect(said(0, 1)).toBe("Removed. Fon's MacBook no longer works for Baan Mali. 1 sign-in permission it held, not yet used, was cancelled.");
+    expect(said(2, 2)).toBe("Removed. Fon's MacBook no longer works for Baan Mali. 2 steps waiting for it were refused. 2 sign-in permissions it held, not yet used, were cancelled.");
+  });
+
+  it("puts the API's own refusals in the page's words, and the console's usual words for the rest", () => {
+    const text = (error: unknown, what: "sign-ins" | "outposts" | "change") => connectionsErrorText(error, what);
+    // A vault that did not answer: nothing is read, or a change may or may not have been made.
+    expect(text(new ApiError(503, "vault_unavailable"), "sign-ins")).toBe(W.signInsUnavailable);
+    expect(text(new ApiError(503, "vault_unavailable"), "outposts")).toBe(W.outpostsUnavailable);
+    expect(text(new ApiError(503, "vault_unavailable"), "change")).toBe(W.saveUnavailable);
+    expect(W.signInsUnavailable).toBe("The API could not read this shop's vault, so its sign-ins are not shown. Try again.");
+    expect(W.saveUnavailable).toBe("The API could not reach this shop's vault, so nothing may have changed. Press Refresh to check, then try again.");
+    expect(text(new ApiError(404, "sign_in_not_found"), "change")).toBe("That sign-in is already gone. The list was refreshed.");
+    expect(text(new ApiError(404, "outpost_not_found"), "change")).toBe("That outpost is already gone. The list was refreshed.");
+    expect(text(new ApiError(400, "invalid_members"), "change")).toBe("Choose who may use it: one or more of Nam, Pim, Ton and Kit.");
+    // The rest is the console's own: a refused key, an API out of reach, a code it has no words for, and something that is no error.
+    expect(text(new ApiError(403, "forbidden"), "change")).toBe(errorText(new ApiError(403, "forbidden")));
+    expect(text(new ApiError(401, "vault_unavailable"), "change")).toBe(errorText(new ApiError(401, "vault_unavailable")));
+    expect(text(new ApiError(0, "network"), "sign-ins")).toBe("Could not reach the API. Check the connection and try again.");
+    expect(text(new ApiError(400, "tenant_required"), "outposts")).toBe("The API did not accept this (tenant_required).");
+    expect(text(new ApiError(500, "boom"), "change")).toBe("The API answered with an error (boom).");
+    expect(text(new Error("x"), "change")).toBe("Something unexpected went wrong. Try again.");
+  });
+
+  it("treats exactly the two refusals that say a record is gone as the list having moved on", () => {
+    expect([...CONNECTIONS_MOVED_ON].sort()).toEqual(["outpost_not_found", "sign_in_not_found"]);
   });
 });

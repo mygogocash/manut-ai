@@ -3,6 +3,7 @@ import { useApiSetup } from "../api";
 import {
   AuditIcon,
   BrandMark,
+  ConnectionsIcon,
   DraftIcon,
   FlagIcon,
   MemoryIcon,
@@ -13,6 +14,7 @@ import {
   useColorScheme,
 } from "../ui/marks";
 import { AuditView } from "./AuditView";
+import { ConnectionsView } from "./ConnectionsView";
 import { DeletionNotices } from "./DeletionNotices";
 import { DraftsView } from "./DraftsView";
 import { GateView } from "./GateView";
@@ -30,6 +32,7 @@ import { useLoad } from "./useLoad";
 import { deletionOf, isDeleting, useShopDeletion } from "./useShopDeletion";
 import {
   auditWords,
+  connectionsWords,
   draftsWords,
   errorText,
   gateWords,
@@ -51,15 +54,17 @@ import {
 /// team knows about one shop, and is where an operator relays the owner's say over it. The Drafts page reads what Nam,
 /// Pim and Ton wrote for one shop, with nothing on it that sends a draft. The People page reads who can use Manut AI for
 /// one shop, and is where an operator invites, removes and sets cover on the owner's word. The Model spend page reads one
-/// shop's model spend for a month against its monthly cap, and sets or clears the cap.
+/// shop's model spend for a month against its monthly cap, and sets or clears the cap. The Connections page reads one shop's site
+/// sign-ins and outposts, so a sign-in the site refused or an outpost that is asleep is seen, and is where an operator removes a
+/// sign-in or an outpost, changes who may use a sign-in, or gives an outpost a new credential.
 
 export const REFRESH_MS = 15000;
 
 /// `questions` is a shop's first week, for a shop made from a template.
 type Tab = "messages" | "payments" | "data" | "questions";
 /// What the main column shows: the chosen shop, every shop at a glance, the Pilot gate across all of them, or one shop's
-/// audit log, memory, drafts, people or model spend.
-type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model";
+/// audit log, memory, drafts, people, model spend or connections.
+type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model" | "connections";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -222,6 +227,16 @@ export function OpsConsole() {
               <SpendIcon />
               <span style={{ flex: 1, minWidth: 0 }}>{modelSpendWords.nav}</span>
             </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
+              aria-current={page === "connections" ? "page" : undefined}
+              onClick={() => setPage("connections")}
+            >
+              <ConnectionsIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{connectionsWords.nav}</span>
+            </button>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 10px 4px" }}>
               <span className="mut" style={{ flex: 1, fontSize: 12 }} id="shops-label">
                 Shops
@@ -311,6 +326,8 @@ export function OpsConsole() {
           <PeopleView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "model" ? (
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
+        ) : page === "connections" ? (
+          <ConnectionsView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (
           <>
             <div className="top">

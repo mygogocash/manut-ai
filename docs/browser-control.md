@@ -463,7 +463,8 @@ The owner removing a sign-in and changing its account or addresses, and the oper
   page has words for.
 - **The operator's members route**, `POST /v1/admin/vault/sign-ins/members`, an exact `ADMIN_METHODS` entry, through the
   vault operation the owner's route uses, with its refusals, logged `signin.members_changed` by the operator. The console
-  has no sign-ins view, so nothing there changed but the Audit page's words. The operator still has no route to change a
+  had no sign-ins view then, so nothing there changed but the Audit page's words (its Connections page came next, below).
+  The operator still has no route to change a
   sign-in's account or addresses: an operator removes it and adds it again.
 - **Tests** (`sign-in-changes.test.ts`, and every owner route in `owner-vault.test.ts`'s list): a helper refused, a
   person's own sign-in answered 404, a removal refusing a grant issued before it at its redeem and at its open, a new or
@@ -487,6 +488,27 @@ The owner removing a sign-in and changing its account or addresses, and the oper
 - **Practice** changes and removes its sample sign-ins by the same rule, and `apps/desktop/e2e/vault-sign-ins.spec.ts`
   walks both there: a new address waiting for the password, an address taken away without it, and a removal kept, then
   made.
+
+The operator's Connections page, in the console (24 Nov 2026; December item 50). Until now an operator could not see a
+shop's broken sign-in or sleeping outpost without its owner. No API change.
+- **The page** (`apps/web/src/ops/ConnectionsView.tsx`, last in the side menu and linked from each shop's row on the
+  Shops page) lists the chosen shop's sign-ins and outposts from the operator's routes, each list with its own failure,
+  and offers the four changes those routes allow: remove a sign-in, change who may use one, remove an outpost, give an
+  outpost a new credential. Each asks first in its row, names what will happen, and runs one at a time. Who may use a
+  sign-in is chosen from Nam, Pim, Ton and Kit (`SIGN_IN_MEMBERS`, held to `@manut/member-grants`' roster by
+  `apps/web/test/signInMembers.test.ts`), sent in the API's order.
+- **No password.** The page offers no way to type one, and says that adding a sign-in or giving it a new password is
+  the owner's, from Customize › Connections. The operator's add and password routes are unchanged; the console does not
+  call them.
+- **The credential** is shown once, with a Copy button, in a box that holds it in the page's state only. Done, choosing
+  another shop or leaving the page lets it go; it is never put in storage, a list, a notice or the address, and its
+  request is made with `cache: "no-store"`, the other half of the answer's own `no-store`.
+- **Practice** answers the six routes as the API does: Baan Mali starts with two sign-ins, one broken, and two outposts,
+  Fon's Mac beating while the page is open and a cloud outpost asleep. The saved world is version 12, and the practice
+  export carries the vault with no secret.
+- **Tests** (`ConnectionsView.test.tsx`, `client.test.ts`, `fake.test.ts`, `words.test.ts`): each client method, the
+  fake, the page's states, each question and its cancel, the credential gone after Done, a shop change and leaving the
+  page. Each guard was broken in turn to see a test fail.
 
 The outpost ready for real sites' pages, this Mac (24 and 25 Nov 2026; December item 49, "Next slices" items 1 and 4). Nothing
 here has met a real site yet: every script runs against test pages in WebKit and Chromium, and the Rust around them

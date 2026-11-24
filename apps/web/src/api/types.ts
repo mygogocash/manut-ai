@@ -514,6 +514,67 @@ export type NewModelCap = { tenant: string; capSatang: number | null };
 /// The largest cap the API takes: ฿10 million, far above any shop's month.
 export const MODEL_CAP_MAX_SATANG = 1_000_000_000;
 
+/// A shop's vault as the operator reads it (docs/pilot-api.md, "Vault sign-ins and outposts"): its site sign-ins and its
+/// outposts. No answer holds a password. A sign-in says only that its password is set, and when; an outpost's credential is in
+/// the one answer that gives a new one, this once, and in no other.
+
+/// The members a sign-in may name, in the order the API lists them: those of `@manut/member-grants`' roster whose jobs run
+/// through a connection. Buddy routes work and never signs in to a site. This app does not depend on that package, so a test
+/// holds this list to the roster.
+export const SIGN_IN_MEMBERS: readonly string[] = ["nam", "pim", "ton", "kit"];
+
+/// One account on one site, kept in the shop's vault with the members who may use it. `state` is `broken` once a member
+/// reported that the site refused the saved password, and a new password, which only the owner gives, mends it. A member is
+/// an id such as `nam`; one this console does not know yet is shown as it is.
+export type SignIn = {
+  id: string;
+  /// The name people use: "Shopee Seller Centre".
+  site: string;
+  /// 1 to 5 https origins: the only places the vault types this sign-in's password.
+  origins: string[];
+  /// The account on the site.
+  username: string;
+  members: string[];
+  state: "working" | "broken";
+  /// The only thing any answer says about the password.
+  passwordSet: true;
+  passwordSetAt: string;
+  /// When it broke (the first report) and the member who reported it.
+  brokenAt: string | null;
+  brokenBy: string | null;
+  /// When an outpost last redeemed a grant for it, and the member whose step that was.
+  lastUsedAt: string | null;
+  lastUsedBy: string | null;
+  createdAt: string;
+};
+
+/// A machine that runs the team's browser: a Mac with the desktop app, or a cloud outpost. It is `online` while its last
+/// heartbeat is under 90 seconds old, and `asleep` otherwise, before its first beat included.
+export type Outpost = {
+  id: string;
+  name: string;
+  kind: "this_mac" | "cloud";
+  status: "online" | "asleep";
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+};
+
+/// Who may use a sign-in from now on: one or more of `SIGN_IN_MEMBERS`, no repeat, in the order they are sent.
+export type NewSignInMembers = { tenant: string; signInId: string; members: string[] };
+export type SignInRef = { tenant: string; signInId: string };
+export type OutpostRef = { tenant: string; outpostId: string };
+
+/// What removing a sign-in answers. The password is deleted with it, and a grant issued for it is refused at its redeem.
+export type SignInRemoval = { removed: true; signInId: string };
+
+/// What removing an outpost answers: its credential stops working at once, and how many of its waiting steps were refused and
+/// how many of its grants not yet redeemed were used up in the same step.
+export type OutpostRemoval = { removed: true; outpostId: string; stepsRefused: number; grantsRefused: number };
+
+/// An outpost and its new credential (`mo1_` and 43 base64url characters), in this answer and nowhere else: the vault keeps
+/// only its SHA-256, so a credential that is lost is given again.
+export type OutpostCredential = { outpost: Outpost; credential: string };
+
 /// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
 export type WorkerMember = "nam" | "pim" | "ton";
 
@@ -687,6 +748,29 @@ export interface PilotApi {
   /// `GET /v1/admin/model/alerts`: the shops whose model spend has reached 80% or 100% of their cap this Bangkok month,
   /// across all shops, from one read that asks no shop's own meter. Rejects with 503 `alerts_unavailable`.
   getModelAlerts(): Promise<ModelAlerts>;
+
+  /// The shop's vault (docs/pilot-api.md, "Vault sign-ins and outposts"). The operator reads it and may do four things to it:
+  /// remove a sign-in, change who may use one, remove an outpost and give an outpost a new credential. There is no route here to
+  /// type a site's password: adding a sign-in and giving it a new password are the owner's, from their own app. Each
+  /// rejects with 400 `tenant_required` and 503 `vault_unavailable`, which does not say whether a change was made.
+  /// `GET /v1/admin/vault/sign-ins?tenant=`: the shop's sign-ins, oldest first, those removed left out.
+  listSignIns(tenant: string): Promise<SignIn[]>;
+  /// `POST /v1/admin/vault/sign-ins/members`: who may use the sign-in from now on, and nothing else about it changes. A member
+  /// taken off loses it at once. Answers the sign-in as it now stands. Rejects with 400 `invalid_members` (none, a repeat, or one
+  /// that is not Nam, Pim, Ton or Kit) and 404 `sign_in_not_found`, also for one already removed.
+  setSignInMembers(input: NewSignInMembers): Promise<SignIn>;
+  /// `POST /v1/admin/vault/sign-ins/remove`: the sign-in and its password are gone, and a grant issued for it is refused at its
+  /// redeem. Rejects with 404 `sign_in_not_found`, also when it was already removed.
+  removeSignIn(input: SignInRef): Promise<SignInRemoval>;
+  /// `GET /v1/admin/outposts?tenant=`: the shop's outposts, oldest first, each `online` or `asleep` as of now.
+  listOutposts(tenant: string): Promise<Outpost[]>;
+  /// `POST /v1/admin/outposts/remove`: the outpost's credential stops working at once, and its waiting steps and grants are
+  /// refused in the same step. Rejects with 404 `outpost_not_found`, also when it was already removed.
+  removeOutpost(input: OutpostRef): Promise<OutpostRemoval>;
+  /// `POST /v1/admin/outposts/credential`: a new credential, in this answer and nowhere else (the answer is `no-store`, and the
+  /// request asks the browser to keep nothing). The old one stops working at once, and the outpost is `asleep` until the holder
+  /// of the new one beats. Rejects with 404 `outpost_not_found`.
+  replaceOutpostCredential(input: OutpostRef): Promise<OutpostCredential>;
 
   /// `GET /v1/admin/workers/drafts`: one page of what Nam, Pim and Ton did for a shop, newest first, drafts and handovers
   /// included. It only reads: a draft in it has not been sent. Rejects with 400 `tenant_required`, 400 `invalid_request` for a

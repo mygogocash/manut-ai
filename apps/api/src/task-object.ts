@@ -13,6 +13,7 @@ import {
   type Role,
   type Standing,
 } from "@manut/approval-core";
+import { indexRequest, OPEN_WINDOW_MS } from "./approval-index";
 import { readJsonBody } from "./body";
 import { BOOKS_KIND, booksDetail, booksPayloadOf, SHEETS_APPEND, type BooksDetail } from "./books-detail";
 import {
@@ -28,6 +29,7 @@ import { isValidCompanyId } from "./companies";
 import { isValidLinePushProposal, LINE_PUSH_OPERATION, lineReplyText } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
 import { listingOf, MAX_LISTED_ATTEMPTS } from "./task-listing";
+import type { TenantDataEnv } from "./tenant-data";
 
 export type TaskCriterionJSON = {
   id: string;
@@ -103,6 +105,11 @@ const MAX_REPLAY_LIMIT = 1000;
 /// Most attempts a single export carries. Claims can grow without bound, so
 /// an unbounded read would let one hot task swell the whole export.
 const MAX_EXPORT_ATTEMPTS = 200;
+/// The most requests one read of named requests may name (`GET /requests?id=`). The approvals list asks a task for at
+/// most this many at a time (approvals.ts), so the read stays bounded by what it asks for, however much the task holds.
+export const MAX_NAMED_REQUESTS = 100;
+/// The longest request id that read takes: every request shares its action's id, a UUID.
+const MAX_REQUEST_ID = 128;
 
 /// One execution of a task by one executor. The fencing token plus the lease
 /// decide who may publish: a stale or fenced-out executor's steps and finish
@@ -929,7 +936,7 @@ export class TaskObject extends DurableObject {
       if (attemptJob[2] === "draft") return this.storeDraft(request, attemptId);
       return this.endAttempt(request, attemptId);
     }
-    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request);
+    if (request.method === "GET" && url.pathname === "/requests") return this.listRequests(request, url);
     const requestItem = url.pathname.match(/^\/requests\/([^/]+)(\/decision)?$/);
     if (requestItem) {
       const requestId = requestItem[1];
@@ -1165,7 +1172,7 @@ export class TaskObject extends DurableObject {
       : undefined;
     if (!kind) return Response.json({ error: "unsupported_operation" }, { status: 400 });
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
-    return this.respond(this.openAskedSync(request, attemptId, parsed.value.fence, checked.fields, (proposal) => ({
+    return this.openAsked(request, attemptId, parsed.value.fence, checked.fields, (proposal) => ({
       kind,
       detail: {
         actionId: proposal.id,
@@ -1173,7 +1180,7 @@ export class TaskObject extends DurableObject {
         targetResourceId: proposal.targetResourceId,
         payloadHash: proposal.payloadHash,
       },
-    })));
+    }));
   }
 
   /// `POST /attempts/:id/ask-submit` with exactly `{ fence, write, site, expiresAt }`: a worker's browser write
@@ -1210,7 +1217,7 @@ export class TaskObject extends DurableObject {
     };
     const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
-    return this.respond(this.openAskedSync(request, attemptId, body.fence, hashed, (proposal) => ({
+    return this.openAsked(request, attemptId, body.fence, hashed, (proposal) => ({
       kind: SUBMIT_KINDS[write.action],
       detail: {
         actionId: proposal.id,
@@ -1225,7 +1232,7 @@ export class TaskObject extends DurableObject {
         text: submitText(write, site),
         payloadHash: proposal.payloadHash,
       } satisfies SubmitDetail,
-    })));
+    }));
   }
 
   /// `POST /attempts/:id/ask-books` with exactly `{ fence, books, connection, expiresAt }`: Ton asks to append a month
@@ -1265,33 +1272,49 @@ export class TaskObject extends DurableObject {
     };
     const hashed: ProposalFields = { ...fields, payloadHash: await payloadHash(actionHashable(fields)) };
     if (!(await this.load())) return Response.json({ error: "not_found" }, { status: 404 });
-    return this.respond(this.openAskedSync(request, attemptId, body.fence, hashed, (proposal) => ({
+    return this.openAsked(request, attemptId, body.fence, hashed, (proposal) => ({
       kind: REQUEST_KINDS[SHEETS_APPEND] ?? BOOKS_KIND,
       detail: booksDetail(proposal.id, books, proposal.payloadHash) satisfies BooksDetail,
-    })));
+    }));
   }
 
   /// A worker's ask, in one transaction: the exact action stored as a proposal bound to its request, and the request
   /// opened through approval-core with the two options, an expiry with the action's, and the stamp of the asking
   /// attempt. Only the attempt that holds the task may ask, since a request from any other would be superseded the
   /// moment it opened. `asked` gives the request's kind and detail from the stored proposal.
-  private openAskedSync(request: Request, attemptId: string, fence: unknown, fields: ProposalFields,
-    asked: (proposal: ActionProposalJSON) => { kind: ApprovalKind; detail: unknown }): SyncAnswer {
+  ///
+  /// Before it, the shop's approval lookup is told which task holds the request (`openingInLookup`), as the task index is
+  /// told of a task before it is made. The checks run first, writing nothing, so an ask that would be refused leaves no
+  /// entry; the transaction runs them again, since awaiting the lookup let other requests in.
+  private async openAsked(request: Request, attemptId: string, fence: unknown, fields: ProposalFields,
+    asked: (proposal: ActionProposalJSON) => { kind: ApprovalKind; detail: unknown }): Promise<Response> {
     const id = crypto.randomUUID();
-    return this.ctx.storage.transactionSync((): SyncAnswer => {
-      const kv = this.ctx.storage.kv;
+    const checks = (kv: SyncKvStorage): SyncAnswer | { doc: TaskDocJSON; live: AttemptJSON; stamps: number[] } => {
       const doc = this.writableDocSync(kv, request);
       if ("status" in doc) return doc;
-      const nowMs = Date.now();
-      const nowS = nowMs / 1000;
+      const nowS = Date.now() / 1000;
       const live = this.liveAttemptSync(kv, doc, attemptId, fence, nowS);
       if (!live.ok) return live.answer;
       if (this.runningAttemptSync(kv, nowS) !== attemptId) return { status: 409, body: { error: "stale_attempt" } };
       const stamps = this.takeWriteStampSync(kv);
       if (stamps === null) return { status: 429, body: { error: "rate_limited" } };
+      return { doc, live: live.attempt, stamps };
+    };
+    const first = this.ctx.storage.transactionSync(() => checks(this.ctx.storage.kv));
+    if ("status" in first) return this.respond(first);
+    const opening = await this.openingInLookup(request, first.doc, id);
+    if (opening instanceof Response) return opening;
+    return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
+      const kv = this.ctx.storage.kv;
+      const checked = checks(kv);
+      if ("status" in checked) return checked;
+      const { doc, live, stamps } = checked;
+      const refused = opening.refusal(doc);
+      if (refused) return refused;
+      const nowMs = Date.now();
+      const nowS = nowMs / 1000;
       const proposal: ActionProposalJSON = {
-        ...newProposal(id, doc.tenantId ?? request.headers.get("x-tenant") ?? "", doc.companyId, fields,
-          new Date(nowMs).toISOString()),
+        ...newProposal(id, this.ownerOf(doc, request), doc.companyId, fields, new Date(nowMs).toISOString()),
         requestId: id,
       };
       const { kind, detail } = asked(proposal);
@@ -1306,11 +1329,40 @@ export class TaskObject extends DurableObject {
       if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };
       kv.put(`action:${id}`, proposal);
       kv.put(`request:${id}`, opened.next);
-      kv.put(`attempt:${attemptId}`, { ...live.attempt, leaseUntil: nowS + LEASE_SECONDS } satisfies AttemptJSON);
+      kv.put(`attempt:${attemptId}`, { ...live, leaseUntil: nowS + LEASE_SECONDS } satisfies AttemptJSON);
       kv.put("writeStamps", stamps);
       this.appendEventsSync(kv, doc, [{ kind: "updated", via: `action:propose:${id}` }]);
       return { status: 200, body: { action: proposal, request: opened.result.request } };
-    });
+    }));
+  }
+
+  /// The tenant a proposal on this task carries, and so the shop whose approvals list its request: the task's own, or,
+  /// on a task from before tasks carried one, the caller's.
+  private ownerOf(doc: TaskDocJSON, request: Request): string {
+    return doc.tenantId ?? request.headers.get("x-tenant") ?? "";
+  }
+
+  /// Writes the entry of a request about to open into its shop's approval lookup (approval-index.ts), before the request
+  /// opens: a request whose entry could not be written is never opened, so the shop can always find it. Answers 503
+  /// `approvals_unavailable` when the lookup cannot be written, or the check the opening transaction must make: the
+  /// request still belongs to the shop whose lookup was written, and it opens within `OPEN_WINDOW_MS` of the write, so a
+  /// read that later finds no request behind an older entry may clear it without racing this open.
+  private async openingInLookup(request: Request, doc: TaskDocJSON, requestId: string):
+    Promise<Response | { refusal: (now: TaskDocJSON) => SyncAnswer | null }> {
+    const tenant = this.ownerOf(doc, request);
+    const startedAt = Date.now();
+    if (!(await indexRequest(this.tenantEnv, tenant, requestId, doc.id))) {
+      return Response.json({ error: "approvals_unavailable" }, { status: 503 });
+    }
+    return {
+      refusal: (now) => this.ownerOf(now, request) !== tenant || Date.now() - startedAt > OPEN_WINDOW_MS
+        ? { status: 503, body: { error: "approvals_unavailable" } } : null,
+    };
+  }
+
+  /// The shop's objects, which a request's lookup entry is written to before it opens.
+  private get tenantEnv(): Pick<TenantDataEnv, "TENANT"> {
+    return this.env as unknown as Pick<TenantDataEnv, "TENANT">;
   }
 
   /// The approval-core record that decides `action`: its stored request, or, for a reply stored before replies carried
@@ -1373,7 +1425,17 @@ export class TaskObject extends DurableObject {
   /// its current revision and against the attempt holding the task, for a session's list of approvals (approvals.ts).
   /// It walks the actions, because every request shares its action's id and an old reply's request exists only as the
   /// one it would have opened. An action of another tenant is never listed, whatever task it sits in.
-  private async listRequests(request: Request): Promise<Response> {
+  ///
+  /// `GET /requests?id=…&id=…` answers only the requests named, at most `MAX_NAMED_REQUESTS`, each read by its own key,
+  /// so the read costs what it asks for and not what the task has held: the approvals list asks for the ones the shop's
+  /// lookup names (approval-index.ts). A named request the task does not hold for the caller is simply not answered, which
+  /// the list reads as the lookup's entry being stale.
+  private async listRequests(request: Request, url: URL): Promise<Response> {
+    const named = url.searchParams.has("id") ? [...new Set(url.searchParams.getAll("id"))] : null;
+    if (named !== null && (named.length > MAX_NAMED_REQUESTS ||
+        named.some((id) => id.length === 0 || id.length > MAX_REQUEST_ID))) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
     const doc = await this.load();
     if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
     return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
@@ -1381,7 +1443,9 @@ export class TaskObject extends DurableObject {
       const now = Date.now();
       const running = { attemptId: this.runningAttemptSync(kv, now / 1000) };
       const requests: { record: ApprovalRecord; standing: Standing }[] = [];
-      for (const [, action] of kv.list<ActionProposalJSON>({ prefix: "action:" })) {
+      const actions = named === null ? [...kv.list<ActionProposalJSON>({ prefix: "action:" })].map(([, action]) => action)
+        : named.flatMap((id) => kv.get<ActionProposalJSON>(`action:${id}`) ?? []);
+      for (const action of actions) {
         if (this.foreignAction(action, request)) continue;
         const record = this.decidingRecordSync(kv, action);
         if (record === undefined) continue;
@@ -1950,12 +2014,12 @@ export class TaskObject extends DurableObject {
     if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });
     const proposal = newProposal(
       crypto.randomUUID(),
-      doc.tenantId ?? request.headers.get("x-tenant") ?? "",
+      this.ownerOf(doc, request),
       doc.companyId,
       checked.fields,
       new Date().toISOString(),
     );
-    if (isReply(proposal)) return this.storeReply(request, proposal);
+    if (isReply(proposal)) return this.storeReply(request, doc, proposal);
     await this.ctx.storage.put(`action:${proposal.id}`, proposal);
     await this.appendEvent(doc, {
       kind: "updated",
@@ -1968,12 +2032,17 @@ export class TaskObject extends DurableObject {
 
   /// Stores a reply with its approval-core request (`replyRequest`), opened in the same storage transaction, so no
   /// reply ever waits without the request that alone decides it, whichever route proposed it: the pilot's reply flow
-  /// or a session's propose route.
-  private storeReply(request: Request, proposal: ActionProposalJSON): Response {
+  /// or a session's propose route. The request's entry goes into the shop's approval lookup first
+  /// (`openingInLookup`), as a worker's ask's does.
+  private async storeReply(request: Request, proposed: TaskDocJSON, proposal: ActionProposalJSON): Promise<Response> {
+    const opening = await this.openingInLookup(request, proposed, proposal.id);
+    if (opening instanceof Response) return opening;
     return this.respond(this.ctx.storage.transactionSync((): SyncAnswer => {
       const kv = this.ctx.storage.kv;
       const doc = kv.get<TaskDocJSON>("task");
       if (!doc || this.foreign(doc, request)) return { status: 404, body: { error: "not_found" } };
+      const refused = opening.refusal(doc);
+      if (refused) return refused;
       const reply: ActionProposalJSON = { ...proposal, requestId: proposal.id };
       const opened = openReply(kv.get<ApprovalRecord>(`request:${reply.id}`), reply);
       if (!opened.result.ok || !opened.next) return { status: 400, body: { error: "invalid_request" } };

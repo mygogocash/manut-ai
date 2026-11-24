@@ -3,6 +3,7 @@ import {
   isLiveShop,
   isSending,
   REPLY_MAX_LENGTH,
+  SIGN_IN_MEMBERS,
   type ApprovalState,
   type ApprovalView,
   type AuditActor,
@@ -25,11 +26,16 @@ import {
   type InviteView,
   type JoinAnswer,
   type LinkedOwner,
+  type Outpost,
+  type OutpostCredential,
+  type OutpostRemoval,
   type Payment,
   type People,
   type PilotApi,
   type ReplyAction,
   type Shop,
+  type SignIn,
+  type SignInRemoval,
   type SubscriptionPayment,
   type UnlinkedOwner,
   type WebSession,
@@ -115,6 +121,14 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// entry per job, oldest first as the shop's task index keeps them, read newest first by a job's task id. Baan Mali has
 /// seven jobs, one for each way a job can end here, and Sabai Tea none. Nothing in practice starts a job, so they are the
 /// sample's own; they are deleted with the shop, and the practice export does not carry them.
+///
+/// A shop's vault (docs/pilot-api.md, "Vault sign-ins and outposts") is kept as the API's vault answers it: the sign-ins not
+/// removed and the outposts, each as the operator lists them, and the four changes an operator may make, each recorded in the
+/// shop's audit log by the record's id only. It holds no password, no credential and no digest of one, because nothing the
+/// console can ask for answers one: a new credential is made, answered once and forgotten, so it is in no saved world. Baan Mali
+/// starts with the two sign-ins and two outposts its audit log tells the story of: a Shopee sign-in that broke and was mended, a
+/// carrier's portal that broke two days ago and still is, Fon's Mac, which beats while the page is open, and a cloud outpost that
+/// never has. Sabai Tea has nothing in its vault. The vault is exported with the shop and deleted with it.
 ///
 /// Joining a shop from an invite link (docs/people.md, "Invites") is answered as the API answers it: a code by email first,
 /// with the API's limits (one a minute, ten a day, ten minutes, five wrong tries), then the accept. Practice sends no email,
@@ -211,6 +225,14 @@ type FakeOwnerAccount = { id: string; subject: string; linkedAt: number };
 type FakeOwnerCode = { code: string; subject: string; ranOut?: boolean };
 /// A job with the shop it belongs to, which the API finds through the shop's own task index.
 type FakeWorkerJob = WorkerJobEntry & { tenant: string };
+/// One shop's vault: its sign-ins, which are the operator's own view because the fake keeps no password to seal, and its outposts.
+type FakeVault = { signIns: SignIn[]; outposts: FakeOutpost[] };
+/// An outpost as the vault keeps it, without the credential's digest, which nothing here checks. `status` is read from the clock
+/// as the API reads it, so it is not kept. `beats` is a machine that is awake and beats every 30 seconds, as the desktop app does
+/// while it runs: its last heartbeat is read as the latest of those beats, so the sample Mac stays online while the page is
+/// open, however long ago the world was made. A new credential ends it, as it does in the API: the outpost sleeps until the holder
+/// of the new credential beats, and nobody holds one in practice.
+type FakeOutpost = Omit<Outpost, "status"> & { beats?: true };
 /// One address's sign-in codes, as the API's auth object keeps them: the live code's end and its wrong tries while there is
 /// one, and when each code of the last 24 hours was sent, oldest first. Practice's code is always `PRACTICE_SIGN_IN_CODE`.
 type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: number[] };
@@ -218,7 +240,7 @@ type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: 
 /// is recorded nowhere else.
 type FakeHelperSession = { tenant: string | null; helperId: string; sessionId: string };
 type FakeDb = {
-  version: 11;
+  version: 12;
   seq: number;
   shops: FakeShop[];
   /// Shops that only the owner's page practises on (a long Thai name, a long link), so they answer `shopOf` and a reply link
@@ -243,14 +265,17 @@ type FakeDb = {
   model: FakeModel;
   /// Every shop's worker jobs, oldest first, the order the API's task index keeps them in.
   workers: FakeWorkerJob[];
+  /// Each shop's vault. A shop with no entry has no sign-in and no outpost.
+  vault: Record<string, FakeVault>;
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
 /// (version 1), before trial starts and subscription payments were kept (version 2), before the audit log
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
 /// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8), before
-/// the sample log of the owner's own changes, this Mac and browser writes (version 9) or before the shops and links the owner's
-/// page practises its long words on (version 10) is replaced by a fresh one rather than read without them.
+/// the sample log of the owner's own changes, this Mac and browser writes (version 9), before the shops and links the owner's
+/// page practises its long words on (version 10) or before the shops' vaults (version 11) is replaced by a fresh one rather
+/// than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -265,6 +290,9 @@ const MAX_WRONG_TRIES = 5;
 const DEVICE_ID_MAX = 128;
 /// A helper session lasts 30 days, with no refresh.
 const HELPER_SESSION_MS = 30 * DAY_MS;
+/// An outpost beats every 30 seconds while it is awake, and is online while its last beat is under 90 seconds old.
+const HEARTBEAT_MS = 30 * 1000;
+const ONLINE_MS = 90 * 1000;
 
 export const PRACTICE_CHANNEL_SECRET = "practice-channel-secret";
 
@@ -373,12 +401,13 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 11 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
+      return parsed && parsed.version === 12 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
         Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
         Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers) &&
-        typeof parsed.people === "object" && parsed.people !== null && Array.isArray(parsed.ownerCodes)
+        typeof parsed.people === "object" && parsed.people !== null && Array.isArray(parsed.ownerCodes) &&
+        typeof parsed.vault === "object" && parsed.vault !== null
         ? parsed
         : null;
     } catch {
@@ -599,6 +628,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     delete db.memory[record.tenant];
     // The people go too, with the names the owner gave them.
     delete db.people[record.tenant];
+    // The vault goes with its sign-ins and outposts.
+    delete db.vault[record.tenant];
     wipeMeter(db.model, record.tenant);
     // The jobs of its team go with it, drafts included.
     db.workers = db.workers.filter((job) => !mine(job));
@@ -855,6 +886,27 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         name: names[passed.by] ?? "", note: passed.note, at: iso(passed.at) })),
       removed: state.removed.map((id) => ({ id, name: names[id] ?? "" })),
     };
+  }
+
+  /// A shop's vault: nothing in it for one that was never given a sign-in or an outpost. The API's admin routes answer for any
+  /// tenant that is one, as its vault object answers for any shop, so the practice world does too.
+  function vaultOf(tenant: string): FakeVault {
+    return db.vault[tenant] ?? { signIns: [], outposts: [] };
+  }
+
+  /// The API's check before any vault route reads the shop: a tenant of 1 to 256 characters, and no more than that.
+  function vaultTenant(tenant: unknown): string {
+    if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
+    return tenant;
+  }
+
+  /// An outpost as the API lists it: `online` while its last heartbeat is under 90 seconds old, `asleep` otherwise, and before
+  /// its first beat. A machine that beats is read at the latest of its beats, never more than 30 seconds old.
+  function outpostView({ beats, ...outpost }: FakeOutpost): Outpost {
+    const at = now();
+    const lastHeartbeatAt = beats ? iso(at - (at % HEARTBEAT_MS)) : outpost.lastHeartbeatAt;
+    const online = lastHeartbeatAt !== null && at - Date.parse(lastHeartbeatAt) < ONLINE_MS;
+    return { ...outpost, status: online ? "online" : "asleep", lastHeartbeatAt };
   }
 
   return {
@@ -1143,6 +1195,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           // Who the people are, what they passed on and the owner's linked account, as the API's export carries them (it never
           // carries a session's hash, nor a count of sessions).
           people: exportedPeople(tenant),
+          // The vault's sign-ins and outposts as the operator lists them: never a password, a credential or a digest of one.
+          signIns: vaultOf(tenant).signIns,
+          outposts: vaultOf(tenant).outposts.map(outpostView),
         };
       }),
 
@@ -1493,6 +1548,79 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         return alertsOf(db.model, db.shops.map((shop) => shop.tenant), monthOf(now()), defaultCapSatang);
       }),
 
+    // The shop's vault, as the API's admin routes answer it: the admin key, the tenant (400 `tenant_required`, and no check that it
+    // is a shop, since the vault answers for any), the body's own checks, and then the vault's own. A change is kept and recorded
+    // in the shop's audit log by the record's id only, as the API records it, and a refusal writes nothing. No password and no
+    // credential is ever kept: the sample sign-ins have none to keep, and a new credential is made, answered and forgotten.
+    listSignIns: (tenant) =>
+      run(() => {
+        admin();
+        return vaultOf(vaultTenant(tenant)).signIns;
+      }),
+
+    // The members are checked before the sign-in is looked for, as the vault does, so a bad list is 400 even for a sign-in that
+    // is not there. They are kept in the order they were sent, and nothing else about the sign-in changes.
+    setSignInMembers: (input) =>
+      run((): SignIn => {
+        admin();
+        const tenant = vaultTenant(input.tenant);
+        const members = keptMembers(input.members);
+        if (!members) throw new ApiError(400, "invalid_members");
+        const signIn = vaultOf(tenant).signIns.find((one) => one.id === input.signInId);
+        if (!signIn) throw new ApiError(404, "sign_in_not_found");
+        signIn.members = members;
+        audit(tenant, PRACTICE_OPERATOR, "signin.members_changed", { signInId: signIn.id });
+        return signIn;
+      }),
+
+    // Removing a sign-in drops it, as the API's tombstone does for every reader: it is not listed again, and removing it twice
+    // is 404.
+    removeSignIn: (input) =>
+      run((): SignInRemoval => {
+        admin();
+        const tenant = vaultTenant(input.tenant);
+        const vault = db.vault[tenant];
+        const signIn = vault?.signIns.find((one) => one.id === input.signInId);
+        if (!vault || !signIn) throw new ApiError(404, "sign_in_not_found");
+        vault.signIns = vault.signIns.filter((one) => one !== signIn);
+        audit(tenant, PRACTICE_OPERATOR, "signin.removed", { signInId: signIn.id });
+        return { removed: true, signInId: signIn.id };
+      }),
+
+    listOutposts: (tenant) =>
+      run(() => {
+        admin();
+        return vaultOf(vaultTenant(tenant)).outposts.map(outpostView);
+      }),
+
+    removeOutpost: (input) =>
+      run((): OutpostRemoval => {
+        admin();
+        const tenant = vaultTenant(input.tenant);
+        const vault = db.vault[tenant];
+        const outpost = vault?.outposts.find((one) => one.id === input.outpostId);
+        if (!vault || !outpost) throw new ApiError(404, "outpost_not_found");
+        vault.outposts = vault.outposts.filter((one) => one !== outpost);
+        audit(tenant, PRACTICE_OPERATOR, "outpost.removed", { outpostId: outpost.id });
+        // The practice world queues no browser step and issues no grant, so nothing was waiting for the outpost.
+        return { removed: true, outpostId: outpost.id, stepsRefused: 0, grantsRefused: 0 };
+      }),
+
+    // As the API's vault does: the old credential stops working and the outpost sleeps until the holder of the new one beats. The
+    // new credential is made here and only here: it goes into the answer and into nothing else, so no saved world, export or log
+    // line can hold it.
+    replaceOutpostCredential: (input) =>
+      run((): OutpostCredential => {
+        admin();
+        const tenant = vaultTenant(input.tenant);
+        const outpost = db.vault[tenant]?.outposts.find((one) => one.id === input.outpostId);
+        if (!outpost) throw new ApiError(404, "outpost_not_found");
+        outpost.lastHeartbeatAt = null;
+        delete outpost.beats;
+        audit(tenant, PRACTICE_OPERATOR, "outpost.credential_rotated", { outpostId: outpost.id });
+        return { outpost: outpostView(outpost), credential: mintCredential() };
+      }),
+
     // As the API: the tenant, then the page (a size of 1 to 25, ten when absent, and a cursor that is a job's task id), then
     // the shop, then that the cursor is one of its jobs. Newest first; the page after a job is the jobs older than it.
     listWorkerJobs: (tenant, query = {}) =>
@@ -1721,12 +1849,25 @@ export async function lineSignature(channelSecret: string, rawBody: string): Pro
   return btoa(binary);
 }
 
-function randomToken(): string {
-  const bytes = new Uint8Array(24);
+function randomToken(size = 24): string {
+  const bytes = new Uint8Array(size);
   crypto.getRandomValues(bytes);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/// A credential as the API's vault mints one for an outpost: `mo1_` and 32 random bytes in base64url, which is 43 characters.
+function mintCredential(): string {
+  return `mo1_${randomToken(32)}`;
+}
+
+/// Who may use a sign-in, by the vault's rule: one or more of `SIGN_IN_MEMBERS`, none twice. Null for anything else, a list of the
+/// wrong kind included. The members are kept in the order they were sent.
+function keptMembers(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > SIGN_IN_MEMBERS.length) return null;
+  if (!value.every((member): member is string => typeof member === "string" && SIGN_IN_MEMBERS.includes(member))) return null;
+  return new Set(value).size === value.length ? [...value] : null;
 }
 
 function seed(at: number): FakeDb {
@@ -1940,7 +2081,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 11,
+    version: 12,
     seq: 100,
     demoShops,
     shops: [
@@ -1995,6 +2136,7 @@ function seed(at: number): FakeDb {
     ownerCodes: sampleOwnerCodes(),
     model: seedModel(at, tenant),
     workers: sampleWorkers(at, tenant),
+    vault: { [tenant]: sampleVault(at) },
   };
 }
 
@@ -2168,6 +2310,24 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
     said(1050, fon, "signin.password_replaced", { signInId: signIn }),
   ];
 
+  // The second sign-in of `sampleVault`, a carrier's portal Fon added from her Connections three days ago. Two days ago a worker asked
+  // to sign in, the older Mac (since removed, and so not in the vault) typed the saved password, the site refused it, and the worker
+  // said so. Nobody has typed a new one, so the sign-in is still broken. It is older than the first sign-in's story, so that one is
+  // still the newest in the log.
+  const oldMac: AuditActor = { kind: "outpost", id: SAMPLE_OLD_OUTPOST };
+  const carrier = SAMPLE_CARRIER_SIGN_IN;
+  const carrierGrant = { taskId: "task_carrier", attemptId: sampleUuid(8), signInId: carrier, grantId: "grant_2" };
+  const carrierStep = { stepId: "step_carrier", outpostId: SAMPLE_OLD_OUTPOST, ...carrierGrant };
+  const carrierStory = [
+    said(3 * day, fon, "signin.created", { signInId: carrier }),
+    said(2 * day, worker(8), "signin.requested", { ...carrierGrant, outpostId: SAMPLE_OLD_OUTPOST }),
+    said(2 * day - 0.5, worker(8), "browser_step.queued", carrierStep),
+    said(2 * day - 1, oldMac, "browser_step.fetched", carrierStep),
+    said(2 * day - 1.2, oldMac, "signin.redeemed", { ...carrierGrant, outpostId: SAMPLE_OLD_OUTPOST }),
+    said(2 * day - 1.5, oldMac, "browser_step.reported", carrierStep, "failed", "sign_in_refused"),
+    said(2 * day - 2, worker(8), "signin.broken", { taskId: carrierGrant.taskId, attemptId: carrierGrant.attemptId, signInId: carrier }),
+  ];
+
   // Browser writes (docs/pilot-api.md, "Submitting through a browser"), each told as the API writes it: the worker's ask, the
   // decision, the step queued, the write begun as the outpost takes it, and how it settled. Each ends its own way.
   const writeStory = (n: number, minutesAgo: number, decider: AuditActor,
@@ -2210,7 +2370,7 @@ function sampleAudit(at: number, tenant: string, connectionId: string): FakeAudi
       "draft_only"),
   ];
 
-  return [...earlier, ...ownerChanges, ...browserControl, ...writes];
+  return [...earlier, ...ownerChanges, ...browserControl, ...carrierStory, ...writes];
 }
 
 /// Ids the API makes as UUIDs, written so that their first eight characters, which the console shows, tell one from another.
@@ -2220,8 +2380,60 @@ const SAMPLE_MAC_OUTPOST = "b4c8d1e2-5f60-4a71-8b92-0c3d4e5f6a7b";
 const SAMPLE_CLOUD_OUTPOST = "c0a1d2e3-7a81-4b92-9c03-1d2e3f4a5b6c";
 /// An older Mac of Fon's, registered from the shop's own session and since removed.
 const SAMPLE_OLD_OUTPOST = "d3e4f5a6-8b92-4c03-8d14-2e3f4a5b6c7d";
-/// The one site sign-in in the sample vault, whose members' forms the sample writes submit.
+/// The first site sign-in in the sample vault, whose members' forms the sample writes submit.
 const SAMPLE_SIGN_IN = "5d0e7c3a-2b41-4f6e-9a1d-7e8f9a0b1c2d";
+/// The second: a carrier's portal Fon added, whose password the site refused and which nobody has mended.
+const SAMPLE_CARRIER_SIGN_IN = "8a1b4c6d-3e52-4f70-b8c9-0d1e2f3a4b5c";
+
+/// Baan Mali's vault as its sample world would have kept it, by the ids `sampleAudit` tells the story of. Shopee Seller Centre broke
+/// about eighteen hours ago, the worker said so, and Fon typed a new password, so it works again. A carrier's portal Fon added three days ago
+/// broke two days ago, and nobody has typed it a new password, so it is still broken. Fon's Mac is awake and beats, so it reads
+/// online; the cloud outpost an operator made has never beaten. An older Mac of Fon's was removed, so it is no longer here. The
+/// sample's sign-ins are oldest first, as the API lists them, and say no more of a password than that it is set, and when.
+function sampleVault(at: number): FakeVault {
+  const ago = (minutes: number) => new Date(at - minutes * MINUTE_MS).toISOString();
+  const day = 24 * 60;
+  return {
+    signIns: [
+      {
+        id: SAMPLE_SIGN_IN,
+        site: "Shopee Seller Centre",
+        origins: ["https://seller.shopee.co.th"],
+        username: "baanmali",
+        members: ["nam", "pim"],
+        state: "working",
+        passwordSet: true,
+        passwordSetAt: ago(1050),
+        brokenAt: null,
+        brokenBy: null,
+        lastUsedAt: ago(1098.8),
+        lastUsedBy: "nam",
+        createdAt: ago(9 * day - 10),
+      },
+      {
+        id: SAMPLE_CARRIER_SIGN_IN,
+        site: "Carrier portal",
+        origins: ["https://portal.carrier.example"],
+        username: "baanmali",
+        members: ["nam"],
+        state: "broken",
+        passwordSet: true,
+        passwordSetAt: ago(3 * day),
+        brokenAt: ago(2 * day - 2),
+        brokenBy: "nam",
+        lastUsedAt: ago(2 * day - 1.2),
+        lastUsedBy: "nam",
+        createdAt: ago(3 * day),
+      },
+    ],
+    outposts: [
+      { id: SAMPLE_CLOUD_OUTPOST, name: "Cloud outpost", kind: "cloud", lastHeartbeatAt: null, createdAt: ago(9 * day - 20) },
+      // Registered by Fon's desktop app as "This Mac" and renamed by her, which `sampleAudit` says. It beats while the page is open.
+      { id: SAMPLE_MAC_OUTPOST, name: "Fon's MacBook", kind: "this_mac", lastHeartbeatAt: ago(0), createdAt: ago(2 * day - 40),
+        beats: true },
+    ],
+  };
+}
 
 /// Baan Mali's people as its sample world would have made them, by the package's own rules, as the design canvas's People
 /// board draws them: Mint, a helper for ten days with two devices, who covers messages until the end of the fourth day from

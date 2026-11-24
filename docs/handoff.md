@@ -146,6 +146,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `ef7f070f`, since the desktop needs the new route); smoke-tested: `GET /v1/tasks`, `/v1/schedules` and
   `/v1/inbound/attention` answer 401 without a session and with a session that is not one, before any query check,
   `POST /v1/tasks` still 401, and the pages, `/app/` and the console's Access load.
+- Dev's API was redeployed on 24 Nov at 20:53 from `9224fb1`, with item 48's approval lookup (API `4c340b5d`, deployed
+  whole, not as a gradual rollout); smoke-tested: `GET /v1/approvals?state=open` and a decision answer 401 without a
+  session, and the approval page, `/app/` and the console's Access load. The pages are unchanged since 19:38.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -161,15 +164,27 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 47, each coding lane in a git worktree of its own (`feat/lane-worktrees`, Opus), started when item 44
-     finished. Two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
-   - item 48, approvals found without reading every task: a per-shop lookup of which task holds each request
-     (`feat/approval-index`, Opus), started when item 46 finished. `GET /v1/approvals` and deciding walk the whole
-     task index one task at a time today, which a busy shop would take past Cloudflare's per-request call limit.
+   - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
+     buttons, select menus and editors, settings pages that keep their form, and frames told from the page
+     (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
+   A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
+   it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
+   Push such a commit from the helper's worktree, review it and finish what is left as the lead.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
+   Merged: 50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
+   with its own failure; remove a sign-in, change who may use it, remove an outpost and give it a new credential, each
+   asked first in its row; the credential shown once and held only in the page's state; no password typed in the
+   console; practice world version 12; no API change, so only the pages Worker is redeployed),
+   48 (a per-shop approval lookup in the TenantObject, written by the task object before a request opens,
+   so `GET /v1/approvals` reads only the tasks it names and deciding finds its task in one read; approval-core's
+   records stay the only truth; old shops build the lookup 25 tasks per read, walking every task until it is done;
+   deploy dev plainly, never as a gradual rollout, so no old task object opens a request without an entry),
+   47 (each coding lane in a git worktree of its own under `~/.manut/lanes`, on a branch made from the
+   developer's, so lanes work at once and the developer's folder never moves; a folder goes only when its record, its
+   path and git's own list agree it is the app's, never pruned, and forced only after the person's yes to what goes;
+   Kit no longer sees the developer's uncommitted changes, and the chat says how many stayed behind), 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
    fact, make and remove a team routine, each change bound to the shop its list was read for; it also fixed the
    Connected Playwright stubs item 44 had left serving only the export, which failed nine `google-sheets` specs and one
    `make-shop` spec in CI on `d74eaf1`. The root gate runs no Playwright: when a merge changes what Connected reads, run

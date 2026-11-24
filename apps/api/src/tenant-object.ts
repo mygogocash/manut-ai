@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
+import { approvalIndexRoute, readyOnFirstTask, stepBackfill, wipeApprovalIndex } from "./approval-index";
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
+import { isValidTenant } from "./companies";
 import type { AttentionItem } from "./inbound";
 import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
 import { nextNoticeAt, noticesUnsent, sendCapNotices } from "./model-alerts";
@@ -33,7 +35,9 @@ const MAX_ATTENTION_ITEMS = 200;
 const MAX_REMEMBERED_DELIVERIES = 1000;
 
 /// Per-tenant state: cloud-work consent, the task index for export and
-/// deletion, inbound attention items, and the deletion tombstone. Split out
+/// deletion, the approval lookup that says which task holds each approval
+/// request (approval-index.ts), inbound attention items, and the deletion
+/// tombstone. Split out
 /// of AuthObject (M4 phase 1): sessions and flags stay global because the
 /// Worker learns the tenant from the session and ops controls are
 /// environment-wide, but everything keyed by tenant lives here, addressed
@@ -58,6 +62,15 @@ export class TenantObject extends DurableObject {
   private get tenantEnv(): Pick<TenantDataEnv, "AUTH"> {
     return this.env as unknown as Pick<TenantDataEnv, "AUTH">;
   }
+
+  /// The task objects, which the approval lookup's backfill reads (approval-index.ts).
+  private get taskEnv(): Pick<TenantDataEnv, "TASK"> {
+    return this.env as unknown as Pick<TenantDataEnv, "TASK">;
+  }
+
+  /// The tenants whose backfill has a step running now. A second read while one runs leaves it to finish rather than
+  /// read the same tasks again; the step's own check of its place keeps two steps from both writing either way.
+  private readonly backfilling = new Set<string>();
 
   /// The model gateway's two jobs: the sweep, which charges every reservation
   /// nothing settled in time as abandoned (model-meter.ts), and sending the
@@ -170,6 +183,13 @@ export class TenantObject extends DurableObject {
     if (url.pathname === "/people" || url.pathname.startsWith("/people/")) {
       return peopleTenantRoute(this.ctx.storage, request, url);
     }
+    // Which task holds each of the shop's approval requests, and which may still be open (approval-index.ts).
+    if (request.method === "POST" && url.pathname === "/approvals/backfill") {
+      return this.backfillStep(request);
+    }
+    if (url.pathname.startsWith("/approvals/")) {
+      return approvalIndexRoute(this.ctx.storage, request, url);
+    }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
       if (!tenant) return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -216,6 +236,10 @@ export class TenantObject extends DurableObject {
 
   /// Task index for export and deletion. Synchronous by design: a task the
   /// index misses is a task deletion cannot prove gone.
+  ///
+  /// A shop's first task also marks its approval lookup complete, in the same
+  /// write: a shop with no task before has no request from before the lookup
+  /// existed, so it has nothing to backfill (approval-index.ts).
   private async indexTask(request: Request): Promise<Response> {
     const parsed = await readJsonBody<{ tenant?: unknown; taskId?: unknown }>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
@@ -226,9 +250,28 @@ export class TenantObject extends DurableObject {
     const key = `tenant-tasks:${body.tenant}`;
     const ids = (await this.ctx.storage.get<string[]>(key)) ?? [];
     if (!ids.includes(body.taskId)) {
-      await this.ctx.storage.put(key, [...ids, body.taskId]);
+      await this.ctx.storage.put({ [key]: [...ids, body.taskId],
+        ...readyOnFirstTask(this.ctx.storage.kv, body.tenant, ids) });
     }
     return Response.json({ indexed: true });
+  }
+
+  /// `POST /approvals/backfill` with `{ tenant }` and `x-approvals`: one step of the shop's approval lookup's backfill
+  /// (approval-index.ts, `stepBackfill`), run by an approvals read that found the lookup not ready. Answers whether the
+  /// lookup is ready after it, and `busy` when a step for the shop is already running.
+  private async backfillStep(request: Request): Promise<Response> {
+    if (request.headers.get("x-approvals") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    const parsed = await readJsonBody<{ tenant?: unknown }>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
+    const { tenant } = parsed.value;
+    if (!isValidTenant(tenant)) return Response.json({ error: "invalid_request" }, { status: 400 });
+    if (this.backfilling.has(tenant)) return Response.json({ ready: false, busy: true });
+    this.backfilling.add(tenant);
+    try {
+      return Response.json(await stepBackfill(this.ctx.storage, this.taskEnv, tenant));
+    } finally {
+      this.backfilling.delete(tenant);
+    }
   }
 
   private async readIndex(url: URL): Promise<Response> {
@@ -295,7 +338,8 @@ export class TenantObject extends DurableObject {
     return Response.json({ items: [...items].reverse() });
   }
 
-  /// Wipes the tenant's consent, task index, attention items, pilot records
+  /// Wipes the tenant's consent, task index, approval lookup (every entry and
+  /// the backfill's place), attention items, pilot records
   /// (shop, customer messages, replies, payments), routines (the team's
   /// setup, its first-week questions and every run), model meter (cap
   /// override, monthly totals and their crossings of the cap, reservations,
@@ -318,6 +362,7 @@ export class TenantObject extends DurableObject {
     }
     const ids = (await this.ctx.storage.get<string[]>(`tenant-tasks:${body.tenant}`)) ?? [];
     await this.ctx.storage.delete(`tenant-tasks:${body.tenant}`);
+    wipeApprovalIndex(this.ctx.storage, body.tenant);
     await this.ctx.storage.delete(`consent:${body.tenant}`);
     await this.ctx.storage.delete([`attention:${body.tenant}`, `attention-deliveries:${body.tenant}`]);
     await wipePilotTenant(this.ctx.storage, body.tenant);

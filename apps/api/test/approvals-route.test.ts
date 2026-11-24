@@ -258,7 +258,7 @@ describe("GET /v1/approvals", () => {
     expect(posted.status).toBe(405);
   });
 
-  it("answers 503 rather than a partial list when a task or the index cannot be read", async () => {
+  it("answers 503 rather than a partial list when a task or the shop's approval lookup cannot be read", async () => {
     const { tenant, headers } = await session();
     const taskId = await ownTask(tenant);
     await proposeReply(tenant, taskId, "ok");
@@ -278,7 +278,55 @@ describe("GET /v1/approvals", () => {
     };
     expect(await list(headers, "state=open", failing("TASK", "/requests"))).toEqual({ status: 503,
       body: { error: "approvals_unavailable" } });
-    expect(await list(headers, "state=open", failing("TENANT", "/index"))).toEqual({ status: 503,
-      body: { error: "approvals_unavailable" } });
+    // The lookup says which tasks to read (approval-index.ts); the walk of the index while its backfill runs is
+    // approval-index.test.ts's.
+    for (const path of ["/approvals/open", "/approvals/settled"]) {
+      for (const state of ["open", "recent"]) {
+        const answer = await list(headers, `state=${state}`, failing("TENANT", path));
+        expect(answer).toEqual(path === "/approvals/settled" && state === "open" ? { status: 200,
+          body: { state, approvals: expect.any(Array) } } : { status: 503, body: { error: "approvals_unavailable" } });
+      }
+    }
+  });
+});
+
+describe("a task's approval requests, read by name", () => {
+  it("answers only the requests named that the caller may read, as the whole read has them, and at most 100 names", async () => {
+    const { tenant } = await session();
+    const other = await session();
+    const taskId = await ownTask(tenant);
+    const first = await proposeReply(tenant, taskId, "first");
+    const second = await proposeReply(tenant, taskId, "second");
+    await proposeReply(tenant, taskId, "not asked for");
+    // An action of another tenant planted in this task is not answered to this tenant, named or not.
+    const otherTask = await ownTask(other.tenant);
+    const planted = await proposeReply(other.tenant, otherTask, "planted");
+    const plantedRecord = (await storedRequest(other.tenant, otherTask, planted.id)).record;
+    await runInDurableObject(task(taskId), async (_instance, state) => {
+      await state.storage.put({ [`action:${planted.id}`]: planted, [`request:${planted.id}`]: plantedRecord });
+    });
+    type Read = { record: { request: { id: string } }; standing: unknown };
+    const byId = (items: Read[]) => [...items].sort((a, b) => (a.record.request.id < b.record.request.id ? -1 : 1));
+    const named = async (names: string[], as = tenant) => {
+      const response = await task(taskId).fetch(new Request(
+        `https://task/requests?${names.map((name) => `id=${encodeURIComponent(name)}`).join("&")}`,
+        { headers: { "x-tenant": as } }));
+      return { status: response.status, body: (await response.json()) as { requests?: Read[] } };
+    };
+
+    const answered = await named([second.id, first.id, crypto.randomUUID(), planted.id, first.id]);
+    expect(answered.status).toBe(200);
+    const whole = await task(taskId).fetch(new Request("https://task/requests", { headers: { "x-tenant": tenant } }));
+    const every = ((await whole.json()) as { requests: Read[] }).requests;
+    expect(byId(answered.body.requests!)).toEqual(byId(every.filter((item) =>
+      [first.id, second.id].includes(item.record.request.id))));
+    expect(answered.body.requests).toHaveLength(2);
+
+    // Another tenant reads the task as missing, named or not; an empty name and a 101st name are refused.
+    expect((await named([first.id], other.tenant)).status).toBe(404);
+    expect((await named([""])).status).toBe(400);
+    expect((await named(Array.from({ length: 101 }, () => crypto.randomUUID()))).status).toBe(400);
+    expect(await named(Array.from({ length: 100 }, () => crypto.randomUUID()))).toEqual({ status: 200,
+      body: { requests: [] } });
   });
 });
