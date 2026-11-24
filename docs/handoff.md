@@ -92,10 +92,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
+1. Three helpers are paused by the account's 5-hour usage limit (24 Nov, 08:15; it resets at 11:00 Bangkok time) and
+   should resume by themselves; if one does not, send its thread a message to go on (`t3_thread_send`), as for item 9.
+   They run, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 18, the code editor's states for developers: a gap list, then the states that need no owner
-     (`feat/code-editor-states`, Opus);
    - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
      Opus);
    - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
@@ -107,7 +107,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
    (the outpost's step channel), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
+   9 (desktop leftovers), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
+   project blocked, keys in changes; `docs/code-editor.md`), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
@@ -185,6 +186,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   language, since translating it would make the app's words what gets approved. The new-device alert says "remove
   access", but the app has no People screen yet, and "Notify me" off silences it: say if a security alert should ring
   regardless.
+- **From item 18 (the code editor):** whether Kit's lanes are a chat (as the canvas's Code board draws) or a terminal
+  (the 16 November decision); the dial reaches only chat sessions today. Also: a real GitHub account (projects from
+  GitHub, checks on a pull request), a real sign-in to Claude Code, where developers' secrets live (the shop's vault
+  or this Mac's keychain), and a native speaker's check of the new Korean, Japanese and Chinese words.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
