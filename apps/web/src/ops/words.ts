@@ -16,6 +16,7 @@ import {
   type Identity,
   type ModelCap,
   type ModelCounts,
+  type ModelCrossing,
   type ModelUsage,
   type People,
   type PilotGate,
@@ -544,7 +545,15 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
       : entry.outcome === "unknown"
         ? `sent a month of the books to ${ownerName}'s Google Sheet without learning whether it landed`
         : `appended a month of the books to ${ownerName}'s Google Sheet`,
+  // The system noting the month's charged model spend reaching 80% of the cap, then all of it (docs/model-gateway.md).
+  "model.cap_near": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached 80% of its monthly cap${amountOf(entry)}`,
+  "model.cap_reached": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached its monthly cap${amountOf(entry)}`,
 };
+
+/// " in November 2026" for an entry about a month of the model meter, or nothing for one that names none.
+function monthOfEntry(entry: AuditEntry): string {
+  return entry.subject.month ? ` in ${monthName(entry.subject.month)}` : "";
+}
 
 /// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the
 /// grant, and a step the vault did not find (a report for an unknown step) names the outpost alone, so it is said in general.
@@ -802,6 +811,8 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["outpostId", "outpost"],
   ["stepId", "browser step"],
   ["grantId", "grant"],
+  // A Bangkok month of the model meter, `YYYY-MM`, as a crossing of the cap names it.
+  ["month", "model month"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {
@@ -907,6 +918,13 @@ export function modelErrorText(error: unknown, action: "read" | "write"): string
   return errorText(error);
 }
 
+/// What went wrong with the list of shops near their caps: the API's own 503 `alerts_unavailable`, or the console's usual
+/// words for anything else, a refused key included.
+export function alertsErrorText(error: unknown): string {
+  return error instanceof ApiError && error.code === "alerts_unavailable" ? modelSpendWords.alertsUnavailable
+    : errorText(error);
+}
+
 export const modelSpendWords = {
   nav: "Model spend",
   title: "Model spend",
@@ -945,6 +963,25 @@ export const modelSpendWords = {
   /// The API keeps one cap per shop, not one per month, so an earlier month is read against the cap as it is now.
   pastNote:
     "The cap and what is left use the shop's cap as it is now. The API does not keep what the cap was in an earlier month.",
+  /// A threshold the month's charged spend reached, as the API noted it: when, against which cap, and the spend then.
+  crossingText: (crossing: ModelCrossing, now: number = Date.now()) => {
+    const cap = moneyText(crossing.capSatang);
+    const reached = crossing.percent >= 100 ? `its ${cap} cap` : `${crossing.percent}% of its ${cap} cap`;
+    return `Reached ${reached}${whenAfter(crossing.at, now)}, with ${moneyText(crossing.spentSatang)} spent.`;
+  },
+
+  // The shops near or at their caps this month, across all shops (`GET /v1/admin/model/alerts`)
+  alertsTitle: "Near or at the cap this month",
+  alertsHelp:
+    "Every shop whose model spend this month has reached 80% of its cap, or all of it. Only what was charged counts: a call in progress counts once it is.",
+  alertsLoading: "Loading the shops near their caps",
+  alertsEmpty: "No shop's model spend has reached 80% of its cap this month.",
+  alertsUnavailable: "The API could not read which shops are near their caps. Try again.",
+  alertsTruncated: (shown: number) => `Showing the first ${countOf(shown, "shop", "shops")}: the API lists no more at once.`,
+  alertTag: (percent: number) =>
+    percent >= 100 ? { label: "At the cap", className: "tag err" } : { label: "Near the cap", className: "tag warn" },
+  showButton: "Show",
+  showLabel: (shop: string) => `Show ${shop}'s model spend`,
 
   // The four figures
   spentLabel: "Spent",

@@ -17,11 +17,13 @@
 ///    provider failure release it all; when the provider answered but its
 ///    usage cannot be read, charge the worst case.
 ///
-/// Also here: the operator routes that read a shop's month and set its cap
-/// override, under the admin gate's exact ADMIN_METHODS entries (index.ts).
+/// Also here: the operator routes that read a shop's month, set its cap
+/// override, and list the shops near or at their caps this month, under the
+/// admin gate's exact ADMIN_METHODS entries (index.ts).
 
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
+import type { CapCrossing, CapNotice } from "./model-alerts";
 import type { CapOverride, UsageState } from "./model-meter";
 import {
   bangkokMonth,
@@ -45,7 +47,7 @@ import {
   type ModelProvider,
 } from "./model-provider";
 import { operatorIdentity } from "./pilot";
-import { tenantCall, type TenantDataEnv } from "./tenant-data";
+import { authCall, tenantCall, type TenantDataEnv } from "./tenant-data";
 
 export type ModelGatewayEnv = Pick<TenantDataEnv, "TENANT"> & {
   /// Anthropic's API key: a Worker secret the owner adds. Without it every call
@@ -254,14 +256,27 @@ export async function callModel(
 export async function modelAdminRoute(
   request: Request,
   url: URL,
-  env: ModelGatewayEnv,
+  env: ModelGatewayEnv & Pick<TenantDataEnv, "AUTH">,
   ctx: ExecutionContext,
 ): Promise<Response | null> {
   if (!url.pathname.startsWith("/v1/admin/model/")) return null;
   const route = `${request.method} ${url.pathname}`;
   if (route === "GET /v1/admin/model/usage") return readMonth(env, url);
   if (route === "PUT /v1/admin/model/cap") return writeCap(request, env, ctx);
+  if (route === "GET /v1/admin/model/alerts") return readAlerts(env);
   return json({ error: "not_found" }, 404);
+}
+
+/// A crossing as the routes show it: the spend that reached it rounded up for reading, as every spend here is, beside
+/// the exact millisatang.
+function crossingView(crossing: CapCrossing) {
+  return {
+    percent: crossing.percent,
+    at: crossing.at,
+    capSatang: crossing.capSatang,
+    spentSatang: ceilSatang(crossing.spentMillisatang),
+    spentMillisatang: crossing.spentMillisatang,
+  };
 }
 
 /// `GET /v1/admin/model/usage?tenant=&month=`: a shop's spend, cap and calls for
@@ -297,6 +312,8 @@ async function readMonth(env: ModelGatewayEnv, url: URL): Promise<Response> {
     remainingSatang: left > 0 ? floorSatang(left) : 0,
     counts: { ok, failed, unreadable, abandoned, refused },
     tokens: { input: state.totals.inputTokens, output: state.totals.outputTokens },
+    // The thresholds the month's charged spend has reached, lowest first (docs/model-gateway.md, "Alerts near the cap").
+    crossings: (state.totals.crossings ?? []).map(crossingView),
     calls: state.calls,
     holds: state.holds.map((hold) => ({
       callId: hold.callId,
@@ -325,9 +342,48 @@ async function writeCap(request: Request, env: ModelGatewayEnv, ctx: ExecutionCo
   }
   const settings = gatewaySettings(env);
   if (!settings.ok) return json({ error: "not_configured", setting: settings.setting }, 503);
-  const written = await meterWrite(env, body.tenant, "/model/cap", { capSatang: cap, setBy: await operatorIdentity(ctx) });
+  // The default cap and the time go too, so the meter measures this month against the new cap in the same write: a
+  // lowered cap notes a threshold the spend is already past, and a raised one takes off one it is back under.
+  const written = await meterWrite(env, body.tenant, "/model/cap", {
+    capSatang: cap,
+    setBy: await operatorIdentity(ctx),
+    defaultCapSatang: settings.settings.defaultCapSatang,
+    nowMs: Date.now(),
+  });
   if (!written.ok) return json({ error: "meter_unavailable" }, 503);
   const { capOverride } = (await written.json()) as { capOverride: CapOverride | null };
   const effective = effectiveCap(capOverride, settings.settings.defaultCapSatang);
   return json({ tenant: body.tenant, capSatang: effective.capSatang, capSource: effective.source, capOverride });
+}
+
+/// `GET /v1/admin/model/alerts`: the shops whose charged model spend has reached 80% or 100% of their cap this Bangkok
+/// month, across all shops, read from AuthObject's record alone (model-alerts.ts): one bounded read, however many shops
+/// there are, and no shop's own object is asked. The shops at their cap come first, then those near it, the latest to
+/// cross first within each. `truncated` says the month had more rows than one read lists.
+async function readAlerts(env: Pick<TenantDataEnv, "AUTH">): Promise<Response> {
+  const month = bangkokMonth(Date.now());
+  let response: Response;
+  try {
+    response = await authCall(env, `/model-alerts?month=${month}`);
+  } catch {
+    return json({ error: "alerts_unavailable" }, 503);
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    return json({ error: "alerts_unavailable" }, 503);
+  }
+  const { rows, truncated } = (await response.json()) as { rows: CapNotice[]; truncated: boolean };
+  const latest = (row: CapNotice) => row.crossings.reduce((at, crossing) => (crossing.at > at ? crossing.at : at), "");
+  const shops = rows
+    .filter((row) => row.crossings.length > 0)
+    .map((row) => ({
+      tenant: row.tenant,
+      percent: Math.max(...row.crossings.map((crossing) => crossing.percent)),
+      latest: latest(row),
+      crossings: row.crossings.map(crossingView),
+    }))
+    .sort((a, b) => b.percent - a.percent || (a.latest < b.latest ? 1 : a.latest > b.latest ? -1 : 0) ||
+      (a.tenant < b.tenant ? -1 : a.tenant > b.tenant ? 1 : 0))
+    .map(({ latest: _latest, ...shop }) => shop);
+  return json({ month, shops, truncated });
 }

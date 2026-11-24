@@ -3,12 +3,26 @@ import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-lo
 import { readJsonBody } from "./body";
 import type { AttentionItem } from "./inbound";
 import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
-import { modelTenantRoute, wipeModelTenant } from "./model-meter";
+import { nextNoticeAt, noticesUnsent, sendCapNotices } from "./model-alerts";
+import { holdsExpired, modelTenantRoute, nextSweepAt, sweepExpiredHolds, wipeModelTenant } from "./model-meter";
 import { peopleTenantRoute, wipePeopleTenant } from "./people-store";
 import { pilotTenantRoute, wipePilotTenant } from "./pilot-store";
 import { routineTenantRoute, wipeRoutineTenant } from "./routine-store";
+import type { TenantDataEnv } from "./tenant-data";
 
 const MAX_BODY_BYTES = 256 * 1024;
+/// The alarm is never set sooner than this from now, so work that is already late (a hold whose expiry passed with no
+/// alarm set) or keeps failing (a notice AuthObject will not take) comes back once a minute, never in a loop.
+const ALARM_FLOOR_MS = 60 * 1000;
+
+/// One job the object's single alarm runs: whether it has work now, when it next will (epoch ms, or null for never),
+/// and the work itself, which does whatever is due when it runs.
+type AlarmJob = {
+  name: string;
+  due(kv: SyncKvStorage, nowMs: number): boolean;
+  nextAt(kv: SyncKvStorage, nowMs: number): number | null;
+  run(nowMs: number): Promise<void>;
+};
 /// Attention items kept per tenant, newest last. Older items fall off rather
 /// than growing the record without bound; the inbox shows recent changes.
 const MAX_ATTENTION_ITEMS = 200;
@@ -26,7 +40,80 @@ const MAX_REMEMBERED_DELIVERIES = 1000;
 /// `t:${tenant}` (`t:operator` for the tenantless operator path). Storage
 /// keys keep their `consent:` / `tenant-tasks:` / `tomb:` prefixes
 /// unchanged; inbound items add `attention:` and `attention-deliveries:`.
+///
+/// The object's one alarm serves every job in `jobs`, set for whichever is due
+/// first. Before the model gateway's sweep it had no alarm: nothing else kept
+/// here (the pilot's records, routines, people, memory, the audit log) schedules
+/// anything, since routines' clocks are the ScheduleObject's alarm and the
+/// session sweep is AuthObject's. A job added later goes in `jobs`.
 export class TenantObject extends DurableObject {
+  constructor(ctx: DurableObjectState, env: unknown) {
+    super(ctx, env as never);
+    // An object that wakes with work and no alarm sets one: holds made before the sweep existed, or an alarm lost.
+    ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.getAlarm()) === null) await this.arm();
+    });
+  }
+
+  private get tenantEnv(): Pick<TenantDataEnv, "AUTH"> {
+    return this.env as unknown as Pick<TenantDataEnv, "AUTH">;
+  }
+
+  /// The model gateway's two jobs: the sweep, which charges every reservation
+  /// nothing settled in time as abandoned (model-meter.ts), and sending the
+  /// shop's crossings of its cap to the cross-shop record (model-alerts.ts).
+  private readonly jobs: readonly AlarmJob[] = [
+    {
+      name: "model-sweep",
+      due: holdsExpired,
+      nextAt: (kv) => nextSweepAt(kv),
+      run: async (nowMs) => {
+        sweepExpiredHolds(this.ctx.storage, nowMs);
+      },
+    },
+    {
+      name: "cap-notices",
+      due: (kv) => noticesUnsent(kv),
+      nextAt: nextNoticeAt,
+      run: () => sendCapNotices(this.ctx.storage, this.tenantEnv),
+    },
+  ];
+
+  /// Runs every job with work now, then sets the alarm for the next. One job's
+  /// failure never stops another: its work is still there, so the alarm comes
+  /// back for it.
+  override async alarm(): Promise<void> {
+    const nowMs = Date.now();
+    for (const job of this.jobs) {
+      if (!job.due(this.ctx.storage.kv, nowMs)) continue;
+      try {
+        await job.run(nowMs);
+      } catch (error) {
+        console.error("tenant alarm job failed", job.name, error);
+      }
+    }
+    await this.arm();
+  }
+
+  /// Sets the alarm for the soonest moment any job has work, never sooner than
+  /// `ALARM_FLOOR_MS` from now, or clears it when none has. It awaits only
+  /// storage, so no other request can run in between and leave it stale.
+  private async arm(): Promise<void> {
+    const nowMs = Date.now();
+    let soonest: number | null = null;
+    for (const job of this.jobs) {
+      const next = job.nextAt(this.ctx.storage.kv, nowMs);
+      if (next !== null && (soonest === null || next < soonest)) soonest = next;
+    }
+    const current = await this.ctx.storage.getAlarm();
+    if (soonest === null) {
+      if (current !== null) await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    const at = Math.max(soonest, nowMs + ALARM_FLOOR_MS);
+    if (current !== at) await this.ctx.storage.setAlarm(at);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/consent") {
@@ -55,9 +142,16 @@ export class TenantObject extends DurableObject {
       return pilotTenantRoute(this.ctx.storage, request, url);
     }
     // The model gateway's ledger for this tenant: cap, monthly spend, open
-    // reservations and one metering record per call (model-meter.ts).
+    // reservations and one metering record per call (model-meter.ts). A write
+    // can open or close a reservation and queue a crossing for the cross-shop
+    // record, so after one the crossing is sent and the alarm set.
     if (url.pathname.startsWith("/model/")) {
-      return modelTenantRoute(this.ctx.storage, request, url);
+      const response = await modelTenantRoute(this.ctx.storage, request, url);
+      if (request.method !== "GET") {
+        await sendCapNotices(this.ctx.storage, this.tenantEnv, { dueBy: Date.now() });
+        await this.arm();
+      }
+      return response;
     }
     // The team's routines and their runs, whether the team is paused, and a shop template's first-week questions
     // (routine-store.ts).
@@ -204,7 +298,8 @@ export class TenantObject extends DurableObject {
   /// Wipes the tenant's consent, task index, attention items, pilot records
   /// (shop, customer messages, replies, payments), routines (the team's
   /// setup, its first-week questions and every run), model meter (cap
-  /// override, monthly totals, reservations, per-call records), audit log
+  /// override, monthly totals and their crossings of the cap, reservations,
+  /// per-call records, and the crossings' notice for AuthObject), audit log
   /// (entries and the miss count), memory (facts and the fingerprints of
   /// forgotten texts) and people (helpers, invites and every helper
   /// session, so no helper can open a deleted shop), then writes a tombstone.
@@ -233,6 +328,8 @@ export class TenantObject extends DurableObject {
     await wipeAuditTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
+    // Nothing the wipe left has work for the alarm, so it is cleared rather than left to wake for nothing.
+    await this.arm();
     return Response.json(tombstone);
   }
 }

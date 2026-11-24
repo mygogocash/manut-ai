@@ -309,7 +309,8 @@ const ADMIN_METHODS = new Set([
   "POST /v1/admin/pilot/gate/cohort",
   // The model gateway (model-gateway.ts): read a shop's month of model spend,
   // and set or clear its cap override. The tenant travels in the query or body.
-  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap",
+  // The shops near or at their caps this month, across all shops, name none.
+  "GET /v1/admin/model/usage", "PUT /v1/admin/model/cap", "GET /v1/admin/model/alerts",
   // The shop's audit log (audit-log.ts), a page at a time. The tenant and the cursor travel in the query.
   "GET /v1/admin/audit",
   // What the team knows about the shop (memory.ts): read it, and the owner's say over each fact as an operator relays

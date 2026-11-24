@@ -848,8 +848,59 @@ describe("the fake's model spend, answered as docs/model-gateway.md says", () =>
     expect(await createFakeApi({ now: () => NOW }).getModelUsage(SABAI_TEA)).toEqual({
       tenant: SABAI_TEA, month: "2026-11", capSatang: 20000, capSource: "default", capOverride: null,
       spentSatang: 0, spentMillisatang: 0, heldSatang: 0, heldMillisatang: 0, remainingSatang: 20000,
-      counts: NO_CALLS, tokens: { input: 0, output: 0 }, calls: [], holds: [],
+      counts: NO_CALLS, tokens: { input: 0, output: 0 }, crossings: [], calls: [], holds: [],
     });
+  });
+
+  it("reads the month's crossings from its calls against the cap as it now is: 80%, then all of it, none under zero", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    // ฿186 of ฿300 is 62%.
+    expect((await api.getModelUsage(BAAN_MALI)).crossings).toEqual([]);
+    // Of ฿200 it is 93%: the call that first took the spend to ฿160 is when 80% was reached.
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 20000 });
+    const [near] = (await api.getModelUsage(BAAN_MALI)).crossings!;
+    expect(near).toMatchObject({ percent: 80, capSatang: 20000 });
+    expect(near!.spentMillisatang).toBeGreaterThanOrEqual(16_000_000);
+    expect(near!.spentSatang * 1000).toBeGreaterThanOrEqual(near!.spentMillisatang);
+    const calls = (await api.getModelUsage(BAAN_MALI)).calls!;
+    expect(calls.map((call) => call.at)).toContain(near!.at);
+    const before = calls.filter((call) => call.at < near!.at).reduce((sum, call) => sum + call.millisatang, 0);
+    expect(before).toBeLessThan(16_000_000);
+    // Of ฿180 the spend is past it too, and a cap of zero, a stop, notes nothing.
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 18000 });
+    expect((await api.getModelUsage(BAAN_MALI)).crossings!.map((crossing) => crossing.percent)).toEqual([80, 100]);
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 0 });
+    expect((await api.getModelUsage(BAAN_MALI)).crossings).toEqual([]);
+  });
+
+  it("lists the shops near or at their caps, and writes the entries a lowered cap causes after the change's own", async () => {
+    const api = createFakeApi({ now: () => NOW });
+    expect(await api.getModelAlerts()).toEqual({ month: "2026-11", shops: [], truncated: false });
+
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 18000 });
+    const listed = await api.getModelAlerts();
+    expect(listed.shops.map((shop) => [shop.tenant, shop.percent])).toEqual([[BAAN_MALI, 100]]);
+    expect(listed.shops[0]!.crossings.map((crossing) => crossing.percent)).toEqual([80, 100]);
+    const log = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries.reverse().map(({ id: _id, at: _at, ...said }) => said);
+    expect(log.slice(-3)).toEqual([
+      { actor: { kind: "operator", email: null }, action: "model.cap_set", subject: {}, outcome: "ok", amountSatang: 18000 },
+      { actor: { kind: "system" }, action: "model.cap_near", subject: { month: "2026-11" }, outcome: "ok", amountSatang: 18000 },
+      { actor: { kind: "system" }, action: "model.cap_reached", subject: { month: "2026-11" }, outcome: "ok",
+        amountSatang: 18000 },
+    ]);
+
+    // Raised again, the shop is off the list, and a raise notes nothing.
+    await api.setModelCap({ tenant: BAAN_MALI, capSatang: 30000 });
+    expect((await api.getModelAlerts()).shops).toEqual([]);
+    const after = (await api.listAudit(BAAN_MALI, { limit: 200 })).entries;
+    expect(after[0]).toMatchObject({ action: "model.cap_set", amountSatang: 30000 });
+  });
+
+  it("answers the list whatever the meter or its settings say, as the API reads it from a record of its own", async () => {
+    const down = createFakeApi({ now: () => NOW, modelGateway: { meterUnavailable: true } });
+    expect(await down.getModelAlerts()).toEqual({ month: "2026-11", shops: [], truncated: false });
+    const misread = createFakeApi({ now: () => NOW, modelGateway: { vars: { MODEL_DEFAULT_CAP_SATANG: "3,390" } } });
+    expect((await misread.getModelAlerts()).shops).toEqual([]);
   });
 
   it("reads any Bangkok month, which turns at midnight there, and refuses what is not a month", async () => {

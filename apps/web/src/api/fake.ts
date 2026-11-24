@@ -45,8 +45,10 @@ import type { Away, Invite, PeopleState } from "@manut/people-rules";
 import * as shopMemory from "@manut/shop-memory";
 import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
 import {
+  alertsOf,
   capOf,
   ceilSatang,
+  crossingsOf,
   gatewayDefaultCap,
   isCapValue,
   isMonth,
@@ -1451,7 +1453,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       }),
 
     // As the API: the tenant, then a cap that is present and null or whole satang within the limit, then the settings
-    // and the meter. The change and its audit entry are written together, and a refusal writes neither.
+    // and the meter. The change and its audit entry are written together, and a refusal writes neither. A cap lowered
+    // under this month's spend notes the threshold it passed, after the change's own entry, as the API's meter does.
     setModelCap: (input) =>
       run(() => {
         admin();
@@ -1459,13 +1462,35 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         if (!validTenant(tenant)) throw new ApiError(400, "tenant_required");
         if (!isCapValue(capSatang)) throw new ApiError(400, "invalid_request");
         const defaultCapSatang = gatewayDefaultCap(options.modelGateway);
+        const month = monthOf(now());
+        const crossed = (cap: number) => crossingsOf(db.model, tenant, month, cap).map((crossing) => crossing.percent);
+        const before = crossed(capOf(db.model, tenant, defaultCapSatang).capSatang);
         writeCap(db.model, tenant, capSatang, iso(now()));
         if (capSatang === null) {
           audit(tenant, PRACTICE_OPERATOR, "model.cap_cleared", {});
         } else {
           audit(tenant, PRACTICE_OPERATOR, "model.cap_set", {}, "ok", { amountSatang: capSatang });
         }
-        return capOf(db.model, tenant, defaultCapSatang);
+        const cap = capOf(db.model, tenant, defaultCapSatang);
+        for (const percent of crossed(cap.capSatang).filter((one) => !before.includes(one))) {
+          audit(tenant, SYSTEM, percent === 100 ? "model.cap_reached" : "model.cap_near", { month }, "ok",
+            { amountSatang: cap.capSatang });
+        }
+        return cap;
+      }),
+
+    // As the API: from the record of crossings alone, which no meter setting or meter failure stands in front of. Only
+    // the console's shops are listed; a default cap the settings cannot give lists no shop that uses it.
+    getModelAlerts: () =>
+      run(() => {
+        admin();
+        let defaultCapSatang = 0;
+        try {
+          defaultCapSatang = gatewayDefaultCap({ ...options.modelGateway, meterUnavailable: false });
+        } catch {
+          // A default cap that cannot be read stops every call in the API, so no shop on it crosses anything.
+        }
+        return alertsOf(db.model, db.shops.map((shop) => shop.tenant), monthOf(now()), defaultCapSatang);
       }),
 
     // As the API: the tenant, then the page (a size of 1 to 25, ten when absent, and a cursor that is a job's task id), then
