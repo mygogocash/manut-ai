@@ -1,0 +1,15 @@
+{
+  "name": "@manut/env-example",
+  "private": true,
+  "type": "module",
+  "description": "Reads a project's .env.example text into the variables the code editor preview needs.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
