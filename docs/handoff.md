@@ -107,12 +107,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 26, rewinding a turn, files and chat together (`feat/rewind-files`, Opus; a Rust build);
-   - item 29, a preview with sample values, and main moving while Kit worked (`feat/preview-and-main-moved`, Sonnet);
    - item 28, what keeps running, with its age, its port and Stop (`feat/what-keeps-running`, Sonnet);
    - item 31, sign-in by a code sent by email, built and off (`feat/email-code-sign-in`, Opus);
    - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet).
-   Done and waiting to merge: item 29 (`feat/preview-and-main-moved`; five files conflict with item 27).
-   Merged: 27 (Kit's lanes on their own branches, with Checked, Tests failed and Reverted), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
+   Merged: 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
+   the shell's `git_moved.rs` only reads), 27 (Kit's lanes on their own branches, with Checked, Tests failed and
+   Reverted; `lane.rs` is the one place the shell changes a repository), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
