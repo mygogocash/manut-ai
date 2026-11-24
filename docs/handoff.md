@@ -137,6 +137,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `19fb6c3d`, API `0dca257c`); smoke-tested: every page has a strict script policy (`script-src 'self'`; the join
   page names no other origin), self-serve answers `sign_ups_closed`, `DELETE /v1/tenant/data` answers 401 without a
   session, a `text/plain` POST 415, and the console is behind Access.
+- Dev was redeployed on 24 Nov at 19:00 from `ce301c5`, with items 45 and 43 (pages `b3dba5ac`, API `9ef0a514`);
+  smoke-tested: `POST /v1/vault/sign-ins/remove` and `/change` answer 401 without a session and 415 for `text/plain`,
+  `GET /v1/admin/model/alerts` and `POST /v1/admin/vault/sign-ins/members` are behind Access, `/v1/google` still
+  answers `google_not_configured`, and the pages, `/app/` and the join page load. The shops' TenantObjects now set an
+  alarm (the model sweep); one with no alarm sets it when it next starts.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -212,7 +217,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
-2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
+2. The night build's queue has one task, `env-example` (added 24 Nov, for the code editor's preview); add pure
+   packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).

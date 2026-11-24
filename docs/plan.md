@@ -447,3 +447,34 @@ setting, quiet hours across midnight with both exceptions, the badge, and an unk
 Done on cloud/notify-rules, 23 Nov 2026: `packages/notify-rules` with `notificationFor`, `inQuietHours`, `canApproveFromNotification` and `badgeCount` (20 tests).
 Wired into the desktop on 24 Nov 2026 (December item 6, merged into `pilot/week-1`): every notification and the Dock badge
 go through it, with a `notice` event added for news that asks nothing (24 tests).
+
+### env-example
+`packages/env-example` (`@manut/env-example`). Reads a project's `.env.example`, given as text, into the variables
+the code editor's preview needs (`docs/code-editor.md`, "Left for later": the preview runs with sample values,
+and should read what a project needs from its `.env.example` as well as from Kit's changes).
+
+- `readEnvExample(text)` answers each variable in file order:
+  - `name`;
+  - `sample`, the value written there, or empty;
+  - `comment`, the comment lines just above it, joined;
+  - `secret`.
+- `secret` is true when the name looks like one:
+  - it ends in `_KEY`, `_SECRET`, `_TOKEN` or `_PASSWORD`;
+  - or it contains `PRIVATE`;
+  - or the sample looks like a real key (`sk-`, `ghp_`, `xoxb-`, a long run of base64).
+- The forms a line may take:
+  - `NAME=value` and `export NAME=value`;
+  - a value in single quotes (kept as written);
+  - a value in double quotes, where `\n` and `\"` are read;
+  - an unquoted value, where a ` #` starts a comment;
+  - blank lines and lines that are only a comment.
+
+  A name is `[A-Za-z_][A-Za-z0-9_]*`.
+- Any other line is listed in `skipped` with its line number, never thrown. A name written twice keeps the later
+  value and is listed in `repeated`.
+- `sampleEnv(vars)` gives an object for the preview: every secret gets a plainly fake value (`sample-` and the
+  name in lower case), and every other variable its written sample.
+- It never reads a file or the process's environment: text in, values out.
+
+Done when: each line form above and each secret rule is tested, with Thai text in a comment and a value, CRLF line
+endings, a repeated name, an empty file and a file of only comments.
