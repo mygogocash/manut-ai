@@ -1365,13 +1365,13 @@ covers the console and the operator routes. They are two Workers, both deployed 
   it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
 - **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
   matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`,
-  `/delete/{token}`, `/ops`).
+  `/delete/{token}`, `/join/{token}`, `/ops`).
   `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
   call the API that served them and a deploy never ships a missing or stale web app.
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
-  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval and deletion pages also
-  `Cache-Control: no-store`. They never apply to the API's answers.
+  `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
+  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
@@ -1521,7 +1521,8 @@ carries `action`, where the action stands, so a second decision can show what ha
 Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an
 address and gives it back to `POST /v1/auth/exchange`, which signs them in with the lifted auth's own session, as Sign
 in with Apple does (`apps/api/src/email-code.ts`, `email-sender.ts`, `auth-object.ts`). The desktop's screen for it is
-Settings › Developer (`docs/sign-in-options.md`, "The desktop"); the web's pages are not built.
+Settings › Developer (`docs/sign-in-options.md`, "The desktop"); the web's is the join page an invite link opens
+(`docs/people.md`, "Invites"), which signs in for one visit and accepts the invite with that sign-in.
 
 **Off unless configured.** Both routes answer 400 `{ error: "email_not_configured" }`, as Apple's exchange answers
 `identity_not_configured` without a client id, unless all three hold: the var `EMAIL_SIGN_IN` is exactly `"on"`; a

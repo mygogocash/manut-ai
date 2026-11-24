@@ -417,7 +417,9 @@ function EmailStep({
             autoCorrect="off"
             spellCheck={false}
             value={email}
-            disabled={busy}
+            // Read-only rather than disabled while the code is asked for, so the field keeps its focus and a phone its
+            // keyboard.
+            readOnly={busy}
             aria-invalid={error ? true : undefined}
             aria-describedby="join-email-help"
             onChange={(event) => onEmail(event.target.value)}
@@ -489,8 +491,9 @@ function CodeStep({
     event.preventDefault();
     onSignIn();
   };
+  // A timer, so the page's live region does not read the count out every second.
   const waiting = waitLeft > 0 ? (
-    <p className="hint" style={{ margin: 0 }}>
+    <p className="hint" role="timer" aria-live="off" style={{ margin: 0 }}>
       {s.resendIn(waitText(waitLeft, s))}
     </p>
   ) : null;
@@ -521,7 +524,8 @@ function CodeStep({
             autoComplete="one-time-code"
             autoFocus
             value={code}
-            disabled={busy !== null}
+            // Read-only rather than disabled while waiting, so after a wrong code the box still has the focus to fix a digit.
+            readOnly={busy !== null}
             aria-invalid={error?.invalid ? true : undefined}
             aria-describedby={error ? "join-code-error" : undefined}
             onChange={(event) => onCode(event.target.value)}
@@ -612,7 +616,7 @@ function Answer({ s, answer, email, onSwitch }: { s: JoinStrings; answer: ShownA
     case "wrong_account": {
       const line = answer.invitedOn === "line";
       return (
-        <section style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-label={s.switchAccount}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="banner warn" role="alert">
             <span className="grow">
               {line ? s.wrongLineTitle(answer.shop.name, email) : s.wrongEmailTitle(answer.shop.name, email)}
@@ -626,7 +630,7 @@ function Answer({ s, answer, email, onSwitch }: { s: JoinStrings; answer: ShownA
               {s.switchAccount}
             </button>
           </div>
-        </section>
+        </div>
       );
     }
     case "expired":

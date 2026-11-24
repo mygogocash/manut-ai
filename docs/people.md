@@ -134,6 +134,34 @@ Accepting needs a signed-in session whose verified identity matches. The answers
   unused for the person it was made for;
 - `expired`, `already_used`, `revoked`, `unknown`: nothing about the shop. A token that does not verify is `unknown`.
 
+**The join page** (`apps/web/src/join/`) is what the link opens, built and **off until signing in by email is on**: in
+every environment today asking for a code answers `email_not_configured`, and the page says "Joining by email isn't on
+yet" and asks the person to have the shop's owner try again later. Once it is on:
+
+- **The first screen names no shop**, because the API names the shop and its owner only to a signed-in accept. It says,
+  in the canvas's voice, that the person was invited to help with a shop on Manut AI and asks them to sign in with the
+  email the invite was sent to.
+- **Signing in** is the canvas's ("States: sign-in, files and forms"): type the address, Send code, type the six digits
+  (the box has `autocomplete="one-time-code"` and `inputmode="numeric"`, and the sixth digit signs in), with words for a
+  wrong code and its tries left, a code that ended, too many codes and the wait, too many tries from one network, being
+  offline, and the API's `invalid_request`.
+- **The answer.** `joined` says "You've joined Baan Mali.", names the owner and what a helper may approve, and says what
+  comes next: open Manut AI on a Mac and sign in with the same email, where the shop is listed (`GET /v1/shops`) and opens
+  with a helper session (`POST /v1/shops/session`, the same one `POST /v1/people/session` gives). `wrong_account` names the
+  shop and only the kind of account the invite is for (for a LINE invite, that Manut AI cannot sign in with LINE yet), with
+  Switch account. `expired`, `revoked`, `already_used` and `unknown` are plain words that name no shop.
+- **What the page holds, it holds for this visit only.** The sign-in's access token is kept in memory, never in
+  `localStorage`, `sessionStorage`, a cookie or a URL, so a reload means signing in again; a web session that lasts is
+  December item 17's to design. Once the invite has its answer, the page ends the sign-in (`DELETE /v1/auth/session`) and
+  the helper session a join gave (`POST /v1/shops/session/end`; the web has no helper screens yet), so the owner's People
+  list counts no device for the browser, while the join is still told to the owner as a new device.
+- **The token does not leak.** It stays in the page's own path and goes only in the accept's body; the page sends no
+  Referer (`no-referrer` in `index.html` and from the pages Worker, which also marks join pages `no-store`) and asks no
+  other origin for anything: the brand's fonts, which every other page loads from Google, are left out of it.
+- **Practice** serves the whole flow from the fake, says its pretend code on the page, and has a demo link for each answer
+  and one for signing in turned off. An invite link from a practice People page opens it too, and joining with the address
+  it names adds the helper to that shop.
+
 ## Cover while the owner is away
 
 The owner sets cover from their session, or the operator on their word: until a date, one current helper covers. Cover
@@ -251,3 +279,5 @@ changes, for the shop the switcher shows, with that shop's own owner session (`d
   sends the link), and opening an invite made for a LINE ID, which waits for LINE Login.)
 - (Built since, 24 Nov 2026: the owner's link page names the helper who approved or declined a reply, as the canvas's
   "Approved by Mint at 19:42." and "Mint approved this at 19:42", from `decidedByHelper` in `docs/pilot-api.md`.)
+- (Built since, 24 Nov 2026: the join page an invite link opens, as in "Invites" above. It is off until signing in by email
+  is on, which needs the owner. Not built: signing in there with Apple or LINE, and a web session that outlasts the visit.)

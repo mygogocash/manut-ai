@@ -220,9 +220,11 @@ describe("the practice fake, accepting an invite", () => {
     if (joined.answer !== "joined") throw new Error("expected joined");
     const saved = [...kept.saved.values()].join("\n");
     expect(saved).toContain("helper.joined");
-    for (const secret of [access, joined.session.accessToken, PRACTICE_SIGN_IN_CODE, "practice-refresh", "practice-csrf"]) {
+    for (const secret of [access, joined.session.accessToken, "practice-refresh", "practice-csrf"]) {
       expect(saved, secret).not.toContain(secret);
     }
+    // The code as a number of its own: the sample's LINE channel id, 2001234567, holds its digits inside a longer run.
+    expect(saved).not.toMatch(new RegExp(`(^|\\D)${PRACTICE_SIGN_IN_CODE}(\\D|$)`));
     api.reset();
     expect((await refusal(api.acceptInvite({ accessToken: access, inviteToken: DEMO_JOIN_TOKENS.joined }))).code).toBe("unauthorized");
     expect((await refusal(api.endShopSession(joined.session.accessToken))).code).toBe("unauthorized");

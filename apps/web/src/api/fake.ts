@@ -253,9 +253,9 @@ const HELPER_SESSION_MS = 30 * DAY_MS;
 
 export const PRACTICE_CHANNEL_SECRET = "practice-channel-secret";
 
-/// The code every practice sign-in by email takes. Practice sends no email, so the join page says it aloud. It is the
-/// design canvas's own sample code (the Security board's prototype).
-export const PRACTICE_SIGN_IN_CODE = "246810";
+/// The code every practice sign-in by email takes. Practice sends no email, so the join page says it aloud. It is the code
+/// the desktop's Practice sign-in says (apps/desktop/src/settings/emailFlow.ts), so both apps' practice reads the same.
+export const PRACTICE_SIGN_IN_CODE = "123456";
 
 /// The join page's demo links (`/join/{token}`). Each is about Khao Soi Nimman, a shop that is not on the console's list,
 /// and answers as its name says whoever signs in, so practising one changes nothing anywhere. `signInOff` stands for an
