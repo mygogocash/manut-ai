@@ -48,6 +48,8 @@ import { operatorIdentity } from "./pilot";
 import { bangkokDay } from "./pilot-gate";
 import type { InboundMessage, Payment, PilotShopRecord } from "./pilot-store";
 import type { AttemptJSON, DraftJSON, TaskDocJSON, TaskEventJSON } from "./task-object";
+import { readRoutines } from "./routine-setup";
+import { memberOn } from "./routine-store";
 import { credStub, tenantCall, type TenantDataEnv } from "./tenant-data";
 
 export const WORKER_MEMBERS = ["nam", "pim", "ton"] as const;
@@ -726,6 +728,13 @@ export async function workersAdminRoute(
   if (!isWorkerMember(body.member)) return json({ error: "unknown_member" }, 400);
   const job = parseJob(body.job);
   if (!job) return json({ error: "invalid_job" }, 400);
+  // Pause everyone, and a member the shop's template left off, start nothing new. The team's routines already skip a run
+  // then (routine-store.ts), and the operator's own start keeps the same rule, with the same reasons, so the Team page's
+  // "Starts nothing new" holds whoever starts the job. A team that cannot be read starts nothing either.
+  const routines = await readRoutines(env, body.tenant);
+  if (!routines) return json({ error: "unavailable" }, 503);
+  if (routines.team.paused) return json({ error: "team_paused" }, 409);
+  if (!memberOn(routines.team, body.member)) return json({ error: "member_off" }, 409);
   const run = await runWorker(env, { tenant: body.tenant, member: body.member, job,
     startedBy: { kind: "operator", email: await operatorIdentity(ctx) } }, { flags });
   if (!run.ok) return json({ error: run.error, ...(run.feature ? { feature: run.feature } : {}) }, run.status);

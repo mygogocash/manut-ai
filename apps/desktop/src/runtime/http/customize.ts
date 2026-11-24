@@ -1,11 +1,16 @@
-// The Customize page's routines on the connected runtime: the shop's schedules, as the runtime already reads them from the
-// API (shop.ts), shown as routines and never changed (a schedule is made, paused or resumed with the API's own routes, which
-// no session has yet; see host.ts). The API's schedule says when to run and what to ask the team to do, but not what kind of
-// work that is or whether it asks first, so a row says `null` for both and the page shows nothing about them.
-import { describeTrigger, type Trigger } from "@manut/routine-rules";
+// The Customize page's routines on the connected runtime. For a shop the person owns, the team's routines come first, as
+// `GET /v1/routines` says each (its timing in `@manut/routine-rules`' words, what it does, whether it asks first, its next
+// run); the owner pauses and resumes them through the API's own routes (host.ts). Then the shop's other schedules, as the
+// runtime already reads them from the API (shop.ts), shown as routines and never changed: no session may change a schedule.
+// A schedule says when to run and what to ask the team to do, but not what kind of work that is or whether it asks first,
+// so its row says `null` for both and the page shows nothing about them.
+import { describeTrigger, type ActionKind, type Trigger } from "@manut/routine-rules";
 import { t } from "../../i18n";
 import type { RoutineRow } from "../routines";
-import type { ShopSchedule, ShopSnapshot } from "./shop";
+import type { ShopSchedule, ShopSnapshot, TeamRoutine } from "./shop";
+
+/** The kinds of work `@manut/routine-rules` knows, as its `ActionKind` names them. */
+const ACTION_KINDS: readonly ActionKind[] = ["brief", "draft", "reply", "send", "pay", "delete"];
 
 const two = (n: number) => String(n).padStart(2, "0");
 
@@ -27,9 +32,29 @@ function whenOf(s: ShopSchedule): string {
   return words || t("rt.whenUnknown");
 }
 
-/** Every schedule of the shop as a routine, in the order the API sent them. The API's next run is exact, and a schedule that
- *  is switched off has none, whatever the API still names. */
+/** A team routine as the Routines list shows it: the API's words and its next run, exact. A kind of work this build does not
+ *  know is `null`, so the page claims nothing about it. */
+export function teamRoutineRow(r: TeamRoutine): RoutineRow {
+  return {
+    id: r.id,
+    name: r.name || t("rt.untitled"),
+    when: r.when || t("rt.whenUnknown"),
+    action: ACTION_KINDS.find((kind) => kind === r.action) ?? null,
+    asksFirst: r.asksFirst,
+    enabled: !r.paused,
+    next: !r.paused && r.next !== null ? r.next / 1000 : null,
+    timeZone: r.timeZone,
+  };
+}
+
+/** The team's routines, in the order they were made, then every other schedule of the shop as a routine, in the order the
+ *  API sent them. The API's next run is exact, and a routine or schedule that is switched off has none, whatever the API
+ *  still names. */
 export function shopRoutines(snapshot: ShopSnapshot): RoutineRow[] {
+  return [...(snapshot.routines ?? []).map(teamRoutineRow), ...scheduleRows(snapshot)];
+}
+
+function scheduleRows(snapshot: ShopSnapshot): RoutineRow[] {
   return snapshot.schedules.map((s) => ({
     id: s.id,
     name: s.name || t("rt.untitled"),

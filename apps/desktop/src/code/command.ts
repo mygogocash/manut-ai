@@ -276,7 +276,8 @@ function lex(line: string): Lexed {
       redirect = true;
       continue;
     }
-    if (c === "`" || (c === "$" && next !== undefined && /[A-Za-z_({0-9?@*#!$-]/.test(next))) {
+    // `$'…'` decodes escapes (`$'\x2dexec'` is `-exec`) and `$"…"` translates its text: neither is what it looks like.
+    if (c === "`" || (c === "$" && next !== undefined && /[A-Za-z_({0-9?@*#!$'"-]/.test(next))) {
       opaque = true;
       word += c;
       inWord = true;

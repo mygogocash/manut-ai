@@ -43,6 +43,7 @@ const TAG: Record<JobStage, { word: Key; cls: string }> = {
   failed: { word: "job.step.failed", cls: "tag err" },
   cancelled: { word: "job.step.cancelled", cls: "tag" },
   partly: { word: "job.step.partly", cls: "tag warn" },
+  drafted: { word: "job.step.drafted", cls: "tag ok" },
 };
 
 export const stageTag = (stage: JobStage): { word: Key; cls: string } => TAG[stage];

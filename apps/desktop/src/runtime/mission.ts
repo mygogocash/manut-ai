@@ -11,8 +11,9 @@
 export const OWNER = "you";
 
 /** Where a job stands, and each step of its timeline. `proposed` waits for the owner; `paused` is what Pause everyone
- *  does to a job that was running. */
-export type JobStage = "proposed" | "approved" | "working" | "paused" | "sent" | "checked" | "failed" | "cancelled" | "partly";
+ *  does to a job that was running; `drafted` is a job that wrote a draft for the owner to read and sent nothing (the
+ *  connected runtime's members draft and never send). */
+export type JobStage = "proposed" | "approved" | "working" | "paused" | "sent" | "checked" | "failed" | "cancelled" | "partly" | "drafted";
 
 export interface JobStep {
   stage: JobStage;
@@ -78,7 +79,8 @@ export interface Job extends JobRow {
 export const ACTIVITY_KINDS = ["msg", "money", "post", "code", "signin", "settings"] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
-export type ActivityStatus = "sent" | "checked" | "posted" | "used" | "changed" | "needs_you";
+/** `drafted`: a member wrote something for the owner to read in the app, and nothing left it. */
+export type ActivityStatus = "sent" | "checked" | "posted" | "used" | "changed" | "needs_you" | "drafted";
 
 /** The words an event holds: a customer's message (private, hidden until the owner shows it and kept out of exports
  *  unless they choose it) or the shop's own post (public, so shown). */
@@ -130,13 +132,19 @@ export interface TeamState {
   routines: number;
   /** the jobs running now, or while paused the ones that were running when it began */
   running: PausedJob[];
+  /** What a pause holds on this runtime, so the page says only what it does. Absent or `team`: every member stops at the
+   *  next safe point and nothing expires while paused (the design canvas's pause, as Practice runs it). `routines`: the
+   *  team's routines skip their runs and nothing else changes (apps/api's Pause everyone): a job already running finishes,
+   *  `running` is the jobs running now, and a request in Needs you keeps its own expiry. */
+  holds?: "team" | "routines";
 }
 
 export interface MissionOps {
   "jobs.list": { params: Record<string, never>; result: { jobs: JobRow[] } };
   "jobs.get": { params: { job: string }; result: Job };
-  /** Newest first. `keptMonths` is how long the shop's log keeps an event before it is deleted for good. */
-  "activity.list": { params: Record<string, never>; result: { events: ActivityEvent[]; keptMonths: number } };
+  /** Newest first. `keptMonths` is how long the shop's log keeps an event before it is deleted for good, or null when the
+   *  runtime keeps no fixed span (the connected runtime's events are the shop's tasks, kept until the shop deletes them). */
+  "activity.list": { params: Record<string, never>; result: { events: ActivityEvent[]; keptMonths: number | null } };
   "team.state": { params: Record<string, never>; result: TeamState };
   /** Stops every member at the next safe point and starts nothing new. Unsends nothing, takes no page offline. */
   "team.pause": { params: Record<string, never>; result: TeamState };

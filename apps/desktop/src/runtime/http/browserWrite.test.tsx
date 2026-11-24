@@ -58,12 +58,15 @@ function action(): ShopAction {
     state: "proposed",
     proposedAt: 0,
     expiresAt: 86_400_000,
+    approvedAt: null,
+    approvedBy: "",
+    dispatchedAt: null,
     raw: {},
   };
 }
 
 function snap(over: Partial<ShopSnapshot> = {}): ShopSnapshot {
-  const task: ShopTask = { id: "task-1", title: "Answer Khun Mali in the shop's chat", objective: "", state: "waitingForAuthorization", createdAt: 0, updatedAt: 0, events: 1, actions: [action()], raw: {} };
+  const task: ShopTask = { id: "task-1", title: "Answer Khun Mali in the shop's chat", objective: "", state: "waitingForAuthorization", createdAt: 0, updatedAt: 0, events: 1, actions: [action()], attempts: [], draft: null, raw: {} };
   return { tasks: [task], approvals: decodeApprovals({ approvals: [write()] }, []), schedules: [], attention: [], attentionOff: false, unreadable: [], readAt: 0, ...over };
 }
 

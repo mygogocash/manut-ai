@@ -441,6 +441,33 @@ describe("POST /v1/admin/workers/run", () => {
     }
   });
 
+  it("starts nothing new while the team is paused, or for a member the shop left off, creating nothing", async () => {
+    // The shop's routine record, written as the Worker writes it (routine-setup.ts, `routineWrite`).
+    const routines = (s: Shop, path: string, body: Record<string, unknown>) => tenantCall(bindings, s.tenant, path, {
+      method: "POST", headers: { "content-type": "application/json", "x-routines": "1" },
+      body: JSON.stringify({ tenant: s.tenant, ...body, actor: OPS }) });
+    const post = { kind: "post", topic: "new menu" };
+
+    const paused = await shop();
+    expect((await routines(paused, "/routines/team", { paused: true, nowMs: Date.now() })).status).toBe(200);
+    expect(await admin("POST", "/v1/admin/workers/run", { tenant: paused.tenant, member: "pim", job: post }))
+      .toEqual({ status: 409, body: { error: "team_paused" } });
+    expect(await indexed(paused)).toEqual([]);
+    expect(await jobAudit(paused)).toEqual([]);
+    // Resumed, the same start goes ahead.
+    expect((await routines(paused, "/routines/team", { paused: false, nowMs: Date.now() })).status).toBe(200);
+    expect((await admin("POST", "/v1/admin/workers/run", { tenant: paused.tenant, member: "pim", job: post })).status)
+      .toBe(200);
+
+    // A shop whose template turned on Nam alone takes no job from Pim.
+    const narrow = await shop();
+    expect((await routines(narrow, "/routines/template", { template: "chat-only", members: ["nam"], routines: [],
+      questions: [] })).status).toBe(200);
+    expect(await admin("POST", "/v1/admin/workers/run", { tenant: narrow.tenant, member: "pim", job: post }))
+      .toEqual({ status: 409, body: { error: "member_off" } });
+    expect(await indexed(narrow)).toEqual([]);
+  });
+
   it("checks what it is asked before anything else", async () => {
     const s = await shop();
     // A tenant whose owner consented to cloud work but that is no pilot shop: there is no shop to work for.

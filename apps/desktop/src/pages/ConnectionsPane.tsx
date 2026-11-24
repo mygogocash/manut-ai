@@ -3,9 +3,10 @@
 // outpost the shop has, each with Rename and Remove. The words and the rows are connections.ts's; the boards are
 // Connections.dc.html and StatesCustomize.dc.html.
 //
-// This Mac's own row stays as it was, from the shell, with its Start and Stop. The shell never tells the page which of the
-// shop's outposts is this Mac (src-tauri/src/outpost/mod.rs, `View`), so the list below shows every one, this Mac's included,
-// by the name it has, rather than guess which.
+// This Mac's own row stays the shell's, with its Start and Stop. The shell gives the page the id this Mac's outpost has on
+// the shop's list (src-tauri/src/outpost/mod.rs, `View`), never its credential, so this Mac's record is folded into that row
+// (`ThisMacRecord`: its name, Rename and Remove) and the list below shows the shop's other outposts. Until the shell says
+// which it is, or when this Mac is not this shop's outpost, the list shows every one by its name rather than guess.
 //
 // The views use no hooks, so a test calls them as plain functions to read their handlers. `useConnections` feeds them through
 // a client of the runtime of the tab's own: nothing the tab sends passes through the store, and the password typed into
@@ -46,7 +47,7 @@ export interface ConnectionsProps {
 }
 
 /** What the last change said, shown in the part of the tab it was in. */
-function Said({ ui, at }: { ui: ConnUi; at: ConnUi["at"] }) {
+export function Said({ ui, at }: { ui: ConnUi; at: ConnUi["at"] }) {
   if (ui.at !== at) return null;
   return (
     <>
@@ -188,20 +189,26 @@ export function VaultPane({ p }: { p: ConnectionsProps }) {
 
 // ---- the shop's outposts ------------------------------------------------------------------------------------------------
 
-function OutpostRow({ o, p }: { o: ShopOutpost; p: ConnectionsProps }) {
+/** The question open about outpost `o`, if any: Rename or Remove. */
+const askAbout = (o: ShopOutpost, p: ConnectionsProps) => (p.ui.ask && p.ui.ask.kind !== "password" && p.ui.ask.outpost === o.id ? p.ui.ask : null);
+
+/** The question open about outpost `o`, drawn in place of its row (`testid` names the row: the shop's list, or this Mac's
+ *  own row in the Outposts box), or nothing when none is open. */
+function OutpostQuestion({ o, p, testid }: { o: ShopOutpost; p: ConnectionsProps; testid: string }) {
   const { ui, dispatch } = p;
-  const ask = ui.ask && ui.ask.kind !== "password" && ui.ask.outpost === o.id ? ui.ask : null;
+  const ask = askAbout(o, p);
   const cancel = () => dispatch({ type: "cancel" });
   const keys = formKeys(cancel);
+  if (!ask) return null;
 
   // Rename: the outpost's name in a field, in its row. Nothing changes until Save.
-  if (ask?.kind === "rename") {
+  if (ask.kind === "rename") {
     const ready = nameReady(ask.draft, o.name);
     const long = [...ask.draft.trim()].length > MAX_OUTPOST_NAME;
     return (
       <form
         className="tr ask"
-        data-testid="shop-outpost"
+        data-testid={testid}
         data-outpost={o.id}
         onKeyDown={keys}
         onSubmit={(e) => {
@@ -243,24 +250,57 @@ function OutpostRow({ o, p }: { o: ShopOutpost; p: ConnectionsProps }) {
   // Remove: a question in its row, with the safe answer holding the focus. Nothing is removed until the owner says so. Its
   // buttons have keys of their own, so they are new elements rather than the row's Rename and Remove reused: `autoFocus`
   // acts only on an element as it first appears.
-  if (ask?.kind === "remove")
-    return (
-      <div className="tr" data-testid="shop-outpost" data-outpost={o.id} onKeyDown={keys}>
-        <span className="grow">
-          <span className="conn-name">{o.name}</span>
-          <span className="conn-line" data-testid="outpost-remove-question">
-            {t("outposts.removeAsk", { name: o.name })}
-          </span>
+  return (
+    <div className="tr" data-testid={testid} data-outpost={o.id} onKeyDown={keys}>
+      <span className="grow">
+        <span className="conn-name">{o.name}</span>
+        <span className="conn-line" data-testid="outpost-remove-question">
+          {t("outposts.removeAsk", { name: o.name })}
         </span>
-        <button key="remove-yes" type="button" className="btn danger solid" disabled={ui.busy} onClick={p.onRemove} data-testid="outpost-remove-yes">
-          {t("outposts.remove")}
-        </button>
-        <button key="remove-keep" type="button" className="btn" autoFocus disabled={ui.busy} onClick={cancel} data-testid="outpost-remove-keep">
-          {t("outposts.keep")}
-        </button>
-      </div>
-    );
+      </span>
+      <button key="remove-yes" type="button" className="btn danger solid" disabled={ui.busy} onClick={p.onRemove} data-testid="outpost-remove-yes">
+        {t("outposts.remove")}
+      </button>
+      <button key="remove-keep" type="button" className="btn" autoFocus disabled={ui.busy} onClick={cancel} data-testid="outpost-remove-keep">
+        {t("outposts.keep")}
+      </button>
+    </div>
+  );
+}
 
+/** Rename and Remove for outpost `o`, each opening its question in the row; one asked from this Mac's own row says its
+ *  words there (`at`). */
+function OutpostLinks({ o, p, at }: { o: ShopOutpost; p: ConnectionsProps; at?: "this_mac" }) {
+  const { ui, dispatch } = p;
+  const where = at ? { at } : {};
+  return (
+    <>
+      <button
+        type="button"
+        className="lk"
+        disabled={ui.busy || ui.ask !== null}
+        onClick={() => dispatch({ type: "rename", outpost: o.id, name: o.name, ...where })}
+        aria-label={`${t("outposts.rename")}: ${o.name}`}
+        data-testid="outpost-rename"
+      >
+        {t("outposts.rename")}
+      </button>
+      <button
+        type="button"
+        className="lk"
+        disabled={ui.busy || ui.ask !== null}
+        onClick={() => dispatch({ type: "remove", outpost: o.id, ...where })}
+        aria-label={`${t("outposts.remove")}: ${o.name}`}
+        data-testid="outpost-remove"
+      >
+        {t("outposts.remove")}
+      </button>
+    </>
+  );
+}
+
+function OutpostRow({ o, p }: { o: ShopOutpost; p: ConnectionsProps }) {
+  if (askAbout(o, p)) return <OutpostQuestion o={o} p={p} testid="shop-outpost" />;
   return (
     <div className="tr" data-testid="shop-outpost" data-outpost={o.id}>
       <span className="grow">
@@ -272,35 +312,35 @@ function OutpostRow({ o, p }: { o: ShopOutpost; p: ConnectionsProps }) {
       <span className={o.online ? "tag ok" : "tag"} data-testid="shop-outpost-tag">
         {o.online ? t("outpost.online") : t("outpost.asleep")}
       </span>
-      <button
-        type="button"
-        className="lk"
-        disabled={ui.busy || ui.ask !== null}
-        onClick={() => dispatch({ type: "rename", outpost: o.id, name: o.name })}
-        aria-label={`${t("outposts.rename")}: ${o.name}`}
-        data-testid="outpost-rename"
-      >
-        {t("outposts.rename")}
-      </button>
-      <button
-        type="button"
-        className="lk"
-        disabled={ui.busy || ui.ask !== null}
-        onClick={() => dispatch({ type: "remove", outpost: o.id })}
-        aria-label={`${t("outposts.remove")}: ${o.name}`}
-        data-testid="outpost-remove"
-      >
-        {t("outposts.remove")}
-      </button>
+      <OutpostLinks o={o} p={p} />
     </div>
   );
 }
 
-/** Every outpost the shop has, as the API lists it, each with Rename and Remove. Drawn once the vault was read: until then, or
- *  when it could not be, the Vault box says why. */
-export function ShopOutpostsPane({ p }: { p: ConnectionsProps }) {
+/** This Mac's own record on the shop's list, folded into this Mac's row in the Outposts box (OutpostPane.tsx) once the shell
+ *  says which outpost it is: the name the shop knows it by, with Rename and Remove, which ask in this row and say their
+ *  words beside it. Where it stands, Online or Asleep and its steps, is the shell's, in the row above. */
+export function ThisMacRecord({ o, p }: { o: ShopOutpost; p: ConnectionsProps }) {
+  if (askAbout(o, p)) return <OutpostQuestion o={o} p={p} testid="this-mac-record" />;
+  return (
+    <div className="tr" data-testid="this-mac-record" data-outpost={o.id}>
+      <span className="grow">
+        <span className="conn-line" data-testid="this-mac-name">
+          {t("outpost.named", { name: o.name })}
+        </span>
+      </span>
+      <OutpostLinks o={o} p={p} at="this_mac" />
+    </div>
+  );
+}
+
+/** Every outpost the shop has, as the API lists it, each with Rename and Remove, but this Mac's own (`thisMac`, the id the
+ *  shell gives), which is folded into this Mac's row above so it is not shown twice. Drawn once the vault was read: until
+ *  then, or when it could not be, the Vault box says why. */
+export function ShopOutpostsPane({ p, thisMac = null }: { p: ConnectionsProps; thisMac?: string | null }) {
   if (p.state.kind !== "ready") return null;
-  const outposts = p.state.value.outposts;
+  const all = p.state.value.outposts;
+  const outposts = all.filter((o) => o.id !== thisMac);
   return (
     <section className="side2 shop-outposts" aria-labelledby="shop-outposts-title" data-testid="shop-outposts">
       <h2 className="h2" id="shop-outposts-title">
@@ -311,7 +351,7 @@ export function ShopOutpostsPane({ p }: { p: ConnectionsProps }) {
       <div className="box">
         {outposts.length === 0 && (
           <p className="none" data-testid="shop-outposts-empty">
-            {t("outposts.empty")}
+            {outposts.length < all.length ? t("outposts.noOther") : t("outposts.empty")}
           </p>
         )}
         {outposts.map((o) => (

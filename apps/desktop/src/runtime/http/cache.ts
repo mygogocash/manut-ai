@@ -10,9 +10,11 @@
 //   ever passed in here: no token, no refresh token, no keychain value.
 // - The file is named by a hash of the origin and the signed-in tenant, so each sign-in has its own and the name says
 //   neither, and the desktop shell keeps only the one file of the one sign-in (src-tauri/src/shop_cache.rs). With several
-//   shops (docs/several-shops.md), every shop's record in it is kept under that shop's id, so a shop's asks are only ever
-//   read back as that shop's, and a shop that leaves is dropped the next time the file is written. Writing the one file
-//   for all of them needs no change to the shell, which removes any other file when it writes one.
+//   shops (docs/several-shops.md), every shop's record in it is kept under that shop's id, with that shop's own read (for a
+//   shop the person owns, its tasks with each member's runs and draft, its schedules, attention items, team and routines),
+//   so a shop's asks and work are only ever read back as that shop's, and a shop that leaves is dropped the next time the
+//   file is written. Writing the one file for all of them needs no change to the shell, which removes any other file when
+//   it writes one.
 // - A kept read is shown for 7 days from the moment it was read and never after. One that is damaged, from another
 //   version of the app or dated ahead of this computer's clock is not believed: it reads as nothing kept. Half a shop
 //   is never shown as the whole one, so a single bad entry ignores the whole file.
@@ -23,11 +25,14 @@
 import { encodeRecord, encodeStanding } from "@manut/approval-core";
 import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
 import { sha256Hex } from "./sha256";
-import type { Attention, ShopAction, ShopPart, ShopSchedule, ShopSnapshot, ShopTask } from "./shop";
+import type { Attention, ShopAction, ShopAttempt, ShopDraft, ShopPart, ShopSchedule, ShopSnapshot, ShopTask, ShopTeam, ShopWork, TeamRoutine } from "./shop";
 
-/** 3 since it keeps several shops, each under its id. A file of 2 (the signed-in tenant's own read, as before shops) is
- *  still read. A file of 1 holds no requests, so it is not read: what waits for the owner would be missing from it. */
-export const CACHE_VERSION = 3;
+/** 4 since each shop the person owns keeps its own work (tasks with their runs and drafts, schedules, attention items,
+ *  team and routines) under its id, and each action when it was approved and sent. Files of 3 (several shops, asks only)
+ *  and 2 (the signed-in tenant's own read, as before shops) are still read, as what they hold: a task from them has no
+ *  runs and no draft, and a shop no work. A file of 1 holds no requests, so it is not read: what waits for the owner would
+ *  be missing from it. */
+export const CACHE_VERSION = 4;
 /** A kept read is shown for this long after it was read. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
@@ -54,52 +59,123 @@ export function encodeSnapshot(s: ShopSnapshot): string {
   return JSON.stringify({
     v: CACHE_VERSION,
     snapshot: {
-      tasks: s.tasks.map((task) => ({
-        id: task.id,
-        title: task.title,
-        objective: task.objective,
-        state: task.state,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-        events: task.events,
-        actions: task.actions.map((a) => ({
-          id: a.id,
-          taskId: a.taskId,
-          operationType: a.operationType,
-          targetResourceId: a.targetResourceId,
-          recipients: a.recipients,
-          payload: a.payload,
-          state: a.state,
-          proposedAt: a.proposedAt,
-          expiresAt: a.expiresAt,
-        })),
-      })),
-      schedules: s.schedules.map((x) => ({
-        id: x.id,
-        name: x.name,
-        prompt: x.prompt,
-        hour: x.hour,
-        minute: x.minute,
-        weekdays: x.weekdays,
-        timeZone: x.timeZone,
-        enabled: x.enabled,
-        revision: x.revision,
-        nextFire: x.nextFire,
-        createdAt: x.createdAt,
-      })),
+      // With several shops the viewed shop's own read is its record's, not kept twice.
+      tasks: s.shops ? [] : s.tasks.map(taskOf),
+      schedules: s.shops ? [] : s.schedules.map(scheduleOf),
       approvals: s.shops ? [] : s.approvals.map(approvalOf),
-      attention: s.attention.map((x) => ({ id: x.id, connectionId: x.connectionId, eventType: x.eventType, issueId: x.issueId, receivedAt: x.receivedAt })),
+      attention: s.shops ? [] : s.attention.map(attentionOf),
       attentionOff: s.attentionOff,
       readAt: s.readAt,
-      // each shop under its own id, with what waits there; the viewed shop's own asks are its record's, not kept twice
+      // each shop under its own id, with what waits there and, for a shop the person owns, its work
       ...(s.shops
         ? {
-            shops: s.shops.map((p) => ({ id: p.shop.id, name: p.shop.name, owner: p.shop.owner, role: p.shop.role, approvals: p.approvals.map(approvalOf) })),
+            shops: s.shops.map((p) => ({
+              id: p.shop.id,
+              name: p.shop.name,
+              owner: p.shop.owner,
+              role: p.shop.role,
+              approvals: p.approvals.map(approvalOf),
+              ...(p.work ? { work: workOf(p.work) } : {}),
+            })),
             viewing: s.viewing ?? null,
           }
         : {}),
     },
   });
+}
+
+function taskOf(task: ShopTask) {
+  return {
+    id: task.id,
+    title: task.title,
+    objective: task.objective,
+    state: task.state,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    events: task.events,
+    actions: task.actions.map((a) => ({
+      id: a.id,
+      taskId: a.taskId,
+      operationType: a.operationType,
+      targetResourceId: a.targetResourceId,
+      recipients: a.recipients,
+      payload: a.payload,
+      state: a.state,
+      proposedAt: a.proposedAt,
+      expiresAt: a.expiresAt,
+      approvedAt: a.approvedAt,
+      approvedBy: a.approvedBy,
+      dispatchedAt: a.dispatchedAt,
+    })),
+    attempts: task.attempts.map((a) => ({
+      id: a.id,
+      executor: a.executor,
+      status: a.status,
+      outcome: a.outcome,
+      reason: a.reason,
+      claimedAt: a.claimedAt,
+      finishedAt: a.finishedAt,
+      deadline: a.deadline,
+      leaseUntil: a.leaseUntil,
+      handedTo: a.handedTo,
+      costSatang: a.costSatang,
+      tokens: a.tokens,
+      model: a.model,
+    })),
+    draft: task.draft && { member: task.draft.member, job: task.draft.job, text: task.draft.text, at: task.draft.at },
+  };
+}
+
+function scheduleOf(x: ShopSchedule) {
+  return {
+    id: x.id,
+    name: x.name,
+    prompt: x.prompt,
+    hour: x.hour,
+    minute: x.minute,
+    weekdays: x.weekdays,
+    timeZone: x.timeZone,
+    enabled: x.enabled,
+    revision: x.revision,
+    nextFire: x.nextFire,
+    createdAt: x.createdAt,
+  };
+}
+
+const attentionOf = (x: Attention) => ({ id: x.id, connectionId: x.connectionId, eventType: x.eventType, issueId: x.issueId, receivedAt: x.receivedAt });
+
+/** The fields of a routine's trigger `@manut/routine-rules` writes, each copied only when it is a plain value of its kind. */
+const TRIGGER_FIELDS = ["kind", "at", "weekdays", "day", "from", "to", "threshold"] as const;
+
+function triggerOf(v: unknown): Record<string, unknown> | null {
+  if (!isObj(v)) return null;
+  const kept: Record<string, unknown> = {};
+  for (const key of TRIGGER_FIELDS) {
+    const value = v[key];
+    if (typeof value === "string" || isNum(value) || (Array.isArray(value) && value.every(isNum))) kept[key] = value;
+  }
+  return kept;
+}
+
+function workOf(w: ShopWork) {
+  return {
+    tasks: w.tasks.map(taskOf),
+    schedules: w.schedules.map(scheduleOf),
+    attention: w.attention.map(attentionOf),
+    team: { paused: w.team.paused, since: w.team.since, members: w.team.members },
+    routines: w.routines.map((r) => ({
+      id: r.id,
+      name: r.name,
+      action: r.action,
+      member: r.member,
+      when: r.when,
+      timeZone: r.timeZone,
+      asksFirst: r.asksFirst,
+      paused: r.paused,
+      next: r.next,
+      trigger: triggerOf(r.trigger),
+    })),
+  };
 }
 
 /** A request as the file keeps it: approval-core's wire JSON, its detail cut to the card's words, with any note passed on. */
@@ -121,23 +197,48 @@ const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const intIn = (v: unknown, lo: number, hi: number): v is number => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 const intOrNull = (v: unknown, lo: number, hi: number): v is number | null => v === null || intIn(v, lo, hi);
 
-function readAction(v: unknown): ShopAction | null {
+/** A file of an earlier version, which kept no runs, no drafts and no approval or send times: what it did keep is read,
+ *  and what it did not is none. A file of this version must hold every field. */
+type Version = 2 | 3 | 4;
+
+function readAction(v: unknown, version: Version): ShopAction | null {
   if (!isObj(v)) return null;
   const { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt } = v;
   if (!isId(id) || !isStr(taskId) || !isStr(operationType) || !isStr(targetResourceId) || !isStr(state)) return null;
   if (!Array.isArray(recipients) || !recipients.every(isStr) || !isObj(payload)) return null;
   if (!numOrNull(proposedAt) || !numOrNull(expiresAt)) return null;
-  return { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt, raw: null };
+  const old = version < 4;
+  const approvedAt = old ? null : v.approvedAt;
+  const approvedBy = old ? "" : v.approvedBy;
+  const dispatchedAt = old ? null : v.dispatchedAt;
+  if (!numOrNull(approvedAt) || !isStr(approvedBy) || !numOrNull(dispatchedAt)) return null;
+  return { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt, approvedAt, approvedBy, dispatchedAt, raw: null };
 }
 
-function readTask(v: unknown): ShopTask | null {
+function readAttempt(v: unknown): ShopAttempt | null {
   if (!isObj(v)) return null;
-  const { id, title, objective, state, createdAt, updatedAt, events, actions } = v;
+  const { id, executor, status, outcome, reason, claimedAt, finishedAt, deadline, leaseUntil, handedTo, costSatang, tokens, model } = v;
+  if (!isId(id) || !isStr(executor) || !isStr(status) || !isStr(outcome) || !isStr(reason) || !isStr(model)) return null;
+  if (!numOrNull(claimedAt) || !numOrNull(finishedAt) || !numOrNull(deadline) || !numOrNull(leaseUntil)) return null;
+  if (!(handedTo === null || isId(handedTo)) || !intOrNull(costSatang, 0, Number.MAX_SAFE_INTEGER) || !intOrNull(tokens, 0, Number.MAX_SAFE_INTEGER)) return null;
+  return { id, executor, status, outcome, reason, claimedAt, finishedAt, deadline, leaseUntil, handedTo, costSatang, tokens, model };
+}
+
+function readDraft(v: unknown): ShopDraft | null | undefined {
+  if (v === null) return null;
+  if (!isObj(v) || !isStr(v.member) || !isStr(v.job) || !isStr(v.text) || !numOrNull(v.at)) return undefined;
+  return { member: v.member, job: v.job, text: v.text, at: v.at };
+}
+
+function readTask(v: unknown, version: Version): ShopTask | null {
+  if (!isObj(v)) return null;
+  const { id, title, objective, state, createdAt, updatedAt, events } = v;
   if (!isId(id) || !isStr(title) || !isStr(objective) || !isStr(state) || !numOrNull(createdAt) || !numOrNull(updatedAt) || !isNum(events)) return null;
-  if (!Array.isArray(actions)) return null;
-  const read = actions.map(readAction);
-  if (read.some((a) => !a)) return null;
-  return { id, title, objective, state, createdAt, updatedAt, events, actions: read as ShopAction[], raw: null };
+  const actions = every(v.actions, (a) => readAction(a, version));
+  const attempts = version < 4 ? [] : every(v.attempts, readAttempt);
+  const draft = version < 4 ? null : readDraft(v.draft);
+  if (!actions || !attempts || draft === undefined) return null;
+  return { id, title, objective, state, createdAt, updatedAt, events, actions, attempts, draft, raw: null };
 }
 
 function readSchedule(v: unknown): ShopSchedule | null {
@@ -170,13 +271,41 @@ function readAttention(v: unknown): Attention | null {
   return { id, connectionId, eventType, issueId, receivedAt, raw: null };
 }
 
-/** One shop of the file, whole: its id, name, owner, the person's role there, and its requests. */
-function readPart(v: unknown): ShopPart | null {
+function readTeam(v: unknown): ShopTeam | null {
+  if (!isObj(v) || typeof v.paused !== "boolean" || !numOrNull(v.since) || !Array.isArray(v.members) || !v.members.every(isId)) return null;
+  return { paused: v.paused, since: v.since, members: v.members };
+}
+
+function readRoutine(v: unknown): TeamRoutine | null {
+  if (!isObj(v)) return null;
+  const { id, name, action, member, when, timeZone, asksFirst, paused, next, trigger } = v;
+  if (!isId(id) || !isStr(name) || !isStr(action) || !isStr(member) || !isStr(when) || !isStr(timeZone)) return null;
+  if (!(asksFirst === null || typeof asksFirst === "boolean") || typeof paused !== "boolean" || !numOrNull(next) || !(trigger === null || isObj(trigger))) return null;
+  return { id, name, action, member, when, timeZone, asksFirst, paused, next, trigger };
+}
+
+/** A shop's work, whole, or null when any part of it is not. */
+function readWork(v: unknown): ShopWork | null {
+  if (!isObj(v)) return null;
+  const tasks = every(v.tasks, (x) => readTask(x, 4));
+  const schedules = every(v.schedules, readSchedule);
+  const attention = every(v.attention, readAttention);
+  const team = readTeam(v.team);
+  const routines = every(v.routines, readRoutine);
+  return tasks && schedules && attention && team && routines ? { tasks, schedules, attention, team, routines } : null;
+}
+
+/** One shop of the file, whole: its id, name, owner, the person's role there, its requests, and for a shop the person
+ *  owns, its work. Only a shop they own has work, as only an owner's session reads it. */
+function readPart(v: unknown, version: Version): ShopPart | null {
   if (!isObj(v)) return null;
   const { id, name, owner, role, approvals } = v;
   if (!isId(id) || !isStr(name) || !isStr(owner) || (role !== "owner" && role !== "helper")) return null;
   const read = every(approvals, readApproval);
-  return read ? { shop: { id, name, owner, role }, approvals: read } : null;
+  if (!read) return null;
+  if (version < 4 || v.work === undefined) return { shop: { id, name, owner, role }, approvals: read };
+  const work = role === "owner" ? readWork(v.work) : null;
+  return work ? { shop: { id, name, owner, role }, approvals: read, work } : null;
 }
 
 /** `list` read entry by entry, or null when it is not a list or any entry is not one. */
@@ -195,25 +324,41 @@ export function decodeCached(text: string | null, now: number): CachedRead {
   } catch {
     return NONE;
   }
-  if (!isObj(file) || (file.v !== CACHE_VERSION && file.v !== 2) || !isObj(file.snapshot)) return NONE;
+  if (!isObj(file) || (file.v !== 4 && file.v !== 3 && file.v !== 2) || !isObj(file.snapshot)) return NONE;
+  const version: Version = file.v;
   const s = file.snapshot;
-  const tasks = every(s.tasks, readTask);
+  const tasks = every(s.tasks, (x) => readTask(x, version));
   const approvals = every(s.approvals, readApproval);
   const schedules = every(s.schedules, readSchedule);
   const attention = every(s.attention, readAttention);
   if (!tasks || !approvals || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
   // Several shops, each under its id; a file of 2, or one written while the person was in no shop, has none.
-  const several = file.v === CACHE_VERSION && s.shops !== undefined;
-  const shops = several ? every(s.shops, readPart) : null;
+  const several = version >= 3 && s.shops !== undefined;
+  const shops = several ? every(s.shops, (x) => readPart(x, version)) : null;
   if (several && (!shops || new Set(shops.map((p) => p.shop.id)).size !== shops.length)) return NONE;
   const readAt = s.readAt;
   if (readAt > now + CLOCK_SLACK_MS) return NONE;
   if (now - readAt > CACHE_MAX_AGE_MS) return { kind: "too_old", at: readAt };
   const snapshot: ShopSnapshot = { tasks, approvals, schedules, attention, attentionOff: s.attentionOff, unreadable: [], readAt };
   if (!shops) return { kind: "usable", snapshot };
-  // The viewed shop is the one the file names while it holds it, else the first; its asks are its own record's.
+  // The viewed shop is the one the file names while it holds it, else the first; its asks and its work are its own
+  // record's, as the host shows a viewed shop (host.ts `atShops`).
   const viewed = shops.find((p) => p.shop.id === s.viewing) ?? shops[0];
-  return { kind: "usable", snapshot: { ...snapshot, approvals: viewed ? viewed.approvals : [], shops, ...(viewed ? { viewing: viewed.shop.id } : {}) } };
+  const work = viewed?.work;
+  return {
+    kind: "usable",
+    snapshot: {
+      ...snapshot,
+      tasks: work?.tasks ?? [],
+      schedules: work?.schedules ?? [],
+      attention: work?.attention ?? [],
+      attentionOff: !work,
+      approvals: viewed ? viewed.approvals : [],
+      shops,
+      ...(viewed ? { viewing: viewed.shop.id } : {}),
+      ...(work ? { team: work.team, routines: work.routines } : {}),
+    },
+  };
 }
 
 // ---- the name ---------------------------------------------------------------------------------------------------------
