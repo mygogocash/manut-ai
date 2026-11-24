@@ -218,10 +218,11 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   its 30 days is opened again before it is sent; one the API answers 401 for any reason but `removed` or `unlinked` is
   opened again once and the request sent once more, a decision too, since the API answers 401 from the credential before
   it reads the body. Two requests that find it ended open it once.
-- **What a shop reads.** `GET /v1/approvals?state=open`, with its own session, and nothing else: the API answers a shop
-  session 401 on the export, the schedules and the attention feed. So the shop being viewed shows Buddy, its asks, no
-  tasks (History is empty), no schedules and no notes. Every listed shop is read each time, at once; one shop that fails
-  (offline, 5xx) fails the whole read, and the kept read stands in for all of them.
+- **What a shop reads.** `GET /v1/approvals?state=open`, with its own session, and nothing else but its helpers' devices
+  for a shop the person owns (A helper's new device, below): the API answers a shop session 401 on the export, the
+  schedules and the attention feed. So the shop being viewed shows Buddy, its asks, no tasks (History is empty), no
+  schedules and no notes. Every listed shop is read each time, at once; one shop that fails (offline, 5xx) fails the whole
+  read, and the kept read stands in for all of them.
 - **One Needs you.** Every shop's open requests are asks in Buddy's chat, sorted by when each was asked (the protocol
   event's new `asked_at`, which the card keeps as its time). An ask's id is `<shop>/<requestId>@<revision>`, the shop
   written as `encodeURIComponent` writes it, so two shops' asks never share a card and an answer finds its shop from the
@@ -242,6 +243,18 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
 - **A place that ended.** 401 `removed` or `unlinked` from a shop's session drops its session and kept read at once and
   closes its asks in words that say when. Each read also looks once, with its own session, at a shop it holds a session
   for that the list no longer has, to say why and when, then drops it. `shops.update` follows either.
+- **A helper's new device** (`devices.ts`; `docs/people.md`, "A helper's new device"). After each read is taken, a shop the
+  person owns is asked `GET /v1/people/devices` with its own session, in the background, so a slow or failing route never
+  holds back the read. A shop they help at is never asked: the API answers a helper's session 403. The answer lists one sign-in for each helper session opened, signed out or not, as `{ id,
+  helperId, name, openedAt }`. The host says each one it has not said yet as the protocol's `device.new` (the helper's
+  name, the shop, when), once, oldest first. The first look at a shop says none, so a first run does not ring for every
+  helper. What it has seen is the ids listed, per shop, in this computer's own storage (`manut.devices.seen`, at most 200
+  for a shop). It is not in the kept read, which lasts 7 days and goes at sign-out, and it is no secret, so not in the
+  keychain. A shop the person leaves, or no longer owns, takes it with it; signing out leaves it. A read of the devices
+  that fails (offline, 5xx, a refusal, an answer this build cannot read) says and forgets nothing, as does one that
+  answers after the person signed out. The store shows each one with `showNewDevice` (`notify.ts`) as "Mint signed in on a new device",
+  through `showOutside` and notify-rules: quiet hours never silence it and Hide details hides who and where. Look first
+  brings the app forward on that shop, and Later only dismisses. "Notify me" off switches it off, as every notification.
 - **Signing out** ends each shop session with `POST /v1/shops/session/end` (the session as the bearer, exactly `{}`),
   together with `DELETE /v1/auth/session`, then clears the keychain item and the kept read whatever the API said; Settings
   says the API was not told when any of them got no answer. A sign-in the API ends has its shop sessions ended the same

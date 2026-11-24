@@ -424,6 +424,14 @@ export function showWoke(count: number, wokeAt: number, open?: () => void): Prom
   return showOutside({ kind: "slept", count, wokeAt }, { open }, "manut:slept");
 }
 
+/** A helper signed in on a new device at a shop the person owns: the owner's alert (docs/people.md, "A helper's new device").
+ *  It goes through `showOutside` like every notification, so notify-rules rules on it: quiet hours never silence it, and
+ *  Hide details hides the helper and the shop. Each sign-in has a notification of its own (the tag carries its id). `open`
+ *  is Look first; Later only dismisses. `at` is ms. True when it was shown. Never throws. */
+export function showNewDevice(sign: { id: string; helper: string; shop: string; at: number }, open?: () => void): Promise<boolean> {
+  return showOutside({ kind: "new_device", helper: { name: sign.helper, shop: sign.shop, at: sign.at } }, { open }, `manut:device:${sign.id}`);
+}
+
 /** True while the person can see the manut window. */
 export function windowWatched(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus();

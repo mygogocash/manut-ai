@@ -321,8 +321,9 @@ describe("a job that waited while the Mac slept", () => {
   });
 });
 
-describe("the two alerts that have no source yet", () => {
-  it("ring through quiet hours, with Look first and Later, when something one day reports them", async () => {
+describe("the two alerts quiet hours never silence", () => {
+  // A helper's new device has its own source (notify.device.test.ts); a live page that stops has none yet.
+  it("ring through quiet hours, with Look first and Later", async () => {
     vi.setSystemTime(at("03:00"));
     const { showOutside } = await load();
     await showOutside({ kind: "page_down", page: "baanmali.shop" });

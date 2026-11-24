@@ -164,6 +164,10 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
   is under that shop's id; a shop that leaves is dropped the next time the file is written. Signing out ends every shop
   session with `POST /v1/shops/session/end` (the session itself as the bearer, exactly `{}`), then clears every shop's
   session and kept read; a sign-out that cannot reach the API still clears this computer.
+- **A helper's new device.** For each shop the person owns, the app also reads `GET /v1/people/devices` with that shop's
+  own session and tells them once of each helper sign-in it has not told before, as a notification: "Mint signed in on a
+  new device" (`docs/people.md`, "A helper's new device"). It never asks about a shop where the person is a helper. The
+  first look at a shop tells nothing, and what it has seen is kept per shop on this computer and goes with the shop.
 - **A shop the person's place in ended.** An answer of 401 `removed` or `unlinked` drops that shop's session and kept read
   at once. A shop that leaves the list is looked at once with its own session, so the app can say why and when, and then
   dropped. Its asks close in those words, and a notice above the account row says them until dismissed: "You no longer
