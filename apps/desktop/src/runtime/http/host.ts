@@ -48,11 +48,12 @@ import { OpError } from "../mock/host";
 import { decisionPath, outcomeOf, type Closing } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
+import { connectionHandlers, type OwnerLink } from "./connections";
 import { shopRoutines } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
 import type { ApiSession, SignInState } from "./session";
 import { readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot } from "./shop";
-import { listShops, ShopSessions, type Departure, type Left } from "./shops";
+import { departureOf, listShops, ShopSessions, type Departure, type Left } from "./shops";
 import { attentionRows, automationRows, pendingAsks, routineRows, taskOpen, team, TEAM, threadRows } from "./view";
 
 /** A read of the shop while open, every minute. */
@@ -676,6 +677,49 @@ export class HttpHost {
     }, 0);
   }
 
+  // ---- Customize › Connections ----------------------------------------------------------------------------------
+
+  /** What the Connections ops need of this host (connections.ts): the shop the switcher shows, the person's role at each
+   *  shop, each shop's own session (or the sign-in while they are in no shops), and the host's word on a shop the
+   *  person's place in ended. Nothing the ops send is kept here. */
+  private ownerLink(): OwnerLink {
+    return {
+      live: () => {
+        if (this.cache.kind === "showing") throw new OpError("offline", t("rt.offline"));
+      },
+      viewed: async () => {
+        const snapshot = this.snapshot ?? (await this.current());
+        if (!snapshot.shops) return null;
+        const part = partOf(snapshot, snapshot.viewing ?? "");
+        if (!part) throw notFound();
+        return { shop: part.shop.id, role: this.shopSessions.roleAt(part.shop) };
+      },
+      roleAt: (shop) => {
+        const part = partOf(this.snapshot, shop);
+        return part ? this.shopSessions.roleAt(part.shop) : undefined;
+      },
+      inShops: () => !!this.snapshot?.shops,
+      read: (shop, path) => (shop === null ? this.session.read(path) : this.shopSessions.read(shop, path)),
+      write: (shop, path, body) => (shop === null ? this.session.write(path, body) : this.shopSessions.write(shop, path, body)),
+      writeOnce: async (shop, path, body) => {
+        if (shop === null) return this.session.writeOnce(path, body);
+        // The shop's session as it is held now, which the read just before opened or renewed (connections.ts). It is sent
+        // once, and not again after a 401 as shops.ts would send it.
+        const held = this.session.shopSession(shop);
+        if (!held) return { kind: "unavailable" };
+        const answer = await this.session.sendAs(held.accessToken, "POST", path, body);
+        const ended = departureOf(answer);
+        if (!ended) return answer;
+        await this.session.dropShopSessions([shop]);
+        return { kind: "left", departure: ended };
+      },
+      departed: (shop, departure) => {
+        this.depart([{ shop, departure }]);
+        return new OpError(departure.why, this.departedWords(shop) ?? t("rt.notFound"));
+      },
+    };
+  }
+
   // ---- ops --------------------------------------------------------------------------------------------------------
 
   private readonly ops: Handlers = (() => {
@@ -804,6 +848,8 @@ export class HttpHost {
       "routine.create": notYet,
       "routine.pause": notYet,
       "routine.resume": notYet,
+      // Customize › Connections: the shop's vault and outposts, with the owner's session (connections.ts).
+      ...connectionHandlers(this.ownerLink()),
     };
   })();
 }

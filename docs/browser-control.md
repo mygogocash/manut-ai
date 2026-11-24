@@ -16,10 +16,11 @@ Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault obj
 `apps/api/src/browser-control.ts` (the operator, owner and outpost routes) and `apps/api/src/browser-writes.ts`
 (submitting: the write step, its table of kinds, and its hand-out and report). The worker's side is six methods on
 the job flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
-`outpost-register.test.ts`, `sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes
-are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
-`apps/desktop/src-tauri/src/outpost/` (the shell runs it) and `apps/desktop/src/pages/OutpostPane.tsx`
-(Customize › Connections).
+`outpost-register.test.ts`, `owner-vault.test.ts`, `sign-in-grants.test.ts`, `browser-steps.test.ts` and
+`browser-submit.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
+`apps/desktop/src-tauri/src/outpost/` (the shell runs it) and `apps/desktop/src/pages/OutpostPane.tsx`; the rest of
+Customize › Connections, for the owner, is `apps/desktop/src/pages/ConnectionsPane.tsx` and `connections.ts`, over
+`src/runtime/http/connections.ts` (the API) or `src/runtime/mock/vault.ts` (Practice).
 
 ## The promises
 
@@ -64,8 +65,9 @@ before its first beat.
 
 An operator can give an outpost a new credential, shown once and kept as its digest like the first: the old one stops
 working at once, and the outpost is asleep until the holder of the new one beats, so nothing new is sent to a machine
-that may not hold it. An operator can also remove an outpost: its credential stops working at once, and whatever
-waited for it (a step waiting or running, a grant not yet redeemed) is refused in the same step. Every outpost route
+that may not hold it. An operator, or the owner in the desktop app, can also remove an outpost: its credential stops
+working at once, and whatever waited for it (a step waiting or running, a grant not yet redeemed) is refused in the same
+step. The owner can rename one too, so their machines are told apart; only the name changes. Every outpost route
 is limited per source address before its credential is even read.
 
 ### The sign-in step
@@ -150,8 +152,8 @@ Every ask, decision, hand-out and report is written to the audit log with ids on
 When a site refuses the saved password, the outpost tells the worker, and the member reports it:
 `port.signInBroken(signInId)`. Only a member named on the sign-in can, from an attempt that still runs. The sign-in
 then reads "Needs a new password", no grant is issued for it, and an unredeemed grant for it is refused. The owner
-types a new password (in the pilot an operator relays it); the sign-in is working again, and the next grant gives the
-new password.
+types a new password in Customize › Connections (or an operator types one the owner relays); the sign-in is working
+again, and the next grant gives the new password.
 
 ### The step channel
 
@@ -328,6 +330,32 @@ The outpost running write steps, this Mac (24 Nov 2026):
   is pressed that the page or the browser would refuse, and the site's answer reads as sent, kept with an error, or
   pending. They run in the page's own world there, not the outpost's content world.
 
+The owner's Connections, on the desktop (24 Nov 2026):
+
+- **The owner's routes** (`ownerVaultRoute` in `browser-control.ts`): `GET /v1/vault/sign-ins` and
+  `GET /v1/vault/outposts` answer what the operator's lists answer for the shop; `POST /v1/vault/sign-ins/password`
+  seals a new password through the vault's own `/sign-ins/password`, the operator's, which also mends a broken sign-in;
+  `POST /v1/vault/outposts/rename` changes an outpost's name and nothing else; `POST /v1/vault/outposts/remove` is the
+  operator's removal. Each takes an owner session of the shop's linked account or the shop's own signed-in session, and
+  the shop is the session's; a helper's session is refused `owner_only`. Bodies are exact, and each change is logged by
+  the owner with ids only: `signin.password_replaced`, the new `outpost.renamed`, and `outpost.removed`. A test puts a
+  known fake password through every route and every refusal, and finds it in no answer, audit entry or log line.
+- **The vault's rename** (`/outposts/rename` in `sign-in-vault.ts`), with the name rule registration uses.
+- **Customize › Connections** (`ConnectionsPane.tsx`): the canvas's Vault box above this Mac's Outposts box, each
+  sign-in with who may use it ("Used by Nam and Ton, last today 09:02"), Working or "Needs a new password" with when the
+  site refused it, and when it was added; and below this Mac's box, every outpost of the shop by its name, Online or
+  Asleep, with Rename and Remove, which ask once before they act. Every word in en, ko, ja and zh.
+- **Which shop.** The lists are of the shop the switcher shows, read with that shop's own session (or with the sign-in
+  while the person is in no shops); a change goes to the shop its row was read for. A shop the person helps at is
+  refused with nothing sent, and nothing is sent while only a kept read of the shop is shown.
+- **The password's path on the desktop.** It lives only in the open Change question's draft, leaves the page's state as
+  Save is pressed, and goes once through a client of the runtime of the tab's own (never the store) to the shell's request
+  command: the same session reads the sign-ins first, so it is one that works and the shop still has the sign-in, then
+  one send with no second try after a 401. It is not put back when the send fails, and no word the page shows holds it.
+  On the loopback bridge the Playwright suite uses, the tab shows only this Mac's box, so no password goes there.
+- **Practice** (`src/runtime/mock/vault.ts`): the canvas's two sign-ins, one of them refused, and two outposts, for the
+  person's own shop; Ran Pa Noi, the sample shop they help at, refuses as a helper's session does.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -455,6 +483,17 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
   origin it may be on included), a step held but not begun when it stops (before, `browser_error`), and a write it
   stopped under before typing.
 
+The owner's Connections (24 Nov 2026), each in `docs/decisions.md`:
+
+- The owner's routes live under `/v1/vault/`, apart from `/v1/outposts/`, the outposts' own namespace with their
+  credential and ingress limit.
+- Each owner change goes through the vault's own operation, the operator's where there is one, so there is one way to
+  each record. The owner may remove any outpost of the shop, a cloud outpost included, and adds or removes no sign-in yet.
+- A rename changes the name only, with registration's rule for a name, and is logged by id, never by the name typed.
+- The new password crosses once: a read first with the same session, then one send with no second try after a 401.
+- This Mac's row stays the shell's, and the list below shows every outpost of the shop, this Mac's own record included:
+  the shell gives the page no outpost id, and a guess by name could rename or remove the wrong machine.
+
 ## Next slices
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
@@ -483,8 +522,11 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
    **Needs the owner:** the Workers Paid plan (if the account is not on it) and the spending, and whether a shop's sites
    may be reached from Cloudflare's addresses at all. Until then, work waits for this Mac, as the step channel's offline
    state already says.
-3. **The rest of Customize › Connections on the desktop**: the shop's sign-ins ("Change" types a new password), the
-   cloud outpost's row, and an owner's route to remove or rename an outpost (today only an operator can remove one).
+3. **The rest of Customize › Connections on the desktop** (built 24 Nov 2026: the shop's sign-ins with Change, the
+   shop's outposts with Rename and Remove, and the owner's routes for them, above). Left of it: adding a sign-in from the
+   app (the canvas's "Add a sign-in": its sites and its members need a form), changing a sign-in's members, the canvas's
+   left pane (the shop's channels and the AI models), folding this Mac's own record into this Mac's row once the shell
+   gives the page its outpost's id, and this Mac's outpost following the shop the switcher shows (below).
 4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
    rotation, `POST /v1/admin/vault/reseal`, `docs/pilot-api.md`);
    changing a sign-in's members; (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
