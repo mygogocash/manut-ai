@@ -501,6 +501,33 @@ against the fake browser. What the owner's first supervised write should check i
   stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`, new, which the
   API settles as failed), and after it as not known (`origin_not_allowed`). Before, a refusal before the press was
   `origin_not_allowed` too, and settled the write as not known though nothing had been pressed.
+- **Fields inside a page's open shadow DOM** (`FIND` in `step.rs`). Every selector a step names, a read's and a write's
+  form and fields, is looked for in the page first and then in each open shadow root inside it (a part of a page whose
+  script keeps its elements apart, as web components do), in the order the page holds them. A closed
+  shadow root cannot be reached by any script: what is in one is not on the page as far as the outpost can tell, so a
+  step naming it ends `selector_not_found` with nothing typed.
+- **More controls for a write** (`FIELDS`). Besides text fields, text areas and lists: a check box takes `"checked"` or
+  `"unchecked"`; a radio button takes the value of one of the buttons of its group (its form's buttons with its name),
+  which is then chosen; an editor that is not a form field (`contenteditable`, named by the element that is the editor
+  itself) takes text. Each is set the way a person's input sets it, so the page's own handlers run: a check box or a
+  radio button is clicked, and only when it is not already as asked (a second click would undo the first); an editor is
+  focused, everything in it selected from inside it, and the text typed over it through the browser's own editing
+  (`insertText`), each line break as Shift and Return make one (`insertLineBreak`), so a chat's editor never takes one as
+  Send. An editor that does not take the focus is typed into not at all. A value a control cannot take (`"yes"` for a
+  check box, a button the group does not have or that is turned off) is `selector_not_found` before anything is set.
+- **Read back before the press.** The press happens only while every field reads back as the approved request named
+  it: each box ticked or not as asked, the button asked for chosen, each list on its item, each text exactly as typed,
+  and an editor's text as a person reads it (each line break and each line of its own as one, a no-break space as a
+  space, the invisible marks editors keep for the caret left out, the empty line an editor keeps at its end not
+  counted). A field that does not read back as asked yet, or that the page still marks as wrong, is looked at again for
+  up to 10 seconds, as a button not yet turned on is (an editor may take a moment to take in its text); still so then is
+  `submit_refused`, with nothing pressed. Before, a value that did not hold was refused at the first look.
+- **A form the page draws after it loads.** Most sellers' centres draw their forms with their own script once the page
+  has loaded, so a write looks for its form and fields again for up to 10 seconds before it says they are not there
+  (`selector_not_found`). Nothing is typed until all of them are there, so looking again never types anything twice.
+- **Tested in two engines** (`apps/desktop/e2e/outpost-scripts.ts`): a web component's form and a closed one, check boxes
+  and radio buttons a page hears clicked once, a box the page unticks again (not pressed), a chat editor that sends on
+  Return and is not sent while typed into, and an editor's text read back from the ways editors draw it.
 
 ## Choices made so far
 
@@ -623,7 +650,8 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
 
 - A write fills only what a person types into or chooses one item from: an input of a text kind, a text area, a list.
   Never a password field (passwords come only from the vault), a hidden one, a check box, a radio button, a file or an
-  editor that is not a form field; a write naming one is `selector_not_found`, with nothing typed.
+  editor that is not a form field; a write naming one is `selector_not_found`, with nothing typed. (Widened the same
+  day: check boxes, radio buttons and editors too, above. Never a password field, a hidden one or a file.)
 - What goes is exactly what was approved: a page that changes a value once it is typed (formatting an amount, say) is not
   pressed. A text area's line break is compared as the one character it keeps.
 - `done` and `submit_refused` are taken only from what the page shows, held for 3 seconds; a site that keeps the form
@@ -703,14 +731,22 @@ The outpost ready for real sites' pages (24 Nov 2026), each in `docs/decisions.m
 - A frame from elsewhere that the guard refused fails no step that only reads; the page going elsewhere fails every step.
 - A write stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`), after
   it as not known (`origin_not_allowed`).
+- Selectors reach open shadow roots, the page's own elements first; closed ones are out of reach (`selector_not_found`).
+- A check box takes "checked" or "unchecked", a radio button the value of a button of its group, an editor its text; a
+  click sets a box or a button, only when not already as asked, and an editor is typed over through the browser's own
+  editing, a line break as Shift and Return.
+- An editor's text is compared as a person reads it; a value that does not read back, or a field marked wrong, is looked
+  at again for up to 10 seconds before the press is refused.
+- A write waits up to 10 seconds for its form and fields to be drawn.
 
 ## Next slices
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
    site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), fields
-   inside frames or a page's shadow DOM, check boxes, radio buttons and editors that are not form fields, and a way to
-   know a settings page took a change when it keeps the form. (Built 24 Nov 2026: telling a page's frames from the page
-   in the navigation hook, above.)
+   inside frames, switches drawn as `role="switch"` or `role="checkbox"` rather than as check boxes (not reached yet: a
+   write naming one is `selector_not_found`), and a way to know a settings page took a change when it keeps the form.
+   (Built 24 Nov 2026: telling a page's frames from the page in the navigation hook; fields in a page's open shadow DOM;
+   check boxes, radio buttons and editors that are not form fields; above.)
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").

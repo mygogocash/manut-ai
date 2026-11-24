@@ -104,7 +104,11 @@ pub struct Pace {
     pub sign_in: Duration,
     /// A write: loading its page, typing, pressing once and the site's answer.
     pub submit: Duration,
-    /// How long a write waits for the page to turn its button on once the values are in.
+    /// How long a write waits, once its page has loaded, for the form and every field to be on it: a page that draws
+    /// its form with its own script after it loads, as most sellers' centres do, has none at first.
+    pub appear: Duration,
+    /// How long a write waits, once the values are in, for the page to turn its button on and for every field to read
+    /// back as approved and be marked wrong by nothing (an editor may take a moment to take in its text).
     pub press: Duration,
     /// How often a wait looks at the page again.
     pub poll: Duration,
@@ -117,6 +121,7 @@ pub const PACE: Pace = Pace {
     read: Duration::from_secs(15),
     sign_in: Duration::from_secs(40),
     submit: Duration::from_secs(45),
+    appear: Duration::from_secs(10),
     press: Duration::from_secs(10),
     poll: Duration::from_millis(400),
     settled: Duration::from_secs(3),
@@ -129,14 +134,39 @@ const VISIBLE: &str = r#"const visible = (el) => {
   return style.visibility !== "hidden" && style.display !== "none";
 };"#;
 
-/// `read`: the text of the page (`s` empty) or of the first element selector `s` names, at most `m` UTF-16 units,
-/// with any half of a surrogate pair made whole, so the answer is always valid JSON. `{ t }`, or `{ e: "origin" }` for
-/// a page off the origins `o`, or `{ e: "selector" }` for a selector that names nothing or is not one.
+/// Finding what a selector names, in the page and in every open shadow root inside it (a part of a page whose script
+/// keeps its elements apart, as web components do). `find` answers the first match: the page's own first, then each
+/// shadow root's in the order the page holds them, nested ones after; null for a selector that names nothing or is not
+/// one. `all` answers every match in that order. A closed shadow root cannot be reached from a script at all, so what is
+/// inside one is never found: a step naming it ends as if it were not on the page (`selector_not_found`), with nothing
+/// typed.
+const FIND: &str = r#"const roots = () => {
+  const found = [document];
+  for (let i = 0; i < found.length; i++) {
+    for (const el of found[i].querySelectorAll("*")) if (el.shadowRoot) found.push(el.shadowRoot);
+  }
+  return found;
+};
+const find = (s) => {
+  try { document.querySelector(s); } catch (_) { return null; }
+  for (const root of roots()) {
+    const el = root.querySelector(s);
+    if (el !== null) return el;
+  }
+  return null;
+};
+const all = (s) => roots().flatMap((root) => Array.from(root.querySelectorAll(s)));"#;
+
+/// `read`: the text of the page (`s` empty) or of the first element selector `s` names (in the page or an open shadow
+/// root), at most `m` UTF-16 units, with any half of a surrogate pair made whole, so the answer is always valid JSON.
+/// `{ t }`, or `{ e: "origin" }` for a page off the origins `o`, or `{ e: "selector" }` for a selector that names nothing
+/// or is not one.
 pub const READ: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ e: "origin" });
+FIND
 let node = document.body ?? document.documentElement;
 if (s !== "") {
-  try { node = document.querySelector(s); } catch (_) { return JSON.stringify({ e: "selector" }); }
+  node = find(s);
   if (node === null) return JSON.stringify({ e: "selector" });
 }
 const text = node === null ? "" : String(node.innerText ?? node.textContent ?? "").slice(0, Number(m));
@@ -212,38 +242,113 @@ if (fields.length === 0) return JSON.stringify({ s: "in" });
 if (location.origin + location.pathname === a && fields.every((f) => f.value === "")) return JSON.stringify({ s: "refused" });
 return JSON.stringify({ s: "pending" });"#;
 
-/// What a write's scripts share: finding an element by a selector (null for one that names nothing or is not a selector),
-/// what kind of field an element is to a write, whether a field holds exactly a value, and whether the page marks a field
-/// as wrong, or its form holds a field the browser itself would refuse to send. A write fills only what a person types
-/// text into or chooses one item of a list from: an input of a text
-/// kind, a text area, or a list. Never a password field: passwords come only from the vault, through a sign-in step.
-/// A text area reads a line break as one "\n", so that is how its value is compared.
-const FIELDS: &str = r#"const find = (s) => { try { return document.querySelector(s); } catch (_) { return null; } };
-const TYPED = ["text", "search", "email", "tel", "url", "number", "date", "time", "datetime-local", "month", "week"];
+/// What a write's scripts share (with `VISIBLE` and `FIND` before them): what kind of field an element is to a write,
+/// what a field holds as a write compares it, whether a value can go into a field, setting it as a person would, and
+/// whether the page marks a field as wrong, or its form holds a field the browser itself would refuse to send.
+///
+/// A write fills what a person types text into, chooses from, or ticks: an input of a text kind, a text area or an
+/// editor that is not a form field (`contenteditable`, the element that is the editor itself) takes text; a list takes
+/// one of its items by value; a check box takes "checked" or "unchecked"; a radio button takes the value of one of the
+/// buttons of its group (the buttons of its form with its name), which is then chosen. Never a password field
+/// (passwords come only from the vault, through a sign-in step), a hidden one, a file, or anything that cannot be seen.
+///
+/// Each is set the way a person's input sets it, so the page's own handlers run: text through the field's own setter
+/// with the events typing fires; an editor's text by selecting what it holds and typing over it through the browser's
+/// own editing (`insertText`, and `insertLineBreak` for a line break, as Shift and Return make one, so a chat's editor
+/// never takes a line break as Send); a check box or a radio button by clicking it, only when it is not already as asked.
+///
+/// A text area reads a line break as one "\n". An editor's text is read as a person reads it: each line break and each
+/// line of its own as "\n", a no-break space as a space, the invisible marks editors keep for the caret left out, and the
+/// empty line an editor keeps at its end for the caret not counted.
+const FIELDS: &str = r#"const TYPED = ["text", "search", "email", "tel", "url", "number", "date", "time", "datetime-local", "month", "week"];
+const toggle = (el) => el !== null && el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
+const editor = (el) => el.isContentEditable === true && !(el.parentElement !== null && el.parentElement.isContentEditable);
 const kindOf = (el) => {
-  if (!visible(el) || el.readOnly) return null;
+  if (!visible(el)) return null;
+  if (el.tagName === "INPUT" && el.type === "checkbox") return "check";
+  if (el.tagName === "INPUT" && el.type === "radio") return "radio";
+  if (el.readOnly) return null;
   if (el.tagName === "TEXTAREA") return "text";
   if (el.tagName === "INPUT") return TYPED.includes(el.type) ? "text" : null;
   if (el.tagName === "SELECT") return el.multiple ? null : "choice";
-  return null;
+  return editor(el) ? "editor" : null;
 };
-const holds = (el, value) => el !== null && el.value === (el.tagName === "TEXTAREA" ? value.replace(/\r\n?/g, "\n") : value);
-const flagged = (el) => el.getAttribute("aria-invalid") === "true" || (el.form !== null && !el.form.noValidate && el.matches(":invalid"));
+const group = (el) => el.name === "" ? [el] :
+  Array.from(el.getRootNode().querySelectorAll('input[type="radio"]')).filter((r) => r.name === el.name && r.form === el.form);
+const plain = (text) => text.replace(/\r\n?/g, "\n").replace(/ /g, " ").replace(/[​﻿]/g, "");
+const editorText = (el) => {
+  let out = "";
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) { out += child.data; continue; }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+      const display = getComputedStyle(child).display;
+      if (display === "none") continue;
+      if (child.tagName === "BR") { out += "\n"; continue; }
+      const line = !display.startsWith("inline") && display !== "contents";
+      if (line && out !== "" && !out.endsWith("\n")) out += "\n";
+      walk(child);
+      if (line && !out.endsWith("\n")) out += "\n";
+    }
+  };
+  walk(el);
+  const text = plain(out);
+  return text.endsWith("\n") ? text.slice(0, -1) : text;
+};
+const read = (el) => {
+  if (el.tagName === "INPUT" && el.type === "checkbox") return el.checked ? "checked" : "unchecked";
+  if (el.tagName === "INPUT" && el.type === "radio") { const on = group(el).find((r) => r.checked); return on === undefined ? "" : on.value; }
+  if (el.tagName === "TEXTAREA") return el.value.replace(/\r\n?/g, "\n");
+  if (el.tagName === "INPUT" || el.tagName === "SELECT") return el.value;
+  return editor(el) ? editorText(el) : null;
+};
+const wanted = (el, value) => el.tagName === "TEXTAREA" ? value.replace(/\r\n?/g, "\n") : editor(el) ? plain(value) : value;
+const holds = (el, value) => el !== null && read(el) === wanted(el, value);
+const fits = (el, kind, value) =>
+  kind === "check" ? value === "checked" || value === "unchecked" :
+  kind === "radio" ? group(el).some((r) => r.value === value && visible(r)) :
+  kind === "choice" ? Array.from(el.options).some((x) => x.value === value && !x.disabled) :
+  true;
+const SETTERS = { INPUT: HTMLInputElement, TEXTAREA: HTMLTextAreaElement, SELECT: HTMLSelectElement };
+const put = (el, kind, value) => {
+  if (kind === "check") { if (el.checked !== (value === "checked")) el.click(); return; }
+  if (kind === "radio") { const r = group(el).find((x) => x.value === value && visible(x)); if (!r.checked) r.click(); return; }
+  el.focus();
+  if (kind === "editor") {
+    // Only into the editor itself: one that did not take the focus is typed into not at all, so nothing goes anywhere
+    // else, and reading it back stops the press.
+    if (el.getRootNode().activeElement !== el) return;
+    document.execCommand("selectAll");
+    if (value === "") document.execCommand("delete");
+    value.replace(/\r\n?/g, "\n").split("\n").forEach((line, i) => {
+      if (i > 0) document.execCommand("insertLineBreak");
+      if (line !== "") document.execCommand("insertText", false, line);
+    });
+  } else {
+    Object.getOwnPropertyDescriptor(SETTERS[el.tagName].prototype, "value").set.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  el.blur();
+};
+const flagged = (el) => el.getAttribute("aria-invalid") === "true" ||
+  (el.form instanceof HTMLFormElement && !el.form.noValidate && el.matches(":invalid"));
 const blocks = (target) => {
   const form = target.tagName === "FORM" ? target : target.form ?? null;
   return form !== null && !form.noValidate && !target.formNoValidate && form.matches(":invalid");
 };"#;
 
 /// `submit`: checks that the form `f` (or the button it names) and every field of `v` (`[[field, value], ...]`, in order)
-/// are on the page, and that each value can go into its field, before anything is typed; then sets each value in order,
-/// as a person's typing does: through the field's own setter, with the events typing fires, each field found again first,
-/// since a value typed may change the page. `{ r: "set" }`; `{ r: "form" }` for no form or button to press; `{ r: "field" }`
-/// for a field that is missing or takes no value of a write (or a list without that item); `{ r: "moved" }` for a field
-/// that went while typing; `{ r: "origin" }` for a page off the origins `o`, where nothing is typed. It answers nothing
-/// about the values.
+/// are on the page or in one of its open shadow roots, and that each value can go into its field, before anything is
+/// typed; then sets each value in order, as a person's input does (`FIELDS`), each field found again first, since a value
+/// set may change the page. `{ r: "set" }`; `{ r: "form" }` for no form or button to press; `{ r: "field" }` for a field
+/// that is missing or takes no value of a write (a list without that item, a radio group without that button, a check box
+/// asked for anything but "checked" or "unchecked"); `{ r: "moved" }` for a field that went while typing; `{ r: "origin" }`
+/// for a page off the origins `o`, where nothing is typed. It answers nothing about the values.
 pub const SET: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
 VISIBLE
+FIND
 FIELDS
 const pairs = JSON.parse(v);
 const target = find(f);
@@ -256,30 +361,27 @@ if (!pressable) return JSON.stringify({ r: "form" });
 for (const [s, value] of pairs) {
   const el = find(s);
   const kind = el === null ? null : kindOf(el);
-  if (kind === null) return JSON.stringify({ r: "field" });
-  if (kind === "choice" && !Array.from(el.options).some((x) => x.value === value && !x.disabled)) return JSON.stringify({ r: "field" });
+  if (kind === null || !fits(el, kind, value)) return JSON.stringify({ r: "field" });
 }
-const SETTERS = { INPUT: HTMLInputElement, TEXTAREA: HTMLTextAreaElement, SELECT: HTMLSelectElement };
 for (const [s, value] of pairs) {
   const el = find(s);
-  if (el === null || kindOf(el) === null) return JSON.stringify({ r: "moved" });
-  el.focus();
-  Object.getOwnPropertyDescriptor(SETTERS[el.tagName].prototype, "value").set.call(el, value);
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-  el.blur();
+  const kind = el === null ? null : kindOf(el);
+  if (kind === null || !fits(el, kind, value)) return JSON.stringify({ r: "moved" });
+  put(el, kind, value);
 }
 return JSON.stringify({ r: "set" });"#;
 
-/// `submit`, once the values are in: presses once, only while every field still holds exactly its approved value and the
-/// page marks none of them as wrong. A form is submitted as its own submit does (`requestSubmit`, which runs the page's
+/// `submit`, once the values are in: reads every field back, and presses once only while each holds exactly its approved
+/// value (a check box ticked or not as asked, the radio button asked for chosen, an editor's text as asked) and the page
+/// marks none of them as wrong. A form is submitted as its own submit does (`requestSubmit`, which runs the page's
 /// checks); a button is clicked once the page has turned it on. `{ r: "pressed", a }` with the address just before the
-/// press; `{ r: "wait" }` for a button not on yet (nothing pressed); `{ r: "changed" }` when the page changed a value since
-/// it was typed and `{ r: "flagged" }` when it marks one as wrong or the browser would refuse the form (nothing pressed);
+/// press; `{ r: "wait" }` for a button not on yet (nothing pressed); `{ r: "changed" }` when a field does not hold its
+/// value and `{ r: "flagged" }` when the page marks one as wrong or the browser would refuse the form (nothing pressed);
 /// `{ r: "gone" }` when the form or button went; `{ r: "origin" }` off the origins `o`.
 pub const PRESS: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
 VISIBLE
+FIND
 FIELDS
 const pairs = JSON.parse(v);
 const fields = pairs.map(([s, value]) => [find(s), value]);
@@ -297,28 +399,31 @@ target.click();
 return JSON.stringify({ r: "pressed", a });"#;
 
 /// `submit`, after the press: how the site answered. `sent` when the page moved from `a`, the form or button `f` went,
-/// or every field given words is gone or emptied (a list back on its empty choice too), as a chat empties its box once it
-/// has sent, or a form clears itself once taken. `refused` when the page is where it was with the form, every value still
-/// as typed, and a field marked as wrong (or a form the browser refuses): the site kept the form with an error. Otherwise
-/// `pending`: still loading, or a site that keeps what was typed and says nothing. `away` off the step's origins `o`.
+/// or every field given words is gone or emptied (a list back on its empty choice too; a check box or radio button is
+/// given no words), as a chat empties its box once it has sent, or a form clears itself once taken. `refused` when the
+/// page is where it was with the form, every value still as typed, and a field marked as wrong (or a form the browser
+/// refuses): the site kept the form with an error. Otherwise `pending`: still loading, or a site that keeps what was typed
+/// and says nothing. `away` off the step's origins `o`.
 pub const SENT: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
 if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
 VISIBLE
+FIND
 FIELDS
 const pairs = JSON.parse(v);
 if (location.href !== a || find(f) === null) return JSON.stringify({ s: "sent" });
-const given = pairs.filter(([, value]) => value !== "");
-if (given.length > 0 && given.every(([s]) => { const el = find(s); return el === null || el.value === ""; })) {
+const given = pairs.filter(([s, value]) => value !== "" && !toggle(find(s)));
+if (given.length > 0 && given.every(([s]) => { const el = find(s); return el === null || read(el) === ""; })) {
   return JSON.stringify({ s: "sent" });
 }
 const fields = pairs.map(([s, value]) => [find(s), value]);
 if (fields.every(([el, value]) => holds(el, value)) && (fields.some(([el]) => flagged(el)) || blocks(find(f)))) return JSON.stringify({ s: "refused" });
 return JSON.stringify({ s: "pending" });"#;
 
-/// The scripts as they are run: `VISIBLE` and `FIELDS` written into each one that uses them.
+/// The scripts as they are run: `VISIBLE`, `FIND` and `FIELDS` written into each one that uses them. None of the three
+/// holds another's name, so the order they are written in changes nothing.
 pub fn script(body: &'static str) -> String {
-    body.replace("FIELDS", FIELDS).replace("VISIBLE", VISIBLE)
+    body.replace("FIELDS", FIELDS).replace("FIND", FIND).replace("VISIBLE", VISIBLE)
 }
 
 /// The kinds this outpost runs. Any other is not run at all.
@@ -528,16 +633,23 @@ fn submit(step: &OutpostStep, origins: &[String], browser: &dyn Browser, watch: 
         // The values as the scripts take them, written once; each script is handed a copy, wiped once WebKit has it.
         // Without them nothing may be typed or pressed: a form pressed with none would be a write nobody approved.
         let v = values_json(values).ok_or(Failure::NotRun)?;
-        if until.over() {
-            return Err(before_typing(until.failure(), until));
-        }
-        let set: SetWire = serde_json::from_str(&browser.call(SET, write_args(origins, form, &v, None), until)?)
-            .map_err(|_| Failure::BrowserError)?;
-        match set.r.as_str() {
-            "set" => Ok(v),
-            "origin" => Err(Failure::OriginNotAllowed),
-            "form" | "field" | "moved" => Err(Failure::SelectorNotFound),
-            _ => Err(Failure::BrowserError),
+        // A form or a field not there yet is looked for again until `pace.appear` is over, since many pages draw their
+        // form with their own script once they have loaded. Nothing is typed before all of it is there, so looking
+        // again never types anything twice.
+        let appear = Instant::now() + pace.appear;
+        loop {
+            if until.over() {
+                return Err(before_typing(until.failure(), until));
+            }
+            let set: SetWire = serde_json::from_str(&browser.call(SET, write_args(origins, form, &v, None), until)?)
+                .map_err(|_| Failure::BrowserError)?;
+            match set.r.as_str() {
+                "set" => return Ok(v),
+                "form" | "field" if Instant::now() < appear && !watch.any() => std::thread::sleep(pace.poll),
+                "origin" => return Err(Failure::OriginNotAllowed),
+                "form" | "field" | "moved" => return Err(Failure::SelectorNotFound),
+                _ => return Err(Failure::BrowserError),
+            }
         }
     })();
     let v = typed.map_err(|failure| if watch.any() { Failure::NavigationRefused } else { failure })?;
@@ -575,11 +687,12 @@ fn before_typing(failure: Failure, until: &Until) -> Failure {
     }
 }
 
-/// Presses once, and answers the address the page was at just before. A button the page has not turned on yet is asked
-/// for again until `pace.press` is over: one never turned on means the site would not take what was typed, so nothing
-/// was submitted. Only an answer that nothing was pressed is ever asked again; a press whose answer did not come back may
-/// have been made, so it fails the step, as not known, and is never made twice. Nothing is pressed once the guard has
-/// refused a navigation of the page or a frame since the page opened (`navigation_refused`).
+/// Presses once, and answers the address the page was at just before. A button the page has not turned on yet, a field
+/// that does not read back as approved yet (an editor taking in its text) or one the page still marks as wrong is looked
+/// at again until `pace.press` is over: still so then means the site would not take what was approved, so nothing was
+/// submitted (`submit_refused`). Only an answer that nothing was pressed is ever asked again; a press whose answer did
+/// not come back may have been made, so it fails the step, as not known, and is never made twice. Nothing is pressed
+/// once the guard has refused a navigation of the page or a frame since the page opened (`navigation_refused`).
 fn press(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, until: &Until,
     pace: &Pace) -> Result<String, Failure> {
     let waited = Instant::now() + pace.press;
@@ -597,8 +710,8 @@ fn press(browser: &dyn Browser, watch: &Watch, args: &dyn Fn(Option<&str>) -> Ve
         let wire: PressWire = serde_json::from_str(&browser.call(PRESS, args(None), until)?).map_err(|_| Failure::BrowserError)?;
         match (wire.r.as_str(), wire.a) {
             ("pressed", Some(at)) => return Ok(at),
-            ("wait", _) if Instant::now() < waited => {}
-            ("wait", _) | ("changed", _) | ("flagged", _) => return Err(unpressed(Failure::SubmitRefused)),
+            ("wait" | "changed" | "flagged", _) if Instant::now() < waited => {}
+            ("wait" | "changed" | "flagged", _) => return Err(unpressed(Failure::SubmitRefused)),
             ("gone", _) => return Err(unpressed(Failure::SelectorNotFound)),
             ("origin", _) => return Err(unpressed(Failure::OriginNotAllowed)),
             _ => return Err(Failure::BrowserError),
@@ -825,10 +938,15 @@ mod tests {
         read: Duration::from_millis(500),
         sign_in: Duration::from_millis(500),
         submit: Duration::from_millis(500),
+        appear: Duration::from_millis(40),
         press: Duration::from_millis(40),
         poll: Duration::from_millis(1),
         settled: Duration::from_millis(5),
     };
+
+    /// QUICK, with waits long enough that a test which counts on looking again more than once still does on a machine
+    /// so busy that one look takes most of QUICK's whole wait. Only tests that end as soon as the page answers use it.
+    const PATIENT: Pace = Pace { submit: Duration::from_secs(20), appear: Duration::from_secs(5), press: Duration::from_secs(5), ..QUICK };
 
     /// An API whose redeem answers what the test says, and which counts redeems.
     struct Vault {
@@ -1217,10 +1335,15 @@ mod tests {
                 _ => unreachable!("nothing is pressed"),
             }));
             assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Failed(Failure::SelectorNotFound), "{answer}");
-            assert_eq!(browser.names(), ["set"]);
+            // A form or a field not there is looked for again for a while; one that went while typing is not.
+            let names = browser.names();
+            assert!(names.iter().all(|n| *n == "set"), "{answer}");
+            if answer == "moved" {
+                assert_eq!(names.len(), 1);
+            }
         }
         // The script checks the form and every field before it sets its first value, and answers only in fixed words.
-        let first_set = SET.find(".set.call(").unwrap();
+        let first_set = SET.find("put(el, kind, value)").unwrap();
         for check in ["return JSON.stringify({ r: \"form\" })", "return JSON.stringify({ r: \"field\" })"] {
             assert!(SET.find(check).unwrap() < first_set, "{check}");
         }
@@ -1233,19 +1356,56 @@ mod tests {
     #[test]
     fn presses_once_waiting_for_the_page_to_turn_its_button_on() {
         let browser = form_page(vec!["wait", "wait", "pressed"], "sent");
-        assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Done(None));
+        assert_eq!(run_step(&write(), &browser, &vault(&[]), &AtomicBool::new(false), &PATIENT), Outcome::Done(None));
         assert_eq!(browser.names().iter().filter(|n| **n == "press").count(), 3);
         // A button never turned on: the site would not take what was typed, and nothing was pressed.
         let never = form_page(vec!["wait"], "sent");
         assert_eq!(run(&write(), &never, &vault(&[])), Outcome::Failed(Failure::SubmitRefused));
         assert!(!never.names().contains(&"sent"));
-        // The page changed a value since it was typed, or marks one as wrong: nothing is pressed.
+        // A field that does not read back as approved, or that the page marks as wrong, for the whole of the wait: nothing
+        // is pressed, however often it is looked at.
         for answer in ["changed", "flagged"] {
             let browser = form_page(vec![answer], "sent");
             assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Failed(Failure::SubmitRefused), "{answer}");
-            assert_eq!(browser.names(), ["set", "press"]);
+            let names = browser.names();
+            assert_eq!(names[0], "set");
+            assert!(names[1..].iter().all(|n| *n == "press"), "{answer} {names:?}");
+        }
+        // One that comes right a moment later (an editor taking in its text, a check the page runs again) is pressed then,
+        // once.
+        for answer in ["changed", "flagged"] {
+            let browser = form_page(vec![answer, answer, "pressed"], "sent");
+            assert_eq!(run_step(&write(), &browser, &vault(&[]), &AtomicBool::new(false), &PATIENT), Outcome::Done(None), "{answer}");
+            assert_eq!(browser.names().iter().filter(|n| **n == "press").count(), 3);
         }
         assert_eq!(run(&write(), &form_page(vec!["gone"], "sent"), &vault(&[])), Outcome::Failed(Failure::SelectorNotFound));
+    }
+
+    #[test]
+    fn waits_for_a_form_the_page_draws_after_it_loads_and_types_nothing_until_it_is_whole() {
+        // The page draws its form with its own script: the first looks find no form, then not every field.
+        let looks = AtomicUsize::new(0);
+        let browser = FakeBrowser::at(None, Box::new(move |name, _| match name {
+            "set" => {
+                let seen = ["form", "field", "set"][looks.fetch_add(1, Ordering::SeqCst).min(2)];
+                json_answer(json!({ "r": seen }))
+            }
+            "press" => json_answer(json!({ "r": "pressed", "a": PAGE })),
+            "sent" => json_answer(json!({ "s": "sent" })),
+            _ => unreachable!("{name}"),
+        }));
+        assert_eq!(run_step(&write(), &browser, &vault(&[]), &AtomicBool::new(false), &PATIENT), Outcome::Done(None));
+        assert_eq!(browser.names()[..4], ["set", "set", "set", "press"]);
+        // A frame from elsewhere refused while it waits: nothing was typed, and it stops there.
+        let refusing = FakeBrowser::refusing(None, |blocked| Box::new(move |name, _| {
+            refuse(&blocked, Blocked::Frame);
+            match name {
+                "set" => json_answer(json!({ "r": "field" })),
+                _ => unreachable!("{name}"),
+            }
+        }));
+        assert_eq!(run(&write(), &refusing, &vault(&[])), Outcome::Failed(Failure::NavigationRefused));
+        assert_eq!(refusing.names(), ["set"]);
     }
 
     #[test]
@@ -1423,10 +1583,14 @@ mod tests {
             (SET, &["o", "f", "v"][..]), (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..])] {
             let script = script(body);
             assert!(script.starts_with("const origins = JSON.parse(o);\nif (!origins.includes(location.origin)) return"), "{script}");
-            assert!(!script.contains("VISIBLE") && !script.contains("FIELDS"));
+            assert!(!script.contains("VISIBLE") && !script.contains("FIELDS") && !script.contains("FIND"));
             for name in names {
                 assert!(script.contains(name));
             }
+        }
+        // None of the three shared parts holds another's name, so the order `script` writes them in changes nothing.
+        for (part, others) in [(VISIBLE, ["FIND", "FIELDS"]), (FIND, ["VISIBLE", "FIELDS"]), (FIELDS, ["VISIBLE", "FIND"])] {
+            assert!(others.iter().all(|other| !part.contains(other)));
         }
         // The typing script answers only how it went, in fixed words, never a field's value. (Its own text, before
         // `VISIBLE` is written in, whose two returns are a yes or a no about a field.)
