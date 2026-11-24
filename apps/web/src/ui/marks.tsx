@@ -121,6 +121,13 @@ export const PeopleIcon = () => (
   </Icon>
 );
 
+/// Two ends of a chain joined by a bar: the sites the team signs in to and the machines it works on, kept connected.
+export const ConnectionsIcon = () => (
+  <Icon>
+    <path d="M6.5 9.5l-1.8 1.8a2 2 0 01-2.8-2.8L3.7 6.7M9.5 6.5l1.8-1.8a2 2 0 012.8 2.8l-1.8 1.8M6.5 9.5l3-3" />
+  </Icon>
+);
+
 /// A coin with a baht-like B: what the AI team spends on language models.
 export const SpendIcon = () => (
   <Icon>

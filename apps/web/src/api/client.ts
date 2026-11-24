@@ -27,7 +27,11 @@ import {
   type NewPayment,
   type NewReply,
   type NewShop,
+  type NewSignInMembers,
   type NewSubscriptionPayment,
+  type Outpost,
+  type OutpostCredential,
+  type OutpostRemoval,
   type Payment,
   type People,
   type PilotApi,
@@ -41,6 +45,8 @@ import {
   type ShopQuestions,
   type ShopTemplate,
   type NewAnswer,
+  type SignIn,
+  type SignInRemoval,
   type SubscriptionPayment,
   type UnlinkedOwner,
   type WebAnswer,
@@ -68,6 +74,9 @@ type Request = {
   empty?: boolean;
   /// One of the owner's web app's routes: it sends the browser's cookies for this origin and the app's header.
   web?: boolean;
+  /// The answer holds a secret the page shows once, so the request asks the browser to keep no copy of it. The API says the
+  /// same in the answer's `cache-control`; this is the other half.
+  noStore?: boolean;
 };
 
 /// The real client. Admin routes carry `Authorization: Bearer <operator key>` and send cookies, so a
@@ -105,6 +114,7 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       credentials: req.admin ? "include" : req.web ? "same-origin" : "omit",
     };
     if (body !== undefined) init.body = body;
+    if (req.noStore) init.cache = "no-store";
 
     try {
       return await doFetch(`${origin}${req.path}${query}`, init);
@@ -319,6 +329,45 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
       }),
     // No query: the list is always the API's own current Bangkok month, across all shops.
     getModelAlerts: () => request<ModelAlerts>({ method: "GET", path: "/v1/admin/model/alerts", admin: true }),
+
+    // The shop's vault. Each change is built field by field, as its route takes exactly these fields, so nothing a caller adds
+    // ever travels: no password, no credential, and no role. A list answers the array its route wraps. The one answer that
+    // holds a credential is passed on whole, and its request asks the browser to keep no copy.
+    listSignIns: async (tenant) =>
+      (await request<{ signIns: SignIn[] }>({ method: "GET", path: "/v1/admin/vault/sign-ins", query: { tenant }, admin: true }))
+        .signIns,
+    setSignInMembers: async (input: NewSignInMembers) =>
+      (await request<{ signIn: SignIn }>({
+        method: "POST",
+        path: "/v1/admin/vault/sign-ins/members",
+        body: { tenant: input.tenant, signInId: input.signInId, members: [...input.members] },
+        admin: true,
+      })).signIn,
+    removeSignIn: (input) =>
+      request<SignInRemoval>({
+        method: "POST",
+        path: "/v1/admin/vault/sign-ins/remove",
+        body: { tenant: input.tenant, signInId: input.signInId },
+        admin: true,
+      }),
+    listOutposts: async (tenant) =>
+      (await request<{ outposts: Outpost[] }>({ method: "GET", path: "/v1/admin/outposts", query: { tenant }, admin: true }))
+        .outposts,
+    removeOutpost: (input) =>
+      request<OutpostRemoval>({
+        method: "POST",
+        path: "/v1/admin/outposts/remove",
+        body: { tenant: input.tenant, outpostId: input.outpostId },
+        admin: true,
+      }),
+    replaceOutpostCredential: (input) =>
+      request<OutpostCredential>({
+        method: "POST",
+        path: "/v1/admin/outposts/credential",
+        body: { tenant: input.tenant, outpostId: input.outpostId },
+        admin: true,
+        noStore: true,
+      }),
 
     // Only what the caller gave goes in the query, so the API's own defaults decide the rest.
     listWorkerJobs: (tenant, query = {}) =>
