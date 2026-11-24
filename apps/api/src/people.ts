@@ -511,8 +511,14 @@ async function newSession(shop: string, prefix: "mhs1" | "mos1" = "mhs1") {
     sessionId: `${prefix === "mos1" ? "os" : "hs"}-${crypto.randomUUID()}`, expiresAt: Date.now() + HELPER_SESSION_TTL_MS };
 }
 
+/// A new owner session for `shop`, minted as `openOwnerSession` mints one, for a shop whose owner makes it and so holds its
+/// first session from the write that makes it (self-serve.ts).
+export function newOwnerSession(shop: string) {
+  return newSession(shop, "mos1");
+}
+
 /// The session a device is given, as it is sent: the token once, and its end.
-const sessionOf = (session: { accessToken: string; expiresAt: number }) =>
+export const sessionOf = (session: { accessToken: string; expiresAt: number }) =>
   ({ accessToken: session.accessToken, expiresAt: iso(session.expiresAt) });
 
 /// The person's signed-in session and the one field a helper's route reads, or the refusal to send.

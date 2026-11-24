@@ -91,6 +91,7 @@ describe("the gate's rules", () => {
       paid: false,
       paidSatang: 0,
       activeOnDay14: "not_yet",
+      inCohort: true,
     });
   });
 
@@ -160,6 +161,28 @@ describe("the cohort's two percentages", () => {
       decisions: ["2027-01-09T05:00:00.000Z"] }),
     input({ tenant: "pilot:unstarted", trialStartedAt: null, subscriptionPayments: PAID }),
   ];
+
+  it("leaves a shop its owner made out of the counts, listed and marked, until an operator adds it", () => {
+    const operators = [ended("a", true, true), ended("b", false, false)];
+    // Paid and active long past day 14, and still left out: nobody chose it for the pilot.
+    const selfServe = { ...ended("own", true, true), selfServe: true };
+    const gate = pilotGate([...operators, selfServe], now);
+    expect(gate.shops.map((shop) => [shop.tenant, shop.selfServe, shop.inCohort])).toEqual([
+      ["pilot:a", undefined, true],
+      ["pilot:b", undefined, true],
+      ["pilot:own", true, false],
+    ]);
+    expect(gate.cohort.counted).toBe(2);
+    expect(gate.cohort.paid).toEqual({ count: 1, percent: 50, thresholdPercent: 25, met: true });
+    expect(gate.cohort.active).toEqual({ count: 1, percent: 50, thresholdPercent: 50, met: true });
+    // Added by an operator, it counts as any other shop does.
+    const added = pilotGate([...operators, { ...selfServe, addedToCohort: true }], now);
+    expect(added.shops[2]).toMatchObject({ selfServe: true, inCohort: true });
+    expect(added.cohort.counted).toBe(3);
+    expect(added.cohort.paid.count).toBe(2);
+    // A self-serve shop alone is not enough data, however well it does.
+    expect(pilotGate([selfServe], now).cohort.status).toBe("not_enough_data");
+  });
 
   it("counts only shops whose day 14 has passed", () => {
     const gate = pilotGate([...notCounted, ended("a", true, true), ended("b", false, true), ended("c", false, false),
@@ -465,7 +488,8 @@ describe("GET /v1/admin/pilot/gate", () => {
     const row = (tenant: string) => gate.shops.find((shop) => shop.tenant === tenant);
     expect(row(paidActive)).toEqual({ tenant: paidActive, name: "Baan Mali",
       trialStartedAt: new Date(paidActiveStart).toISOString(), day: 21, trialEnded: true, paid: true, paidAt,
-      paidSatang: 49900, activeOnDay14: "yes", lastDecisionAt: new Date(paidActiveStart + 9 * DAY_MS).toISOString() });
+      paidSatang: 49900, activeOnDay14: "yes", lastDecisionAt: new Date(paidActiveStart + 9 * DAY_MS).toISOString(),
+      inCohort: true });
     expect(row(activeOnly)).toMatchObject({ day: 17, trialEnded: true, paid: false, paidSatang: 0, activeOnDay14: "yes",
       lastDecisionAt: new Date(lastDecision).toISOString() });
     expect(row(quiet)).toMatchObject({ day: 16, trialEnded: true, paid: false, activeOnDay14: "no" });
@@ -477,7 +501,7 @@ describe("GET /v1/admin/pilot/gate", () => {
     expect(gate.cohort.paid.count - before.cohort.paid.count).toBe(1);
     expect(gate.cohort.active.count - before.cohort.active.count).toBe(2);
     // The cohort is the one of every row answered, against both lines.
-    const counted = gate.shops.filter((shop) => shop.trialEnded);
+    const counted = gate.shops.filter((shop) => shop.inCohort && shop.trialEnded);
     const paid = counted.filter((shop) => shop.paid).length;
     const active = counted.filter((shop) => shop.activeOnDay14 === "yes").length;
     expect(gate.cohort).toEqual({

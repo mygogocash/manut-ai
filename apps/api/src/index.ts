@@ -21,6 +21,7 @@ import { routinesRoute } from "./routines";
 import { relayPath, relayRoute, relaySourceGroup } from "./relay";
 import { RelayObject } from "./relay-object";
 import { ScheduleObject } from "./schedule-object";
+import { signUpsOpen } from "./self-serve";
 import { shopsRoute } from "./shops";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
@@ -96,6 +97,11 @@ export interface Env {
   PILOT_APPROVAL_LIMITER?: RateLimit;
   /// The outposts' own routes (browser-control.ts), which take an outpost's credential: one bucket per address.
   OUTPOST_LIMITER?: RateLimit;
+  /// Making a shop of one's own (self-serve.ts; docs/pilot-api.md, "Making a shop of your own"). Built and off: the route
+  /// answers `sign_ups_closed` until SELF_SERVE_SHOPS is exactly "on", which no environment sets: opening sign-ups is the
+  /// owner's call. While it is on, every try counts against SELF_SERVE_SHOP_LIMITER, per source address.
+  SELF_SERVE_SHOPS?: string;
+  SELF_SERVE_SHOP_LIMITER?: RateLimit;
   /// The pages Worker (pages.ts, wrangler.web.jsonc), which serves the web app for every path outside the API.
   /// Unbound, those paths answer this Worker's own 404.
   WEB?: Fetcher;
@@ -145,6 +151,10 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   }
   // An outpost's heartbeat, redeem and steps carry its credential, so every try counts, before the credential is read.
   else if (isOutpostRoute(request.method, pathname)) binding = env.OUTPOST_LIMITER;
+  // Making a shop of one's own wakes AUTH to read the session and then makes a shop, so every try counts, any method, before
+  // anything is read; but only while sign-ups are open: while they are closed the route answers sign_ups_closed and
+  // touches nothing at all (self-serve.ts).
+  else if (pathname === "/v1/shops/new" && signUpsOpen(env)) binding = env.SELF_SERVE_SHOP_LIMITER;
   else if (relay) {
     // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
     // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.

@@ -60,6 +60,7 @@ const API_AUDIT_ACTIONS = [
   "owner.session_opened",
   "owner.session_ended",
   "helper.session_ended",
+  "shop.made_by_owner",
   "signin.created",
   "signin.password_replaced",
   "signin.removed",

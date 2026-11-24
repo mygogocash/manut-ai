@@ -42,6 +42,7 @@ import {
 import type { OwnerAccount } from "./people-store";
 import { operatorIdentity } from "./pilot";
 import type { PilotShopRecord } from "./pilot-store";
+import { newShopRoute, type SelfServeEnv } from "./self-serve";
 import {
   indexShop,
   keepOwnerCode,
@@ -78,15 +79,19 @@ const iso = (ms: number) => new Date(ms).toISOString();
 /// The same answer for a shop the person is not in and a shop that does not exist, so no one learns which shops exist.
 const notFound = () => json({ error: "not_found" }, 404);
 
-/// `/v1/shops*` and `/v1/admin/shops/owner*` (after the admin gate), and `/v1/consent/cloud` and `/v1/tenant/export`
-/// with a shop session. Answers null for any other path, and for those two with any other credential.
-export async function shopsRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv, ctx: ExecutionContext):
-  Promise<Response | null> {
+/// `/v1/shops*` (making a shop of one's own is self-serve.ts's) and `/v1/admin/shops/owner*` (after the admin gate), and
+/// `/v1/consent/cloud` and `/v1/tenant/export` with a shop session. Answers null for any other path, and for those two
+/// with any other credential.
+export async function shopsRoute(request: Request, url: URL, env: PeopleEnv & TenantDataEnv & SelfServeEnv,
+  ctx: ExecutionContext): Promise<Response | null> {
   switch (url.pathname) {
     case "/v1/shops":
     case "/v1/shops/session":
     case "/v1/shops/owner-code":
       return personRoute(request, url.pathname, env);
+    // A shop the person makes themselves (self-serve.ts), off until the owner opens sign-ups.
+    case "/v1/shops/new":
+      return newShopRoute(request, env);
     case "/v1/shops/session/end":
       return endSessionRoute(request, env);
     case "/v1/consent/cloud":

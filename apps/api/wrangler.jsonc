@@ -44,6 +44,11 @@
   // the route is limited before it answers even while it is off.
   // TEST_EMAIL_OUTBOX, like TEST_JWKS_JSON, belongs in wrangler.test.json
   // only: the dev deploy check refuses any config that sets a TEST_ var.
+  // Making a shop of one's own (docs/pilot-api.md, "Making a shop of your
+  // own") is built and off: POST /v1/shops/new answers sign_ups_closed, and
+  // reads nothing, until the var SELF_SERVE_SHOPS is "on". No environment sets
+  // it: opening sign-ups is the owner's call. Its limiter,
+  // SELF_SERVE_SHOP_LIMITER, is bound everywhere and counts only while it is on.
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front
@@ -172,6 +177,16 @@
             "limit": 300,
             "period": 60
           }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112341",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
         }
       ]
     },
@@ -268,6 +283,16 @@
             "limit": 300,
             "period": 60
           }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112342",
+          "simple": {
+            "limit": 10,
+            "period": 60
+          }
         }
       ]
     },
@@ -362,6 +387,16 @@
           "namespace_id": "2026112332",
           "simple": {
             "limit": 300,
+            "period": 60
+          }
+        },
+        // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open: the route
+        // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
+        {
+          "name": "SELF_SERVE_SHOP_LIMITER",
+          "namespace_id": "2026112343",
+          "simple": {
+            "limit": 10,
             "period": 60
           }
         }

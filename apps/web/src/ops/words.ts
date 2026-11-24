@@ -454,11 +454,16 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   // The owner's linked account and the shop sessions (docs/several-shops.md). The log holds the link's id only, never the
   // account itself, so the words say whose account by the shop's owner. A device signing in or out is the account's or the
   // helper's own doing, so it is said of them.
-  "owner.linked": (_entry, { ownerName }) => `linked ${ownerName}'s account to the shop`,
+  // An operator links the owner's account on a code; an owner who made the shop themselves is linked as they make it.
+  "owner.linked": (entry, { ownerName }) =>
+    entry.actor.kind === "owner" ? "became the shop's owner as they made it" : `linked ${ownerName}'s account to the shop`,
   "owner.unlinked": (_entry, { ownerName }) => `unlinked ${ownerName}'s account from the shop`,
   "owner.session_opened": () => "signed in to the shop on a device",
   "owner.session_ended": () => "signed out of the shop on a device",
   "helper.session_ended": () => "signed out on a device",
+  // A shop its owner made in the app, signed in, with no operator (docs/several-shops.md, "A shop its owner makes"). The
+  // log names the owner's account by its id, which the actor says.
+  "shop.made_by_owner": () => "made the shop themselves in the app, with no operator",
   // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
   // ids only, never a username or a password.
   "signin.created": () => "added a site sign-in to the vault",
