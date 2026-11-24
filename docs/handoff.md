@@ -87,6 +87,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   routes answer 401 without a session, the approval page loads, and the served bundle is the one just built.
 - Dev's API was redeployed on 24 Nov at 07:57 from `df6094b`, with the new-device route and the outpost's `not_run`
   (API `8ec35ae7`); smoke-tested: the devices route answers 401 without a session.
+- Dev's API was redeployed on 24 Nov at 08:39 from `601192a`, with re-sealing the vault (API `d7d4e7f2`);
+  smoke-tested: the route is behind Access. To rotate the vault's key, follow `docs/pilot-api.md`, "Re-sealing the
+  vault after a key rotation": keep `CRED_KEY_PREVIOUS` until every shop answers `remaining` 0.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -105,7 +108,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
-   (the outpost's step channel), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
+   (the outpost's step channel), 23 (re-sealing the vault after a key rotation, `POST /v1/admin/vault/reseal`, and a
+   worker's list of its sign-ins), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
    9 (desktop leftovers), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
    project blocked, keys in changes; `docs/code-editor.md`), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
@@ -115,8 +119,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - items 19 (the outpost following the shop sessions) and 23 (re-sealing sign-ins, listing them to workers), after
-     21, which changes the same outpost and vault code; the cloud outpost after that (it may cost money).
+   - item 19 (the outpost following the shop sessions), after 21, which changes the same outpost code; the cloud
+     outpost after that (it may cost money).
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
