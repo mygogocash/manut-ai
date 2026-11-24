@@ -152,6 +152,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's pages were redeployed on 25 Nov at 02:39 from `1ea1207`, with item 50's Connections page (pages `7821c338`;
   the API is unchanged since 20:53); smoke-tested: `/` and `/app/` answer 200, and `/ops` and the admin vault and
   outpost routes answer 302 to Cloudflare Access without a key.
+- Dev was redeployed on 25 Nov at 06:42 from `1e1e58c`, with item 49's two step failures (API `37beffbf`, deployed
+  whole, then pages `d4e5c73c` with the console's words for them).
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -169,6 +171,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
      Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
+   - item 52, Show older on the connected desktop: History, Mission Control and the activity log read past the
+     newest 50 tasks from the cursor (`feat/show-older`, Sonnet), started 25 Nov when item 49 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
