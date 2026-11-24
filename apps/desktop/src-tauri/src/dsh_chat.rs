@@ -300,7 +300,7 @@ impl DshChat {
             Input::Approve { .. } | Input::Clarify { .. } => Err("DeepSeek Harness asks nothing in this chat".into()),
             Input::Model { .. } => Err("DeepSeek Harness uses the model set in its own app".into()),
             Input::Mode { .. } | Input::Effort { .. } => Err("DeepSeek Harness uses the mode and effort set in its own app".into()),
-            Input::Rewind => Err("DeepSeek Harness cannot take a message back here".into()),
+            Input::Rewind | Input::RewindTo { .. } => Err("DeepSeek Harness cannot take a message back here".into()),
             // one headless run per message: nothing to add to a running one
             Input::Steer { .. } => Err("DeepSeek Harness cannot take a message into a running answer".into()),
         }

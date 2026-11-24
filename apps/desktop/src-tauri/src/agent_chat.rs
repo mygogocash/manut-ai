@@ -57,6 +57,12 @@ pub enum Input {
     /// Take back the person's last message and what came after it, through the agent's own rewind (Claude Code
     /// `rewind_conversation`, Codex `thread/revert`); the UI then offers its text again. Files stay as they are.
     Rewind,
+    /// Take back the person's message `id` (its bubble's id) and everything after it, through the same rewinds:
+    /// Claude Code goes back to before that message, Codex to before the turn it went into. Rewind to before a turn
+    /// (src/sessions/rewind.ts) puts the session's files back first ([`crate::turn_files`]). Only messages this process
+    /// took can be named; every other agent refuses it.
+    #[serde(rename = "rewind_to")]
+    RewindTo { id: String },
     /// Hand a message the person held in manut (its bubble `id`) to the running turn without stopping it, through
     /// the agent's own mid-turn input: Codex `turn/steer`, pi / oh-my-pi / OmO `steer`, Claude Code a stream-json
     /// user message written mid-turn (read into the turn after the running tool). Every other agent refuses it.
@@ -122,13 +128,14 @@ impl Waiting {
             st.emit(ev("message.dropped", json!({"id": id})));
         }
     }
-    /// The agent took its oldest message.
-    fn take(&mut self, st: &mut Step) {
-        if let Some((id, true)) = self.sent.pop_front() {
-            if !id.is_empty() {
-                st.emit(ev("message.taken", json!({"id": id})));
-            }
+    /// The agent took its oldest message: its id ("" when it had none), so an adapter can tell which message the
+    /// agent's own copy is.
+    fn take(&mut self, st: &mut Step) -> Option<String> {
+        let (id, busy) = self.sent.pop_front()?;
+        if busy && !id.is_empty() {
+            st.emit(ev("message.taken", json!({"id": id})));
         }
+        Some(id)
     }
     /// The agent took a message by id (Codex's `clientId`); older ones were taken before it.
     fn take_id(&mut self, st: &mut Step, id: &str) {
@@ -1041,6 +1048,11 @@ pub struct Claude {
     /// the uuids of the person's messages Claude Code echoed back in this process, oldest first: what a rewind
     /// takes back (the last one)
     sent_uuids: Vec<String>,
+    /// the bubble id of each of those messages, in step with `sent_uuids` ("" when manut gave it none): what a rewind to
+    /// a turn names
+    sent_ids: Vec<String>,
+    /// where a rewind to a turn asked Claude Code to go back to (an index in `sent_uuids`), until it answers
+    rewind_to: Option<usize>,
     /// its own todo list (TaskCreate / TaskUpdate, or TodoWrite): (task id or the call's id until it has one, text,
     /// status)
     tasks: Vec<(String, String, String)>,
@@ -1393,11 +1405,24 @@ impl Adapter for Claude {
                         st.emit(ev("session.error", json!({"message": format!("{what} not changed: {}", s(r, "error"))})));
                     }
                 } else if id.starts_with("manut-rewind-") {
-                    // the conversation is back to before the person's last message: the chat takes that message
-                    // back and offers its text again
+                    // the conversation is back to before the person's last message, or to before the message a rewind
+                    // to a turn named (`id` on the event): the chat takes that message and what came after back, and
+                    // offers its text again
+                    let to = self.rewind_to.take();
                     if s(r, "subtype") == "success" && body.get("rewound").and_then(Value::as_bool) == Some(true) {
-                        self.sent_uuids.pop();
-                        st.emit(ev("rewound", json!({"text": s(body, "prefillText")})));
+                        match to {
+                            Some(at) => {
+                                let gone = self.sent_ids.get(at).cloned().unwrap_or_default();
+                                self.sent_uuids.truncate(at);
+                                self.sent_ids.truncate(at);
+                                st.emit(ev("rewound", json!({"text": s(body, "prefillText"), "id": gone})));
+                            }
+                            None => {
+                                self.sent_uuids.pop();
+                                self.sent_ids.pop();
+                                st.emit(ev("rewound", json!({"text": s(body, "prefillText")})));
+                            }
+                        }
                     } else {
                         let why = if s(r, "error").is_empty() { s(body, "error") } else { s(r, "error") };
                         st.emit(ev("session.error", json!({"message": clip(&format!("Not taken back: {}", if why.is_empty() { "Claude Code refused" } else { &why }), 200)})));
@@ -1581,13 +1606,17 @@ impl Adapter for Claude {
             // Claude Code took a message the person sent (`--replay-user-messages`): a queued one is not waiting now
             "user" if !sub && v.get("isReplay").and_then(Value::as_bool) == Some(true) => {
                 let uuid = s(&v, "uuid");
-                if !uuid.is_empty() {
+                let echoed = !uuid.is_empty();
+                if echoed {
                     self.sent_uuids.push(uuid);
                     if self.sent_uuids.len() == 1 {
                         st.emit(ev("session.info", json!({"rewind": true})));
                     }
                 }
-                self.waiting.take(&mut st);
+                let taken = self.waiting.take(&mut st).unwrap_or_default();
+                if echoed {
+                    self.sent_ids.push(taken);
+                }
                 // a message queued behind a stopped turn starts its own
                 self.begin(&mut st, false);
             }
@@ -1767,6 +1796,17 @@ impl Adapter for Claude {
                     return Err("wait until the turn ends".into());
                 }
                 let Some(uuid) = self.sent_uuids.last().cloned() else { return Err("nothing to take back".into()) };
+                self.rewind_to = None;
+                self.control(&mut st, "rewind", json!({"subtype": "rewind_conversation", "target_message_uuid": uuid}));
+            }
+            // a rewind to a turn: back to before the message that began it, however many came after
+            Input::RewindTo { id } => {
+                if self.turn {
+                    return Err("wait until the turn ends".into());
+                }
+                let Some(at) = self.sent_ids.iter().rposition(|x| !id.is_empty() && *x == id) else { return Err("Claude Code cannot take that message back here".into()) };
+                let uuid = self.sent_uuids[at].clone();
+                self.rewind_to = Some(at);
                 self.control(&mut st, "rewind", json!({"subtype": "rewind_conversation", "target_message_uuid": uuid}));
             }
             // Claude Code's own switch; it answers with a status line carrying the new mode
@@ -1840,6 +1880,11 @@ pub struct Codex {
     helpers: Subagents,
     /// the person's turns Codex named in this process, oldest first: a rewind reverts the thread to before the last
     turns: Vec<String>,
+    /// the turn each of the person's messages went into, by its bubble id (Codex's `clientId`), oldest first: what a
+    /// rewind to a turn names
+    msg_turns: Vec<(String, String)>,
+    /// where a rewind to a turn asked Codex to go back to (an index in `turns`), until it answers
+    revert_to: Option<usize>,
     /// reasoning items that streamed a summary: their raw text is not shown as well
     summarized: std::collections::HashSet<String>,
     /// turn/steer request id -> the steered message's bubble id
@@ -1875,6 +1920,8 @@ impl Codex {
             waiting: Waiting::default(),
             helpers: Subagents::new("codex"),
             turns: Vec::new(),
+            msg_turns: Vec::new(),
+            revert_to: None,
             summarized: Default::default(),
             steers: HashMap::new(),
         }
@@ -2144,6 +2191,7 @@ impl Adapter for Codex {
                     let cwd = self.cwd.clone();
                     self.call(&mut st, "thread/start", json!({"cwd": cwd}));
                 } else if what == "thread/revert" {
+                    self.revert_to = None;
                     st.emit(ev("session.error", json!({"message": clip(&format!("Not taken back: {msg}"), 200)})));
                 } else if what == "turn/start" {
                     self.end(&mut st, "error", Some(clip(&msg, 200)));
@@ -2227,8 +2275,20 @@ impl Adapter for Codex {
                     self.steers.remove(&n);
                 }
                 "thread/revert" => {
-                    self.turns.pop();
-                    st.emit(ev("rewound", json!({})));
+                    match self.revert_to.take() {
+                        // a rewind to a turn: the chat goes back to before the first message of the turn that went
+                        Some(at) => {
+                            let gone = self.turns.get(at).and_then(|t| self.msg_turns.iter().find(|(_, x)| x == t)).map(|(b, _)| b.clone()).unwrap_or_default();
+                            self.turns.truncate(at);
+                            st.emit(ev("rewound", json!({"id": gone})));
+                        }
+                        None => {
+                            self.turns.pop();
+                            st.emit(ev("rewound", json!({})));
+                        }
+                    }
+                    let turns = &self.turns;
+                    self.msg_turns.retain(|(_, t)| turns.contains(t));
                     st.emit(ev("session.info", json!({"rewind": !self.turns.is_empty()})));
                 }
                 "model/list" => {
@@ -2400,6 +2460,12 @@ impl Adapter for Codex {
                     "userMessage" => {
                         let cid = s(&item, "clientId");
                         if !cid.is_empty() {
+                            // the turn it went into (Codex names the turn before it records the message)
+                            if let Some(t) = self.turn_id.clone() {
+                                if !self.msg_turns.iter().any(|(b, _)| *b == cid) {
+                                    self.msg_turns.push((cid.clone(), t));
+                                }
+                            }
                             self.waiting.take_id(&mut st, &cid);
                         }
                     }
@@ -2611,6 +2677,18 @@ impl Adapter for Codex {
                     return Err("wait until the turn ends".into());
                 }
                 let (Some(thread), Some(turn)) = (self.thread.clone(), self.turns.last().cloned()) else { return Err("nothing to take back".into()) };
+                self.revert_to = None;
+                self.call(&mut st, "thread/revert", json!({"threadId": thread, "beforeTurnId": turn}));
+            }
+            // a rewind to a turn: the thread goes back to before the turn the named message went into
+            Input::RewindTo { id } => {
+                if self.turn {
+                    return Err("wait until the turn ends".into());
+                }
+                let at = self.msg_turns.iter().find(|(b, _)| !id.is_empty() && *b == id).and_then(|(_, t)| self.turns.iter().position(|x| x == t));
+                let (Some(thread), Some(at)) = (self.thread.clone(), at) else { return Err("Codex cannot take that message back here".into()) };
+                self.revert_to = Some(at);
+                let turn = self.turns[at].clone();
                 self.call(&mut st, "thread/revert", json!({"threadId": thread, "beforeTurnId": turn}));
             }
             Input::Effort { effort } => {
@@ -3114,7 +3192,9 @@ impl Adapter for Pi {
                 }
             }
             // the agent took the person's message (a follow-up leaves its queue here)
-            "message_end" if s(&v["message"], "role") == "user" => self.waiting.take(&mut st),
+            "message_end" if s(&v["message"], "role") == "user" => {
+                self.waiting.take(&mut st);
+            }
             "thinking_level_changed" => st.emit(ev("session.info", json!({"effort": s(&v, "level")}))),
             "commands_changed" => st.emit(pi_commands(&v)),
             "message_start" if s(&v["message"], "role") == "custom" => {
@@ -3326,7 +3406,7 @@ impl Adapter for Pi {
                 self.read(&mut st, "get_available_thinking_levels");
             }
             Input::Mode { mode } => return Err(format!("{} has no permission mode here ({mode})", self.label)),
-            Input::Rewind => return Err(format!("{} cannot take a message back here", self.label)),
+            Input::Rewind | Input::RewindTo { .. } => return Err(format!("{} cannot take a message back here", self.label)),
             Input::Effort { effort } => {
                 if !self.levels.contains(&effort) {
                     return Err(format!("unknown thinking level {effort}"));
@@ -7344,6 +7424,69 @@ mod tests {
         let st = x.on_line(&format!(r#"{{"id":{id},"result":{{"thread":{{"id":"01a1c3b9-4b7f-7542-900c-c5f4dc80eefa"}},"turnsBackwardsCursor":null,"itemsBackwardsCursor":null}}}}"#));
         assert_eq!(st.events, vec![json!({"event": "rewound"}), json!({"event": "session.info", "rewind": false})]);
         assert!(x.on_input(Input::Rewind).is_err(), "nothing left to take back");
+    }
+
+    #[test]
+    fn claude_rewind_to_a_turn_goes_back_to_before_the_message_that_began_it() {
+        // claude-12-rewind's two turns, each message echoed back as Claude Code does, then a rewind to the first:
+        // rewind_conversation names that message's uuid, and its answer takes back both turns
+        // the page sends it as `{kind: "rewind_to", id}` (ChatInput in src/sessions/host.ts)
+        assert_eq!(serde_json::from_value::<Input>(json!({"kind": "rewind_to", "id": "local-s1"})).unwrap(), Input::RewindTo { id: "local-s1".into() });
+        let mut c = claude_up();
+        assert!(c.on_input(Input::RewindTo { id: "local-s1".into() }).is_err(), "nothing sent yet");
+        let lines = real("claude-12-rewind.jsonl");
+        c.on_input(sent_with("Remember the word ORCHID. Reply only: ok", "local-s1")).unwrap();
+        run(&mut c, &lines[..5]);
+        c.on_input(sent_with("Did I ask you to remember a word earlier in this conversation?", "local-s2")).unwrap();
+        run(&mut c, &lines[6..11]);
+        let st = c.on_input(Input::RewindTo { id: "local-s1".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(w[0]["request"], json!({"subtype": "rewind_conversation", "target_message_uuid": "de0a73ab-5879-4e81-b093-fb2cdb29704a"}));
+        let rid = s(&w[0], "request_id");
+        let st = c.on_line(&lines[5].replace("manut-rewind-REQ", &rid));
+        assert_eq!(st.events[0], json!({"event": "rewound", "text": "Remember the word ORCHID. Reply only: ok", "id": "local-s1"}));
+        assert_eq!(st.events[1], json!({"event": "session.info", "rewind": false}), "both messages went");
+        assert!(c.on_input(Input::RewindTo { id: "local-s2".into() }).is_err(), "a message taken back cannot be named again");
+        assert!(c.on_input(Input::RewindTo { id: String::new() }).is_err());
+    }
+
+    #[test]
+    fn codex_rewind_to_a_turn_reverts_to_before_the_turn_the_message_went_into() {
+        let mut x = codex_up();
+        assert!(x.on_input(Input::RewindTo { id: "local-s1".into() }).is_err());
+        let turn = |x: &mut Codex, id: &str, t: &str| {
+            x.on_input(sent_with("go", id)).unwrap();
+            run(
+                x,
+                &[
+                    format!(r#"{{"method":"turn/started","params":{{"turn":{{"id":"{t}","status":"inProgress","items":[]}}}}}}"#),
+                    format!(r#"{{"method":"item/started","params":{{"item":{{"type":"userMessage","id":"u-{t}","clientId":"{id}","content":[]}}}}}}"#),
+                    format!(r#"{{"method":"turn/completed","params":{{"turn":{{"id":"{t}","status":"completed"}}}}}}"#),
+                ],
+            );
+        };
+        turn(&mut x, "local-s1", "T1");
+        turn(&mut x, "local-s2", "T2");
+        turn(&mut x, "local-s3", "T3");
+        let st = x.on_input(Input::RewindTo { id: "local-s2".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(s(&w[0], "method"), "thread/revert");
+        assert_eq!(w[0]["params"]["beforeTurnId"], json!("T2"));
+        let id = w[0]["id"].as_u64().unwrap();
+        let st = x.on_line(&format!(r#"{{"id":{id},"result":{{"thread":{{"id":"01a1c3b9-4b7f-7542-900c-c5f4dc80eefa"}}}}}}"#));
+        assert_eq!(st.events, vec![json!({"event": "rewound", "id": "local-s2"}), json!({"event": "session.info", "rewind": true})]);
+        // turn 3 went with turn 2; turn 1 is still there
+        assert!(x.on_input(Input::RewindTo { id: "local-s3".into() }).is_err());
+        let st = x.on_input(Input::RewindTo { id: "local-s1".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(w[0]["params"]["beforeTurnId"], json!("T1"));
+        // a refusal says so; the turn stays
+        let id = w[0]["id"].as_u64().unwrap();
+        let st = x.on_line(&format!(r#"{{"id":{id},"error":{{"code":-32600,"message":"busy"}}}}"#));
+        assert_eq!(st.events, vec![json!({"event": "session.error", "message": "Not taken back: busy"})]);
+        assert!(x.on_input(Input::RewindTo { id: "local-s1".into() }).is_ok());
+        // the other agents refuse it
+        assert!(Pi::new("/w/proj", "OmO").on_input(Input::RewindTo { id: "local-s1".into() }).is_err());
     }
 
     #[test]

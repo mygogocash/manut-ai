@@ -918,7 +918,7 @@ impl Adapter for Acp {
             Input::Clarify { .. } => return Err("no such question".into()),
             // the agent picks its own permission mode and effort; manut offers no switch for them here
             Input::Mode { .. } | Input::Effort { .. } => return Err(format!("{} has no mode or effort switch here", self.agent.label)),
-            Input::Rewind => return Err(format!("{} cannot take a message back here", self.agent.label)),
+            Input::Rewind | Input::RewindTo { .. } => return Err(format!("{} cannot take a message back here", self.agent.label)),
             // ACP runs one prompt at a time and has no mid-turn input
             Input::Steer { .. } => return Err(format!("{} cannot take a message into a running answer", self.agent.label)),
             Input::Model { model } => {
