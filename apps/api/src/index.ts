@@ -4,7 +4,7 @@ import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
-import { isOutpostRoute, outpostRoute, ownerOutpostRoute, vaultAdminRoute } from "./browser-control";
+import { isOutpostRoute, outpostRoute, ownerOutpostRoute, ownerVaultRoute, vaultAdminRoute } from "./browser-control";
 import { vaultResealRoute } from "./vault-reseal";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
@@ -685,6 +685,10 @@ export default {
     // This Mac registering itself as an outpost through the desktop, with the owner's session (browser-control.ts).
     const ownerOutpost = await ownerOutpostRoute(request, url, env);
     if (ownerOutpost) return ownerOutpost;
+    // The owner's Connections: the shop's sign-ins and outposts, a new password, and renaming or removing an outpost, with
+    // the owner's session (browser-control.ts).
+    const ownerVault = await ownerVaultRoute(request, url, env);
+    if (ownerVault) return ownerVault;
 
     // The team's routines, Pause everyone, shop templates and their first-week questions (routines.ts): the
     // operator's routes, under the admin gate above, and the shop's own session's routes. Making or changing a routine

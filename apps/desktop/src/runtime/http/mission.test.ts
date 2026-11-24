@@ -99,6 +99,6 @@ describe("Mission Control for the signed-in tenant", () => {
       expect(t("rt.notYetShow", undefined, l).trim()).not.toBe("");
       expect(t("rt.notYet", undefined, l).trim()).not.toBe("");
     }
-    expect(t("rt.notYet", undefined, "en")).toMatch(/pauses your team’s routines/);
+    expect(t("rt.notYet", undefined, "en")).toMatch(/pauses your team’s routines and looks after Connections/);
   });
 });

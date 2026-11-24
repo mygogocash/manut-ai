@@ -1,5 +1,5 @@
-// Customize: two tabs in the top bar, as the canvas has them: Memory and routines, and Connections (this Mac as one of the
-// shop's outposts, OutpostPane.tsx).
+// Customize: two tabs in the top bar, as the canvas has them: Memory and routines, and Connections (the shop's vault and
+// outposts for its owner, ConnectionsPane.tsx, around this Mac as one of the shop's outposts, OutpostPane.tsx).
 //
 // Memory and routines, as the design canvas draws it (Brain.dc.html). On the left, what the team knows, each fact
 // with where it came from and the owner's Correct and Forget, what waits for the owner's OK and is not used until they
@@ -24,6 +24,7 @@ import { getStore, useStore } from "../state/store";
 import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } from "./ConnectionsPane";
 import { OutpostPane, useOutpost, type OutpostPaneProps } from "./OutpostPane";
 import { correctionReady, groupFacts, MEMORY_START, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
 import {
@@ -492,6 +493,7 @@ export function CustomizeView({
   tab = "memory",
   onTab,
   connections,
+  vault,
 }: {
   memory: MemoryPaneProps;
   routines: RoutinesPaneProps;
@@ -499,8 +501,10 @@ export function CustomizeView({
   tab?: CustomizeTab;
   /** with it, the tabs are drawn and switch the page */
   onTab?: (tab: CustomizeTab) => void;
-  /** the Connections tab's Outposts box */
+  /** the Connections tab's Outposts box for this Mac */
   connections?: OutpostPaneProps;
+  /** the Connections tab's vault and the shop's outposts, on a runtime that answers them */
+  vault?: ConnectionsProps | null;
 } & CustomizeEntries): ReactNode {
   const tabs = onTab && (
     <div className="tabs" role="tablist" aria-label={t("menu.customize")}>
@@ -530,7 +534,11 @@ export function CustomizeView({
     >
       {showConnections ? (
         <div className="brain conn" data-testid="connections">
-          <OutpostPane {...connections} />
+          <div className="conncol">
+            {vault && <VaultPane p={vault} />}
+            <OutpostPane {...connections} />
+            {vault && <ShopOutpostsPane p={vault} />}
+          </div>
         </div>
       ) : (
         <div className="brain">
@@ -546,6 +554,7 @@ export function CustomizePage() {
   const s = useStore();
   const [tab, setTab] = useState<CustomizeTab>("memory");
   const outpost = useOutpost();
+  const vault = useConnections(tab === "connections", s.shops.current);
   const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
   const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);
   const [memoryUi, memoryDispatch] = useReducer(memoryReduce, MEMORY_START);
@@ -612,6 +621,7 @@ export function CustomizePage() {
       tab={tab}
       onTab={setTab}
       connections={outpost}
+      vault={vault}
     />
   );
 }

@@ -339,7 +339,11 @@ const has = (words: string[], ...opts: string[]) => words.some((w) => opts.inclu
 function script(name: string, head: number): Verdict {
   const n = name.toLowerCase();
   if (/deploy|release|publish|ship|(^|[:._-])prod(uction)?($|[:._-])/.test(n)) return live();
-  if (/fix|write|format|fmt|prettier/.test(n) && !/check|lint$/.test(n)) return v("change", say("kit.say.format"), head);
+  // A name that only looks says so: "check" anywhere in it ("format:check", "prettier-check"), or "lint" at its end. One
+  // that also fixes or writes ("lint:fix") still changes files. A name kept from this rule is read below as a check, or as
+  // unknown, which asks every time, so it is never let through as anything freer than what it says.
+  const onlyLooks = n.includes("check") || n.endsWith("lint");
+  if (/fix|write|format|fmt|prettier/.test(n) && !onlyLooks) return v("change", say("kit.say.format"), head);
   if (/^(test|tests|spec|e2e|coverage|cover)([:._-].*)?$/.test(n) || /[:._-](test|tests|spec|e2e)$/.test(n)) return v("check", say("kit.say.test"));
   if (/^(check|checks|lint|typecheck|type-check|types|tsc|verify|validate|ci)([:._-].*)?$/.test(n) || /[:._-](check|lint|typecheck)$/.test(n))
     return v("check", say("kit.say.check"));

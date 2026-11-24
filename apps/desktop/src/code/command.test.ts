@@ -33,6 +33,17 @@ describe("what a step does", () => {
       expect([line, action(line)]).toEqual([line, "change"]);
   });
 
+  it("reads a script that only looks as a check, and one that also fixes or writes as a change", () => {
+    for (const line of ["pnpm run format:check", "pnpm run prettier-check", "pnpm run lint", "pnpm run lint:check"])
+      expect([line, action(line)]).toEqual([line, "check"]);
+    for (const line of ["pnpm run format", "pnpm run lint:fix", "pnpm run prettier:write", "pnpm run fmt"])
+      expect([line, action(line)]).toEqual([line, "change"]);
+    // Kept from the change rule by "check" but not a known check either, and a name the reader does not know: each asks
+    // every time.
+    expect(action("pnpm run fix:checkstyle")).toBe("unknown");
+    expect(action("pnpm run eslint")).toBe("unknown");
+  });
+
   it("installs, deletes and pushes", () => {
     for (const line of ["pnpm install", "npm ci", "pnpm remove dayjs", "pnpm update", "uv add httpx", "cargo add serde", "go mod tidy", "poetry add requests"])
       expect([line, action(line)]).toEqual([line, "install"]);

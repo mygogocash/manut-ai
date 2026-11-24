@@ -420,3 +420,52 @@
   color: var(--aui-muted);
   font-size: 12.5px;
 }
+
+/* The desktop's own: the Connections tab is one column, the canvas's aside, with the Vault box above this Mac's Outposts box
+   and every outpost of the shop below it (ConnectionsPane.tsx). The canvas's left pane, the shop's channels and AI models,
+   is a later slice. */
+.brain .conncol {
+  flex: 0 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.brain.conn .conncol .side2 {
+  flex: none;
+  border-left: 0;
+}
+/* The Vault heading with its tag on the same line, as the canvas puts them. */
+.brain .vhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brain .vault .box,
+.brain .shop-outposts .box {
+  padding: 2px 12px;
+}
+.brain .conncol .box > .none {
+  padding: 10px 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+/* What a change did, on the canvas's green ground, as a refusal is on its red. */
+.brain .msg.ok {
+  background: var(--okbg);
+  color: var(--aui-success);
+}
+/* A question asked in its row (Change, Rename) takes the row's whole width: its label, its field, then its buttons. */
+.brain .signin .ask {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+}
+.brain .tr.ask {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}

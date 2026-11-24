@@ -458,6 +458,8 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "signin.redeemed": () => "asked for a sign-in to type into a site",
   "outpost.removed": () => "removed an outpost",
   "outpost.credential_rotated": () => "gave an outpost a new credential",
+  // The owner's own Connections: the log keeps the outpost's id, never the name the owner typed.
+  "outpost.renamed": () => "renamed an outpost",
   // The whole vault sealed again under a new key after a rotation (no ids: the counts were in the operator's answer).
   "vault.resealed": () => "sealed the shop's vault again under a new key",
   // The step channel: a worker's browser steps, by id only, never a page or what it read.
