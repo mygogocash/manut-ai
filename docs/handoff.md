@@ -92,6 +92,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   vault after a key rotation": keep `CRED_KEY_PREVIOUS` until every shop answers `remaining` 0.
 - Dev was redeployed on 24 Nov at 09:53 from `87891ce`, with the owner's vault and outposts routes (pages `704d2f11`,
   API `3c019e17`); smoke-tested: `/v1/vault/sign-ins` and `/v1/vault/outposts` answer 401 without a session.
+- Dev's pages were redeployed on 24 Nov at 10:22 from `44a0c99` (pages `335dc6c5`), with the console's words for every audit action;
+  smoke-tested: the console is behind Access and the approval page loads.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -105,8 +107,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
      (`feat/outpost-shop-sessions`, Opus; a Rust build, after item 25's);
    - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
      jobs from the API, routines' pause and Pause everyone (`feat/connected-whole-shop`, Opus);
-   - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet);
-   - item 25, the shell naming the tool and the path on an agent's ask (`feat/ask-fields`, Opus; a Rust build).
+   - item 27, Kit's lanes on their own branches, with Checked, Tests failed and Reverted (`feat/kit-lanes`, Sonnet);
+   - item 28, what keeps running, with its age, its port and Stop (`feat/what-keeps-running`, Sonnet).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
@@ -114,7 +116,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    (the outpost's step channel), 23 (re-sealing the vault after a key rotation, `POST /v1/admin/vault/reseal`, and a
    worker's list of its sign-ins), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 21 (Customize › Connections for the owner: sign-ins with Change, outposts with Rename and
+   9 (desktop leftovers), 24 (the console's words for every audit action, held by a test that reads `audit-log.ts`),
+   25 (each coding ask carries the agent's own tool, command and paths; Kit reads those, and a word the shell would
+   expand asks), 21 (Customize › Connections for the owner: sign-ins with Change, outposts with Rename and
    Remove), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
    project blocked, keys in changes; `docs/code-editor.md`), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
@@ -124,7 +128,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
-   - items 25 to 29, the code editor's states left for later that need no owner (`docs/code-editor.md`), as slots
+   - items 26 and 29, the code editor's states left for later that need no owner (`docs/code-editor.md`), as slots
      free; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
