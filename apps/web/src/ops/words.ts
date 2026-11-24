@@ -357,14 +357,24 @@ export function auditNamesOf(people: People): AuditNames {
   );
 }
 
-/// Who did it, the way an operator knows them: an operator by their Access email, the owner by name, a helper by the name
-/// the owner gave them when the people list knows it.
+/// What the API writes as the owner's id when the shop's own signed-in session acted (`OWNER_SESSION` in apps/api/src/people.ts),
+/// and what a decision's record calls the owner's link. Any other id on an owner is the account linked as the owner's.
+const OWN_SESSION_ID = "owner-session";
+const OWNER_LINK_ID = "owner-link";
+
+/// Who did it, the way an operator knows them: an operator by their Access email, a helper by the name the owner gave them
+/// when the people list knows it, an outpost by its id. The owner is named three ways, because the owner can act three ways
+/// (docs/several-shops.md): through a signed link, which has no id, and so is the owner's name alone; from the shop's own
+/// session, which the log names `owner-session`; and from the app of the account linked as theirs, which the log names by the
+/// link's id. The words say which, so the raw `owner-session` is never what an operator reads.
 export function auditActorText(actor: AuditActor, ownerName: string, names: AuditNames = NO_NAMES): string {
   switch (actor.kind) {
     case "operator":
       return actor.email ?? "An operator (no Access identity)";
     case "owner":
-      return actor.id ? `${ownerName} (${actor.id})` : ownerName;
+      if (!actor.id || actor.id === OWNER_LINK_ID) return ownerName;
+      if (actor.id === OWN_SESSION_ID) return `${ownerName} (the shop's own session)`;
+      return `${ownerName} (linked account ${actor.id})`;
     case "helper":
       return nameOf(names, actor.id) ?? `Helper ${actor.id}`;
     case "worker":
@@ -403,7 +413,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "dispatch.settled": () => "finished sending an approved action",
   "attempt.started": () => "started a worker attempt",
   "attempt.ended": (entry) => (entry.actor.kind === "worker" ? "finished its attempt" : "ended a worker attempt"),
-  "approval.requested": () => "asked for approval of an action",
+  // A browser write's ask names the sign-in it would use, which no other approval request does (docs/pilot-api.md, "Audit log").
+  "approval.requested": (entry) =>
+    entry.subject.signInId ? "asked for approval to submit a form on a site" : "asked for approval of an action",
   "approval.decided": () => "decided an approval request",
   "approval.superseded": () => "closed an approval request",
   "memory.remembered": () => "told the team something to remember",
@@ -452,7 +464,9 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "signin.created": () => "added a site sign-in to the vault",
   "signin.password_replaced": () => "replaced a site sign-in's password",
   "signin.removed": () => "removed a site sign-in from the vault",
-  "outpost.registered": () => "registered an outpost",
+  // The owner can register only the Mac their desktop app runs on (`POST /v1/outposts/register`); an operator registers any kind.
+  "outpost.registered": (entry) =>
+    entry.actor.kind === "owner" ? "registered their Mac as an outpost" : "registered an outpost",
   "signin.requested": () => "asked to sign in to a site",
   "signin.broken": () => "reported that a site refused a saved password",
   "signin.redeemed": () => "asked for a sign-in to type into a site",
@@ -462,11 +476,74 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "outpost.renamed": () => "renamed an outpost",
   // The whole vault sealed again under a new key after a rotation (no ids: the counts were in the operator's answer).
   "vault.resealed": () => "sealed the shop's vault again under a new key",
-  // The step channel: a worker's browser steps, by id only, never a page or what it read.
-  "browser_step.queued": () => "asked an outpost to run a browser step",
-  "browser_step.fetched": () => "picked up a browser step",
-  "browser_step.reported": () => "reported how a browser step went",
+  // The step channel: a worker's browser steps, by id only, never a page or what it read. A write's steps name the request they
+  // carry and a sign-in's name the grant, so the ids say which kind of step it was. An outpost that was refused a step was not
+  // handed it, and the words say so rather than that it picked it up.
+  "browser_step.queued": (entry) => stepWords(entry, {
+    write: "asked an outpost to submit the approved form",
+    signIn: "asked an outpost to sign in to a site",
+    other: "asked an outpost to run a browser step",
+  }),
+  "browser_step.fetched": (entry) => stepWords(entry, entry.outcome === "refused" ? {
+    write: "was not handed the approved form to submit",
+    signIn: "was not handed a sign-in step",
+    other: "was not handed a browser step",
+  } : {
+    write: "picked up the approved form to submit",
+    signIn: "picked up a sign-in step",
+    other: "picked up a browser step",
+  }),
+  "browser_step.reported": (entry) => stepWords(entry, {
+    write: "reported how submitting the form went",
+    signIn: "reported how signing in went",
+    other: "reported how a browser step went",
+  }),
 };
+
+/// The words for the kind of step an entry is about, read off the ids it names: a write's carry the request, a sign-in's the
+/// grant, and a step the vault did not find (a report for an unknown step) names the outpost alone, so it is said in general.
+function stepWords(entry: AuditEntry, words: { write: string; signIn: string; other: string }): string {
+  return entry.subject.requestId ? words.write : entry.subject.grantId ? words.signIn : words.other;
+}
+
+/// The audit actions that change who can use Manut AI for a shop, whoever makes them: an operator in the console, or the owner
+/// from their own session (docs/pilot-api.md, "Helpers" and "The owner's own routes"). A helper joining is the helper's own
+/// doing, and a helper's sign-in is no change to the list, so neither is one.
+const PEOPLE_CHANGE_ACTIONS: ReadonlySet<string> = new Set([
+  "invite.created",
+  "invite.revoked",
+  "helper.removed",
+  "away.set",
+  "away.cleared",
+  "owner.linked",
+  "owner.unlinked",
+]);
+
+/// The changes to a shop's people in a page of its audit log, in the page's order (newest first), at most `limit` of them, and
+/// whether there were more than that.
+export function peopleChangesOf(entries: readonly AuditEntry[], limit: number): { shown: AuditEntry[]; more: boolean } {
+  const changes = entries.filter((entry) => PEOPLE_CHANGE_ACTIONS.has(entry.action));
+  return { shown: changes.slice(0, limit), more: changes.length > limit };
+}
+
+/// Who made a change to the list, as a tag: the owner (however they acted: their linked account, the shop's own session or a
+/// link) or an operator. Anyone else is named by the sentence alone, so there is no tag.
+export function peopleChangedBy(actor: AuditActor, ownerName: string): { label: string; className: string } | null {
+  switch (actor.kind) {
+    case "owner":
+      return { label: peopleWords.changedByOwner(ownerName), className: "tag" };
+    case "operator":
+      return { label: peopleWords.changedByOperator, className: "tag" };
+    default:
+      return null;
+  }
+}
+
+/// The actions the Audit page has words for. A test holds this list against the API's own (`AUDIT_ACTIONS` in
+/// apps/api/src/audit-log.ts), so an action the API gains cannot reach the page as "did something.new".
+export function auditActionsWithWords(): string[] {
+  return Object.keys(AUDIT_ACTIONS);
+}
 
 /// The entry as one sentence: "ops@manut.test recorded an order payment of ฿1,290." Given the people list's names, a helper
 /// is named as the owner named them.
@@ -550,7 +627,7 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   unseal_failed: "The vault could not open the saved password.",
   task_unavailable: "The task could not be read.",
   // Why a browser step was refused, and how an outpost may say one failed (docs/browser-control.md, the step channel).
-  step_kind_not_allowed: "Only steps that read are allowed so far.",
+  step_kind_not_allowed: "That kind of step cannot be asked for this way. A form is submitted only as an approved write.",
   invalid_url: "The page's address was not a plain https address.",
   origin_not_allowed: "The page was not on a site that member may use.",
   invalid_selector: "The part of the page to read was not written as one.",
@@ -571,10 +648,60 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   not_run: "The outpost did not run the step, so nothing was submitted.",
   timed_out: "The step took too long.",
   browser_error: "The browser stopped part way.",
+  // Why a browser write was not asked for, not queued or not handed out: the ask's own checks, the step's, and the begin gate's
+  // (docs/pilot-api.md, "Submitting through a browser"). Words the Drafts page has for its own jobs (`not_my_job`,
+  // `not_connected`) stay its own; these are for the audit log.
+  not_my_job: "That job belongs to another member of the team.",
+  not_connected: "The shop had nothing connected for that job, or the sign-in was not in the vault.",
+  kind_mismatch: "The write and the member's rules disagreed about what kind of approval it needs, so nobody was asked.",
+  unknown_member: "The team member is not one the rules know.",
+  unknown_capability: "The job is not one the rules know.",
+  unknown_kind: "The kind of approval is not one the rules know.",
+  unknown_action: "The kind of write is not one the API allows.",
+  invalid_write: "The write was not written so that an outpost could run it exactly and its owner could read it word for word.",
+  draft_only: "The job is in practice mode, so the form was kept as a draft and nobody was asked to approve it.",
+  invalid_request: "The request was not written the way the API reads it.",
+  request_not_found: "There was no such approved write.",
+  not_approved: "The write had not been approved.",
+  request_changed: "The request had changed since it was approved.",
+  already_begun: "The write had already been started.",
+  action_expired: "The approved write had run out of time.",
+  request_queued: "Another step already carried that write.",
+  already_settled: "The write had already been settled.",
+  dispatch_in_flight: "The write was already on its way.",
+  action_unknown: "The write had been on its way for over five minutes, so whether it went through is not known.",
+  payload_changed: "What was approved no longer matched what would be submitted, so nothing was submitted.",
+  grant_changed: "The member's grant had changed since the write was approved.",
+  task_settled: "The task had already finished.",
 };
 
-export function auditReasonText(reason: string): string {
-  return Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+/// What a failed write step's report means for the form, in place of the general words. The API settles a write from the code
+/// (`NOTHING_SUBMITTED` in apps/api/src/browser-writes.ts): after these codes the outpost had typed and sent nothing, so the
+/// write failed; after any other it cannot be said that the site did not take it, so the write is not known. `submit_refused`
+/// and `not_run` are about writes already, and their general words say so.
+const WRITE_REPORT_REASONS: Readonly<Record<string, string>> = {
+  page_unavailable: "The page did not load, so nothing was submitted.",
+  selector_not_found: "A field or the form was not on the page, so nothing was submitted.",
+  sign_in_refused: "The site refused the saved password, so nothing was submitted.",
+  grant_refused: "There was no sign-in to type, so nothing was submitted.",
+  origin_not_allowed: "The browser went off the page's site. It is not known whether the site took the form.",
+  timed_out: "The step took too long. It is not known whether the site took the form.",
+  browser_error: "The browser stopped part way. It is not known whether the site took the form.",
+};
+
+/// The refusals of a write step's report that come after the write was settled from it: the switches, the owner's consent, and
+/// the attempt and task the outcome must land in. What was done on the site stands, whatever could not be recorded in the attempt.
+/// A report the vault refused (an expired or repeated one) settled nothing, so it has no such note.
+const WRITE_STANDS: ReadonlySet<string> = new Set(["feature_disabled", "consent_required", "attempt_ended", "task_unavailable"]);
+
+/// Why, in words. Given the entry, a write step's report says what its reason means for the form; every other entry, and the
+/// Drafts page, read the reason alone.
+export function auditReasonText(reason: string, entry?: AuditEntry): string {
+  const general = Object.hasOwn(AUDIT_REASONS, reason) ? AUDIT_REASONS[reason]! : `Reason: ${reason}.`;
+  if (entry?.action !== "browser_step.reported" || !entry.subject.requestId) return general;
+  if (entry.outcome === "failed" && Object.hasOwn(WRITE_REPORT_REASONS, reason)) return WRITE_REPORT_REASONS[reason]!;
+  if (entry.outcome === "refused" && WRITE_STANDS.has(reason)) return `${general} The form itself stands as the outpost reported it.`;
+  return general;
 }
 
 /// The ids an entry is about, in one order whatever order they came in. A worker's request shares its action's id,
@@ -925,15 +1052,20 @@ const KIND_TAGS = {
 } as const satisfies Record<ApprovalKind, string>;
 
 /// The People page: who can use Manut AI for one shop, laid out from the design canvas's "Settings: people" and "States:
-/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts for the owner, who
-/// cannot yet change the list from the app (and may have no account linked at all), so the words name the owner and say what a
-/// helper may and may not approve. What each role may approve is read from approval-core's `mayDecide`, and only named here.
-/// Sentences that hold a name or a date are functions.
+/// people and roles" boards, whose own words it keeps wherever the pilot can say them. The operator acts on the owner's word,
+/// and since the owner's own routes (docs/several-shops.md, slice 4) the owner can change the list too, from the account linked
+/// as theirs, so the words say which of the two can, name the owner, and say what a helper may and may not approve. What each
+/// role may approve is read from approval-core's `mayDecide`, and only named here. Sentences that hold a name or a date are
+/// functions.
 export const peopleWords = {
   nav: "People",
   title: "People",
-  intro: (owner: string) =>
-    `Who can use Manut AI for this shop. ${owner} cannot change this list from the app yet, so invite, cancel, remove and set cover only when ${owner} asks you to.`,
+  /// Whether the owner can change the list themselves is whether an account is linked as theirs (`owner.account` of the people
+  /// list): the API lets the linked account invite, cancel, remove and set cover as an operator does, and nothing else can.
+  intro: (owner: string, linked: boolean) =>
+    linked
+      ? `Who can use Manut AI for this shop. ${owner} can invite, cancel, remove and set cover from their own sign-in too, so a change may be theirs. Make a change here when ${owner} asks you to.`
+      : `Who can use Manut AI for this shop. ${owner} has no account linked yet, so only an operator can change this list. Make a change here when ${owner} asks you to.`,
   shopLabel: "Shop",
   refresh: "Refresh",
   tryAgain: "Try again",
@@ -1093,6 +1225,21 @@ export const peopleWords = {
   noteRequest: (requestId: string) => `request ${requestId}`,
   noNotes: (owner: string) =>
     `No notes yet. When a helper cannot approve a request, they can pass it to ${owner} with a note, and it shows here.`,
+
+  // Who changed the list: the shop's audit log, read for the changes to its people. The people list itself does not say who made
+  // a change, and the log does, for the owner's changes as well as an operator's (docs/pilot-api.md, "Audit log").
+  changesTitle: "Who changed this list",
+  changesNote: "Newest first",
+  changesLabel: (shop: string) => `Changes to ${shop}'s list of people`,
+  changesLoading: "Loading who changed the list",
+  changesNone: "No change to the list is recorded yet.",
+  /// The page reads the newest entries only, so when it found no change and the log goes back further, it does not say there was none.
+  changesNoneNewest: (entries: number) =>
+    `No change to the list in the newest ${entries.toLocaleString("en-US")} audit entries. The Audit page has older ones.`,
+  changesMore: (shown: number) => `Showing the newest ${shown}. The Audit page has the rest.`,
+  changesUnavailable: "The API could not read the audit log, so who changed the list is not shown. Press Refresh to try again.",
+  changedByOwner: (owner: string) => `By ${owner}`,
+  changedByOperator: "By an operator",
 } as const;
 
 /// What the API said to a change of the people that changed nothing: its own refusals in the page's words, and the console's

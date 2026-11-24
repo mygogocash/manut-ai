@@ -44,6 +44,17 @@ describe("what a step does", () => {
     expect(action("pnpm run eslint")).toBe("unknown");
   });
 
+  it("cannot read a word the shell would expand first, so it asks: a pattern or a brace list", () => {
+    // `find . -{true,exec} rm {} \;` is `find . -true -exec rm {} ;` once the shell has expanded it: it deletes, though
+    // nothing in it says -exec. A pattern can become an option the same way, from a file named like one.
+    for (const line of ["find . -{true,exec} rm {} \\;", "find . -name x -e{xec,} rm {} \\;", "echo {a,b}", "touch f{1..3}",
+      "ls *.ts", "grep -rn foo src/*.ts", "cat src/?.ts", "ls [ab].ts", "find . -name x *"])
+      expect([line, action(line)]).toEqual([line, "unknown"]);
+    // Quoted or escaped, each is only itself, and find's `{}` holds no list.
+    for (const line of ["find . -name '*.ts'", "grep -rn \"a*b\" src", "echo '{a,b}'", "cat file\\{a,b\\}", "ls src"])
+      expect([line, action(line)]).toEqual([line, "read"]);
+  });
+
   it("installs, deletes and pushes", () => {
     for (const line of ["pnpm install", "npm ci", "pnpm remove dayjs", "pnpm update", "uv add httpx", "cargo add serde", "go mod tidy", "poetry add requests"])
       expect([line, action(line)]).toEqual([line, "install"]);

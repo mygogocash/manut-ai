@@ -26,6 +26,7 @@ use std::time::Instant;
 use serde_json::{json, Map, Value};
 
 use crate::agent_chat::{last_line, Adapter, Event, Input, Step};
+use crate::ask_tool::acp_tool;
 
 fn ev(name: &str, fields: Value) -> Event {
     let mut m = Map::new();
@@ -709,7 +710,9 @@ impl Acp {
         };
         let key = format!("acp-{}", rpc_id);
         self.pending.insert(key.clone(), Ask { rpc_id, once, deny });
-        let mut f = json!({"request_id": key, "title": title, "command": command, "choices": choices});
+        // the card's words are cut to a line for the person; Kit's dial reads the call's own kind and input
+        let tool = acp_tool(&tc, &self.cwd);
+        let mut f = json!({"request_id": key, "title": title, "command": command, "choices": choices, "tool": tool});
         if !self.cwd.is_empty() {
             f["cwd"] = Value::String(self.cwd.clone());
         }
@@ -1085,6 +1088,15 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         assert_eq!(end.len(), 1);
         assert_eq!(end[0]["ok"], true);
         assert!(end[0]["ms"].is_u64());
+    }
+
+    #[test]
+    fn real_opencode_asks_name_the_calls_kind_line_and_folder_for_kits_dial() {
+        let mut a = Acp::new(opencode(), "/w/proj", None);
+        let st = replay(&mut a, "opencode-2-allow-once.jsonl", Some("run echo hi"), &["once"]);
+        let card = of(&st.events, "approval.request")[0];
+        // from the call's own `kind` and `rawInput`, never from its title
+        assert_eq!(card["tool"], json!({"kind": "command", "line": "echo hi > a.txt", "cwd": "/w/proj"}));
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod acp_chat;
 mod agent_chat;
 mod app_menu;
 mod appimage;
+mod ask_tool;
 mod claude_usage;
 mod custom_agents;
 mod disk;
