@@ -108,6 +108,71 @@ export const STATES: PageState[] = [
     shows: "This link does not work",
     buttons: [],
   },
+  // Customers write in Thai and the drafts answer in Thai: a long message and a long reply, in a shop with a long Thai
+  // name, and then the same reply on the permission step and while it is sent.
+  {
+    page: "approval",
+    name: "a long Thai message and reply wait for the owner",
+    path: "/approve/demo-long-thai",
+    shows: "Sends a reply to ศิริพรรณเจริญสุขสวัสดิ์ on LINE.",
+    buttons: ["Approve", "No"],
+  },
+  {
+    page: "approval",
+    name: "the permission step, for a shop with a long Thai name",
+    path: "/approve/demo-long-thai",
+    reach: (page) => tap(page, "Approve"),
+    shows: "Allow Manut AI to send messages for ร้านเทียนหอมและน้ำมันหอมระเหยบ้านสวนมะลิ",
+    buttons: ["Allow and send this reply", "Not now"],
+  },
+  {
+    page: "approval",
+    name: "a long Thai reply, approved and being sent",
+    path: "/approve/demo-long-thai",
+    reach: approveAndAllow,
+    shows: "Approved. Sending the reply to ศิริพรรณเจริญสุขสวัสดิ์.",
+    buttons: [],
+  },
+  // A long order id and a long tracking link have no place to break, and neither has a customer name made of one word.
+  {
+    page: "approval",
+    name: "a long order id, link and customer name wait for the owner",
+    path: "/approve/demo-long-link",
+    shows: "Sends a reply to Khun_Wichai_Chaiyaphum_01 on LINE.",
+    buttons: ["Approve", "No"],
+  },
+  {
+    page: "approval",
+    name: "the permission step, with a long link in the reply",
+    path: "/approve/demo-long-link",
+    reach: (page) => tap(page, "Approve"),
+    shows: "Allow Manut AI to send messages for Baan Suan Mali Natural Candles and Essential Oils, Chiang Mai",
+    buttons: ["Allow and send this reply", "Not now"],
+  },
+  {
+    page: "approval",
+    name: "a long link, approved and being sent",
+    path: "/approve/demo-long-link",
+    reach: approveAndAllow,
+    shows: "Approved. Sending the reply to Khun_Wichai_Chaiyaphum_01.",
+    buttons: [],
+  },
+  {
+    page: "approval",
+    name: "a long customer name, after the owner says no",
+    path: "/approve/demo-long-link",
+    reach: (page) => tap(page, "No"),
+    shows: "You said no. Nothing was sent to Khun_Wichai_Chaiyaphum_01.",
+    buttons: [],
+  },
+  // On a phone with a weak connection the request does not arrive: the page says so and offers one button.
+  {
+    page: "approval",
+    name: "the request cannot be loaded",
+    path: "/approve/demo-offline",
+    shows: "Could not load this request",
+    buttons: ["Try again"],
+  },
   {
     page: "deletion",
     name: "the shop's data waits for the owner",
@@ -156,6 +221,21 @@ export const STATES: PageState[] = [
     path: "/delete/not-a-real-link",
     shows: "This link does not work",
     buttons: [],
+  },
+  // A shop with a long Thai name, whose counts run to the millions.
+  {
+    page: "deletion",
+    name: "a shop with a long Thai name waits for the owner",
+    path: "/delete/demo-delete-long",
+    shows: "Delete everything Manut AI stores for ร้านขนมไทยโบราณและเครื่องแกงสดบ้านคุณยายสมศรี",
+    buttons: ["Delete everything", "Keep my data"],
+  },
+  {
+    page: "deletion",
+    name: "the request cannot be loaded",
+    path: "/delete/demo-delete-offline",
+    shows: "Could not load this request",
+    buttons: ["Try again"],
   },
 ];
 

@@ -29,6 +29,41 @@ describe("routing", () => {
     expect(screen.getByText("Practice mode. This page uses sample data and deletes nothing real.")).toBeTruthy();
   });
 
+  it("has a practice link for long Thai words, for a long link, for a dead connection and for a long shop name", async () => {
+    window.history.replaceState(null, "", "/");
+    render(<App setup={{ api: createFakeApi(), mode: "fake" }} />);
+    const home = () => act(() => {
+      window.history.pushState(null, "", "/");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "A long Thai message and reply, in a shop with a long Thai name" }));
+    expect(window.location.pathname).toBe("/approve/demo-long-thai");
+    expect(await screen.findByText(/^Sends a reply to ศิริพรรณเจริญสุขสวัสดิ์ on LINE/)).toBeTruthy();
+
+    home();
+    fireEvent.click(screen.getByRole("link", { name: "A long order id and link, which cannot break across lines" }));
+    expect(window.location.pathname).toBe("/approve/demo-long-link");
+    expect(await screen.findByText(/^Sends a reply to Khun_Wichai_Chaiyaphum_01 on LINE/)).toBeTruthy();
+
+    // A request that cannot be read says so, and offers the one thing to do.
+    home();
+    fireEvent.click(screen.getByRole("link", { name: "No connection: the request cannot be loaded" }));
+    expect(window.location.pathname).toBe("/approve/demo-offline");
+    expect(await screen.findByText("Could not load this request")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    home();
+    fireEvent.click(screen.getByRole("link", { name: "Delete a shop's data: a long Thai shop name and counts in the millions" }));
+    expect(window.location.pathname).toBe("/delete/demo-delete-long");
+    expect(await screen.findByText("1,234,567 customer messages")).toBeTruthy();
+
+    home();
+    fireEvent.click(screen.getByRole("link", { name: "Delete a shop's data: no connection, the request cannot be loaded" }));
+    expect(window.location.pathname).toBe("/delete/demo-delete-offline");
+    expect(await screen.findByText("Could not load this request")).toBeTruthy();
+  });
+
   it("lists the practice link codes for a shop's People page, each with what it does, in practice mode only", () => {
     window.history.replaceState(null, "", "/");
     const { unmount } = render(<App setup={{ api: createFakeApi(), mode: "fake" }} />);
