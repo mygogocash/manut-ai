@@ -7,6 +7,13 @@ import { dayOffset, formatClock, formatDate } from "../format";
 export const OWNER_CARD: CSSProperties = { padding: 16, display: "flex", flexDirection: "column", gap: 12 };
 /// Buttons the owner presses on a phone: at least 44px tall, sharing the row.
 export const OWNER_TOUCH: CSSProperties = { minHeight: 44, flex: "1 1 0" };
+/// A button that stands alone, such as the retry in a notice: the same 44px, with no share of a row to take.
+export const OWNER_TAP: CSSProperties = { minHeight: 44 };
+/// The column both pages sit in: a phone's reading width, and words that have nowhere to break (a customer's name made of
+/// one word, an order id, a link) break at the edge of their card instead of running out of it and widening the page. The
+/// message and the reply say the same for themselves, because that is where such words usually are; a name in a heading,
+/// at a larger text size, is the other place, and this covers it and every other line the page writes.
+export const OWNER_MAIN: CSSProperties = { maxWidth: 560, padding: "16px 16px 40px", gap: 16, overflowWrap: "anywhere" };
 
 /// The words `whenText` needs from a page's strings table.
 export type WhenWords = {
