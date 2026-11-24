@@ -1110,8 +1110,17 @@ export class MockHost {
     // ---- Customize › Connections: the sample vault and outposts, which only the person's own shop has. The list is the
     // shop being viewed; a change acts on the shop its row was read for, as on the connected runtime.
     "connections.list": () => this.atVault(this.shop, () => ({ ok: true, value: this.vault.list(OWN_SHOP) })),
+    "connections.add": (p) => this.atVault(p.shop, () => {
+      const { shop: _shop, ...fields } = p;
+      const added = this.vault.add(fields, this.now());
+      return added.ok ? { ok: true, value: { signIn: added.value } } : added;
+    }),
     "connections.password": (p) => this.atVault(p.shop, () => {
       const changed = this.vault.password(p.signIn, p.password, this.now());
+      return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
+    }),
+    "connections.members": (p) => this.atVault(p.shop, () => {
+      const changed = this.vault.members(p.signIn, p.members);
       return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
     }),
     "connections.rename": (p) => this.atVault(p.shop, () => {
