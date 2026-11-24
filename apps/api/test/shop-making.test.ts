@@ -294,6 +294,8 @@ describe("an operator's make that stops part way", () => {
     expect(await journal(name)).toEqual([]);
   });
 
+  // It makes and checks a whole shop once for every step the make takes, so it takes a few seconds alone and went past
+  // the five-second default on a gate with several helpers' tests running at once; it has thirty.
   it("treats an object that throws as one that answers 500, at every step", async () => {
     const begin: Fail = { binding: "AUTH", method: "POST", path: "/pilot-making/begin" };
     for (const fail of [begin, ...OPERATOR_STEPS.map((step) => step.fail)]) {
@@ -309,7 +311,7 @@ describe("an operator's make that stops part way", () => {
       expect((await shopState(retried.body.tenant as string)).log).toEqual(WHOLE);
       expect(await journal(name)).toEqual([]);
     }
-  });
+  }, 30_000);
 
   it("goes on with a shop that another try of the same make wrote in the meantime, and logs it once", async () => {
     const name = uniqueName("Meanwhile");
@@ -484,6 +486,8 @@ describe("a make by its owner that stops part way", () => {
     expect(await slotsLeft(person)).toBe(0);
   });
 
+  // It makes and checks a whole shop once for every step the make takes, so it takes a few seconds alone and went past
+  // the five-second default on a gate with several helpers' tests running at once; it has thirty.
   it("treats an object that throws as one that answers 500, at every step, and loses no slot", async () => {
     const begin: Fail = { binding: "AUTH", method: "POST", path: "/pilot-making/begin" };
     for (const fail of [begin, ...OWN_STEPS.map((step) => step.fail)]) {
@@ -503,7 +507,7 @@ describe("a make by its owner that stops part way", () => {
       expect(await journal(name)).toEqual([]);
       expect(await slotsLeft(person)).toBe(SHOPS_MADE_LIMIT - 1);
     }
-  });
+  }, 30_000);
 
   it("gives the slot back when a try that finds the shop written cannot open its session, and the next try finishes it", async () => {
     const person = await signIn();

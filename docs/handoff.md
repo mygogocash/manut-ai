@@ -120,22 +120,32 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   manifest is served, `POST /v1/web/shops` answers 403 `csrf_required` without `x-manut-web`, 403 `origin_forbidden`
   from another origin and 401 `signed_out` (with `emailSignIn: false`) from this one, and email sign-in and self-serve
   still answer that they are off.
+- Dev was redeployed on 24 Nov at 15:38 from `445d47c`, with Google Sheets' two guards and its desktop row (pages
+  `4ead247d`, API `17b0aeac`); smoke-tested: `/v1/google` still answers 503 `google_not_configured`, the pages and
+  `/app/` load, and the console is behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Three helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
+1. Two helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
    and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. At
    13:02 items 10, 34, 35 and 36 stopped at the limit ("resets 4:10pm"); 35, 34 and 10 were sent on at 13:16 to 13:20
-   and ran, and 36's follow-up stayed queued so that three work at a time; it was sent on once 34 finished. A
+   and ran, and 36's follow-up stayed queued so that three work at a time; it was sent on once 34 finished.
+   At 15:45 items 39 and 40 and the security review stopped at the limit again ("resets 6:10pm"), before either item
+   pushed anything. At 16:02 the review and item 40 were sent on in their own threads; item 39 waits for one of them
+   to finish, as three heavy helpers at once reached the limit three times on 24 Nov. A
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
-   - a security review of the API surface added on 24 Nov as a whole (email sign-in, self-serve, Google, the web
-     session, the join page, the making journal, test-only paths), findings only (Opus);
-   - item 40, the owner adds a sign-in and changes who may use it, from the app (`feat/owner-sign-ins`, Opus).
+   - item 40, the owner adds a sign-in and changes who may use it, from the app (`feat/owner-sign-ins`, Opus);
+   - item 41, the security review's front-door findings (`fix/front-door-hardening`, Opus).
+   Next: item 42, the review's session and self-serve findings (Opus), then item 39 (Bring it back; its run stopped
+   at the limit before it pushed anything, so send it on in its own thread).
+   The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
+   `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
+   `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
    Merged: 37 (Google Sheets on the desktop: Customize › Connections' row, the append shown whole before Approve, a
    month already sent asked again only with words that say so, and a shop's deletion revoking its Google token first),
    38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until
@@ -284,6 +294,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop` `src/runtime/http/browserWrite.test.tsx`, "the chat's card, Home and Needs you": its first imports of
   three whole pages take about two seconds alone and went past the five-second default in four loaded gates on 24 Nov;
   it has thirty seconds since.
+- `apps/api` `test/shop-making.test.ts`, the two "at every step" tests: each makes and checks a whole shop once for
+  every step a make takes, and one went past the five-second default in a loaded gate on 24 Nov; both have thirty
+  seconds since.
 - Two API tests compared times written by two reads of the clock (24 Nov): the worker's oldest-first sign-in list
   (`browser-steps.test.ts`, its two sign-ins now made in different milliseconds) and a self-serve shop's audit entries
   (now written with the shop's own time). A Worker's clock moves only between requests, so watch for this pattern.

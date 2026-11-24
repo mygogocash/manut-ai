@@ -11,6 +11,10 @@ staging and production). They never go in a file in the repository. Vars go in t
 
 ## Built, and off until the owner says
 
+**Not yet, whatever the owner decides:** a security review of the API surface added on 24 Nov 2026 found ways a stranger
+could misuse email sign-in and self-serve once they are on (sending codes without a real limit, making shops without
+one, and more). Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until December items 41 and 42 have merged.
+
 | What | The switch | What it needs from the owner | Details |
 | --- | --- | --- | --- |
 | Sign-in by a code sent by email (the API, the desktop's Settings › Developer, the web's join page) | var `EMAIL_SIGN_IN` set to `"on"`, the `send_email` binding `EMAIL`, and vars `EMAIL_FROM_ADDRESS` and `EMAIL_FROM_NAME` | A yes; the Workers Paid plan; a sending domain onboarded to Cloudflare Email Service, with the sender's address and name; the Thai words for the email | `docs/sign-in-options.md`; `docs/pilot-api.md`, "Signing in by email" |
