@@ -182,6 +182,14 @@ type DeletionView = {
 | `POST /v1/admin/memory/forget` | `{ tenant, id }` | `{ id }`: the fact is gone, and its words with it |
 | `POST /v1/admin/workers/run` | `{ tenant, member, job }` | `WorkerRun`: how one member's job for the shop ended, with its draft ("Workers", below) |
 | `GET /v1/admin/workers/drafts` | `?tenant=&before=&limit=` | `WorkerJobsPage`: one page of the shop's worker jobs, newest first, drafts and handovers included ("Workers' drafts", below) |
+| `GET /v1/admin/model/usage` | `?tenant=&month=` | A shop's model spend, cap, crossings of the cap and calls for one Bangkok month (`docs/model-gateway.md`, "Operator routes") |
+| `PUT /v1/admin/model/cap` | `{ tenant, capSatang }` | The shop's cap as it now stands; `capSatang: null` clears the override (`docs/model-gateway.md`) |
+| `GET /v1/admin/model/alerts` | none | This Bangkok month's shops at or near their caps, across all shops, from one read (`docs/model-gateway.md`, "Alerts near the cap") |
+
+The console's **Model spend** page opens with the shops near or at their caps this month, from `GET /v1/admin/model/alerts`:
+one request, never one per shop. Each row names the shop, says "At the cap" or "Near the cap" and when, and its Show
+button opens that shop's month below, which says which thresholds its spend reached. Refresh and a cap change read the
+list again.
 
 The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
 reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
@@ -487,7 +495,7 @@ type AuditEntry = {
   subject: AuditSubject;        // ids only
   outcome: string;              // one of the outcomes below
   reason?: string;              // a code: why an attempt ended, why a decision was refused
-  amountSatang?: number;        // the money it was about: a payment recorded, a cap set
+  amountSatang?: number;        // the money it was about: a payment recorded, a cap set, the cap a crossing reached
 };
 
 type AuditActor =
@@ -500,7 +508,7 @@ type AuditActor =
 
 type AuditSubject = Partial<Record<"taskId" | "actionId" | "messageId" | "attemptId" | "requestId" | "paymentId" |
   "connectionId" | "previousConnectionId" | "confirmationId" | "factId" | "inviteId" | "helperId" | "signInId" |
-  "outpostId" | "stepId" | "grantId", string>>;
+  "outpostId" | "stepId" | "grantId" | "month", string>>;   // `month`: a Bangkok month of the model meter, YYYY-MM
 
 type AuditMissed = { count: number; lastAt: string; lastAction: string };
 ```
@@ -516,6 +524,7 @@ What is written, and by whom:
 | `reply.proposed` | operator | `taskId`, `actionId`, `messageId` | `ok` |
 | `payment.recorded`, `subscription_payment.recorded` | operator | `paymentId`, with `amountSatang` | `ok` |
 | `model.cap_set`, `model.cap_cleared` | operator | none; a cap set carries `amountSatang` | `ok` |
+| `model.cap_near`, `model.cap_reached` | system, when a Bangkok month's charged model spend first reaches 80% of the shop's cap, and 100%, in the same write as the charge or cap change that got it there (`docs/model-gateway.md`, "Alerts near the cap") | `month`; carries the cap it was measured against as `amountSatang` | `ok` |
 | `deletion.requested` | operator | `confirmationId` for a live shop | `awaiting_owner` for a live shop; `ok` for one deleted at once, which the deletion then wipes with the rest |
 | `consent.given`, `consent.withdrawn` | owner: through a link or the lifted session (no id), or an owner session (the linked account's id) | none | `ok` |
 | `reply.decided` | owner | `taskId`, `actionId` | `approved` or `declined` |
