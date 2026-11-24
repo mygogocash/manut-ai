@@ -55,6 +55,7 @@ import {
   type BotSeed,
 } from "./seed";
 import { HELPED_INTRO, HELPED_REFUSAL, HELPED_SHOP, OWN_SHOP, sampleAsks, sampleShops, SHOPS_SAID, type WaitingAsk } from "./shops";
+import { PracticePeople, type PeopleResult } from "./people";
 import { PracticeVault, type VaultResult } from "./vault";
 
 /** A refusal, as the protocol's reply frame carries it. */
@@ -192,6 +193,8 @@ export class MockHost {
   private shopAsks = new Map<string, WaitingAsk>();
   /** The person's own shop's sample vault and outposts, for Customize › Connections (vault.ts). */
   private vault = new PracticeVault(0);
+  /** The person's own shop's sample people, for Settings › People (people.ts). */
+  private people = new PracticePeople(0);
 
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
@@ -247,6 +250,7 @@ export class MockHost {
     this.shop = OWN_SHOP;
     this.shopAsks = new Map();
     this.vault = new PracticeVault(boot);
+    this.people = new PracticePeople(boot);
     this.routines = ROUTINE_SEED.map((input) => {
       const made = createRoutine(input);
       if (!made.ok) throw new Error(`the staged routine "${input.name}" was refused: ${made.reason}`);
@@ -1107,12 +1111,43 @@ export class MockHost {
       const removed = this.vault.remove(p.outpost);
       return removed.ok ? { ok: true, value: { outpost: removed.value } } : removed;
     }),
+
+    // ---- Settings › People: the sample owner, helper and invite, which only the person's own shop has. The list is the shop
+    // being viewed; a change acts on the shop its list was read for, as on the connected runtime.
+    "people.list": () => this.atPeople(this.shop, () => ({ ok: true, value: this.people.list(OWN_SHOP, this.now()) })),
+    "people.invite": (p) => this.atPeople(p.shop, () => {
+      const made = this.people.makeInvite(p.name, p.identity, this.now());
+      return made.ok ? { ok: true, value: { invite: made.value } } : made;
+    }),
+    "people.cancelInvite": (p) => this.atPeople(p.shop, () => {
+      const done = this.people.cancelInvite(p.invite);
+      return done.ok ? { ok: true, value: { invite: done.value } } : done;
+    }),
+    "people.remove": (p) => this.atPeople(p.shop, () => this.people.remove(p.helper)),
+    "people.setAway": (p) => this.atPeople(p.shop, () => {
+      const done = this.people.setAway(p.helper, p.until, this.now());
+      return done.ok ? { ok: true, value: { away: done.value } } : done;
+    }),
+    "people.clearAway": (p) => this.atPeople(p.shop, () => {
+      const done = this.people.clearAway();
+      return done.ok ? { ok: true, value: { away: done.value } } : done;
+    }),
   };
 
   /** Runs a Connections op on `shop`'s sample vault: the person's own shop's. At Ran Pa Noi they are a helper, and only Noi,
    *  its owner, sees its sign-ins and outposts, as the API answers a helper's session; any other shop is not theirs. */
   private atVault<T>(shop: unknown, run: () => VaultResult<T>): T {
     if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees its sign-ins and outposts.");
+    if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
+    const done = run();
+    if (!done.ok) throw new OpError(done.code, done.message);
+    return done.value;
+  }
+
+  /** Runs a People op on `shop`'s sample people: the person's own shop's. At Ran Pa Noi they are a helper, and only Noi, its owner,
+   *  sees or changes who can help there, as the API answers a helper's session; any other shop is not theirs. */
+  private atPeople<T>(shop: unknown, run: () => PeopleResult<T>): T {
+    if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees or changes who can help at Ran Pa Noi.");
     if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
     const done = run();
     if (!done.ok) throw new OpError(done.code, done.message);
