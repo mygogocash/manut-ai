@@ -202,6 +202,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   Paid (10 browser hours and 10 concurrent browsers a month included, then $0.09 an hour); ten pilot shops would cost
   about $8 a month above the plan. It needs the plan and the spending, and the owner's word that shops' sites may be
   reached from Cloudflare's addresses.
+- **Sign-in, the biggest blocker:** `docs/sign-in-options.md` compares Sign in with Apple ($99 a year), a code sent by
+  email (Cloudflare Email Service, about 3,000 emails a month with Workers Paid, then $0.35 a thousand) and LINE Login
+  (free, parked), and recommends codes by email first. The owner chooses.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
