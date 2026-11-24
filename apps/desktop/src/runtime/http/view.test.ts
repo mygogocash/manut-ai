@@ -25,6 +25,9 @@ function action(over: Partial<ShopAction> = {}): ShopAction {
     state: "proposed",
     proposedAt: T0 + 90_000,
     expiresAt: T0 + 86_400_000,
+    approvedAt: null,
+    approvedBy: "",
+    dispatchedAt: null,
     raw: {},
     ...over,
   };
@@ -40,6 +43,8 @@ function task(over: Partial<ShopTask> = {}): ShopTask {
     updatedAt: T0 + 120_000,
     events: 2,
     actions: [action()],
+    attempts: [],
+    draft: null,
     raw: {},
     ...over,
   };

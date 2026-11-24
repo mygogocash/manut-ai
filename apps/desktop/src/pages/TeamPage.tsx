@@ -27,7 +27,7 @@ import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { Avatar } from "../ui";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
-import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseStep, routinesLine, sinceText, type PauseUi } from "./pause";
+import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseStep, pauseWords, routinesLine, sinceText, type PauseUi } from "./pause";
 import { useJobs } from "./RecentWork";
 import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
 import { lineWords, teamLine, type TeamLine } from "./teamLine";
@@ -122,10 +122,11 @@ export interface TeamPauseProps {
 }
 
 function PauseSide({ p, state }: { p: TeamPauseProps; state: TeamState | null }) {
+  const words = pauseWords(state);
   if (state?.paused)
     return (
       <>
-        <h2 className="h2">{t("pause.was")}</h2>
+        <h2 className="h2">{t(words.was)}</h2>
         {state.running.length === 0 && <p className="hint">{t("pause.noneRunning")}</p>}
         {state.running.map((j) => (
           <div key={j.id} className="tr">
@@ -133,12 +134,12 @@ function PauseSide({ p, state }: { p: TeamPauseProps; state: TeamState | null })
               <button type="button" className="lk strong" onClick={() => p.onOpenJob(j.id)} data-testid={`pause-job-${j.id}`}>
                 {j.title}
               </button>
-              <span className="mut line">{pausedJobLine(j, p.nameOf)}</span>
+              <span className="mut line">{pausedJobLine(j, p.nameOf, state.holds)}</span>
             </span>
           </div>
         ))}
         <h2 className="h2">{t("pause.still")}</h2>
-        {(["pause.still1", "pause.still2", "pause.still3", "pause.still4"] as const).map((k) => (
+        {words.still.map((k) => (
           <div key={k} className="tr">
             <span className="grow">{t(k)}</span>
           </div>
@@ -148,7 +149,7 @@ function PauseSide({ p, state }: { p: TeamPauseProps; state: TeamState | null })
   return (
     <>
       <h2 className="h2">{t("pause.button")}</h2>
-      <p className="hint">{t("pause.hint")}</p>
+      <p className="hint">{t(words.hint)}</p>
       <div className="tr">
         <span className="grow">{t("pause.not1")}</span>
       </div>
@@ -162,14 +163,15 @@ function PauseSide({ p, state }: { p: TeamPauseProps; state: TeamState | null })
 function PauseQuestion({ p, state }: { p: TeamPauseProps; state: TeamState }) {
   const gone = goneOut(state.running);
   const names = memberNames(state.members, p.nameOf);
+  const words = pauseWords(state);
   return (
     <div className="dialog" role="dialog" aria-labelledby="pause-title" onKeyDown={(e) => e.key === "Escape" && p.onKeep()} data-testid="pause-dialog">
       <h3 id="pause-title">{t("pause.askTitle")}</h3>
       <p>
-        {t(state.members.length === 1 ? "pause.stops1" : "pause.stops", { names })} {routinesLine(state.routines)}
+        {t(words.stops(state.members.length), { names })} {routinesLine(state.routines)}
       </p>
       <p>
-        {jobsLine(state.running.length)} {t("pause.stays")}
+        {jobsLine(state.running.length)} {t(words.stays)}
       </p>
       {gone.length > 0 && (
         <ul className="gone">
@@ -178,7 +180,7 @@ function PauseQuestion({ p, state }: { p: TeamPauseProps; state: TeamState }) {
           ))}
         </ul>
       )}
-      <p className="mut small">{t("pause.keeps")}</p>
+      <p className="mut small">{t(words.keeps)}</p>
       <div className="chips">
         <button type="button" className="btn danger solid" disabled={p.ui.busy} onClick={p.onPause} data-testid="pause-confirm">
           {t("pause.button")}
@@ -391,7 +393,7 @@ export function TeamView({
           {state && !paused && pause.ui.ask && <PauseQuestion p={pause} state={state} />}
           {state && paused && (
             <div className="banner warn" role="status" data-testid="pause-banner">
-              {t("pause.banner", { since: sinceText(state.since ?? pause.nowMs / 1000, pause.nowMs) })}
+              {t(pauseWords(state).banner, { since: sinceText(state.since ?? pause.nowMs / 1000, pause.nowMs) })}
             </div>
           )}
           {state && !paused && pause.ui.back && (
