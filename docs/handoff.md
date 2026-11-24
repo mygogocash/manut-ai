@@ -95,15 +95,16 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 ## Next steps, in order
 
-1. Three helpers are paused by the account's 5-hour usage limit (24 Nov, 08:15; it resets at 11:00 Bangkok time) and
-   should resume by themselves; if one does not, send its thread a message to go on (`t3_thread_send`), as for item 9.
-   They run, each on its own branch from `pilot/week-1`; review each, merge it after the
+1. Four helpers are running (24 Nov). Items 20, 21 and 24 stopped at the account's 5-hour usage limit at 08:15 and
+   were sent on again at 09:35 in their own threads (`t3_thread_send`, as for item 9), once a new helper (item 25)
+   showed the limit no longer held. They run, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
      Opus);
    - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
      jobs from the API, routines' pause and Pause everyone (`feat/connected-whole-shop`, Opus);
-   - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet).
+   - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet);
+   - item 25, the shell naming the tool and the path on an agent's ask (`feat/ask-fields`, Opus; a Rust build).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
