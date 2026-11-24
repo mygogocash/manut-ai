@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
-import { pilotDeletionRoute, pilotRegistryKey, pilotRegistryRoute } from "./pilot-store";
+import { pilotDeletionRoute, pilotRegistryRoute } from "./pilot-store";
 import { shopsAuthRoute, wipeShopsTenant } from "./shops-store";
 
 type AuthEnv = {
@@ -498,10 +498,11 @@ export class AuthObject extends DurableObject {
     return Response.json({ routes: next.length });
   }
 
-  /// Wipes a tenant's sessions and the global index rows that name it.
-  /// Consent, the task index, attention items and the tombstone live in the
-  /// per-tenant TenantObject (M4 phase 1) and are wiped through the worker
-  /// alongside tasks, connections, and schedules.
+  /// Wipes a tenant's sessions and the global index rows that name it, all
+  /// but a pilot shop's registry row, which the tenant deletion removes last
+  /// of all (tenant-data.ts). Consent, the task index, attention items and
+  /// the tombstone live in the per-tenant TenantObject (M4 phase 1) and are
+  /// wiped through the worker alongside tasks, connections, and schedules.
   private async tenantWipe(request: Request): Promise<Response> {
     if (request.headers.get("x-wipe") !== "1") {
       return Response.json({ error: "forbidden" }, { status: 403 });
@@ -538,9 +539,10 @@ export class AuthObject extends DurableObject {
     // Company-console state for this tenant goes with the sessions: the
     // account entitlement and the membership index. Company records
     // themselves are owned by their companies, not by any one member.
-    // A pilot shop's registry row goes too, so a deleted shop leaves the
-    // operator console's list.
-    await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`, pilotRegistryKey(body.tenant)]);
+    // A pilot shop's registry row stays until the shop's own data is gone,
+    // so a deletion that stops part way never takes the shop off the
+    // operator console's list while data is left.
+    await this.ctx.storage.delete([`entitlement:${body.tenant}`, `memberships:${body.tenant}`]);
     // Inbound routes name the tenant, so they go too. The index is keyed by
     // provider account, not tenant, so this scans it; it holds one row per
     // connected workspace and stays small.

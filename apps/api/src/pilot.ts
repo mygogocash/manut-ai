@@ -121,7 +121,8 @@ export type ApprovalView = {
 /// - `awaiting_owner`: open, and nothing is deleted;
 /// - `deleting`: the owner said yes and the wipe has not finished (running,
 ///   or stopped part way until the operator's same request finishes it);
-/// - `deleted`: the wipe finished;
+/// - `deleted`: the shop's data is deleted (the wipe's last step, taking the
+///   shop off the console's list, may still be left for that same request);
 /// - `declined`: the owner kept the data, and nothing was deleted;
 /// - `expired`: nobody answered in time, and nothing was deleted.
 export type DeletionState = "awaiting_owner" | "deleting" | "deleted" | "declined" | "expired";
@@ -633,9 +634,12 @@ async function loadDeletion(env: PilotEnv, claim: DeletionClaim): Promise<Loaded
   return asLoaded((await response.json()) as StoredDeletion, claim);
 }
 
-/// When a deletion this confirmation started finished: the time on its record
-/// or, if the wipe finished but completing the record failed, the tenant's
-/// tombstone, which the wipe writes last. Null while anything is left.
+/// When the shop's data was deleted by the deletion this confirmation started:
+/// the time on its record or, if the wipe finished but completing the record
+/// failed, the tenant's tombstone, which the wipe writes last of the data.
+/// Null while any data is left. The owner's page reads `deleted` from here
+/// even while the deletion's very last step, taking the shop off the
+/// console's list, is still to run: none of the owner's data is left.
 async function deletionFinishedAt(env: PilotEnv, tenant: string, deletion: PilotDeletionRecord | null): Promise<string | null> {
   if (deletion?.deletedAt) return deletion.deletedAt;
   const response = await tenantCall(env, tenant, `/tombstone?tenant=${encodeURIComponent(tenant)}`);
@@ -761,7 +765,11 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   // Every other write names an existing pilot shop.
   if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
   const shop = await readShop(env, body.tenant);
-  if (!shop) return noShop(env, body.tenant);
+  if (!shop) {
+    // A deletion can stop after it has removed the shop's own record; the same request finishes it.
+    if (route === "POST /v1/admin/pilot/deletions") return finishDeletion(env, body.tenant, body);
+    return noShop(env, body.tenant);
+  }
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags, actor);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body, actor);
@@ -772,7 +780,9 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
 
 /// A tenant with no shop record: deleted, saying when and by whom, or never a
 /// shop at all. A shop whose wipe finished but whose record could not be
-/// completed is known by the tombstone the wipe writes last.
+/// completed is known by the tombstone the wipe writes last of the shop's
+/// data; so is one whose deletion has only its last step left, taking the
+/// shop off the console's list, since its data is gone.
 async function noShop(env: PilotEnv, tenant: string): Promise<Response> {
   const deletion = (await readDeletionState(env, tenant))?.deletion ?? null;
   const deletedAt = deletion ? await deletionFinishedAt(env, tenant, deletion).catch(() => null) : null;
@@ -788,6 +798,41 @@ async function readDeletionState(env: PilotEnv, tenant: string): Promise<StoredD
   const response = await authCall(env, `/pilot-deletions?tenant=${encodeURIComponent(tenant)}`);
   if (!response.ok) return null;
   return (await response.json()) as StoredDeletion;
+}
+
+/// The shop's deletion when one has started and not finished: a shop that never went live is wiped as its deletion is
+/// recorded, and a live one once its owner says yes. Null when there is none, when the owner has not said yes (the
+/// confirmation waits, was declined or expired), or once the record says it finished.
+function unfinishedDeletion({ deletion, confirmation }: StoredDeletion): PilotDeletionRecord | null {
+  if (!deletion || deletion.deletedAt) return null;
+  if (!deletion.confirmationId) return deletion;
+  return approvedDeletion(confirmation) && confirmation?.request.id === deletion.confirmationId ? deletion : null;
+}
+
+/// Whether the shop is still on the registry, the operator console's list. Taking it off is the deletion's last step
+/// (tenant-data.ts), so a deletion that started is finished once the shop is not. Null when it cannot be read.
+async function isRegistered(env: PilotEnv, tenant: string): Promise<boolean | null> {
+  const response = await authCall(env, `/pilot-shops?tenant=${encodeURIComponent(tenant)}`);
+  if (!response.ok) return null;
+  return ((await response.json()) as { registered?: unknown }).registered === true;
+}
+
+/// `POST /v1/admin/pilot/deletions` for a tenant with no shop record. A deletion can stop after it has removed the
+/// record and before its last step, and the console still lists the shop as deleting (`listShops`), so the same
+/// request finishes it: the record of the deletion says one started, and the shop is still on the registry. The name
+/// is checked against that record, which kept the shop's name, so a request for the wrong shop still deletes nothing.
+/// Anything else answers as every route does for a shop that is not there: deleted, or never a shop.
+async function finishDeletion(env: PilotEnv, tenant: string, body: Record<string, unknown>): Promise<Response> {
+  const stored = await readDeletionState(env, tenant);
+  if (!stored) return json({ error: "audit_unavailable" }, 503);
+  const started = unfinishedDeletion(stored);
+  if (!started) return noShop(env, tenant);
+  const listed = await isRegistered(env, tenant);
+  if (listed === null) return json({ error: "shops_unavailable" }, 503);
+  // Off the registry, the wipe finished and only completing its record did not; the tombstone says when.
+  if (!listed) return noShop(env, tenant);
+  if (!sameName(body.confirmName, started.name)) return json({ error: "name_mismatch" }, 409);
+  return (await wipeShop(env, started)).response;
 }
 
 function writeDeletion(env: PilotEnv, record: PilotDeletionRecord): Promise<Response> {
@@ -818,11 +863,13 @@ function sameName(typed: unknown, stored: string): boolean {
 /// Deletes everything stored for one pilot shop, at the shop's request,
 /// through the same tenant deletion a shop's own session uses: its task with
 /// every reply, the sealed LINE secrets and the webhook route, messages,
-/// payments and consent, then its registry row, leaving a tombstone that
-/// records when. Nothing can bring the data back, so the operator types the
+/// payments and consent, leaving a tombstone that records when, and last its
+/// registry row. Nothing can bring the data back, so the operator types the
 /// shop's exact name as well as sending its id, and an id pasted for the
 /// wrong shop deletes nothing. A partial wipe answers 500 wipe_incomplete
-/// naming what is left, and sending the same request again finishes it.
+/// naming what is left; the shop stays on the console's list as deleting,
+/// and sending the same request again finishes it (`finishDeletion` once the
+/// wipe has taken the shop's own record).
 /// Pilot shops belong to no company, so unlike the session route there are
 /// no company indexes to prune afterwards.
 ///
@@ -831,7 +878,9 @@ function sameName(typed: unknown, stored: string): boolean {
 /// the link to send the owner, the same link while that confirmation waits.
 /// The owner's yes runs the deletion. Once the owner has said yes, this same
 /// request finishes a wipe that stopped part way, without asking again. A shop
-/// that never went live is deleted at once, as before.
+/// that never went live is deleted at once, as before, and its deletion that
+/// stopped part way is finished as it was asked for, unless the shop has gone
+/// live since, when its owner is asked.
 ///
 /// The record of the deletion is written before anything is wiped, and a
 /// deletion that cannot be recorded does not start. It is completed with the
@@ -849,6 +898,10 @@ async function deleteShop(env: PilotEnv, shop: PilotShopRecord, body: Record<str
   const live = await isLive(env, shop);
   if (live === null) return json({ error: "consent_unavailable" }, 503);
   if (live) return askOwner(env, shop, ctx);
+  // A deletion of this shop that started and stopped part way is the same request: its record keeps who asked and
+  // when, so finishing it neither moves them nor logs a second request.
+  const started = unfinishedDeletion(current);
+  if (started) return (await wipeShop(env, started)).response;
   const record: PilotDeletionRecord = {
     tenant: shop.tenant,
     name: shop.name,
@@ -970,7 +1023,16 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
 /// Every pilot shop, with its latest deletion request when it has one, so the
 /// console shows a shop waiting for its owner after any reload. A deletion
 /// request that cannot be read fails the list rather than vanishing from it: a
-/// shop shown without one reads as nobody having asked.
+/// shop shown without one reads as nobody having asked. A shop whose record
+/// cannot be read fails it too, rather than drop off the list.
+///
+/// A shop stays on the registry until its deletion has finished, because
+/// taking it off is the deletion's last step (tenant-data.ts). So a shop whose
+/// deletion started and stopped part way is still here, marked `deleting`,
+/// and the operator's same deletion request finishes it. If the deletion
+/// stopped after it had removed the shop's own record, the row is what the
+/// record of the deletion kept, the tenant and the shop's name: enough to
+/// find the shop and send the request again, and nothing of its data.
 async function listShops(env: PilotEnv): Promise<Response> {
   const registry = await authCall(env, "/pilot-shops");
   if (!registry.ok) return json({ error: "shops_unavailable" }, 503);
@@ -978,12 +1040,18 @@ async function listShops(env: PilotEnv): Promise<Response> {
   const shops = await Promise.all(
     tenants.map(async (tenant) => {
       const [shop, consent, stored] = await Promise.all([
-        readShop(env, tenant),
+        listedShopRecord(env, tenant),
         shopConsent(env, tenant),
         readDeletionState(env, tenant),
       ]);
-      if (!shop) return null;
       if (!stored) throw new Error("deletion_unavailable");
+      const started = unfinishedDeletion(stored);
+      if (!shop) {
+        // With no deletion under way here, only the session route's deletion, which keeps no pilot record, can have
+        // stopped part way to leave such a row. It is not listed, as before, and running that deletion again ends it.
+        if (!started) return null;
+        return { tenant, name: started.name, ownerName: "", consent: false, deleting: { shopRecord: false } };
+      }
       const deletion = await shopDeletion(env, tenant, stored);
       return {
         tenant,
@@ -993,11 +1061,21 @@ async function listShops(env: PilotEnv): Promise<Response> {
         ...(shop.template ? { template: shop.template } : {}),
         consent,
         ...(deletion ? { deletion } : {}),
+        ...(started ? { deleting: { shopRecord: true } } : {}),
       };
     }),
   ).catch(() => null);
   if (!shops) return json({ error: "shops_unavailable" }, 503);
   return json({ shops: shops.filter((shop) => shop !== null) });
+}
+
+/// The shop's record for the list: null when it has none, which a deletion that stopped part way can leave, and an
+/// error when it cannot be read, so the list fails rather than leave a shop out.
+async function listedShopRecord(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
+  const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`shop_read_${response.status}`);
+  return ((await response.json()) as { shop: PilotShopRecord }).shop;
 }
 
 /// The shop's current owner confirmation as the console shows it, its link

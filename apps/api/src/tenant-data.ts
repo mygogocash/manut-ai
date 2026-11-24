@@ -244,14 +244,25 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
 }
 ///
 /// The order is the safety property. Tasks, connections and schedules go
-/// first; the tenant's sessions go next; the task index and consent go last,
-/// replaced by the tombstone. Any failure stops the run before the sessions
-/// and the index are touched, answering 500 wipe_incomplete with the parts
-/// that failed. The surviving session lets the user run the delete again and
-/// the surviving index lets that run find every remaining task. A tombstone
-/// written over surviving credentials or schedules would tell the user their
-/// data was gone while sealed connector secrets, or alarms that keep minting
-/// tasks, lived on.
+/// first; the tenant's sessions go next; the task index and consent go last
+/// of the data, replaced by the tombstone. Any failure stops the run before
+/// the sessions and the index are touched, answering 500 wipe_incomplete with
+/// the parts that failed. The surviving session lets the user run the delete
+/// again and the surviving index lets that run find every remaining task. A
+/// tombstone written over surviving credentials or schedules would tell the
+/// user their data was gone while sealed connector secrets, or alarms that
+/// keep minting tasks, lived on.
+///
+/// After the tombstone, and only once it is written, a pilot shop's row in
+/// the operator console's registry goes, as the very last step. The registry
+/// is how an operator finds a shop, and so how they find a deletion that
+/// stopped part way to send it again: it indexes shops as the task index
+/// indexes tasks, and goes last for the same reason. A run that stops before
+/// it leaves the shop listed as deleting until the same request finishes it.
+/// Every step answers again after its own wipe (the index reads as empty, the
+/// wipes find nothing more to remove), so a second run after any stop,
+/// including one after the tombstone, runs to the end. Other tenants have no
+/// registry row, and removing none changes nothing.
 export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<Response> {
   const indexResp = await tenantCall(env, tenant, `/index?tenant=${encodeURIComponent(tenant)}`);
   // An unreadable index is not an empty one: wiping nothing and then the
@@ -307,9 +318,9 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
   const connections = (await credResp.json()) as { connectionsWiped?: number };
   const sched = (await schedResp.json()) as { schedulesWiped?: number; occurrencesWiped?: number };
   // Sessions before the tombstone: a live session must never survive its
-  // tenant's deletion. The tombstone goes last (TenantObject below); if it
-  // fails, the surviving index keeps every remaining task retryable and the
-  // delete can run again.
+  // tenant's deletion. The tombstone goes last of the data (TenantObject
+  // below); if it fails, the surviving index keeps every remaining task
+  // retryable and the delete can run again.
   const authResp = await authCall(env, "/tenant-wipe", {
     method: "POST",
     headers: { "content-type": "application/json", "x-wipe": "1" },
@@ -328,6 +339,15 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     return json({ error: "wipe_incomplete", tasksWiped, failed: ["index"] }, 500);
   }
   const wiped = (await tenantResp.json()) as { deletedAt?: string };
+  // Last of all, the shop leaves the operator's list (the order above says why). If this fails, the data is gone
+  // but the shop stays listed as deleting, and the same request removes it.
+  const registryResp = await authCall(env, `/pilot-shops?tenant=${encodeURIComponent(tenant)}`, {
+    method: "DELETE",
+    headers: { "x-wipe": "1" },
+  });
+  if (!registryResp.ok) {
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["registry"] }, 500);
+  }
   return json({
     tasksWiped,
     connectionsWiped: connections.connectionsWiped ?? 0,

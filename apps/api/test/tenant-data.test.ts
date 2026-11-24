@@ -11,7 +11,7 @@ import { tenantDelete, tenantExport, tenantPrune, type TenantDataEnv } from "../
 const TENANT = "apple:tenant-data-sub";
 const TASK_IDS = ["task-a", "task-b"];
 
-type Call = { ns: string; name: string; method: string; path: string; tenant: string };
+type Call = { ns: string; name: string; method: string; path: string; tenant: string; url: string };
 
 /// Canned answers keyed "<NS> <METHOD> <path>", or "<NS>:<name> <METHOD>
 /// <path>" for one object (a single task). Anything unlisted is a test bug
@@ -49,6 +49,7 @@ function defaults(): Record<string, () => Response> {
     "SCHEDULES GET /schedules": () => Response.json({ schedules: [{ id: "sched-1" }] }),
     "SCHEDULES POST /tenant-wipe": () => Response.json({ schedulesWiped: 1, occurrencesWiped: 3 }),
     "AUTH POST /tenant-wipe": () => Response.json({ sessionsWiped: 1 }),
+    "AUTH DELETE /pilot-shops": () => Response.json({ removed: true }),
   };
 }
 
@@ -66,6 +67,7 @@ function stubEnv(overrides: Record<string, () => Response> = {}) {
           method: request.method,
           path,
           tenant: request.headers.get("x-tenant") ?? "",
+          url: request.url,
         });
         const answer = table[`${ns}:${name} ${request.method} ${path}`] ?? table[`${ns} ${request.method} ${path}`];
         return answer ? answer() : Response.json({ error: "unexpected_call" }, { status: 599 });
@@ -99,7 +101,7 @@ describe("tenant deletion fan-out", () => {
       sessionsWiped: 1,
       deletedAt: "2026-09-24T00:00:00.000Z",
     });
-    // Data first, sessions next, the index and tombstone last.
+    // Data first, sessions next, then the index and tombstone, and last of all the shop's row in the operator's list.
     expect(calls.filter((call) => call.method !== "GET").map((call) => `${call.ns} ${call.path}`)).toEqual([
       "TASK /wipe",
       "TASK /wipe",
@@ -107,7 +109,26 @@ describe("tenant deletion fan-out", () => {
       "SCHEDULES /tenant-wipe",
       "AUTH /tenant-wipe",
       "TENANT /tenant-wipe",
+      "AUTH /pilot-shops",
     ]);
+    // The row is the caller's own, named by the tenant the deletion runs for.
+    expect(calls.at(-1)?.url).toBe(`https://auth/pilot-shops?tenant=${encodeURIComponent(TENANT)}`);
+  });
+
+  it("keeps the shop on the operator's list when its own object's wipe fails", async () => {
+    const { env, reached } = stubEnv({ "TENANT POST /tenant-wipe": fail });
+    const response = await tenantDelete(env, TENANT);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "wipe_incomplete", tasksWiped: 2, failed: ["index"] });
+    expect(reached("AUTH", "DELETE", "/pilot-shops")).toBe(false);
+  });
+
+  it("names the registry when only taking the shop off the list fails, after the tombstone", async () => {
+    const { env, reached } = stubEnv({ "AUTH DELETE /pilot-shops": fail });
+    const response = await tenantDelete(env, TENANT);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "wipe_incomplete", tasksWiped: 2, failed: ["registry"] });
+    expect(reached("TENANT", "POST", "/tenant-wipe")).toBe(true);
   });
 
   it("fails loudly when the credential vault wipe fails, and keeps the session and index", async () => {
@@ -150,6 +171,7 @@ describe("tenant deletion fan-out", () => {
     expect(response.status).toBe(500);
     expect(((await response.json()) as { failed?: string[] }).failed).toEqual(["sessions"]);
     expect(reached("TENANT", "POST", "/tenant-wipe")).toBe(false);
+    expect(reached("AUTH", "DELETE", "/pilot-shops")).toBe(false);
   });
 });
 

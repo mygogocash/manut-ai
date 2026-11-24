@@ -830,15 +830,17 @@ async function deletionRecord(tenant: string) {
 }
 
 async function listedShop(tenant: string) {
-  const listed = await admin<{ shops: { tenant: string; deletion?: Record<string, unknown> }[] }>("GET",
-    "/v1/admin/pilot/shops");
+  const listed = await admin<{ shops: { tenant: string; deletion?: Record<string, unknown>;
+    deleting?: { shopRecord: boolean } }[] }>("GET", "/v1/admin/pilot/shops");
   expect(listed.status).toBe(200);
   return listed.body.shops.find((entry) => entry.tenant === tenant);
 }
 
 /// The Worker's environment with one kind of call to one namespace answering 500 the next `times` times, as when an
-/// object cannot be reached part way through. Every other call reaches the real objects.
-function failingCalls(binding: "TASK" | "TENANT", method: string, path: string, times: number): Env {
+/// object cannot be reached part way through. With `lost`, the object does the work and only its answer is lost on
+/// the way back. Every other call reaches the real objects.
+function failingCalls(binding: "TASK" | "TENANT" | "AUTH" | "CRED" | "SCHEDULES", method: string, path: string,
+  times: number, lost = false): Env {
   let left = times;
   const namespace = bindings[binding];
   const wrapped = {
@@ -850,6 +852,7 @@ function failingCalls(binding: "TASK" | "TENANT", method: string, path: string, 
           const request = new Request(input, init);
           if (request.method === method && new URL(request.url).pathname === path && left > 0) {
             left--;
+            if (lost) await (await stub.fetch(request)).arrayBuffer();
             return Response.json({ error: "fixture_call_failed" }, { status: 500 });
           }
           return stub.fetch(request);
@@ -1215,6 +1218,194 @@ describe("deleting a live shop needs its owner's confirmation", () => {
     }
     expect(keys).toHaveLength(2);
     expect((await deletionView(token)).body.state).toBe("awaiting_owner");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A deletion that stops part way stays on the operator's list until the same request finishes it
+// ---------------------------------------------------------------------------
+
+/// Whether the shop registry in AuthObject still lists the tenant.
+async function registered(tenant: string): Promise<boolean> {
+  const response = await authCall(bindings, `/pilot-shops?tenant=${encodeURIComponent(tenant)}`);
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { registered: boolean }).registered;
+}
+
+/// A shop whose own record a deletion removed, as listed from what its record of the deletion keeps.
+const shopRecordGone = (tenant: string, name: string) =>
+  ({ tenant, name, ownerName: "", consent: false, deleting: { shopRecord: false } });
+
+describe("a deletion that stops part way", () => {
+  it("keeps a shop whose wipe stopped at its own object on the list as deleting, and the same request finishes it", async () => {
+    const { shop } = await liveShopWithData();
+    const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+
+    // The owner says yes, and every part of the shop is wiped but its own object, which cannot be reached.
+    const decided = await decideDeletion(token, true, failingCalls("TENANT", "POST", "/tenant-wipe", 1));
+    expect(decided).toMatchObject({ status: 200, body: { state: "deleting" } });
+    expect(await listedShop(shop.tenant)).toMatchObject({ tenant: shop.tenant, name: "Baan Somtam",
+      ownerName: "Khun Ploy", deletion: { state: "deleting" }, deleting: { shopRecord: true } });
+    expect(await messages(shop.tenant)).toHaveLength(2);
+
+    const finished = await askToDelete(shop.tenant);
+    expect(finished).toMatchObject({ status: 200, body: { deletedAt: expect.any(String) } });
+    expect(await listedShop(shop.tenant)).toBeUndefined();
+    expect(await registered(shop.tenant)).toBe(false);
+    expect((await deletionView(token)).body.state).toBe("deleted");
+    expect((await deletionRecord(shop.tenant)).deletion?.deletedAt).toBe(finished.body.deletedAt);
+  });
+
+  // Every step of the deletion, in its order, failing once while the owner's yes runs it. A `lost` step did its work
+  // and only its answer went missing. Once the shop's own object is wiped its data is gone, so the owner's page says
+  // deleted, while the console still lists the shop, from its record of the deletion, until the last step is done.
+  const steps = [
+    { step: "the index read", fail: () => failingCalls("TENANT", "GET", "/index", 1), dataGone: false },
+    { step: "a task wipe", fail: () => failingCalls("TASK", "DELETE", "/wipe", 1), dataGone: false },
+    { step: "the vault wipe", fail: () => failingCalls("CRED", "POST", "/tenant-wipe", 1), dataGone: false },
+    { step: "the schedules wipe", fail: () => failingCalls("SCHEDULES", "POST", "/tenant-wipe", 1), dataGone: false },
+    { step: "the sessions wipe", fail: () => failingCalls("AUTH", "POST", "/tenant-wipe", 1), dataGone: false },
+    { step: "the shop's own wipe", fail: () => failingCalls("TENANT", "POST", "/tenant-wipe", 1), dataGone: false },
+    { step: "the answer of the shop's own wipe, after its tombstone",
+      fail: () => failingCalls("TENANT", "POST", "/tenant-wipe", 1, true), dataGone: true },
+    { step: "taking the shop off the list", fail: () => failingCalls("AUTH", "DELETE", "/pilot-shops", 1),
+      dataGone: true },
+  ];
+
+  it.each(steps)("finishes when the same request runs again after $step stopped it", async ({ fail, dataGone }) => {
+    const { shop } = await liveShopWithData();
+    const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+
+    const decided = await decideDeletion(token, true, fail());
+    expect(decided).toMatchObject({ status: 200, body: { state: dataGone ? "deleted" : "deleting" } });
+    expect(await registered(shop.tenant)).toBe(true);
+    expect(await listedShop(shop.tenant)).toMatchObject(dataGone
+      ? shopRecordGone(shop.tenant, "Baan Somtam")
+      : { ownerName: "Khun Ploy", deletion: { state: "deleting" }, deleting: { shopRecord: true } });
+
+    const finished = await askToDelete(shop.tenant);
+    expect(finished).toMatchObject({ status: 200, body: { deletedAt: expect.any(String) } });
+    expect(await listedShop(shop.tenant)).toBeUndefined();
+    expect(await registered(shop.tenant)).toBe(false);
+    expect((await deletionView(token)).body.state).toBe("deleted");
+    expect((await admin("GET", `/v1/admin/pilot/messages?tenant=${encodeURIComponent(shop.tenant)}`)).body)
+      .toMatchObject({ error: "tenant_deleted", deletedAt: finished.body.deletedAt });
+    expect((await askToDelete(shop.tenant)).body).toMatchObject({ error: "tenant_deleted" });
+  });
+
+  it("lists a shop whose own record is gone from its record of the deletion, and finishes it only by that name", async () => {
+    const { shop } = await liveShopWithData();
+    const token = deletionTokenOf((await askToDelete(shop.tenant)).body.confirmUrl);
+    // The shop's own wipe stops part way, after the shop's record and before the rest of its object.
+    const tenantObject = bindings.TENANT.get(bindings.TENANT.idFromName(`t:${shop.tenant}`));
+    await runInDurableObject(tenantObject, async (_instance, state) => {
+      expect(await state.storage.delete(`pilot-shop:${encodeURIComponent(shop.tenant)}`)).toBe(true);
+    });
+    expect((await decideDeletion(token, true, failingCalls("TENANT", "POST", "/tenant-wipe", 1))).body.state)
+      .toBe("deleting");
+    expect(await listedShop(shop.tenant)).toEqual(shopRecordGone(shop.tenant, "Baan Somtam"));
+
+    for (const confirmName of ["Baan Som", "Khun Ploy", undefined]) {
+      expect(await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName }))
+        .toEqual({ status: 409, body: { error: "name_mismatch" } });
+    }
+    await runInDurableObject(tenantObject, async (_instance, state) => {
+      expect((await state.storage.list({ prefix: "pilot-msg:" })).size).toBe(2);
+    });
+
+    const finished = await askToDelete(shop.tenant, " Baan Somtam ");
+    expect(finished.status).toBe(200);
+    expect(await listedShop(shop.tenant)).toBeUndefined();
+    await runInDurableObject(tenantObject, async (_instance, state) => {
+      expect([...(await state.storage.list({ prefix: "pilot-" })).keys()]).toEqual([]);
+    });
+    expect((await deletionView(token)).body.state).toBe("deleted");
+  });
+
+  it("keeps a shop that never went live on the list as deleting too, and finishes it as it was asked for", async () => {
+    const shop = await newShop("Sabai Tea");
+    const stopped = await adminWith(failingCalls("TENANT", "POST", "/tenant-wipe", 1), "POST",
+      "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Sabai Tea" }, "ops@manut.test");
+    expect(stopped).toEqual({ status: 500, body: { error: "wipe_incomplete", tasksWiped: 0, failed: ["index"] } });
+    // No owner was asked, so there is no link: only that the deletion has not finished.
+    expect(await listedShop(shop.tenant)).toEqual({ tenant: shop.tenant, name: "Sabai Tea", ownerName: "Khun Dao",
+      consent: false, deleting: { shopRecord: true } });
+    const { deletion: asked } = await deletionRecord(shop.tenant);
+
+    const finished = await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Sabai Tea" });
+    expect(finished).toMatchObject({ status: 200, body: { deletedAt: expect.any(String) } });
+    expect(await listedShop(shop.tenant)).toBeUndefined();
+    // The record keeps who asked and when, and says when the deletion finished.
+    expect((await deletionRecord(shop.tenant)).deletion).toEqual({ ...asked, deletedAt: finished.body.deletedAt,
+      counts: expect.any(Object) });
+    expect(asked).toMatchObject({ deletedBy: "ops@manut.test" });
+  });
+
+  it("asks the owner of a shop that went live after its deletion stopped, rather than finish it", async () => {
+    const shop = await newShop("Baan Somtam");
+    const stopped = await adminWith(failingCalls("TENANT", "GET", "/index", 1), "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" });
+    expect(stopped.body).toMatchObject({ error: "wipe_incomplete", failed: ["index-read"] });
+    expect((await listedShop(shop.tenant))?.deleting).toEqual({ shopRecord: true });
+    // Consent is only ever recorded through an approval link; written here directly, as that route writes it.
+    expect((await tenantCall(bindings, shop.tenant, "/consent", { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenant: shop.tenant, cloudWork: true }) })).status).toBe(200);
+
+    expect((await askToDelete(shop.tenant)).status).toBe(202);
+    expect((await listedShop(shop.tenant))?.deleting).toBeUndefined();
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).status).toBe(200);
+  });
+
+  it("runs again cleanly once it has finished: every object answers its own wipe a second time", async () => {
+    const { shop } = await liveShopWithData();
+    expect(await (await tenantDelete(bindings, shop.tenant)).json()).toMatchObject({ tasksWiped: 1, connectionsWiped: 1 });
+    const again = await tenantDelete(bindings, shop.tenant);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ tasksWiped: 0, connectionsWiped: 0, schedulesWiped: 0, occurrencesWiped: 0,
+      sessionsWiped: 0, deletedAt: expect.any(String) });
+  });
+
+  it("answers as before for a shop whose deletion finished, or that never was one", async () => {
+    const shop = await newShop("Sabai Tea");
+    expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Sabai Tea" })).status)
+      .toBe(200);
+    expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: shop.tenant, confirmName: "Sabai Tea" })).body)
+      .toMatchObject({ error: "tenant_deleted" });
+    expect((await admin("POST", "/v1/admin/pilot/deletions", { tenant: "pilot:nobody", confirmName: "Sabai Tea" })).body)
+      .toEqual({ error: "shop_not_found" });
+  });
+
+  it("fails the list rather than leave out a shop whose record cannot be read", async () => {
+    const shop = await newShop("Sabai Tea");
+    expect(await adminWith(failingCalls("TENANT", "GET", "/pilot/shop", 1), "GET", "/v1/admin/pilot/shops"))
+      .toEqual({ status: 503, body: { error: "shops_unavailable" } });
+    expect(await listedShop(shop.tenant)).toBeDefined();
+  });
+});
+
+describe("the shop registry", () => {
+  it("takes a shop off only at the deletion's last step, and only the shop it names", async () => {
+    const one = await newShop("Sabai Tea");
+    const two = await newShop("Khao Man Gai Lek");
+    expect(await registered(one.tenant)).toBe(true);
+    // The sessions step leaves the row, which a deletion now removes last of all.
+    expect((await authCall(bindings, "/tenant-wipe", { method: "POST",
+      headers: { "content-type": "application/json", "x-wipe": "1" },
+      body: JSON.stringify({ tenant: one.tenant }) })).status).toBe(200);
+    expect(await registered(one.tenant)).toBe(true);
+
+    const remove = (headers: Record<string, string>, tenant = one.tenant) =>
+      authCall(bindings, `/pilot-shops?tenant=${encodeURIComponent(tenant)}`, { method: "DELETE", headers });
+    expect((await remove({})).status).toBe(403);
+    expect((await remove({ "x-admin": "1" })).status).toBe(403);
+    expect((await authCall(bindings, "/pilot-shops", { method: "DELETE", headers: { "x-wipe": "1" } })).status)
+      .toBe(400);
+    expect(await registered(one.tenant)).toBe(true);
+    expect((await remove({ "x-wipe": "1" })).status).toBe(200);
+    expect(await registered(one.tenant)).toBe(false);
+    expect(await registered(two.tenant)).toBe(true);
+    expect((await authCall(bindings, "/pilot-shops?tenant=")).status).toBe(400);
   });
 });
 
