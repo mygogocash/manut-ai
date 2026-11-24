@@ -11,11 +11,18 @@
 /// (docs/several-shops.md). Every route here works on that shop's requests and no other, and a shop or a role named in
 /// the listing's query is refused rather than read.
 ///
-/// The scope is the shop's own, as for the tenant export: every task in the shop's index, each read with only the
-/// shop's tenant, so the task object's tenancy rules apply as they do to every task read. A task of another tenant
-/// planted in the index answers 404 and is skipped, and an action of another tenant inside the shop's own task is never
-/// listed or decided (`/requests` in task-object.ts). Fellow members' company tasks open only to a verified company
-/// assertion, which these routes never make, so they are not reached here.
+/// The scope is the shop's own, as for the tenant export: the tasks in the shop's index, each read with only the shop's
+/// tenant, so the task object's tenancy rules apply as they do to every task read. A task of another tenant planted in
+/// the index answers 404 and is skipped, and an action of another tenant inside the shop's own task is never listed or
+/// decided (`/requests` in task-object.ts). Fellow members' company tasks open only to a verified company assertion,
+/// which these routes never make, so they are not reached here.
+///
+/// Which of those tasks to read comes from the shop's approval lookup (approval-index.ts): the tasks that may hold an
+/// open request, the tasks of the newest settled ones, or the one task that holds a request being decided. The lookup
+/// only says where to look, and names only tasks in the shop's index; every answer is approval-core's record as the task
+/// holds it. So the cost of a read grows with what is open or asked for, not with every task the shop ever had. Until
+/// the lookup holds every request the shop had before it existed, its backfill is not done and the routes walk the
+/// index as they always did, running one step of the backfill beside the walk.
 ///
 /// Each record carries the kind its request was opened with, which the task object sets from the operation it decides
 /// (`REQUEST_KINDS` in task-object.ts): a LINE reply is `reply`, a worker's `linear.issue.create` is `command`. A plain
@@ -23,6 +30,15 @@
 /// and is not listed.
 
 import { decodeRecord, encodeRecord, encodeStanding, type ApprovalRecord, type Standing } from "@manut/approval-core";
+import {
+  openEntries,
+  reportLearned,
+  runBackfillStep,
+  settledEntries,
+  whereIs,
+  type Learned,
+  type Located,
+} from "./approval-index";
 import { readJsonBody } from "./body";
 import { helperBooksDetail, isBooksDetail } from "./books-detail";
 import { decideRequest, type JobFlags, type JobFlowEnv } from "./job-flow";
@@ -36,6 +52,7 @@ import {
   type Caller,
   type PeopleEnv,
 } from "./people";
+import { MAX_NAMED_REQUESTS } from "./task-object";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
 /// How many recent approvals one answer holds when the query does not say, and the most it may ask for.
@@ -45,7 +62,9 @@ const MAX_BODY_BYTES = 16 * 1024;
 /// The longest request id a route looks up: every request shares its action's id, a UUID.
 const MAX_REQUEST_ID = 128;
 
-type Found = { taskId: string; record: ApprovalRecord; standing: Standing };
+type Listed = { record: ApprovalRecord; standing: Standing };
+type Found = { taskId: string } & Listed;
+type ReadEnv = Pick<TenantDataEnv, "TASK" | "TENANT">;
 
 export type ApprovalsEnv = PeopleEnv & JobFlowEnv;
 
@@ -147,37 +166,198 @@ async function passOn(request: Request, env: ApprovalsEnv, caller: Caller, reque
   found.taskId, body.note);
 }
 
-/// The task in the shop's index that holds the request, with its record. Each task is read with the shop as its tenant,
-/// so a task of another shop, even one planted in this shop's index, answers 404 and is passed over, and a request of
-/// another shop is never found. An index or a task that cannot be read is 503, never taken for a missing request.
-async function findRequest(env: Pick<TenantDataEnv, "TASK" | "TENANT">, shop: string, requestId: string):
+/// One request as a task holds it for the shop, read with the shop as its tenant: null when the task does not hold it
+/// for the shop (no such request, or the task is another shop's or was never made), undefined when the task cannot be
+/// read.
+async function readOne(env: Pick<TenantDataEnv, "TASK">, shop: string, taskId: string, requestId: string):
+  Promise<ApprovalRecord | null | undefined> {
+  const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request(
+    `https://task/requests/${encodeURIComponent(requestId)}`, { headers: { "x-tenant": shop } })).catch(() => null);
+  if (response?.status === 404) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response?.ok) {
+    await response?.body?.cancel();
+    return undefined;
+  }
+  return ((await response.json()) as { record: ApprovalRecord }).record;
+}
+
+/// The task that holds the request, with its record: the one the shop's approval lookup names, read with the shop as
+/// its tenant, so a task of another shop, even one an entry names, answers 404 and a request of another shop is never
+/// found. Once the lookup is ready, a request it does not lead to is not the shop's (404). Until then, the shop's index
+/// is walked as before, beside a step of the lookup's backfill. A lookup or a task that cannot be read is 503, never
+/// taken for a missing request.
+async function findRequest(env: ReadEnv, shop: string, requestId: string):
+  Promise<{ taskId: string; record: ApprovalRecord } | Response> {
+  const where = await whereIs(env, shop, requestId);
+  if (!where) return json({ error: "approvals_unavailable" }, 503);
+  if (where.taskId !== null) {
+    const record = await readOne(env, shop, where.taskId, requestId);
+    if (record === undefined) return json({ error: "approvals_unavailable" }, 503);
+    if (record !== null) return { taskId: where.taskId, record };
+  }
+  if (where.ready) return json({ error: "not_found" }, 404);
+  const [found] = await Promise.all([walkFind(env, shop, requestId), runBackfillStep(env, shop)]);
+  return found;
+}
+
+/// `findRequest` by walking every task in the shop's index, while the lookup's backfill runs.
+async function walkFind(env: ReadEnv, shop: string, requestId: string):
   Promise<{ taskId: string; record: ApprovalRecord } | Response> {
   const index = await tenantCall(env, shop, `/index?tenant=${encodeURIComponent(shop)}`).catch(() => null);
   if (!index?.ok) return json({ error: "approvals_unavailable" }, 503);
   const { taskIds } = (await index.json()) as { taskIds?: string[] };
   for (const taskId of taskIds ?? []) {
-    const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request(
-      `https://task/requests/${encodeURIComponent(requestId)}`, { headers: { "x-tenant": shop } })).catch(() => null);
-    if (response?.status === 404) {
-      await response.body?.cancel();
-      continue;
-    }
-    if (!response?.ok) return json({ error: "approvals_unavailable" }, 503);
-    const { record } = (await response.json()) as { record: ApprovalRecord };
+    const record = await readOne(env, shop, taskId, requestId);
+    if (record === null) continue;
+    if (record === undefined) return json({ error: "approvals_unavailable" }, 503);
     return { taskId, record };
   }
   return json({ error: "not_found" }, 404);
 }
 
+/// Every request each task in the shop's index holds for the shop, task by task as the index keeps them, or undefined
+/// when the index or a task cannot be read. The create route indexes a task before creating it, so the index may name
+/// one that never came to exist; a task of another tenant answers the same, and both are passed over.
+async function walkAll(env: ReadEnv, tenant: string): Promise<Found[] | undefined> {
+  const index = await tenantCall(env, tenant, `/index?tenant=${encodeURIComponent(tenant)}`).catch(() => null);
+  if (!index?.ok) return undefined;
+  const { taskIds } = (await index.json()) as { taskIds?: string[] };
+  const found: Found[] = [];
+  for (const taskId of taskIds ?? []) {
+    const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request("https://task/requests",
+      { headers: { "x-tenant": tenant } })).catch(() => null);
+    if (response?.status === 404) continue;
+    if (!response?.ok) return undefined;
+    const { requests } = (await response.json()) as { requests: Listed[] };
+    for (const entry of requests) found.push({ taskId, ...entry });
+  }
+  return found;
+}
+
+/// The walk, while the lookup's backfill is not done, with one step of the backfill beside it.
+async function walkWhileBackfilling(env: ReadEnv, tenant: string): Promise<Found[] | undefined> {
+  const [found] = await Promise.all([walkAll(env, tenant), runBackfillStep(env, tenant)]);
+  return found;
+}
+
+/// The requests the lookup names, each read from the task its entry names, at most `MAX_NAMED_REQUESTS` to a call and
+/// only those, with the shop as the tenant: what the tasks hold, and every name a task did not answer (its entry is
+/// stale, or the task is not the shop's). Undefined when any task cannot be read, since an approval left out would read
+/// as nobody having asked.
+async function readNamed(env: Pick<TenantDataEnv, "TASK">, tenant: string, named: readonly Located[]):
+  Promise<{ found: Found[]; missing: Located[] } | undefined> {
+  const byTask = new Map<string, Set<string>>();
+  for (const { requestId, taskId } of named) byTask.set(taskId, (byTask.get(taskId) ?? new Set()).add(requestId));
+  const calls: { taskId: string; ids: string[] }[] = [];
+  for (const [taskId, ids] of byTask) {
+    const all = [...ids];
+    for (let i = 0; i < all.length; i += MAX_NAMED_REQUESTS) calls.push({ taskId, ids: all.slice(i, i + MAX_NAMED_REQUESTS) });
+  }
+  const answers = await Promise.all(calls.map(async ({ taskId, ids }) => {
+    try {
+      const query = ids.map((id) => `id=${encodeURIComponent(id)}`).join("&");
+      const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request(
+        `https://task/requests?${query}`, { headers: { "x-tenant": tenant } }));
+      if (response.status === 404) {
+        await response.body?.cancel();
+        return { taskId, ids, requests: [] as Listed[] };
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        return undefined;
+      }
+      return { taskId, ids, requests: ((await response.json()) as { requests: Listed[] }).requests };
+    } catch {
+      return undefined;
+    }
+  }));
+  const found: Found[] = [];
+  const missing: Located[] = [];
+  for (const answer of answers) {
+    if (answer === undefined) return undefined;
+    const asked = new Set(answer.ids);
+    const held = new Set<string>();
+    for (const listed of answer.requests) {
+      // Only what was asked for counts as found.
+      if (!asked.has(listed.record.request.id)) continue;
+      held.add(listed.record.request.id);
+      found.push({ taskId: answer.taskId, ...listed });
+    }
+    for (const requestId of answer.ids) if (!held.has(requestId)) missing.push({ requestId, taskId: answer.taskId });
+  }
+  return { found, missing };
+}
+
+/// What reading named requests tells the lookup: each one found settled, with when it was asked, so it leaves the open
+/// set for the settled list, and each one its task did not hold. One found open is already where the lookup has it.
+function learnedFrom(read: { found: Found[]; missing: Located[] }): Learned {
+  return {
+    found: read.found.filter((item) => item.standing.state !== "open").map((item) => ({
+      requestId: item.record.request.id, taskId: item.taskId, askedAt: item.record.request.createdAt, open: false })),
+    missing: read.missing,
+  };
+}
+
+/// `state=open`'s candidates. With the lookup ready: only the tasks its open entries name, and only those requests.
+/// Expiry and superseding change a request's standing with nothing written anywhere, so it is this read that tells:
+/// what it finds no longer open, or not there, it reports back, and the entry leaves the open set.
+async function openCandidates(env: ReadEnv, tenant: string): Promise<Found[] | undefined> {
+  const lookup = await openEntries(env, tenant);
+  if (!lookup) return undefined;
+  if (!lookup.ready) return walkWhileBackfilling(env, tenant);
+  const read = await readNamed(env, tenant, lookup.open);
+  if (!read) return undefined;
+  await reportLearned(env, tenant, learnedFrom(read));
+  return read.found;
+}
+
+/// `state=recent`'s candidates. With the lookup ready: every entry that may still be open, since any of them may have
+/// been decided, expired or superseded since a read last looked, and the newest `limit` settled entries. Settled ones
+/// are read in the lookup's order, newest asked first, and more are read only while some turn out gone from their tasks
+/// (the retention sweep removes old ones): once `limit` of them are found, every settled request after them was asked
+/// earlier than all of these, so none of them can be among the newest `limit`. So the read stays bounded by `limit` and
+/// what is open, whatever the shop has kept.
+async function recentCandidates(env: ReadEnv, tenant: string, limit: number): Promise<Found[] | undefined> {
+  const lookup = await openEntries(env, tenant);
+  if (!lookup) return undefined;
+  if (!lookup.ready) return walkWhileBackfilling(env, tenant);
+  const read = await readNamed(env, tenant, lookup.open);
+  if (!read) return undefined;
+  const found = [...read.found];
+  // Settled entries found settled are what the lookup already has; only what the open entries showed, and every entry
+  // whose task did not hold it, is news to report.
+  const learned = learnedFrom(read);
+  let settled = 0;
+  let after: string | null = null;
+  for (;;) {
+    const page = await settledEntries(env, tenant, limit - settled, after);
+    if (!page) return undefined;
+    const pageRead = await readNamed(env, tenant, page.settled);
+    if (!pageRead) return undefined;
+    found.push(...pageRead.found);
+    learned.missing.push(...pageRead.missing);
+    settled += pageRead.found.filter((item) => item.standing.state !== "open").length;
+    if (settled >= limit || page.next === null) break;
+    after = page.next;
+  }
+  await reportLearned(env, tenant, learned);
+  // An entry a report moved from open to settled between the two listings is read twice; it is listed once.
+  const seen = new Set<string>();
+  return found.filter((item) => !seen.has(item.record.request.id) && !!seen.add(item.record.request.id));
+}
+
 /// `state=open` answers every approval still waiting for a decision: its standing is `open`. `state=recent` answers
-/// the newest `limit` of those that left it: decided, expired, or superseded. Both list the newest asked first. An
-/// index or a task that cannot be read fails the whole answer rather than leaving its approvals out: an approval
-/// missing from the list would read as nobody having asked.
+/// the newest `limit` of those that left it: decided, expired, or superseded. Both list the newest asked first. The
+/// lookup, an index or a task that cannot be read fails the whole answer rather than leaving its approvals out: an
+/// approval missing from the list would read as nobody having asked.
 ///
 /// A helper is listed every approval too, so they can pass on what they may not decide, but an append of Ton's books
 /// (books-detail.ts) shows them only that it waits, for which month and which sheet: a month's books are sales, which
 /// helpers do not see (the design canvas's People board). Its rows and totals stay the owner's.
-export async function listApprovals(env: Pick<TenantDataEnv, "TASK" | "TENANT">, tenant: string, url: URL,
+export async function listApprovals(env: ReadEnv, tenant: string, url: URL,
   role: Caller["role"] = "owner"): Promise<Response> {
   const state = url.searchParams.get("state");
   if (state !== "open" && state !== "recent") return json({ error: "invalid_state" }, 400);
@@ -185,20 +365,8 @@ export async function listApprovals(env: Pick<TenantDataEnv, "TASK" | "TENANT">,
   const limit = limitText === null ? DEFAULT_RECENT : Number(limitText);
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_RECENT) return json({ error: "invalid_limit" }, 400);
 
-  const index = await tenantCall(env, tenant, `/index?tenant=${encodeURIComponent(tenant)}`).catch(() => null);
-  if (!index?.ok) return json({ error: "approvals_unavailable" }, 503);
-  const { taskIds } = (await index.json()) as { taskIds?: string[] };
-  const found: Found[] = [];
-  for (const taskId of taskIds ?? []) {
-    const response = await env.TASK.get(env.TASK.idFromName(taskId)).fetch(new Request("https://task/requests",
-      { headers: { "x-tenant": tenant } })).catch(() => null);
-    // The create route indexes a task before creating it, so the index may name one that never came to exist; a task
-    // of another tenant answers the same.
-    if (response?.status === 404) continue;
-    if (!response?.ok) return json({ error: "approvals_unavailable" }, 503);
-    const { requests } = (await response.json()) as { requests: { record: ApprovalRecord; standing: Standing }[] };
-    for (const entry of requests) found.push({ taskId, ...entry });
-  }
+  const found = state === "open" ? await openCandidates(env, tenant) : await recentCandidates(env, tenant, limit);
+  if (!found) return json({ error: "approvals_unavailable" }, 503);
 
   const chosen = found
     .filter((entry) => (entry.standing.state === "open") === (state === "open"))

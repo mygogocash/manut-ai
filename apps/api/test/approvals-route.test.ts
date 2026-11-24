@@ -258,7 +258,7 @@ describe("GET /v1/approvals", () => {
     expect(posted.status).toBe(405);
   });
 
-  it("answers 503 rather than a partial list when a task or the index cannot be read", async () => {
+  it("answers 503 rather than a partial list when a task or the shop's approval lookup cannot be read", async () => {
     const { tenant, headers } = await session();
     const taskId = await ownTask(tenant);
     await proposeReply(tenant, taskId, "ok");
@@ -278,8 +278,15 @@ describe("GET /v1/approvals", () => {
     };
     expect(await list(headers, "state=open", failing("TASK", "/requests"))).toEqual({ status: 503,
       body: { error: "approvals_unavailable" } });
-    expect(await list(headers, "state=open", failing("TENANT", "/index"))).toEqual({ status: 503,
-      body: { error: "approvals_unavailable" } });
+    // The lookup says which tasks to read (approval-index.ts); the walk of the index while its backfill runs is
+    // approval-index.test.ts's.
+    for (const path of ["/approvals/open", "/approvals/settled"]) {
+      for (const state of ["open", "recent"]) {
+        const answer = await list(headers, `state=${state}`, failing("TENANT", path));
+        expect(answer).toEqual(path === "/approvals/settled" && state === "open" ? { status: 200,
+          body: { state, approvals: expect.any(Array) } } : { status: 503, body: { error: "approvals_unavailable" } });
+      }
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import type { ApprovalKind, ApprovalRecord } from "@manut/approval-core";
 import { expect } from "vitest";
+import { indexRequest } from "../src/approval-index";
 import worker, { type Env } from "../src/index";
 import { testOutbox } from "../src/email-sender";
 import { MAKES_TODAY_KEY } from "../src/shops-store";
@@ -263,6 +264,9 @@ export async function plantRequest(tenant: string, taskId: string, kind: Approva
     requestId: id };
   const record: ApprovalRecord = { status: "pending", request: { id, kind, options: JOB_REQUEST_OPTIONS,
     revision: options.revision ?? 1, createdAt: now, expiresAt, detail: { actionId: id, kind } } };
+  // Every route that opens a request writes its entry into the shop's approval lookup first (task-object.ts,
+  // `openingInLookup`). A planted request stands for a route not built yet, so it gets its entry the same way.
+  expect(await indexRequest(bindings, tenant, id, taskId)).toBe(true);
   await runInDurableObject(taskStub(taskId), async (_instance, state) => {
     await state.storage.put({ [`action:${id}`]: action, [`request:${id}`]: record });
   });
