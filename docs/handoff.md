@@ -80,6 +80,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   without a credential, a bad link 404, the admin routes are behind Access.
 - Dev's API was redeployed on 24 Nov at 07:02 from `88d6b15`, with the desktop outpost's registration route (API
   `941d9565`); smoke-tested: registering, the steps and the approvals answer 401 without a session.
+- Dev's API was redeployed on 24 Nov at 07:17 from `abd2333`, with an owner's shop session on the memory, consent,
+  export and helpers (API `fcfcfdaf`); smoke-tested: those routes answer 401 without a session.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -91,7 +93,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - item 18, the code editor's states for developers: a gap list, then the states that need no owner
      (`feat/code-editor-states`, Opus);
    - item 12, the desktop showing a browser write word for word, then its outpost submitting it
-     (`feat/outpost-submits`, Opus; a Rust build in the shared target folder).
+     (`feat/outpost-submits`, Opus; a Rust build in the shared target folder);
+   - item 15, a helper's new device as an alert to the owner (`feat/new-device-alert`, Sonnet).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
@@ -103,8 +106,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - item 15 (a helper's new device, after 13); item 17 (an installable web app) waits for owners' sign-in, as there is
-     no owner home page yet;
+   - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - item 19, the outpost following the shop sessions, after 12; the cloud outpost after that.
    - item 20, a pilot shop's full pages for its owner on the desktop, now that an owner's shop session reaches more.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
