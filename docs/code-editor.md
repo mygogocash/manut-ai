@@ -16,8 +16,8 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band, a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. No New lane and no effort word | `code/Lanes.tsx`, `code/KitPanel.tsx` |
-| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the folder is on, so the developer's branch is not written to. The row and the composer's foot show it. Nothing is pushed or merged from here | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
+| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band, a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. No New lane and no effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx` |
+| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged from here. See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
 | Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one | `tasks/` |
@@ -61,7 +61,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Open an existing project: from GitHub or a folder on this Mac; Kit reads it first and changes nothing | Part: a folder can be added and sessions start in it, and plan mode reads without changing. From GitHub lacks (Owner: a real GitHub account) | `sessions/folders.ts` |
-| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the note "main changed while Kit worked. 1 file needs both changes." sits on the row of each lane whose own base moved, with the files. Show me both draws what the lane's base changed beside what Kit changed. Let Kit merge sends Kit the ask as a message, to the lane of the row it was pressed on when that lane runs as a chat in the project, else to the project's newest chat (none running: a new session with the ask in its box); Kit's steps then ask through their own cards. A folder that no lane's row covers (a session with no branch of its own) keeps the note under Kit's dial, read for the project's default base. See [How the main branch moving is read](#how-the-main-branch-moving-is-read) | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/useMoved.ts`, `code/Lanes.tsx`, `code/askKit.ts` |
+| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the note "main changed while Kit worked. 1 file needs both changes." sits on the row of each lane whose own base moved, with the files, read in the lane's own folder. Show me both draws what the lane's base changed beside what Kit changed. Let Kit merge sends Kit the ask as a message, to the lane of the row it was pressed on when that lane runs as a chat in the project, else to the project's newest chat (none running: a new session with the ask in its box); Kit's steps then ask through their own cards. The developer's folder keeps a note under Kit's dial, read for the project's default base, while Kit works in it (a session with no folder of its own). See [How the main branch moving is read](#how-the-main-branch-moving-is-read) | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/useMoved.ts`, `code/Lanes.tsx`, `code/askKit.ts` |
 | A check failed after the pull request: "Pull request 12: lint failed. Tests passed." | Part: Tasks reads a pull request's checks through `gh`; the lane does not show them (Owner: a real GitHub account to try it) | `tasks/TasksPage.tsx` |
 | Rewind: pick a turn; the files and the chat go back together | Has (this branch): see [Rewind to before a turn](#rewind-to-before-a-turn) | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs` |
 
@@ -78,7 +78,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | The terminal: Kit runs commands here, and you can type too | Has | `sessions/term/`, `terminal/Panel.tsx` |
-| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
+| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). A lane's commands run in its own folder and are listed with its project. Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
 
 ## KitCode: the parts
 
@@ -120,7 +120,9 @@ The states whose rules are pure functions, with their tests, then the screens th
   names) and from its output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`): passed, failed with how
   many and which, or unknown.
 - `apps/desktop/src/code/laneBranch.ts` and `src-tauri/src/lane.rs`: a lane's branch named from its work, planned, and
-  made by the shell with `git checkout -b`.
+  made by the shell in a folder of its own (`git worktree add`), with the app's record of each folder it made, the list of
+  them, and their removal (see [Where a lane works](#where-a-lane-works)). `code/KeptLanes.tsx` draws the folders kept after
+  their sessions closed, with Remove's panel.
 - `apps/desktop/src/code/lane.ts`, `laneStore.ts`: what a lane's events showed, the state the owner reads from it, and
   the line under the row. `Lanes.tsx` draws the band in the Kit panel, and gives each row a slot under its line (`below`)
   that the Code page fills with Bring it back's panel and the main-moved note.
@@ -130,8 +132,8 @@ The states whose rules are pure functions, with their tests, then the screens th
   and Codex), or says `declined` when the person said no and it never ran.
 - `apps/desktop/src-tauri/src/git_moved.rs`: the main branch moving, read with the person's own `git`: the folder's
   branch, the branch it started from, and the files each side changed since. It only reads. The shell changes a
-  repository in two places only: `lane.rs` makes a lane's branch, and `turn_files.rs` keeps Rewind's snapshots under
-  refs of the app's own and puts a turn's files back.
+  repository in two places only: `lane.rs` makes and removes a lane's folder and its branch, and `turn_files.rs` keeps
+  Rewind's snapshots under refs of the app's own and puts a turn's files back.
 - `apps/desktop/src/code/moved.ts`: what that means. The files both sides changed, the shell's answer checked before it is
   believed (and, for a lane, that it is about the lane's own branch), one side's diff as the diff view draws it, and the ask
   Let Kit merge sends. `useMoved.ts` reads it again while the page is open, for a lane's own base or the project's default,
@@ -142,7 +144,10 @@ The states whose rules are pure functions, with their tests, then the screens th
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
   `/kit pass`, `fail`, `unread` and `slow`: an edit, then a test run whose output comes with the step's end, and
-  `e2e/kit-lanes.spec.ts` walks each lane state.
+  `e2e/kit-lanes.spec.ts` walks each lane state. The mock host makes lanes' folders as the shell does (`laneWorktree`, with
+  its records in `window.__manutLanes`), so a browser walks two lanes at once, the chat's note, a closed lane's folder going
+  or kept, and Remove's panel: `__manutLaneChanged` and `__manutLaneAhead` say what is in a folder, `__manutLeft` how many of
+  the developer's changed files did not come along.
 
 ### How an ask is read
 
@@ -198,13 +203,15 @@ and the whole command line (`command`: the step's start cuts it to 160 character
 would hide it). The other agents hand on none, so their test runs are Not confirmed. A step the person refused says
 `declined`, and is no test run.
 
-A lane's branch is made by the shell (`lane_branch`, `src-tauri/src/lane.rs`) as the session starts and before the agent
-runs: `git checkout -b kit/<words>` from the branch the folder is on, with a fixed argument list and a name checked
-against the one form Kit makes. No file changes, and nothing is pushed, fetched, merged or deleted. It refuses a
-folder that is not a repository, one with no commit, one in the middle of a rebase, merge, cherry-pick, revert or
-bisect, and one whose index is locked; the lane then has no branch of its own and its row says it works on the folder's.
-A folder has one checkout, so a lane that starts while another is working or waiting in the folder joins that lane's
-branch, and its row says so. If the folder is on some other branch when a lane's turn ends, the row shows that branch.
+A lane's branch and its own folder are made by the shell (`lane_worktree`, `src-tauri/src/lane.rs`) as the session starts and
+before the agent runs: `git worktree add --no-track -b kit/<words> <folder> <commit>` from the commit the developer's folder
+is on, with a fixed argument list and a name checked against the one form Kit makes; see [Where a lane works](#where-a-lane-works).
+Nothing is pushed, fetched or merged. It refuses a folder that is not a repository, one with no commit, one in the middle of
+a rebase, merge, cherry-pick, revert or bisect, one whose index is locked, and a folder inside a repository that the commit
+does not hold (`not_committed`); the lane then has no branch of its own, works in the session's folder, and its row says it
+works on the folder's branch. Every lane is made from the developer's branch: a second lane started while the first works
+gets a folder and a branch of its own, never the first's, and is never stacked on the first's work. If a lane's folder is on
+some other branch when its turn ends (Kit switched it), the row shows that branch.
 
 Kit's dial acts on the asks of a coding session that runs as a chat in the app, whose asks arrive as cards: the
 canvas's Code board draws Kit's lane that way ("Tell Kit what to change", Kit's note). Since 16 November the Code
@@ -214,10 +221,72 @@ does not reach those sessions yet. The Code page shows the dial for every projec
 Words the shell would expand are never read as what they look like: an unquoted pattern (`*`, `?`, `[`) or brace
 list (`{a,b}`, `{1..3}`) makes a command unreadable, so it asks at every level (`lex` in `src/code/command.ts`).
 
+### Where a lane works
+
+Each lane works in a folder of its own: a git worktree of the developer's repository, on the lane's own branch, made from the
+branch the developer's folder is on (`src-tauri/src/lane.rs`, planned in `code/laneBranch.ts`). The lane's chat session runs
+its agent there, and everything that reads a lane reads it there: Kit's dial, the test runs, Rewind and Bring it back, the
+main-moved note and what keeps running (`workDir` in `code/laneBranch.ts`). Several lanes work at once, none touching
+another's files or the developer's folder.
+
+- **Where the folders live.** `~/.manut/lanes/<project>/<words>`: under the app's data folder, never inside the developer's
+  folder or its `.git`. `<project>` is the repository folder's name as one plain word, `<words>` the branch's words after
+  `kit/` (`kit/promptpay-qr` works in `~/.manut/lanes/web-app/promptpay-qr`), with `-2`, `-3` … when that name is on disk
+  already. A session started in a folder inside the repository (`apps/web`) works in the same folder inside its worktree.
+  The folders the app makes there are for this account only. git keeps its own note of each worktree in the repository
+  (`.git/worktrees/<name>`), as it does for any.
+- **Which are the app's.** Beside each folder the app makes, a record of it (`<words>.json`), written as a new file before
+  git is asked: the folder, the repository, the developer's folder, the branch, the branch it was made from and the commit.
+  Only a folder with such a record, exactly two names below `~/.manut/lanes`, that git still lists as a worktree of the
+  recorded repository, is ever removed; a record that names any folder but the one beside it is no record. The app never
+  runs `git worktree prune`, and `--force` only ever reaches a folder it made, after the person's yes. Nothing is written
+  through a link: a link where a lanes' folder or a record would go is refused or passed over.
+- **What comes along.** The committed tree only. The developer's uncommitted changes stay in their folder, and nothing git
+  ignores (`node_modules`, build output) is copied or linked: a link would let the lane's install write into the developer's
+  folder, and a copy could be of other versions than the lane's lock file says. No hook runs while a folder is made or
+  removed (git's `core.hooksPath` points at a folder that is never made), so nothing a project sets up on checkout (an
+  install, a generated file) happens by itself. The chat says it as the lane starts: where Kit works, how many of the
+  developer's changed files did not come along, and that nothing is installed there yet. The app installs nothing; Kit may,
+  and the dial asks first, as for any install.
+- **When a folder goes.** When its session is closed, once its agent stopped, if git says nothing in it would be lost (no file
+  changed or new; what git ignores goes with it). The branch stays. A folder with changes is kept and listed under the lanes
+  as one of Kit's folders kept, for its project, which stays on the Code page for it even when no session is left there.
+  Remove opens a panel that says how many changed files go with the folder; ticking Delete the branch too says how many
+  commits on the branch are not on its base, or that it could not tell. The press is the yes to exactly those numbers: when
+  what is there differs, nothing is done and the panel shows the numbers there are now. A folder removed by hand takes only
+  git's note of it and the record with it.
+- **While the session is listed** the folder stays, through the agent's end, a Restart and a restart of the app: a lane's
+  branch and folder are saved with its session, so Resume and Restart start its agent in its own folder again, never in the
+  developer's. A lane whose folder is gone does not start, with the shell's words.
+- **Refusals.** Not a repository, no commit, a folder the commit does not hold, the developer in the middle of a rebase,
+  merge, cherry-pick, revert or bisect, an index that is locked, every name taken. The session then has no lane of its own
+  and works in its folder, as a session in a folder that is not a repository always did. Making a folder may take up to 120
+  seconds (a checkout writes every file the project tracks); a folder git could not finish making is taken back, and its
+  branch with it while that is still where it was made.
+- **Kit's dial.** Inside is the lane's own folder. The level, the kept rules and the allowed folders are the project's, the
+  developer's folder's, as Kit's panel shows them. A lane's step in the developer's folder, or in another lane's, is outside:
+  stopped, and listed under the project as the lane's ("Kit's lane tried to change a file outside its own folder"). Allow this
+  folder on a folder of the developer's lets the lane read there; a change still stays inside the lane's own folder.
+- **The test runs.** A run is the lane's when it runs in the lane's folder. A test command whose words send it elsewhere first
+  (a `cd` or `pushd` out of it, a package manager's `-C`, `--dir`, `--prefix` or `--cwd`) is not the lane's, and a folder its
+  words cannot say (a variable, a pattern, `cd -`, anything after a `popd`) counts as elsewhere: a lane that read the
+  developer's run as its own would say its tests passed when nobody ran them on its work.
+- **What changes for the developer.** Their folder's branch, index, stash and HEAD never change because of a lane; before,
+  `git checkout -b` moved the folder onto each lane's branch as the lane started. Kit's work is on the lane's branch, in the
+  lane's folder (Show folder on a kept one; the session's own Show in Finder and Open in Terminal open its folder); it
+  reaches the developer's folder only when they merge it or switch to it. While the lane's folder exists, git will not switch
+  the developer's folder to the lane's branch (it is checked out in the lane's), and `git worktree list` lists the folder.
+  Kit no longer sees the developer's uncommitted changes.
+- **Lanes made before this change** (on the developer's folder, with `git checkout -b`) were never saved with their session,
+  so after the update such a session comes back with no lane of its own and keeps working where it was, in the developer's
+  folder; the app moves nothing. That folder may still be on the old lane's `kit/` branch; switching it back is the
+  developer's to do.
+
 ### How the main branch moving is read
 
 Before the lanes, Rewind and this note the shell ran no `git`: `git_branch.rs` reads `.git/HEAD` as a file and `tasks.rs`
-runs `gh`. Now three places run the person's own `git`: `lane.rs` makes a lane's branch (`git checkout -b`),
+runs `gh`. Now three places run the person's own `git`: `lane.rs` makes and removes a lane's folder (`git worktree add` and
+`remove`, and `git branch -D` when the person asks for the branch to go),
 `turn_files.rs` keeps each turn's files under refs of the app's own (see Rewind to before a turn), and `git_moved.rs`
 only reads. Which files changed on both sides needs git's own object store, so `session_main_moved` runs `git` through the runner
 Tasks already uses for `gh` (`tasks::run_env`: no shell, nothing on stdin, 20 seconds, a cap on the output). Every call only
@@ -234,13 +303,14 @@ path both sides changed, with keys masked as every CLI answer in `tasks.rs` is.
   the other edited needs both changes.
 - The note shows when at least one file needs both changes. A base that moved without touching the lane's files shows nothing:
   git merges that by itself.
-- **On the lane's row.** Each lane whose own branch the folder has checked out (the row's branch is Kit's own or the one it
-  shares) reads git for its own `base`, and shows the note under its line. The shell answers for the checked-out branch only,
-  so an answer about another branch is not this lane's and shows nothing: a lane whose branch the folder has left (the row says
-  so) has no note. Two lanes that share one branch each read it and each show it.
-- **Under the dial.** A folder that no lane's row covers (a session with no branch of its own: not a repository, an older
-  shell, git refusing) keeps the note under Kit's dial for the project, read for the default base. It stands down while any
-  row covers the folder's branch, so the same files are never said twice.
+- **On the lane's row.** Each lane reads git in its own folder, where its branch is checked out, for its own `base`, and shows
+  the note under its line. A lane's folder is a worktree of the developer's repository, so the base it reads is the same
+  branch the developer's folder sees. The shell answers for the checked-out branch only, so an answer about another branch is
+  not this lane's and shows nothing: a lane whose folder has left its branch (the row says so) has no note.
+- **Under the dial.** The developer's folder keeps the note under Kit's dial for the project, read for the default base, while
+  Kit works in it: a session with no folder of its own (not a repository, an older shell, git refusing, a terminal), or no
+  session yet. It stands down while every session of the project works in a lane's folder of its own, since Kit then changes
+  nothing in the developer's folder and the note would be about the developer's own work.
 - Read when a project opens on the Code page, when the window is looked at again, and once a minute, for each note.
 
 Let Kit merge sends Kit a message, `mergeAsk`: merge the base into the branch, these files changed on both sides, fix any
@@ -270,6 +340,10 @@ panel and for the project that panel shows (`src/running/`, mounted by `code/Kit
 there switches the list). Each row has the command, how long it has run, the port it listens on if there is one, and
 Stop. A line under the list counts what runs in the other projects, so a dev server left in one is never out of sight. The canvas draws it in StatesCodeDev, "Watching it run": a Running tag, "Dev server, 42 minutes, port 3000" and
 a Stop button. It draws no question before Stop, so there is none.
+
+**Whose it is.** A command belongs to the project its session started in. A lane's agent works in the lane's own folder, so the
+shell names that folder for its commands; the page lists them with the session's project all the same (`projectOf` in
+`RunningPanel.tsx`), and a command whose session the page does not know is the folder's the shell names.
 
 **Where it comes from.** The shell holds the program of each terminal (`Sessions`) and each chat (`ChatSessions`).
 Nothing it already sent says what they started: `session-fg` names only an agent, and a chat's `background` is a
@@ -316,8 +390,8 @@ The canvas's StatesCodeDev "Rewind": "The files and the chat go back together. E
 Nothing live changes." It works for a coding session that runs as a chat in the app with Claude Code or Codex, the two
 agents that can take their chat back to a chosen message.
 
-- **A snapshot when a turn starts.** Before a message that starts a turn goes to the agent, the shell keeps the session
-  folder's files as they are (`src-tauri/src/turn_files.rs`). It keeps them again when the turn ends, so a rewind can
+- **A snapshot when a turn starts.** Before a message that starts a turn goes to the agent, the shell keeps the files of the
+  folder the agent works in as they are (`src-tauri/src/turn_files.rs`): a lane's own folder, else the session's. It keeps them again when the turn ends, so a rewind can
   tell what the agent changed from what changed by hand between turns.
   - In a git repository, in git's own objects: each file's bytes as a blob (no filter, no line-ending change), and each
     snapshot as a tree under a ref of the app's own, `refs/manut/snapshots/<session>/<n>`, built in an index file of
@@ -334,7 +408,8 @@ agents that can take their chat back to a chosen message.
     `DerivedData`, `.dart_tool`, `.expo`, `.terraform` and `.git`;
   - everywhere, `.DS_Store`, `Thumbs.db` and `desktop.ini`, files over 50 MB, and a name with a line break in it.
 - **Bounds.** A folder with more than 50,000 files, or more than 1 GB in them, gets no snapshot, and the panel says its
-  turns cannot be rewound. A message waits at most 20 seconds for its turn's files; when keeping them takes longer, the
+  turns cannot be rewound. Nor does the home folder, the disk's root or the app's data folder, `~/.manut`, except a lane's own
+  folder in it (`~/.manut/lanes/<project>/<words>`), which is a project's checkout like any other. A message waits at most 20 seconds for its turn's files; when keeping them takes longer, the
   message goes and that turn is not offered. A session keeps its newest 20 turns. Its snapshots go when the session is
   closed and when its agent starts again (a new process can take back only the messages it was sent itself). When the
   app starts, the snapshots of sessions that are gone go too.
@@ -406,20 +481,25 @@ rewind.
   the messages their running process was sent, so those turns are not offered.
 - Rewind for a session in its own terminal, or with an agent other than Claude Code and Codex: the first sends no message
   through the app, and the others have no rewind of their own.
-- Lanes that work at once in one folder, each on its own branch: a working folder for each lane (a git worktree). Today a
-  second lane joins the branch of the first while that one works, and a lane that starts after it is made from where the
-  folder is, so it stacks on the earlier lane's work.
-- The developer's own uncommitted changes in the folder come along when a lane's branch is made (a new branch has the
-  same tree). Saying so on the lane, or asking first, wants a decision.
+- Bringing the developer's uncommitted changes into a new lane's folder, or asking first: today none come along, and the
+  chat says how many did not.
+- Codex in a lane's folder: a worktree keeps its git data in the developer's repository, outside the folder, so a `git
+  commit` that Codex runs inside its workspace sandbox may be refused there and ask to run outside it. Not tried with a real
+  Codex.
+- A lane's folder from its own row: Remove while the session is listed (today the folder goes, or is kept, when the session
+  closes), and a way to bring a kept folder's changes into the developer's (a diff to apply). A kept folder past the newest
+  20 of its repository shows no counts until Remove reads them.
+- A kept folder whose repository moved on disk: its record names the old place, so it is no longer listed; it stays under
+  `~/.manut/lanes` until removed by hand.
 - Test output from OpenCode and the other ACP agents, and from pi: their steps hand on none, so their runs are Not
   confirmed. More runners than the six (mocha, Playwright, `unittest`).
 - Open pull request and Ask Kit to fix it on a lane, a tests view beside it, the effort word and New lane. A pull request
   needs a push, which asks; New lane waits on the owner's call on chats and terminals.
-- A lane after a restart: a chat session that comes back has no lane, since chat sessions are not listed after one.
-- The main-moved note for a lane whose branch the folder has left: the shell reads only the branch the folder has checked out,
-  so such a lane shows no note, and the row says it works on another branch now. Reading a named branch is Rust
-  (`session_main_moved` would take a `branch` beside `base`). Two lanes that share one branch each read git once a minute for the
-  same answer; one read could serve both.
+- A lane after a restart keeps its branch and its folder, but what its events showed (its test runs, Reverted) is of the run
+  before and starts again.
+- The main-moved note for a lane whose folder has left its branch (Kit switched it): the shell reads only the branch the folder
+  has checked out, so such a lane shows no note, and the row says it works on another branch now. Reading a named branch is
+  Rust (`session_main_moved` would take a `branch` beside `base`).
 - The main branch moving: the merge's result shown by the app as a diff after Kit merges (today Kit is asked to show it, and
   asked not to push), and a file both sides changed in the very same way is still counted as needing both changes.
 - What keeps running, inside an open session: the list is on the Code page, for the project Kit's panel shows, and an
