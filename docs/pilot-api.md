@@ -318,7 +318,9 @@ type DeletedShop = {
     gone. Until then it is listed with `deleting`, and the same request finishes it. If the wipe stopped after it
     had removed the shop's own record, the row is only what the record of the deletion kept (`Deleting`, above),
     the same request still finishes it, and `confirmName` is checked against the name that record kept. A shop
-    whose record or deletion cannot be read fails the list with 503 `shops_unavailable` rather than drop off it.
+    whose record or deletion cannot be read fails the list with 503 `shops_unavailable` rather than drop off it,
+    and a deletion request for it answers 503 `shop_unavailable`, deleting nothing, rather than take it for one
+    whose record is gone (which would skip asking the owner of a shop that went live since its deletion stopped).
   - The console shows such a shop as the list does: "Deleting" under its name in the side menu, "Deletion not
     finished" in its header, and in its Shop data tab what stopped with "Finish deleting", which sends the same
     request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page

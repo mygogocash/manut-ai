@@ -1357,6 +1357,21 @@ describe("a deletion that stops part way", () => {
     expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).status).toBe(200);
   });
 
+  it("never takes a shop record it cannot read for one a deletion removed", async () => {
+    const shop = await newShop("Baan Somtam");
+    expect((await adminWith(failingCalls("TENANT", "GET", "/index", 1), "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" })).body).toMatchObject({ failed: ["index-read"] });
+    // The shop goes live after its deletion stopped, so finishing it now needs its owner's yes.
+    expect((await tenantCall(bindings, shop.tenant, "/consent", { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenant: shop.tenant, cloudWork: true }) })).status).toBe(200);
+
+    expect(await adminWith(failingCalls("TENANT", "GET", "/pilot/shop", 1), "POST", "/v1/admin/pilot/deletions",
+      { tenant: shop.tenant, confirmName: "Baan Somtam" })).toEqual({ status: 503, body: { error: "shop_unavailable" } });
+    expect((await admin("GET", `/v1/admin/pilot/export?tenant=${encodeURIComponent(shop.tenant)}`)).status).toBe(200);
+    expect((await askToDelete(shop.tenant)).status).toBe(202);
+  });
+
   it("runs again cleanly once it has finished: every object answers its own wipe a second time", async () => {
     const { shop } = await liveShopWithData();
     expect(await (await tenantDelete(bindings, shop.tenant)).json()).toMatchObject({ tasksWiped: 1, connectionsWiped: 1 });

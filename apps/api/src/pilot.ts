@@ -764,17 +764,20 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (route === "POST /v1/admin/pilot/shops") return createShop(env, body, actor);
   // Every other write names an existing pilot shop.
   if (!isValidTenant(body.tenant)) return json({ error: "tenant_required" }, 400);
-  const shop = await readShop(env, body.tenant);
-  if (!shop) {
-    // A deletion can stop after it has removed the shop's own record; the same request finishes it.
-    if (route === "POST /v1/admin/pilot/deletions") return finishDeletion(env, body.tenant, body);
-    return noShop(env, body.tenant);
+  if (route === "POST /v1/admin/pilot/deletions") {
+    // A deletion can stop after it has removed the shop's own record, and the same request finishes it. So the
+    // record is read strictly here: one that cannot be read is never taken for one that is gone, which would skip
+    // asking the owner of a shop that went live since its deletion stopped.
+    const found = await shopRecord(env, body.tenant).catch(() => undefined);
+    if (found === undefined) return json({ error: "shop_unavailable" }, 503);
+    return found ? deleteShop(env, found, body, ctx) : finishDeletion(env, body.tenant, body);
   }
+  const shop = await readShop(env, body.tenant);
+  if (!shop) return noShop(env, body.tenant);
   if (route === "POST /v1/admin/pilot/line-connections") return connectLine(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags, actor);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body, actor);
-  if (route === "POST /v1/admin/pilot/deletions") return deleteShop(env, shop, body, ctx);
   return json({ error: "not_found" }, 404);
 }
 
@@ -1040,7 +1043,7 @@ async function listShops(env: PilotEnv): Promise<Response> {
   const shops = await Promise.all(
     tenants.map(async (tenant) => {
       const [shop, consent, stored] = await Promise.all([
-        listedShopRecord(env, tenant),
+        shopRecord(env, tenant),
         shopConsent(env, tenant),
         readDeletionState(env, tenant),
       ]);
@@ -1069,9 +1072,9 @@ async function listShops(env: PilotEnv): Promise<Response> {
   return json({ shops: shops.filter((shop) => shop !== null) });
 }
 
-/// The shop's record for the list: null when it has none, which a deletion that stopped part way can leave, and an
-/// error when it cannot be read, so the list fails rather than leave a shop out.
-async function listedShopRecord(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
+/// The shop's record: null when it has none, which a deletion that stopped part way can leave, and an error when it
+/// cannot be read, so neither the list nor a deletion ever takes an unreadable record for a missing one.
+async function shopRecord(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
   const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`shop_read_${response.status}`);
