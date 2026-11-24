@@ -953,6 +953,25 @@ mends a broken sign-in: `state` is `working` again and `brokenAt` and `brokenBy`
 seal, as a revoked connection does, so a restored backup cannot bring the password back. A grant waiting for it is
 refused. 404 `sign_in_not_found`, also when it was already removed.
 
+### `POST /v1/admin/vault/reseal`
+
+Exactly `{ tenant }`. Seals the shop's connection secrets and its site sign-ins' passwords again under the vault's
+current key, and answers `{ connections, signIns }`, each `{ resealed, current, unreadable, remaining }`: how many it
+sealed again, how many already were under the current key, the ids of any that neither configured key opens (a secret
+nobody can recover, which its owner must give again), and how many live records still need the previous key. A record
+revoked, removed or given a new secret while it was being sealed is left as it now is. 503 `vault_not_configured`
+when the vault has no key, 503 `vault_unavailable` when it did not answer. Writes `vault.resealed`, by the operator,
+with no ids (it is the shop's whole vault; the counts are in the answer).
+
+**Re-sealing the vault after a key rotation.** A secret opens under `CRED_KEY`, or under `CRED_KEY_PREVIOUS` while
+that is set, and nothing else. To rotate:
+
+1. Set `CRED_KEY_PREVIOUS` to the current key, then `CRED_KEY` to a new one (`wrangler secret put`). Every secret
+   still opens.
+2. Send `POST /v1/admin/vault/reseal` for every shop, and send it again for any shop whose `remaining` is not 0.
+3. Only when every shop answers `remaining` 0 in both, delete `CRED_KEY_PREVIOUS`. A secret listed in `unreadable` was
+   sealed under a key neither setting holds: its owner gives it again.
+
 ### `POST /v1/admin/outposts`
 
 `{ tenant, name, kind }` answers `{ outpost: Outpost, credential: string }`. The credential (`mo1_` and 43 base64url

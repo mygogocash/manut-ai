@@ -16,6 +16,7 @@
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
 /// - `POST /sign-ins/broken` `{ signInId, member }`: a member named on it reports that the site refused the password.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
+/// - `POST /sign-ins/reseal` `{}`: every live sign-in sealed again under the current key, after a rotation (reseal.ts).
 /// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
@@ -51,6 +52,7 @@ import { appendAudit, type AuditActor, type AuditSubject } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { resealStore, type ResealStore } from "./reseal";
 import { credStub, type TenantDataEnv } from "./tenant-data";
 
 export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
@@ -59,7 +61,7 @@ export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
 export type VaultEnv = Pick<TenantDataEnv, "CRED" | "TENANT">;
 
 /// What the vault keeps for one sign-in. `sealed` is the password; the rest is what the owner sees.
-type SignInRecord = {
+export type SignInRecord = {
   id: string;
   tenant: string;
   /// The name people use: "Shopee Seller Centre".
@@ -345,6 +347,8 @@ export async function signInVaultRoute(
       return markBroken(storage, tenant, body);
     case "POST /sign-ins/remove":
       return removeSignIn(storage, tenant, body);
+    case "POST /sign-ins/reseal":
+      return resealSignIns(storage, vaultKeys, tenant, body);
     case "POST /outposts":
       return registerOutpost(storage, tenant, body);
     case "POST /outposts/heartbeat":
@@ -667,6 +671,29 @@ async function removeSignIn(storage: DurableObjectStorage, tenant: string, body:
   await storage.put(keys.signIn(record.id), { ...record, username: "", sealed: EMPTY_SEAL,
     removedAt: new Date().toISOString() } satisfies SignInRecord);
   return json({ removed: true, signInId: record.id });
+}
+
+/// The shop's live sign-ins as re-sealing reaches them (reseal.ts). A removed sign-in keeps no password, so it is never
+/// one of them, and one removed while its password was being sealed again is read back as gone and left removed.
+export function signInResealStore(storage: DurableObjectStorage, tenant: string): ResealStore<SignInRecord> {
+  return {
+    live: () => liveSignIns(storage, tenant),
+    reread: async (id) => (await liveSignIn(storage, tenant, id)) ?? undefined,
+    write: (record) => storage.put(keys.signIn(record.id), record),
+  };
+}
+
+/// `POST /sign-ins/reseal` with exactly `{}`: after an operator rotates the vault's key, every live sign-in of the shop
+/// whose password is sealed under another key is sealed again under the current one, so the previous key can be retired
+/// (reseal.ts). It answers how many it sealed, how many already were, any it could not open, and how many still need
+/// the previous key.
+async function resealSignIns(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
+  body: Record<string, unknown>): Promise<Response> {
+  if (Object.keys(body).length > 0) return json({ error: "invalid_request" }, 400);
+  const key = vaultKeys.CRED_KEY;
+  if (!key) return json({ error: "vault_not_configured" }, 503);
+  return json(await resealStore(signInResealStore(storage, tenant),
+    { CRED_KEY: key, CRED_KEY_PREVIOUS: vaultKeys.CRED_KEY_PREVIOUS }));
 }
 
 // The step channel: what a worker asks an outpost's browser to do, and how it went (docs/browser-control.md).

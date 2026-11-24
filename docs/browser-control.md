@@ -467,7 +467,8 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
    quits the app on this Mac ("Move them to the cloud outpost and quit").
 3. **The rest of Customize › Connections on the desktop**: the shop's sign-ins ("Change" types a new password), the
    cloud outpost's row, and an owner's route to remove or rename an outpost (today only an operator can remove one).
-4. **Smaller gaps**: re-sealing sign-ins after a vault key rotation (they open under the previous key until then);
+4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
+   rotation, `POST /v1/admin/vault/reseal`, `docs/pilot-api.md`);
    changing a sign-in's members; listing to a worker, by site name, the sign-ins its member may use; a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
    as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the

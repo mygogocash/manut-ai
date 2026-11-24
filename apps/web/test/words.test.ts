@@ -816,6 +816,8 @@ describe("the audit log's words for the owner's people and for browser control",
       .toBe("ops@manut.test removed an outpost.");
     expect(said({ actor: op, action: "outpost.credential_rotated", subject: { outpostId: "o1" } }))
       .toBe("ops@manut.test gave an outpost a new credential.");
+    expect(said({ actor: op, action: "vault.resealed", subject: {} }))
+      .toBe("ops@manut.test sealed the shop's vault again under a new key.");
     expect(said({ actor: worker, action: "browser_step.queued", subject: { stepId: "st1", outpostId: "o1" } }))
       .toBe("Worker attempt 6f9d1f0e asked an outpost to run a browser step.");
     expect(said({ actor: outpost, action: "browser_step.fetched", subject: { stepId: "st1", outpostId: "o1" } }))
