@@ -20,6 +20,7 @@ mod outpost;
 mod power;
 #[cfg(all(test, unix))]
 mod pty_bench;
+mod running;
 mod session_files;
 mod sessions;
 mod shop_cache;
@@ -391,6 +392,25 @@ struct ShellStarted {
     /// the shell asked for was not on this machine's list: its name (the default shell started instead)
     #[serde(skip_serializing_if = "Option::is_none")]
     missing: Option<String>,
+}
+
+/// What keeps running (running.rs, the page's src/running/): every command that this app's terminals and chats started
+/// and that still runs, with its arguments, when it started and the ports it listens on. Only processes under a session
+/// this app started are looked at, and the page sends nothing. `unsupported` where the shell has no reader (Windows).
+#[tauri::command]
+async fn running_list(shell: State<'_, Shell>) -> Result<Vec<running::Row>, String> {
+    let roots = running::roots_of(&shell.sessions, &shell.chats);
+    tauri::async_runtime::spawn_blocking(move || running::list(&roots)).await.map_err(|e| e.to_string())?
+}
+
+/// Stop one command of those and everything it started: `stopping` once each is told to end (what still runs a few
+/// seconds later is killed), `gone` when it is not there to stop. The page names the command by its session, its process
+/// id and when it started, never by words; the shell finds it under that session again, so nothing else can be reached.
+#[tauri::command]
+async fn running_stop(shell: State<'_, Shell>, kind: String, session: u32, pid: u32, started: Option<u64>) -> Result<&'static str, String> {
+    let kind = running::Kind::parse(&kind).ok_or("not a kind of session")?;
+    let roots = running::roots_of(&shell.sessions, &shell.chats);
+    tauri::async_runtime::spawn_blocking(move || running::stop(&roots, &running::Target { kind, session, pid, started })).await.map_err(|e| e.to_string())?
 }
 
 /// This computer's name (empty when the system gives none), asked once when the page starts: the page uses it only to
@@ -1070,6 +1090,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         past_chat_messages,
         conversation_state,
         codex_conversation,
+        running_list,
+        running_stop,
         host_name,
         asks_badge,
         tasks_status,

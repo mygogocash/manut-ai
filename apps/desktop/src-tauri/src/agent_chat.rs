@@ -3365,6 +3365,8 @@ struct ChatLive {
     /// the program and everything it started (`cmd.exe` and its `node.exe` on Windows)
     tree: Arc<Option<ProcessTree>>,
     exited: Arc<AtomicBool>,
+    /// the folder it started in (what keeps running names its commands by it: [`ChatSessions::roots`])
+    cwd: PathBuf,
 }
 
 /// Every running chat session of this app. [`ChatSessions::close_all`] runs on exit.
@@ -3800,8 +3802,16 @@ impl ChatSessions {
             });
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
-        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited });
+        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited, cwd: cwd.to_path_buf() });
         Ok(id)
+    }
+
+    /// The program of every chat still running, with its id and the folder it started in: what the commands that keep
+    /// running are read from ([`crate::running`]), as [`crate::sessions::Sessions::roots`] gives it for the terminals. A DSH
+    /// chat has no process between its messages, so it is not here; a chat that ended is not listed.
+    pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
+        let g = self.live.lock().unwrap();
+        g.iter().filter(|(_, c)| !c.exited.load(Ordering::SeqCst)).map(|(id, c)| (*id, c.pid, c.cwd.clone())).collect()
     }
 
     /// One thing the person did in chat `id`.

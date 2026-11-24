@@ -246,13 +246,13 @@ fn parent_pid(_pid: u32) -> u32 {
 }
 
 #[cfg(target_os = "macos")]
-fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
+pub(crate) fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
     let n = unsafe { libc::proc_pidpath(pid as i32, buf.as_mut_ptr().cast(), buf.len() as u32) };
     (n > 0).then_some(n as usize)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
+pub(crate) fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
     use std::io::Write;
     let mut link = [0u8; 32];
     let mut w = &mut link[..];
@@ -264,7 +264,7 @@ fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
 /// Process `pid`'s argv into `out`, NUL-separated (no trailing NUL). macOS: `KERN_PROCARGS2` (argc, the exec path,
 /// padding, argv, environment); the buffer is sized to `KERN_ARGMAX` once and reused.
 #[cfg(target_os = "macos")]
-fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
+pub(crate) fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
     out.clear();
     thread_local! {
         static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -309,7 +309,7 @@ fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
 
 /// Linux: `/proc/<pid>/cmdline`.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
+pub(crate) fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
     use std::io::Read;
     out.clear();
     let Ok(mut f) = std::fs::File::open(format!("/proc/{pid}/cmdline")) else { return false };
