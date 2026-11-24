@@ -936,7 +936,10 @@ describe("the audit log's words for the owner's people and for browser control",
   it("has words of its own for every code an outpost may report, read from the API's list", () => {
     const codes = stepFailures();
     expect(codes).toContain("navigation_refused");
-    expect(codes.length).toBeGreaterThanOrEqual(10);
+    expect(codes).toContain("sign_in_interrupted");
+    expect(codes.length).toBeGreaterThanOrEqual(11);
+    expect(auditReasonText("sign_in_interrupted")).toBe("The site asked for more than the saved sign-in, such as a check "
+      + "that you are a person or a code, so the outpost stopped there.");
     for (const code of codes) {
       const words = auditReasonText(code);
       expect(words, code).not.toMatch(/^Reason:/);

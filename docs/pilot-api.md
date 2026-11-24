@@ -1281,7 +1281,9 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
   and kept the form), `not_run` (the outpost did not do what the step asks: a kind it does not know, a step missing what
   its kind needs, or a stop before the step began or, for a write, before anything was typed), `navigation_refused` (a
   write step, before it pressed anything: the page or one of its frames tried to go off the step's origins, and the
-  outpost refused it and stopped), `timed_out`, `browser_error`; and no text.
+  outpost refused it and stopped), `sign_in_interrupted` (a sign-in step: the site asked for more than the saved
+  sign-in, such as a check that you are a person or a code, and the outpost stopped; the sign-in is not broken),
+  `timed_out`, `browser_error`; and no text.
 
 This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
 nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the

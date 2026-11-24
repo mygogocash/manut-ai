@@ -1,7 +1,8 @@
 //! One browser step, run in the outpost's browser (docs/browser-control.md, "The step channel"). Three read: `open`
 //! goes to a page, `read` reads the text of the page that is open (or of the part a selector names), and `sign_in`
-//! redeems a grant and types the sign-in into the page that is open, then submits that form, since signing in is how
-//! reading a shop's own site starts. One writes: `submit` makes a write the owner approved through approval-core,
+//! redeems a grant and types the sign-in into the page that is open, the account's name and password together, or the
+//! name first and the password on the next page, since signing in is how reading a shop's own site starts. Fields are
+//! found in the page and in its open shadow roots. One writes: `submit` makes a write the owner approved through approval-core,
 //! exactly as approved ("Submitting through a browser"). Any other kind is not run at all (`not_run`), and neither is a
 //! step missing what its kind needs: nothing is opened, read, typed or pressed for it.
 //!
@@ -193,61 +194,145 @@ for (let i = 0; i < text.length; i++) {
 }
 return JSON.stringify({ t: well });"#;
 
-/// `sign_in`, before the redeem: whether the page has a visible password field to type into, and where the page is
-/// (`a`, its origin and path). `{ e: "origin" }` for a page off the origins `o`.
-pub const FORM: &str = r#"const origins = JSON.parse(o);
-if (!origins.includes(location.origin)) return JSON.stringify({ e: "origin" });
-VISIBLE
-const field = Array.from(document.querySelectorAll('input[type="password"]')).find(visible);
-return JSON.stringify({ f: field !== undefined, a: location.origin + location.pathname });"#;
+/// What a sign-in's scripts share (with `VISIBLE` and `FIND` before them), in the page and its open shadow roots: the
+/// visible password fields; the text fields a person types an account's name into; the account's field of a page that
+/// asks for the name alone, which must say so plainly, never a guess (the one field the page marks `autocomplete`
+/// "username", or else its only email field); and whether the page asks for a one-time code (`autocomplete`
+/// "one-time-code", the mark sites give the box for a code sent to a phone).
+const ACCOUNT: &str = r#"const tokens = (el) => (el.getAttribute("autocomplete") ?? "").toLowerCase().split(/\s+/);
+const typeIs = (el, ...kinds) => kinds.includes((el.getAttribute("type") ?? "").toLowerCase());
+const passwords = () => all('input[type="password"]').filter(visible);
+const texts = (scope) => Array.from(scope.querySelectorAll("input")).filter((el) => visible(el) && !el.readOnly &&
+  typeIs(el, "", "text", "email", "tel"));
+const account = () => {
+  const fields = roots().flatMap(texts);
+  const named = fields.filter((el) => tokens(el).includes("username"));
+  if (named.length > 0) return named[0];
+  const emails = fields.filter((el) => typeIs(el, "email") || tokens(el).includes("email"));
+  return emails.length === 1 ? emails[0] : undefined;
+};
+const asksCode = () => all("input").some((el) => visible(el) && tokens(el).includes("one-time-code"));"#;
 
-/// `sign_in`: types username `u` and password `p` into the page's sign-in form and submits it. The page's origin is
-/// checked against the sign-in's origins `o` first, in this same evaluation: off them, nothing is typed
-/// (`{ r: "origin" }`). `{ r: "form" }` when there is no visible password field; `{ r: "typed" }` once it is done. The
-/// values go in through the input's own setter and the events a person's typing fires, so a site's scripts see them as
-/// typed. It answers nothing about what it typed.
-pub const TYPE: &str = r#"const origins = JSON.parse(o);
-if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
-VISIBLE
-const password = Array.from(document.querySelectorAll('input[type="password"]')).find(visible);
-if (password === undefined) return JSON.stringify({ r: "form" });
-const scope = password.form ?? document;
-const texts = Array.from(scope.querySelectorAll("input")).filter((el) => visible(el) && !el.readOnly &&
-  ["", "text", "email", "tel"].includes((el.getAttribute("type") ?? "").toLowerCase()));
-let user = texts.find((el) => (el.getAttribute("autocomplete") ?? "").toLowerCase().split(/\s+/).includes("username"));
-if (user === undefined) {
-  const before = texts.filter((el) => el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING);
-  user = before[before.length - 1];
-}
-const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+/// Typing into a sign-in's field and sending its form, as a person does: the value through the input's own setter with
+/// the events typing fires, so a site's scripts see it as typed; then the form's own submit button clicked, or the form
+/// submitted as its own submit does, or Return pressed in the field when it has no form.
+const SUBMIT: &str = r#"const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
 const put = (el, value) => {
   el.focus();
-  setValue.call(el, value);
+  valueSetter.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
 };
+const submitFrom = (field) => {
+  const form = field.form;
+  const button = form === null ? undefined :
+    Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')).find(visible);
+  if (button !== undefined) button.click();
+  else if (form !== null && typeof form.requestSubmit === "function") form.requestSubmit();
+  else for (const type of ["keydown", "keypress", "keyup"]) {
+    field.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
+  }
+};"#;
+
+/// `sign_in`, before the redeem: what the page asks for, and where it is (`a`, its origin and path). `f` is `password`
+/// for a visible password field (a sign-in on one page, or the second page already), `username` for a page that asks
+/// for the account's name alone, plainly (`ACCOUNT`), and `none` for neither. `{ e: "origin" }` for a page off the
+/// origins `o`.
+pub const FORM: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ e: "origin" });
+VISIBLE
+FIND
+ACCOUNT
+const a = location.origin + location.pathname;
+if (passwords().length > 0) return JSON.stringify({ f: "password", a });
+return JSON.stringify({ f: account() === undefined ? "none" : "username", a });"#;
+
+/// `sign_in` on one page: types username `u` and password `p` into the page's sign-in form and submits it. The page's
+/// origin is checked against the sign-in's origins `o` first, in this same evaluation: off them, nothing is typed
+/// (`{ r: "origin" }`). `{ r: "form" }` when there is no visible password field to type into; `{ r: "typed" }` once it is
+/// done. The account's field is the form's one marked "username", or else its last text field before the password. It
+/// answers nothing about what it typed.
+pub const TYPE: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
+VISIBLE
+FIND
+ACCOUNT
+SUBMIT
+const password = passwords().find((el) => !el.readOnly);
+if (password === undefined) return JSON.stringify({ r: "form" });
+const near = texts(password.form ?? password.getRootNode());
+let user = near.find((el) => tokens(el).includes("username"));
+if (user === undefined) {
+  const before = near.filter((el) => el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING);
+  user = before[before.length - 1];
+}
 if (user !== undefined) put(user, u);
 put(password, p);
-const form = password.form;
-const button = form === null ? undefined :
-  Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')).find(visible);
-if (button !== undefined) button.click();
-else if (form !== null && typeof form.requestSubmit === "function") form.requestSubmit();
-else for (const type of ["keydown", "keypress", "keyup"]) {
-  password.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
-}
+submitFrom(password);
 return JSON.stringify({ r: "typed" });"#;
 
-/// `sign_in`, after the submit: how the site answered. `in` when no visible password field is left; `refused` when
-/// the page is still where the form was (`a`) and every visible password field is empty, as a site leaves it when it
-/// refused the password; otherwise `pending` (still loading, a captcha, a site that keeps what was typed). `away` for
-/// a page off the step's origins `o`.
+/// `sign_in` over two pages, the first: types username `u` into the account's field of a page that asks for it alone
+/// and sends it, checking the page's origin against the sign-in's origins `o` first, in this same evaluation. No password
+/// is given to it. `{ r: "form" }` when the page has no such field, or shows a password field after all (then it is not
+/// a first page); `{ r: "typed" }` once it is done; `{ r: "origin" }` off the origins, where nothing is typed.
+pub const TYPE_USER: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
+VISIBLE
+FIND
+ACCOUNT
+SUBMIT
+const user = account();
+if (passwords().length > 0 || user === undefined) return JSON.stringify({ r: "form" });
+put(user, u);
+submitFrom(user);
+return JSON.stringify({ r: "typed" });"#;
+
+/// `sign_in` over two pages, between them: what the page shows now that it has the account's name, on the sign-in's
+/// origins `o`. `password` once a password field a person can type into is showing, whether the page moved or swapped
+/// its form in place; `user` while the account's field is still there (the site still deciding, or showing an error
+/// beside it); `code` for a box for a one-time code; `other` for anything else (a check that you are a person, "verify
+/// it's you", a choice of accounts, a message). `pending` while loading; `away` off the origins.
+pub const NEXT: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
+if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
+VISIBLE
+FIND
+ACCOUNT
+if (asksCode()) return JSON.stringify({ s: "code" });
+if (passwords().some((el) => !el.readOnly)) return JSON.stringify({ s: "password" });
+return JSON.stringify({ s: account() === undefined ? "other" : "user" });"#;
+
+/// `sign_in` over two pages, the second: types password `p` into the page's visible password field and sends it,
+/// checking the page's origin against the sign-in's origins `o` first, in this same evaluation. Nothing else is typed.
+/// `{ r: "typed", a }` with where the page was (origin and path) as it was typed; `{ r: "form" }` when no password field
+/// is showing after all; `{ r: "origin" }` off the origins, where nothing is typed.
+pub const TYPE_PASS: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
+VISIBLE
+FIND
+ACCOUNT
+SUBMIT
+const password = passwords().find((el) => !el.readOnly);
+if (password === undefined) return JSON.stringify({ r: "form" });
+const a = location.origin + location.pathname;
+put(password, p);
+submitFrom(password);
+return JSON.stringify({ r: "typed", a });"#;
+
+/// `sign_in`, after the password was sent: how the site answered. `in` when no visible password field is left;
+/// `user` when none is left but an account's field is showing (a site back on its first page); `code` when the page
+/// asks for a one-time code; `refused` when the page is still where the form was (`a`) and every visible password field
+/// is empty, as a site leaves it when it refused the password; otherwise `pending` (still loading, a check that you are
+/// a person beside the form, a site that keeps what was typed). `away` for a page off the step's origins `o`.
 pub const CHECK: &str = r#"const origins = JSON.parse(o);
 if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
 if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
 VISIBLE
-const fields = Array.from(document.querySelectorAll('input[type="password"]')).filter(visible);
-if (fields.length === 0) return JSON.stringify({ s: "in" });
+FIND
+ACCOUNT
+if (asksCode()) return JSON.stringify({ s: "code" });
+const fields = passwords();
+if (fields.length === 0) return JSON.stringify({ s: account() === undefined ? "in" : "user" });
 if (location.origin + location.pathname === a && fields.every((f) => f.value === "")) return JSON.stringify({ s: "refused" });
 return JSON.stringify({ s: "pending" });"#;
 
@@ -451,10 +536,13 @@ if (!fields.every(([el, value]) => holds(el, value))) return JSON.stringify({ s:
 const shows = ([el, value]) => toggle(el) ? value !== "" && value !== "unchecked" : wanted(el, value) !== "";
 return JSON.stringify({ s: fields.some(shows) ? "saved" : "blank" });"#;
 
-/// The scripts as they are run: `VISIBLE`, `FIND` and `FIELDS` written into each one that uses them. None of the three
-/// holds another's name, so the order they are written in changes nothing.
+/// The shared parts of the scripts, by the name each script writes on a line of its own where the part goes.
+pub const PARTS: [(&str, &str); 5] = [("FIELDS", FIELDS), ("ACCOUNT", ACCOUNT), ("SUBMIT", SUBMIT), ("FIND", FIND), ("VISIBLE", VISIBLE)];
+
+/// The scripts as they are run: each shared part written into each script that names it. No part holds another's
+/// name, so the order they are written in changes nothing.
 pub fn script(body: &'static str) -> String {
-    body.replace("FIELDS", FIELDS).replace("FIND", FIND).replace("VISIBLE", VISIBLE)
+    PARTS.iter().fold(body.to_owned(), |text, (name, part)| text.replace(name, part))
 }
 
 /// The kinds this outpost runs. Any other is not run at all.
@@ -485,7 +573,7 @@ pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi,
     let result = match step.kind.as_str() {
         "open" => open(step, &origins, browser, &Until { deadline: now + pace.open, stop }),
         "read" => read(step, &origins, browser, &Until { deadline: now + pace.read, stop }, pace),
-        "sign_in" => sign_in(step, &origins, browser, api, &Until { deadline: now + pace.sign_in, stop }, pace),
+        "sign_in" => sign_in(step, &origins, browser, api, &watch, &Until { deadline: now + pace.sign_in, stop }, pace),
         _ => submit(step, &origins, browser, &watch, &Until { deadline: now + pace.submit, stop }, pace),
     };
     if step.kind != "submit" && watch.now() == Blocked::Page {
@@ -533,7 +621,7 @@ fn read(step: &OutpostStep, origins: &[String], browser: &dyn Browser, until: &U
 
 #[derive(Deserialize)]
 struct FormWire {
-    f: Option<bool>,
+    f: Option<String>,
     a: Option<String>,
     e: Option<String>,
 }
@@ -541,6 +629,7 @@ struct FormWire {
 #[derive(Deserialize)]
 struct TypedWire {
     r: String,
+    a: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -548,76 +637,113 @@ struct CheckWire {
     s: String,
 }
 
-fn sign_in(step: &OutpostStep, origins: &[String], browser: &dyn Browser, api: &dyn OutpostApi, until: &Until, pace: &Pace)
-    -> Result<Option<String>, Failure> {
+/// `sign_in`: redeems the grant and signs in on the page that is open, on one page (the account's name and password
+/// together) or over two (the name on the first; the password on the next one, which may be a page of its own or the
+/// same page swapping its form). Each is typed only on the sign-in's own origins, and the password only once a page
+/// asks for one: the first page is never handed it. Between the two, anything but the next page or the first one still
+/// deciding (a check that you are a person, a code, "verify it's you") stops the step (`sign_in_interrupted`), and the
+/// password is typed nowhere. All of it inside the sign-in's 40 seconds: the step lives only as long as its grant's
+/// minute, so it is given no more for two pages.
+fn sign_in(step: &OutpostStep, origins: &[String], browser: &dyn Browser, api: &dyn OutpostApi, watch: &Watch, until: &Until,
+    pace: &Pace) -> Result<Option<String>, Failure> {
     let grant = step.grant_id.as_deref().ok_or(Failure::NotRun)?;
     on_page(origins, browser, until, pace)?;
     browser.keep_on(origins);
-    // Is there a form to type into? Asked before the redeem, so a password is never fetched for a page it cannot go into.
-    let form: FormWire = serde_json::from_str(&browser.call(FORM, vec![("o", Zeroizing::new(origins_json(origins)))], until)?)
-        .map_err(|_| Failure::BrowserError)?;
-    let at = match (form.f, form.a, form.e.as_deref()) {
-        (_, _, Some("origin")) => return Err(Failure::OriginNotAllowed),
-        (Some(false), _, None) => return Err(Failure::SelectorNotFound),
-        (Some(true), Some(at), None) => at,
-        _ => return Err(Failure::BrowserError),
+    // Is there a form to type into? Asked before the redeem, so a password is never fetched for a page it cannot go into;
+    // looked for again for a while, as a write's form is, since many sign-in pages draw their form with their own script.
+    let appear = Instant::now() + pace.appear;
+    let (two_pages, at) = loop {
+        let form: FormWire = serde_json::from_str(&browser.call(FORM, vec![("o", Zeroizing::new(origins_json(origins)))], until)?)
+            .map_err(|_| Failure::BrowserError)?;
+        match (form.f.as_deref(), form.a, form.e.as_deref()) {
+            (_, _, Some("origin")) => return Err(Failure::OriginNotAllowed),
+            (Some("password"), Some(at), None) => break (false, at),
+            (Some("username"), Some(at), None) => break (true, at),
+            (Some("none"), _, None) if Instant::now() < appear && !until.over() && watch.now() < Blocked::Page => {
+                std::thread::sleep(pace.poll)
+            }
+            (Some("none"), _, None) => return Err(Failure::SelectorNotFound),
+            _ => return Err(Failure::BrowserError),
+        }
     };
     let Redeemed { origins: theirs, username, password } = api.redeem(grant).map_err(|_| Failure::GrantRefused)?;
     // It is typed only on the sign-in's own origins as the vault answered them, which are also this step's.
     let typing: Vec<String> = origin::clean(&theirs).into_iter().filter(|o| origins.contains(o)).collect();
-    match browser.address() {
-        Some(address) if origin::allowed(&address, &typing) => {}
+    let on_typing = || browser.address().is_some_and(|address| origin::allowed(&address, &typing));
+    if !on_typing() {
         // Dropping the username and password here wipes them.
-        _ => return Err(Failure::OriginNotAllowed),
+        return Err(Failure::OriginNotAllowed);
     }
-    let typed = browser.call(TYPE, vec![("o", Zeroizing::new(origins_json(&typing))), ("u", username), ("p", password)], until)?;
-    match serde_json::from_str::<TypedWire>(&typed).map_err(|_| Failure::BrowserError)?.r.as_str() {
-        "typed" => {}
-        "origin" => return Err(Failure::OriginNotAllowed),
-        "form" => return Err(Failure::SelectorNotFound),
-        _ => return Err(Failure::BrowserError),
+    if !two_pages {
+        let typed = browser.call(TYPE, vec![("o", Zeroizing::new(origins_json(&typing))), ("u", username), ("p", password)], until)?;
+        typed_as(&typed)?;
+        return settle(origins, &at, browser, watch, until, pace, false);
     }
-    settle(origins, &at, browser, until, pace)
+    // The first page: the account's name alone. The password stays here, in its wiped buffer, until a page asks for it.
+    let typed = browser.call(TYPE_USER, vec![("o", Zeroizing::new(origins_json(&typing))), ("u", username)], until)?;
+    typed_as(&typed)?;
+    next(&typing, browser, watch, until, pace)?;
+    // Looked at again before the password moves: the next page must be on the sign-in's own origins too.
+    if !on_typing() {
+        return Err(Failure::OriginNotAllowed);
+    }
+    let typed = browser.call(TYPE_PASS, vec![("o", Zeroizing::new(origins_json(&typing))), ("p", password)], until)?;
+    let at = typed_as(&typed)?.ok_or(Failure::BrowserError)?;
+    settle(origins, &at, browser, watch, until, pace, true)
+}
+
+/// What a typing script answered: typed (with where the page was, when it says), or why nothing was typed.
+fn typed_as(answer: &str) -> Result<Option<String>, Failure> {
+    let typed: TypedWire = serde_json::from_str(answer).map_err(|_| Failure::BrowserError)?;
+    match typed.r.as_str() {
+        "typed" => Ok(typed.a),
+        "origin" => Err(Failure::OriginNotAllowed),
+        "form" => Err(Failure::SelectorNotFound),
+        _ => Err(Failure::BrowserError),
+    }
+}
+
+/// Waits, once the account's name was sent, for the next page, which is the one that asks for the password: a page on
+/// the sign-in's own origins showing a password field a person can type into, whether the page moved to it or swapped
+/// its form in place. It is taken as soon as it is there, and the password script looks at it again as it types. The
+/// first page still showing is the site still deciding (or saying beside the field that it does not know the account),
+/// which decides nothing: never a refusal. Anything else that holds for `pace.settled` (a check that you are a person, a
+/// box for a code, "verify it's you", a choice of accounts) stops the step (`sign_in_interrupted`): the outpost cannot
+/// answer it, and guessing would put the password where it was not asked for.
+fn next(typing: &[String], browser: &dyn Browser, watch: &Watch, until: &Until, pace: &Pace) -> Result<(), Failure> {
+    let answer = answered(browser, watch, Blocked::Page, NEXT, &|| vec![("o", Zeroizing::new(origins_json(typing)))], until, pace,
+        &|answer| match answer {
+            "password" => Some(Duration::ZERO),
+            "code" | "other" | "away" => Some(pace.settled),
+            _ => None,
+        })?;
+    match answer.as_str() {
+        "password" => Ok(()),
+        "away" => Err(Failure::OriginNotAllowed),
+        _ => Err(Failure::SignInInterrupted),
+    }
 }
 
 /// Waits for the site's answer to a sign-in: the same answer seen for `pace.settled` while nothing loads. A site that
 /// signed in leaves no password field (done); one that refused the password leaves its form, emptied, where it was
-/// (`sign_in_refused`). Anything still undecided when the step's time is up is `timed_out`, never a refusal: a
-/// refusal marks the sign-in broken for everyone until the owner types a new password.
-fn settle(origins: &[String], at: &str, browser: &dyn Browser, until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
-    let mut seen: Option<(String, Instant)> = None;
-    loop {
-        if until.over() {
-            return Err(until.failure());
-        }
-        std::thread::sleep(pace.poll);
-        if browser.loading() {
-            seen = None;
-            continue;
-        }
-        let args = vec![("o", Zeroizing::new(origins_json(origins))), ("a", Zeroizing::new(at.to_owned()))];
-        // A page between two loads cannot be read; it is looked at again.
-        let Some(state) = browser.call(CHECK, args, until).ok().and_then(|s| serde_json::from_str::<CheckWire>(&s).ok()) else {
-            seen = None;
-            continue;
-        };
-        let now = Instant::now();
-        let since = match &seen {
-            Some((last, since)) if *last == state.s => *since,
-            _ => {
-                seen = Some((state.s.clone(), now));
-                now
-            }
-        };
-        if now.duration_since(since) < pace.settled {
-            continue;
-        }
-        match state.s.as_str() {
-            "in" => return Ok(None),
-            "refused" => return Err(Failure::SignInRefused),
-            "away" => return Err(Failure::OriginNotAllowed),
-            _ => {}
-        }
+/// (`sign_in_refused`). A site that asks for a one-time code, or (after two pages) shows its first page again, asked for
+/// more than the saved sign-in (`sign_in_interrupted`). Anything still undecided when the step's time is up is
+/// `timed_out`, never a refusal: a refusal marks the sign-in broken for everyone until the owner types a new password.
+/// The page going off the step's origins ends the wait at once.
+fn settle(origins: &[String], at: &str, browser: &dyn Browser, watch: &Watch, until: &Until, pace: &Pace, two_pages: bool)
+    -> Result<Option<String>, Failure> {
+    let args = || vec![("o", Zeroizing::new(origins_json(origins))), ("a", Zeroizing::new(at.to_owned()))];
+    let answer = answered(browser, watch, Blocked::Page, CHECK, &args, until, pace, &|answer| match answer {
+        "in" | "user" | "code" | "refused" | "away" => Some(pace.settled),
+        _ => None,
+    })?;
+    match answer.as_str() {
+        // On one page, no password field left is done, as it always was, whatever else the page shows.
+        "in" => Ok(None),
+        "user" if !two_pages => Ok(None),
+        "refused" => Err(Failure::SignInRefused),
+        "away" => Err(Failure::OriginNotAllowed),
+        _ => Err(Failure::SignInInterrupted),
     }
 }
 
@@ -923,6 +1049,12 @@ pub mod fake {
             "form"
         } else if body == TYPE {
             "type"
+        } else if body == TYPE_USER {
+            "type_user"
+        } else if body == NEXT {
+            "next"
+        } else if body == TYPE_PASS {
+            "type_pass"
         } else if body == CHECK {
             "check"
         } else if body == SET {
@@ -1131,7 +1263,7 @@ mod tests {
         // A sign-in whose page holds a frame from elsewhere still signs in: the password went into the page's own form,
         // which no frame from another origin can read.
         let signing = FakeBrowser::refusing(Some(&format!("{ACCOUNTS}/seller/login")), |blocked| Box::new(move |name, _| match name {
-            "form" => json_answer(serde_json::json!({ "f": true, "a": format!("{ACCOUNTS}/seller/login") })),
+            "form" => json_answer(serde_json::json!({ "f": "password", "a": format!("{ACCOUNTS}/seller/login") })),
             "type" => json_answer(serde_json::json!({ "r": "typed" })),
             _ => {
                 refuse(&blocked, Blocked::Frame);
@@ -1190,7 +1322,7 @@ mod tests {
     /// answers `after` (the CHECK script's `s`).
     fn sign_in_page(after: &'static str) -> FakeBrowser {
         FakeBrowser::at(Some(&format!("{ACCOUNTS}/seller/login")), Box::new(move |name, _| match name {
-            "form" => json_answer(serde_json::json!({ "f": true, "a": format!("{ACCOUNTS}/seller/login") })),
+            "form" => json_answer(serde_json::json!({ "f": "password", "a": format!("{ACCOUNTS}/seller/login") })),
             "type" => json_answer(serde_json::json!({ "r": "typed" })),
             "check" => json_answer(serde_json::json!({ "s": after })),
             _ => unreachable!(),
@@ -1242,7 +1374,7 @@ mod tests {
         assert_eq!(moving.names(), ["form"]);
         // The script itself found the page off the origins when it came to type.
         let away = FakeBrowser::at(Some(&format!("{ACCOUNTS}/seller/login")), Box::new(|name, _| match name {
-            "form" => json_answer(serde_json::json!({ "f": true, "a": "x" })),
+            "form" => json_answer(serde_json::json!({ "f": "password", "a": "x" })),
             "type" => json_answer(serde_json::json!({ "r": "origin" })),
             _ => unreachable!(),
         }));
@@ -1252,7 +1384,7 @@ mod tests {
     #[test]
     fn redeems_nothing_for_a_page_with_no_form_or_off_the_origins() {
         let api = vault(&[ACCOUNTS]);
-        let no_form = FakeBrowser::at(Some(&format!("{ACCOUNTS}/")), Box::new(|_, _| json_answer(serde_json::json!({ "f": false, "a": "x" }))));
+        let no_form = FakeBrowser::at(Some(&format!("{ACCOUNTS}/")), Box::new(|_, _| json_answer(serde_json::json!({ "f": "none", "a": "x" }))));
         assert_eq!(run(&sign_in_step(), &no_form, &api), Outcome::Failed(Failure::SelectorNotFound));
         let off = FakeBrowser::at(Some("https://evil.example/login"), Box::new(|_, _| unreachable!()));
         assert_eq!(run(&sign_in_step(), &off, &api), Outcome::Failed(Failure::OriginNotAllowed));
@@ -1281,11 +1413,159 @@ mod tests {
         // An answer is taken only once it has held: a page that flips between answers is not decided by one look.
         let flips = std::sync::atomic::AtomicUsize::new(0);
         let flipping = FakeBrowser::at(Some(&format!("{ACCOUNTS}/seller/login")), Box::new(move |name, _| match name {
-            "form" => json_answer(serde_json::json!({ "f": true, "a": "x" })),
+            "form" => json_answer(serde_json::json!({ "f": "password", "a": "x" })),
             "type" => json_answer(serde_json::json!({ "r": "typed" })),
             _ => json_answer(serde_json::json!({ "s": if flips.fetch_add(1, Ordering::SeqCst) % 2 == 0 { "refused" } else { "in" } })),
         }));
         assert_eq!(run(&sign_in_step(), &flipping, &api), Outcome::Failed(Failure::TimedOut));
+    }
+
+    /// A sign-in over two pages: the first asks for the account's name alone; once it is sent the page answers `next` in
+    /// turn (the last one again after that); the password page types; then the site answers `after`.
+    fn two_pages(next: Vec<&'static str>, after: &'static str) -> FakeBrowser {
+        let next = Mutex::new(next);
+        FakeBrowser::at(Some(&format!("{ACCOUNTS}/signin/identifier")), Box::new(move |name, _| match name {
+            "form" => json_answer(json!({ "f": "username", "a": format!("{ACCOUNTS}/signin/identifier") })),
+            "type_user" => json_answer(json!({ "r": "typed" })),
+            "next" => {
+                let mut left = next.lock().unwrap();
+                let answer = if left.len() > 1 { left.remove(0) } else { left[0] };
+                json_answer(json!({ "s": answer }))
+            }
+            "type_pass" => json_answer(json!({ "r": "typed", "a": format!("{ACCOUNTS}/signin/password") })),
+            "check" => json_answer(json!({ "s": after })),
+            _ => unreachable!("{name}"),
+        }))
+    }
+
+    #[test]
+    fn signs_in_over_two_pages_with_the_password_only_once_a_page_asks_for_it() {
+        let api = vault(&[ACCOUNTS, SHOP]);
+        // The site takes a moment over the account's name, then shows the password page.
+        let browser = two_pages(vec!["user", "pending", "user", "password"], "in");
+        assert_eq!(run_step(&sign_in_step(), &browser, &api, &AtomicBool::new(false), &PATIENT), Outcome::Done(None));
+        assert_eq!(*api.redeemed.lock().unwrap(), ["g-1"]);
+        let names = browser.names();
+        assert_eq!(names[..2], ["form", "type_user"]);
+        let pass = names.iter().position(|n| *n == "type_pass").unwrap();
+        assert!(names[2..pass].iter().all(|n| *n == "next") && pass >= 6, "{names:?}");
+        assert!(names[pass + 1..].iter().all(|n| *n == "check"));
+        let calls = browser.calls.lock().unwrap();
+        // The first page is handed the account's name and never the password; the second the password alone; each told
+        // the sign-in's own origins, which it checks again itself before typing.
+        let user = &calls[1].1;
+        assert_eq!((user["u"].as_str(), user.contains_key("p")), ("fon@baanmali", false));
+        assert_eq!(user["o"], format!(r#"["{ACCOUNTS}","{SHOP}"]"#));
+        let typed = &calls[pass].1;
+        assert_eq!((typed["p"].as_str(), typed.contains_key("u")), ("Pa55-known", false));
+        // The site's answer is read against where the password was typed.
+        assert_eq!(calls[pass + 1].1["a"], format!("{ACCOUNTS}/signin/password"));
+        for (name, args) in calls.iter().filter(|(name, _)| !["type_user", "type_pass"].contains(name)) {
+            assert!(args.values().all(|v| !v.contains("Pa55-known") && !v.contains("fon@baanmali")), "{name}");
+        }
+    }
+
+    #[test]
+    fn stops_between_the_two_pages_at_anything_but_the_next_page_and_never_guesses() {
+        let api = vault(&[ACCOUNTS]);
+        // A check that you are a person, "verify it's you", a box for a code: the step stops and says so, and the
+        // password goes nowhere.
+        for answer in ["other", "code"] {
+            let browser = two_pages(vec!["user", answer], "in");
+            assert_eq!(run(&sign_in_step(), &browser, &api), Outcome::Failed(Failure::SignInInterrupted), "{answer}");
+            assert!(!browser.names().contains(&"type_pass"), "{answer}");
+        }
+        // The first page still there when the time is up (the site still deciding, or saying beside the field that it
+        // does not know the account): timed out, never a refusal, which would mark the sign-in broken.
+        let deciding = two_pages(vec!["user"], "in");
+        assert_eq!(run(&sign_in_step(), &deciding, &api), Outcome::Failed(Failure::TimedOut));
+        assert!(!deciding.names().contains(&"type_pass"));
+        // Off the sign-in's origins: the script says so, or the guard refused the page going there.
+        assert_eq!(run(&sign_in_step(), &two_pages(vec!["away"], "in"), &api), Outcome::Failed(Failure::OriginNotAllowed));
+        let leaving = FakeBrowser::refusing(Some(&format!("{ACCOUNTS}/signin/identifier")), |blocked| Box::new(move |name, _| match name {
+            "form" => json_answer(json!({ "f": "username", "a": "x" })),
+            "type_user" => {
+                refuse(&blocked, Blocked::Page);
+                json_answer(json!({ "r": "typed" }))
+            }
+            "next" => json_answer(json!({ "s": "user" })),
+            _ => unreachable!("{name}"),
+        }));
+        let slow = Pace { sign_in: Duration::from_secs(30), ..QUICK };
+        let started = Instant::now();
+        assert_eq!(run_step(&sign_in_step(), &leaving, &api, &AtomicBool::new(false), &slow), Outcome::Failed(Failure::OriginNotAllowed));
+        assert!(started.elapsed() < Duration::from_secs(10), "it stops at once, not when its time is up");
+        // A frame from elsewhere refused on the way is no reason to stop: the next page comes, and the sign-in ends.
+        let framed = FakeBrowser::refusing(Some(&format!("{ACCOUNTS}/signin/identifier")), |blocked| Box::new(move |name, _| match name {
+            "form" => json_answer(json!({ "f": "username", "a": "x" })),
+            "type_user" => {
+                refuse(&blocked, Blocked::Frame);
+                json_answer(json!({ "r": "typed" }))
+            }
+            "next" => json_answer(json!({ "s": "password" })),
+            "type_pass" => json_answer(json!({ "r": "typed", "a": "y" })),
+            _ => json_answer(json!({ "s": "in" })),
+        }));
+        assert_eq!(run(&sign_in_step(), &framed, &api), Outcome::Done(None));
+    }
+
+    #[test]
+    fn types_the_password_only_on_the_sign_ins_own_origins_after_two_pages() {
+        // The step may be on both of the shop's origins, but the sign-in's own are only the accounts site; the next page
+        // turned out to be on the other one.
+        let browser = two_pages(vec!["password"], "in");
+        let page = browser.page.clone();
+        let moved = FakeBrowser { answer: Box::new(move |name, _| match name {
+            "form" => json_answer(json!({ "f": "username", "a": "x" })),
+            "type_user" => {
+                *page.lock().unwrap() = Some(format!("{SHOP}/password"));
+                json_answer(json!({ "r": "typed" }))
+            }
+            "next" => json_answer(json!({ "s": "password" })),
+            _ => unreachable!("{name}: the password is typed nowhere"),
+        }), ..browser };
+        assert_eq!(run(&sign_in_step(), &moved, &vault(&[ACCOUNTS])), Outcome::Failed(Failure::OriginNotAllowed));
+        assert_eq!(moved.names(), ["form", "type_user", "next"]);
+        // A page the first page's script finds asks for a password after all: nothing is typed there.
+        let second = FakeBrowser::at(Some(&format!("{ACCOUNTS}/signin")), Box::new(|name, _| match name {
+            "form" => json_answer(json!({ "f": "username", "a": "x" })),
+            "type_user" => json_answer(json!({ "r": "form" })),
+            _ => unreachable!("{name}"),
+        }));
+        assert_eq!(run(&sign_in_step(), &second, &vault(&[ACCOUNTS])), Outcome::Failed(Failure::SelectorNotFound));
+    }
+
+    #[test]
+    fn says_how_the_site_answered_after_two_pages_and_never_takes_more_for_signed_in() {
+        let api = vault(&[ACCOUNTS]);
+        assert_eq!(run(&sign_in_step(), &two_pages(vec!["password"], "in"), &api), Outcome::Done(None));
+        assert_eq!(run(&sign_in_step(), &two_pages(vec!["password"], "refused"), &api), Outcome::Failed(Failure::SignInRefused));
+        // A box for a code after the password, or the first page back again: the site wants more than the saved sign-in.
+        for after in ["code", "user"] {
+            assert_eq!(run(&sign_in_step(), &two_pages(vec!["password"], after), &api), Outcome::Failed(Failure::SignInInterrupted), "{after}");
+        }
+        assert_eq!(run(&sign_in_step(), &two_pages(vec!["password"], "pending"), &api), Outcome::Failed(Failure::TimedOut));
+        // On one page, an account's field left with no password field is signed in, as it always was; a box for a code is
+        // not.
+        assert_eq!(run(&sign_in_step(), &sign_in_page("user"), &api), Outcome::Done(None));
+        assert_eq!(run(&sign_in_step(), &sign_in_page("code"), &api), Outcome::Failed(Failure::SignInInterrupted));
+    }
+
+    #[test]
+    fn waits_for_a_sign_in_form_the_page_draws_and_redeems_nothing_until_there_is_one() {
+        let looks = AtomicUsize::new(0);
+        let drawn = FakeBrowser::at(Some(&format!("{ACCOUNTS}/seller/login")), Box::new(move |name, _| match name {
+            "form" => {
+                let f = if looks.fetch_add(1, Ordering::SeqCst) < 2 { "none" } else { "password" };
+                json_answer(json!({ "f": f, "a": format!("{ACCOUNTS}/seller/login") }))
+            }
+            "type" => json_answer(json!({ "r": "typed" })),
+            _ => json_answer(json!({ "s": "in" })),
+        }));
+        let api = vault(&[ACCOUNTS]);
+        assert_eq!(run_step(&sign_in_step(), &drawn, &api, &AtomicBool::new(false), &PATIENT), Outcome::Done(None));
+        assert_eq!(drawn.names()[..4], ["form", "form", "form", "type"]);
+        assert_eq!(api.redeemed.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -1741,26 +2021,34 @@ mod tests {
 
     #[test]
     fn the_scripts_check_the_origin_first_and_type_through_arguments_only() {
-        for (body, names) in [(READ, &["o", "s", "m"][..]), (FORM, &["o"][..]), (TYPE, &["o", "u", "p"][..]), (CHECK, &["o", "a"][..]),
-            (SET, &["o", "f", "v"][..]), (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..]), (SAVED, &["o", "v"][..])] {
+        for (body, names) in [(READ, &["o", "s", "m"][..]), (FORM, &["o"][..]), (TYPE, &["o", "u", "p"][..]), (TYPE_USER, &["o", "u"][..]),
+            (NEXT, &["o"][..]), (TYPE_PASS, &["o", "p"][..]), (CHECK, &["o", "a"][..]), (SET, &["o", "f", "v"][..]),
+            (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..]), (SAVED, &["o", "v"][..])] {
             let script = script(body);
             assert!(script.starts_with("const origins = JSON.parse(o);\nif (!origins.includes(location.origin)) return"), "{script}");
-            assert!(!script.contains("VISIBLE") && !script.contains("FIELDS") && !script.contains("FIND"));
+            assert!(PARTS.iter().all(|(name, _)| !script.contains(name)), "{script}");
             for name in names {
                 assert!(script.contains(name));
             }
         }
-        // None of the three shared parts holds another's name, so the order `script` writes them in changes nothing.
-        for (part, others) in [(VISIBLE, ["FIND", "FIELDS"]), (FIND, ["VISIBLE", "FIELDS"]), (FIELDS, ["VISIBLE", "FIND"])] {
-            assert!(others.iter().all(|other| !part.contains(other)));
+        // No shared part holds another's name, so the order `script` writes them in changes nothing.
+        for (name, part) in PARTS {
+            assert!(PARTS.iter().all(|(other, _)| !part.contains(other)), "{name}");
         }
-        // The typing script answers only how it went, in fixed words, never a field's value. (Its own text, before
-        // `VISIBLE` is written in, whose two returns are a yes or a no about a field.)
-        let answers: Vec<&str> = TYPE.match_indices("return ").map(|(at, _)| &TYPE[at..]).collect();
-        assert_eq!(answers.len(), 3);
-        for answer in answers {
-            assert!(["return JSON.stringify({ r: \"origin\" })", "return JSON.stringify({ r: \"form\" })",
-                "return JSON.stringify({ r: \"typed\" })"].iter().any(|fixed| answer.starts_with(fixed)), "{answer}");
+        // The first page's script is handed the account's name alone and the second page's the password alone: each
+        // types only what it was given.
+        assert!(TYPE_USER.contains("put(user, u)") && !TYPE_USER.contains(", p)") && !TYPE_USER.contains("(p)"));
+        assert!(TYPE_PASS.contains("put(password, p)") && !TYPE_PASS.contains(", u)") && !TYPE_PASS.contains("(u)"));
+        // The typing scripts answer only how it went, in fixed words, never a field's value (their own text, before the
+        // shared parts are written in).
+        for body in [TYPE, TYPE_USER, TYPE_PASS] {
+            let answers: Vec<&str> = body.match_indices("return ").map(|(at, _)| &body[at..]).collect();
+            assert_eq!(answers.len(), 3);
+            for answer in answers {
+                assert!(["return JSON.stringify({ r: \"origin\" })", "return JSON.stringify({ r: \"form\" })",
+                    "return JSON.stringify({ r: \"typed\" })", "return JSON.stringify({ r: \"typed\", a })"].iter()
+                    .any(|fixed| answer.starts_with(fixed)), "{answer}");
+            }
         }
     }
 }

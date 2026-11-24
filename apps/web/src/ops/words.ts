@@ -726,6 +726,7 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   page_unavailable: "The page did not load.",
   selector_not_found: "Nothing on the page matched what it was to read.",
   sign_in_refused: "The site refused the saved password.",
+  sign_in_interrupted: "The site asked for more than the saved sign-in, such as a check that you are a person or a code, so the outpost stopped there.",
   grant_refused: "There was no sign-in to type.",
   submit_refused: "The site refused what was submitted and kept the form.",
   not_run: "The outpost did not run the step, so nothing was submitted.",

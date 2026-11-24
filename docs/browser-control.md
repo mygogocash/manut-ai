@@ -91,7 +91,8 @@ or the grant that carries them. The worker turns the name into the sign-in's id 
    removed or reported broken meanwhile, is refused. Another outpost's try leaves the grant for its own; any refusal
    after the grant was found to be the outpost's own, unused and on time, leaves it used up.
 4. **The outpost types it** into a page whose origin is one of the sign-in's origins, and keeps it nowhere: not on
-   disk, not in a log, not in what it reports back.
+   disk, not in a log, not in what it reports back. A site that asks for the account's name on one page and the
+   password on the next is signed in over both, the password typed only once a page on those origins asks for it.
 
 Every change and every redeem writes an audit entry with ids only: the sign-in, the outpost, the grant, the task and
 the attempt. The grant id may be written down, since it is worthless without the outpost's credential and dead after
@@ -216,7 +217,10 @@ with no password in either.
    (`port.browserStepOutcome(stepId)`). An outcome that cannot land is taken back: the step reads refused, and what it
    read is dropped.
 5. **A sign-in the site refused** comes back as `failed`, `sign_in_refused`, with the sign-in's id, and the worker
-   reports it broken (`port.signInBroken`) as above.
+   reports it broken (`port.signInBroken`) as above. A sign-in the site interrupted, asking for more than the saved
+   sign-in (a check that you are a person, a code sent to a phone, "verify it's you"), comes back as `failed`,
+   `sign_in_interrupted`: the site refused nothing, so the worker does not report it broken; it tells the owner, who
+   can sign in by hand.
 
 No password is in a step, its outcome or its audit entries. A step carries a grant's id, never what it unlocks, and
 the outpost types the password and keeps it nowhere. The control plane checks this too: a read whose text holds the
@@ -502,8 +506,9 @@ against the fake browser. What the owner's first supervised write should check i
   API settles as failed), and after it as not known (`origin_not_allowed`). Before, a refusal before the press was
   `origin_not_allowed` too, and settled the write as not known though nothing had been pressed.
 - **Fields inside a page's open shadow DOM** (`FIND` in `step.rs`). Every selector a step names, a read's and a write's
-  form and fields, is looked for in the page first and then in each open shadow root inside it (a part of a page whose
-  script keeps its elements apart, as web components do), in the order the page holds them. A closed
+  form and fields, and every field a sign-in looks for, is looked for in the page first and then in each open shadow
+  root inside it (a part of a page whose script keeps its elements apart, as web components do), in the order the page
+  holds them. A closed
   shadow root cannot be reached by any script: what is in one is not on the page as far as the outpost can tell, so a
   step naming it ends `selector_not_found` with nothing typed.
 - **More controls for a write** (`FIELDS`). Besides text fields, text areas and lists: a check box takes `"checked"` or
@@ -539,6 +544,29 @@ against the fake browser. What the owner's first supervised write should check i
   known, since after the press no code may say that nothing was sent. Nothing is typed or pressed again. The outcome
   words stay as they were: done, failed and nothing sent, or not known. A write's time grows from 45 to 60 seconds for
   it.
+- **A sign-in over two pages** (`sign_in`, `next` and `settle` in `step.rs`; `FORM`, `TYPE_USER`, `NEXT`, `TYPE_PASS`,
+  `CHECK`). The first look says what the page asks for: a password (one page, as before), the account's name alone, or
+  neither. A page asks for the name alone only when it says so plainly, never by a guess: its field marked "username"
+  for the browser's autofill, or else its only email field. The grant is redeemed only then; the first page is handed
+  the account's name and never the password, which waits in its wiped buffer. The next page is whatever shows a
+  password field a person can type into, on the sign-in's own origins, whether the site moved to a new page or swapped
+  its form in place; it is taken as soon as it is there, the address is checked against the sign-in's origins again,
+  and the password script checks it once more as it types. The first page still showing decides nothing (the site may
+  be checking the account, or saying beside the field that it does not know it): at the end of the sign-in's time that
+  is `timed_out`, never a refusal. Anything else that holds for 3 seconds between the pages (a check that you are a
+  person, a box for a code, "verify it's you", a choice of accounts) stops the step with the new code
+  `sign_in_interrupted`, and the password is typed nowhere. All of it keeps the sign-in's 40 seconds: the step lives
+  only as long as its grant's minute.
+- **The site's answer to the password**, after one page or two: a box for a one-time code (a field marked
+  "one-time-code") is `sign_in_interrupted`, where before no password field left counted as signed in; after two pages,
+  the first page back again is `sign_in_interrupted` too. Neither is ever `sign_in_refused`, which marks the sign-in
+  broken for everyone. The page going off the step's origins ends the wait at once rather than at the end of its time.
+- **A sign-in page drawn by its own script** is looked for again for up to 10 seconds, as a write's form is, before
+  the step says there is no form; nothing is redeemed until there is one. A sign-in's fields are found in open shadow
+  roots too.
+- **Tested in two engines**: a one-page sign-in in and refused and asking for a code, one in a web component, a first
+  page that moves to its password page, one that swaps its form in place, one that asks whether you are a person
+  between the pages, and a page with two email fields that is never taken for a first page.
 
 ## Choices made so far
 
@@ -579,7 +607,8 @@ The step channel's (24 Nov 2026):
 - A read brings back at most 4 KB as JSON, which fits one agent event with room to spare and keeps what a worker's
   model reads small. Longer is refused without using the step up, so the outpost can cut it and report again.
 - An outpost says a step failed with a code from a fixed list, never free text: `origin_not_allowed`,
-  `page_unavailable`, `selector_not_found`, `sign_in_refused`, `grant_refused`, `timed_out`, `browser_error`.
+  `page_unavailable`, `selector_not_found`, `sign_in_refused`, `grant_refused`, `timed_out`, `browser_error`. (Since
+  added: `submit_refused` and `not_run` for writes, `navigation_refused` and `sign_in_interrupted`, below.)
 - An outcome lands in the attempt's events as a tool call (`toolStarted`, then `toolUpdated`), the agent event
   contract's existing kinds, so no reader needs a new one. It lands when it is reported, so a step's row appears once
   it ended; the worker sees an outcome only once it has landed.
@@ -646,7 +675,8 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   same day: on macOS the hook tells them apart, below.)
 - A sign-in submits the form it typed into. The site's answer must hold for 3 seconds: no password field left is done,
   the same address with the password fields emptied is `sign_in_refused`, anything else is `timed_out`, never a guessed
-  refusal.
+  refusal. (Since 25 Nov 2026: a box for a one-time code, or after two pages the first page back, is
+  `sign_in_interrupted`, below.)
 - Connections counts steps, not the canvas's jobs, and names the outpost "This Mac" in the app's language.
 
 The desktop showing a browser write's (24 Nov 2026), each in `docs/decisions.md`:
@@ -754,6 +784,10 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
 - A settings page that keeps its form as typed and says nothing for 6 seconds is loaded anew, after an empty page, and
   read back: every value as approved, one of them one an empty form would not show, for 3 seconds, is done; anything
   else is not known. A write has 60 seconds.
+- A sign-in over two pages takes the next page to be whatever shows a password field on the sign-in's own origins,
+  moved to or swapped in place, as soon as it shows; a first page must name its account field plainly. The first page
+  still showing decides nothing; anything else between the pages, and a code asked for after the password, is
+  `sign_in_interrupted`, never a refusal. A sign-in keeps its 40 seconds.
 
 ## Next slices
 
@@ -795,10 +829,10 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
    (built 24 Nov 2026: changing a sign-in's members, by the owner from the app and by the operator, above);
    (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
-   as data, never as instructions, when it reaches a model. From the desktop outpost: sign-in forms inside frames or
-   over two pages (the username first), and the outpost on Windows and Linux (no keychain support there yet). (Built
-   24 Nov 2026: the shop sessions of the several-shops switcher, which the outpost now follows, above; telling a page's
-   frames from the page in the navigation hook, above.)
+   as data, never as instructions, when it reaches a model. From the desktop outpost: sign-in forms inside frames, and
+   the outpost on Windows and Linux (no keychain support there yet). (Built 24 Nov 2026: the shop sessions of the
+   several-shops switcher, which the outpost now follows, above; telling a page's frames from the page in the navigation
+   hook, above. Built 25 Nov 2026: sign-in forms over two pages, the username first, above.)
 
 ## Sources
 

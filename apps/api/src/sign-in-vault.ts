@@ -825,10 +825,13 @@ type ReadStepKind = (typeof READ_STEP_KINDS)[number];
 /// nothing changed. `not_run`: the outpost did not do what the step asks (a kind it does not know, a step missing what
 /// its kind needs, or a stop before the step began or, for a write, before anything was typed), so nothing was
 /// submitted. `navigation_refused`: a write step, before it pressed anything, had the page or one of its frames try to go
-/// off the step's origins; the outpost refused it and stopped, so nothing was submitted. `timed_out` and
+/// off the step's origins; the outpost refused it and stopped, so nothing was submitted. `sign_in_interrupted`: the site
+/// asked for more than the saved sign-in (a check that you are a person, a code sent to a phone, "verify it's you"), so
+/// the outpost stopped there; the sign-in was not refused, so the worker does not report it broken. `timed_out` and
 /// `browser_error`: anything else.
 export const STEP_FAILURES = ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused",
-  "grant_refused", "submit_refused", "not_run", "navigation_refused", "timed_out", "browser_error"] as const;
+  "grant_refused", "submit_refused", "not_run", "navigation_refused", "sign_in_interrupted", "timed_out",
+  "browser_error"] as const;
 
 /// A step lives two minutes from when it is queued, or until its grant ends if that is sooner. An outpost asks for its
 /// steps every few seconds and a page loads in seconds, so a step normally ends well inside a minute; two leave room for

@@ -19,14 +19,20 @@ function raw(name: string): string {
   if (!found) throw new Error(`step.rs has no ${name}`);
   return found[1];
 }
-/** A script as it is run: `FIELDS`, `FIND` and `VISIBLE` written in, as `step::script` does. */
+/** A script as it is run: every shared part written in where it names it, as `step::script` does with `PARTS`. */
 const script = (name: string) =>
-  raw(name).replace("FIELDS", raw("FIELDS")).replace("FIND", raw("FIND")).replace("VISIBLE", raw("VISIBLE"));
+  ["FIELDS", "ACCOUNT", "SUBMIT", "FIND", "VISIBLE"].reduce((text, part) => text.replace(part, () => raw(part)), raw(name));
 const READ = script("READ");
 const SET = script("SET");
 const PRESS = script("PRESS");
 const SENT = script("SENT");
 const SAVED = script("SAVED");
+const FORM = script("FORM");
+const TYPE = script("TYPE");
+const TYPE_USER = script("TYPE_USER");
+const NEXT = script("NEXT");
+const TYPE_PASS = script("TYPE_PASS");
+const CHECK = script("CHECK");
 
 const ORIGIN = "https://shop.test";
 const o = JSON.stringify([ORIGIN]);
@@ -121,6 +127,73 @@ const PAGES: Record<string, string> = {
         document.body.dataset.saved = JSON.stringify(Object.fromEntries(new FormData(e.target)));
       });
     </script>`),
+  // A sign-in on one page: the right password signs in (no password field left); a wrong one empties the field where it
+  // was; a code is asked for when the account is "otp@baanmali".
+  "/login": html(`
+    <form id="login"><input name="email" autocomplete="username"><input type="password" name="pw"><button>Sign in</button></form>
+    <script>
+      document.getElementById("login").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const f = e.target;
+        if (f.pw.value !== "right-pw") { f.pw.value = ""; return; }
+        document.body.innerHTML = f.email.value === "otp@baanmali"
+          ? '<form><input autocomplete="one-time-code" inputmode="numeric"><button>Verify</button></form>' : "<p>Welcome</p>";
+      });
+    </script>`),
+  // A sign-in over two pages that moves to its password page, which knows the account from the address.
+  "/identifier": html(`<form action="/password" method="get"><input type="email" name="email" autocomplete="username"><button>Next</button></form>`),
+  "/password": html(`
+    <p id="who"></p><form id="pw"><input type="password" name="pw"><button>Sign in</button></form>
+    <script>
+      document.getElementById("who").textContent = new URLSearchParams(location.search).get("email");
+      document.getElementById("pw").addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (e.target.pw.value === "right-pw") document.body.innerHTML = "<p>Welcome</p>";
+        else e.target.pw.value = "";
+      });
+    </script>`),
+  // A sign-in over two pages on one page that swaps its form a moment after the account's name is sent, or that, for
+  // "robot@baanmali", asks whether you are a person instead, or that sends you back to the first page on a wrong password.
+  "/swap": html(`
+    <form id="f">
+      <div id="first"><input type="email" autocomplete="username"><button type="button">Next</button></div>
+      <div id="second" hidden><input type="password"><button>Sign in</button></div>
+    </form>
+    <script>
+      window.heard = [];
+      const f = document.getElementById("f");
+      for (const el of f.querySelectorAll("input")) el.addEventListener("input", () => heard.push(el.type));
+      f.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const [email, pw] = f.querySelectorAll("input");
+        if (!document.getElementById("first").hidden) {
+          setTimeout(() => {
+            if (email.value === "robot@baanmali") { document.body.innerHTML = '<p>Show that you are a person</p><input name="answer">'; return; }
+            document.getElementById("first").hidden = true;
+            document.getElementById("second").hidden = false;
+          }, 300);
+          return;
+        }
+        if (pw.value === "right-pw") { document.body.innerHTML = "<p>Welcome</p>"; return; }
+        pw.value = "";
+        document.getElementById("first").hidden = false;
+        document.getElementById("second").hidden = true;
+      });
+    </script>`),
+  // A sign-in drawn as a web component, its fields in an open shadow root.
+  "/shadow-login": html(`
+    <shop-login></shop-login>
+    <script>
+      customElements.define("shop-login", class extends HTMLElement {
+        connectedCallback() {
+          const root = this.attachShadow({ mode: "open" });
+          root.innerHTML = '<form><input name="email" autocomplete="username"><input type="password" name="pw"><button>Sign in</button></form>';
+          root.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); document.body.dataset.signed = e.target.email.value; });
+        }
+      });
+    </script>`),
+  // A page that asks for an account plainly nowhere: two email fields and no field marked "username".
+  "/newsletter": html(`<form><input type="email" name="a"><input type="email" name="b"><button>Join</button></form>`),
   // Editors that are not form fields: a chat box that sends on Return, an editor with a line of its own per paragraph,
   // and one the page fills with lines as a rich editor keeps them.
   "/editors": html(`
@@ -210,7 +283,7 @@ const inside = (p: Page, selector: string, key: "value" | "checked" | "innerText
     [selector, key] as const);
 
 /** Every case, for a spec file to run in its browser. */
-export function writeScriptCases(): void {
+export function outpostScriptCases(): void {
   test("checks the form and every field before typing anything, and types nowhere else", async ({ page: p }) => {
     await serve(p);
     await p.goto(`${ORIGIN}/chat`);
@@ -433,6 +506,78 @@ export function writeScriptCases(): void {
     await p.goto(`${ORIGIN}/kept`);
     expect(await run(p, SAVED, { o, v: pairs })).toEqual({ s: "other" });
     expect(await value(p, "input[name=hours]")).toBe("08:00-17:00");
+  });
+
+  test("a sign-in's first look says what the page asks for, and never guesses an account's field", async ({ page: p }) => {
+    await serve(p);
+    const form = async (path: string, origins = o) => { await p.goto(`${ORIGIN}${path}`); return run(p, FORM, { o: origins }); };
+    expect(await form("/login")).toEqual({ f: "password", a: `${ORIGIN}/login` });
+    expect(await form("/identifier")).toEqual({ f: "username", a: `${ORIGIN}/identifier` });
+    // A password field the page keeps hidden for later is not one it asks for yet.
+    expect(await form("/swap")).toEqual({ f: "username", a: `${ORIGIN}/swap` });
+    expect(await form("/shadow-login")).toEqual({ f: "password", a: `${ORIGIN}/shadow-login` });
+    // Two email fields and none marked as the account's: not a first page, whatever it might be.
+    expect(await form("/newsletter")).toEqual({ f: "none", a: `${ORIGIN}/newsletter` });
+    expect(await form("/saved")).toEqual({ f: "none", a: `${ORIGIN}/saved` });
+    expect(await form("/login", JSON.stringify(["https://elsewhere.test"]))).toEqual({ e: "origin" });
+  });
+
+  test("signs in on one page, and reads the site's answer: in, refused, or a code asked for", async ({ page: p }) => {
+    await serve(p);
+    const signIn = async (u: string, pw: string) => {
+      await p.goto(`${ORIGIN}/login`);
+      expect(await run(p, TYPE, { o, u, p: pw })).toEqual({ r: "typed" });
+      return () => run(p, CHECK, { o, a: `${ORIGIN}/login` });
+    };
+    await expect.poll(await signIn("fon@baanmali", "right-pw")).toEqual({ s: "in" });
+    await expect.poll(await signIn("fon@baanmali", "wrong-pw")).toEqual({ s: "refused" });
+    await expect.poll(await signIn("otp@baanmali", "right-pw")).toEqual({ s: "code" });
+    // Typed into a sign-in inside a web component's open shadow root, as into the page's own.
+    await p.goto(`${ORIGIN}/shadow-login`);
+    expect(await run(p, TYPE, { o, u: "fon@baanmali", p: "right-pw" })).toEqual({ r: "typed" });
+    expect(await p.evaluate(() => document.body.dataset.signed)).toBe("fon@baanmali");
+    // Off the sign-in's origins nothing is typed.
+    await p.goto(`${ORIGIN}/login`);
+    expect(await run(p, TYPE, { o: JSON.stringify(["https://elsewhere.test"]), u: "fon@baanmali", p: "right-pw" })).toEqual({ r: "origin" });
+    expect(await value(p, "input[name=email]")).toBe("");
+  });
+
+  test("signs in over two pages, typing the password only once a page asks for it", async ({ page: p }) => {
+    await serve(p);
+    await p.goto(`${ORIGIN}/identifier`);
+    expect(await run(p, TYPE_USER, { o, u: "fon@baanmali" })).toEqual({ r: "typed" });
+    // The site moved to its password page, which knows the account from what the first page sent.
+    await p.waitForURL(`${ORIGIN}/password?email=fon%40baanmali`);
+    await expect.poll(async () => (await run(p, NEXT, { o })).s).toBe("password");
+    expect(await p.textContent("#who")).toBe("fon@baanmali");
+    const typed = await run(p, TYPE_PASS, { o, p: "right-pw" });
+    expect(typed).toEqual({ r: "typed", a: `${ORIGIN}/password` });
+    await expect.poll(async () => (await run(p, CHECK, { o, a: typed.a })).s).toBe("in");
+    // A first page's script finds a page that asks for a password already: it types nothing there.
+    await p.goto(`${ORIGIN}/login`);
+    expect(await run(p, TYPE_USER, { o, u: "fon@baanmali" })).toEqual({ r: "form" });
+    expect(await value(p, "input[name=email]")).toBe("");
+  });
+
+  test("signs in over two pages on a page that swaps its form, and says what came between", async ({ page: p }) => {
+    await serve(p);
+    await p.goto(`${ORIGIN}/swap`);
+    expect(await run(p, TYPE_USER, { o, u: "fon@baanmali" })).toEqual({ r: "typed" });
+    // The first page still showing while the site decides, then the password field in its place.
+    expect((await run(p, NEXT, { o })).s).toBe("user");
+    await expect.poll(async () => (await run(p, NEXT, { o })).s).toBe("password");
+    // Only the account's name was typed before the page asked for the password.
+    expect(await p.evaluate(() => (window as unknown as { heard: string[] }).heard)).toEqual(["email"]);
+    const typed = await run(p, TYPE_PASS, { o, p: "wrong-pw" });
+    expect(typed).toEqual({ r: "typed", a: `${ORIGIN}/swap` });
+    // A wrong password here sends the site back to its first page: after two pages that is not signed in.
+    await expect.poll(async () => (await run(p, CHECK, { o, a: typed.a })).s).toBe("user");
+    // A site that asks whether you are a person between the pages: other, and no password field anywhere.
+    await p.goto(`${ORIGIN}/swap`);
+    expect(await run(p, TYPE_USER, { o, u: "robot@baanmali" })).toEqual({ r: "typed" });
+    await expect.poll(async () => (await run(p, NEXT, { o })).s).toBe("other");
+    expect(await run(p, TYPE_PASS, { o, p: "right-pw" })).toEqual({ r: "form" });
+    expect((await run(p, NEXT, { o: JSON.stringify(["https://elsewhere.test"]) })).s).toBe("away");
   });
 
   test("reads an editor's text as a person reads it, whatever the editor draws it with", async ({ page: p }) => {
