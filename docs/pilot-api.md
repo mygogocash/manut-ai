@@ -2214,9 +2214,14 @@ type GoogleStatus = {
   no script and is never cached; it is in English for now.
 - **Disconnecting** revokes the refresh token at Google (`POST /revoke`, the token in the body) and then forgets it in
   the vault, whatever Google answered: `revoked: false` means Google could not be reached, and the owner can remove
-  Manut AI in their Google account's settings. 404 `not_connected` when there is nothing to disconnect.
+  Manut AI in their Google account's settings. 404 `not_connected` when there is nothing to disconnect. It is the only
+  way to remove a Google connection: the generic `DELETE /v1/connections/:id` answers 409 `disconnect_required` for one,
+  since it would forget the token without telling Google.
 - **Tokens.** An access token is asked for, from the sealed refresh token, each time an ask or a send needs one, used
-  for that ask or send, and never stored. No token is in any answer, page, log, URL or audit entry.
+  for that ask or send, and never stored. No token is in any answer, page, log, URL or audit entry. The broker sends an
+  action only through a connection of its operation's own provider, so the Google token never goes anywhere but Google,
+  whatever connection a proposal names (a LINE reply only through a LINE connection, a Linear issue only through a
+  Linear one).
 - **Broken.** When Google refuses the grant (`invalid_grant`: the access was removed, or ran out), the connection is
   marked broken, `google.broken` is written once, and nothing is asked or sent through it again; the owner connects
   again to mend it. Any other trouble reaching Google changes nothing and fails only that ask or send.
@@ -2245,7 +2250,7 @@ type GoogleStatus = {
 
 The owner decides it from their session (`POST /v1/approvals/{requestId}/decision`, "Deciding from a session"). An
 approval goes to the broker's one-use begin gate, as every write does, which sends it once: the live grant is checked
-(the connection, its revision, the sheet, not broken), a fresh access token is asked for, and the approved rows go to
+(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, and the approved rows go to
 `spreadsheets.values.append` exactly as `@manut/sheets-rows` builds them, `valueInputOption=RAW` (no cell runs as a
 formula) and `insertDataOption=INSERT_ROWS`, after a header row. It settles `confirmed` on Google's success, `failed` only
 when Google refused it before applying it (400, 401, 403, 404, 429) or when it was never sent, and `unknown` for any

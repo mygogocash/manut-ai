@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/index";
 import { bahtText, booksPayloadOf, booksText, booksTotals, type BooksDetail } from "../src/books-detail";
 import { monthIsWhole, plainTitle, sheetTitle } from "../src/books-sheet";
+import { dispatchAction } from "../src/broker-actions";
 import { dispatchApproved } from "../src/job-flow";
 import { bangkokMonth } from "../src/model-price";
 import { sortableId, type Payment } from "../src/pilot-store";
@@ -20,12 +21,14 @@ import {
   installGoogle,
   lastMonth,
   operator,
+  send,
   sendJson,
   status,
   vault,
   vaultRecords,
   world,
 } from "./google-fixtures";
+import { tenantSession } from "./authenticated-fixtures";
 import { bindings, joinHelper, linkedOwner, setupShop, shopConsents, type Owner, type Shop } from "./people-fixtures";
 
 // Ton appends a month of the shop's books to the owner's Google Sheet (books-sheet.ts, books-detail.ts; docs/pilot-api.md,
@@ -357,6 +360,39 @@ describe("a month of the books, asked, approved once and sent once", () => {
     const [ownerSees] = await openApprovals(owner.headers);
     expect((ownerSees!.record.request.detail as unknown as BooksDetail).totals.sales).toBe("฿350");
     expect((await decide(owner.headers, asked.body.requestId!)).body.action).toBe("confirmed");
+  });
+
+  it("never sends the Google token anywhere but Google, whatever operation a proposal names", async () => {
+    const { shop, owner, connectionId } = await readyShop();
+    const month = lastMonth();
+    await paidIn(shop, month, [{ orderRef: "SP-6", amountSatang: 600 }]);
+    expect((await askBooks(owner, month)).body.outcome).toBe("asked");
+    const sheetId = (await status(owner)).connection!.sheet!.id;
+    // The shop's own session proposes a Linear issue through the Google connection, inside its granted sheet, and
+    // approves it on the older decision route, which an action that no request decides still takes.
+    const session = await tenantSession(shop.tenant);
+    const taskId = `books-escape-${crypto.randomUUID()}`;
+    const created = await send("/v1/tasks", { method: "POST", headers: { ...session, "idempotency-key": taskId },
+      body: { id: taskId, title: "t", objective: "o", state: "draft", location: "cloud", funding: "cloudBYOK",
+        criteria: [], updatedAt: new Date().toISOString(), tenantId: shop.tenant } });
+    expect(created.status).toBe(200);
+    const proposed = await sendJson<ActionProposalJSON>(`/v1/tasks/${taskId}/actions`, { method: "POST",
+      headers: session, body: { connectionId, providerAccountId: "google", operationType: "linear.issue.create",
+        targetResourceId: sheetId, resourceScope: [sheetId], payload: { title: "Not for Linear" }, grantRevision: 2,
+        expiresAt: new Date(Date.now() + 3600_000).toISOString() } });
+    expect(proposed.status).toBe(200);
+    expect((await send(`/v1/tasks/${taskId}/actions/${proposed.body.id}/decision`, { method: "POST", headers: session,
+      body: { approve: true, by: "founder" } })).status).toBe(200);
+    let sent = 0;
+    const settled = await dispatchAction(googleEnv, taskId, proposed.body.id, { tenant: shop.tenant, grantRevision: 2,
+      fetchImpl: async () => {
+        sent++;
+        return Response.json({ data: { issueCreate: { success: true, issue: { id: "x", identifier: "X-1", title: "t",
+          url: "https://linear.app/x" } } } });
+      } });
+    expect(((await settled.json()) as ActionProposalJSON).state).toBe("failed");
+    expect(sent).toBe(0);
+    expect(world.google.tokenCalls("refresh_token")).toHaveLength(1);
   });
 
   it("asks only for a month that has ended and has something in it", async () => {

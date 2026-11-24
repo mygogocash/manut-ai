@@ -260,6 +260,12 @@ export class CredObject extends DurableObject {
     const id = url.pathname.split("/")[2] ?? "";
     const record = await this.load(id, request);
     if (record instanceof Response) return record;
+    // A connection only its sign-in makes is removed only by its own disconnect, which revokes it at the provider first
+    // and writes it to the log (google-connect.ts sends the Worker's `x-google` header). The generic route would forget
+    // the token while the owner's Google account still lists Manut AI as having access.
+    if (SIGN_IN_ONLY_PROVIDERS.has(record.provider) && request.headers.get("x-google") !== "1") {
+      return Response.json({ error: "disconnect_required" }, { status: 409 });
+    }
     // Revocation wipes secret material but keeps the tombstone, so a
     // restored backup cannot quietly resurrect a live credential.
     const tombstone: ConnectionRec = {

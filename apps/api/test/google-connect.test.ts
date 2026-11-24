@@ -32,6 +32,7 @@ import {
   vaultRecords,
   world,
 } from "./google-fixtures";
+import { tenantSession } from "./authenticated-fixtures";
 import { bindings, joinHelper, linkedOwner, setupShop } from "./people-fixtures";
 
 // Connecting the owner's own Google account for Ton's books (google-connect.ts, google-vault.ts; docs/pilot-api.md,
@@ -276,6 +277,20 @@ describe("connecting the owner's Google account", () => {
     expect(await status(owner)).toEqual({ connected: false, connection: null });
     expect((await auditOf(shop)).filter((entry) => entry.action === "google.disconnected").map((entry) => entry.reason))
       .toEqual(["not_revoked", undefined]);
+  });
+
+  it("keeps the generic connection routes from removing a Google connection without revoking it at Google", async () => {
+    const shop = await setupShop();
+    const owner = await linkedOwner(shop);
+    const id = await connect(owner);
+    const session = await tenantSession(shop.tenant);
+    expect(await sendJson(`/v1/connections/${id}`, { method: "DELETE", headers: session }))
+      .toEqual({ status: 409, body: { error: "disconnect_required" } });
+    expect((await status(owner)).connection?.id).toBe(id);
+    expect(world.google.revokes()).toEqual([]);
+    // The owner's disconnect revokes first, then removes it.
+    expect((await sendJson("/v1/google/disconnect", { method: "POST", headers: owner.headers, body: {} })).body)
+      .toEqual({ disconnected: true, revoked: true });
   });
 
   it("keeps the generic connection routes from storing a Google token, so the sign-in is the only way in", async () => {

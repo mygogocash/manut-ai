@@ -326,7 +326,7 @@ async function disconnect(env: GoogleRouteEnv, caller: Extract<Caller, { role: "
   }
   const forgotten = await credStub(env, caller.shop).fetch(new Request(
     `https://cred/connections/${encodeURIComponent(connection.id)}`, { method: "DELETE",
-      headers: { "x-tenant": caller.shop } })).catch(() => null);
+      headers: { "x-tenant": caller.shop, "x-google": "1" } })).catch(() => null);
   await forgotten?.body?.cancel();
   if (!forgotten?.ok) return json({ error: "vault_unavailable" }, 503);
   await appendAudit(env, caller.shop, { actor: ownerActor(caller), action: "google.disconnected",

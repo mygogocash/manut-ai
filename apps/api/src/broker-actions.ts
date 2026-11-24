@@ -3,6 +3,7 @@ import { SHEETS_APPEND } from "./books-detail";
 import { sendBooks } from "./books-sheet";
 import { readConnectionSecret } from "./cred-broker";
 import type { GoogleEnv } from "./google";
+import { GOOGLE_PROVIDER } from "./google-vault";
 import { LINE_PUSH_OPERATION, lineReplyText, openLineCredentials, pushLineMessage } from "./connectors/line";
 import { checkGrant, ConnectorError } from "./connectors/types";
 import { readReplyBinding } from "./pilot-store";
@@ -18,6 +19,15 @@ type ActionEnv = GoogleEnv & {
 };
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+/// The provider each operation the broker sends is for. An action goes out only through a connection of that provider,
+/// so a connection's secret is only ever sent to the service it was given for: a Google token never reaches Linear,
+/// whatever connection id a proposal names. An operation not listed here is sent through no connection.
+const OPERATION_PROVIDERS: Readonly<Record<string, string>> = {
+  "linear.issue.create": "linear",
+  [LINE_PUSH_OPERATION]: "line",
+  [SHEETS_APPEND]: GOOGLE_PROVIDER,
+};
 
 /// A provider fault the broker classifies: permanent failures settle the
 /// action as failed, ambiguous ones as unknown. Unknown never retries
@@ -245,6 +255,7 @@ export async function finishDispatchAction(
   ).json()) as {
     connections?: {
       id?: string;
+      provider?: string;
       accountId?: string;
       resourceIds?: string[];
       allowsActions?: boolean;
@@ -254,6 +265,10 @@ export async function finishDispatchAction(
   };
   const connection = (listing.connections ?? []).find((entry) => entry.id === proposal.connectionId);
   if (!connection) {
+    return settle("failed");
+  }
+  if (!Object.hasOwn(OPERATION_PROVIDERS, proposal.operationType) ||
+      connection.provider !== OPERATION_PROVIDERS[proposal.operationType]) {
     return settle("failed");
   }
   // A connection its provider refused (google-vault.ts) sends nothing until the owner connects again.

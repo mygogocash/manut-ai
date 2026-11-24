@@ -33,7 +33,7 @@ function randomIp(): string {
   return `2001:db8:${groups.join(":")}`;
 }
 
-export type Sent = { method?: string; headers?: { authorization?: string }; body?: unknown; target?: Env };
+export type Sent = { method?: string; headers?: Record<string, string>; body?: unknown; target?: Env };
 
 /// A request to the Worker as a signed-in app or the owner's browser sends it, with its own source address, run to the
 /// end of its waitUntil work.
