@@ -82,6 +82,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `941d9565`); smoke-tested: registering, the steps and the approvals answer 401 without a session.
 - Dev's API was redeployed on 24 Nov at 07:17 from `abd2333`, with an owner's shop session on the memory, consent,
   export and helpers (API `fcfcfdaf`); smoke-tested: those routes answer 401 without a session.
+- Dev was redeployed on 24 Nov at 07:32 from `e6d8f5a`, with the deletion follow-up in the API and the console
+  (pages `0f73ff1f`, API `9c50074a`); smoke-tested: the console and the admin routes are behind Access, the owner's
+  routes answer 401 without a session, the approval page loads, and the served bundle is the one just built.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
