@@ -246,6 +246,14 @@ describe("signing in", () => {
     expect(browser.jar.size).toBe(0);
   });
 
+  it("says on opening, to someone signed out, whether signing in by email is on", async () => {
+    const off = { ...bindings } as Record<string, unknown>;
+    delete off.EMAIL_SIGN_IN;
+    const response = await direct("/v1/web/shops", {}, off as unknown as Env);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "signed_out", emailSignIn: false });
+  });
+
   it("answers email_not_configured while signing in by email is off, as the exchange does", async () => {
     const off = { ...bindings } as Record<string, unknown>;
     delete off.EMAIL_SIGN_IN;
@@ -295,10 +303,10 @@ describe("the person's shops", () => {
     browser.jar.set(SIGN_IN_COOKIE, refreshedFrom!);
     const ended = await browser.shops();
     expect(ended.status).toBe(401);
-    expect(ended.body).toEqual({ error: "signed_out" });
+    expect(ended.body).toEqual({ error: "signed_out", emailSignIn: true });
     expect(ended.cookies).toEqual([]);
 
-    expect((await new Browser().shops()).body).toEqual({ error: "signed_out" });
+    expect((await new Browser().shops()).body).toEqual({ error: "signed_out", emailSignIn: true });
   });
 
   it("clears the session of a shop the person has left, and opens one for a shop they joined", async () => {
@@ -438,7 +446,7 @@ describe("signing out", () => {
     expect((await stale.approvals(owned.tenant)).body).toEqual({ error: "session_ended", shop: owned.tenant });
     expect((await stale.approvals(helped.tenant)).body).toEqual({ error: "session_ended", shop: helped.tenant });
     stale.jar.delete(ACCESS_COOKIE);
-    expect((await stale.shops()).body).toEqual({ error: "signed_out" });
+    expect((await stale.shops()).body).toEqual({ error: "signed_out", emailSignIn: true });
     expect((await new Browser().send("POST", "/v1/web/sign-out", {})).body).toEqual({ signedOut: true, shopsEnded: 0 });
   });
 

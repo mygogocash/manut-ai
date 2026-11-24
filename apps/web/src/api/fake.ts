@@ -32,10 +32,12 @@ import {
   type Shop,
   type SubscriptionPayment,
   type UnlinkedOwner,
+  type WebSession,
   type WorkerDraft,
   type WorkerJobEntry,
 } from "./types";
 import { pilotGate } from "./gate";
+import { PRACTICE_SHOPS, practiceOwner, type PracticeOwner } from "./practiceOwner";
 import { isCode, normalizeEmail } from "./email";
 import { endOfShopDay, formatIsoDate } from "../format";
 import * as peopleRules from "@manut/people-rules";
@@ -133,6 +135,9 @@ export type FakeApiOptions = {
   /// (`DEMO_JOIN_TOKENS.signInOff`), both sign-in routes answer `email_not_configured`, as every real environment does
   /// today. Defaults to this page's own path.
   pagePath?: () => string;
+  /// The query of the page open now: the owner's app opened as `/app/?demo=sign-in-off` (`APP_SIGN_IN_OFF`) answers the
+  /// same way. Defaults to this page's own query.
+  pageSearch?: () => string;
 };
 
 type Outcome = "confirmed" | "failed" | "unknown";
@@ -282,6 +287,10 @@ export const DEMO_JOIN_SHOP = {
 /// The join page's sign-in-off demo link, wherever it is open.
 const SIGN_IN_OFF_PATH = new RegExp(`^/join/${DEMO_JOIN_TOKENS.signInOff}/?$`);
 
+/// The owner's app opened with this query stands for an environment where signing in by email is off, as every real one
+/// is today: `/app/?demo=sign-in-off`.
+export const APP_SIGN_IN_OFF = "demo=sign-in-off";
+
 /// The link codes the practice world holds, as an owner's app shows them (`XXXX-XXXX`). Each works once, and a code goes the first
 /// time it is tried, whatever the answer. The sample world's accounts are Fon's, whom Baan Mali already has, Dao's and a guest's.
 export const PRACTICE_OWNER_CODES = {
@@ -323,6 +332,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const webOrigin =
     options.webOrigin ?? (typeof location !== "undefined" ? location.origin : "http://localhost:5173");
   const pagePath = options.pagePath ?? (() => (typeof location !== "undefined" ? location.pathname : "/"));
+  const pageSearch = options.pageSearch ?? (() => (typeof location !== "undefined" ? location.search : ""));
 
   let db = load() ?? seed(now());
 
@@ -333,6 +343,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
   const signIns = new Map<string, string>();
   const helperSessions = new Map<string, FakeHelperSession>();
   let tokenSeq = 0;
+  // The owner's web app's sign-in (src/app): the address and the practice world made for it, in this closure only, as the
+  // real one is in cookies the page cannot read. A reload forgets it.
+  let webSession: { address: string; world: PracticeOwner } | null = null;
 
   function load(): FakeDb | null {
     if (!storage) return null;
@@ -378,9 +391,27 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return work();
   }
 
-  /// Signing in by email is off while the sign-in-off demo link is open, as it is in every real environment today.
+  /// Signing in by email is off while the sign-in-off demo link is open, or the owner's app with its sign-in-off demo
+  /// query, as it is in every real environment today.
   function signInOff(): boolean {
-    return SIGN_IN_OFF_PATH.test(pagePath());
+    const path = pagePath();
+    return SIGN_IN_OFF_PATH.test(path) ||
+      (/^\/app(\/|$)/.test(path) && new URLSearchParams(pageSearch()).get("demo") === "sign-in-off");
+  }
+
+  /// Tries a code for an address, as the API's auth object does: no live code (never asked, used, or past its ten minutes)
+  /// is `code_ended`; a wrong code takes a try and the fifth ends it; the right one is used up, so it signs in once.
+  function useCode(address: string, code: string): void {
+    const record = emailCodes.get(address);
+    const live = record?.live;
+    if (!record || !live || now() >= live.expiresAt) throw new ApiError(401, "code_ended");
+    if (code !== PRACTICE_SIGN_IN_CODE) {
+      const wrong = live.wrong + 1;
+      const triesLeft = Math.max(0, MAX_WRONG_TRIES - wrong);
+      emailCodes.set(address, { ...record, live: triesLeft > 0 ? { ...live, wrong } : null });
+      throw new ApiError(401, "wrong_code", undefined, { triesLeft });
+    }
+    emailCodes.set(address, { ...record, live: null });
   }
 
   /// The API's 429 for an address that had a code in the last minute or ten in the last day: whole seconds, rounded up.
@@ -1453,16 +1484,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           throw new ApiError(400, "invalid_request");
         }
         if (signInOff()) throw new ApiError(400, "email_not_configured");
-        const record = emailCodes.get(address);
-        const live = record?.live;
-        if (!record || !live || now() >= live.expiresAt) throw new ApiError(401, "code_ended");
-        if (code !== PRACTICE_SIGN_IN_CODE) {
-          const wrong = live.wrong + 1;
-          const triesLeft = Math.max(0, MAX_WRONG_TRIES - wrong);
-          emailCodes.set(address, { ...record, live: triesLeft > 0 ? { ...live, wrong } : null });
-          throw new ApiError(401, "wrong_code", undefined, { triesLeft });
-        }
-        emailCodes.set(address, { ...record, live: null });
+        useCode(address, code);
         tokenSeq += 1;
         const accessToken = `practice-access-${tokenSeq}`;
         signIns.set(accessToken, address);
@@ -1508,6 +1530,36 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     signOut: async (accessToken) => {
       await quiet(() => {
         if (!signIns.delete(accessToken)) throw new ApiError(401, "invalid_session");
+      });
+    },
+
+    // The owner's web app (docs/pilot-api.md, "The web app's session"), on its practice world (practiceOwner.ts). The body
+    // is read as the API reads it, the code as the join page's is, and a sign-in makes a new world, so practising changes
+    // nothing anywhere else.
+    webSignIn: async (input) => {
+      await quiet(async () => {
+        const address = typeof input.email === "string" ? normalizeEmail(input.email) : null;
+        if (!address || typeof input.code !== "string" || !isCode(input.code)) throw new ApiError(400, "invalid_request");
+        if (signInOff()) throw new ApiError(400, "email_not_configured");
+        useCode(address, input.code);
+        webSession = { address, world: await practiceOwner(now) };
+      });
+    },
+    webShops: () =>
+      quiet((): WebSession => (webSession
+        ? { signedIn: true, shops: PRACTICE_SHOPS.map((shop) => ({ ...shop })) }
+        : { signedIn: false, emailSignIn: !signInOff() })),
+    webApprovals: async (shop, state) => {
+      await quiet(() => undefined);
+      return webSession ? webSession.world.approvals(shop, state) : { status: 401, body: { error: "session_ended", shop } };
+    },
+    webDecide: async (input) => {
+      await quiet(() => undefined);
+      return webSession ? webSession.world.decide(input) : { status: 401, body: { error: "session_ended", shop: input.shop } };
+    },
+    webSignOut: async () => {
+      await quiet(() => {
+        webSession = null;
       });
     },
   };

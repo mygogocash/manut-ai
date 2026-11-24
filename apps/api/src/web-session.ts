@@ -321,25 +321,27 @@ async function signIn(request: Request, url: URL, env: WebSessionEnv, ctx: Execu
 /// `POST /v1/web/shops` with `{}`: the shops the person is in (`GET /v1/shops`), each with a session ready: one the
 /// browser holds is kept, and one it lacks is opened (`POST /v1/shops/session`) and kept, so a helper's phone counts as
 /// one device for its 30 days rather than one each time the app opens. A cookie for a shop the person is no longer in
-/// (removed, unlinked or deleted) is cleared. 401 `signed_out` when there is no sign-in or the lifted auth ended it;
-/// 503 `shops_unavailable` when the shops cannot be read. A shop whose session could not be opened is listed with
+/// (removed, unlinked or deleted) is cleared. 401 `signed_out` when there is no sign-in or the lifted auth ended it, with
+/// `emailSignIn`, whether signing in by email is on, so the app can say on opening that it is not; 503
+/// `shops_unavailable` when the shops cannot be read. A shop whose session could not be opened is listed with
 /// `ready: false`.
 async function shops(request: Request, url: URL, env: WebSessionEnv, ctx: ExecutionContext, jar: Jar): Promise<Response> {
   if (request.method !== "POST") return answer({ error: "method_not_allowed" }, 405);
   const refused = await emptyBody(request);
   if (refused) return refused;
   const cookies: string[] = [];
+  const signedOut = () => answer({ error: "signed_out", emailSignIn: emailSignIn(env) !== null }, 401, cookies);
   let listed: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const access = await accessOf(env, jar, cookies, attempt > 0);
-    if (!access) return answer({ error: "signed_out" }, 401, cookies);
+    if (!access) return signedOut();
     const list = inner(url, "/v1/shops", "GET", access);
     listed = await shopsRoute(list.request, list.url, env, ctx);
     // An access token the lifted auth no longer holds (signed out elsewhere, or past its hour) is refreshed once.
     if (listed?.status !== 401) break;
     await listed.body?.cancel();
   }
-  if (!listed || listed.status === 401) return answer({ error: "signed_out" }, 401, cookies);
+  if (!listed || listed.status === 401) return signedOut();
   const body = await jsonOf(listed);
   if (!listed.ok || !isRecord(body) || !Array.isArray(body.shops)) return answer({ error: "shops_unavailable" }, 503, cookies);
   const access = jar.access ?? "";
