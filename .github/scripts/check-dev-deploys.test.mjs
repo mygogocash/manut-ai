@@ -70,8 +70,8 @@ describe("the dev deploy check", () => {
       const run = check(config(`${env}-test-var`, { ...BASE, env: { ...BASE.env,
         [env]: { name: `manut-api-${env}`, vars: { TEST_JWKS_JSON: "{}" } } } }));
       assert.equal(run.status, 1, run.out);
-      assert.match(run.out, new RegExp(`::error::.* sets TEST_JWKS_JSON for its ${env} environment: a TEST_ var belongs in ` +
-        "wrangler\\.test\\.json only\\. Nothing was deployed\\."));
+      assert.match(run.out, new RegExp(`::error::.* sets TEST_JWKS_JSON for its ${env} environment: ` +
+        "a TEST_ var belongs in wrangler\\.test\\.json only\\. Nothing was deployed\\."));
       assert.doesNotMatch(run.out, /deploys manut-api-dev/);
     });
   }
@@ -80,12 +80,14 @@ describe("the dev deploy check", () => {
     const blocks = {
       top: { ...BASE, vars: { PUBLIC_API_ORIGIN: "https://api.manut.test" } },
       dev: { ...BASE, env: { dev: { name: "manut-api-dev", vars: { PUBLIC_API_ORIGIN: "https://dev.manut.test" } } } },
-      prod: { ...BASE, env: { ...BASE.env, prod: { name: "manut-api-prod", vars: { PUBLIC_API_ORIGIN: "https://manut.test" } } } },
+      prod: { ...BASE, env: { ...BASE.env,
+        prod: { name: "manut-api-prod", vars: { PUBLIC_API_ORIGIN: "https://manut.test" } } } },
     };
     for (const [where, value] of Object.entries(blocks)) {
       const run = check(config(`origin-${where}`, value));
       assert.equal(run.status, 1, run.out);
-      assert.match(run.out, /::error::.* sets PUBLIC_API_ORIGIN to https:\/\/[a-z.]+\.test for its .*: an origin under \.test is a test Worker's/);
+      assert.match(run.out,
+        /::error::.* sets PUBLIC_API_ORIGIN to https:\/\/[a-z.]+\.test for its .*: an origin under \.test is a test Worker's/);
     }
     // A real origin, and one that only looks like a test one, are deployed as before.
     for (const origin of ["https://dev.manut.xyz", "https://manut.test.example", "http://api.manut.test"]) {

@@ -464,7 +464,8 @@ describe("off unless configured", () => {
   ];
   /// Off as well: the test outbox is no sender anywhere but a test Worker (test-origin.ts), and the test config binds no
   /// other. There the test Apple key signs no one in either (test-keys.test.ts).
-  const OFF_REAL: Record<string, unknown>[] = [{ PUBLIC_API_ORIGIN: undefined }, { PUBLIC_API_ORIGIN: "https://dev.manut.xyz" }];
+  const OFF_REAL: Record<string, unknown>[] = [{ PUBLIC_API_ORIGIN: undefined },
+    { PUBLIC_API_ORIGIN: "https://dev.manut.xyz" }];
 
   it("answers both routes email_not_configured, and wakes nothing, until it is on with a sender and the secret",
     async () => {

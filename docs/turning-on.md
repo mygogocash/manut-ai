@@ -15,7 +15,10 @@ settings only where `PUBLIC_API_ORIGIN` is under `.test`, so one set as a secret
 
 **Not yet, whatever the owner decides:** a security review of the API surface added on 24 Nov 2026 found ways a stranger
 could misuse email sign-in and self-serve once they are on (sending codes without a real limit, making shops without
-one, and more). Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until December items 41 and 42 have merged.
+one, and more). December item 41 fixed the front door: a body must be JSON, every limit counts per address or IPv6 /64,
+codes are capped per address, per source and in all (`docs/pilot-api.md`, "Signing in by email"), an email sign-in is
+refused on the lifted routes and on every shop route of its own tenant, and the test keys work only on a `.test`
+origin. Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until item 42 (sessions and self-serve) has merged too.
 
 | What | The switch | What it needs from the owner | Details |
 | --- | --- | --- | --- |

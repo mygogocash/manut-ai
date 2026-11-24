@@ -306,7 +306,8 @@ export class AuthObject extends DurableObject {
     const account = await emailAccount(address);
     const code = sixDigitCode();
     const mac = await macEmailCode(secret, account, code);
-    const [fromHere, fromAnywhere] = await Promise.all([macCodeSource(secret, source, account), macCodeSource(secret, source)]);
+    const [fromHere, fromAnywhere] = await Promise.all([
+      macCodeSource(secret, source, account), macCodeSource(secret, source)]);
     const key = codeKey(account);
     // The limits are read and the new code stored and counted in one transaction, so two requests for one address at
     // once send one code, and the day's count never misses a send. The day's limits come first: they are the same for
