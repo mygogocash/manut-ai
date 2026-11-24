@@ -58,9 +58,9 @@ order id, the link and the name break at the card's edge.
 
 **Larger text.** The specs multiply every font size the page declares by 1.25 and by 1.5 (`setTextScale` in
 `e2e/layout.ts`), which is what a phone's text-size setting does to text sized in px, and boxes keep their size. They do
-not set the root font size, as the brief first said: this page sizes its text in px and pins the root to 14px, so a root
-of 150% changed none of its text in any of the four engines (the heading stayed 17px, the buttons 13px), and a spec built
-that way would have passed whatever the layout did. The helper stops the test if the text did not grow by the factor.
+not set the root font size, which is the obvious first try: this page sizes its text in px and pins the root to 14px, so a
+root of 150% changed none of its text in any of the four engines (the heading stayed 17px, the buttons 13px), and a spec
+built that way would have passed whatever the layout did. The helper stops the test if the text did not grow by the factor.
 
 **The checks check themselves.** `harness.spec.ts` puts a known defect on a real page (a box wider than the screen, a long
 word, a button wider than its card, clipped text, overlapping lines, a short button, a covered button, and a fixed-height
@@ -76,8 +76,10 @@ pnpm --filter @manut/web e2e --project="Android 360x740 (Chromium)" --workers=1 
 
 The server takes port 5417 and will not reuse one, so a second run never tests another checkout. If a killed run left it
 behind, find it with `lsof -nP -iTCP:5417 -sTCP:LISTEN` and stop it. A failing test leaves its screenshot in
-`apps/web/test-results/`; in CI the job summary lists the failing states with the phones they failed on, and the job keeps
-the JSON report and those screenshots for seven days.
+`apps/web/test-results/`. In CI the job summary lists the failing states with the phones they failed on, and the job keeps
+the JSON report (artifact `web-phones-results`) and, when something failed, those screenshots (`web-phones-failures`) for
+seven days. The first run on one of GitHub's runners took 6 minutes 41 seconds in all, 5 minutes of it the specs (300
+tests at two workers: 294 passed and 6 skipped, the iPhones' landscape ones), so it stays one job.
 
 ## What it cannot cover
 

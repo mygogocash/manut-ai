@@ -87,15 +87,22 @@ jobs:
       - name: Write the counts to the job summary
         if: ${{ !cancelled() }}
         run: node .github/scripts/playwright-summary.mjs --title "Web on phones" --note "Every demo state of the owner's two pages on four phone sizes, in light and dark and at larger text. A failing test fails the run. docs/phone-pass.md says what this covers and what only a real phone can." "$RUNNER_TEMP/playwright-results-web-phones.json"
-      # The JSON report, and the screenshot Playwright takes of each failing test.
-      - name: Keep the report and the failures' screenshots
+      # The JSON report, alone so that it sits at the top of its artifact as the desktop's do.
+      - name: Keep the report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-phones-results
-          path: |
-            ${{ runner.temp }}/playwright-results-web-phones.json
-            apps/web/test-results
+          path: ${{ runner.temp }}/playwright-results-web-phones.json
+          if-no-files-found: ignore
+          retention-days: 7
+      # The screenshot Playwright takes of each failing test, when there is one.
+      - name: Keep the screenshots of the failures
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-phones-failures
+          path: apps/web/test-results
           if-no-files-found: ignore
           retention-days: 7
 
