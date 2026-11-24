@@ -5,6 +5,8 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
 import { KitPanelView, codeProjects, type KitPanelProps } from "./KitPanel";
+import { laneRowOf } from "./Lanes";
+import { emptyLane } from "./lane";
 import { emptyProject } from "./project";
 
 const root = "/Users/fon/baanmali-preorder";
@@ -126,5 +128,30 @@ describe("the projects the page lists", () => {
   it("are the folders sessions run in, newest first, then the added ones, each once", () => {
     expect(codeProjects([root, "/Users/fon/storefront", `${root}/`], ["/Users/fon/blog", root])).toEqual([root, "/Users/fon/storefront", "/Users/fon/blog"]);
     expect(codeProjects([], [])).toEqual([]);
+  });
+});
+
+describe("the lanes", () => {
+  const lane = laneRowOf({ rec: { id: "s1", agent: "claude", cwd: root, status: "running", promptTitle: "PromptPay QR at checkout", lane: { name: "kit/promptpay-qr", base: "main" } }, agent: "Claude Code", lane: emptyLane(), turn: null, asks: [] });
+
+  it("open the panel, before how much Kit does alone, and open the lane's session", () => {
+    const p = props({ lanes: [lane], now: 1, onOpenLane: vi.fn() });
+    const out = html(p);
+    expect(out).toContain("PromptPay QR at checkout");
+    expect(out).toContain("kit/promptpay-qr");
+    expect(out.indexOf("Lanes")).toBeGreaterThan(-1);
+    expect(out.indexOf("Lanes")).toBeLessThan(out.indexOf("How much Kit does alone"));
+    const open = drawn(KitPanelView(p)).find((e) => e.type === "button" && e.props.title === "Open this lane");
+    (open!.props.onClick as () => void)();
+    expect(p.onOpenLane).toHaveBeenCalledWith("s1");
+  });
+
+  it("are not drawn when the project has none, and the panel is as it was", () => {
+    for (const p of [props(), props({ lanes: [] })]) {
+      const out = html(p);
+      expect(out).not.toContain("Lanes");
+      expect(byId(p, "lanes")).toHaveLength(0);
+      expect(out).toContain("How much Kit does alone");
+    }
   });
 });
