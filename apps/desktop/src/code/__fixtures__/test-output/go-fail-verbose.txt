@@ -1,0 +1,14 @@
+=== RUN   TestBuildsThePayload
+--- PASS: TestBuildsThePayload (0.00s)
+=== RUN   TestAddsTheItemsUp
+--- PASS: TestAddsTheItemsUp (0.00s)
+=== RUN   TestLocksTheAmountIntoTheQR
+    promptpay_test.go:14: expected "590.00", got "59.00"
+--- FAIL: TestLocksTheAmountIntoTheQR (0.00s)
+=== RUN   TestRefund
+    promptpay_test.go:20: later
+--- SKIP: TestRefund (0.00s)
+FAIL
+exit status 1
+FAIL	example.com/shop/promptpay	0.004s
+FAIL

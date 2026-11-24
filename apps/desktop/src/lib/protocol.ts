@@ -705,7 +705,11 @@ export type BridgeEvent =
       /** delegate_task only: the `[dag:<run>/<node>]` parts it hands out. */
       dag?: { run: string; node: string }[];
     })
-  | (EventBase & { event: "tool.end"; tool_id: string; name: string; ok: boolean; ms: number })
+  /** `output`: the end of what a command printed, for a SESSIONS chat's lane to read a test run's result from
+   *  (src/code/testRun.ts); it is read as the step ends and never shown, kept or logged, since it can hold anything a
+   *  command prints. `declined`: the person said no, so the command never ran. `command`: the whole command line, which
+   *  the step's start cuts short. Only a command's step carries them. */
+  | (EventBase & { event: "tool.end"; tool_id: string; name: string; ok: boolean; ms: number; output?: string; declined?: boolean; command?: string })
   /** A subagent's latest state, in ONE agent-neutral shape: Hermes' `subagent.*` events of a bot's turn (clipped by the
    *  bridge), and every SESSIONS agent's subagents (Claude Code Agent/Task, Codex sub-agent threads, OmO `task`; any
    *  later agent emits the same). The same `id` updates the same row; `delegation` groups one fan-out. */
