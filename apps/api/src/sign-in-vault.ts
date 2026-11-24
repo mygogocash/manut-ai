@@ -14,6 +14,7 @@
 /// - `GET /sign-ins`: the live sign-ins, oldest first.
 /// - `POST /sign-ins` `{ site, origins, username, password, members }`: a new sign-in.
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
+/// - `POST /sign-ins/members` `{ signInId, members }`: who may use it from now on, and nothing else changed.
 /// - `POST /sign-ins/broken` `{ signInId, member }`: a member named on it reports that the site refused the password.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
 /// - `POST /sign-ins/reseal` `{}`: every live sign-in sealed again under the current key, after a rotation (reseal.ts).
@@ -344,6 +345,8 @@ export async function signInVaultRoute(
       return createSignIn(storage, vaultKeys, tenant, body);
     case "POST /sign-ins/password":
       return replacePassword(storage, vaultKeys, tenant, body);
+    case "POST /sign-ins/members":
+      return changeMembers(storage, tenant, body);
     case "POST /sign-ins/broken":
       return markBroken(storage, tenant, body);
     case "POST /sign-ins/remove":
@@ -685,6 +688,23 @@ async function replacePassword(storage: DurableObjectStorage, vaultKeys: SignInV
     brokenAt: null, brokenBy: null };
   await storage.put(keys.signIn(record.id), replaced);
   return json({ signIn: viewOf(replaced) });
+}
+
+/// Who may use a sign-in from now on, checked as at creation (`membersOf`: one or more of the members whose jobs run
+/// through a connection). Nothing else about it changes: not its password, whether it works, or when it was last used.
+/// A member taken off loses it at once, since every grant, redeem and step reads the members from the record as it
+/// happens (`unusable`), so nothing issued to that member before the change can be used after it. A redeem already past
+/// that check as the change lands finishes, as one does when a sign-in is removed. The read and the write wait only on
+/// this object's own storage, so nothing can land between them and be undone.
+async function changeMembers(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
+  Promise<Response> {
+  const members = membersOf(body.members);
+  if (members === null) return json({ error: "invalid_members" }, 400);
+  const record = await liveSignIn(storage, tenant, body.signInId);
+  if (!record) return json(NOT_FOUND, 404);
+  const changed: SignInRecord = { ...record, members };
+  await storage.put(keys.signIn(record.id), changed);
+  return json({ signIn: viewOf(changed) });
 }
 
 /// Removal wipes the account and the seal but keeps the record as a tombstone, as a revoked connection does, so a

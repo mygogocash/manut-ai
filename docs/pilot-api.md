@@ -537,12 +537,16 @@ What is written, and by whom:
 | `helper.removed` | operator, or the owner from a session | `helperId` | `ok` |
 | `away.set`, `away.cleared` | operator, or the owner from a session | `helperId` (who covers, or covered) | `ok` |
 | `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
-| `signin.created`, `signin.password_replaced`, `signin.removed` | operator | `signInId` | `ok` |
-| `outpost.registered` | operator | `outpostId` | `ok` |
+| `signin.created`, `signin.password_replaced` | operator, or the owner from a session (the linked account's id; `owner-session` for the shop's own session) | `signInId` | `ok` |
+| `signin.removed` | operator | `signInId` | `ok` |
+| `signin.members_changed` | the owner from a session (as above), choosing who may use the sign-in | `signInId` | `ok` |
+| `outpost.registered` | operator, or the owner from a session registering this Mac | `outpostId` | `ok` |
+| `outpost.renamed` | the owner from a session | `outpostId` | `ok` |
 | `signin.requested` | worker | `signInId`, `outpostId`, `taskId`, `attemptId`, and `grantId` when a grant was issued | `ok`, or `refused` with the vault's refusal as the `reason` |
 | `signin.broken` | worker | `signInId`, `taskId`, `attemptId` | `ok`, or `refused` (`member_not_allowed`, `sign_in_not_found`) |
 | `signin.redeemed` | outpost | `outpostId`; for a grant the vault found, also `signInId`, `taskId`, `attemptId`, `grantId` | `ok`, or `refused` with the refusal as the `reason` |
-| `outpost.removed`, `outpost.credential_rotated` | operator | `outpostId` | `ok` |
+| `outpost.removed` | operator, or the owner from a session | `outpostId` | `ok` |
+| `outpost.credential_rotated` | operator | `outpostId` | `ok` |
 | `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok`, or `refused` with the refusal as the `reason` |
 | `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
 | `browser_step.reported` | outpost | `outpostId`; for a step the vault found, also `stepId`, `taskId`, `attemptId`, and a sign-in step's `signInId` and `grantId` | `done`, `failed` with the outpost's code (or `text_withheld`) as the `reason`, or `refused` with the refusal |
@@ -931,7 +935,8 @@ the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Re
 limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`. One route under `/v1/outposts/` is the
 owner's instead: the desktop registering this Mac (`POST /v1/outposts/register`), which takes the owner's session and
 no outpost's credential. The owner's Connections take the owner's session too, under `/v1/vault/` ("The owner's vault
-and outposts", below): the shop's sign-ins and outposts, a new password, and renaming or removing an outpost.
+and outposts", below): the shop's sign-ins and outposts, adding a sign-in, a new password, who may use a sign-in, and
+renaming or removing an outpost.
 
 ```ts
 type SignIn = {
@@ -1111,32 +1116,46 @@ signed-in session, and the shop is the session's: no route reads one from a body
 | Method and path | Body | Answer |
 | --- | --- | --- |
 | `GET /v1/vault/sign-ins` | none | `{ tenant, signIns: SignIn[] }`, as the operator's list answers it for the shop |
+| `POST /v1/vault/sign-ins` | `{ site, origins, username, password, members }` | `{ signIn: SignIn }`, added to the shop's vault as the operator's route adds it, with the password sealed |
 | `POST /v1/vault/sign-ins/password` | `{ signInId, password }` | `{ signIn: SignIn }`, with the new password sealed; a broken sign-in is `working` again |
+| `POST /v1/vault/sign-ins/members` | `{ signInId, members }` | `{ signIn: SignIn }` with its new members; nothing else about it changes |
 | `GET /v1/vault/outposts` | none | `{ tenant, outposts: Outpost[] }`, as the operator's list answers it for the shop |
 | `POST /v1/vault/outposts/rename` | `{ outpostId, name }` | `{ outpost: Outpost }` with the name trimmed; nothing else about it changes |
 | `POST /v1/vault/outposts/remove` | `{ outpostId }` | `{ removed: true, outpostId, stepsRefused, grantsRefused }`, as the operator's removal answers |
 
 - **Who and in what order.** Who is asking comes first (401 `unauthorized` for no session, the operator's key or an
   outpost's credential; 401 `unlinked` with `unlinkedAt`, or `removed`; 503 `people_unavailable` when the session cannot
-  be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`), then the
-  query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and the body. So a caller with no session learns
-  nothing about a route, not even its method.
-- **Exact.** A body is exactly the keys above, each a string. Anything more, a `tenant`, a `shop` or a `role` above all,
-  or a value of another type answers 400 `invalid_request`; a body that is not JSON, 400 `invalid_json`.
-- **Through the vault's own operations.** A new password goes through the vault's `/sign-ins/password`, the operator's,
-  and is sealed the same way; a removal is the operator's removal, so the outpost's credential stops working at once and
-  its waiting steps and grants are refused in the same step; a rename is the vault's `/outposts/rename`, with the name
-  rule registration uses. The vault's own refusals pass through: 400 `invalid_password` (not text of 1 to 1,024
-  characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or holding a control character), 404
-  `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found` (also another shop's, or one
-  already removed), 503 `vault_not_configured` and `vault_unavailable`.
-- **The password** goes from the body straight into the vault. It is never kept, logged or answered: the answer is the
-  sign-in's public view, which says only when its password was set.
-- **The log.** `signin.password_replaced`, `outpost.renamed` and `outpost.removed`, by `{ kind: "owner", id }` (the linked
-  account's id, or `owner-session` for the shop's own session), with the record's id only, never a password or the name
-  typed. A refusal writes nothing, as the operator's do not.
-- Like the registration, none of these is behind the outposts' ingress limit: each needs a session first. The owner adds
-  no sign-in and registers no cloud outpost here; an operator does.
+  be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`; the shop's
+  sign-ins take `GET` and `POST`, every other route one method), then the query (a `shop`, `tenant` or `role` in it: 400
+  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods.
+- **Exact.** A body is exactly the keys above. An id, a new password and a name are strings. Anything more, a `tenant`,
+  a `shop` or a `role` above all, a key missing, or an id, password or name of another type answers 400
+  `invalid_request`; a body that is not JSON, 400 `invalid_json`; over 16 KB, 413 `body_too_large`. Every other value
+  (a new sign-in's `site`, `origins`, `username`, `password` and `members`, and the `members` chosen) is the vault's to
+  check, as it is on the operator's route, so a value of the wrong kind gets that field's refusal.
+- **Through the vault's own operations.** A new sign-in goes through the vault's `/sign-ins`, the operator's, so it is
+  checked, sealed under `CRED_KEY` and kept exactly as the operator's is, with the operator's refusals
+  (`POST /v1/admin/vault/sign-ins` above: 400 `invalid_site`, `invalid_origins`, `invalid_username`, `invalid_password`,
+  `invalid_members`; 409 `too_many_sign_ins`; 503 `vault_not_configured`). A new password goes through the vault's
+  `/sign-ins/password`, the operator's, and is sealed the same way. Who may use a sign-in goes through the vault's
+  `/sign-ins/members`, whose members are checked as at creation (400 `invalid_members`: none, a repeat, or one who is not
+  Nam, Pim, Ton or Kit) and which changes nothing else: not its password, whether it works, or when it was last used. A
+  member taken off loses it at once: a grant not yet redeemed for them, and any new one, is refused `member_not_allowed`,
+  and no step of theirs goes to its origins. A removal is the operator's removal, so the outpost's credential stops
+  working at once and its waiting steps and grants are refused in the same step; a rename is the vault's
+  `/outposts/rename`, with the name rule registration uses. The vault's own refusals pass through: those above, 400
+  `invalid_password` (not text of 1 to 1,024 characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or
+  holding a control character), 404 `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found`
+  (also another shop's, or one already removed), 503 `vault_not_configured` and `vault_unavailable`.
+- **The password** goes from the body straight into the vault, a new sign-in's as a new password. It is never kept,
+  logged or answered: the answer is the sign-in's public view, which says only when its password was set.
+- **The log.** `signin.created`, `signin.password_replaced`, `signin.members_changed`, `outpost.renamed` and
+  `outpost.removed`, by `{ kind: "owner", id }` (the linked account's id, or `owner-session` for the shop's own session),
+  with the record's id only: never a password, an account's name, who may use a sign-in, or the name typed. A refusal
+  writes nothing, as the operator's do not.
+- Like the registration, none of these is behind an ingress limit, the two added on 24 November included: each needs a
+  session first, and the vault bounds what a shop keeps (50 sign-ins, 20 outposts). The owner registers no cloud outpost
+  and removes no sign-in here; an operator does.
 
 ### `POST /v1/outposts/heartbeat`
 
