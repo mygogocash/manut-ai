@@ -3,14 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<!-- The owner's page carries a capability token in its path: never send it on in a Referer header. -->
+<!-- The owner's pages and the join page carry a token in their path: never send it on in a Referer header. -->
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>Manut AI</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Thai:wght@400;500;600&amp;family=Noto+Serif+Thai:wght@400;600&amp;family=Source+Serif+4:wght@400;600&amp;display=swap">
+<!-- Nothing here comes from another origin: the app links the brand's fonts itself on every page but the join page
+     (src/fonts.ts), which asks no other origin for anything. -->
 </head>
 <body>
 <div id="root"></div>
