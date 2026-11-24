@@ -309,9 +309,17 @@ export class ApiSession {
     return this.authorised("POST", path, body, through);
   }
 
+  /** `write`, but the body crosses at most once: after a 401 it is not sent again, although the API refused the first one
+   *  before reading it. For a body that must never be sent twice, the owner's new password for a site (connections.ts). A
+   *  session near its end is still refreshed first, as for every request, so a 401 here means it ended meanwhile; the next
+   *  request finds that out and refreshes, or signs out, as usual. */
+  writeOnce(path: string, body: unknown): Promise<Answer> {
+    return this.authorised("POST", path, body, this.fetch, false);
+  }
+
   // ---- inside ---------------------------------------------------------------------------------------------------
 
-  private async authorised(method: "GET" | "POST", path: string, body?: unknown, through: FetchLike = this.fetch): Promise<Answer> {
+  private async authorised(method: "GET" | "POST", path: string, body?: unknown, through: FetchLike = this.fetch, again = true): Promise<Answer> {
     await this.load();
     let rec = this.record;
     if (!rec) return { kind: "signed_out" };
@@ -323,7 +331,7 @@ export class ApiSession {
     }
     const used = rec.accessToken;
     let res = await this.send(method, path, used, body, this.origin, through);
-    if (res.kind === "answer" && res.status === 401 && !removed(res)) {
+    if (again && res.kind === "answer" && res.status === 401 && !removed(res)) {
       const refreshed = await this.refreshFor(used);
       if (refreshed !== "ok") return { kind: refreshed };
       const again = this.record;
