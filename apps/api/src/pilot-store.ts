@@ -191,9 +191,9 @@ async function values<T>(storage: DurableObjectStorage, prefix: string, options:
 /// Worker named: the operator's Access identity for the console's writes, the owner for the owner's link. A write
 /// that names nobody is the system's. An actor the log cannot keep becomes a counted miss rather than a wrong name.
 function audited(storage: DurableObjectStorage, tenant: string, actor: unknown, fallback: AuditActor,
-  record: Omit<AuditRecord, "actor">): Promise<Record<string, unknown>> {
+  record: Omit<AuditRecord, "actor">, nowMs?: number): Promise<Record<string, unknown>> {
   const who = actorOr(actor, fallback);
-  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action);
+  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action, nowMs);
 }
 
 /// `/pilot/*` on a TenantObject. Reads need only the tenant; writes need the
@@ -304,15 +304,16 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
     ...(typeof body.template === "string" ? { template: body.template } : {}),
     ...(owned ? { selfServe: true as const } : {}),
   };
-  // Each entry is minted after the one before, so the log reads them in this order (audit-log.ts). The owner's entries name
-  // the account by its link id only, as `owner.linked` does when an operator links one: never its subject or an email.
+  // Each entry is minted after the one before, so the log reads them in this order (audit-log.ts), and every one of them
+  // says the write's own moment, the shop's `createdAt`. The owner's entries name the account by its link id only, as
+  // `owner.linked` does when an operator links one: never its subject or an email.
   const byOwner = owned ? { kind: "owner" as const, id: owned.accountId } : null;
   const about = owned ? { ownerAccountId: owned.accountId } : {};
   const entries = [await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
-    outcome: "ok" })];
+    outcome: "ok" }, nowMs)];
   if (byOwner) {
     for (const action of ["shop.made_by_owner", "owner.linked", "owner.session_opened"] as const) {
-      entries.push(await audited(storage, tenant, byOwner, { kind: "system" }, { action, subject: about, outcome: "ok" }));
+      entries.push(await audited(storage, tenant, byOwner, { kind: "system" }, { action, subject: about, outcome: "ok" }, nowMs));
     }
   }
   await storage.put(Object.assign({ [keys.shop(tenant)]: shop }, owned ? { [owned.key]: owned.record } : {}, ...entries));

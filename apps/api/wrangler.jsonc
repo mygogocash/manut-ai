@@ -196,7 +196,7 @@
         // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
         {
           "name": "SELF_SERVE_SHOP_LIMITER",
-          "namespace_id": "2026112341",
+          "namespace_id": "2026112342",
           "simple": {
             "limit": 10,
             "period": 60
@@ -310,7 +310,7 @@
         // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
         {
           "name": "SELF_SERVE_SHOP_LIMITER",
-          "namespace_id": "2026112342",
+          "namespace_id": "2026112343",
           "simple": {
             "limit": 10,
             "period": 60
@@ -424,7 +424,7 @@
         // answers sign_ups_closed, and touches nothing, until SELF_SERVE_SHOPS is "on", which no environment sets.
         {
           "name": "SELF_SERVE_SHOP_LIMITER",
-          "namespace_id": "2026112343",
+          "namespace_id": "2026112344",
           "simple": {
             "limit": 10,
             "period": 60
@@ -449,6 +449,10 @@
   // The Google callback's limiter comes next (2026112337 here, 38, 39 and 40
   // in dev, staging and prod; google-connect.ts), keyed per source address;
   // its ids have not been checked against the account's limiters yet.
+  // Making a shop of one's own comes after it (2026112341 here, 42, 43 and 44
+  // in dev, staging and prod; self-serve.ts), keyed per source address and
+  // counted only while sign-ups are open; its ids have not been checked
+  // against the account's limiters yet either.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -534,6 +538,15 @@
       "namespace_id": "2026112337",
       "simple": {
         "limit": 30,
+        "period": 60
+      }
+    },
+    // Making a shop of one's own (self-serve.ts), per source address, counted only while sign-ups are open.
+    {
+      "name": "SELF_SERVE_SHOP_LIMITER",
+      "namespace_id": "2026112341",
+      "simple": {
+        "limit": 10,
         "period": 60
       }
     }

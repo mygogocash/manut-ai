@@ -317,14 +317,15 @@ function missedAfter(prior: AuditMissed | undefined, action: string, nowMs: numb
 
 /// The storage entries that record `record` in the same write as the record it describes: the entry, or when the
 /// entry cannot be kept as given, the shop's miss count raised by one. Spread into that write's `put`, so the two
-/// land together or not at all; never throws, so the action never fails for its entry.
+/// land together or not at all; never throws, so the action never fails for its entry. `nowMs` is the write's own moment
+/// when it has one, so a record and its entries say the same time.
 export async function auditPut(
   storage: DurableObjectStorage,
   tenant: string,
   record: AuditRecord | null,
   missedAction: AuditAction,
+  nowMs: number = Date.now(),
 ): Promise<Record<string, unknown>> {
-  const nowMs = Date.now();
   if (record !== null && isAuditRecord(record)) {
     const entry = entryOf(record, nowMs);
     return { [keys.entry(tenant, entry.id)]: entry };
