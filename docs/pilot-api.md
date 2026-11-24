@@ -191,12 +191,25 @@ one request, never one per shop. Each row names the shop, says "At the cap" or "
 button opens that shop's month below, which says which thresholds its spend reached. Refresh and a cap change read the
 list again.
 
+The console's **Connections** page, last in its side menu, adds no route. For the shop chosen on the page it lists the
+shop's site sign-ins (`GET /v1/admin/vault/sign-ins`: the site, its addresses, the account, who may use it, working or
+broken and who said so when, last used, and when its password was set) and its outposts (`GET /v1/admin/outposts`: name,
+kind, online or asleep, last heartbeat, registered). Each list is read by its own route and says its own failure, so one
+that cannot be read never hides the other. An operator may remove a sign-in (`/sign-ins/remove`), change who may use one
+(`/sign-ins/members`), remove an outpost (`/outposts/remove`) and give an outpost a new credential
+(`/outposts/credential`). Each asks first, in its row, in words that name what will happen, and one change runs at a
+time; a 404 that says the record is already gone closes the question and reads the list again. A new credential is shown
+once, with a Copy button, held only in the page's state, and its request asks the browser to keep no copy. The page takes
+no password: it says in one line that adding a sign-in and giving one a new password are the owner's, from their own app
+("Vault sign-ins and outposts", below).
+
 The console's **Shops** page, first in its side menu, adds no route. It lists every pilot shop from routes in this table and
 reads them all at once, one request each: `GET /v1/admin/pilot/shops` for the rows, `GET /v1/admin/pilot/gate` for each
 shop's trial day, whether it has paid and whether it is active, `GET /v1/admin/model/usage` (this Bangkok month) for its
 spend against its cap, and `GET /v1/admin/audit?limit=1` for when its log last changed. A request that fails is said to
 have failed, in its cell and, with the shop's name, in a banner, and every other cell stays; the gate failing as a whole
-says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory and Model spend pages. A shop its
+says so and leaves the rest. Each row links to the shop's Messages, Drafts, Audit, Memory, People, Model spend and
+Connections pages. A shop its
 owner made in the app (`selfServe`, "Making a shop of your own", below) is marked "Made by its owner" under its name, so an
 operator sees where it came from; the Pilot gate page marks it the same way and says whether it is counted.
 

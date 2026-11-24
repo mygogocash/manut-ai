@@ -167,12 +167,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
      buttons, select menus and editors, settings pages that keep their form, and frames told from the page
      (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
-   - item 50, the console's Connections page for a shop's sign-ins and outposts, from the admin routes, with no
-     password typed in the console (`feat/console-connections`, Sonnet), started when item 48 finished.
+   A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
+   it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
+   Push such a commit from the helper's worktree, review it and finish what is left as the lead.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 48 (a per-shop approval lookup in the TenantObject, written by the task object before a request opens,
+   Merged: 50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
+   with its own failure; remove a sign-in, change who may use it, remove an outpost and give it a new credential, each
+   asked first in its row; the credential shown once and held only in the page's state; no password typed in the
+   console; practice world version 12; no API change, so only the pages Worker is redeployed),
+   48 (a per-shop approval lookup in the TenantObject, written by the task object before a request opens,
    so `GET /v1/approvals` reads only the tasks it names and deciding finds its task in one read; approval-core's
    records stay the only truth; old shops build the lookup 25 tasks per read, walking every task until it is done;
    deploy dev plainly, never as a gradual rollout, so no old task object opens a request without an entry),
