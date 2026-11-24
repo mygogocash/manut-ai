@@ -4,6 +4,10 @@
 /// Durable Object classes, and so tests can drive export and deletion against
 /// a stubbed environment where any one fan-out call fails.
 
+import { readConnectionSecret } from "./cred-broker";
+import { googleConfig, revokeToken, type FetchImpl, type GoogleEnv } from "./google";
+import { GOOGLE_PROVIDER } from "./google-vault";
+
 /// The namespaces export and deletion reach. The Worker's `Env` satisfies
 /// this, and a test can too without standing up the whole Worker.
 export type TenantDataEnv = {
@@ -253,6 +257,16 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
 /// user their data was gone while sealed connector secrets, or alarms that
 /// keep minting tasks, lived on.
 ///
+/// Before the vault is wiped, the shop's Google connection is revoked at Google, as `POST /v1/google/disconnect` does it
+/// (google-connect.ts): the vault's wipe forgets the sealed token, and a token forgotten without being revoked would leave
+/// Manut AI listed in the owner's Google account with access to the sheet it made. Google being unreachable, or the
+/// connection's secret unreadable, never stops the deletion: the answer says how many connections were revoked
+/// (`googleRevoked`) and how many were not (`googleNotRevoked`), so the operator can tell the owner to remove Manut AI in
+/// their Google account's settings. The counts are there only for a shop that had a Google connection, and never hold a
+/// token. A vault that cannot be listed is a vault that cannot be wiped, so it stops the deletion at the vault step like
+/// any failure of it, before anything is forgotten that was not looked at. A run that stops later and is asked again finds
+/// no connection left to revoke, so the answer of the run that stops carries the counts too.
+///
 /// After the tombstone, and only once it is written, a pilot shop's row in
 /// the operator console's registry goes, as the very last step. The registry
 /// is how an operator finds a shop, and so how they find a deletion that
@@ -263,7 +277,8 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
 /// wipes find nothing more to remove), so a second run after any stop,
 /// including one after the tombstone, runs to the end. Other tenants have no
 /// registry row, and removing none changes nothing.
-export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<Response> {
+export async function tenantDelete(env: TenantDataEnv & GoogleEnv, tenant: string, options: TenantDeleteOptions = {}):
+  Promise<Response> {
   const indexResp = await tenantCall(env, tenant, `/index?tenant=${encodeURIComponent(tenant)}`);
   // An unreadable index is not an empty one: wiping nothing and then the
   // index would orphan every task it listed.
@@ -294,14 +309,21 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
   if (failed.length > 0) {
     return json({ error: "wipe_incomplete", tasksWiped, failed }, 500);
   }
-  const credResp = await credStub(env, tenant).fetch(
-    new Request("https://cred/tenant-wipe", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-wipe": "1" },
-      body: JSON.stringify({ tenant }),
-    }),
-  );
-  if (!credResp.ok) failed.push("connections");
+  const google = await revokeGoogle(env, tenant, options.fetchImpl ?? fetch);
+  // What the answer says of Google, kept on every answer from here on: it is only true of this run.
+  const googleCounts = google.revoked + google.notRevoked > 0
+    ? { googleRevoked: google.revoked, googleNotRevoked: google.notRevoked } : {};
+  // A vault that could not be looked at is not wiped: its Google token might still be there to revoke.
+  const credResp = google.listed
+    ? await credStub(env, tenant).fetch(
+      new Request("https://cred/tenant-wipe", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-wipe": "1" },
+        body: JSON.stringify({ tenant }),
+      }),
+    )
+    : null;
+  if (!credResp?.ok) failed.push("connections");
   const schedResp = await scheduleStub(env, tenant).fetch(
     new Request("https://schedules/tenant-wipe", {
       method: "POST",
@@ -312,8 +334,8 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
   if (!schedResp.ok) failed.push("schedules");
   // Same ordering rule as the task wipes above: stop before the sessions
   // and the tombstone so the delete stays retryable.
-  if (failed.length > 0) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed }, 500);
+  if (failed.length > 0 || !credResp) {
+    return json({ error: "wipe_incomplete", tasksWiped, failed, ...googleCounts }, 500);
   }
   const connections = (await credResp.json()) as { connectionsWiped?: number };
   const sched = (await schedResp.json()) as { schedulesWiped?: number; occurrencesWiped?: number };
@@ -327,7 +349,7 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     body: JSON.stringify({ tenant }),
   });
   if (!authResp.ok) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed: ["sessions"] }, 500);
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["sessions"], ...googleCounts }, 500);
   }
   const auth = (await authResp.json()) as { sessionsWiped?: number };
   const tenantResp = await tenantCall(env, tenant, "/tenant-wipe", {
@@ -336,7 +358,7 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     body: JSON.stringify({ tenant }),
   });
   if (!tenantResp.ok) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed: ["index"] }, 500);
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["index"], ...googleCounts }, 500);
   }
   const wiped = (await tenantResp.json()) as { deletedAt?: string };
   // Last of all, the shop leaves the operator's list (the order above says why). If this fails, the data is gone
@@ -346,7 +368,7 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     headers: { "x-wipe": "1" },
   });
   if (!registryResp.ok) {
-    return json({ error: "wipe_incomplete", tasksWiped, failed: ["registry"] }, 500);
+    return json({ error: "wipe_incomplete", tasksWiped, failed: ["registry"], ...googleCounts }, 500);
   }
   return json({
     tasksWiped,
@@ -354,6 +376,51 @@ export async function tenantDelete(env: TenantDataEnv, tenant: string): Promise<
     schedulesWiped: sched.schedulesWiped ?? 0,
     occurrencesWiped: sched.occurrencesWiped ?? 0,
     sessionsWiped: auth.sessionsWiped ?? 0,
+    ...googleCounts,
     deletedAt: wiped.deletedAt,
   });
+}
+
+export type TenantDeleteOptions = {
+  /// Google's fetch for the revoke. Production leaves it unset and uses the global fetch; a test hands in a fake.
+  fetchImpl?: FetchImpl;
+};
+
+/// Ends the shop's live Google connections at Google before the vault forgets their tokens. The listing is the vault's own
+/// (never a secret); each token is read back from the vault only to be sent to Google's revoke endpoint, in the body, and is
+/// kept nowhere. Nothing here throws: a connection that could not be revoked (Google did not answer or refused, the secret
+/// would not open, or Google is not set up on this Worker, so there is nothing to ask it with) is counted as such, and
+/// `listed` is false only when the vault itself could not be read.
+async function revokeGoogle(env: TenantDataEnv & GoogleEnv, tenant: string, fetchImpl: FetchImpl):
+  Promise<{ listed: boolean; revoked: number; notRevoked: number }> {
+  let ids: string[];
+  try {
+    const response = await credStub(env, tenant).fetch(new Request(
+      `https://cred/connections?tenant=${encodeURIComponent(tenant)}`, { headers: { "x-tenant": tenant } }));
+    if (!response.ok) {
+      await response.body?.cancel();
+      return { listed: false, revoked: 0, notRevoked: 0 };
+    }
+    const { connections } = (await response.json()) as { connections?: { id?: unknown; provider?: unknown }[] };
+    ids = (connections ?? []).filter((one) => one.provider === GOOGLE_PROVIDER && typeof one.id === "string")
+      .map((one) => one.id as string);
+  } catch {
+    return { listed: false, revoked: 0, notRevoked: 0 };
+  }
+  const config = googleConfig(env);
+  let revoked = 0;
+  let notRevoked = 0;
+  for (const id of ids) {
+    let done = false;
+    if (config) {
+      try {
+        done = await revokeToken(fetchImpl, config, await readConnectionSecret(env, id, tenant));
+      } catch {
+        done = false;
+      }
+    }
+    if (done) revoked++;
+    else notRevoked++;
+  }
+  return { listed: true, revoked, notRevoked };
 }

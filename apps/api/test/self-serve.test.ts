@@ -291,10 +291,12 @@ describe("the limits on making shops", () => {
   it(`lets a reservation that never finished stop counting after ${MADE_RESERVATION_MS / 60_000} minutes`, async () => {
     const person = await signIn();
     const auth = bindings.AUTH.get(bindings.AUTH.idFromName("auth"));
-    const reserve = (shop: string) => auth.fetch(new Request("https://auth/shops-made/reserve", { method: "POST",
-      headers: { "content-type": "application/json", "x-admin": "1" }, body: JSON.stringify({ subject: person.tenant, shop }) }));
-    for (let n = 0; n < SHOPS_MADE_LIMIT; n++) expect((await reserve(`pilot:${crypto.randomUUID()}`)).status).toBe(200);
-    expect((await reserve(`pilot:${crypto.randomUUID()}`)).status).toBe(409);
+    // A make that begins and goes no further: each asks for a shop of its own name, so none finds another on the journal.
+    const reserve = (shop: string, name: string) => auth.fetch(new Request("https://auth/pilot-making/begin", { method: "POST",
+      headers: { "content-type": "application/json", "x-admin": "1" },
+      body: JSON.stringify({ tenant: shop, name, ownerName: "Dao", template: null, subject: person.tenant }) }));
+    for (let n = 0; n < SHOPS_MADE_LIMIT; n++) expect((await reserve(`pilot:${crypto.randomUUID()}`, `Began ${n}`)).status).toBe(200);
+    expect((await reserve(`pilot:${crypto.randomUUID()}`, "One too many")).status).toBe(409);
     // Ten minutes on, as if every one of those makes had failed without giving its slot back.
     await runInDurableObject(auth, async (_instance, state) => {
       const key = `shops-made:${encodeURIComponent(person.tenant)}`;

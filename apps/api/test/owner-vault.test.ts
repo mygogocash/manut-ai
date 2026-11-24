@@ -112,11 +112,15 @@ function heartbeat(tenant: string, outpostId: string, credential: string) {
     "content-type": "application/json" }, body: JSON.stringify({ tenant, outpostId }) });
 }
 
-/// Every route here with a body it would take, so a refusal can be shown on each.
+/// Every route here with a body it would take, so a refusal can be shown on each. Adding a sign-in and choosing who may
+/// use one are tested for what they do in owner-sign-ins.test.ts.
 function everyRoute(signInId: string, outpostId: string): [string, string, unknown][] {
   return [
     ["GET", "/v1/vault/sign-ins", undefined],
+    ["POST", "/v1/vault/sign-ins", { site: "Carrier portal", origins: ["https://track.carrier.example"],
+      username: "baan.mali", password: NEW_PASSWORD, members: ["nam"] }],
     ["POST", "/v1/vault/sign-ins/password", { signInId, password: NEW_PASSWORD }],
+    ["POST", "/v1/vault/sign-ins/members", { signInId, members: ["kit"] }],
     ["GET", "/v1/vault/outposts", undefined],
     ["POST", "/v1/vault/outposts/rename", { outpostId, name: "Fon's MacBook" }],
     ["POST", "/v1/vault/outposts/remove", { outpostId }],
@@ -189,6 +193,8 @@ describe("the owner's view of the shop's vault and outposts", () => {
       const answer = await send(mint.headers, method, path, body);
       expect(answer, `${method} ${path}`).toEqual({ status: 403, text: JSON.stringify({ error: "owner_only" }) });
     }
+    // Nothing was added, and the sign-in is as it was, its members included.
+    expect(await operatorSignIns(shop.tenant)).toEqual([signIn]);
     expect(await sealedPassword(shop.tenant, signIn.id)).toBe(PASSWORD);
     expect(await operatorOutposts(shop.tenant)).toEqual([{ ...outpost, status: "asleep" }]);
     expect((await heartbeat(shop.tenant, outpost.id, credential)).status).toBe(200);
@@ -207,6 +213,7 @@ describe("the owner's view of the shop's vault and outposts", () => {
       }
     }
     expect(await sealedPassword(shop.tenant, signIn.id)).toBe(PASSWORD);
+    expect(await operatorSignIns(shop.tenant)).toEqual([signIn]);
     expect(await operatorOutposts(shop.tenant)).toHaveLength(1);
   });
 
@@ -230,10 +237,12 @@ describe("the owner's view of the shop's vault and outposts", () => {
     expect(await sealedPassword(shop.tenant, signIn.id)).toBe(PASSWORD);
   });
 
-  it("takes each route's one method, after the session", async () => {
+  it("takes each route's own methods, after the session", async () => {
     const { owner } = await shopWithVault();
-    for (const [method, path] of [["POST", "/v1/vault/sign-ins"], ["DELETE", "/v1/vault/sign-ins"],
-      ["GET", "/v1/vault/sign-ins/password"], ["POST", "/v1/vault/outposts"], ["PUT", "/v1/vault/outposts"],
+    // The shop's sign-ins take two: `GET` lists them and `POST` adds one. Every other route takes one.
+    for (const [method, path] of [["PUT", "/v1/vault/sign-ins"], ["DELETE", "/v1/vault/sign-ins"],
+      ["PATCH", "/v1/vault/sign-ins"], ["GET", "/v1/vault/sign-ins/password"], ["GET", "/v1/vault/sign-ins/members"],
+      ["PUT", "/v1/vault/sign-ins/members"], ["POST", "/v1/vault/outposts"], ["PUT", "/v1/vault/outposts"],
       ["GET", "/v1/vault/outposts/rename"], ["GET", "/v1/vault/outposts/remove"]] as const) {
       const answer = await send(owner, method, path, method === "GET" || method === "DELETE" ? undefined : {});
       expect(answer, `${method} ${path}`).toEqual({ status: 405, text: JSON.stringify({ error: "method_not_allowed" }) });

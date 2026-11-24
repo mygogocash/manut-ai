@@ -29,6 +29,7 @@ import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExpor
 import { TenantObject } from "./tenant-object";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
 import { workersAdminRoute } from "./workers";
+import { webSessionRoute } from "./web-session";
 
 export { AuthObject, CompanyObject, CredObject, RelayObject, ScheduleObject, TaskObject, TenantObject };
 
@@ -152,6 +153,12 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
+  // The owner's web app (web-session.ts): signing in with a code counts in the exchange's bucket, and reading the
+  // person's shops and signing out, which may refresh and end the sign-in, in the refresh's.
+  else if (request.method === "POST" && pathname === "/v1/web/sign-in") binding = env.AUTH_EXCHANGE_LIMITER;
+  else if (request.method === "POST" && (pathname === "/v1/web/shops" || pathname === "/v1/web/sign-out")) {
+    binding = env.AUTH_SESSION_LIMITER;
+  }
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
   else if (request.method === "POST" && pathname.startsWith("/v1/inbound/line/")) binding = env.LINE_INBOUND_LIMITER;
   // Any method: the link is a bearer capability, so every probe counts. The
@@ -678,6 +685,12 @@ export default {
       );
     }
 
+    // The owner's web app (web-session.ts): its session lives in cookies the page cannot read, and these routes are
+    // the only ones that read them. Each hands its request on to the route that does the work with the right bearer from
+    // the cookies; every other route takes a bearer and nothing else. Its ingress limits ran above.
+    const web = await webSessionRoute(request, url, env, ctx, () => featureFlags(env));
+    if (web) return web;
+
     // Inbound Linear webhooks (inbound.ts). Public, because Linear holds no
     // session: the signature is the credential. While officeInbound is off
     // the request falls through to the final not_found, byte for byte what
@@ -738,8 +751,8 @@ export default {
     // This Mac registering itself as an outpost through the desktop, with the owner's session (browser-control.ts).
     const ownerOutpost = await ownerOutpostRoute(request, url, env);
     if (ownerOutpost) return ownerOutpost;
-    // The owner's Connections: the shop's sign-ins and outposts, a new password, and renaming or removing an outpost, with
-    // the owner's session (browser-control.ts).
+    // The owner's Connections: the shop's sign-ins and outposts, a sign-in added, a new password, who may use a sign-in, and
+    // renaming or removing an outpost, with the owner's session (browser-control.ts).
     const ownerVault = await ownerVaultRoute(request, url, env);
     if (ownerVault) return ownerVault;
     // Google Sheets for Ton's books (google-connect.ts): the owner's own routes from their session, and Google's callback,

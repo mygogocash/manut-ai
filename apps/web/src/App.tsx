@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { ApiProvider, createApi, type ApiSetup } from "./api";
-import { DEMO_DELETION_TOKENS, DEMO_JOIN_TOKENS, DEMO_TOKENS, PRACTICE_OWNER_CODES } from "./api/fake";
+import { APP_SIGN_IN_OFF, DEMO_DELETION_TOKENS, DEMO_JOIN_TOKENS, DEMO_TOKENS, PRACTICE_OWNER_CODES } from "./api/fake";
+import { OwnerApp } from "./app/OwnerApp";
 import { ApprovePage } from "./approve/ApprovePage";
 import { DeletePage } from "./delete/DeletePage";
 import { loadBrandFonts } from "./fonts";
@@ -27,6 +28,8 @@ export function App({ setup }: { setup?: ApiSetup }) {
         <JoinPage key={route.token} token={route.token} />
       ) : route.name === "ops" ? (
         <OpsConsole />
+      ) : route.name === "app" ? (
+        <OwnerApp />
       ) : (
         <Home setup={api} notFound={route.name === "notFound"} />
       )}
@@ -96,6 +99,17 @@ function Home({ setup, notFound }: { setup: ApiSetup; notFound: boolean }) {
                 <Link className="lk" href="/ops">
                   Operator console
                 </Link>
+              </li>
+              {/* The owner's app is a page of its own (app/index.html), so these are plain links that load it. */}
+              <li>
+                <a className="lk" href="/app/">
+                  The owner's app: sign in with any email and the code it shows
+                </a>
+              </li>
+              <li>
+                <a className="lk" href={`/app/?${APP_SIGN_IN_OFF}`}>
+                  The owner's app: signing in by email is off
+                </a>
               </li>
               {DEMO_LINKS.map((demo) => (
                 <li key={demo.href}>

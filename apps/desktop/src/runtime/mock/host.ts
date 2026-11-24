@@ -57,6 +57,7 @@ import {
 } from "./seed";
 import { HELPED_INTRO, HELPED_REFUSAL, HELPED_SHOP, OWN_SHOP, sampleAsks, sampleShops, SHOPS_SAID, type WaitingAsk } from "./shops";
 import { PracticePeople, type PeopleResult } from "./people";
+import { PracticeGoogle, readPracticeGoogleStart, type GoogleResult } from "./google";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf } from "../makeShop";
 import { PracticeVault, type VaultResult } from "./vault";
 
@@ -200,6 +201,8 @@ export class MockHost {
   private vault = new PracticeVault(0);
   /** The person's own shop's sample people, for Settings › People (people.ts). */
   private people = new PracticePeople(0);
+  /** The person's own shop's sample Google Sheet, for Customize › Connections (google.ts). */
+  private google = new PracticeGoogle(0);
 
   constructor(opts: MockHostOptions = {}) {
     this.now = opts.now ?? (() => Date.now() / 1000);
@@ -257,6 +260,7 @@ export class MockHost {
     this.made = [];
     this.vault = new PracticeVault(boot);
     this.people = new PracticePeople(boot);
+    this.google = new PracticeGoogle(boot, readPracticeGoogleStart());
     this.routines = ROUTINE_SEED.map((input) => {
       const made = createRoutine(input);
       if (!made.ok) throw new Error(`the staged routine "${input.name}" was refused: ${made.reason}`);
@@ -1106,8 +1110,17 @@ export class MockHost {
     // ---- Customize › Connections: the sample vault and outposts, which only the person's own shop has. The list is the
     // shop being viewed; a change acts on the shop its row was read for, as on the connected runtime.
     "connections.list": () => this.atVault(this.shop, () => ({ ok: true, value: this.vault.list(OWN_SHOP) })),
+    "connections.add": (p) => this.atVault(p.shop, () => {
+      const { shop: _shop, ...fields } = p;
+      const added = this.vault.add(fields, this.now());
+      return added.ok ? { ok: true, value: { signIn: added.value } } : added;
+    }),
     "connections.password": (p) => this.atVault(p.shop, () => {
       const changed = this.vault.password(p.signIn, p.password, this.now());
+      return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
+    }),
+    "connections.members": (p) => this.atVault(p.shop, () => {
+      const changed = this.vault.members(p.signIn, p.members);
       return changed.ok ? { ok: true, value: { signIn: changed.value } } : changed;
     }),
     "connections.rename": (p) => this.atVault(p.shop, () => {
@@ -1118,6 +1131,13 @@ export class MockHost {
       const removed = this.vault.remove(p.outpost);
       return removed.ok ? { ok: true, value: { outpost: removed.value } } : removed;
     }),
+
+    // ---- Customize › Connections, Google Sheets: the sample sheet, which only the person's own shop has (google.ts). Nothing is
+    // sent and no window opens; a change acts on the shop its row was read for, as on the connected runtime.
+    "google.status": () => this.atGoogle(this.shop, () => ({ ok: true, value: this.google.status(OWN_SHOP, this.now()) })),
+    "google.connect": (p) => this.atGoogle(p.shop, () => this.google.connect(this.now())),
+    "google.disconnect": (p) => this.atGoogle(p.shop, () => this.google.disconnect()),
+    "google.books": (p) => this.atGoogle(p.shop, () => this.google.books(p.month, this.nowMs())),
 
     // ---- Settings › People: the sample owner, helper and invite, which only the person's own shop has. The list is the shop
     // being viewed; a change acts on the shop its list was read for, as on the connected runtime.
@@ -1178,6 +1198,17 @@ export class MockHost {
     return done.value;
   }
 
+  /** Runs a Google Sheets op on `shop`'s sample sheet: the person's own shop's. At Ran Pa Noi they are a helper, and only Noi, its
+   *  owner, sees or changes its Google Sheets, as the API answers a helper's session; any other shop is not theirs. */
+  private atGoogle<T>(shop: unknown, run: () => GoogleResult<T>): T {
+    if (shop === HELPED_SHOP) throw new OpError("owner_only", "Only Noi, the shop's owner, sees or changes its Google Sheets.");
+    if (this.made.some((one) => one.id === shop)) throw new OpError("not_yet", MADE_NO_SHEET);
+    if (shop !== OWN_SHOP) throw new OpError("not_found", "no such shop");
+    const done = run();
+    if (!done.ok) throw new OpError(done.code, done.message);
+    return done.value;
+  }
+
   /** Runs a People op on `shop`'s sample people: the person's own shop's. At Ran Pa Noi they are a helper, and only Noi, its owner,
    *  sees or changes who can help there, as the API answers a helper's session; any other shop is not theirs. */
   private atPeople<T>(shop: unknown, run: () => PeopleResult<T>): T {
@@ -1195,6 +1226,7 @@ export class MockHost {
 }
 
 /** What People and Connections say about a shop made in Practice, which has no sample people or sign-ins of its own. */
+const MADE_NO_SHEET = "A shop you made in Practice has no sample Google Sheet. Switch back to your own shop to try it.";
 const MADE_IN_PRACTICE = "A shop you made in Practice has no sample helpers or sign-ins. Switch back to your own shop to try them.";
 
 let shared: MockHost | null = null;

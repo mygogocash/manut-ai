@@ -456,13 +456,98 @@
   background: var(--okbg);
   color: var(--aui-success);
 }
-/* A question asked in its row (Change, Rename) takes the row's whole width: its label, its field, then its buttons. */
+/* The desktop's own: Google Sheets, the canvas's app row above the Vault box (GooglePane.tsx). The avatar is the canvas's "G" on a
+   pastel ground, dark text in both themes as the canvas's avatars are, and the buttons sit together so they wrap together. */
+.brain .google .box {
+  padding: 2px 12px;
+}
+.brain .google-av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  align-self: flex-start;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #cdddeb;
+  color: #111110;
+  font-size: 13px;
+  font-weight: 600;
+}
+.brain .google-acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+/* A question or the waiting box under the row takes its whole width, as a question in a vault row does. */
+.brain .google .ask {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 4px 0 10px;
+}
+.brain .google .ask .conn-line {
+  color: var(--ink);
+}
+.brain .google .google-wait .conn-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The desktop's own: Needs you, offered inside Ton's ask, sits on its own line when the words fill the row. */
+.brain .google .msg .btn {
+  margin-left: 4px;
+}
+/* A question asked in its row (Change, Who uses it, Rename) takes the row's whole width: its label, its field, then its
+   buttons. */
 .brain .signin .ask {
   flex: 1 1 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-top: 2px;
+}
+/* A sign-in's two links sit together, so they wrap together under its name on a narrow window. */
+.brain .signin-acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+/* The desktop's own: Add a sign-in, the canvas's last row of the Vault box, opens its form in that row's place. The form is
+   a column of short fields, as the New routine form is; an address field keeps its Remove beside it. */
+.brain .add-row .ask {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 0 6px;
+}
+.brain .add-signin .field > .help {
+  margin: 0;
+}
+.brain .add-signin .address {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brain .add-signin .address-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brain .add-signin .address-row .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.brain .add-signin .lk.more {
+  align-self: flex-start;
+}
+.brain .help.err {
+  color: var(--aui-danger);
 }
 .brain .tr.ask {
   flex-direction: column;

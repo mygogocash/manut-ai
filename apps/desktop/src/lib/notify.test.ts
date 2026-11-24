@@ -56,6 +56,21 @@ describe("noteFor: only what needs the person", () => {
   });
 });
 
+describe("noteFor: a request that says its own short line", () => {
+  const LONG = "Already sent: this month went to the sheet on 3 November (41 rows) and Google confirmed it.\n\nAdd the books for October 2026 to the Google Sheet “Manut AI books: Baan Mali”, tab “Books”.\n41 rows, after the header row.\nSales ฿12,300 (30)";
+  it("says the brief as its body, and keeps the whole text as the action the card shows, which the body is not", () => {
+    const n = noteFor(ev({ event: "approval.request", request_id: "pilot%3Aa/r@1", title: "Ton asks to add the books", command: LONG, whole: true, brief: "Ton asks to add the books for October 2026 to Google Sheets", choices: ["once", "deny"], kind: "command" }), ctx());
+    expect(n).toMatchObject({ body: "Ton asks to add the books for October 2026 to Google Sheets", ask: { approval: "command", action: LONG } });
+    // the body is not the whole text, so notify-rules offers no Approve even were the kind one a notification may approve
+    expect(n?.body).not.toBe(n?.ask?.action);
+  });
+  it("says the command, cut as before, when it has no brief", () => {
+    const n = noteFor(ev({ event: "approval.request", request_id: "a@1", title: "", command: LONG, choices: [], kind: "command" }), ctx());
+    expect(n?.body.startsWith("Already sent: this month went to the sheet on 3 November")).toBe(true);
+    expect(n?.body.endsWith("…")).toBe(true);
+  });
+});
+
 describe("noteFor: what notify-rules needs to know of a request", () => {
   const approval = (over: Record<string, unknown> = {}) => ev({ event: "approval.request", request_id: "req-5@1", title: "Refund", command: "Send on LINE: “Thanks!”", choices: ["once", "deny"], kind: "reply", ...over });
   it("carries the ask's id, its approval-core kind, who asks and how many wait, and says whether the card offers Allow once", () => {

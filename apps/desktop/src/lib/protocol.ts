@@ -7,6 +7,7 @@
 // a runtime does not have is declared in its `RuntimeCapabilities`, not removed from here.
 
 import type { ConnectionOps } from "../runtime/connections";
+import type { GoogleOps } from "../runtime/google";
 import type { MemoryOps } from "../runtime/memory";
 import type { MissionOps } from "../runtime/mission";
 import type { MakeShopOps } from "../runtime/makeShop";
@@ -367,7 +368,7 @@ export interface FolderResumeResult extends FolderOpenResult {
  *  team knows, in `src/runtime/memory.ts`, its routines, in `src/runtime/routines.ts`, and its Connections tab, the shop's
  *  vault and outposts, in `src/runtime/connections.ts`; and Settings › People, the helpers around the shop, in
  *  `src/runtime/people.ts`). */
-export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps, PeopleOps, MakeShopOps {
+export interface OpMap extends MissionOps, MemoryOps, RoutineOps, ConnectionOps, PeopleOps, GoogleOps, MakeShopOps {
   hello: { params: Record<string, never>; result: HelloResult };
   "bots.list": { params: Record<string, never>; result: { bots: Bot[] } };
   "chat.open": { params: { bot: string; existing_only?: boolean }; result: ChatOpenResult };
@@ -754,6 +755,10 @@ export type BridgeEvent =
        *  and every value): every surface shows it with nothing cut or scrolled away, and a notification approves it only when
        *  its body is that text, shown whole (notify-rules' `shownWhole`). */
       whole?: boolean;
+      /** What a notification says in place of the whole text, when the text is too long for one and the ask is one no notification
+       *  approves (Ton's append of the books to the owner's Google Sheet): one line, and the title says the same. The text stays
+       *  `command`, which the card shows whole. */
+      brief?: string;
       choices: ApprovalChoice[];
       /** Asked inside a subagent: which one (its id and name or task). */
       subagent?: AskSubagent;

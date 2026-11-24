@@ -53,6 +53,11 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     acceptInvite: missing("acceptInvite"),
     endShopSession: missing("endShopSession"),
     signOut: missing("signOut"),
+    webSignIn: missing("webSignIn"),
+    webShops: missing("webShops"),
+    webApprovals: missing("webApprovals"),
+    webDecide: missing("webDecide"),
+    webSignOut: missing("webSignOut"),
     ...overrides,
   };
 }

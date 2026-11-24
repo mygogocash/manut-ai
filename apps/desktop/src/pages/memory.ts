@@ -4,9 +4,13 @@
 // Forget keeps are `@manut/shop-memory`'s rules, which the runtime applies (src/runtime/memory.ts); nothing here decides
 // them, and nothing here can use a fact: the page only shows what the runtime says and asks it to act.
 import { MAX_FACTS, MAX_TEXT } from "@manut/shop-memory";
-import { lang, locale, t, type Key } from "../i18n";
+import { dayText } from "../app/time";
+import { t, type Key } from "../i18n";
 import type { MemoryFact } from "../runtime/memory";
 import { unavailable } from "./load";
+
+// Where the day is said is the app's own time formatters (src/app/time.ts); the pages keep importing it from here.
+export { dayText };
 
 /** The two lists the page shows. Only a confirmed fact is one the team uses. Anything else waits, which includes a status this
  *  app does not know, so a waiting fact can never be shown as used. */
@@ -24,13 +28,6 @@ export function withoutFact(facts: readonly MemoryFact[], id: string): MemoryFac
   return facts.filter((f) => f.id !== id);
 }
 
-/** "3 November", or "3 November 2025" when it is not this year. English writes the day first, as the canvas does and as the
- *  shop's own country does. Connections says its days the same way (connections.ts). */
-export function dayText(sec: number, nowMs: number): string {
-  const at = new Date(sec * 1000);
-  const thisYear = at.getFullYear() === new Date(nowMs).getFullYear();
-  return at.toLocaleDateString(lang() === "en" ? "en-GB" : locale(), { day: "numeric", month: "long", ...(thisYear ? {} : { year: "numeric" }) });
-}
 
 /** Where a fact came from, as the canvas's "Where it came from" says it. A fact the owner corrected says so instead: its
  *  words are the owner's now, and "From your price list" would say something false about them. A source this app does not

@@ -145,7 +145,7 @@ type DeletionView = {
 
 | Method and path | Body or query | Answer |
 | --- | --- | --- |
-| `POST /v1/admin/pilot/shops` | `{ name, ownerName, template? }` | `{ tenant, name, ownerName, template? }`. 400 `{ "error": "unknown_template" }`, making no shop, for a template that is not one ("Shop templates", below) |
+| `POST /v1/admin/pilot/shops` | `{ name, ownerName, template? }` | `{ tenant, name, ownerName, template? }`. 400 `{ "error": "unknown_template" }`, making no shop, for a template that is not one ("Shop templates", below). 503 `{ "error": "shop_unavailable" }` when the shop could not be made whole and listed: nothing is listed, and the same request, with the same names and template, finishes that very shop instead of making another ("A make that stops part way", below) |
 | `GET /v1/admin/pilot/shops` | none | `{ shops: Shop[] }` |
 | `POST /v1/admin/pilot/line-connections` | `{ tenant, channelId, botUserId, channelSecret, channelAccessToken }` | `{ connectionId, webhookUrl }` |
 | `GET /v1/admin/pilot/messages` | `?tenant=` | `{ messages: InboundMessage[] }`, newest first |
@@ -278,6 +278,11 @@ type DeletedShop = {
   schedulesWiped: number;
   occurrencesWiped: number;
   sessionsWiped: number;
+  // Only for a shop that had a Google connection: how many were ended at Google before the vault forgot their tokens, and
+  // how many could not be. The shop's data is deleted either way; the second is for the owner to end in their Google
+  // account ("Google Sheets for Ton's books", below). The deletion's record keeps both with the other counts.
+  googleRevoked?: number;
+  googleNotRevoked?: number;
   deletedAt: string;
 };
 ```
@@ -337,6 +342,13 @@ type DeletedShop = {
     request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page
     says its deletion did not finish and offers the same button. The practice fake lists and finishes a deletion
     that did not finish by the same rules, though a practice wipe never stops part way.
+  - **Google.** A shop's Google connection is revoked at Google before its vault forgets the token, as `POST
+    /v1/google/disconnect` does it, in every deletion: the operator's of a shop that never went live, the owner's yes on
+    their link, and a person's own tenant. Google not answering, or the secret not opening, or Google not being set up on
+    this Worker, never stops the deletion: the answer counts the connection as `googleNotRevoked`. The vault is listed
+    first, and a vault that cannot be listed is not wiped (`connections` in `failed`), so no token is forgotten that was
+    not looked at. A run that stops after the vault was wiped carries the same counts on its `wipe_incomplete`, since the
+    run that finishes it has no connection left to revoke. No token is in any answer, record or log.
   - Every step answers again after its own wipe: the task index reads as empty once the shop's own object is wiped,
     and each wipe finds nothing more to remove. So the same request runs to the end after a stop at any step,
     including one after the tombstone, when only taking the shop off the list is left.
@@ -510,12 +522,16 @@ What is written, and by whom:
 | `helper.removed` | operator, or the owner from a session | `helperId` | `ok` |
 | `away.set`, `away.cleared` | operator, or the owner from a session | `helperId` (who covers, or covered) | `ok` |
 | `request.passed_on` | helper | `requestId`, `taskId` | `ok` |
-| `signin.created`, `signin.password_replaced`, `signin.removed` | operator | `signInId` | `ok` |
-| `outpost.registered` | operator | `outpostId` | `ok` |
+| `signin.created`, `signin.password_replaced` | operator, or the owner from a session (the linked account's id; `owner-session` for the shop's own session) | `signInId` | `ok` |
+| `signin.removed` | operator | `signInId` | `ok` |
+| `signin.members_changed` | the owner from a session (as above), choosing who may use the sign-in | `signInId` | `ok` |
+| `outpost.registered` | operator, or the owner from a session registering this Mac | `outpostId` | `ok` |
+| `outpost.renamed` | the owner from a session | `outpostId` | `ok` |
 | `signin.requested` | worker | `signInId`, `outpostId`, `taskId`, `attemptId`, and `grantId` when a grant was issued | `ok`, or `refused` with the vault's refusal as the `reason` |
 | `signin.broken` | worker | `signInId`, `taskId`, `attemptId` | `ok`, or `refused` (`member_not_allowed`, `sign_in_not_found`) |
 | `signin.redeemed` | outpost | `outpostId`; for a grant the vault found, also `signInId`, `taskId`, `attemptId`, `grantId` | `ok`, or `refused` with the refusal as the `reason` |
-| `outpost.removed`, `outpost.credential_rotated` | operator | `outpostId` | `ok` |
+| `outpost.removed` | operator, or the owner from a session | `outpostId` | `ok` |
+| `outpost.credential_rotated` | operator | `outpostId` | `ok` |
 | `browser_step.queued` | worker | `outpostId`, `taskId`, `attemptId`, and `stepId` when it was queued; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok`, or `refused` with the refusal as the `reason` |
 | `browser_step.fetched` | outpost | `stepId`, `outpostId`, `taskId`, `attemptId`; a sign-in step's `signInId` and `grantId`; a write step's `signInId`, `requestId` and `actionId` | `ok` when it was handed out, or `refused` with why (`attempt_ended`, `consent_required`, `origin_not_allowed` and so on); an empty fetch writes nothing |
 | `browser_step.reported` | outpost | `outpostId`; for a step the vault found, also `stepId`, `taskId`, `attemptId`, and a sign-in step's `signInId` and `grantId` | `done`, `failed` with the outpost's code (or `text_withheld`) as the `reason`, or `refused` with the refusal |
@@ -903,7 +919,8 @@ the body is read: over it they answer 429 `{ "error": "rate_limited" }` with `Re
 limiter, or a source address, 503 `{ "error": "rate_limit_unavailable" }`. One route under `/v1/outposts/` is the
 owner's instead: the desktop registering this Mac (`POST /v1/outposts/register`), which takes the owner's session and
 no outpost's credential. The owner's Connections take the owner's session too, under `/v1/vault/` ("The owner's vault
-and outposts", below): the shop's sign-ins and outposts, a new password, and renaming or removing an outpost.
+and outposts", below): the shop's sign-ins and outposts, adding a sign-in, a new password, who may use a sign-in, and
+renaming or removing an outpost.
 
 ```ts
 type SignIn = {
@@ -1083,32 +1100,46 @@ signed-in session, and the shop is the session's: no route reads one from a body
 | Method and path | Body | Answer |
 | --- | --- | --- |
 | `GET /v1/vault/sign-ins` | none | `{ tenant, signIns: SignIn[] }`, as the operator's list answers it for the shop |
+| `POST /v1/vault/sign-ins` | `{ site, origins, username, password, members }` | `{ signIn: SignIn }`, added to the shop's vault as the operator's route adds it, with the password sealed |
 | `POST /v1/vault/sign-ins/password` | `{ signInId, password }` | `{ signIn: SignIn }`, with the new password sealed; a broken sign-in is `working` again |
+| `POST /v1/vault/sign-ins/members` | `{ signInId, members }` | `{ signIn: SignIn }` with its new members; nothing else about it changes |
 | `GET /v1/vault/outposts` | none | `{ tenant, outposts: Outpost[] }`, as the operator's list answers it for the shop |
 | `POST /v1/vault/outposts/rename` | `{ outpostId, name }` | `{ outpost: Outpost }` with the name trimmed; nothing else about it changes |
 | `POST /v1/vault/outposts/remove` | `{ outpostId }` | `{ removed: true, outpostId, stepsRefused, grantsRefused }`, as the operator's removal answers |
 
 - **Who and in what order.** Who is asking comes first (401 `unauthorized` for no session, the operator's key or an
   outpost's credential; 401 `unlinked` with `unlinkedAt`, or `removed`; 503 `people_unavailable` when the session cannot
-  be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`), then the
-  query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and the body. So a caller with no session learns
-  nothing about a route, not even its method.
-- **Exact.** A body is exactly the keys above, each a string. Anything more, a `tenant`, a `shop` or a `role` above all,
-  or a value of another type answers 400 `invalid_request`; a body that is not JSON, 400 `invalid_json`.
-- **Through the vault's own operations.** A new password goes through the vault's `/sign-ins/password`, the operator's,
-  and is sealed the same way; a removal is the operator's removal, so the outpost's credential stops working at once and
-  its waiting steps and grants are refused in the same step; a rename is the vault's `/outposts/rename`, with the name
-  rule registration uses. The vault's own refusals pass through: 400 `invalid_password` (not text of 1 to 1,024
-  characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or holding a control character), 404
-  `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found` (also another shop's, or one
-  already removed), 503 `vault_not_configured` and `vault_unavailable`.
-- **The password** goes from the body straight into the vault. It is never kept, logged or answered: the answer is the
-  sign-in's public view, which says only when its password was set.
-- **The log.** `signin.password_replaced`, `outpost.renamed` and `outpost.removed`, by `{ kind: "owner", id }` (the linked
-  account's id, or `owner-session` for the shop's own session), with the record's id only, never a password or the name
-  typed. A refusal writes nothing, as the operator's do not.
-- Like the registration, none of these is behind the outposts' ingress limit: each needs a session first. The owner adds
-  no sign-in and registers no cloud outpost here; an operator does.
+  be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`; the shop's
+  sign-ins take `GET` and `POST`, every other route one method), then the query (a `shop`, `tenant` or `role` in it: 400
+  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods.
+- **Exact.** A body is exactly the keys above. An id, a new password and a name are strings. Anything more, a `tenant`,
+  a `shop` or a `role` above all, a key missing, or an id, password or name of another type answers 400
+  `invalid_request`; a body that is not JSON, 400 `invalid_json`; over 16 KB, 413 `body_too_large`. Every other value
+  (a new sign-in's `site`, `origins`, `username`, `password` and `members`, and the `members` chosen) is the vault's to
+  check, as it is on the operator's route, so a value of the wrong kind gets that field's refusal.
+- **Through the vault's own operations.** A new sign-in goes through the vault's `/sign-ins`, the operator's, so it is
+  checked, sealed under `CRED_KEY` and kept exactly as the operator's is, with the operator's refusals
+  (`POST /v1/admin/vault/sign-ins` above: 400 `invalid_site`, `invalid_origins`, `invalid_username`, `invalid_password`,
+  `invalid_members`; 409 `too_many_sign_ins`; 503 `vault_not_configured`). A new password goes through the vault's
+  `/sign-ins/password`, the operator's, and is sealed the same way. Who may use a sign-in goes through the vault's
+  `/sign-ins/members`, whose members are checked as at creation (400 `invalid_members`: none, a repeat, or one who is not
+  Nam, Pim, Ton or Kit) and which changes nothing else: not its password, whether it works, or when it was last used. A
+  member taken off loses it at once: a grant not yet redeemed for them, and any new one, is refused `member_not_allowed`,
+  and no step of theirs goes to its origins. A removal is the operator's removal, so the outpost's credential stops
+  working at once and its waiting steps and grants are refused in the same step; a rename is the vault's
+  `/outposts/rename`, with the name rule registration uses. The vault's own refusals pass through: those above, 400
+  `invalid_password` (not text of 1 to 1,024 characters), 400 `invalid_name` (blank once trimmed, over 80 characters, or
+  holding a control character), 404 `sign_in_not_found` (also another shop's or a removed one), 404 `outpost_not_found`
+  (also another shop's, or one already removed), 503 `vault_not_configured` and `vault_unavailable`.
+- **The password** goes from the body straight into the vault, a new sign-in's as a new password. It is never kept,
+  logged or answered: the answer is the sign-in's public view, which says only when its password was set.
+- **The log.** `signin.created`, `signin.password_replaced`, `signin.members_changed`, `outpost.renamed` and
+  `outpost.removed`, by `{ kind: "owner", id }` (the linked account's id, or `owner-session` for the shop's own session),
+  with the record's id only: never a password, an account's name, who may use a sign-in, or the name typed. A refusal
+  writes nothing, as the operator's do not.
+- Like the registration, none of these is behind an ingress limit, the two added on 24 November included: each needs a
+  session first, and the vault bounds what a shop keeps (50 sign-ins, 20 outposts). The owner registers no cloud outpost
+  and removes no sign-in here; an operator does.
 
 ### `POST /v1/outposts/heartbeat`
 
@@ -1395,13 +1426,15 @@ covers the console and the operator routes. They are two Workers, both deployed 
   it ([Cloudflare's note](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)).
 - **The pages Worker** (`wrangler.web.jsonc`, `src/pages.ts`) serves `apps/web`'s build: a file when one
   matches, otherwise the app's one page, which picks the screen from the path (`/approve/{token}`,
-  `/delete/{token}`, `/join/{token}`, `/ops`).
+  `/delete/{token}`, `/join/{token}`, `/ops`). The owner's web app has a page of its own at `/app/`, with its manifest,
+  icons and service worker (`docs/web-app.md`).
   `wrangler dev` and `wrangler deploy` build the web app first with `VITE_API_ORIGIN=same-origin`, so the pages
   call the API that served them and a deploy never ships a missing or stale web app.
 - **Page headers**, set in `src/pages.ts`: no framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), so
   no other site can trick an owner into pressing Approve; `Referrer-Policy: no-referrer`;
   `X-Content-Type-Options: nosniff`; `X-Robots-Tag: noindex, nofollow`; approval, deletion and join pages also
-  `Cache-Control: no-store`, since each carries a token in its path. They never apply to the API's answers.
+  `Cache-Control: no-store`, since each carries a token in its path. Everything under `/app/` gets a policy of its own
+  that runs only this origin's scripts (`src/app-policy.ts`). They never apply to the API's answers.
 - **`WEB_ORIGIN` and `PUBLIC_API_ORIGIN`** are both the API Worker's public origin.
 - **Cloudflare Access:** one application on that host, covering `/ops` and `/v1/admin/*` and nothing else;
   `ADMIN_ACCESS_AUD` is its audience. The owner's `/approve/*`, `/delete/*` and `/v1/pilot/*`, LINE's
@@ -1962,9 +1995,11 @@ Applying one:
   the rest;
 - keeps its first-week questions, `q1` onwards, for Buddy to ask the owner.
 
-All of it is one write to the shop's object, after the clocks and before the shop is listed: a shop whose setup could
-not be written answers 503 `shop_unavailable` and is never listed, and asking again makes a whole one. The log has
-`template.applied` (naming the template by id) and one `routine.created` for each routine.
+All of it is in the one write to the shop's object that makes the shop (`pilot-store.ts`), after the clocks and before the
+shop is listed, so the shop's object holds the shop with its setup or nothing of it. A shop whose setup could not be
+written answers 503 `shop_unavailable` and is never listed, and asking again finishes it ("A make that stops part way",
+below). The log has `shop.created`, then `template.applied` (naming the template by id) and one `routine.created` for each
+routine.
 
 **`GET /v1/admin/questions?tenant=`** answers `{ tenant, template, questions: Question[] }`: the template the shop was
 made from (null for none), and each question with its answer as the team now knows it.
@@ -2086,11 +2121,11 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
 | 400 | `{ error: "invalid_name" }`, `{ error: "invalid_owner_name" }` | The shop's name, or the person's own, is empty, longer than 80 characters once its outer spaces are off, or holds a control character (a helper's name's rule, `keptName` in `people-store.ts`) |
 | 400 | `{ error: "unknown_template" }` | `template` is not one of the three, or `null` |
 | 409 | `{ error: "too_many_shops", limit: 3 }` | The account has made 3 shops that still exist |
-| 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again makes a whole new shop |
+| 503 | `{ error: "shop_unavailable" }` | The shop could not be made, listed or counted. Nothing is listed, the slot is given back, and asking again with the same name, owner name and template finishes that very shop, never a second one ("A make that stops part way", below) |
 
 - **The same shop the operator's route makes.** Both go through `writeNewShop` in `pilot.ts`: the shop's record with
-  `shop.created` in one write, then the template applied the one way ("Shop templates", above: its members, its routines
-  each paused, its first-week questions, `template.applied` and one `routine.created` each).
+  `shop.created` and the template's setup ("Shop templates", above: its members, its routines each paused, its
+  first-week questions, `template.applied` and one `routine.created` each) in one write.
 - **Owned from the first write.** For a shop its owner makes, that first write to the shop's object also links the person's
   account as its owner (`owner.account` on the People answer, `{ id, subject, linkedAt }` in the export) and opens this
   device's owner session, with `shop.made_by_owner`, `owner.linked` and `owner.session_opened`. Every entry of the making,
@@ -2100,12 +2135,66 @@ email's). `template` is `handmade`, `fashion`, `food` or `null` for none. While 
   console's list (the pilot registry) and in the person's index as theirs, so `GET /v1/shops` and `GET
   /v1/admin/pilot/shops` list it together or not at all. A shop whose setup or listing could not be written is never listed,
   and its session's token, which only the answer would carry, is never sent.
-- **At most 3 made shops per account.** A slot is reserved in AuthObject before anything is made, in one transaction, so
-  requests racing for the last slot cannot pass it. A shop that was deleted no longer counts, and a reservation whose make
-  failed is given back, or stops counting after 10 minutes. Shops an operator linked to the account never count: the limit
-  is on making, not owning.
+- **At most 3 made shops per account.** A slot is reserved in AuthObject before anything is made, in the same transaction
+  that puts the make on the journal, so requests racing for the last slot cannot pass it. A shop that was deleted no longer
+  counts, and a reservation whose make failed is given back at once, and taken again by the request that finishes that
+  make, or stops counting after 10 minutes if nobody asks again. Shops an operator linked to the account never count: the
+  limit is on making, not owning.
 - **The pilot gate** lists a self-serve shop and leaves it out of the cohort unless an operator adds it ("The pilot gate",
   above).
+
+### A make that stops part way
+
+A shop is made by `POST /v1/admin/pilot/shops` and by `POST /v1/shops/new`, both through `writeNewShop` in `pilot.ts`, and a
+make writes to more than one object. It cannot be one write, so it is made to be finished instead, as a deletion is
+("Export and deletion", above): a deletion that stops part way keeps the shop on the console's list until the same request
+finishes it, and a make that stops part way keeps the shop **off** the list until the same request finishes it. In order,
+and each step safe to run again:
+
+1. **Begin.** AuthObject puts the make on its *journal of makes* (`pilot-making:<tenant>`, `{ tenant, name, ownerName,
+   template, by, at }`, where `by` is the person making their own shop, or null for an operator) before anything of the shop
+   is written. For a person's own make the same transaction takes one of their slots (409 `too_many_shops`, writing
+   nothing). If the same shop is already on the journal, an earlier try stopped part way and this one finishes it: the
+   answer is that shop's tenant, not a new one. The same shop is the same name, owner name and template, from the same
+   person, or from an operator. Another name, owner name or template, or another person, is another shop, and leaves this
+   one where it is. Two asks at once for the same shop find each other the same way, and make one.
+2. **Look.** The shop's own object says whether the shop is already there; if an earlier try wrote it, it is left as it is,
+   with nothing set up again.
+3. **Clocks**, for a shop made from a template.
+4. **The shop's own write**: the shop's record, its people record when its owner makes it, its template's setup, and an
+   audit entry for each, in one storage write (`createShop` in `pilot-store.ts`). The shop's object holds the shop whole or
+   nothing of it, and its log (`shop.created`, then `shop.made_by_owner`, `owner.linked` and `owner.session_opened` for an
+   owner's own, then `template.applied` and a `routine.created` each) never says more than was written, and says each
+   thing once however many tries it took. A shop already there answers 409 `already_exists` and changes nothing.
+5. **A session of its own**, for a person's own make that found the shop already written: that try's first owner session has
+   a token only its answer would have carried, which went nowhere, so this try opens another, as `POST /v1/shops/session`
+   does, for the account the first linked. It leaves the person's index to the next step, so the console and the person's own
+   list still agree.
+6. **List.** The registry row, and the make leaves the journal in that same write (`POST /pilot-shops`); for a person's own
+   shop it is `POST /shops-made/finish`, which also puts the shop in the person's index and marks the slot done. Asking
+   again answers the same and moves the shop nowhere on the list. It is asked twice if the first try fails, because only the
+   answer may have been lost, and the shop is whole.
+
+What a stop leaves, and what asking again does:
+
+| Stopped at | Left | Asking again |
+| --- | --- | --- |
+| Begin | Nothing. If only the answer was lost, the journal row, and for a person's own make a slot that the make gives back at once | Finishes that shop, on the slot it takes again |
+| Look, clocks, or the shop's own write | The journal row, nothing of the shop, and at most clocks for routines that never came to be, which remove themselves at their first instant. If only the answer to the write was lost, the shop whole | Writes the shop, or finds it written, and lists it |
+| Opening a session (a person's own make) | The shop whole, the journal row, the slot given back | Opens a session and lists it |
+| List | The shop whole in its own object, not listed, and the journal row | Lists it |
+
+So a stop never leaves a half-made shop: a shop's object has the shop with its setup, or none; no stop lists a shop that
+cannot be opened, in the console's Shops overview or in the person's own list; and the log says a shop was made only when
+its record is there, once. A person's slot is given back by the failure and taken again by the retry, or lapses after 10
+minutes (`MADE_RESERVATION_MS`), so no slot is lost; a retry that finds the account at its limit with other shops is refused
+409 and changes nothing.
+
+Not built: a make that nobody asks for again is not cleared by itself. Its journal row, and its shop if it got so far, wait.
+The shop is on no list, so nobody is shown it, and for a shop its owner makes the token of its first session was never
+sent. It holds nothing a customer or an owner gave it. Deleting the shop with `POST /v1/admin/pilot/deletions`, by its id
+(on the journal) and exact name, as for any shop that never went live, clears it and takes its row off the journal, and so
+does the wipe of any tenant.
 
 ### What an owner session reaches
 
@@ -2217,6 +2306,57 @@ type OwnerAccountView = { id: string; linkedAt: string; devices: number };   // 
   link and every owner session with the rest of its people, and takes the shop out of every person's index. A person who
   deletes their own data keeps their links, which are their shops' records, and loses a code they had not used yet.
 
+## The web app's session
+
+The owner's web app (`/app/`, `docs/web-app.md`) signs a person in with a code sent by email and keeps the sign-in after
+the app is closed, in cookies this API sets and the page's script cannot read (`apps/api/src/web-session.ts`). These five
+routes are the only ones in the API that read a cookie. Each hands its request on, with the right bearer from the
+cookies, to the route that does the work: the lifted auth to sign in, refresh and sign out, the person's own routes for
+their shops ("Several shops"), and the shop's approvals with that shop's own session ("Approvals for a session",
+"Deciding from a session"). Every other route keeps taking a bearer and nothing else. Signing in by email is off
+(`email_not_configured`) until the owner turns it on, so the app can sign no one in today.
+
+**The cookies.** Each is `__Host-` (this exact host, every path), `Secure`, `HttpOnly` and `SameSite=Strict`:
+
+| Cookie | Value | Lasts |
+| --- | --- | --- |
+| `__Host-manut-sign-in` | the sign-in's device id (`web-<uuid>`, minted here, never by the page) and refresh token | 30 days, set again by each refresh; the lifted auth ends the chain at 90 days |
+| `__Host-manut-access` | the sign-in's access token | its hour, less a minute |
+| `__Host-manut-shop-<16 hex>` | one shop session (`mos1.` or `mhs1.`) and the id it decides as; the name is the start of the shop id's SHA-256 | the session's 30 days, less an hour |
+
+**Who may call.** Every route answers 403 `csrf_required` without the header `x-manut-web: 1`, which a page on another
+origin can send only after a CORS preflight the API never answers, and 403 `origin_forbidden` for an `Origin` that is
+not this origin, a `Sec-Fetch-Site` other than `same-origin`, or a `POST` with no `Origin`. These come before the
+method (405 `method_not_allowed`) and the cookies. No answer carries a token, and every answer is
+`cache-control: no-store`. A `/v1/web/` path that is none of the five answers 404 `not_found`.
+
+| Method and path | Body or query | Answer |
+| --- | --- | --- |
+| `POST /v1/web/sign-in` | exactly `{ email, code }` | `{ signedIn: true }` and the sign-in's two cookies. The sessions the browser held before are ended and their cookies cleared first. Refusals as the exchange's: 401 `wrong_code` with `triesLeft`, 401 `code_ended`, 400 `invalid_request` (another field, a `deviceId` above all, or a code that is not six digits), 400 `email_not_configured` |
+| `POST /v1/web/shops` | `{}` or none | `{ shops: WebShop[] }`: the person's shops (`GET /v1/shops`), each with a session ready, one kept from its cookie or opened (`POST /v1/shops/session`) and set. A cookie for a shop no longer listed is cleared. Refreshes the sign-in when the access cookie has gone, or the token is refused. 401 `signed_out` with `emailSignIn` (whether signing in by email is on, so the app can say on opening that it is not) when there is no sign-in or the lifted auth ended it (no cookie is cleared then: another tab's refresh may have set the one that works); 503 `shops_unavailable` |
+| `GET /v1/web/approvals` | `?shop=&state=open\|recent[&limit=]`, nothing else | `GET /v1/approvals`'s answer to that shop's session, as it is |
+| `POST /v1/web/approvals/{requestId}/decision` | exactly `{ shop, optionId, seenRevision }` | `POST /v1/approvals/{requestId}/decision`'s answer to that shop's session with `{ optionId, seenRevision }`, as it is |
+| `POST /v1/web/sign-out` | `{}` or none | `{ signedOut: true, shopsEnded }`: every shop session ended (`POST /v1/shops/session/end`) and the sign-in (`DELETE /v1/auth/session`, refreshed first when the access cookie has gone), best effort; every cookie cleared whatever happened |
+
+```ts
+type WebShop = {
+  id: string; name: string; ownerName: string;
+  role: "owner" | "helper";
+  you: string | null;   // the id this person's decisions name there: the linked account's (owner-…) or the helper's
+  ready: boolean;       // false when its session could not be opened now
+};
+```
+
+- **The two shop routes** answer 401 `session_ended` with `shop` when the browser holds no session for the shop, or the
+  shop no longer holds the one it sent, and clear that cookie: reading the person's shops again opens a new one. A
+  session removal or unlinking ended keeps its own answer (`removed` with `removedAt`, `unlinked` with `unlinkedAt`), with
+  `shop`, and its cookie is cleared too. A query naming anything but `shop`, `state` and `limit`, or a body naming a
+  `role`, is 400 `invalid_request`, as on the shop routes.
+- **Limits.** `POST /v1/web/sign-in` counts in the exchange's bucket (`AUTH_EXCHANGE_LIMITER`), and `POST /v1/web/shops`
+  and `POST /v1/web/sign-out` in the refresh's (`AUTH_SESSION_LIMITER`), per source address, before anything is read.
+- **What the shops see.** Opening a shop session here is opening one anywhere: an owner's writes `owner.session_opened`,
+  a helper's is a new device the owner hears of. The app keeps each for its 30 days, so a phone counts as one device.
+
 ## Google Sheets for Ton's books
 
 The owner connects their own Google account, and Ton appends a month of the shop's books to a Google Sheet in the
@@ -2252,8 +2392,18 @@ type GoogleStatus = {
     connectedAt: string;
     state: "working" | "broken";
     broken?: { at: string; reason: string; words: string };  // words the owner reads, e.g. "… Connect Google again."
-    sheet: null | { id: string; title: string; tab: string; url: string | null };  // the sheet Ton appends to
+    sheet: null | {                // the sheet Ton appends to
+      id: string; title: string; tab: string; url: string | null;
+      appended: AppendedMonth[];   // what was sent to it, newest first, at most 24: never the rows
+    };
   };
+};
+
+type AppendedMonth = {
+  month: string;                   // YYYY-MM
+  at: string;                      // when the send began
+  rows: number;                    // after the header row
+  outcome: "confirmed" | "unknown"; // unknown: Google's answer left it open whether the rows landed, or never came
 };
 ```
 
@@ -2312,16 +2462,40 @@ type GoogleStatus = {
    sheet is kept, as the connection's one granted resource under a new grant revision; an ask while another makes it is
    refused (`sheet_in_progress`). A sheet the connection already has is read first (its title as it is now, and that
    its `Books` tab is still there, else `sheet_tab_missing`); one that is gone for this account is made again.
-4. The task object stores the month's exact rows and the sheet as an immutable proposal (`google.sheets.append`) and
-   opens its approval-core request, of kind `command`, which only the owner may decide, expiring after a day.
+4. **A month sent before is said first, never asked for silently.** The sheet's record in the vault keeps what was
+   appended to it (below). When it holds an append of this month, the proposal carries `earlier`: how many times the
+   month was sent, and for the latest when (`at`), how many rows and how it ended (`confirmed`, or `unknown` for a send
+   Google left open, or one that never reported back). The request's `text` then begins with that: "Already sent: this
+   month went to the sheet on 2026-11-03 (41 rows) and Google confirmed it. Approving adds its rows a second time.", or
+   for an unknown one "Maybe already sent: … but Google did not say whether the rows arrived. Look in the sheet first:
+   approving adds its rows a second time, so they would be there twice if they had arrived." (`again` after more than
+   one). The ask is made all the same: the owner's yes is the choice to add the rows again, which an owner who deleted
+   them by hand, or who looked and found a lost send's rows missing, needs. `earlier` is part of the payload, so it is
+   hashed with the rows and shown with them. Only the record of the sheet the request names counts: a sheet made anew
+   because the old one was deleted holds none of the rows, so its first ask has no `earlier`.
+5. The task object stores the month's exact rows, `earlier` and the sheet as an immutable proposal (`google.sheets.append`)
+   and opens its approval-core request, of kind `command`, which only the owner may decide, expiring after a day.
 
 The owner decides it from their session (`POST /v1/approvals/{requestId}/decision`, "Deciding from a session"). An
 approval goes to the broker's one-use begin gate, as every write does, which sends it once: the live grant is checked
-(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, and the approved rows go to
-`spreadsheets.values.append` exactly as `@manut/sheets-rows` builds them, `valueInputOption=RAW` (no cell runs as a
-formula) and `insertDataOption=INSERT_ROWS`, after a header row. It settles `confirmed` on Google's success, `failed` only
-when Google refused it before applying it (400, 401, 403, 404, 429) or when it was never sent, and `unknown` for any
-other end (no answer, a timeout, a server error), which is never sent again. `google.appended` records how it settled.
+(the connection, its provider, its revision, the sheet, not broken), a fresh access token is asked for, the append is
+written into the sheet's record, and the approved rows go to `spreadsheets.values.append` exactly as `@manut/sheets-rows`
+builds them, `valueInputOption=RAW` (no cell runs as a formula) and `insertDataOption=INSERT_ROWS`, after a header row. It
+settles `confirmed` on Google's success, `failed` only when Google refused it before applying it (400, 401, 403, 404, 429)
+or when it was never sent, and `unknown` for any other end (no answer, a timeout, a server error), which is never sent
+again. `google.appended` records how it settled.
+
+**What the sheet's record keeps.** One entry for each append, with the sheet's binding in the vault and never the rows:
+`{ actionId, month, at, rows, outcome }`, oldest first, the newest 120. It is written as `sending` before the request leaves,
+so a send the Worker never finished (it stopped part way) still counts as sent, and is finished as `confirmed` or `unknown`
+when Google's answer is known; an append Google refused before applying it adds nothing, so its entry is taken out. The
+app and the next ask read `sending` as `unknown`. It goes with the sheet when the owner connects again, and a new sheet
+starts empty. Writing it is also the send's last check: the vault refuses the begin unless the month was sent exactly as
+often as the request said (`earlier.count`, or none), so two requests for one month that were both asked before either was
+sent cannot both write it, and a request that did tell of an earlier send goes through. The refused one settles `failed`
+with the reason `month_already_sent`, nothing reaches Google, and asked again it says what was sent. Other reasons a
+send settles `failed` before Google: `google_broken`, `sheet_changed`, `not_connected`, `already_begun` and
+`vault_unavailable`.
 
 ```ts
 // What an append's request names, in `record.request.detail`. Its id is the append's action id.
@@ -2339,6 +2513,11 @@ type BooksDetail = {
     beforeVat?: string; vat?: string;  // a VAT-registered shop's only
   };
   flags: number;                 // entries Ton flagged for the owner to check
+  earlier: null | {              // the month went to this sheet before (the text above says so first)
+    count: number;               // how many times, the latest included
+    at: string; rows: number;    // the latest: when it began and how many rows it carried
+    outcome: "confirmed" | "unknown";
+  };
   lines: { date: string; ref: string; kind: "sale" | "refund" | "expense"; channelOrCategory: string;
     amountSatang: number; beforeVatSatang: number | null; vatSatang: number | null }[];  // the exact rows
   text: string;                  // the control plane's sentence naming all of the above
@@ -2362,7 +2541,12 @@ An append's job ends `failed` with one of these, besides the job flow's own: `go
 `sheet_in_progress`, `sheet_not_made`, `sheet_tab_missing`. The owner's route answers 400 `invalid_month` before
 anything starts.
 
-**Not built yet.** The desktop's and the web's screens (Customize › Connections gets a Google row); the Google Picker,
-for the owner to choose an existing sheet; a monthly schedule for the append; refusing a month already appended (each
-request names its month, and the owner may approve the same month twice); and revoking the token at Google when the
-shop's data is deleted (deletion forgets it).
+**Deleting the shop** revokes the token at Google first, as disconnecting does ("Export and deletion", above).
+
+**The desktop** reads these routes from Customize › Connections, with the viewed shop's own owner session: the Google row (its
+status, Connect, Disconnect and Send a month's books) and, in Needs you, Ton's append with its whole text (`apps/desktop`:
+`src/pages/GooglePane.tsx`, `src/runtime/http/google.ts`, `books.ts`; `docs/decisions.md`). It reads the 503
+`google_not_configured` as Google being off, which needs the API's `error` code on a 5xx.
+
+**Not built yet.** The web's screens; the Google Picker, for the owner to choose an existing sheet; and a monthly schedule for
+the append.

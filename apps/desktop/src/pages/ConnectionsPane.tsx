@@ -1,7 +1,8 @@
 // Customize › Connections for the shop's owner, around this Mac's Outposts box (OutpostPane.tsx): the canvas's Vault box
-// above it, with each site sign-in, who may use it, whether it works, when it was added, and its Change; and below it, every
-// outpost the shop has, each with Rename and Remove. The words and the rows are connections.ts's; the boards are
-// Connections.dc.html and StatesCustomize.dc.html.
+// above it, with each site sign-in, who may use it, whether it works, when it was added, its Change and Who uses it, and the
+// canvas's Add a sign-in under them; and below it, every outpost the shop has, each with Rename and Remove. The words and the
+// rows are connections.ts's; the boards are Connections.dc.html and StatesCustomize.dc.html, which draw Add a sign-in as a
+// link and no form, so the form is the tab's own in-place question, as Change is.
 //
 // This Mac's own row stays the shell's, with its Start and Stop. The shell gives the page the id this Mac's outpost has on
 // the shop's list (src-tauri/src/outpost/mod.rs, `View`), never its credential, so this Mac's record is folded into that row
@@ -15,17 +16,35 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { Op, OpParams, OpResult } from "../lib/protocol";
 import { createRuntime, runtimeKind, type RuntimeAdapter } from "../runtime";
-import { MAX_OUTPOST_NAME, MAX_PASSWORD, type ShopConnections, type ShopOutpost, type VaultSignIn } from "../runtime/connections";
+import {
+  MAX_ORIGINS,
+  MAX_OUTPOST_NAME,
+  MAX_PASSWORD,
+  MAX_SITE,
+  MAX_USERNAME,
+  SIGN_IN_MEMBERS,
+  type ShopConnections,
+  type ShopOutpost,
+  type VaultSignIn,
+} from "../runtime/connections";
 import {
   addedLine,
+  addFields,
+  addressProblem,
   CONN_START,
   connectionsDo,
   connReduce,
+  memberName,
+  membersReady,
   nameReady,
   outpostLine,
   passwordReady,
+  readAddresses,
   refusalText,
   signInLine,
+  siteProblem,
+  usernameProblem,
+  type AddDraft,
   type ConnAction,
   type ConnectionsCalls,
   type ConnUi,
@@ -40,7 +59,7 @@ export interface ConnectionsProps {
   ui: ConnUi;
   nowMs: number;
   dispatch: (a: ConnAction) => void;
-  /** Save, in the open Change or Rename */
+  /** Save, in the open Change, Who uses it or Rename; Add, in Add a sign-in */
   onSave: () => void;
   /** Remove, in the open question */
   onRemove: () => void;
@@ -114,9 +133,59 @@ function PasswordForm({ s, p, draft }: { s: VaultSignIn; p: ConnectionsProps; dr
   );
 }
 
+/** Who may use a sign-in: a box for each member whose jobs run through a connection, by name, ticked for those who may.
+ *  Nam, Pim, Ton and Kit are named the same in every language. */
+function MembersField({ chosen, p, legend, testid }: { chosen: readonly string[]; p: ConnectionsProps; legend: string; testid: string }) {
+  return (
+    <fieldset className="field" data-testid={testid}>
+      <legend>{legend}</legend>
+      <div className="chips">
+        {SIGN_IN_MEMBERS.map((m) => (
+          <label key={m} className={chosen.includes(m) ? "daychip on" : "daychip"}>
+            <input type="checkbox" value={m} checked={chosen.includes(m)} disabled={p.ui.busy} onChange={() => p.dispatch({ type: "member", member: m })} data-testid={`member-${m}`} />
+            {memberName(m)}
+          </label>
+        ))}
+      </div>
+      <p className="help">{t("vault.whoHint")}</p>
+    </fieldset>
+  );
+}
+
+/** Who uses it, in the sign-in's own row: the members' boxes and Save, which is ready once someone is ticked and it says
+ *  something new. Nothing is sent until Save. */
+function MembersForm({ s, p, chosen }: { s: VaultSignIn; p: ConnectionsProps; chosen: readonly string[] }) {
+  const { ui, dispatch } = p;
+  const ready = membersReady(chosen, s.members);
+  const cancel = () => dispatch({ type: "cancel" });
+  return (
+    <form
+      className="ask"
+      data-testid="members-form"
+      onKeyDown={formKeys(cancel)}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !ui.busy) p.onSave();
+      }}
+    >
+      <MembersField chosen={chosen} p={p} legend={t("vault.whoAsk", { site: s.site })} testid="members-field" />
+      <div className="chips">
+        <button type="submit" className="btn dark" disabled={ui.busy || !ready} data-testid="members-save">
+          {ui.busy ? t("conn.saving") : t("conn.save")}
+        </button>
+        <button type="button" className="btn" disabled={ui.busy} onClick={cancel} data-testid="members-cancel">
+          {t("conn.cancel")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
   const ask = p.ui.ask?.kind === "password" && p.ui.ask.signIn === s.id ? p.ui.ask : null;
+  const who = p.ui.ask?.kind === "members" && p.ui.ask.signIn === s.id ? p.ui.ask : null;
   const broken = s.state === "broken";
+  const locked = p.ui.busy || p.ui.ask !== null;
   return (
     <div className={broken ? "tr signin broken" : "tr signin"} data-testid="signin" data-signin={s.id}>
       <span className="grow">
@@ -131,20 +200,187 @@ function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
       <span className={broken ? "tag warn" : "tag ok"} data-testid="signin-tag">
         {broken ? t("vault.needsPassword") : t("vault.working")}
       </span>
-      {!ask && (
-        <button
-          type="button"
-          className={broken ? "btn" : "lk"}
-          disabled={p.ui.busy || p.ui.ask !== null}
-          onClick={() => p.dispatch({ type: "change", signIn: s.id })}
-          aria-label={`${t("vault.change")}: ${s.site}`}
-          data-testid="signin-change"
-        >
-          {t("vault.change")}
-        </button>
+      {!ask && !who && (
+        <span className="signin-acts">
+          <button
+            type="button"
+            className={broken ? "btn" : "lk"}
+            disabled={locked}
+            onClick={() => p.dispatch({ type: "change", signIn: s.id })}
+            aria-label={`${t("vault.change")}: ${s.site}`}
+            data-testid="signin-change"
+          >
+            {t("vault.change")}
+          </button>
+          <button
+            type="button"
+            className="lk"
+            disabled={locked}
+            onClick={() => p.dispatch({ type: "who", signIn: s.id, members: s.members })}
+            aria-label={`${t("vault.who")}: ${s.site}`}
+            data-testid="signin-who"
+          >
+            {t("vault.who")}
+          </button>
+        </span>
       )}
       {ask && <PasswordForm s={s} p={p} draft={ask.draft} />}
+      {who && <MembersForm s={s} p={p} chosen={who.members} />}
     </div>
+  );
+}
+
+/** Add a sign-in, in place of its link under the sign-ins: the site's name, its address or addresses, the account's name on
+ *  it, its password and who may use it. What the vault would not keep is said under its field as it is typed, and Add waits
+ *  until everything is there. The password leaves the page's state as Add is pressed, and is never shown. */
+function AddSignInForm({ p, draft }: { p: ConnectionsProps; draft: AddDraft }) {
+  const { ui, dispatch } = p;
+  const reads = readAddresses(draft.addresses);
+  const ready = addFields(draft) !== null;
+  const cancel = () => dispatch({ type: "cancel" });
+  const set = (field: "site" | "username" | "password") => (e: { target: { value: string } }) => dispatch({ type: "addField", field, text: e.target.value });
+  const longSite = siteProblem(draft);
+  const badUser = usernameProblem(draft);
+  return (
+    <form
+      className="ask add-signin"
+      aria-labelledby="add-signin-title"
+      data-testid="add-form"
+      onKeyDown={formKeys(cancel)}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !ui.busy) p.onSave();
+      }}
+    >
+      <p className="conn-name" id="add-signin-title">
+        {t("vault.add.title")}
+      </p>
+      <div className="field">
+        <label htmlFor="add-site">{t("vault.add.site")}</label>
+        <input
+          id="add-site"
+          className="input"
+          type="text"
+          value={draft.site}
+          placeholder={t("vault.add.siteExample")}
+          autoFocus
+          autoComplete="off"
+          disabled={ui.busy}
+          aria-invalid={longSite || undefined}
+          onChange={set("site")}
+          data-testid="add-site"
+        />
+        {longSite && (
+          <p className="help err" data-testid="add-site-problem">
+            {t("conn.err.site", { max: MAX_SITE })}
+          </p>
+        )}
+      </div>
+      <fieldset className="field" data-testid="add-addresses">
+        <legend>{t("vault.add.addresses")}</legend>
+        <p className="help">{t("vault.add.addressesHint")}</p>
+        {draft.addresses.map((text, i) => {
+          const read = reads[i];
+          const problem = read?.kind === "problem";
+          return (
+            <div key={i} className="address" data-testid="add-address-row">
+              <div className="address-row">
+                <input
+                  className="input"
+                  type="text"
+                  inputMode="url"
+                  value={text}
+                  placeholder={t("vault.add.addressExample")}
+                  aria-label={t("vault.add.addressN", { n: i + 1 })}
+                  aria-invalid={problem || undefined}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={ui.busy}
+                  onChange={(e) => dispatch({ type: "address", index: i, text: e.target.value })}
+                  data-testid="add-address"
+                />
+                {draft.addresses.length > 1 && (
+                  <button
+                    type="button"
+                    className="lk"
+                    disabled={ui.busy}
+                    onClick={() => dispatch({ type: "addressLess", index: i })}
+                    aria-label={t("vault.add.addressRemove", { n: i + 1 })}
+                    data-testid="add-address-remove"
+                  >
+                    {t("outposts.remove")}
+                  </button>
+                )}
+              </div>
+              {read?.kind === "problem" && (
+                <p className="help err" data-testid="add-address-problem">
+                  {addressProblem(read.problem)}
+                </p>
+              )}
+              {read?.kind === "origin" && read.changed && (
+                <p className="help" data-testid="add-address-kept">
+                  {t("vault.add.kept", { origin: read.origin })}
+                </p>
+              )}
+            </div>
+          );
+        })}
+        {draft.addresses.length < MAX_ORIGINS && (
+          <button type="button" className="lk more" disabled={ui.busy} onClick={() => dispatch({ type: "addressMore" })} data-testid="add-address-more">
+            {t("vault.add.addressMore")}
+          </button>
+        )}
+      </fieldset>
+      <div className="field">
+        <label htmlFor="add-username">{t("vault.add.username")}</label>
+        <input
+          id="add-username"
+          className="input"
+          type="text"
+          value={draft.username}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={ui.busy}
+          aria-invalid={badUser || undefined}
+          onChange={set("username")}
+          data-testid="add-username"
+        />
+        <p className={badUser ? "help err" : "help"} data-testid="add-username-help">
+          {badUser ? t("conn.err.username", { max: MAX_USERNAME }) : t("vault.add.usernameHint")}
+        </p>
+      </div>
+      <div className="field">
+        <label htmlFor="add-password">{t("vault.add.password")}</label>
+        <input
+          id="add-password"
+          className="input"
+          type="password"
+          value={draft.password}
+          maxLength={MAX_PASSWORD}
+          autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={ui.busy}
+          onChange={set("password")}
+          data-testid="add-password"
+        />
+        <p className="help">{t("vault.changeHint")}</p>
+      </div>
+      <MembersField chosen={draft.members} p={p} legend={t("vault.add.who")} testid="add-members" />
+      <div className="chips">
+        <button type="submit" className="btn dark" disabled={ui.busy || !ready} data-testid="add-save">
+          {ui.busy ? t("conn.saving") : t("vault.add.save")}
+        </button>
+        <button type="button" className="btn" disabled={ui.busy} onClick={cancel} data-testid="add-cancel">
+          {t("conn.cancel")}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -181,6 +417,16 @@ export function VaultPane({ p }: { p: ConnectionsProps }) {
           {state.value.signIns.map((s) => (
             <SignInRow key={s.id} s={s} p={p} />
           ))}
+          {/* The canvas's last row: Add a sign-in, which opens its form in the row's place. */}
+          <div className="tr add-row" data-testid="signin-add-row">
+            {ui.ask?.kind === "add" ? (
+              <AddSignInForm p={p} draft={ui.ask.draft} />
+            ) : (
+              <button type="button" className="lk" disabled={ui.busy || ui.ask !== null} onClick={() => p.dispatch({ type: "add" })} data-testid="signin-add">
+                {t("vault.add")}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </section>
@@ -190,7 +436,7 @@ export function VaultPane({ p }: { p: ConnectionsProps }) {
 // ---- the shop's outposts ------------------------------------------------------------------------------------------------
 
 /** The question open about outpost `o`, if any: Rename or Remove. */
-const askAbout = (o: ShopOutpost, p: ConnectionsProps) => (p.ui.ask && p.ui.ask.kind !== "password" && p.ui.ask.outpost === o.id ? p.ui.ask : null);
+const askAbout = (o: ShopOutpost, p: ConnectionsProps) => ((p.ui.ask?.kind === "rename" || p.ui.ask?.kind === "remove") && p.ui.ask.outpost === o.id ? p.ui.ask : null);
 
 /** The question open about outpost `o`, drawn in place of its row (`testid` names the row: the shop's list, or this Mac's
  *  own row in the Outposts box), or nothing when none is open. */
@@ -413,7 +659,9 @@ export function useConnections(active: boolean, viewing: string | null): Connect
   if (!offered) return null;
 
   const calls: ConnectionsCalls = {
+    add: (shop, fields) => ask("connections.add", { shop, ...fields }),
     password: (shop, signIn, password) => ask("connections.password", { shop, signIn, password }),
+    members: (shop, signIn, members) => ask("connections.members", { shop, signIn, members }),
     rename: (shop, outpost, name) => ask("connections.rename", { shop, outpost, name }),
     remove: (shop, outpost) => ask("connections.remove", { shop, outpost }),
   };
@@ -434,8 +682,16 @@ export function useConnections(active: boolean, viewing: string | null): Connect
     onSave: () => {
       const open = ui.ask;
       if (ui.busy || !open) return;
-      // The draft is read once, here, and `begin` takes it out of the page's state before anything is sent.
+      // A typed password is read once, here, and `begin` takes it out of the page's state before anything is sent.
       if (open.kind === "password" && passwordReady(open.draft)) void run({ what: "password", signIn: open.signIn, password: open.draft });
+      if (open.kind === "add") {
+        const fields = addFields(open.draft);
+        if (fields) void run({ what: "add", fields });
+      }
+      if (open.kind === "members" && state.kind === "ready") {
+        const current = state.value.signIns.find((s) => s.id === open.signIn)?.members ?? [];
+        if (membersReady(open.members, current)) void run({ what: "members", signIn: open.signIn, members: open.members });
+      }
       if (open.kind === "rename" && state.kind === "ready") {
         const current = state.value.outposts.find((o) => o.id === open.outpost)?.name ?? "";
         if (nameReady(open.draft, current)) void run({ what: "rename", outpost: open.outpost, name: open.draft.trim() });

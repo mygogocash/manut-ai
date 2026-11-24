@@ -133,6 +133,29 @@ try {
     assert.equal(linked.headers.get("cache-control"), "no-store", `${path} is never stored`);
     await linked.arrayBuffer();
   }
+  // The owner's web app is a page of its own, at /app/, with its manifest, its service worker and a policy that runs
+  // only this origin's scripts (docs/web-app.md).
+  for (const headers of NAVIGATIONS) {
+    const app = await pages.fetch(new URL("/app/", pagesBase), { headers });
+    assert.equal(app.status, 200, "pages /app/");
+    assert.match(app.headers.get("content-type") ?? "", /^text\/html/, "pages /app/");
+    assert.match(app.headers.get("content-security-policy") ?? "", /^default-src 'self'; script-src 'self';/, "pages /app/");
+    assert.match(app.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'$/, "pages /app/");
+    assert.equal(app.headers.get("x-frame-options"), "DENY", "pages /app/");
+    const html = await app.text();
+    assert.match(html, /<div id="root"><\/div>/, "pages /app/");
+    assert.match(html, /<link rel="manifest" href="\/app\/manifest\.webmanifest">/, "the app names its manifest");
+    assert.doesNotMatch(html, /(?:href|src)="(?:https?:)?\/\//, "pages /app/ links nothing on another origin");
+  }
+  const worker = await pages.fetch(new URL("/app/sw.js", pagesBase));
+  assert.equal(worker.status, 200, "the app's service worker is served");
+  assert.match(worker.headers.get("content-type") ?? "", /javascript/, "the app's service worker is JavaScript");
+  assert.doesNotMatch(await worker.text(), /^\s*(import|export)\b/m, "the app's service worker is a classic script");
+  const manifest = await pages.fetch(new URL("/app/manifest.webmanifest", pagesBase));
+  assert.equal(manifest.status, 200, "the app's manifest is served");
+  assert.equal((await manifest.json()).scope, "/app/", "the app's manifest keeps to /app/");
+  checked += 3;
+
   const script = /<script[^>]+src="(\/assets\/[^"]+\.js)"/.exec(home)?.[1];
   assert.ok(script, "index.html names its script");
   const js = await pages.fetch(new URL(script, pagesBase));

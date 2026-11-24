@@ -1,6 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker, { type Env } from "../src/index";
+import { APP_POLICY } from "../src/app-policy";
 import pages from "../src/pages";
 
 const bindings = env as unknown as Env;
@@ -64,6 +65,22 @@ describe("the pages Worker", () => {
     const response = await pages.fetch(new Request(`https://pilot.manut.test${path}`), { ASSETS: fetcher(seen, answer) });
     return { response, seen };
   }
+
+  it("runs only this origin's scripts in the owner's web app, and changes no other page's policy", async () => {
+    for (const path of ["/app/", "/app", "/app/sw.js", "/app/offline.html", "/app/manifest.webmanifest", "/app/elsewhere"]) {
+      const { response } = await page(path);
+      expect(response.headers.get("content-security-policy"), path).toBe(APP_POLICY);
+      expect(response.headers.get("x-frame-options"), path).toBe("DENY");
+      expect(response.headers.get("referrer-policy"), path).toBe("no-referrer");
+      expect(response.headers.get("cache-control"), path).toBeNull();
+    }
+    expect(APP_POLICY).toContain("script-src 'self';");
+    expect(APP_POLICY).toContain("frame-ancestors 'none'");
+    expect(APP_POLICY).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/);
+    for (const path of ["/apps", "/application", "/ops", "/join/inv_123"]) {
+      expect((await page(path)).response.headers.get("content-security-policy"), path).toBe("frame-ancestors 'none'");
+    }
+  });
 
   it("serves the web app's files with headers that keep pages out of frames and tokens out of Referers", async () => {
     for (const path of ["/", "/ops", "/approve/tok_123", "/join/inv_123", "/assets/index-abc.js"]) {

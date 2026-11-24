@@ -9,8 +9,9 @@
 /// - `ensureClocks` and `removeClock` keep the shop's schedule object in step: a schedule for a daily or weekly routine,
 ///   through `toSchedule`, and a timer for a monthly or window one (schedule-object.ts). A stock routine waits for a
 ///   stock feed, which does not exist yet, so it has no clock.
-/// - `checkedTemplate` and `applyTemplate` are a shop template (`@manut/shop-templates`): its members on, its routines
-///   paused until the owner turns each on, and its first-week questions for Buddy to ask.
+/// - `checkedTemplate` and `newShopSetup` are a shop template (`@manut/shop-templates`): its members on, its routines
+///   paused until the owner turns each on, and its first-week questions for Buddy to ask. The setup goes into the write
+///   that makes the shop (pilot-store.ts), so a shop never starts half set up.
 ///
 /// Order is how a half-finished change heals itself. A clock is written before its routine and removed after it, so
 /// whatever stops part way leaves at most a clock with no routine, which finds it gone at its first instant and removes
@@ -26,7 +27,6 @@ import {
   type Trigger,
 } from "@manut/routine-rules";
 import { checkTemplate, templateById, type RoutineKind, type ShopTemplate } from "@manut/shop-templates";
-import type { AuditActor } from "./audit-log";
 import { sortableId } from "./pilot-store";
 import { memberOn, type RoutineRun, type RoutineState, type StoredRoutine, type Team } from "./routine-store";
 import { scheduleStub, tenantCall, type TenantDataEnv } from "./tenant-data";
@@ -286,21 +286,21 @@ export function templateRoutines(template: ShopTemplate, nowMs: number):
   return { ok: true, routines };
 }
 
-/// Sets a new shop up from a template: the clocks first, then the members it turns on, its routines and its questions
-/// in one write to the shop's object, logged as `template.applied` and one `routine.created` each. Answers whether all
-/// of it was written. Only the workers among its members can be turned on; Kit has no job here yet.
-export async function applyTemplate(env: Pick<TenantDataEnv, "TENANT" | "SCHEDULES">, tenant: string,
-  template: ShopTemplate, actor: AuditActor): Promise<boolean> {
+/// A new shop's setup from a template: the members it turns on, its routines and its questions. It goes into the write that
+/// makes the shop, beside the shop's own record (pilot-store.ts), which logs it as `template.applied` and one
+/// `routine.created` each. The clocks are written first, here, as the module note says. Null when the setup cannot be built
+/// or its clocks cannot be written, and then nothing of the shop is written. Only the workers among its members can be
+/// turned on; Kit has no job here yet. Each asking builds its routines afresh, so a clock that a stopped try wrote is for
+/// a routine that never came to be, and removes itself at its first instant.
+export async function newShopSetup(env: Pick<TenantDataEnv, "SCHEDULES">, tenant: string, template: ShopTemplate):
+  Promise<{ template: string; members: WorkerMember[]; routines: StoredRoutine[]; questions: { id: string; text: string }[] } | null> {
   const built = templateRoutines(template, Date.now());
-  if (!built.ok) return false;
-  if (!(await ensureClocks(env, tenant, built.routines))) return false;
-  const response = await routineWrite(env, tenant, "/routines/template", {
+  if (!built.ok) return null;
+  if (!(await ensureClocks(env, tenant, built.routines))) return null;
+  return {
     template: template.id,
     members: template.team.filter(isWorkerMember),
     routines: built.routines,
     questions: template.questions.map((text, index) => ({ id: `q${index + 1}`, text })),
-    actor,
-  });
-  await response?.body?.cancel();
-  return response?.ok === true;
+  };
 }
