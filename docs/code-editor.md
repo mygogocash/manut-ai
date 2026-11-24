@@ -19,7 +19,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band, a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. No New lane and no effort word | `code/Lanes.tsx`, `code/KitPanel.tsx` |
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the folder is on, so the developer's branch is not written to. The row and the composer's foot show it. Nothing is pushed or merged from here | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
-| Revert this turn | Part (this branch): the agent's own rewind takes back the last message, and the lane says Reverted; the files stay as they are | `sessions/sessions.ts` (`rewind`), `agent_chat.rs` (`Rewind`), `code/lane.ts` |
+| Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
 | Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one | `tasks/` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff | `chat/activity/Work.tsx` (`DiffView`) |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer, files and modes | `sessions/SessionView.tsx` |
@@ -34,7 +34,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Working: the pill names the real step, with the time | Has (this branch): the lane's tag names the agent's own step ("Running tests" while a test run runs) with the time, and its line says Kit works on a separate branch and nothing is live | `code/Lanes.tsx`, `chat/activity/Activity.slot.tsx` |
 | Needs you: Kit asks a question, "Answer Kit" | Has: the agent's questions are cards, and Needs you lists them. The lane says "Kit asks: …" with Answer Kit (this branch) | `chat/cards/Cards.slot.tsx`, `pages/NeedsPage.tsx`, `code/Lanes.tsx` |
 | Checked, and Tests failed ("1 of 14 tests failed", the test and the wrong value) | Has (this branch): "14 tests passed" and "1 of 14 tests failed. Nothing is live.", with the failing tests named. The wrong value is in the terminal; the lane does not keep a test's output | `code/lane.ts`, `code/Lanes.tsx` |
-| Reverted, and Bring it back | Part (this branch): Reverted, with the time and "The files stay as they are". Bring it back lacks, since the files were never taken back | `code/lane.ts` |
+| Reverted, and Bring it back | Part: after Rewind the chat says "Rewound to before “Thai date format”. 3 files are back as they were.", and the lane says Reverted with the time and that the files are back; after the agent's own Edit, which takes back only the chat, the lane says the files stay as they are. Bring it back lacks | `sessions/rewind.ts` (`rewoundNote`), `code/lane.ts` |
 | Test output, passing and failing | Part: the terminal and the step show it; the lane reads its result and keeps none of it | `code/testRun.ts` |
 | Artifacts: Building, Private preview, Needs you, Live, Rolled back, Failed | Lacks: the Artifacts page is empty. Going live reaches customers (Owner) | `pages/ArtifactsPage.tsx` |
 
@@ -63,7 +63,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Open an existing project: from GitHub or a folder on this Mac; Kit reads it first and changes nothing | Part: a folder can be added and sessions start in it, and plan mode reads without changing. From GitHub lacks (Owner: a real GitHub account) | `sessions/folders.ts` |
 | The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the Code page says "main changed while Kit worked. 1 file needs both changes." under Kit's dial, with the files. Show me both draws what main changed beside what Kit changed. Let Kit merge sends Kit the ask as a message (no running lane: a new session with the ask in its box); Kit's steps then ask through their own cards. Per project, not per lane row: lanes are not on the page yet | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/askKit.ts` |
 | A check failed after the pull request: "Pull request 12: lint failed. Tests passed." | Part: Tasks reads a pull request's checks through `gh`; the lane does not show them (Owner: a real GitHub account to try it) | `tasks/TasksPage.tsx` |
-| Rewind: pick a turn; the files and the chat go back together | Part: the chat only, through the agent's rewind | `sessions/sessions.ts` |
+| Rewind: pick a turn; the files and the chat go back together | Has (this branch): see [Rewind to before a turn](#rewind-to-before-a-turn) | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs` |
 
 ### Your own AI plan
 
@@ -90,8 +90,8 @@ and "Running tests" in the working tag) with their counts in the line under the 
 ## Needs the owner
 
 - Whether Kit's lanes run as chats in the app, as the canvas's Code board draws them, or only in terminals, as decided
-  on 16 November. The dial's asks reach only the first, and so do the lanes: the + menu starts terminals only, so the
-  Lanes band is empty until a chat session exists.
+  on 16 November. The dial's asks, the lanes and Rewind to before a turn reach only the first: the + menu starts
+  terminals only, so the Lanes band is empty until a chat session exists.
 
 - Adding a project from GitHub, and a check that fails after a pull request: a real GitHub account.
 - Your plan at its limit, and using the AI budget for a job: money, and a real plan.
@@ -290,15 +290,58 @@ and `running_stop` in `lib.rs`; `Sessions::roots` and `ChatSessions::roots` give
 for a browser: `window.__manutMockRunning` seeds it and `window.__manutRunningCalls` records each stop),
 `RunningPanel.tsx` and `running.css`. `e2e/running.spec.ts` walks it in a browser, with Kit's panel and its project picker.
 
+## Rewind to before a turn
+
+The canvas's StatesCodeDev "Rewind": "The files and the chat go back together. Every turn can be undone as a whole.
+Nothing live changes." It works for a coding session that runs as a chat in the app with Claude Code or Codex, the two
+agents that can take their chat back to a chosen message.
+
+- **A snapshot when a turn starts.** Before a message that starts a turn goes to the agent, the shell keeps the session
+  folder's files as they are (`src-tauri/src/turn_files.rs`). It keeps them again when the turn ends, so a rewind can
+  tell what the agent changed from what changed by hand between turns.
+  - In a git repository, in git's own objects: each file's bytes as a blob (no filter, no line-ending change), and each
+    snapshot as a tree under a ref of the app's own, `refs/manut/snapshots/<session>/<n>`, built in an index file of
+    the app's own. The developer's branches, index, stash and HEAD never change. A ref that names a tree, not a commit,
+    stays out of `git log --all` and every history view, and `git gc` keeps what it names. `git for-each-ref` lists it.
+  - In any other folder, or when git cannot run, as a copy in the app's data folder,
+    `~/.manut/turn-snapshots/<session>/blobs/<sha256>`, each content once, readable by this account only.
+  - Either way each snapshot's list of files is in `~/.manut/turn-snapshots/<session>/`.
+- **What is left out**, never kept and never touched by a rewind:
+  - in a repository, what git ignores, and a `node_modules` git does not ignore;
+  - in any other folder, which has no ignore rules to read, the folders a project rebuilds: `node_modules`,
+    `bower_components`, `target`, `dist`, `build`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`, `.cache`,
+    `coverage`, `__pycache__`, `.venv`, `venv`, `.tox`, `.pytest_cache`, `.mypy_cache`, `.gradle`, `Pods`,
+    `DerivedData`, `.dart_tool`, `.expo`, `.terraform` and `.git`;
+  - everywhere, `.DS_Store`, `Thumbs.db` and `desktop.ini`, files over 50 MB, and a name with a line break in it.
+- **Bounds.** A folder with more than 50,000 files, or more than 1 GB in them, gets no snapshot, and the panel says its
+  turns cannot be rewound. A message waits at most 20 seconds for its turn's files; when keeping them takes longer, the
+  message goes and that turn is not offered. A session keeps its newest 20 turns. Its snapshots go when the session is
+  closed and when its agent starts again (a new process can take back only the messages it was sent itself). When the
+  app starts, the snapshots of sessions that are gone go too.
+- **Rewind** (`sessions/RewindPanel.tsx`): pick a turn, read what goes back, press Rewind once. The shell keeps the files as
+  they are, then puts that turn's snapshot back. Then the agent takes the chat back to before that message (`rewind_to`:
+  Claude Code's `rewind_conversation` to that message, Codex's `thread/revert` to before its turn). When the agent refuses,
+  or does not answer within 30 seconds, the files go back as they were. After a rewind the box holds that message's
+  words, as the agent's own Edit does, and the chat says how many files went back.
+- **Changed by hand.** A file that changed outside the agent's turns since that turn is listed, and stays as it is unless
+  the person unticks it. A change made while a turn runs counts as the agent's. When a turn's end was not seen (the app
+  closed in the middle of it), all of that turn's changes are listed as changed by hand, so none is missed.
+- **Nothing live changes.** A rewind writes files in the session's folder only. It never moves a branch and never touches
+  a remote. When a step since the turn pushed, published or deployed (as Kit's command reader reads it,
+  `code/command.ts`), the panel says rewinding does not take that back. When the branch has new commits since, it says
+  the files go back and the commits stay.
+
 ## Left for later (no owner needed)
 
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
   commands the dial gives (Claude Code's `--permission-mode` and `--allowedTools`). That is Rust, and it widens the
   shell's fixed list of arguments, so it wants its own review.
-
-- Rewinding a turn, files and chat together, and the lane's Bring it back: the agents' own rewind takes back the chat
-  only. The shell needs to keep the files as they were when a turn starts (a stash-like snapshot) and put them back; that
-  is Rust.
+- Bring it back, after a rewind (StatesCode "Reverted"). The files from before a rewind are kept only until the agent
+  answers it.
+- Rewinding a turn sent before the app restarted, or before the agent started again: Claude Code and Codex take back only
+  the messages their running process was sent, so those turns are not offered.
+- Rewind for a session in its own terminal, or with an agent other than Claude Code and Codex: the first sends no message
+  through the app, and the others have no rewind of their own.
 - Lanes that work at once in one folder, each on its own branch: a working folder for each lane (a git worktree). Today a
   second lane joins the branch of the first while that one works, and a lane that starts after it is made from where the
   folder is, so it stacks on the earlier lane's work.
