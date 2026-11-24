@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApi } from "../src/api/client";
 import { ApiError, type PilotApi } from "../src/api/types";
+// The API's own sources, read as text (they run in the Worker and cannot be imported): the routes the client calls must be ones the
+// API's admin gate and handlers still have.
+import browserControlSource from "../../api/src/browser-control.ts?raw";
+import indexSource from "../../api/src/index.ts?raw";
 
 type Call = {
   url: string;
@@ -9,6 +13,7 @@ type Call = {
   body: unknown;
   raw: unknown;
   credentials: RequestCredentials | undefined;
+  cache: RequestCache | undefined;
 };
 
 function harness(key: string | null, answer: (url: string) => Response = () => json({})) {
@@ -22,6 +27,7 @@ function harness(key: string | null, answer: (url: string) => Response = () => j
       body: typeof init?.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init?.body,
       raw: init?.body,
       credentials: init?.credentials,
+      cache: init?.cache,
     });
     return answer(url);
   });
@@ -658,6 +664,167 @@ describe("the API client, for the owner's linked account", () => {
     const { api, fetch } = harness(null);
     await expect(api.linkOwner({ tenant: "t1", code: "K7M4-X9RQ" })).rejects.toMatchObject({ code: "operator_key_missing" });
     await expect(api.unlinkOwner({ tenant: "t1" })).rejects.toMatchObject({ code: "operator_key_missing" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// The shop's vault (docs/pilot-api.md, "Vault sign-ins and outposts"): its sign-ins and outposts are read, and the operator may do four
+// things to it. Each sends the tenant and exactly what its route takes, and answers what the API answers. No route here carries a
+// password, and the one answer that holds a credential asks the browser to keep no copy.
+describe("the API client, for a shop's sign-ins and outposts", () => {
+  const signIn = {
+    id: "si-1", site: "Shopee Seller Centre", origins: ["https://seller.shopee.co.th"], username: "baanmali", members: ["nam", "pim"],
+    state: "broken", passwordSet: true, passwordSetAt: "2026-11-20T03:00:00.000Z", brokenAt: "2026-11-23T01:00:00.000Z",
+    brokenBy: "nam", lastUsedAt: "2026-11-23T00:59:00.000Z", lastUsedBy: "nam", createdAt: "2026-11-14T03:00:00.000Z",
+  };
+  const outpost = { id: "op-1", name: "Fon's MacBook", kind: "this_mac", status: "asleep", lastHeartbeatAt: "2026-11-23T02:00:00.000Z",
+    createdAt: "2026-11-21T03:00:00.000Z" };
+  const CREDENTIAL = `mo1_${"A".repeat(43)}`;
+  const answers: Record<string, unknown> = {
+    "GET /v1/admin/vault/sign-ins": { tenant: "pilot:1", signIns: [signIn] },
+    "POST /v1/admin/vault/sign-ins/members": { signIn: { ...signIn, members: ["ton"] } },
+    "POST /v1/admin/vault/sign-ins/remove": { removed: true, signInId: "si-1" },
+    "GET /v1/admin/outposts": { tenant: "pilot:1", outposts: [outpost] },
+    "POST /v1/admin/outposts/remove": { removed: true, outpostId: "op-1", stepsRefused: 2, grantsRefused: 1 },
+    "POST /v1/admin/outposts/credential": { outpost: { ...outpost, status: "asleep", lastHeartbeatAt: null }, credential: CREDENTIAL },
+  };
+  // The calls are answered by method and path, so a call that goes to a path it should not fails the test by its answer.
+  const answering = (url: string, method = "GET") => json(answers[`${method} ${new URL(url).pathname}`] ?? { error: "not_found" }, 200);
+
+  function harnessOf(key: string | null) {
+    const calls: Call[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET", headers: new Headers(init?.headers),
+        body: typeof init?.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init?.body, raw: init?.body,
+        credentials: init?.credentials, cache: init?.cache });
+      return answering(String(input), init?.method);
+    });
+    return { api: createHttpApi({ origin: "https://api.example.test/", operatorKey: () => key, fetch }), calls, fetch };
+  }
+
+  async function everyVaultRoute(api: PilotApi) {
+    await api.listSignIns("pilot:1");
+    await api.setSignInMembers({ tenant: "pilot:1", signInId: "si-1", members: ["ton"] });
+    await api.removeSignIn({ tenant: "pilot:1", signInId: "si-1" });
+    await api.listOutposts("pilot:1");
+    await api.removeOutpost({ tenant: "pilot:1", outpostId: "op-1" });
+    await api.replaceOutpostCredential({ tenant: "pilot:1", outpostId: "op-1" });
+  }
+
+  it("sends the operator key to the contract's six paths, with the tenant and exactly what each route takes", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    await everyVaultRoute(api);
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "GET https://api.example.test/v1/admin/vault/sign-ins?tenant=pilot%3A1",
+      "POST https://api.example.test/v1/admin/vault/sign-ins/members",
+      "POST https://api.example.test/v1/admin/vault/sign-ins/remove",
+      "GET https://api.example.test/v1/admin/outposts?tenant=pilot%3A1",
+      "POST https://api.example.test/v1/admin/outposts/remove",
+      "POST https://api.example.test/v1/admin/outposts/credential",
+    ]);
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer op-key-123");
+      expect(call.credentials).toBe("include");
+    }
+    expect(calls[0]?.raw).toBeUndefined();
+    expect(calls[1]?.body).toEqual({ tenant: "pilot:1", signInId: "si-1", members: ["ton"] });
+    expect(calls[2]?.body).toEqual({ tenant: "pilot:1", signInId: "si-1" });
+    expect(calls[3]?.raw).toBeUndefined();
+    expect(calls[4]?.body).toEqual({ tenant: "pilot:1", outpostId: "op-1" });
+    expect(calls[5]?.body).toEqual({ tenant: "pilot:1", outpostId: "op-1" });
+  });
+
+  it("calls only routes the API's admin gate and its vault handlers still have", () => {
+    for (const route of [
+      "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/members", "POST /v1/admin/vault/sign-ins/remove",
+      "GET /v1/admin/outposts", "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
+    ]) {
+      expect(indexSource, `${route} in the admin gate`).toContain(`"${route}"`);
+      expect(browserControlSource, `${route} in the vault routes`).toContain(`"${route}"`);
+    }
+  });
+
+  it("never sends a field its route does not take: no password, no credential, no role, and the members as a copy", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    const extra = { password: "hunter2", credential: CREDENTIAL, credentialHash: "ab".repeat(32), role: "owner", site: "Elsewhere", name: "x",
+      origins: ["https://elsewhere.example"], username: "someone" };
+    const members = ["nam", "kit"];
+    await api.setSignInMembers({ tenant: "t1", signInId: "si-1", members, ...extra } as never);
+    await api.removeSignIn({ tenant: "t1", signInId: "si-1", ...extra } as never);
+    await api.removeOutpost({ tenant: "t1", outpostId: "op-1", ...extra } as never);
+    await api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-1", ...extra } as never);
+
+    expect(calls.map((c) => c.raw)).toEqual([
+      '{"tenant":"t1","signInId":"si-1","members":["nam","kit"]}',
+      '{"tenant":"t1","signInId":"si-1"}',
+      '{"tenant":"t1","outpostId":"op-1"}',
+      '{"tenant":"t1","outpostId":"op-1"}',
+    ]);
+    expect(String(calls.map((c) => `${c.url}${String(c.raw)}`))).not.toMatch(/hunter2|mo1_|credentialHash/);
+  });
+
+  it("answers what the API answers: the lists unwrapped, the sign-in as it now stands, the counts, and the credential whole", async () => {
+    const { api } = harnessOf("op-key-123");
+    expect(await api.listSignIns("pilot:1")).toEqual([signIn]);
+    expect(await api.setSignInMembers({ tenant: "pilot:1", signInId: "si-1", members: ["ton"] })).toEqual({ ...signIn, members: ["ton"] });
+    expect(await api.removeSignIn({ tenant: "pilot:1", signInId: "si-1" })).toEqual({ removed: true, signInId: "si-1" });
+    expect(await api.listOutposts("pilot:1")).toEqual([outpost]);
+    expect(await api.removeOutpost({ tenant: "pilot:1", outpostId: "op-1" })).toEqual({ removed: true, outpostId: "op-1", stepsRefused: 2,
+      grantsRefused: 1 });
+    expect(await api.replaceOutpostCredential({ tenant: "pilot:1", outpostId: "op-1" })).toEqual({
+      outpost: { ...outpost, status: "asleep", lastHeartbeatAt: null }, credential: CREDENTIAL });
+  });
+
+  it("asks the browser to keep no copy of the one answer that holds a credential, and of no other", async () => {
+    const { api, calls } = harnessOf("op-key-123");
+    await everyVaultRoute(api);
+    expect(calls.map((c) => c.cache)).toEqual([undefined, undefined, undefined, undefined, undefined, "no-store"]);
+  });
+
+  it("turns every refusal of the vault routes into an ApiError with the API's status and code", async () => {
+    const calls: [(api: PilotApi) => Promise<unknown>, number, string][] = [
+      [(api) => api.listSignIns(""), 400, "tenant_required"],
+      [(api) => api.listSignIns("t1"), 503, "vault_unavailable"],
+      [(api) => api.listOutposts(""), 400, "tenant_required"],
+      [(api) => api.listOutposts("t1"), 503, "vault_unavailable"],
+      [(api) => api.setSignInMembers({ tenant: "t1", signInId: "si-1", members: [] }), 400, "invalid_members"],
+      [(api) => api.setSignInMembers({ tenant: "t1", signInId: "si-9", members: ["nam"] }), 404, "sign_in_not_found"],
+      [(api) => api.setSignInMembers({ tenant: "t1", signInId: "si-1", members: ["nam"] }), 503, "vault_unavailable"],
+      [(api) => api.removeSignIn({ tenant: "t1", signInId: "si-9" }), 404, "sign_in_not_found"],
+      [(api) => api.removeSignIn({ tenant: "t1", signInId: "si-1" }), 503, "vault_unavailable"],
+      [(api) => api.removeOutpost({ tenant: "t1", outpostId: "op-9" }), 404, "outpost_not_found"],
+      [(api) => api.removeOutpost({ tenant: "t1", outpostId: "op-1" }), 503, "vault_unavailable"],
+      [(api) => api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-9" }), 404, "outpost_not_found"],
+      [(api) => api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-1" }), 503, "vault_unavailable"],
+      [(api) => api.listSignIns("t1"), 401, "unauthorized"],
+    ];
+    for (const [call, status, code] of calls) {
+      const { api } = harness("op-key-123", () => json({ error: code }, status));
+      const failed = await call(api).catch((e: unknown) => e);
+      expect(failed).toBeInstanceOf(ApiError);
+      expect(failed).toMatchObject({ status, code });
+    }
+  });
+
+  it("reports a request that never got an answer as status 0, so the page can say it could not reach the API", async () => {
+    const api = createHttpApi({ origin: "https://api.example.test", operatorKey: () => "op-key-123",
+      fetch: () => Promise.reject(new TypeError("offline")) });
+    await expect(api.listOutposts("t1")).rejects.toMatchObject({ status: 0, code: "network" });
+    await expect(api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-1" })).rejects.toMatchObject({ status: 0, code: "network" });
+  });
+
+  it("refuses every vault route with no key and sends nothing", async () => {
+    const { api, fetch } = harnessOf(null);
+    await expect(everyVaultRoute(api)).rejects.toMatchObject({ code: "operator_key_missing" });
+    for (const call of [
+      () => api.listSignIns("t1"),
+      () => api.setSignInMembers({ tenant: "t1", signInId: "si-1", members: ["nam"] }),
+      () => api.removeSignIn({ tenant: "t1", signInId: "si-1" }),
+      () => api.listOutposts("t1"),
+      () => api.removeOutpost({ tenant: "t1", outpostId: "op-1" }),
+      () => api.replaceOutpostCredential({ tenant: "t1", outpostId: "op-1" }),
+    ]) await expect(call()).rejects.toMatchObject({ code: "operator_key_missing" });
     expect(fetch).not.toHaveBeenCalled();
   });
 });
