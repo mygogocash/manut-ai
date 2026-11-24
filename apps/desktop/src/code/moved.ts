@@ -50,9 +50,11 @@ export function bothSides(ours: readonly string[], theirs: readonly string[]): s
 
 /** The state to show for the shell's answer, or null: no answer, the base branch itself, a base that has not moved,
  *  or one that moved without touching a file the branch touched (git merges that by itself, and nothing in it needs
- *  the person). */
-export function movedOf(view: GitView | null | undefined): Moved | null {
+ *  the person). The shell answers for the branch the folder has checked out, so a lane's note names its own branch
+ *  (`branch`): an answer about another is not that lane's, and is null. */
+export function movedOf(view: GitView | null | undefined, branch?: string): Moved | null {
   if (!view || view.branch === view.base || view.tip === view.fork) return null;
+  if (branch !== undefined && view.branch !== branch) return null;
   const files = bothSides(view.ours, view.theirs);
   return files.length ? { branch: view.branch, base: view.base, files } : null;
 }
@@ -140,11 +142,26 @@ export interface Side {
   ours: SideFile;
 }
 
+/** What a read of the folder's git is about: the branch a lane was made from (`base`; none: the project's default, the one
+ *  `origin/HEAD` points at, else `main`, else `master`), and the branch the lane works on (`branch`; none: whichever branch
+ *  the folder has checked out). */
+export interface MovedAsk {
+  base?: string;
+  branch?: string;
+}
+
+/** The state folder `root` is in, as the shell reads it for `ask`: null while the base has not moved under the branch, or
+ *  the folder is on another branch than the lane's. A read that fails rejects. */
+export async function readMoved(host: ReadsGit, root: string, ask: MovedAsk = {}): Promise<Moved | null> {
+  return movedOf(await host.mainMoved(root, { base: ask.base ?? null }), ask.branch);
+}
+
 /** Both sides of the first `MAX_SHOWN` of `files`, as the shell read them, in the order of `files`; null when the shell
- *  has nothing to say any more (the folder is not on that branch now). A file the shell gave no diffs for is left out. */
-export async function readSides(host: ReadsGit, root: string, files: readonly string[]): Promise<Side[] | null> {
+ *  has nothing to say any more (the folder is not on that branch now). A file the shell gave no diffs for is left out. The
+ *  lane's own `base` is the one read, as it was for the note. */
+export async function readSides(host: ReadsGit, root: string, files: readonly string[], base?: string): Promise<Side[] | null> {
   const asked = files.slice(0, MAX_SHOWN);
-  const v = await host.mainMoved(root, { show: asked });
+  const v = await host.mainMoved(root, { base: base ?? null, show: asked });
   if (!v) return null;
   return asked.flatMap((path) => {
     const b = v.both.find((x) => x.path === path);

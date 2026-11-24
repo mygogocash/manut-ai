@@ -31,9 +31,11 @@ export function laneOf(s: Pick<Lanes, "getState" | "chatKey">, root: string): st
   return s.getState().list.find((r) => r.status === "running" && pathKey(r.cwd) === here && s.chatKey(r.id) !== null)?.id ?? null;
 }
 
-/** Send `text` to Kit in project `root`. */
-export async function askKit(s: Lanes, root: string, text: string): Promise<Asked> {
-  const lane = laneOf(s, root);
+/** Send `text` to Kit in project `root`. `prefer`: the lane the ask is about (the row it was pressed on), which gets it when
+ *  it runs as a chat in this project; a lane that ended, or is in another folder, hands the ask to the project's newest. */
+export async function askKit(s: Lanes, root: string, text: string, prefer?: string): Promise<Asked> {
+  const asked = prefer ? s.getState().list.find((r) => r.id === prefer && r.status === "running" && pathKey(r.cwd) === pathKey(root) && s.chatKey(r.id) !== null) : undefined;
+  const lane = asked?.id ?? laneOf(s, root);
   if (lane) {
     await s.send(lane, text);
     return { how: "sent", session: lane };

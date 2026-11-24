@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
-import { LanesView, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
+import { LanesView, laneBase, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
 type Ev = { event: string; [k: string]: unknown };
 const feed = (events: Ev[]): LaneRecord => events.reduce((lane, ev, i) => noteLane(lane, ev, 1_000 + i), emptyLane());
@@ -191,6 +191,21 @@ describe("the Lanes band", () => {
     const out = html(canvas());
     expect(out).toContain("已检查");
     expect(out).toContain("Kit 询问：Which year should customers see: 2026 or 2569?");
+  });
+});
+
+describe("the branch a lane's main-moved note reads", () => {
+  it("is the lane's own branch and the one it was made from, while the folder is on it", () => {
+    expect(laneBase(laneRowOf(input()))).toEqual({ branch: "kit/promptpay-qr", base: "main" });
+    // a lane that joined another's branch was made from the branch that lane was made from
+    expect(laneBase(laneRowOf(input({ rec: { ...input().rec, lane: { name: "kit/promptpay-qr", base: "develop", shared: true } } })))).toEqual({ branch: "kit/promptpay-qr", base: "develop" });
+  });
+
+  it("is none for a lane with no branch of its own, and for one whose branch the folder has left", () => {
+    expect(laneBase(laneRowOf(input({ rec: { ...input().rec, lane: undefined }, live: { branch: "main" } })))).toBeNull();
+    expect(laneBase(laneRowOf(input({ rec: { ...input().rec, lane: undefined }, live: {} })))).toBeNull();
+    // the shell answers for the checked-out branch, which is not this lane's
+    expect(laneBase(laneRowOf(input({ live: { branch: "main" } })))).toBeNull();
   });
 });
 

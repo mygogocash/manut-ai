@@ -437,7 +437,7 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
-  /** lane.branch: the branch the shell made for a lane, and the one it was made from */
+  /** lane.branch: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
   /** main.moved: the paths whose two diffs were asked for */
@@ -951,12 +951,15 @@ export class MockHost implements SessionHost {
     return { branch, base };
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
-    this.log({ op: "main.moved", cwd, show: o.show ?? [] });
+    this.log({ op: "main.moved", cwd, show: o.show ?? [], ...(o.base ? { base: o.base } : {}) });
     const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
     if (!v) return null;
     // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
     const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
-    return { ...v, both };
+    // as the shell reads it: the branch the folder has checked out now (a lane's own, once Kit made it), against the branch the
+    // page names as the base, else the answer's own
+    const branch = this.g.__manutBranches?.[cwd] || v.branch;
+    return { ...v, branch, base: o.base || v.base, both };
   }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });

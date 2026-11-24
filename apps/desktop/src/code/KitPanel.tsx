@@ -16,7 +16,7 @@ import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
-import { LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
+import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
 import { MainMoved } from "./MainMoved";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
@@ -169,13 +169,20 @@ export function codeProjects(cwds: readonly string[], added: readonly string[]):
 }
 
 /** What a lane's row shows under its line: Bring it back's panel, while the person has it open and the lane can still bring its
- *  files back. */
-function LaneBelow({ row, backOpen, onCloseBack }: { row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
+ *  files back, then the note that the branch it was made from changed the files it changed (read for the lane's own base, while
+ *  the folder is on its branch). */
+function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
   // a lane that can no longer bring its files back (a turn began, or they were brought back) shuts its panel for good
   useEffect(() => {
     if (backOpen && !row.canBringBack) onCloseBack();
   }, [backOpen, row.canBringBack, onCloseBack]);
-  return backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null;
+  const own = laneBase(row);
+  return (
+    <>
+      {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}
+      {own && <MainMoved root={root} base={own.base} branch={own.branch} lane={row.id} />}
+    </>
+  );
 }
 
 export function KitPanel() {
@@ -213,7 +220,7 @@ export function KitPanel() {
         laneBack={{
           backOpen: backFor,
           onBack: (id) => setBackFor((now) => (now === id ? null : id)),
-          below: (row) => <LaneBelow row={row} backOpen={backFor === row.id} onCloseBack={closeBack} />,
+          below: (row) => <LaneBelow root={root} row={row} backOpen={backFor === row.id} onCloseBack={closeBack} />,
         }}
         onProject={setPicked}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
@@ -223,7 +230,8 @@ export function KitPanel() {
         onOpenSession={(id) => getStore().actions.openSession(id)}
       >
         <PreviewSample root={root} />
-        <MainMoved root={root} />
+        {/* a lane's row carries its own note while the folder is on its branch; the folder that no row covers keeps it here */}
+        <MainMoved root={root} off={lanes.some((l) => laneBase(l) !== null)} />
       </KitPanelView>
       {/* what keeps running (src/running/) for the project the panel shows, right under it */}
       <RunningPanel project={root} />

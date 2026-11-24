@@ -64,6 +64,14 @@ export interface LaneRowInput {
   canBringBack?: boolean;
 }
 
+/** The branch a lane works on and the branch it was made from (`lane.base`), while the folder is on that branch: what the lane's
+ *  main-moved note reads (MainMoved.tsx). None for a lane with no branch of its own, and for one whose branch the folder has left,
+ *  since the shell answers for the checked-out branch and has nothing to say about this lane's. */
+export function laneBase(row: Pick<LaneRow, "branch">): { branch: string; base: string } | null {
+  const b = row.branch;
+  return b && (b.kind === "own" || b.kind === "shared") ? { branch: b.name, base: b.base } : null;
+}
+
 /** The row of one lane. `time` writes a time of day. */
 export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) => hhmm(new Date(ms))): LaneRow {
   const { rec, lane, turn } = i;

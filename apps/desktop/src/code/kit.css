@@ -223,3 +223,8 @@
 .kitp .bb p {
   margin: 0;
 }
+/* The main-moved note on a lane's row (MainMoved.tsx): the same banner as under the dial, indented to where the row's line
+   starts, as Bring it back's panel is. */
+.kitp .lane .banner.kitm {
+  margin: 4px 10px 8px;
+}
