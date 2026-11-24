@@ -78,6 +78,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's API was redeployed on 24 Nov at 06:51 from `8b49ff9`, with browser control's slice 2 and the begin gate's
   race fix (API `66c25549`; the pages did not change); smoke-tested: the outpost's steps and the approvals answer 401
   without a credential, a bad link 404, the admin routes are behind Access.
+- Dev's API was redeployed on 24 Nov at 07:02 from `88d6b15`, with the desktop outpost's registration route (API
+  `941d9565`); smoke-tested: registering, the steps and the approvals answer 401 without a session.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
