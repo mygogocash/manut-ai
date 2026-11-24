@@ -550,7 +550,7 @@ mod system {
         /// When the computer started, seconds since the epoch (`btime` of `/proc/stat`): it does not change while this runs.
         fn boot_time() -> Option<u64> {
             static BTIME: OnceLock<Option<u64>> = OnceLock::new();
-            *BTIME.get_or_init(|| std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok()))
+            *BTIME.get_or_init(|| std::fs::read_to_string("/proc/stat").ok()?.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse::<u64>().ok()))
         }
 
         pub fn started(pid: u32) -> Option<u64> {
@@ -792,20 +792,22 @@ mod tests {
 
     #[test]
     fn a_row_is_the_json_the_page_reads() {
-        let f = shell_terminal();
-        let row = commands(&f, &[root(Kind::Pty, 7, 10)]).remove(0);
-        let json = serde_json::to_value(&row).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "kind": "pty", "session": 7, "folder": "/home/you/code/app", "pid": 11, "started": 2000,
-                "argv": ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "dev"], "ports": [5173]
-            })
-        );
-        let chat = Row { kind: Kind::Chat, started: None, ..row };
-        let json = serde_json::to_value(&chat).unwrap();
-        assert_eq!(json["kind"], "chat");
-        assert!(json["started"].is_null());
+        // The file the page's own test reads too (src/running/host.test.ts), so neither side can change the shape alone.
+        let want: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/running-rows.json")).unwrap();
+        let folder = || "/home/you/code/baanmali-preorder".to_string();
+        let rows = vec![
+            Row {
+                kind: Kind::Pty,
+                session: 7,
+                folder: folder(),
+                pid: 4242,
+                started: Some(1_795_491_078_871),
+                argv: ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "dev"].map(String::from).to_vec(),
+                ports: vec![3000, 24678],
+            },
+            Row { kind: Kind::Chat, session: 2, folder: folder(), pid: 4400, started: None, argv: ["/bin/zsh", "-c", "vitest --watch"].map(String::from).to_vec(), ports: vec![] },
+        ];
+        assert_eq!(serde_json::to_value(&rows).unwrap(), want);
         assert_eq!(Kind::parse("pty"), Some(Kind::Pty));
         assert_eq!(Kind::parse("chat"), Some(Kind::Chat));
         assert_eq!(Kind::parse("tab"), None);
@@ -907,6 +909,22 @@ mod tests {
 
         fn alive(pid: u32) -> bool {
             look().info(pid).is_some()
+        }
+
+        #[test]
+        fn roots_name_terminals_and_chats_apart_though_their_numbers_may_match() {
+            let tmp = std::env::temp_dir().canonicalize().unwrap();
+            let sessions = Sessions::default();
+            let chats = ChatSessions::default();
+            let pty = sessions.spawn(vec!["/bin/sh".into(), "-c".into(), "sleep 66".into()], &tmp, None, &[], 80, 24, |_| {}).unwrap();
+            let chat = chats.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 67".into()], &tmp, None, &[], Box::new(crate::agent_chat::Claude::default()), |_| {}).unwrap();
+            // each table counts from one, so the same number can be a terminal and a chat: the kind tells them apart
+            let roots = roots_of(&sessions, &chats);
+            assert_eq!(roots.iter().map(|r| (r.kind, r.session)).collect::<Vec<_>>(), [(Kind::Pty, pty), (Kind::Chat, chat)]);
+            assert!(roots.iter().all(|r| r.pid > 1 && r.folder == tmp), "{roots:?}");
+            sessions.close_all();
+            chats.close_all();
+            assert!(roots_of(&sessions, &chats).is_empty());
         }
 
         #[test]

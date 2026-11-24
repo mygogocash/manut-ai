@@ -4482,6 +4482,27 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn roots_name_each_running_chat_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {
+        let c = ChatSessions::default();
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let (_out, sink) = collect();
+        let running = c.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 69".into()], &tmp, None, &[], Box::new(Pi::default()), sink).unwrap();
+        let (ended_out, ended_sink) = collect();
+        c.spawn(vec!["/bin/sh".into(), "-c".into(), "exit 0".into()], &tmp, None, &[], Box::new(Pi::default()), ended_sink).unwrap();
+        assert!(wait_for(|| ended_out.lock().unwrap().iter().any(|o| matches!(o, ChatOut::Exit(..))), 10));
+        // the one that ended is not listed: its number may be someone else's by now
+        let roots = c.roots();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let (id, pid, folder) = &roots[0];
+        assert_eq!(*id, running);
+        assert!(*pid > 1);
+        assert_eq!(folder, &tmp);
+        c.close(running);
+        assert!(c.roots().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn close_all_stops_every_chat() {
         let c = ChatSessions::default();
         let tmp = std::env::temp_dir().canonicalize().unwrap();

@@ -1,5 +1,6 @@
 // Code: Kit's settings for one project (src/code/KitPanel.tsx: how much Kit does alone, what was stopped outside the
-// project, what is always allowed), then the coding sessions the sidebar's TERMINALS section listed, reused whole from
+// project, what is always allowed), what keeps running (src/running/RunningPanel.tsx: the commands the sessions below
+// started that still run, each with Stop), then the coding sessions the sidebar's TERMINALS section listed, reused whole from
 // src/sessions/SessionsSection.tsx (its header with the + menu, its folder groups and rows, and the menu a right press
 // on the empty part opens), then the Tasks row (src/tasks/TasksBar.tsx) that opens the Tasks page. A session opened
 // from here fills the main column, and the menu keeps marking Code while it does.
@@ -11,6 +12,7 @@ import { SessionBackgroundMenu } from "../sessions/SessionBackgroundMenu";
 import { SessionList, SessionsHeader } from "../sessions/SessionsSection";
 import { TasksBar } from "../tasks/TasksBar";
 import { KitPanel } from "../code/KitPanel";
+import { RunningPanel } from "../running/RunningPanel";
 import { MenuPageFrame } from "./MenuPage";
 
 /** A press on the section itself, not on a row, a control or a menu: what opens the section's own menu. */
@@ -24,6 +26,7 @@ export function CodePage() {
     <MenuPageFrame page="code" title={t("menu.code")}>
       <div className="col">
         {SESSIONS_ENTRY && <KitPanel />}
+        {SESSIONS_ENTRY && <RunningPanel />}
         {SESSIONS_ENTRY && (
           // It keeps the sidebar section's test id, so what found TERMINALS there finds it here.
           <section
