@@ -56,6 +56,11 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   it with its first decision. None of the answers below changed.
 - Customer message text is stored for the pilot (the operator must read it to draft a reply) and falls under
   the backend's existing retention and tenant export/delete.
+- Every ingress limit counts per source group (24 Nov 2026): the address Cloudflare gives as `CF-Connecting-IP`, as an
+  IPv4 address, or as an IPv6 /64 and never a whole IPv6 address, since one subscriber holds a whole /64 and rotating
+  addresses inside it would otherwise give a fresh bucket each time. An IPv4-mapped IPv6 address counts as its IPv4
+  address. A request whose source cannot be read answers 503 `rate_limit_unavailable` before anything is counted or
+  read. "Per source address" below means this.
 
 ## Public routes
 
@@ -1587,9 +1592,9 @@ Service. Then the environment's block in `wrangler.jsonc` gets `"send_email": [{
 
 ### `POST /v1/auth/email/code`
 
-Body exactly `{ email }`. It is limited per source IP before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed
-and configured as the exchange's limiter): 429 `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable`
-without the binding. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
+Body exactly `{ email }`. It is limited per source address, an IPv4 address or an IPv6 /64 ("Security rules", above),
+before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed and configured as the exchange's limiter): 429
+`rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding or a source. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
 characters, one `@` between two parts with no spaces.
 
 | Status | Body | When |

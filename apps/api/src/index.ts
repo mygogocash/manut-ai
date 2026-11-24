@@ -143,13 +143,17 @@ function json(data: unknown, status = 200): Response {
 /// These unauthenticated routes must be limited before parsing or waking AUTH.
 /// Cloudflare supplies this source IP; client forwarding headers and body fields
 /// never choose a bucket. Per-location limits are abuse control, not accounting.
+/// Every bucket is a source group, as the relay's always were: an IPv4 address, or
+/// an IPv6 /64 and never a whole IPv6 address, because one subscriber holds a whole
+/// /64 and rotating addresses inside it would otherwise give a fresh bucket each
+/// time. A source that cannot be read is refused, never given a bucket of its own.
 async function ingressRateGate(request: Request, pathname: string, env: Env): Promise<Response | null> {
   let binding: RateLimit | undefined;
-  let key = request.headers.get("cf-connecting-ip")?.trim();
+  const key = relaySourceGroup(request.headers.get("cf-connecting-ip"));
   const relay = relayPath(pathname);
   if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
-  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source IP as the
-  // exchange's is. The limits per email address are the auth object's (email-code.ts).
+  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source group as the
+  // exchange's is. The limits per email address and per source are the auth object's (email-code.ts).
   else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
@@ -175,12 +179,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   // anything is read; but only while sign-ups are open: while they are closed the route answers sign_ups_closed and
   // touches nothing at all (self-serve.ts).
   else if (pathname === "/v1/shops/new" && signUpsOpen(env)) binding = env.SELF_SERVE_SHOP_LIMITER;
-  else if (relay) {
-    // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
-    // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
-    binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
-    key = relaySourceGroup(key) ?? undefined;
-  }
+  // Relay upgrades count per source group like everything above, so rotating addresses inside one prefix gains nothing
+  // (RT-1). Any method counts.
+  else if (relay) binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
   else return null;
 
   if (!binding || !key) return json({ error: "rate_limit_unavailable" }, 503);

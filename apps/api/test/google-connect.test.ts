@@ -311,7 +311,8 @@ describe("connecting the owner's Google account", () => {
       .toEqual({ status: 503, body: { error: "rate_limit_unavailable" } });
     // The real binding: 30 a minute from one address. Off, each answers google_not_configured until the limit.
     const fill = async () => {
-      const ip = `2001:db8::${crypto.randomUUID().replaceAll("-", "").slice(0, 4)}`;
+      // A /64 of its own: the limit counts a whole IPv6 /64 as one address.
+      const ip = `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}::1`;
       const answers: number[] = [];
       for (let index = 0; index <= 30; index++) {
         const context = createExecutionContext();

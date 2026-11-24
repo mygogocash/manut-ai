@@ -31,7 +31,8 @@ function authCounter() {
 }
 
 async function send(request: Request, target: Env) {
-  request.headers.set("cf-connecting-ip", `2001:db8::${crypto.randomUUID().slice(0, 4)}`);
+  // A /64 of its own: the ingress limits count a whole IPv6 /64 as one source.
+  request.headers.set("cf-connecting-ip", `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}::1`);
   const context = createExecutionContext();
   const response = await worker.fetch(request, target, context);
   await waitOnExecutionContext(context);

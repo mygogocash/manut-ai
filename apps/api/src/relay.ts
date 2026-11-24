@@ -30,10 +30,11 @@ export function relayPath(pathname: string): { hostID: string; role: RelayRole }
   return match ? { hostID: match[1] ?? "", role: match[2] as RelayRole } : null;
 }
 
-/// The bucket an upgrade counts against: an IPv4 address, or an IPv6 /64 and never a whole IPv6
-/// address, so rotating addresses inside one prefix gains nothing (threat model RT-1). An
-/// IPv4-mapped IPv6 address counts as its IPv4 address. Anything unreadable is null, and the
-/// caller fails closed.
+/// The bucket an upgrade counts against, and every other ingress limit too (`ingressRateGate` in
+/// index.ts), and the source a sign-in code by email is counted against (email-code.ts): an IPv4
+/// address, or an IPv6 /64 and never a whole IPv6 address, so rotating addresses inside one
+/// prefix gains nothing (threat model RT-1). An IPv4-mapped IPv6 address counts as its IPv4
+/// address. Anything unreadable is null, and the caller fails closed.
 export function relaySourceGroup(address: string | null | undefined): string | null {
   const text = address?.trim() ?? "";
   const quad = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
