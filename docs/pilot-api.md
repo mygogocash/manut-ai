@@ -1103,8 +1103,10 @@ ingress limit: it needs a session, and a shop holds 20 outposts at most.
 | 400 | `invalid_request` | Not a JSON object, or one that names a `tenant`: the shop is the session's |
 | 400 | `invalid_kind` | Anything but `this_mac`: a cloud outpost is the operator's to register |
 | 400 | `invalid_name` | Blank once trimmed, over 80 characters, or holding a control character |
+| 404 | `not_found` | A person's own sign-in (24 Nov 2026), after its body is checked: its tenant is no shop, so it has no vault, and nothing is registered. The desktop reads it as `no_shop` |
 | 409 | `too_many_outposts` | The shop already has 20 |
 | 503 | `people_unavailable` | The shop's record could not be read to check a shop session |
+| 503 | `vault_unavailable` | The shop's record could not be read to see that the tenant is a shop |
 
 ### The owner's vault and outposts
 
@@ -1127,7 +1129,10 @@ signed-in session, and the shop is the session's: no route reads one from a body
   outpost's credential; 401 `unlinked` with `unlinkedAt`, or `removed`; 503 `people_unavailable` when the session cannot
   be checked), then the role (a helper's session: 403 `owner_only`), then the method (405 `method_not_allowed`; the shop's
   sign-ins take `GET` and `POST`, every other route one method), then the query (a `shop`, `tenant` or `role` in it: 400
-  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods.
+  `invalid_request`) and the body. So a caller with no session learns nothing about a route, not even its methods. Only
+  then is the tenant checked to be a pilot shop (24 Nov 2026): a person's own sign-in, whose tenant is none, answers 404
+  `not_found` on every route, and nothing is kept for it (503 `vault_unavailable` when the shop's record cannot be read).
+  The desktop reads that as `no_shop` ("No shop is linked to your account yet").
 - **Exact.** A body is exactly the keys above. An id, a new password and a name are strings. Anything more, a `tenant`,
   a `shop` or a `role` above all, a key missing, or an id, password or name of another type answers 400
   `invalid_request`; a body that is not JSON, 400 `invalid_json`; over 16 KB, 413 `body_too_large`. Every other value
@@ -1705,8 +1710,11 @@ security review of 24 Nov 2026 asked that nothing else take it (`docs/decisions.
     events): cloud tasks and their executor's protocol; the team's work runs in the Worker's job flow, never here.
   - `/v1/companies` and everything under it: the lifted product's companies, not a shop's.
 - **The shop's routes answer it 404 `not_found`**, as the owner's people and Google already did, after its body is
-  checked and with nothing kept: the team's routines and Pause everyone (`/v1/routines`, `/v1/team/*`, "Routines") and
-  what the team knows (`/v1/memory`, "Memory").
+  checked and with nothing kept: the team's routines and Pause everyone (`/v1/routines`, `/v1/team/*`, "Routines"), what
+  the team knows (`/v1/memory`, "Memory"), the shop's vault and outposts (`/v1/vault/*`) and registering this Mac
+  (`POST /v1/outposts/register`), "Vault sign-ins and outposts". The desktop reads the vault's and the registration's 404
+  for the sign-in of a person in no shops as `no_shop`, and says "No shop is linked to your account yet" in Customize ›
+  Connections, as it does for Google and people.
 
 Apple's sign-in (`apple:`) keeps the lifted routes as they were for now: it is on in no environment, and needs the
 owner's Apple team. `docs/turning-on.md` says to refuse it as an email sign-in is before it is turned on.

@@ -99,6 +99,7 @@ describe("the Outposts box", () => {
     expect(registeredError("offline")).toBe("Offline: the Manut AI API cannot be reached.");
     expect(registeredError("keychain")).toBe("This Mac's key could not be kept in the keychain, so it is not set up. Try again.");
     expect(registeredError("left")).toBe("You no longer have access to this shop, so this Mac was not added.");
+    expect(registeredError("no_shop")).toBe("No shop is linked to your account yet, so this Mac has no shop to work for.");
     const html = draw(pane(signedIn({ state: "unregistered" }), { error: registeredError("owner_only") }));
     expect(html).toContain('role="alert"');
     expect(words(html)).toContain("Only the shop's owner can add this Mac.");
@@ -109,10 +110,12 @@ describe("the Outposts box", () => {
     const english = states.map((state) => outpostRow(signedIn({ state })).line);
     const helper = outpostRow({ kind: "helper" }).line;
     const left = registeredError("left");
+    const noShop = registeredError("no_shop");
     for (const lang of LANGS.filter((l) => l !== "en")) {
       setLang(lang);
       expect(outpostRow({ kind: "helper" }).line, lang).not.toBe(helper);
       expect(registeredError("left"), lang).not.toBe(left);
+      expect(registeredError("no_shop"), lang).not.toBe(noShop);
       expect(draw(pane(signedIn({ steps: 3 })))).toContain(t("outpost.title"));
       expect(stepsLine(3)).toContain("3");
       expect(stepsLine(3)).not.toBe("Running 3 steps");
