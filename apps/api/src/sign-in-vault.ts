@@ -15,6 +15,8 @@
 /// - `POST /sign-ins` `{ site, origins, username, password, members }`: a new sign-in.
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
 /// - `POST /sign-ins/members` `{ signInId, members }`: who may use it from now on, and nothing else changed.
+/// - `POST /sign-ins/change` `{ signInId, origins, username, password }`: its account and its addresses, with its password
+///   typed again (`password` a string), or only addresses taken away (`password` null). See `changeSignIn`.
 /// - `POST /sign-ins/broken` `{ signInId, member }`: a member named on it reports that the site refused the password.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
 /// - `POST /sign-ins/reseal` `{}`: every live sign-in sealed again under the current key, after a rotation (reseal.ts).
@@ -347,6 +349,8 @@ export async function signInVaultRoute(
       return replacePassword(storage, vaultKeys, tenant, body);
     case "POST /sign-ins/members":
       return changeMembers(storage, tenant, body);
+    case "POST /sign-ins/change":
+      return changeSignIn(storage, vaultKeys, tenant, body);
     case "POST /sign-ins/broken":
       return markBroken(storage, tenant, body);
     case "POST /sign-ins/remove":
@@ -707,8 +711,68 @@ async function changeMembers(storage: DurableObjectStorage, tenant: string, body
   return json({ signIn: viewOf(changed) });
 }
 
+/// A sign-in's account and its addresses from now on (docs/browser-control.md, "Changing a sign-in"). The danger is a
+/// stored password typed where it was never meant to go: someone holding a stolen owner session points a password they
+/// never knew at an address of their own, and the next sign-in step types it into their page. So the rule is that a
+/// password is only ever typed into the account and the addresses it was given with:
+///
+/// - Adding or changing any address, or changing the account, needs the password typed again in the same change
+///   (`password` a string). It is sealed as adding seals it, so the record's addresses, account and password always
+///   came together, from one person who knew the password. That person may be the one with the stolen session, but then
+///   the password the vault types is theirs, and the owner's is gone from the vault rather than sent anywhere new.
+/// - Taking addresses away, keeping at least one, and nothing else, may go without it (`password` null): the password
+///   then goes to fewer of the places it was given for, never to a new one.
+///
+/// Anything else without the password is refused `password_required`, and a change that keeps the account and the same
+/// addresses (in any order) is refused `no_change`: a new password alone is `/sign-ins/password`'s, so the log's entry
+/// for a change always means the account or the addresses moved. Every value is checked with the rules adding uses
+/// (`originsOf`, `usernameOf`, `passwordOf`), so the vault never keeps here what it would refuse there. A new password
+/// mends a broken sign-in, as `/sign-ins/password` does; taking addresses away leaves it as it was. Who may use it and
+/// when it was last used stay.
+///
+/// The password is sealed before the record is read, as at a new password, so the read, the checks and the write wait
+/// only on this object's own storage and nothing (a removal, another change) can land between them and be undone. A
+/// redeem already past its own read as the change lands finishes with the record it read, whose password was given for
+/// the addresses it read: the rule holds for it too.
+async function changeSignIn(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
+  body: Record<string, unknown>): Promise<Response> {
+  const origins = originsOf(body.origins);
+  if (origins === null) return json({ error: "invalid_origins" }, 400);
+  const username = usernameOf(body.username);
+  if (username === null) return json({ error: "invalid_username" }, 400);
+  // Absent reads as null, so a call that leaves the password out can only take addresses away.
+  const typed = body.password === undefined || body.password === null ? null : passwordOf(body.password);
+  if (typed === null && body.password !== undefined && body.password !== null) {
+    return json({ error: "invalid_password" }, 400);
+  }
+  let sealed: SealedSecret | null = null;
+  if (typed !== null) {
+    const key = vaultKeys.CRED_KEY;
+    if (!key) return json({ error: "vault_not_configured" }, 503);
+    sealed = await sealSecret(typed, key);
+  }
+  const record = await liveSignIn(storage, tenant, body.signInId);
+  if (!record) return json(NOT_FOUND, 404);
+  const sameAccount = username === record.username;
+  // Origins are distinct on both sides (`originsOf` refuses a repeat), so every new one being an old one and the counts
+  // being equal is the same set.
+  const onlyKept = origins.every((origin) => record.origins.includes(origin));
+  if (sameAccount && onlyKept && origins.length === record.origins.length) return json({ error: "no_change" }, 400);
+  if (sealed === null && !(sameAccount && onlyKept)) return json({ error: "password_required" }, 400);
+  const changed: SignInRecord = { ...record, origins, username,
+    ...(sealed !== null ? { sealed, passwordSetAt: new Date().toISOString(), state: "working" as const, brokenAt: null,
+      brokenBy: null } : {}) };
+  await storage.put(keys.signIn(record.id), changed);
+  return json({ signIn: viewOf(changed) });
+}
+
 /// Removal wipes the account and the seal but keeps the record as a tombstone, as a revoked connection does, so a
-/// restored backup cannot quietly bring back a password the owner took away.
+/// restored backup cannot quietly bring back a password the owner took away. It is the one removal, the operator's and
+/// the owner's alike. Nothing else needs to change with it: every grant, redeem and step reads the sign-in as it happens
+/// (`liveSignIn`, `unusable`), so a grant issued before the removal is refused at its claim and again at its open
+/// (`sign_in_not_found`), no new one is issued, a step carrying one is refused as it is handed out, and no step goes to its
+/// addresses any more. A redeem whose open had already read the sign-in as the removal lands finishes, with the password
+/// the owner gave for those addresses.
 async function removeSignIn(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>):
   Promise<Response> {
   const record = await liveSignIn(storage, tenant, body.signInId);

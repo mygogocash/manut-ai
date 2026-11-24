@@ -9,9 +9,9 @@
 ///   lands in the attempt's events.
 /// - The owner's routes, with the owner's session: this Mac registering itself as an outpost through the desktop
 ///   (`POST /v1/outposts/register`), and the owner's Connections (`ownerVaultRoute`): the shop's sign-ins and outposts, a
-///   sign-in added, a new password typed into the vault, who may use a sign-in, and renaming or removing an outpost, all
-///   under `/v1/vault/`. Under `/v1/outposts/` only the registration takes a session; the outposts' credentials open none
-///   of the owner's routes.
+///   sign-in added, changed (its account or its addresses) or removed, a new password typed into the vault, who may use a
+///   sign-in, and renaming or removing an outpost, all under `/v1/vault/`. Under `/v1/outposts/` only the registration
+///   takes a session; the outposts' credentials open none of the owner's routes.
 ///
 /// Every change is written to the shop's audit log with ids only, after it has happened (`appendAudit`): the record
 /// lives in the vault object and the log in the TenantObject, so the entry is best effort and never holds the change
@@ -51,10 +51,12 @@ const MAX_BODY_BYTES = 16 * 1024;
 /// request that does not even carry one costs the vault nothing.
 const OUTPOST_CREDENTIAL = /^mo1_[A-Za-z0-9_-]{43}$/;
 
-/// The operator's writes, the vault path each one is, and what the log calls it.
+/// The operator's writes, the vault path each one is, and what the log calls it. Who may use a sign-in goes through the
+/// vault's `/sign-ins/members`, the same operation as the owner's route, so the two refuse the same members the same way.
 const OPERATOR_WRITES: Readonly<Record<string, { path: string; action: AuditAction }>> = {
   "POST /v1/admin/vault/sign-ins": { path: "/sign-ins", action: "signin.created" },
   "POST /v1/admin/vault/sign-ins/password": { path: "/sign-ins/password", action: "signin.password_replaced" },
+  "POST /v1/admin/vault/sign-ins/members": { path: "/sign-ins/members", action: "signin.members_changed" },
   "POST /v1/admin/vault/sign-ins/remove": { path: "/sign-ins/remove", action: "signin.removed" },
 };
 
@@ -583,9 +585,9 @@ async function listSignIns(env: VaultEnv, url: URL): Promise<Response> {
   }
 }
 
-/// `POST /v1/admin/vault/sign-ins{,/password,/remove}` with `{ tenant, ... }`: the operator's change, recorded under
-/// the operator's Access identity (none for a service token). Answers what the vault answers: the sign-in's public view
-/// on success, or the refusal with its status.
+/// `POST /v1/admin/vault/sign-ins{,/password,/members,/remove}` with `{ tenant, ... }`: the operator's change, recorded
+/// under the operator's Access identity (none for a service token). Answers what the vault answers: the sign-in's public
+/// view on success (for a removal, `{ removed, signInId }`), or the refusal with its status.
 async function operatorWrite(request: Request, env: VaultEnv, ctx: ExecutionContext,
   write: { path: string; action: AuditAction }): Promise<Response> {
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
@@ -614,10 +616,11 @@ async function operatorWrite(request: Request, env: VaultEnv, ctx: ExecutionCont
 // The owner's Connections: the shop's sign-ins and outposts, from the owner's own session (docs/browser-control.md,
 // "The owner's Connections"; docs/pilot-api.md, "The owner's vault and outposts").
 
-/// One owner route that takes a body: its exact keys, and those of them the route itself requires to be strings (the
-/// ids, and a new password). Any other value is the vault's to check, as it is on the operator's route, so a value of
-/// the wrong kind gets the operator's refusal for that field (`invalid_origins`, `invalid_members`, ...).
-type OwnerBody = { keys: readonly string[]; strings: readonly string[] };
+/// One owner route that takes a body: its exact keys, those of them the route itself requires to be strings (the ids, and
+/// a new password), and those that are a string or null (a change's password: null keeps the one sealed). Any other value
+/// is the vault's to check, as it is on the operator's route, so a value of the wrong kind gets the operator's refusal for
+/// that field (`invalid_origins`, `invalid_members`, ...).
+type OwnerBody = { keys: readonly string[]; strings: readonly string[]; stringsOrNull?: readonly string[] };
 const LIST = "list" as const;
 
 /// Each owner route by its path, and what it takes for each method it answers: `GET` lists, `POST` changes.
@@ -626,17 +629,24 @@ const OWNER_VAULT_ROUTES: ReadonlyMap<string, Readonly<{ GET?: typeof LIST; POST
     POST: { keys: ["site", "origins", "username", "password", "members"], strings: [] } }],
   ["/v1/vault/sign-ins/password", { POST: { keys: ["signInId", "password"], strings: ["signInId", "password"] } }],
   ["/v1/vault/sign-ins/members", { POST: { keys: ["signInId", "members"], strings: ["signInId"] } }],
+  ["/v1/vault/sign-ins/change", { POST: { keys: ["signInId", "origins", "username", "password"], strings: ["signInId"],
+    stringsOrNull: ["password"] } }],
+  ["/v1/vault/sign-ins/remove", { POST: { keys: ["signInId"], strings: ["signInId"] } }],
   ["/v1/vault/outposts", { GET: LIST }],
   ["/v1/vault/outposts/rename", { POST: { keys: ["outpostId", "name"], strings: ["outpostId", "name"] } }],
   ["/v1/vault/outposts/remove", { POST: { keys: ["outpostId"], strings: ["outpostId"] } }],
 ]);
 
-/// The owner's changes to a sign-in, by route: the operation of the shop's vault each goes through (for adding one and
-/// for a new password, the operator's own), and what the log calls it.
-const OWNER_SIGN_IN_CHANGES: Readonly<Record<string, { path: string; action: AuditAction }>> = {
+/// The owner's changes to a sign-in, by route: the operation of the shop's vault each goes through (for adding one, a new
+/// password and a removal, the operator's own), and what the log calls it. A change that keeps the sealed password
+/// (`password` null) can only have taken addresses away, which the vault checks, so it is logged as that
+/// (`keptPassword`).
+const OWNER_SIGN_IN_CHANGES: Readonly<Record<string, { path: string; action: AuditAction; keptPassword?: AuditAction }>> = {
   "/v1/vault/sign-ins": { path: "/sign-ins", action: "signin.created" },
   "/v1/vault/sign-ins/password": { path: "/sign-ins/password", action: "signin.password_replaced" },
   "/v1/vault/sign-ins/members": { path: "/sign-ins/members", action: "signin.members_changed" },
+  "/v1/vault/sign-ins/change": { path: "/sign-ins/change", action: "signin.changed", keptPassword: "signin.narrowed" },
+  "/v1/vault/sign-ins/remove": { path: "/sign-ins/remove", action: "signin.removed" },
 };
 
 /// The owner's routes for the shop's vault and outposts, which the desktop's Customize › Connections uses. Answers null for
@@ -651,13 +661,17 @@ const OWNER_SIGN_IN_CHANGES: Readonly<Record<string, { path: string; action: Aud
 /// - **Lists.** `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts` answer what the operator's lists answer for the shop: each
 ///   sign-in's public view, which says only that its password is set, and each outpost without its credential's digest.
 /// - **Changes.** Adding a sign-in (`POST /v1/vault/sign-ins`), a new password (`POST /v1/vault/sign-ins/password`), who may
-///   use a sign-in (`POST /v1/vault/sign-ins/members`), and renaming or removing an outpost (`POST /v1/vault/outposts/rename`,
+///   use a sign-in (`POST /v1/vault/sign-ins/members`), its account or its addresses (`POST /v1/vault/sign-ins/change`),
+///   removing it (`POST /v1/vault/sign-ins/remove`), and renaming or removing an outpost (`POST /v1/vault/outposts/rename`,
 ///   `POST /v1/vault/outposts/remove`). Each goes through the same operation of the shop's vault as the operator's route, or
 ///   where the operator has none the vault's own, so there is one way to each record. A body is exactly the keys its route
-///   reads, and the ids and a new password are strings: a `tenant`, a `shop` or a `role` above all is refused rather than
-///   read. Every other value is checked by the vault, as the operator's route has it checked, with the same refusals.
+///   reads, the ids and a new password are strings, and a change's password is a string or null: a `tenant`, a `shop` or a
+///   `role` above all is refused rather than read. Every other value is checked by the vault, as the operator's route has
+///   it checked, with the same refusals.
 /// - **The password.** It goes from the body straight into the vault, which seals it as the operator's route does. It is
-///   never kept here, logged, or answered: the answer is the sign-in's public view, and the log names the sign-in by id.
+///   never kept here, logged, or answered: the answer is the sign-in's public view, and the log names the sign-in by id. A
+///   change of the account or of an address that would let the sealed password go somewhere new is refused unless the
+///   same body types it again (the vault's `/sign-ins/change`).
 /// - **The log.** Each change done writes its entry by the owner (`ownerActor`), with the record's id only; a refusal
 ///   writes nothing, as the operator's do not. Nothing here is behind an ingress limit, as this Mac's registration is not:
 ///   like every session route it needs a session first, and the vault bounds what it keeps (50 sign-ins, 20 outposts a
@@ -684,7 +698,8 @@ export async function ownerVaultRoute(request: Request, url: URL, env: VaultEnv 
   const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
   const body = parsed.value;
-  if (!isRecord(body) || !hasExactly(body, route.keys) || !route.strings.every((key) => typeof body[key] === "string")) {
+  if (!isRecord(body) || !hasExactly(body, route.keys) || !route.strings.every((key) => typeof body[key] === "string") ||
+      !(route.stringsOrNull ?? []).every((key) => body[key] === null || typeof body[key] === "string")) {
     return json({ error: "invalid_request" }, 400);
   }
   const shop = await shopRefusal(env, tenant);
@@ -719,19 +734,30 @@ async function ownerList(env: VaultEnv, tenant: string, path: "/sign-ins" | "/ou
 ///   one, through the operator's `/sign-ins/password`, which also mends a broken sign-in.
 /// - `POST /v1/vault/sign-ins/members` with exactly `{ signInId, members }`: who may use it from now on, through the
 ///   vault's `/sign-ins/members`, whose members are checked as at creation.
+/// - `POST /v1/vault/sign-ins/change` with exactly `{ signInId, origins, username, password }`: its account and its
+///   addresses from now on, through the vault's `/sign-ins/change`, which checks them as adding does. `password` is the
+///   password typed again, sealed as adding seals it, or null to keep the one sealed, which the vault allows only when the
+///   change takes addresses away and changes nothing else (`password_required` otherwise; `no_change` for none at all).
+///   Logged `signin.changed`, or `signin.narrowed` for addresses taken away with the password kept.
+/// - `POST /v1/vault/sign-ins/remove` with exactly `{ signInId }`: removed through the vault's `/sign-ins/remove`, the
+///   operator's own, so a grant already issued for it, and every redeem after it, is refused. Answers
+///   `{ removed: true, signInId }`.
 ///
 /// Only the route's own fields are passed on. The answer is the vault's, the sign-in's public view or a refusal, which
 /// never holds a password; a change done writes its entry by the owner, with the sign-in's id only.
 async function ownerSignInChange(env: VaultEnv, tenant: string, caller: Extract<Caller, { role: "owner" }>,
-  change: { path: string; action: AuditAction }, body: Record<string, unknown>, keys: readonly string[]):
-  Promise<Response> {
+  change: { path: string; action: AuditAction; keptPassword?: AuditAction }, body: Record<string, unknown>,
+  keys: readonly string[]): Promise<Response> {
   const fields = Object.fromEntries(keys.map((key) => [key, body[key]]));
   const answer = await askVault(env, tenant, change.path, fields);
   if (!answer) return json({ error: "vault_unavailable" }, 503);
-  const signIn = answer.status === 200 && isRecord(answer.body.signIn) ? answer.body.signIn : null;
-  if (signIn && typeof signIn.id === "string") {
-    await appendAudit(env, tenant, { actor: ownerActor(caller), action: change.action,
-      subject: { signInId: signIn.id }, outcome: "ok" });
+  if (answer.status === 200) {
+    // Every change answers the sign-in's public view, but a removal, which answers its id.
+    const signInId = isRecord(answer.body.signIn) ? answer.body.signIn.id : answer.body.signInId;
+    if (typeof signInId === "string") {
+      const action = change.keptPassword !== undefined && body.password === null ? change.keptPassword : change.action;
+      await appendAudit(env, tenant, { actor: ownerActor(caller), action, subject: { signInId }, outcome: "ok" });
+    }
   }
   return json(answer.body, answer.status);
 }
