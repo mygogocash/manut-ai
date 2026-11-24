@@ -14,10 +14,16 @@ const standIn = (): UrlStandIn | undefined =>
   typeof window !== "undefined" ? (window as { __MANUT_BRIDGE_URL__?: UrlStandIn }).__MANUT_BRIDGE_URL__ : undefined;
 const envUrl = (): string | undefined => (import.meta.env?.VITE_MANUT_BRIDGE as string | undefined) || undefined;
 
+/** The page's switch for the in-process runtime (the e2e suite sets it, before the page loads). The suite builds the page with
+ *  `VITE_MANUT_BRIDGE` for the mock bridge, so a spec that walks Practice, the app's own runtime, says so here and the page starts
+ *  as it does with no bridge configured. Nothing in the app sets it. */
+const inProcess = (): boolean => typeof window !== "undefined" && (window as { __MANUT_IN_PROCESS__?: unknown }).__MANUT_IN_PROCESS__ === true;
+
 /** Whether a WebSocket runtime is configured at all: the page's `__MANUT_BRIDGE_URL__` stand-in, or the
- *  `VITE_MANUT_BRIDGE` build variable. With neither, the app runs on its in-process runtime and never dials. */
+ *  `VITE_MANUT_BRIDGE` build variable. With neither, the app runs on its in-process runtime and never dials; so it does when
+ *  the page says `__MANUT_IN_PROCESS__`, whatever else is configured. */
 export function bridgeUrlConfigured(): boolean {
-  return !!standIn() || !!envUrl();
+  return !inProcess() && (!!standIn() || !!envUrl());
 }
 
 /** The URL to dial: the stand-in's answer, else `VITE_MANUT_BRIDGE`. Asked again before every dial, because a

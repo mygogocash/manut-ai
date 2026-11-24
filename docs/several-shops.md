@@ -206,7 +206,8 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
    asks, the owner says yes on the link), and a shop session on `DELETE /v1/tenant/data` still answers 401; answering the
    first-week questions from the app. The desktop now reads the export and the routines with an owner session, shows the
    shop whole and pauses and resumes its routines and its team (24 Nov 2026); its screens for what the team knows, the
-   consent, saving the export as a file and the helpers are still to come.
+   consent and saving the export as a file are still to come; the helpers have their screen now (Settings › People, 24 Nov 2026,
+   `docs/people.md`).
 5. **Done here (API):** ending a shop session from the app, `POST /v1/shops/session/end` (24 Nov 2026). It ends the one
    session it is called with, an owner's or a helper's, and the desktop calls it on sign-out for each shop session it holds.
    A sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
@@ -231,9 +232,10 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 - A shop the person helps at shows only what waits there. Whether a helper sees more of it (its tasks, its team) is the
   owner's to decide. A shop the person owns is read whole each minute, its export included, which carries every task's
   history; a list route for a session's tasks would make that lighter (`docs/runtime-adapter.md`, "Next slices").
-- The owner's writes from the desktop are pausing and resuming a routine and Pause everyone. Making a routine, the shop's
-  own schedules, what the team knows, the consent and the helpers have routes an owner session reaches, and no screen on
-  the desktop that uses them yet.
+- The owner's writes from the desktop are pausing and resuming a routine and Pause everyone, the shop's vault and outposts
+  (Customize › Connections), and the shop's helpers (Settings › People, 24 Nov 2026). Making a routine, the shop's own
+  schedules, what the team knows and the consent have routes an owner session reaches, and no screen on the desktop that
+  uses them yet.
 - A request that leaves a shop's open list with no answer from this computer closes as "Answered elsewhere", or as timed
   out once past its expiry: a shop session reads no tasks, so the app cannot tell a decision from a withdrawal there.
   Reading `GET /v1/approvals?state=recent` when an ask leaves would tell, at one more request.
