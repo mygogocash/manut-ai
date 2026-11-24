@@ -3,18 +3,23 @@
 // - Runtime: Practice (the in-process demo team, the default) or Connected (the runtime over apps/api at one
 //   origin). The choice is saved on this computer (runtime/setting.ts) and applies at the next start, which the page
 //   offers when the saved choice is not the one running.
-// - Sign-in: the lifted backend signs in with Apple only. Until the app can ask Apple itself (docs/runtime-adapter.md),
-//   an identity token and its nonce are pasted here; the session then lives in the keychain, never on the page.
+// - Sign-in: with a code sent by email (EmailSignIn.tsx), or with Apple. Until the app can ask Apple itself
+//   (docs/runtime-adapter.md), an identity token and its nonce are pasted here; either way the session then lives in the
+//   keychain, never on the page. The API answers "not on yet" to the email way until the owner turns it on. In Practice
+//   there is no API, so the email way runs on a pretend code that it says aloud and sends nothing.
 //
 // `DeveloperView` draws a given state, so the tests draw every one; `DeveloperPage` keeps the form's state and acts.
-// The markup is Settings' own row (Settings.slot.tsx `Row`), so the page looks like the rest of Settings.
-import { useState } from "react";
+// The markup is Settings' own row (DevRow.tsx, as Settings.slot.tsx `Row` draws it), so the page looks like the rest of
+// Settings.
+import { useEffect, useState, type ReactNode } from "react";
 import { Seg } from "../chat/model/Seg";
 import { t, type Key } from "../i18n";
 import { sessionFor } from "../runtime/http";
 import type { SignInState } from "../runtime/http/session";
 import { pendingRestart, restartApp, saveRuntimeChoice, useSignIn } from "../runtime/link";
 import { parseOrigin, readRuntimeSetting, type OriginRefusal, type RuntimeSetting } from "../runtime/setting";
+import { Row } from "./DevRow";
+import { EmailSignIn } from "./EmailSignIn";
 
 type Mode = RuntimeSetting["mode"];
 
@@ -41,28 +46,30 @@ export interface DeveloperViewProps {
   onNonce: (text: string) => void;
   onSignIn: () => void;
   onSignOut: () => void;
+  /** the sign-in by email, drawn above Apple's rows when signed out and alone in Practice (EmailSignIn.tsx); none when absent */
+  email?: ReactNode;
 }
 
-/** One row as Settings draws it: what it is on the left, what to do on the right. */
-function Row({ title, hint, children }: { title?: string; hint?: string; children?: React.ReactNode }) {
-  return (
-    <div className="st-row">
-      <div className="st-k">
-        {title && <b>{title}</b>}
-        {hint && <span>{hint}</span>}
-      </div>
-      {children !== undefined && <div className="st-v">{children}</div>}
-    </div>
-  );
-}
-
-/** What the sign-in row says under "Not signed in": why the last try failed, that the API ended the session, that a
- *  sign-out could not reach the API, or how to sign in. */
+/** What the top row says under "Not signed in", for either way in: that the API ended the session, that a sign-out could
+ *  not reach the API, that the keychain did not keep a session just made, or how to sign in. */
 function signedOutHint(state: SignInState, notTold: boolean): string {
-  if (state.kind === "signed_out" && state.failure) return t(`dev.fail.${state.failure}` as Key);
   if (state.kind === "signed_out" && state.ended) return t("dev.ended");
   if (notTold) return t("dev.notTold");
+  if (state.kind === "signed_out" && state.failure === "keychain") return t("dev.fail.keychain");
+  return t("dev.signInLead");
+}
+
+/** What Apple's row says: why the last try with an identity token failed, or how to use it. A failure of the keychain is
+ *  the top row's, since either way in can meet it. */
+function appleHint(state: SignInState): string {
+  if (state.kind === "signed_out" && state.failure && state.failure !== "keychain") return t(`dev.fail.${state.failure}` as Key);
   return t("dev.signInHint");
+}
+
+/** Who is signed in. An email sign-in's tenant is `email:` and a hash of the address, which says nothing to a person,
+ *  so it is not shown; Apple's is shown as it always was. */
+function signedInTitle(tenant: string): string {
+  return tenant.startsWith("email:") ? t("dev.signedInEmail") : t("dev.signedIn", { tenant });
 }
 
 function SignIn(p: DeveloperViewProps & { signIn: SignInState }) {
@@ -71,7 +78,7 @@ function SignIn(p: DeveloperViewProps & { signIn: SignInState }) {
   if (signIn.kind === "no_keychain") return <Row title={t("dev.signedOut")} hint={t("dev.noKeychain")} />;
   if (signIn.kind === "signed_in") {
     return (
-      <Row title={t("dev.signedIn", { tenant: signIn.tenant })}>
+      <Row title={signedInTitle(signIn.tenant)}>
         <button type="button" className="st-btn" onClick={p.onSignOut} data-testid="dev-sign-out">
           {t("dev.signOut")}
         </button>
@@ -82,6 +89,8 @@ function SignIn(p: DeveloperViewProps & { signIn: SignInState }) {
   return (
     <>
       <Row title={t("dev.signedOut")} hint={signedOutHint(signIn, p.notTold)} />
+      {p.email}
+      <Row title={t("dev.apple")} hint={appleHint(signIn)} />
       <Row title={t("dev.token")}>
         {/* A password field, so the token is not on the screen for anyone looking over a shoulder. */}
         <input
@@ -169,6 +178,15 @@ export function DeveloperView(p: DeveloperViewProps) {
           </div>
         </>
       )}
+      {/* Practice has no API and no session, so the only sign-in to show is the pretend one by email, to try the screens. */}
+      {p.saved.mode === "practice" && p.email && (
+        <>
+          <div className="st-gh">{t("dev.signInTitle")}</div>
+          <div className="st-grp" data-testid="dev-sign">
+            {p.email}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -183,6 +201,12 @@ export function DeveloperPage() {
   const [notTold, setNotTold] = useState(false);
   const origin = saved.mode === "connected" ? saved.origin : null;
   const signIn = useSignIn(origin);
+  const signingIn = signIn?.kind === "signing_in";
+
+  // A sign-out that the API was not told of is said until the next sign-in starts, whichever way the person signs in.
+  useEffect(() => {
+    if (signingIn) setNotTold(false);
+  }, [signingIn]);
 
   // Moving the choice off the shop (to Practice, or to another origin) also forgets the saved read of it.
   const save = (next: RuntimeSetting) => {
@@ -201,6 +225,7 @@ export function DeveloperPage() {
       notTold={notTold}
       token={token}
       nonce={nonce}
+      email={<EmailSignIn key={origin ?? "practice"} origin={origin} held={signingIn} />}
       onMode={(next) => {
         setMode(next);
         setOriginError(null);

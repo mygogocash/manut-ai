@@ -1,11 +1,20 @@
 // Settings › Developer, drawn with react-dom/server: Practice or Connected, the API origin, the restart that applies a
-// new choice, and signing in to the API in each of its states.
-import { afterEach, describe, expect, it } from "vitest";
+// new choice, and signing in to the API in each of its states, by a code sent by email (EmailSignIn.tsx, tested on its
+// own) and with Apple.
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
 import { DeveloperView, type DeveloperViewProps } from "./DeveloperPage";
+import { EmailSignInView } from "./EmailSignIn";
+import type { EmailFlowState } from "./emailFlow";
 
-const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+const words = (html: string) =>
+  html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+/** The sign-in by email as the page mounts it, in a first-step state, for a page drawn without hooks. */
+const FIRST: EmailFlowState = { step: "email", email: "", code: "", sentTo: null, busy: null, wait: null, live: false, notice: null };
+const emailSection = (practice: boolean) => (
+  <EmailSignInView state={FIRST} now={0} practice={practice} held={false} onEmail={vi.fn()} onCode={vi.fn()} onSend={vi.fn()} onSignIn={vi.fn()} onAnother={vi.fn()} />
+);
 const noop = () => {};
 const CONNECTED = { mode: "connected", origin: "https://dev.manut.xyz" } as const;
 
@@ -68,7 +77,7 @@ describe("Settings › Developer", () => {
 
   it("signs in with an identity token kept out of sight and its nonce", () => {
     const html = draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn: { kind: "signed_out" } });
-    expect(words(html)).toContain("The API signs in with Apple. Until the app can ask Apple itself, paste an identity token and the nonce it was made with.");
+    expect(words(html)).toContain("Sign in with Apple Until the app can ask Apple itself, paste an identity token and the nonce it was made with.");
     expect(html).toMatch(/<input[^>]*type="password"[^>]*aria-label="Identity token"[^>]*data-testid="dev-token"/);
     expect(html).toMatch(/<input[^>]*type="text"[^>]*aria-label="Nonce"[^>]*data-testid="dev-nonce"/);
     expect(html).toMatch(/<button type="button" class="st-btn" data-testid="dev-sign-in">Sign in<\/button>/);
@@ -98,6 +107,56 @@ describe("Settings › Developer", () => {
   it("says when a sign-out could not reach the API", () => {
     const html = draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn: { kind: "signed_out" }, notTold: true });
     expect(words(html)).toContain("Signed out on this computer. The API could not be told, so the session ends by itself later.");
+  });
+
+  it("offers a code sent by email first, above Apple's rows, which keep their own fields and button", () => {
+    const html = draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn: { kind: "signed_out" }, email: emailSection(false) });
+    expect(words(html)).toContain("Not signed in Sign in with a code we email you, or with Apple.");
+    for (const id of ["dev-email", "dev-email-address", "dev-email-send", "dev-token", "dev-nonce", "dev-sign-in"]) expect(html, id).toContain(`data-testid="${id}"`);
+    // the email way comes before Apple's rows, which are as they were
+    expect(html.indexOf('data-testid="dev-email"')).toBeLessThan(html.indexOf("Sign in with Apple"));
+    expect(html.indexOf("Sign in with Apple")).toBeLessThan(html.indexOf('data-testid="dev-token"'));
+    expect(html).toMatch(/<button type="button" class="st-btn" data-testid="dev-sign-in">Sign in<\/button>/);
+    expect(html).not.toContain("Practice:");
+  });
+
+  it("holds the email way's section while a sign-in runs, as it holds Apple's button", () => {
+    const html = draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn: { kind: "signing_in" }, email: emailSection(false) });
+    expect(html).toContain('data-testid="dev-email"');
+    expect(html).toMatch(/disabled=""[^>]*data-testid="dev-sign-in">Signing in…/);
+  });
+
+  it("says an Apple failure by Apple's rows, and the keychain's or the API ending the session in the top row, where both ways in meet them", () => {
+    const rows = (signIn: DeveloperViewProps["signIn"]) => {
+      const html = words(draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn, email: emailSection(false) }));
+      return { top: html.slice(html.indexOf("Not signed in"), html.indexOf("Email We email you")), apple: html.slice(html.indexOf("Sign in with Apple") + "Sign in with Apple".length, html.indexOf("Identity token")) };
+    };
+    expect(rows({ kind: "signed_out", failure: "invalid_identity" }).apple).toContain("The API did not accept that identity token and nonce.");
+    expect(rows({ kind: "signed_out", failure: "invalid_identity" }).top).not.toContain("did not accept");
+    expect(rows({ kind: "signed_out", failure: "keychain" }).top).toContain("The keychain did not keep the session.");
+    expect(rows({ kind: "signed_out", failure: "keychain" }).apple).toContain("Until the app can ask Apple itself");
+    expect(rows({ kind: "signed_out", ended: "expired" }).top).toContain("The API ended the session. Sign in again.");
+    expect(rows({ kind: "signed_out" }).apple).toContain("Until the app can ask Apple itself");
+  });
+
+  it("shows no sign-in at all in Practice without the pretend one, and then only that, with no Apple row and no keychain", () => {
+    const none = draw();
+    expect(none).not.toContain('data-testid="dev-sign"');
+    const html = draw({ email: emailSection(true) });
+    expect(words(html)).toContain("Sign-in Practice: nothing is sent and nothing is kept. Try signing in with a pretend code.");
+    expect(html).toContain('data-testid="dev-sign"');
+    expect(html).toContain('data-testid="dev-email-send"');
+    for (const id of ["dev-token", "dev-nonce", "dev-sign-in", "dev-sign-out"]) expect(html, id).not.toContain(`data-testid="${id}"`);
+  });
+
+  it("names an email sign-in by the way it signed in, never by the hash that its tenant is", () => {
+    const hash = "ab".repeat(32);
+    const html = draw({ saved: CONNECTED, mode: "connected", originText: CONNECTED.origin, signIn: { kind: "signed_in", tenant: `email:${hash}`, signedInAt: 0 } });
+    expect(words(html)).toContain("Signed in by email");
+    expect(html).not.toContain(hash);
+    expect(html).toMatch(/data-testid="dev-sign-out"[^>]*>Sign out</);
+    expect(html).not.toContain('data-testid="dev-email"');
+    expect(html).not.toContain('data-testid="dev-token"');
   });
 
   it("says plainly when this computer cannot keep a session, and offers no sign-in", () => {
@@ -146,5 +205,8 @@ describe("Settings › Developer on the app's store", () => {
     expect(html).toMatch(/data-testid="settings-nav-developer"[^>]*>Developer</);
     expect(html).toContain('data-testid="settings-page-developer"');
     expect(html).toContain('data-testid="dev-runtime"');
+    // in Practice, which is the default, the page offers the pretend sign-in by email to try the screens
+    expect(html).toContain('data-testid="dev-email"');
+    expect(words(html)).toContain("Practice: nothing is sent and nothing is kept.");
   });
 });
