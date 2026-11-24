@@ -2529,6 +2529,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setSessionFg,
     /** The pty id session `id`'s terminal runs on (the `session-fg` event's id), null before it started. */
     ptyOf: (id: string): number | null => terms.get(id)?.hostId ?? null,
+    /** The id the shell gave session `id`'s chat (what `chat_start` answered), null before it started or for a session that is no
+     *  coding chat of the shell's: what keeps running names its commands by it, as `ptyOf` names a terminal's. */
+    chatIdOf: (id: string): number | null => procs.get(id)?.hostId ?? null,
     /** The native folder dialog (TERMINALS + menu's "Choose folder…"); null when cancelled. */
     pickFolder: (at: string) => host.pickFolder(at),
     continuePast,

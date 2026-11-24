@@ -3439,6 +3439,8 @@ struct ChatLive {
     /// the program and everything it started (`cmd.exe` and its `node.exe` on Windows)
     tree: Arc<Option<ProcessTree>>,
     exited: Arc<AtomicBool>,
+    /// the folder it started in (what keeps running names its commands by it: [`ChatSessions::roots`])
+    cwd: PathBuf,
 }
 
 /// Every running chat session of this app. [`ChatSessions::close_all`] runs on exit.
@@ -3874,8 +3876,16 @@ impl ChatSessions {
             });
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
-        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited });
+        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited, cwd: cwd.to_path_buf() });
         Ok(id)
+    }
+
+    /// The program of every chat still running, with its id and the folder it started in: what the commands that keep
+    /// running are read from ([`crate::running`]), as [`crate::sessions::Sessions::roots`] gives it for the terminals. A DSH
+    /// chat has no process between its messages, so it is not here; a chat that ended is not listed.
+    pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
+        let g = self.live.lock().unwrap();
+        g.iter().filter(|(_, c)| !c.exited.load(Ordering::SeqCst)).map(|(id, c)| (*id, c.pid, c.cwd.clone())).collect()
     }
 
     /// One thing the person did in chat `id`.
@@ -4545,6 +4555,27 @@ mod tests {
         let work = home.join(".manut").join("accounts").join("claude").join("work");
         assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), format!("cfg={}", work.display()));
         let _ = (std::fs::remove_file(mark), std::fs::remove_dir_all(home));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn roots_name_each_running_chat_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {
+        let c = ChatSessions::default();
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let (_out, sink) = collect();
+        let running = c.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 69".into()], &tmp, None, &[], Box::new(Pi::default()), sink).unwrap();
+        let (ended_out, ended_sink) = collect();
+        c.spawn(vec!["/bin/sh".into(), "-c".into(), "exit 0".into()], &tmp, None, &[], Box::new(Pi::default()), ended_sink).unwrap();
+        assert!(wait_for(|| ended_out.lock().unwrap().iter().any(|o| matches!(o, ChatOut::Exit(..))), 10));
+        // the one that ended is not listed: its number may be someone else's by now
+        let roots = c.roots();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let (id, pid, folder) = &roots[0];
+        assert_eq!(*id, running);
+        assert!(*pid > 1);
+        assert_eq!(folder, &tmp);
+        c.close(running);
+        assert!(c.roots().is_empty());
     }
 
     #[cfg(unix)]

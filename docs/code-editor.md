@@ -78,7 +78,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | The terminal: Kit runs commands here, and you can type too | Has | `sessions/term/`, `terminal/Panel.tsx` |
-| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Part: a terminal row shows its program's last line and age; there is no list of what keeps running | `sessions/termActivity.ts` |
+| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
 
 ## KitCode: the parts
 
@@ -243,6 +243,53 @@ environment, not a value found in the code. The sample for a shop ID is all zero
 The app has no preview of its own yet, so nothing runs with `previewEnv` today; a preview started by the app must use it. And
 nothing saves a secret: Add the shop ID says the vault comes later.
 
+## What keeps running
+
+The Code page lists the commands that this app's own terminals and chats started and that still run, under Kit's
+panel and for the project that panel shows (`src/running/`, mounted by `code/KitPanel.tsx`, so picking another project
+there switches the list). Each row has the command, how long it has run, the port it listens on if there is one, and
+Stop. A line under the list counts what runs in the other projects, so a dev server left in one is never out of sight. The canvas draws it in StatesCodeDev, "Watching it run": a Running tag, "Dev server, 42 minutes, port 3000" and
+a Stop button. It draws no question before Stop, so there is none.
+
+**Where it comes from.** The shell holds the program of each terminal (`Sessions`) and each chat (`ChatSessions`).
+Nothing it already sent says what they started: `session-fg` names only an agent, and a chat's `background` is a
+count. So `src-tauri/src/running.rs` walks down from those programs through the processes they started (libproc on
+macOS, `/proc` on Linux, no program run) and reads nothing else. The page asks (`running_list`, nothing sent) every 3
+seconds while the Code page shows and the window is visible, and the shell answers with each command's session,
+folder, process id, start time, arguments and ports. A process's environment is never kept or sent.
+
+**What is a command.** Under a login shell (a Shell terminal), whatever its person ran from it; a shell they started
+inside it is not one, but what it ran is. Under an agent (a chat, or an agent in a terminal), only what it ran through
+its own shell, `sh -c …`, which is how Claude Code (seen in a live process list) and Codex (`zsh -lc '…'`) run a command;
+an agent that runs commands another way is not read yet. An agent run from a Shell terminal is an agent, not a command. The MCP servers an agent keeps for its whole session, its language servers and its other
+helpers are not commands: a list that showed them, with a Stop, would be a list nobody trusts. A command is listed once
+it has run 5 seconds, so a `git status` never flickers in; a dev server is listed 5 seconds after it starts.
+
+**What a row shows.** The command as a person recognises it: a program by its own name and arguments, a node script by
+its package (`pnpm dev`, not `node …/pnpm.cjs dev`), a shell's `-c` as the script it was given, and Claude Code's wrapper
+(`source snapshot … && eval '<the command>' < /dev/null && pwd -P >| …`) as the command inside it. Any key in it is
+hidden with the cards' masker (`maskSecrets`), and only then is a long command cut at 160 characters, so a cut cannot
+leave the front of a key too short for the masker to know. Then how long it has run (the system's own start time; the
+app's `elapsed` and `duration` words), and the ports: the TCP ports the command, or anything it started, listens on
+(`pnpm dev` listens through the `node` two levels down), as "port 3000" or "ports 5173, 24678", with the rest counted.
+A command names the session it runs in, which opens it: a terminal as its row is named, and a chat, which is a lane, as
+its lane is (`chatIdOf` beside `ptyOf` gives the shell's id for each). A shell of the bottom panel has no session here, so
+its commands name none. Rows are oldest first, and stay in that order.
+
+**Stop** ends the command and everything it started: SIGTERM to each, parent first, and SIGKILL three seconds later to
+whatever still runs. The page tells the shell only which command it is (kind of session, session id, process id, start
+time), never its words. The shell finds that command under that session again before it signals, and signals each
+process only if it is still the one it listed (same program, same start time), so a number the page made up, a process
+that took a finished one's number, a session's own shell, a process deeper in a command's tree, and anything outside the
+app's own sessions are never touched. After Stop the row says Stopping until the command is gone; if it is still there
+after 10 seconds the button comes back, with "Could not stop it. Try again."
+
+**Files.** `src-tauri/src/running.rs` (the walk, its tests with a table of processes and with real ones, `running_list`
+and `running_stop` in `lib.rs`; `Sessions::roots` and `ChatSessions::roots` give the programs; `fg.rs` lends its readers).
+`src/running/model.ts` (the words of a row), `feed.ts` (the polling and Stop's states), `host.ts` (the shell, and a mock
+for a browser: `window.__manutMockRunning` seeds it and `window.__manutRunningCalls` records each stop),
+`RunningPanel.tsx` and `running.css`. `e2e/running.spec.ts` walks it in a browser, with Kit's panel and its project picker.
+
 ## Left for later (no owner needed)
 
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
@@ -266,7 +313,10 @@ nothing saves a secret: Add the shop ID says the vault comes later.
   `session_main_moved` takes as `base`, so the note can sit on the lane's row instead of under the project's dial.
 - The main branch moving: the merge's result shown by the app as a diff after Kit merges (today Kit is asked to show it, and
   asked not to push), and a file both sides changed in the very same way is still counted as needing both changes.
-- Something that keeps running: the commands still running, with their age, port and Stop.
+- What keeps running, inside an open session: the list is on the Code page, for the project Kit's panel shows, and an
+  open session does not show its own commands. Also: Windows has no reader, so the page draws nothing there; a command
+  that left its parent for good (a daemon) is no longer found; a long-lived `sh -c` that an agent keeps for its own use
+  would be listed as a command; and so might a helper a shell's startup file leaves running (not seen yet).
 - The preview itself: the project run beside the lane, started with `previewEnv`, so a secret it reads is a sample. Reading
   what a project needs from its `.env.example` as well as from Kit's changes.
 - Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project

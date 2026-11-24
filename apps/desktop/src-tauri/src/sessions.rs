@@ -849,6 +849,9 @@ struct Live {
     /// The account home variable it was started with (`account_env`): its Codex home, for
     /// [`Sessions::codex_conversation`].
     account_env: Vec<(String, String)>,
+    /// The folder it started in, which the page's Code list groups it by: what keeps running names its commands by it
+    /// ([`Sessions::roots`]).
+    cwd: PathBuf,
 }
 
 impl Live {
@@ -1033,8 +1036,17 @@ impl Sessions {
                 }
             });
         }
-        self.live.lock().unwrap().insert(id, Live { master: pair.master, input, writer_done, killer, pid, exited, out, account_env: account_env.to_vec() });
+        self.live.lock().unwrap().insert(id, Live { master: pair.master, input, writer_done, killer, pid, exited, out, account_env: account_env.to_vec(), cwd: cwd.to_path_buf() });
         Ok(id)
+    }
+
+    /// The program of every terminal session still running, with its id and the folder it started in: what the
+    /// commands that keep running are read from ([`crate::running`]). With [`crate::agent_chat::ChatSessions::roots`] it
+    /// is the one place that names which processes are this app's own, so nothing outside the trees under these is ever
+    /// read or stopped. A session that ended is not listed (its pid may be someone else's by now).
+    pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
+        let g = self.live.lock().unwrap();
+        g.iter().filter(|(_, l)| !l.exited.load(Ordering::SeqCst)).filter_map(|(id, l)| Some((*id, l.pid?, l.cwd.clone()))).collect()
     }
 
     /// Start allow-listed agent `agent` in `cwd`. Anything not in [`AGENTS`] is refused before a process
@@ -2376,6 +2388,24 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn roots_name_each_running_terminal_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {
+        let s = Sessions::default();
+        let (running, _out, _exit) = collect(&s, &["/bin/sh", "-c", "sleep 68"], 80, 24);
+        let (_ended, _o, ended_exit) = collect(&s, &["/bin/sh", "-c", "exit 0"], 80, 24);
+        assert!(wait_for(|| ended_exit.lock().unwrap().is_some()), "no exit");
+        // the one that ended is not listed: its number may be someone else's by now
+        let roots = s.roots();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let (id, pid, folder) = &roots[0];
+        assert_eq!(*id, running);
+        assert!(*pid > 1);
+        assert_eq!(folder, &std::env::temp_dir().canonicalize().unwrap());
+        s.close(running);
+        assert!(s.roots().is_empty());
     }
 
     #[cfg(unix)]
