@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
-import { macEmailCode } from "./approval-link";
+import { macCodeSource, macEmailCode } from "./approval-link";
 import { sha256Hex, verifyAppleToken } from "./auth";
 import { readJsonBody } from "./body";
 import {
-  CODE_KEY_PREFIX, CODE_TTL_SECONDS, codeEmail, codeKey, codeRequestAddress, emailAccount, emailExchange, emailSignIn,
-  emailTenant, EMAIL_TENANT_PREFIX, purgeAt, readCodeRecord, RESEND_SECONDS, sendCode, sixDigitCode, tryCode,
-  type EmailSignInEnv,
+  CODE_DAY_KEY, CODE_KEY_PREFIX, CODE_TTL_SECONDS, codeEmail, codeKey, codeRequestAddress, codeSource, countCodeDay,
+  emailAccount, emailExchange, emailSignIn, emailTenant, EMAIL_TENANT_PREFIX, purgeAt, readCodeDay, readCodeRecord,
+  RESEND_SECONDS, sendCode, sixDigitCode, tryCode, type EmailSignInEnv,
 } from "./email-code";
 import { deliver } from "./email-sender";
 import { timingSafeEqual } from "./people";
@@ -285,6 +285,10 @@ export class AuthObject extends DurableObject {
   /// the same for every address, whether or not Manut AI or any shop knows it, since nothing here looks the address up,
   /// and it does not wait for the email: the object stays up while the send is pending, and whatever the email service
   /// says goes to the log as an error code alone (email-sender.ts).
+  ///
+  /// Every ask is counted against where it came from: the Worker names the source group its ingress limit counted
+  /// (`x-code-source`), which is kept only as tags under the secret (approval-link.ts, `macCodeSource`), and an ask
+  /// without one is refused before anything is kept.
   private async emailCode(request: Request): Promise<Response> {
     const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return Response.json({ error: parsed.error }, { status: parsed.status });
@@ -292,22 +296,30 @@ export class AuthObject extends DurableObject {
     if (!address) return Response.json({ error: "invalid_request" }, { status: 400 });
     const sender = emailSignIn(this.authEnv);
     if (!sender) return Response.json({ error: "email_not_configured" }, { status: 400 });
+    const source = codeSource(request.headers.get("x-code-source"));
+    if (!source) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const secret = this.authEnv.APPROVAL_LINK_SECRET;
     const account = await emailAccount(address);
     const code = sixDigitCode();
-    const mac = await macEmailCode(this.authEnv.APPROVAL_LINK_SECRET, account, code);
+    const mac = await macEmailCode(secret, account, code);
+    const [fromHere, fromAnywhere] = await Promise.all([macCodeSource(secret, source, account), macCodeSource(secret, source)]);
     const key = codeKey(account);
-    // The limits are read and the new code stored in one transaction, so two requests for one address at once send one
-    // code. A new code replaces the one before it.
+    // The limits are read and the new code stored and counted in one transaction, so two requests for one address at
+    // once send one code, and the day's count never misses a send. The day's limits come first: they are the same for
+    // every address. A new code replaces the one before it.
     const decided = await this.ctx.storage.transaction(async (storage) => {
-      const decision = sendCode(readCodeRecord(await storage.get(key)), mac, Date.now() / 1_000);
-      if (!decision.ok) return decision;
-      await storage.put(key, decision.record);
+      const now = Date.now() / 1_000;
+      const today = countCodeDay(readCodeDay(await storage.get(CODE_DAY_KEY), now), fromAnywhere, now);
+      if (!today.ok) return today;
+      const decision = sendCode(readCodeRecord(await storage.get(key)), mac, now, fromHere);
+      if (!decision.ok) return { ...decision, status: 429, error: "too_many_codes" } as const;
+      await storage.put({ [key]: decision.record, [CODE_DAY_KEY]: today.today });
       await alarmBy(storage, purgeAt(decision.record));
       return decision;
     });
     if (!decided.ok) {
-      return Response.json({ error: "too_many_codes", retryAfter: decided.retryAfter },
-        { status: 429, headers: { "retry-after": String(decided.retryAfter) } });
+      return Response.json({ error: decided.error, retryAfter: decided.retryAfter },
+        { status: decided.status, headers: { "retry-after": String(decided.retryAfter) } });
     }
     this.ctx.waitUntil(deliver(sender, codeEmail(address, code)));
     return Response.json({ sent: true, expiresIn: CODE_TTL_SECONDS, resendIn: RESEND_SECONDS });

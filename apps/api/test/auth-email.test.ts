@@ -2,7 +2,10 @@ import { createExecutionContext, env, runDurableObjectAlarm, runInDurableObject,
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../src/auth";
 import { AuthObject } from "../src/auth-object";
-import { CODE_TTL_SECONDS, DAILY_CODES, DAY_SECONDS } from "../src/email-code";
+import {
+  ADDRESS_DAILY_CODES, ALL_DAILY_CODES, CODE_DAY_KEY, CODE_TTL_SECONDS, codeDayOf, DAILY_CODES, DAY_SECONDS,
+  SOURCE_DAILY_CODES,
+} from "../src/email-code";
 import { testOutbox } from "../src/email-sender";
 import worker, { type Env } from "../src/index";
 import {
@@ -33,6 +36,27 @@ function post(path: string, body: unknown): Promise<Response> {
 }
 
 const askCode = (email: string) => post("/v1/auth/email/code", { email });
+
+/// The test config with the code route's ingress limit letting every request through, so a test can ask more than ten
+/// times a minute from one source and reach the auth object's own limits, which count per address and per source.
+const unlimited = { ...bindings, AUTH_CODE_LIMITER: { limit: async () => ({ success: true }) } } as unknown as Env;
+
+/// Asks for a code for `email` from `ip`, through the Worker, past its per-minute limit.
+async function askFrom(email: string, ip: string): Promise<Response> {
+  const body = JSON.stringify({ email });
+  const context = createExecutionContext();
+  const response = await worker.fetch(new Request(`${API}/v1/auth/email/code`, { method: "POST", body,
+    headers: { "content-type": "application/json", "content-length": String(body.length), "cf-connecting-ip": ip } }),
+  unlimited, context);
+  await waitOnExecutionContext(context);
+  return response;
+}
+
+/// A new IPv6 /64, as a source: each call gives another address inside it.
+function sourceIn(): (i: number) => string {
+  const prefix = crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":");
+  return (i) => `2001:db8:${prefix}::${(i + 1).toString(16)}`;
+}
 
 const signInWith = (email: string, code: string, deviceId = `device-${crypto.randomUUID()}`) =>
   post("/v1/auth/exchange", { provider: "email", email, code, deviceId });
@@ -258,21 +282,128 @@ describe("how often a code is sent", () => {
     expect((await signInWith(email, second)).status).toBe(200);
   });
 
-  it("sends an address ten codes in any 24 hours, then waits until the first is a day old", async () => {
+  it("sends an address ten codes in any 24 hours asked from one source, then that source waits until the first is a day old",
+    async () => {
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now");
+      const email = address();
+      const here = sourceIn();
+      for (let i = 0; i < DAILY_CODES; i++) {
+        clock.mockReturnValue(now + i * 60_000);
+        expect((await askFrom(email, here(i))).status).toBe(200);
+      }
+      clock.mockReturnValue(now + DAILY_CODES * 60_000);
+      // Any address of the same /64 is the same source.
+      const capped = await askFrom(email, here(99));
+      expect(capped.status).toBe(429);
+      expect(capped.headers.get("retry-after")).toBe(String(DAY_SECONDS - DAILY_CODES * 60));
+      expect(await capped.json()).toEqual({ error: "too_many_codes", retryAfter: DAY_SECONDS - DAILY_CODES * 60 });
+      clock.mockReturnValue(now + DAY_SECONDS * 1000);
+      expect((await askFrom(email, here(100))).status).toBe(200);
+      expect(sentTo(email)).toBe(DAILY_CODES + 1);
+    });
+
+  it("lets the address's owner ask from their own network after a stranger's ten from another", async () => {
+    // The review's proof (24 Nov 2026): ten asks for an address from one source, spread over ten minutes, refused it
+    // every code for a day, from anywhere, and a stranger could do that every day.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    const email = address("owner");
+    const stranger = sourceIn();
+    for (let i = 0; i < DAILY_CODES; i++) {
+      clock.mockReturnValue(now + i * 60_000);
+      expect((await askFrom(email, stranger(i))).status).toBe(200);
+    }
+    clock.mockReturnValue(now + DAILY_CODES * 60_000);
+    expect((await askFrom(email, stranger(DAILY_CODES))).status).toBe(429);
+    const owner = await askFrom(email, sourceIn()(1));
+    expect(owner.status).toBe(200);
+    expect((await signInWith(email, codeFor(email))).status).toBe(200);
+  });
+
+  it("sends an address thirty codes in any 24 hours from every source together, then waits for the oldest", async () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now");
     const email = address();
-    for (let i = 0; i < DAILY_CODES; i++) {
+    const sources = [sourceIn(), sourceIn(), sourceIn()];
+    for (let i = 0; i < ADDRESS_DAILY_CODES; i++) {
       clock.mockReturnValue(now + i * 60_000);
-      expect((await askCode(email)).status).toBe(200);
+      expect((await askFrom(email, sources[i % 3]!(i))).status).toBe(200);
     }
-    clock.mockReturnValue(now + DAILY_CODES * 60_000);
-    const capped = await askCode(email);
+    clock.mockReturnValue(now + ADDRESS_DAILY_CODES * 60_000);
+    const capped = await askFrom(email, sourceIn()(1));
+    expect(await capped.json()).toEqual({ error: "too_many_codes", retryAfter: DAY_SECONDS - ADDRESS_DAILY_CODES * 60 });
+    expect(sentTo(email)).toBe(ADDRESS_DAILY_CODES);
+  });
+
+  it("sends one source twenty codes a day across every address, then it waits until midnight in Bangkok", async () => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const here = sourceIn();
+    for (let i = 0; i < SOURCE_DAILY_CODES; i++) expect((await askFrom(address(), here(i))).status).toBe(200);
+    const email = address();
+    const capped = await askFrom(email, here(SOURCE_DAILY_CODES));
+    const midnight = Math.ceil(((codeDayOf(now / 1000) + 1) * DAY_SECONDS - 7 * 3600) - now / 1000);
     expect(capped.status).toBe(429);
-    expect(await capped.json()).toEqual({ error: "too_many_codes", retryAfter: DAY_SECONDS - DAILY_CODES * 60 });
-    clock.mockReturnValue(now + DAY_SECONDS * 1000);
-    expect((await askCode(email)).status).toBe(200);
-    expect(sentTo(email)).toBe(DAILY_CODES + 1);
+    expect(await capped.json()).toEqual({ error: "too_many_codes", retryAfter: midnight });
+    expect(sentTo(email)).toBe(0);
+    // Another source still asks for that address, and an IPv4 address is a source of its own.
+    expect((await askFrom(email, sourceIn()(1))).status).toBe(200);
+    expect((await askFrom(address(), "192.0.2.17")).status).toBe(200);
+  });
+
+  it("pauses every code once three hundred went out today, until midnight in Bangkok", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    // The day's count as three hundred sends across many sources would leave it.
+    await runInDurableObject(auth(), (_instance, state) =>
+      state.storage.put(CODE_DAY_KEY, { day: codeDayOf(now / 1000), sent: ALL_DAILY_CODES, from: {} }));
+    const email = address();
+    const paused = await askFrom(email, sourceIn()(1));
+    const midnight = Math.ceil(((codeDayOf(now / 1000) + 1) * DAY_SECONDS - 7 * 3600) - now / 1000);
+    expect(paused.status).toBe(503);
+    expect(paused.headers.get("retry-after")).toBe(String(midnight));
+    expect(await paused.json()).toEqual({ error: "codes_paused", retryAfter: midnight });
+    expect(sentTo(email)).toBe(0);
+    // The address's own record was never touched, and the next day starts again.
+    const key = `email-code:${await sha256Hex(email)}`;
+    expect(await runInDurableObject(auth(), (_instance, state) => state.storage.get(key))).toBeUndefined();
+    clock.mockReturnValue(now + midnight * 1000);
+    expect((await askFrom(email, sourceIn()(1))).status).toBe(200);
+    expect(sentTo(email)).toBe(1);
+  });
+
+  it("counts three hundred a day through the auth object, each from where it was asked", async () => {
+    const stub = bindings.AUTH.get(bindings.AUTH.idFromName(`email-day-${crypto.randomUUID()}`));
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const statuses: number[] = [];
+    for (let i = 0; i < ALL_DAILY_CODES; i++) {
+      // Fifteen sources, twenty each: no source past its own day.
+      const response = await authCall(stub, "/email-code", { email: address() }, { "x-code-source": `192.0.2.${i % 15}` });
+      statuses.push(response.status);
+    }
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    const paused = await authCall(stub, "/email-code", { email: address() }, { "x-code-source": "198.51.100.1" });
+    expect(paused.status).toBe(503);
+    expect(await paused.json()).toMatchObject({ error: "codes_paused" });
+    const day = await runInDurableObject(stub, (_instance, state) => state.storage.get<{ sent: number;
+      from: Record<string, number> }>(CODE_DAY_KEY));
+    expect(day!.sent).toBe(ALL_DAILY_CODES);
+    expect(Object.values(day!.from)).toEqual(Array<number>(15).fill(SOURCE_DAILY_CODES));
+    // The day's record names no source: only tags.
+    for (const tagged of Object.keys(day!.from)) expect(tagged).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(day)).not.toContain("192.0.2");
+  });
+
+  it("refuses an ask the Worker names no source for, and keeps nothing", async () => {
+    const stub = bindings.AUTH.get(bindings.AUTH.idFromName(`email-sourceless-${crypto.randomUUID()}`));
+    for (const headers of [{}, { "x-code-source": "" }, { "x-code-source": "x".repeat(65) }]) {
+      const response = await authCall(stub, "/email-code", { email: address() }, headers);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_request" });
+    }
+    expect(await runInDurableObject(stub, async (_instance, state) => (await state.storage.list()).size)).toBe(0);
   });
 
   it("keeps an address's record a day after its last code, then the alarm deletes it", async () => {
@@ -280,12 +411,15 @@ describe("how often a code is sent", () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     const email = address();
-    expect((await authCall(stub, "/email-code", { email })).status).toBe(200);
+    expect((await authCall(stub, "/email-code", { email }, { "x-code-source": "192.0.2.17" })).status).toBe(200);
     const key = `email-code:${await sha256Hex(email)}`;
     const read = () => runInDurableObject(stub, async (_instance, state) =>
       ({ record: await state.storage.get(key), alarm: await state.storage.getAlarm() }));
     const before = await read();
-    expect(before.record).toMatchObject({ code: { wrong: 0 }, sent: [now / 1000] });
+    // The send's source is kept as a tag, never as the address it came from.
+    expect(before.record).toMatchObject({ code: { wrong: 0 },
+      sent: [{ at: now / 1000, from: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) }] });
+    expect(JSON.stringify(before.record)).not.toContain("192.0.2.17");
     expect(before.alarm! - (now + DAY_SECONDS * 1000)).toBeGreaterThanOrEqual(0);
     expect(before.alarm! - (now + DAY_SECONDS * 1000)).toBeLessThanOrEqual(1);
     clock.mockReturnValue(now + DAY_SECONDS * 1000 - 1000);
@@ -388,6 +522,27 @@ describe("what an answer tells", () => {
     expect(await seen(await signInWith(known, otherThan(codeFor(known)))))
       .toEqual(await seen(await signInWith(unknown, otherThan(codeFor(unknown)))));
     expect(await seen(await signInWith(idleKnown, "123456"))).toEqual(await seen(await signInWith(idleUnknown, "123456")));
+  });
+
+  it("counts a known address's asks per source exactly as one nobody knows, and refuses both alike", async () => {
+    const known = address("fon");
+    await signIn(known);
+    const shop = await setupShop();
+    expect((await invite(shop, "Fon", { kind: "email", address: known })).status).toBe(200);
+    const unknown = address("nobody");
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    const seen = async (response: Response) => [response.status, response.headers.get("content-type"),
+      response.headers.get("retry-after"), await response.text()];
+    const [forKnown, forUnknown] = [sourceIn(), sourceIn()];
+    for (let i = 0; i < DAILY_CODES; i++) {
+      clock.mockReturnValue(now + i * 60_000);
+      expect(await seen(await askFrom(known, forKnown(i)))).toEqual(await seen(await askFrom(unknown, forUnknown(i))));
+    }
+    clock.mockReturnValue(now + DAILY_CODES * 60_000);
+    const refused = await seen(await askFrom(known, forKnown(DAILY_CODES)));
+    expect(refused[0]).toBe(429);
+    expect(refused).toEqual(await seen(await askFrom(unknown, forUnknown(DAILY_CODES))));
   });
 
   it("lets an email invite match the address a code signed in", async () => {
@@ -496,7 +651,7 @@ describe("where the code never is", () => {
     const answer = await runInDurableObject(stub, async (_instance, state) => {
       const object = new AuthObject(state, envWith({ TEST_EMAIL_OUTBOX: undefined, EMAIL: refusing }));
       const response = await object.fetch(new Request("https://auth/email-code", { method: "POST",
-        body: JSON.stringify({ email }) }));
+        headers: { "x-code-source": "192.0.2.17" }, body: JSON.stringify({ email }) }));
       return [response.status, await response.text()];
     });
     expect(answer).toEqual([200, JSON.stringify({ sent: true, expiresIn: 600, resendIn: 60 })]);

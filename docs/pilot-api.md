@@ -1604,13 +1604,25 @@ Service. Then the environment's block in `wrangler.jsonc` gets `"send_email": [{
 
 Body exactly `{ email }`. It is limited per source address, an IPv4 address or an IPv6 /64 ("Security rules", above),
 before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed and configured as the exchange's limiter): 429
-`rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding or a source. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
-characters, one `@` between two parts with no spaces.
+`rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable` without the binding or a source. The address is
+normalized as Apple's verified email is: trimmed and lower-cased, at most 254 characters, one `@` between two parts with
+no spaces.
+
+How many codes go out (24 Nov 2026; `docs/decisions.md`), each counted when it is sent, in one auth object transaction
+with the address's record, against the source the ingress limit counted:
+
+- An address gets at most one code a minute, from anywhere.
+- An address gets at most ten in any 24 hours asked from one source, and thirty from every source together. A stranger
+  asking ten times from their own network leaves the address's owner asking from theirs; filling an address's day takes
+  three sources, and thirty is still all a mailbox can be sent in a day.
+- One source has at most twenty codes sent a day across every address, and every source together three hundred. The
+  day is Bangkok's: both start again at midnight there.
 
 | Status | Body | When |
 | --- | --- | --- |
 | 200 | `{ sent: true, expiresIn: 600, resendIn: 60 }` | A code went to the email service for the address. The same for every address: nothing here looks the address up, so the answer cannot say whether Manut AI or any shop knows it, and it never waits for the email or says what the service did with it |
-| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours. `retryAfter` is whole seconds until it may have another |
+| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours asked from this source, or thirty from every source; or this source had twenty sent today. `retryAfter` is whole seconds until one may be sent, after every limit that holds |
+| 503 | `{ error: "codes_paused", retryAfter }`, with `retry-after` | Three hundred codes went out today across every address. Codes are paused for everyone until midnight in Bangkok, which `retryAfter` counts down to. Nothing is sent or kept |
 | 400 | `{ error: "invalid_request" }` | The body is not exactly `{ email }` with an address |
 | 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
 | 411, 413 | `length_required`, `body_too_large` | As the exchange |
@@ -1646,17 +1658,23 @@ characters, as Apple's.
   by the address the owner invited, so either sign-in that verified it opens their helper sessions: the owner sees one
   helper, the other sign-in arrives as a new device ("Mint signed in on a new device"), and removing the helper ends
   both. The helper's own list of shops (`GET /v1/shops`) is per sign-in until they open the shop with the other.
-- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows.
-  What they do show is whether someone asked for a code for the address lately (a 429, or `wrong_code` rather than
-  `code_ended`), whoever asked.
+- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows:
+  no limit looks the address up. What they do show is whether someone asked for a code for the address lately (a 429,
+  or `wrong_code` rather than `code_ended`), whoever asked, and whether this source or everyone has used today's codes.
 
 ### What is kept, and where the code never is
 
 - In the auth object, under `email-code:<SHA-256 of the address>`: the live code's HMAC-SHA256 under
   `APPROVAL_LINK_SECRET`, in a domain tag of its own (`manut-ai/email-code/v1.`, over the address's hash and the code),
-  when it ends and its wrong tries; and when each code of the last 24 hours was sent. Never the code, never the address.
-  The alarm deletes the record a day after its last send, and a tenant wipe of the email identity deletes it with the
-  sessions. Changing `APPROVAL_LINK_SECRET` ends every live code, as it ends every link.
+  when it ends and its wrong tries; and when each code of the last 24 hours was sent, and from which source, as a tag:
+  an HMAC-SHA256 under the same secret in a domain tag of its own (`manut-ai/email-code-source/v1.`, over the address's
+  hash and the source group), so no one can read a source's address back from it, and two addresses' records cannot be
+  joined by where their asks came from. Never the code, never the address, never a source's address. The alarm deletes
+  the record a day after its last send, and a tenant wipe of the email identity deletes it with the sessions. Changing
+  `APPROVAL_LINK_SECRET` ends every live code, as it ends every link, and starts every source's count again.
+- Beside them, `email-sends:day`: the Bangkok day, how many codes went out on it, and how many from each source, by the
+  source's tag for no one address (the same HMAC over no hash and the group). It holds counts and tags only, at most one
+  tag a send, and the next day's first send replaces it.
 - The code is never in a log, the audit log, an error, an answer or a URL: it goes only into the email. A send the email
   service refuses is logged as the service's error code alone (`E_RECIPIENT_SUPPRESSED` and the like), never its
   message, which may name the address.

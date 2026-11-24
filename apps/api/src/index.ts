@@ -687,14 +687,16 @@ export default {
         if (!emailSignIn(env)) return json({ error: "email_not_configured" }, 400);
       }
       const target = codeRoute ? "email-code" : url.pathname.endsWith("exchange") ? "exchange" : "refresh";
+      const headers = new Headers({ "content-type": "application/json" });
+      // A code is counted against where it was asked from as well as the address (email-code.ts): the object is told
+      // the source group the ingress limit counted, and nothing else about the request.
+      if (codeRoute) {
+        const source = relaySourceGroup(request.headers.get("cf-connecting-ip"));
+        if (!source) return json({ error: "rate_limit_unavailable" }, 503);
+        headers.set("x-code-source", source);
+      }
       const stub = env.AUTH.get(env.AUTH.idFromName("auth"));
-      return stub.fetch(
-        new Request(`https://auth/${target}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: parsed.raw,
-        }),
-      );
+      return stub.fetch(new Request(`https://auth/${target}`, { method: "POST", headers, body: parsed.raw }));
     }
     if (request.method === "DELETE" && url.pathname === "/v1/auth/session") {
       const authorization = request.headers.get("authorization");
