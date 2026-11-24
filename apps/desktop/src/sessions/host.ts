@@ -12,6 +12,8 @@ import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
+import { readView, type GitView } from "../code/moved";
+import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -112,6 +114,11 @@ export interface SessionHost extends HistoryHost {
    *  Rejects with a short code (`not_a_repository`, `no_commit`, `taken`, `git_missing`) or git's own words. Absent in a
    *  shell that is older than lanes: the session then starts on the branch the folder is on. */
   laneBranch?(cwd: string, names: string[]): Promise<{ branch: string; base: string }>;
+  /** The main branch moving while Kit worked (src/code/moved.ts): what the person's own `git` says of `cwd`, read-only
+   *  (src-tauri/src/git_moved.rs): its branch, the branch it started from, and the files each side changed since. `show`
+   *  are the paths whose two diffs are wanted; `base` names the branch it started from (none: `origin/HEAD`'s, else
+   *  `main`, else `master`). null when there is nothing to say: not a repository, a detached HEAD, no git, the base itself. */
+  mainMoved(cwd: string, o?: { base?: string | null; show?: string[] }): Promise<GitView | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -259,6 +266,10 @@ export class TauriHost implements SessionHost {
     const { invoke } = await this.core();
     return invoke<{ branch: string; base: string }>("lane_branch", { cwd, names });
   }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    const { invoke } = await this.core();
+    return readView(await invoke<unknown>("session_main_moved", { cwd, base: o.base ?? null, show: o.show ?? [] }));
+  }
   async reveal(cwd: string) {
     const { invoke } = await this.core();
     await invoke("session_reveal", { cwd });
@@ -391,6 +402,7 @@ export interface MockCall {
     | "import.read"
     | "reveal"
     | "terminal"
+    | "main.moved"
     | "custom.preview"
     | "custom.botPreview"
     | "custom.confirm"
@@ -421,6 +433,8 @@ export interface MockCall {
   /** lane.branch: the branch the shell made for a lane, and the one it was made from */
   branch?: string;
   base?: string;
+  /** main.moved: the paths whose two diffs were asked for */
+  show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
   key?: string;
 }
@@ -478,6 +492,9 @@ type MockGlobals = {
   __manutBranches?: Record<string, string>;
   /** e2e: the names of branches that exist already, so a lane's branch of that name is made with a number after it */
   __manutMockTaken?: string[];
+  /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
+   *  lane whose main moved; a folder left out: nothing to say) */
+  __manutMoved?: Record<string, GitView>;
   /** e2e: these agents are an old version that never answers in chat mode (the shell's start deadline ends them) */
   __manutMockNoChat?: AgentId[];
   /** ACP agents the mock host treats as signed in (the others of MOCK_SIGNED_OUT answer -32000). */
@@ -920,6 +937,14 @@ export class MockHost implements SessionHost {
     this.log({ op: "lane.branch", cwd, branch, base });
     return { branch, base };
   }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    this.log({ op: "main.moved", cwd, show: o.show ?? [] });
+    const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
+    if (!v) return null;
+    // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
+    const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
+    return { ...v, both };
+  }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });
   }
@@ -1314,12 +1339,21 @@ class MockChat {
       }
       if (text.startsWith("/kit ")) {
         // Kit's states on the Code page (src/code/): an ask as the shell writes it (agent_chat.rs), a key typed into a
-        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key
+        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key; `/kit shop` a change that reads
+        // the shop ID from the environment
         const word = text.slice(5).trim();
         if (word === "key") {
           const lines = ["@@ -1,2 +1,3 @@", " export const CURRENCY = 'THB';", '+export const PROMPTPAY_KEY = "sk-FAKE0000000000000000TEST";'];
           this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/config.ts", kind: "update", lines, added: 1, removed: 0 }] }));
           this.say("I put the PromptPay key in src/config.ts.", 120);
+          this.at(400, () => this.end("done"));
+          return;
+        }
+        if (word === "shop") {
+          // a change whose code reads the PromptPay shop ID from the environment, as the canvas's checkout needs (src/code/preview.ts)
+          const lines = ["@@ -12,3 +12,4 @@", "   const total = order.items.reduce(sum, 0);", "+  const qr = promptPayQR(process.env.PROMPTPAY_SHOP_ID, total);", "   return <PayPanel amount={total} qr={qr} />;"];
+          this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/checkout.tsx", kind: "update", lines, added: 1, removed: 0 }] }));
+          this.say("The QR code reads the shop ID from PROMPTPAY_SHOP_ID.", 120);
           this.at(400, () => this.end("done"));
           return;
         }
@@ -1350,6 +1384,7 @@ class MockChat {
         const asks: Record<string, { title: string; command: string; tool: AskTool }> = {
           install: run("pnpm add qrcode"),
           test: run("pnpm test"),
+          merge: run("git merge main"),
           commit: run("git commit -m 'Add a PromptPay QR'"),
           deploy: run("wrangler deploy"),
           edit: { title: "Allow Edit to change src/checkout.tsx?", command: "", tool: { kind: "edit", name: "Edit", paths: [`${cwd}/src/checkout.tsx`], cwd } },
