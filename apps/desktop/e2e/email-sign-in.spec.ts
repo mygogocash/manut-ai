@@ -1,14 +1,39 @@
 // Signing in by a code sent by email, in Settings › Developer (src/settings/EmailSignIn.tsx): in Practice, where the
 // screens run on a pretend code that they say aloud and no email is ever sent, and, over a stubbed desktop shell, against
 // an API that has signing in by email switched off, which is what every real environment answers until the owner turns it
-// on (docs/sign-in-options.md, "The desktop").
+// on (docs/sign-in-options.md, "The desktop"). Both run on the app's own runtime, so the page asks for it
+// (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which has no Practice and no
+// Connected.
 import { expect, test, type Page } from "@playwright/test";
-import { chatOpen } from "./start";
+
+const PORT = Number(process.env.MANUT_PORT || 5307);
+
+test.use({
+  storageState: {
+    cookies: [],
+    origins: [
+      {
+        origin: `http://127.0.0.1:${PORT}`,
+        localStorage: [
+          { name: "manut.onboarded", value: "1" },
+          { name: "manut.lang", value: "en" },
+          // quiet hours would hold notifications back by the hour the suite runs at
+          { name: "manut.notify.quiet", value: "00:00-00:00" },
+        ],
+      },
+    ],
+  },
+});
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __MANUT_IN_PROCESS__: boolean }).__MANUT_IN_PROCESS__ = true;
+  });
+});
 
 /** Settings › Developer, as a person gets there: the account row, then Developer in Settings' list. */
 async function openDeveloper(page: Page) {
   await page.goto("/");
-  await chatOpen(page);
   await page.getByTestId("nav-settings").click();
   await page.getByTestId("settings-nav-developer").click();
   await expect(page.getByTestId("dev-email")).toBeVisible();
@@ -41,6 +66,8 @@ test.describe("in Practice", () => {
   test("asks for a code, says the pretend one aloud, takes a wrong code and a pasted right one, and sends nothing", async ({ page }) => {
     const requests = apiRequests(page);
     await openDeveloper(page);
+    // the app is on its own Practice runtime, not the mock bridge's
+    await expect(page.getByTestId("mode-line")).toHaveText("Practice mode");
     const form = page.getByTestId("dev-email");
     await expect(form).toContainText("Practice: nothing is sent and nothing is kept.");
     // Practice has no API, so there is no Apple row and no keychain to sign in to
@@ -222,10 +249,9 @@ test.describe("connected to an API that has signing in by email off", () => {
   });
 
   test("says plainly that signing in by email isn't on yet, and what to do instead", async ({ page }) => {
-    await page.goto("/");
-    await page.getByTestId("nav-settings").click();
-    await page.getByTestId("settings-nav-developer").click();
-    await expect(page.getByTestId("dev-email")).toBeVisible();
+    await openDeveloper(page);
+    // the app is on its connected runtime, which asks the API through the stubbed shell
+    await expect(page.getByTestId("mode-line")).toContainText("dev.manut.xyz");
     // Apple's way stays beside it
     await expect(page.getByTestId("dev-token")).toBeVisible();
     await expect(page.getByTestId("dev-sign-in")).toBeVisible();
