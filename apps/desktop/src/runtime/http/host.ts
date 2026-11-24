@@ -56,6 +56,7 @@ import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { DeviceWatch, readDevices } from "./devices";
+import { memoryHandlers } from "./memory";
 import { peopleHandlers } from "./people";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf, type MakeShopRefusal } from "../makeShop";
 import type { TeamState } from "../mission";
@@ -1020,13 +1021,9 @@ export class HttpHost {
       },
       "team.pause": () => this.pauseTeam(true),
       "team.resume": () => this.pauseTeam(false),
-      // What the team knows: the API serves a shop's memory to operators only (admin routes), so no session can read or
-      // change it. Nothing the owner types is sent anywhere.
-      "memory.list": notYetShow,
-      "memory.remember": notYet,
-      "memory.confirm": notYet,
-      "memory.correct": notYet,
-      "memory.forget": notYet,
+      // What the team knows: the shop's facts, read and changed with the owner's session (memory.ts). Held in the page that asked,
+      // and in no read of the shop that is kept.
+      ...memoryHandlers(this.ownerLink()),
       // The team's routines, then the shop's other schedules, for the shop viewed (its owner's to see: a shop the person helps at
       // is refused). The owner pauses and resumes a routine through the API's routines routes, for the shop its list was read
       // for; making and removing one wait for a later slice, and a schedule no session may change.

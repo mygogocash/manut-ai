@@ -3,6 +3,8 @@
 // shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
 // without a shell or a network.
 import { decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
+import { createRoutine, describeTrigger, nextRun, type ActionKind, type Trigger } from "@manut/routine-rules";
+import { confirm as confirmFact, correct as correctFact, emptyState, forget as forgetFact, propose, remember as rememberFact, type FactSource, type MemoryState, type Result } from "@manut/shop-memory";
 import { vi } from "vitest";
 import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
 import { ApiSession } from "./session";
@@ -444,6 +446,19 @@ export interface ServedShops {
    *  owner's changes to the team leave it; a shop the person owns with none listed here has no tasks, no routines and
    *  all three members on */
   work: Record<string, ShopWorkJson>;
+  /** what each shop's team knows, by shop id, in `@manut/shop-memory`'s own state: the owner's own routes read and change it, as
+   *  apps/api's do (`/v1/memory`); a shop with none listed here knows nothing yet. Seed it with `learned`. */
+  memory: Record<string, MemoryState>;
+}
+
+/** What a shop's team has learned: each text with where it came from, in the order given, as the package's `propose` keeps them
+ *  (a customer's words wait for the owner). */
+export function learned(...facts: { text: string; source?: FactSource; at?: number }[]): MemoryState {
+  return facts.reduce((state, f, i) => {
+    const made = propose(state, f.text, f.source ?? { kind: "owner" }, f.at ?? T0 + i * 1000);
+    if (!made.ok) throw new Error(`the fixture's fact "${f.text}" was refused: ${made.reason}`);
+    return made.state;
+  }, emptyState());
 }
 
 /** A shop's work as the fake API keeps it: the export's tasks, schedules and attention items, and the team's routines. */
@@ -532,6 +547,7 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     refused: new Set(),
     opened: {},
     work: Object.fromEntries(list.filter((s) => s.role === "owner").map((s) => [s.id, { ...emptyWork(), ...work[s.id] }])),
+    memory: {},
   };
   /** The shop a shop-session request is for, or the 401 to answer; null when the bearer is not a shop session. */
   const shopOf = (req: Recorded): { shop: string; role: "owner" | "helper" } | FakeAnswer | null => {
@@ -602,5 +618,103 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
       }),
     );
   }
+  ownerMemoryRoutes(api, served, owned, now);
+  ownerRoutineRoutes(api, owned, now);
   return served;
+}
+
+type Owned = (req: Recorded, answer: (shop: string, work: ShopWorkJson) => FakeAnswer) => FakeAnswer;
+
+/** What apps/api's `memory.ts` answers a session: its own shop's facts (`GET /v1/memory`) and the owner's four changes, each a body of
+ *  exactly the fields it reads, through the package. A helper's session is 403 `owner_only`. */
+function ownerMemoryRoutes(api: FakeApi, served: ServedShops, owned: Owned, now: () => number): void {
+  const STATUS: Record<string, number> = { invalid_text: 400, invalid_source: 400, not_found: 404, already_known: 409, forgotten: 409, full: 409 };
+  const exact = (body: unknown, keys: readonly string[]): body is Record<string, unknown> =>
+    !!body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === keys.length && keys.every((k) => k in (body as object));
+  const stateOf = (shop: string): MemoryState => (served.memory[shop] ??= emptyState());
+  api.on("GET", "/v1/memory", (req) =>
+    owned(req, (shop) => {
+      const state = stateOf(shop);
+      return { status: 200, json: { tenant: shop, facts: state.facts, forgottenCount: state.forgotten.length } };
+    }),
+  );
+  type Done = { ok: true; state: MemoryState; reply: unknown } | { ok: false; reason: string };
+  const fact = (r: Result): Done => (r.ok ? { ok: true, state: r.state, reply: r.fact } : { ok: false, reason: r.reason });
+  const change = (path: string, keys: readonly string[], run: (state: MemoryState, body: Record<string, unknown>) => Done) =>
+    api.on("POST", path, (req) =>
+      owned(req, (shop) => {
+        if (!exact(req.body, keys)) return { status: 400, json: { error: "invalid_request" } };
+        const body = req.body as Record<string, unknown>;
+        if ("id" in body && !(typeof body.id === "string" && body.id.length > 0 && body.id.length <= 64)) return { status: 400, json: { error: "invalid_request" } };
+        const done = run(stateOf(shop), body);
+        if (!done.ok) return { status: STATUS[done.reason] ?? 400, json: { error: done.reason } };
+        served.memory[shop] = done.state;
+        return { status: 200, json: done.reply };
+      }),
+    );
+  change("/v1/memory/remember", ["text"], (state, body) => fact(rememberFact(state, body.text as string, now())));
+  change("/v1/memory/confirm", ["id"], (state, body) => fact(confirmFact(state, body.id as string, now())));
+  change("/v1/memory/correct", ["id", "text"], (state, body) => fact(correctFact(state, body.id as string, body.text as string, now())));
+  change("/v1/memory/forget", ["id"], (state, body) => {
+    const gone = forgetFact(state, body.id as string);
+    return gone.ok ? { ok: true, state: gone.state, reply: { id: body.id } } : { ok: false, reason: gone.reason };
+  });
+}
+
+const WORK: Record<string, readonly ActionKind[]> = { nam: ["reply"], pim: ["draft", "send"], ton: ["brief", "draft", "send", "pay", "delete"] };
+
+/** What apps/api's `routines.ts` answers a session that makes or removes a routine (`POST /v1/routines`, `/v1/routines/remove`): the
+ *  package builds the routine and the API names who runs it, a body is exactly the fields the route reads, a team keeps at most 50,
+ *  and a routine that is not there is 404. */
+function ownerRoutineRoutes(api: FakeApi, owned: Owned, now: () => number): void {
+  let made = 0;
+  api.on("POST", "/v1/routines", (req) =>
+    owned(req, (_shop, w) => {
+      const body = req.body;
+      const FIELDS = ["name", "action", "trigger", "timeZone", "asksFirst", "member"];
+      if (!body || typeof body !== "object" || Array.isArray(body) || !Object.keys(body).every((k) => FIELDS.includes(k))) return { status: 400, json: { error: "invalid_request" } };
+      const input = body as Record<string, unknown>;
+      if (input.asksFirst !== undefined && typeof input.asksFirst !== "boolean") return { status: 400, json: { error: "invalid_request" } };
+      made += 1;
+      const built = createRoutine({
+        id: `rt-made-${String(made).padStart(4, "0")}`,
+        name: input.name as string,
+        action: input.action as ActionKind,
+        trigger: input.trigger as Trigger,
+        ...(input.timeZone !== undefined ? { timeZone: input.timeZone as string } : {}),
+        ...(input.asksFirst !== undefined ? { asksFirst: input.asksFirst } : {}),
+      });
+      if (!built.ok) return { status: 400, json: { error: built.reason } };
+      const { routine } = built;
+      const member = input.member === undefined ? (routine.action === "reply" ? "nam" : "ton") : input.member;
+      if (typeof member !== "string" || !(member in WORK)) return { status: 400, json: { error: "unknown_member" } };
+      if (!WORK[member].includes(routine.action)) return { status: 400, json: { error: "wrong_member" } };
+      if (w.routines.length >= 50) return { status: 409, json: { error: "full" } };
+      const next = nextRun(routine, now());
+      const view: Record<string, unknown> = {
+        ...routine,
+        member,
+        when: describeTrigger(routine),
+        paused: false,
+        next: next === null ? null : iso(next),
+        ...(routine.trigger.kind === "stockBelow" ? { waitsFor: "stock_feed" } : {}),
+        createdAt: iso(now()),
+        lastRun: null,
+      };
+      w.routines.push(view);
+      return { status: 200, json: { routine: view } };
+    }),
+  );
+  api.on("POST", "/v1/routines/remove", (req) =>
+    owned(req, (_shop, w) => {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || typeof body !== "object" || Object.keys(body).length !== 1 || typeof body.routineId !== "string" || !/^rt-[0-9a-z-]{1,64}$/.test(body.routineId)) {
+        return { status: 400, json: { error: "invalid_request" } };
+      }
+      const at = w.routines.findIndex((r) => r.id === body.routineId);
+      if (at < 0) return { status: 404, json: { error: "not_found" } };
+      w.routines.splice(at, 1);
+      return { status: 200, json: { removed: body.routineId } };
+    }),
+  );
 }

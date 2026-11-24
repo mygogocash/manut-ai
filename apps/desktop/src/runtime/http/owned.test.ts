@@ -302,7 +302,6 @@ describe("the owner's everyday writes", () => {
       ["routine.create", { shop: SHOP_A.id, name: "x", action: "brief", trigger: { kind: "daily", at: "08:00" } }],
       ["routine.remove", { shop: SHOP_A.id, routine: "rt-0001-brief" }],
       ["automations.remove", { bot: "ton", job: "rt-0001-brief" }],
-      ["memory.remember", { shop: SHOP_A.id, text: "x" }],
     ] as const)
       expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
     expect(writes(api).slice(before)).toEqual([]);

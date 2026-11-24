@@ -1,7 +1,7 @@
-// What the connected runtime says to the Customize page's ops. What the team knows is "not yet": the API serves a shop's
-// memory to operators only (admin routes), and no session can read or change it. The routines are the shop's schedules as
-// the runtime already reads them, shown and never changed. Nothing but reads ever reaches the API, and none of the memory
-// ops or the routine writes reaches it at all.
+// What the connected runtime says to the Customize page's ops for a person who is in no shops (the signed-in tenant): what the team knows is a
+// shop's, so there is none to show or change and nothing is sent; the routines are the tenant's own schedules as the runtime already reads
+// them, shown and never changed. A shop the person owns is owned.test.ts's, memory.test.ts's and routines.test.ts's. Nothing but reads ever
+// reaches the API from here.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../../i18n";
 import type { BridgeError } from "../../lib/protocol";
@@ -35,23 +35,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("what the team knows on the connected runtime", () => {
-  it("cannot be shown yet, and says so in words that fit a read", async () => {
+describe("what the team knows on the connected runtime, for a person who is in no shops", () => {
+  const noShop = { code: "no_shop", message: t("memory.err.noShop") };
+
+  it("has none to show: what the team knows is a shop's, and the API answers a person's own sign-in 404", async () => {
     const { req } = await connected();
-    expect(await refusal(req("memory.list", {}))).toEqual({ code: "not_yet", message: t("rt.notYetShow") });
-    // a read's refusal is not the write's: it must not say that Connected only reads
-    expect(t("rt.notYetShow")).not.toMatch(/only reads/);
+    expect(await refusal(req("memory.list", {}))).toEqual(noShop);
   });
 
-  it("cannot be changed yet, and says so as every other write does", async () => {
+  it("has none to change, and says so for each of the four changes", async () => {
     const { req } = await connected();
     for (const [op, params] of [
-      ["memory.remember", { text: "We ship on weekdays" }],
-      ["memory.confirm", { fact: "f5" }],
-      ["memory.correct", { fact: "f1", text: "Free shipping on orders over ฿900" }],
-      ["memory.forget", { fact: "f1" }],
+      ["memory.remember", { shop: null, text: "We ship on weekdays" }],
+      ["memory.confirm", { shop: null, fact: "f5" }],
+      ["memory.correct", { shop: null, fact: "f1", text: "Free shipping on orders over ฿900" }],
+      ["memory.forget", { shop: null, fact: "f1" }],
     ] as const)
-      expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
+      expect(await refusal(req(op, params)), op).toEqual(noShop);
   });
 
   it("sends nothing to the API for any of them, so nothing the owner typed leaves the computer", async () => {
@@ -59,10 +59,10 @@ describe("what the team knows on the connected runtime", () => {
     const sent = api.calls.length;
     for (const [op, params] of [
       ["memory.list", {}],
-      ["memory.remember", { text: "We ship on weekdays" }],
-      ["memory.confirm", { fact: "f5" }],
-      ["memory.correct", { fact: "f1", text: "Free shipping on orders over ฿900" }],
-      ["memory.forget", { fact: "f1" }],
+      ["memory.remember", { shop: null, text: "We ship on weekdays" }],
+      ["memory.confirm", { shop: null, fact: "f5" }],
+      ["memory.correct", { shop: null, fact: "f1", text: "Free shipping on orders over ฿900" }],
+      ["memory.forget", { shop: null, fact: "f1" }],
     ] as const)
       await refusal(req(op, params));
     expect(api.calls).toHaveLength(sent);
@@ -70,7 +70,7 @@ describe("what the team knows on the connected runtime", () => {
   });
 
   it("says the same in every language it is shown in", () => {
-    for (const l of LANGS) for (const k of ["rt.notYet", "rt.notYetShow"] as const) expect(t(k, undefined, l).trim(), `${l} ${k}`).not.toBe("");
+    for (const l of LANGS) for (const k of ["rt.notYet", "rt.notYetShow", "memory.err.noShop"] as const) expect(t(k, undefined, l).trim(), `${l} ${k}`).not.toBe("");
   });
 });
 
@@ -153,9 +153,10 @@ describe("the team's routines on the connected runtime", () => {
   it("cannot add, pause or resume a routine yet, and says so as every other write does", async () => {
     const { req } = await connected();
     for (const [op, params] of [
-      ["routine.create", { name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
-      ["routine.pause", { routine: "sched-1" }],
-      ["routine.resume", { routine: "sched-1" }],
+      ["routine.create", { shop: null, name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
+      ["routine.pause", { shop: null, routine: "sched-1" }],
+      ["routine.resume", { shop: null, routine: "sched-1" }],
+      ["routine.remove", { shop: null, routine: "sched-1" }],
     ] as const)
       expect(await refusal(req(op, params)), op).toEqual({ code: "not_yet", message: t("rt.notYet") });
   });
@@ -165,9 +166,10 @@ describe("the team's routines on the connected runtime", () => {
     await req("routine.list", {});
     const sent = api.calls.length;
     for (const [op, params] of [
-      ["routine.create", { name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
-      ["routine.pause", { routine: "sched-1" }],
-      ["routine.resume", { routine: "sched-1" }],
+      ["routine.create", { shop: null, name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
+      ["routine.pause", { shop: null, routine: "sched-1" }],
+      ["routine.resume", { shop: null, routine: "sched-1" }],
+      ["routine.remove", { shop: null, routine: "sched-1" }],
     ] as const)
       await refusal(req(op, params));
     expect(api.calls).toHaveLength(sent);
@@ -202,21 +204,24 @@ describe("the Customize page's ops while only a kept read of the shop is shown",
     expect(api.calls).toHaveLength(sent);
   });
 
-  it("still cannot show what the team knows, in the same words as when it is connected", async () => {
-    const { req } = await keptOnly();
-    expect(await refusal(req("memory.list", {}))).toEqual({ code: "not_yet", message: t("rt.notYetShow") });
+  it("does not read what the team knows from the kept read, which holds none of it", async () => {
+    const { api, req } = await keptOnly();
+    const sent = api.calls.length;
+    expect(await refusal(req("memory.list", {}))).toEqual({ code: "offline", message: t("rt.offline") });
+    expect(api.calls).toHaveLength(sent);
   });
 
   it("refuses every memory and routine write as offline, holds none back, and sends nothing", async () => {
     const { api, req } = await keptOnly();
     for (const [op, params] of [
-      ["memory.remember", { text: "We ship on weekdays" }],
-      ["memory.confirm", { fact: "f5" }],
-      ["memory.correct", { fact: "f1", text: "Free shipping on orders over ฿900" }],
-      ["memory.forget", { fact: "f1" }],
-      ["routine.create", { name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
-      ["routine.pause", { routine: "sched-1" }],
-      ["routine.resume", { routine: "sched-1" }],
+      ["memory.remember", { shop: null, text: "We ship on weekdays" }],
+      ["memory.confirm", { shop: null, fact: "f5" }],
+      ["memory.correct", { shop: null, fact: "f1", text: "Free shipping on orders over ฿900" }],
+      ["memory.forget", { shop: null, fact: "f1" }],
+      ["routine.create", { shop: null, name: "Remind me about parcels", action: "draft", trigger: { kind: "daily", at: "15:00" } }],
+      ["routine.pause", { shop: null, routine: "sched-1" }],
+      ["routine.resume", { shop: null, routine: "sched-1" }],
+      ["routine.remove", { shop: null, routine: "sched-1" }],
     ] as const)
       expect(await refusal(req(op, params)), op).toEqual({ code: "offline", message: t("rt.offline") });
     expect(api.calls.every((c) => c.method === "GET")).toBe(true);
