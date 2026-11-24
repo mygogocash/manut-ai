@@ -2,7 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, useApiSetup, type DeletionView } from "../api";
 import { formatClock } from "../format";
 import { BrandMark, BrokenLinkIcon, CheckIcon, ClockIcon, CloudOffIcon, useColorScheme } from "../ui/marks";
-import { Loading, Notice, OWNER_CARD as CARD, OWNER_TOUCH as TOUCH, Pulse, whenText } from "../ui/owner";
+import {
+  Loading,
+  Notice,
+  OWNER_CARD as CARD,
+  OWNER_MAIN as MAIN,
+  OWNER_TAP as TAP,
+  OWNER_TOUCH as TOUCH,
+  Pulse,
+  whenText,
+} from "../ui/owner";
 import { deleteStrings, type DeleteStrings } from "./strings";
 
 /// The owner's deletion page, opened from a link in LINE, built like the approval page. It asks one thing: may
@@ -133,7 +142,7 @@ export function DeletePage({
   else if (phase === "loadError")
     body = (
       <Notice icon={<CloudOffIcon />} title={s.loadErrorTitle} body={s.loadErrorBody}>
-        <button type="button" className="btn" onClick={() => setLoadAttempt((n) => n + 1)}>
+        <button type="button" className="btn" style={TAP} onClick={() => setLoadAttempt((n) => n + 1)}>
           {s.tryAgain}
         </button>
       </Notice>
@@ -155,7 +164,7 @@ export function DeletePage({
 
   return (
     <div className="r" data-t={scheme} style={{ minHeight: "100vh" }}>
-      <main className="col" style={{ maxWidth: 560, padding: "16px 16px 40px", gap: 16 }}>
+      <main className="col" style={MAIN}>
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BrandMark />
           <div style={{ minWidth: 0, lineHeight: 1.3 }}>
