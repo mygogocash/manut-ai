@@ -75,3 +75,40 @@ for (const [name, path] of [["approval", "/approve/demo-offline"], ["deletion", 
     await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
   });
 }
+
+/// Signs in on the join page or the owner's app with practice's one code, as a thumb does.
+async function signIn(page: Page): Promise<void> {
+  await page.getByLabel("Email").fill("noi@khaosoi.example");
+  await tap(page, "Send code");
+  await page.getByLabel("6-digit code").fill("123456");
+}
+
+test("the owner's app: Approve sends a reply, Decline says no, and a helper's books wait for the owner", async ({ page }) => {
+  await page.goto("/app/");
+  await signIn(page);
+  await page.getByRole("link", { name: "Needs you", exact: true }).tap();
+  const card = (request: string) => page.locator(`[data-ask="${request}"]`);
+  await card("practice-bm-late").getByRole("button", { name: "Approve", exact: true }).tap();
+  await expect(card("practice-bm-late").getByText("Approved and sent.")).toBeVisible();
+  await card("practice-ksn-hours").getByRole("button", { name: "Decline", exact: true }).tap();
+  await expect(card("practice-ksn-hours").getByText("You said no. Nothing was sent.")).toBeVisible();
+  // Ton's books at the shop Noi helps at: approval-core's rule leaves them to the owner, so there is nothing to press.
+  await shows(page, "Only the owner can approve changes to the shop's own records. It waits for Lek.");
+  await expect(card("practice-ksn-books").getByRole("button")).toHaveCount(0);
+});
+
+test("the owner's app: Sign out goes back to signing in", async ({ page }) => {
+  await page.goto("/app/");
+  await signIn(page);
+  await page.getByRole("link", { name: "Shops", exact: true }).tap();
+  await tap(page, "Sign out");
+  await shows(page, "Sign in to Manut AI");
+});
+
+test("the join page: Switch account goes back to signing in", async ({ page }) => {
+  await page.goto("/join/demo-join-wrong");
+  await signIn(page);
+  await shows(page, "This invite to Khao Soi Nimman is for another email address.");
+  await tap(page, "Switch account");
+  await shows(page, "You've been invited to help with a shop on Manut AI");
+});

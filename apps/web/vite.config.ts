@@ -12,8 +12,26 @@ function workspace(path: string): string {
   return decodeURIComponent(new URL(path, import.meta.url).pathname);
 }
 
+/// The owner's web app's service worker (src/app/sw.ts) is built as a script of its own at `/app/sw.js`, with no hash in
+/// its name, so its address stays the one registered and a browser sees a new worker when its bytes change.
+const SERVICE_WORKER = "app-sw";
+
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rolldownOptions: {
+      // Two pages and the worker: every page but the app's (index.html), the owner's web app (app/index.html, served at
+      // `/app/`), and the app's service worker.
+      input: {
+        main: workspace("./index.html"),
+        app: workspace("./app/index.html"),
+        [SERVICE_WORKER]: workspace("./src/app/sw.ts"),
+      },
+      output: {
+        entryFileNames: (chunk) => (chunk.name === SERVICE_WORKER ? "app/sw.js" : "assets/[name]-[hash].js"),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@manut/approval-core": workspace("../../packages/approval-core/src/index.ts"),

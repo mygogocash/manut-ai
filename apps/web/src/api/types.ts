@@ -404,6 +404,37 @@ export type JoinAnswer =
 /// travels only in the body, as `{ token }`, never in a URL.
 export type InviteAcceptance = { accessToken: string; inviteToken: string };
 
+/// The owner's web app (docs/web-app.md; docs/pilot-api.md, "The web app's session"). Its session lives in cookies the
+/// API sets and the page cannot read, so nothing here carries or answers a credential.
+
+/// A sign-in with a code sent by email, exactly as `POST /v1/web/sign-in` takes it.
+export type WebSignIn = { email: string; code: string };
+
+/// One shop the signed-in person is in, as `POST /v1/web/shops` names it: its owner, the person's role there, the id their
+/// decisions there name (the linked account's or the helper's), and whether a session for it is ready.
+export type WebShop = {
+  id: string;
+  name: string;
+  ownerName: string;
+  role: "owner" | "helper";
+  you: string | null;
+  ready: boolean;
+};
+
+/// Who the browser's session is, as `POST /v1/web/shops` answers: signed in, with their shops; or signed out, with whether
+/// signing in by email is on at all, so the app can say on opening that it is not.
+export type WebSession = { signedIn: true; shops: WebShop[] } | { signedIn: false; emailSignIn: boolean };
+
+/// Which of a shop's approvals to read: the ones still waiting, or the newest of the others.
+export type WebApprovalsState = "open" | "recent";
+
+/// A decision on one of a shop's requests: the request, and the option and revision the person saw.
+export type WebDecision = { shop: string; requestId: string; optionId: string; seenRevision: number };
+
+/// A shop route's answer as the web routes pass it on: its status and its JSON body, which the app reads field by field
+/// (src/app/asks.ts), since every answer of the decision route's table is one to show.
+export type WebAnswer = { status: number; body: unknown };
+
 /// Who set a shop's monthly model cap, and when. `setBy` is the operator's Cloudflare Access email, and null for a
 /// service token (and in practice mode, whose key has no identity).
 export type ModelCapOverride = { capSatang: number; setAt: string; setBy: string | null };
@@ -659,6 +690,23 @@ export interface PilotApi {
   endShopSession(accessToken: string): Promise<void>;
   /// `DELETE /v1/auth/session` with the signed-in session: ends it, and its refresh with it.
   signOut(accessToken: string): Promise<void>;
+
+  /// The owner's web app's routes (docs/pilot-api.md, "The web app's session"): the only ones that send the browser's
+  /// cookies, each with the app's header. None carries or answers a token.
+  /// `POST /v1/web/sign-in` with exactly `{ email, code }`. Rejects as the exchange does: 401 `wrong_code`
+  /// (`ApiError.triesLeft`), 401 `code_ended`, 400 `invalid_request`, 400 `email_not_configured`, 429 `rate_limited`.
+  webSignIn(input: WebSignIn): Promise<void>;
+  /// `POST /v1/web/shops` with `{}`: the person's shops, each with a session ready where one could be opened, or that
+  /// nobody is signed in (401 `signed_out`), which is a state and not a failure. Rejects with 503 `shops_unavailable`.
+  webShops(): Promise<WebSession>;
+  /// `GET /v1/web/approvals?shop=&state=`: every answer with a JSON body resolves, as it is; only no answer, or one that is
+  /// not JSON, rejects.
+  webApprovals(shop: string, state: WebApprovalsState): Promise<WebAnswer>;
+  /// `POST /v1/web/approvals/{requestId}/decision` with exactly `{ shop, optionId, seenRevision }`: resolves as
+  /// `webApprovals` does, since a refusal (already decided, expired, not permitted) is an answer to show.
+  webDecide(input: WebDecision): Promise<WebAnswer>;
+  /// `POST /v1/web/sign-out` with `{}`: ends every session the browser holds and clears its cookies.
+  webSignOut(): Promise<void>;
 }
 
 /// What an error answer carried besides its code, kept so the screens can say exactly what happened.

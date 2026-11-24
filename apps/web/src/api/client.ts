@@ -42,6 +42,9 @@ import {
   type NewAnswer,
   type SubscriptionPayment,
   type UnlinkedOwner,
+  type WebAnswer,
+  type WebSession,
+  type WebShop,
   type WorkerJobsPage,
 } from "./types";
 
@@ -62,12 +65,16 @@ type Request = {
   headers?: Record<string, string>;
   /// The answer has no body (the LINE webhook).
   empty?: boolean;
+  /// One of the owner's web app's routes: it sends the browser's cookies for this origin and the app's header.
+  web?: boolean;
 };
 
 /// The real client. Admin routes carry `Authorization: Bearer <operator key>` and send cookies, so a
 /// Cloudflare Access session for the API host travels with them. The owner's routes carry neither: the
 /// token in the path is their only credential. The join page's routes carry neither too: their credential is the
-/// session the page passes in, which the page holds in memory and this client never keeps.
+/// session the page passes in, which the page holds in memory and this client never keeps. The owner's web app's routes
+/// carry no token at all: they send this origin's cookies, which hold its session where the page cannot read it, and
+/// the app's header, without which the API refuses them (docs/pilot-api.md, "The web app's session").
 export function createHttpApi(options: HttpApiOptions): PilotApi {
   const origin = options.origin.replace(/\/+$/, "");
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
@@ -76,6 +83,7 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
   /// `network`. Every route goes through here, so the key, the cookies and the body are decided in one place.
   async function send(req: Request): Promise<Response> {
     const headers: Record<string, string> = { accept: "application/json", ...req.headers };
+    if (req.web) headers["x-manut-web"] = "1";
     if (req.admin) {
       const key = options.operatorKey();
       // Never let an admin call leave without its key: the gate would refuse it anyway, and a keyless call
@@ -92,7 +100,8 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
     const init: RequestInit = {
       method: req.method,
       headers,
-      credentials: req.admin ? "include" : "omit",
+      // Only the web app's routes send this origin's cookies, and no other route reads one.
+      credentials: req.admin ? "include" : req.web ? "same-origin" : "omit",
     };
     if (body !== undefined) init.body = body;
 
@@ -364,7 +373,69 @@ export function createHttpApi(options: HttpApiOptions): PilotApi {
     signOut: async (accessToken) => {
       await request<unknown>({ method: "DELETE", path: "/v1/auth/session", headers: { authorization: `Bearer ${accessToken}` } });
     },
+
+    // The owner's web app. Each body is built field by field, as each route takes exactly these fields, and nothing here
+    // ever holds a token: the session is in the browser's cookies, which the page cannot read.
+    webSignIn: async (input) => {
+      await request<unknown>({ method: "POST", path: "/v1/web/sign-in", body: { email: input.email, code: input.code }, web: true });
+    },
+    // Signed out is an answer, with whether signing in by email is on at all; anything else that is not a list is an error.
+    webShops: async (): Promise<WebSession> => {
+      const response = await send({ method: "POST", path: "/v1/web/shops", body: {}, web: true });
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch {
+        parsed = undefined;
+      }
+      if (response.ok && isRecord(parsed) && Array.isArray(parsed.shops)) return { signedIn: true, shops: webShopsOf(parsed) };
+      if (response.status === 401 && isRecord(parsed) && parsed.error === "signed_out") {
+        return { signedIn: false, emailSignIn: parsed.emailSignIn !== false };
+      }
+      throw response.ok ? new ApiError(response.status, "bad_response") : errorFrom(response, parsed);
+    },
+    webApprovals: (shop, state) =>
+      answerOf(send({ method: "GET", path: "/v1/web/approvals", query: { shop, state }, web: true })),
+    webDecide: (input) =>
+      answerOf(send({
+        method: "POST",
+        path: `/v1/web/approvals/${encodeURIComponent(input.requestId)}/decision`,
+        body: { shop: input.shop, optionId: input.optionId, seenRevision: input.seenRevision },
+        web: true,
+      })),
+    webSignOut: async () => {
+      await request<unknown>({ method: "POST", path: "/v1/web/sign-out", body: {}, web: true });
+    },
   };
+}
+
+/// A web route's answer with its JSON body, whatever its status: the app reads it field by field. An answer that is not
+/// JSON is the API failing (`bad_response`).
+async function answerOf(sent: Promise<Response>): Promise<WebAnswer> {
+  const response = await sent;
+  try {
+    return { status: response.status, body: (await response.json()) as unknown };
+  } catch {
+    throw new ApiError(response.status, "bad_response");
+  }
+}
+
+/// The shops of a `POST /v1/web/shops` answer, read field by field: an entry this build cannot read (a role it does not
+/// know above all) is left out, since nothing here could act for it, and nothing else an entry held is kept.
+export function webShopsOf(body: unknown): WebShop[] {
+  const entries = isRecord(body) && Array.isArray(body.shops) ? body.shops : [];
+  const seen = new Set<string>();
+  const shops: WebShop[] = [];
+  for (const entry of entries) {
+    if (!isRecord(entry) || !isText(entry.id) || !entry.id || seen.has(entry.id) || !isText(entry.name) ||
+        !isText(entry.ownerName) || (entry.role !== "owner" && entry.role !== "helper") || typeof entry.ready !== "boolean") {
+      continue;
+    }
+    seen.add(entry.id);
+    shops.push({ id: entry.id, name: entry.name, ownerName: entry.ownerName, role: entry.role,
+      you: isText(entry.you) && entry.you ? entry.you : null, ready: entry.ready });
+  }
+  return shops;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

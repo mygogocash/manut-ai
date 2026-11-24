@@ -12,7 +12,7 @@ spec is the Manut AI design canvas.
 | Path | What it is | Started from |
 | --- | --- | --- |
 | `apps/api` | Cloudflare Workers backend: tenants, members, tasks with exact-action approvals, a one-use dispatch broker, an encrypted credential vault, schedules, retention | GoSpark's `cloud/` at `a7537c80`, lifted whole |
-| `apps/web` | The owner's approval page (`/approve/:token`), the page an invite link opens (`/join/:token`, off until signing in by email is on) and the operator console (`/ops`), served from the API's own origin by a pages Worker behind the API Worker | The design canvas's classes and states |
+| `apps/web` | The owner's approval page (`/approve/:token`), the page an invite link opens (`/join/:token`, off until signing in by email is on), the owner's web app for the phone's home screen (`/app/`, `docs/web-app.md`, off until signing in by email is on) and the operator console (`/ops`), served from the API's own origin by a pages Worker behind the API Worker | The design canvas's classes and states; the desktop's reading of approvals (`apps/desktop/src/runtime/http/approvals.ts`) |
 | `apps/desktop` | The desktop app (Tauri 2 + React 19): shell, chat, Needs you, terminal and coding-agent adapters, running on a demo runtime until the real one exists | A fork of Oh My Hermes (`apps/omher` at `77b8646`), Hermes bridge removed |
 | `packages/approval-core` | Settle-once approval rules shared by every client | GoSpark's decision binding and Orca's settle-once journal |
 | `packages/agent-events` | The one event contract every agent reports through, with tolerant decoders and a timeline reducer | GoSpark's provider events (`ProviderSession.swift`) and their tests |
