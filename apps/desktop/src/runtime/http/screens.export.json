@@ -1,0 +1,996 @@
+{
+  "_": "Every screen as the connected runtime showed it while it read the shop's export, taken on 24 Nov 2026 before it read the task list. screens.test.ts reads it; never regenerate it from the list.",
+  "owned": {
+    "bots": [
+      {
+        "name": "buddy",
+        "running": true,
+        "paused": false
+      },
+      {
+        "name": "nam",
+        "running": false,
+        "paused": false
+      },
+      {
+        "name": "pim",
+        "running": true,
+        "paused": false
+      },
+      {
+        "name": "ton",
+        "running": false,
+        "paused": false
+      }
+    ],
+    "info": {
+      "buddy": {
+        "places": {},
+        "first_active": 1795395600,
+        "last_active": 1795396170,
+        "skills": 0,
+        "routines": 1
+      },
+      "nam": {
+        "places": {},
+        "first_active": 1795395664,
+        "last_active": 1795395664,
+        "skills": 0,
+        "routines": 0
+      },
+      "pim": {
+        "places": {},
+        "first_active": 1795395856,
+        "last_active": 1795396170,
+        "skills": 0,
+        "routines": 1
+      },
+      "ton": {
+        "places": {},
+        "first_active": 1795395724,
+        "last_active": 1795395724,
+        "skills": 0,
+        "routines": 1
+      }
+    },
+    "schedule": {
+      "buddy": [
+        {
+          "id": "sched-own",
+          "name": "Stock check",
+          "schedule": "0 18 * * *",
+          "next_run_at": 1795399200,
+          "last_run_at": null,
+          "last_status": null,
+          "enabled": true
+        }
+      ],
+      "nam": [],
+      "pim": [
+        {
+          "id": "rt-0002-post",
+          "name": "Weekly post",
+          "schedule": "0 10 * * 1",
+          "next_run_at": 1795420800,
+          "last_run_at": null,
+          "last_status": null,
+          "enabled": true
+        }
+      ],
+      "ton": [
+        {
+          "id": "rt-0001-brief",
+          "name": "Morning brief",
+          "schedule": "0 8 * * *",
+          "next_run_at": 1795420800,
+          "last_run_at": null,
+          "last_status": null,
+          "enabled": true
+        }
+      ]
+    },
+    "threads": [
+      {
+        "thread": "worker-task-pim",
+        "title": "A post",
+        "cwd": "",
+        "started_at": 1795396169,
+        "last": 1795396170,
+        "running": true,
+        "needs": false,
+        "message_count": 2,
+        "preview": "Draft a reply to a customer's message for the owner to read."
+      },
+      {
+        "thread": "task-issue",
+        "title": "File the supplier's issue",
+        "cwd": "",
+        "started_at": 1795395600,
+        "last": 1795395930,
+        "running": true,
+        "needs": false,
+        "message_count": 3,
+        "preview": "Answer her question about delivery"
+      },
+      {
+        "thread": "worker-task-handed",
+        "title": "A reply to a customer",
+        "cwd": "",
+        "started_at": 1795395799,
+        "last": 1795395856,
+        "running": false,
+        "needs": false,
+        "message_count": 2,
+        "preview": "Draft a reply to a customer's message for the owner to read."
+      },
+      {
+        "thread": "task-sent",
+        "title": "Reply to Khun Somchai",
+        "cwd": "",
+        "started_at": 1795395600,
+        "last": 1795395775,
+        "running": false,
+        "needs": false,
+        "message_count": 3,
+        "preview": "Answer her question about delivery"
+      },
+      {
+        "thread": "worker-task-ton",
+        "title": "Sales summary for 2026-11-22",
+        "cwd": "",
+        "started_at": 1795395719,
+        "last": 1795395720,
+        "running": false,
+        "needs": false,
+        "message_count": 2,
+        "preview": "Draft a reply to a customer's message for the owner to read."
+      },
+      {
+        "thread": "task-reply",
+        "title": "Reply to Khun Mali",
+        "cwd": "",
+        "started_at": 1795395600,
+        "last": 1795395695,
+        "running": false,
+        "needs": true,
+        "message_count": 3,
+        "preview": "Answer her question about delivery"
+      },
+      {
+        "thread": "worker-task-nam",
+        "title": "A reply to a customer",
+        "cwd": "",
+        "started_at": 1795395659,
+        "last": 1795395660,
+        "running": false,
+        "needs": false,
+        "message_count": 2,
+        "preview": "Draft a reply to a customer's message for the owner to read."
+      }
+    ],
+    "notes": {
+      "worker-task-pim": [
+        [
+          "**A post**\n\nDraft a reply to a customer's message for the owner to read.",
+          1795396169
+        ],
+        [
+          "Now: a draft, not started",
+          1795396170
+        ]
+      ],
+      "task-issue": [
+        [
+          "**File the supplier's issue**\n\nAnswer her question about delivery",
+          1795395600
+        ],
+        [
+          "Create a Linear issue: “Jasmine candles arrived broken” (sending)",
+          1795395910
+        ],
+        [
+          "Now: working on it",
+          1795395930
+        ]
+      ],
+      "worker-task-handed": [
+        [
+          "**A reply to a customer**\n\nDraft a reply to a customer's message for the owner to read.",
+          1795395799
+        ],
+        [
+          "Pim’s draft, for you to read. Nothing was sent.\n\nPim's reply, which is newer.",
+          1795395856
+        ],
+        [
+          "Now: a draft, not started",
+          1795395856
+        ]
+      ],
+      "task-sent": [
+        [
+          "**Reply to Khun Somchai**\n\nAnswer her question about delivery",
+          1795395600
+        ],
+        [
+          "Send on LINE: “Your parcel is on its way.” (sent)",
+          1795395750
+        ],
+        [
+          "Now: done",
+          1795395775
+        ]
+      ],
+      "worker-task-ton": [
+        [
+          "**Sales summary for 2026-11-22**\n\nDraft a reply to a customer's message for the owner to read.",
+          1795395719
+        ],
+        [
+          "Now: a draft, not started",
+          1795395720
+        ]
+      ],
+      "task-reply": [
+        [
+          "**Reply to Khun Mali**\n\nAnswer her question about delivery",
+          1795395600
+        ],
+        [
+          "Send on LINE: “We open at nine.” (waiting for you)",
+          1795395690
+        ],
+        [
+          "Now: waiting for your approval",
+          1795395695
+        ]
+      ],
+      "worker-task-nam": [
+        [
+          "**A reply to a customer**\n\nDraft a reply to a customer's message for the owner to read.",
+          1795395659
+        ],
+        [
+          "Nam’s draft, for you to read. Nothing was sent.\n\nThank you! Your parcel left this morning.",
+          1795395664
+        ],
+        [
+          "Now: a draft, not started",
+          1795395660
+        ]
+      ]
+    },
+    "jobs": [
+      {
+        "id": "worker-task-pim",
+        "title": "A post",
+        "bot": "pim",
+        "stage": "working",
+        "at": 1795396170
+      },
+      {
+        "id": "task-issue",
+        "title": "File the supplier's issue",
+        "bot": "buddy",
+        "stage": "approved",
+        "at": 1795395920
+      },
+      {
+        "id": "worker-task-handed",
+        "title": "A reply to a customer",
+        "bot": "pim",
+        "stage": "drafted",
+        "at": 1795395856
+      },
+      {
+        "id": "task-sent",
+        "title": "Reply to Khun Somchai",
+        "bot": "buddy",
+        "stage": "sent",
+        "at": 1795395770
+      },
+      {
+        "id": "worker-task-ton",
+        "title": "Sales summary for 2026-11-22",
+        "bot": "ton",
+        "stage": "failed",
+        "at": 1795395724
+      },
+      {
+        "id": "task-reply",
+        "title": "Reply to Khun Mali",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395690
+      },
+      {
+        "id": "worker-task-nam",
+        "title": "A reply to a customer",
+        "bot": "nam",
+        "stage": "drafted",
+        "at": 1795395664
+      }
+    ],
+    "pages": {
+      "worker-task-pim": {
+        "id": "worker-task-pim",
+        "title": "A post",
+        "bot": "pim",
+        "stage": "working",
+        "at": 1795396170,
+        "steps": [
+          {
+            "stage": "working",
+            "at": 1795396170
+          }
+        ],
+        "goal": "Draft a reply to a customer's message for the owner to read.",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 38,
+        "tookSeconds": null,
+        "trace": [
+          {
+            "tool": "pim · claude-haiku-5-5",
+            "found": "active",
+            "ms": 30000,
+            "costSatang": 38,
+            "tokens": 640,
+            "result": "running"
+          }
+        ]
+      },
+      "task-issue": {
+        "id": "task-issue",
+        "title": "File the supplier's issue",
+        "bot": "buddy",
+        "stage": "approved",
+        "at": 1795395920,
+        "steps": [
+          {
+            "stage": "proposed",
+            "at": 1795395910
+          },
+          {
+            "stage": "approved",
+            "at": 1795395920
+          }
+        ],
+        "goal": "Answer her question about delivery",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": null,
+        "trace": []
+      },
+      "worker-task-handed": {
+        "id": "worker-task-handed",
+        "title": "A reply to a customer",
+        "bot": "pim",
+        "stage": "drafted",
+        "at": 1795395856,
+        "steps": [
+          {
+            "stage": "working",
+            "at": 1795395800
+          },
+          {
+            "stage": "working",
+            "at": 1795395840
+          },
+          {
+            "stage": "drafted",
+            "at": 1795395856
+          }
+        ],
+        "goal": "Draft a reply to a customer's message for the owner to read.",
+        "again": null,
+        "summary": "Pim's reply, which is newer.",
+        "recipients": [],
+        "costSatang": 32,
+        "tookSeconds": 22,
+        "trace": [
+          {
+            "tool": "nam · claude-haiku-5-5",
+            "found": "→ pim",
+            "ms": 6000,
+            "costSatang": 12,
+            "tokens": 300,
+            "result": "pass"
+          },
+          {
+            "tool": "pim · claude-haiku-5-5",
+            "found": "done",
+            "ms": 16000,
+            "costSatang": 20,
+            "tokens": 500,
+            "result": "pass"
+          }
+        ]
+      },
+      "task-sent": {
+        "id": "task-sent",
+        "title": "Reply to Khun Somchai",
+        "bot": "buddy",
+        "stage": "sent",
+        "at": 1795395770,
+        "steps": [
+          {
+            "stage": "proposed",
+            "at": 1795395750
+          },
+          {
+            "stage": "approved",
+            "at": 1795395760
+          },
+          {
+            "stage": "sent",
+            "at": 1795395770
+          }
+        ],
+        "goal": "Answer her question about delivery",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": null,
+        "trace": []
+      },
+      "worker-task-ton": {
+        "id": "worker-task-ton",
+        "title": "Sales summary for 2026-11-22",
+        "bot": "ton",
+        "stage": "failed",
+        "at": 1795395724,
+        "steps": [
+          {
+            "stage": "working",
+            "at": 1795395720
+          },
+          {
+            "stage": "failed",
+            "at": 1795395724
+          }
+        ],
+        "goal": "Draft a reply to a customer's message for the owner to read.",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": 4,
+        "trace": [
+          {
+            "tool": "ton · claude-haiku-5-5",
+            "found": "failed: budget",
+            "ms": 4000,
+            "costSatang": 0,
+            "tokens": 0,
+            "result": "fail"
+          }
+        ]
+      },
+      "task-reply": {
+        "id": "task-reply",
+        "title": "Reply to Khun Mali",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395690,
+        "steps": [
+          {
+            "stage": "proposed",
+            "at": 1795395690
+          }
+        ],
+        "goal": "Answer her question about delivery",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": null,
+        "trace": []
+      },
+      "worker-task-nam": {
+        "id": "worker-task-nam",
+        "title": "A reply to a customer",
+        "bot": "nam",
+        "stage": "drafted",
+        "at": 1795395664,
+        "steps": [
+          {
+            "stage": "working",
+            "at": 1795395660
+          },
+          {
+            "stage": "drafted",
+            "at": 1795395664
+          }
+        ],
+        "goal": "Draft a reply to a customer's message for the owner to read.",
+        "again": null,
+        "summary": "Thank you! Your parcel left this morning.",
+        "recipients": [],
+        "costSatang": 38,
+        "tookSeconds": 4,
+        "trace": [
+          {
+            "tool": "nam · claude-haiku-5-5",
+            "found": "done",
+            "ms": 4000,
+            "costSatang": 38,
+            "tokens": 640,
+            "result": "pass"
+          }
+        ]
+      }
+    },
+    "chips": [
+      "team"
+    ],
+    "activity": {
+      "events": [
+        {
+          "id": "worker-task-handed:draft",
+          "at": 1795395856,
+          "who": "pim",
+          "kind": "msg",
+          "title": "Pim wrote a draft for you to read",
+          "item": "A reply to a customer",
+          "job": "worker-task-handed",
+          "approval": "No approval needed: it stays in this app",
+          "status": "drafted",
+          "where": "This app",
+          "undo": "Nothing to undo. Nothing left the app.",
+          "note": "",
+          "text": {
+            "body": "Pim's reply, which is newer.",
+            "private": true
+          }
+        },
+        {
+          "id": "task-sent:a-sent",
+          "who": "buddy",
+          "kind": "msg",
+          "item": "Reply to Khun Somchai",
+          "job": "task-sent",
+          "where": "LINE Official Account",
+          "note": "",
+          "text": {
+            "body": "Your parcel is on its way.",
+            "private": true
+          },
+          "at": 1795395770,
+          "title": "Buddy sent a reply on LINE",
+          "approval": "You approved it",
+          "status": "sent",
+          "undo": "No. LINE messages can’t be unsent."
+        },
+        {
+          "id": "task-reply:a-reply",
+          "who": "buddy",
+          "kind": "msg",
+          "item": "Reply to Khun Mali",
+          "job": "task-reply",
+          "where": "LINE Official Account",
+          "note": "",
+          "text": {
+            "body": "We open at nine.",
+            "private": true
+          },
+          "at": 1795395690,
+          "title": "Buddy asks to send a reply on LINE",
+          "approval": "Waiting for you",
+          "status": "needs_you",
+          "undo": "Nothing goes out until you approve."
+        },
+        {
+          "id": "worker-task-nam:draft",
+          "at": 1795395664,
+          "who": "nam",
+          "kind": "msg",
+          "title": "Nam wrote a draft for you to read",
+          "item": "A reply to a customer",
+          "job": "worker-task-nam",
+          "approval": "No approval needed: it stays in this app",
+          "status": "drafted",
+          "where": "This app",
+          "undo": "Nothing to undo. Nothing left the app.",
+          "note": "",
+          "text": {
+            "body": "Thank you! Your parcel left this morning.",
+            "private": true
+          }
+        }
+      ],
+      "keptMonths": null
+    },
+    "team": {
+      "paused": false,
+      "since": null,
+      "members": [
+        "nam",
+        "pim",
+        "ton"
+      ],
+      "routines": 2,
+      "running": [
+        {
+          "id": "worker-task-pim",
+          "title": "A post",
+          "bot": "pim",
+          "out": null
+        },
+        {
+          "id": "task-issue",
+          "title": "File the supplier's issue",
+          "bot": "buddy",
+          "out": null
+        }
+      ],
+      "holds": "routines"
+    },
+    "chat": [
+      [
+        "A Linear issue was changed (issue-9).",
+        1795395630
+      ]
+    ],
+    "asks": [
+      {
+        "request_id": "pilot%3Ashop-a/a-reply@1",
+        "title": "",
+        "command": "Send on LINE: “We open at nine.”",
+        "choices": [
+          "once",
+          "deny"
+        ],
+        "kind": "reply"
+      },
+      {
+        "request_id": "pilot%3Ashop-b/b-reply@1",
+        "title": "",
+        "command": "Send on LINE: “Yes, we deliver.”",
+        "choices": [
+          "once",
+          "deny"
+        ],
+        "kind": "reply"
+      }
+    ],
+    "automations": [
+      [
+        "buddy",
+        "sched-own",
+        "Stock check",
+        "0 18 * * *",
+        false,
+        1795399200
+      ],
+      [
+        "ton",
+        "rt-0001-brief",
+        "Morning brief",
+        "0 8 * * *",
+        false,
+        1795420800
+      ],
+      [
+        "pim",
+        "rt-0002-post",
+        "Weekly post",
+        "0 10 * * 1",
+        false,
+        1795420800
+      ]
+    ]
+  },
+  "ownTenant": {
+    "bots": [
+      {
+        "name": "buddy",
+        "running": false,
+        "paused": false
+      }
+    ],
+    "info": {
+      "buddy": {
+        "places": {},
+        "first_active": 1795395600,
+        "last_active": 1795395800,
+        "skills": 0,
+        "routines": 1
+      }
+    },
+    "schedule": {
+      "buddy": [
+        {
+          "id": "sched-1",
+          "name": "Morning brief",
+          "schedule": "30 8 * * 1-5",
+          "next_run_at": 1795399200,
+          "last_run_at": null,
+          "last_status": null,
+          "enabled": true
+        }
+      ]
+    },
+    "threads": [
+      {
+        "thread": "worker-task-own",
+        "title": "A reply to a customer",
+        "cwd": "",
+        "started_at": 1795395799,
+        "last": 1795395800,
+        "running": false,
+        "needs": false,
+        "message_count": 2,
+        "preview": "Draft a reply to a customer's message for the owner to read."
+      },
+      {
+        "thread": "task-1",
+        "title": "Reply to Khun Mali",
+        "cwd": "",
+        "started_at": 1795395600,
+        "last": 1795395720,
+        "running": false,
+        "needs": true,
+        "message_count": 3,
+        "preview": "Answer her question about delivery"
+      },
+      {
+        "thread": "task-2",
+        "title": "Order more candles",
+        "cwd": "",
+        "started_at": 1795395600,
+        "last": 1795395700,
+        "running": false,
+        "needs": true,
+        "message_count": 3,
+        "preview": "Answer her question about delivery"
+      }
+    ],
+    "notes": {
+      "worker-task-own": [
+        [
+          "**A reply to a customer**\n\nDraft a reply to a customer's message for the owner to read.",
+          1795395799
+        ],
+        [
+          "Nam’s draft, for you to read. Nothing was sent.\n\nA draft for my own tenant.",
+          1795395804
+        ],
+        [
+          "Now: a draft, not started",
+          1795395800
+        ]
+      ],
+      "task-1": [
+        [
+          "**Reply to Khun Mali**\n\nAnswer her question about delivery",
+          1795395600
+        ],
+        [
+          "Send on LINE: “Your order ships tomorrow morning.” (waiting for you)",
+          1795395690
+        ],
+        [
+          "Now: waiting for your approval",
+          1795395720
+        ]
+      ],
+      "task-2": [
+        [
+          "**Order more candles**\n\nAnswer her question about delivery",
+          1795395600
+        ],
+        [
+          "Create a Linear issue: “Order more jasmine candles” (waiting for you)",
+          1795395695
+        ],
+        [
+          "Now: waiting for your approval",
+          1795395700
+        ]
+      ]
+    },
+    "jobs": [
+      {
+        "id": "worker-task-own",
+        "title": "A reply to a customer",
+        "bot": "nam",
+        "stage": "drafted",
+        "at": 1795395804
+      },
+      {
+        "id": "task-2",
+        "title": "Order more candles",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395695
+      },
+      {
+        "id": "task-1",
+        "title": "Reply to Khun Mali",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395690
+      }
+    ],
+    "pages": {
+      "worker-task-own": {
+        "id": "worker-task-own",
+        "title": "A reply to a customer",
+        "bot": "nam",
+        "stage": "drafted",
+        "at": 1795395804,
+        "steps": [
+          {
+            "stage": "working",
+            "at": 1795395800
+          },
+          {
+            "stage": "drafted",
+            "at": 1795395804
+          }
+        ],
+        "goal": "Draft a reply to a customer's message for the owner to read.",
+        "again": null,
+        "summary": "A draft for my own tenant.",
+        "recipients": [],
+        "costSatang": 38,
+        "tookSeconds": 4,
+        "trace": [
+          {
+            "tool": "nam · claude-haiku-5-5",
+            "found": "done",
+            "ms": 4000,
+            "costSatang": 38,
+            "tokens": 640,
+            "result": "pass"
+          }
+        ]
+      },
+      "task-2": {
+        "id": "task-2",
+        "title": "Order more candles",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395695,
+        "steps": [
+          {
+            "stage": "proposed",
+            "at": 1795395695
+          }
+        ],
+        "goal": "Answer her question about delivery",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": null,
+        "trace": []
+      },
+      "task-1": {
+        "id": "task-1",
+        "title": "Reply to Khun Mali",
+        "bot": "buddy",
+        "stage": "proposed",
+        "at": 1795395690,
+        "steps": [
+          {
+            "stage": "proposed",
+            "at": 1795395690
+          }
+        ],
+        "goal": "Answer her question about delivery",
+        "again": null,
+        "summary": "",
+        "recipients": [],
+        "costSatang": 0,
+        "tookSeconds": null,
+        "trace": []
+      }
+    },
+    "chips": [
+      "team"
+    ],
+    "activity": {
+      "events": [
+        {
+          "id": "worker-task-own:draft",
+          "at": 1795395804,
+          "who": "nam",
+          "kind": "msg",
+          "title": "Nam wrote a draft for you to read",
+          "item": "A reply to a customer",
+          "job": "worker-task-own",
+          "approval": "No approval needed: it stays in this app",
+          "status": "drafted",
+          "where": "This app",
+          "undo": "Nothing to undo. Nothing left the app.",
+          "note": "",
+          "text": {
+            "body": "A draft for my own tenant.",
+            "private": true
+          }
+        },
+        {
+          "id": "task-2:lin-1",
+          "who": "buddy",
+          "kind": "code",
+          "item": "Order more candles",
+          "job": "task-2",
+          "where": "linear.issue.create",
+          "note": "",
+          "text": null,
+          "at": 1795395695,
+          "title": "Buddy asks: Create a Linear issue: “Order more jasmine candles”",
+          "approval": "Waiting for you",
+          "status": "needs_you",
+          "undo": "Nothing goes out until you approve."
+        },
+        {
+          "id": "task-1:action-1",
+          "who": "buddy",
+          "kind": "msg",
+          "item": "Reply to Khun Mali",
+          "job": "task-1",
+          "where": "LINE Official Account",
+          "note": "",
+          "text": {
+            "body": "Your order ships tomorrow morning.",
+            "private": true
+          },
+          "at": 1795395690,
+          "title": "Buddy asks to send a reply on LINE",
+          "approval": "Waiting for you",
+          "status": "needs_you",
+          "undo": "Nothing goes out until you approve."
+        }
+      ],
+      "keptMonths": null
+    },
+    "team": {
+      "refused": "not_yet"
+    },
+    "chat": [
+      [
+        "A Linear issue was changed (issue-9).",
+        1795395630
+      ]
+    ],
+    "asks": [
+      {
+        "request_id": "action-1@1",
+        "title": "Reply to Khun Mali",
+        "command": "Send on LINE: “Your order ships tomorrow morning.”",
+        "choices": [
+          "once",
+          "deny"
+        ],
+        "kind": "reply"
+      },
+      {
+        "request_id": "lin-1@1",
+        "title": "Order more candles",
+        "command": "Create a Linear issue: “Order more jasmine candles”",
+        "choices": [
+          "once",
+          "deny"
+        ],
+        "kind": "command"
+      }
+    ],
+    "automations": [
+      [
+        "buddy",
+        "sched-1",
+        "Morning brief",
+        "30 8 * * 1-5",
+        false,
+        1795399200
+      ]
+    ]
+  }
+}
