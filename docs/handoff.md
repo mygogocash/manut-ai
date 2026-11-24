@@ -87,8 +87,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 13, an owner's shop session on the shop's memory, consent and export, and the owner managing helpers
-     (`feat/owner-session-routes`, Opus, API);
    - item 16, a shop whose deletion stopped stays listed and can be finished (`fix/deletion-stays-listed`, Opus);
    - item 18, the code editor's states for developers: a gap list, then the states that need no owner
      (`feat/code-editor-states`, Opus);
@@ -96,7 +94,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
      (`feat/outpost-submits`, Opus; a Rust build in the shared target folder).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
-   desktop's switcher with one Needs you across the shops (several shops, slice 2), 8a
+   desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
+   the shop's memory, consent and export, and managing helpers; slice 4), 8a
    (the outpost's step channel), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
    9 (desktop leftovers), 11 (the Playwright follow-up, #17: every spec runs, in six
@@ -107,6 +106,7 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - item 15 (a helper's new device, after 13); item 17 (an installable web app) waits for owners' sign-in, as there is
      no owner home page yet;
    - item 19, the outpost following the shop sessions, after 12; the cloud outpost after that.
+   - item 20, a pilot shop's full pages for its owner on the desktop, now that an owner's shop session reaches more.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
@@ -157,6 +157,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - **Night replies:** the canvas's routine "Every night after 21:00: Answer order-status questions" reads as Nam
   replying alone; the rules (and CLAUDE.md) make every reply to a customer ask first, so the desktop shows
   "Asks first" on it. Say if night replies about order status may go without asking.
+- **Settle how an operator confirms an owner's link code before any real owner is linked.** Since item 13, a linked
+  owner account gets the shop's whole export (customers' messages and LINE names, helpers' emails), can change
+  consent and can remove helpers, so a wrong link now costs more. Also: whether helpers may read any of the memory
+  (none today); and the words for giving and withdrawing consent in the app are legal terms.
 - **Helpers:** a real sign-in for them (LINE Login is parked; email sign-in needs a sending service, which may
   cost money; today only an email Apple verified can accept an invite); whether helpers' decisions should count
   toward the pilot gate (they do not now).
