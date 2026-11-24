@@ -7,7 +7,8 @@ view" (`docs/plan.md`, December item 7). The first slice is built in `apps/api`:
 the owner's account kept beside the helpers in `people.ts` and `people-store.ts`. The routes are in
 `docs/pilot-api.md`, "Several shops". The console's owner link (slice 3), owner sessions on more routes (slice 4) and
 ending a shop session (slice 5) are built too, and so is the desktop (slice 2, 24 Nov 2026): the switcher, one Needs
-you across the shops, and each shop kept apart offline.
+you across the shops, and each shop kept apart offline. Since then the desktop shows a shop the person owns whole (24 Nov
+2026, `feat/connected-whole-shop`): its tasks, its team, Mission Control and the owner's routine and pause writes.
 
 ## Where things stood
 
@@ -143,9 +144,13 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
   keychain item that holds the sign-in, under the shop's id, and nowhere else; every write to that item takes its turn
   with the sign-in's refreshes. A session that ended, or that answers 401 for any reason but `unlinked` or `removed`, is
   opened again once with the sign-in.
-- **What a shop shows.** A shop session reads only that shop's approvals (the API answers it 401 everywhere else), so a
-  pilot shop shows Buddy, with its requests and nothing more: History, Automations and Buddy's notes are empty until
-  owner sessions reach more routes (slice 4 below). A person in no shop sees their own signed-in tenant, as before shops.
+- **What a shop shows.** A shop the person owns is read with its owner session for its requests, its export (its tasks
+  with each member's runs and drafts, its schedules and attention items) and its team with its routines
+  (`GET /v1/routines`), so its pages show what the signed-in tenant's show and more: its tasks as Buddy's threads in
+  History, its team (Buddy, then Nam, Pim and Ton as the shop has them on), Mission Control's jobs, activity log and Pause
+  everyone, and its routines (`docs/runtime-adapter.md`, "A shop the person owns"). A shop the person helps at shows Buddy
+  with its requests and nothing more: what a helper sees is the owner's call, and the export and the routines answer a
+  helper's session 403 `owner_only`. A person in no shop sees their own signed-in tenant, as before shops.
 - **One switcher, in the account row.** The account row still opens Settings, and names the person and the shop being
   viewed. With two or more shops a small button at the row's end (two chevrons, "Switch shop") opens the list above it:
   the shops the person owns first, each with "Owner" or "Helper" and a tick on the one shown. Choosing one switches every
@@ -191,7 +196,9 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
    them (403 `owner_only`), what the team knows included, since it can hold the owner's costs and suppliers. Not in this
    slice: deleting the shop's data from an owner session, which stays with the owner's confirmation link (the operator
    asks, the owner says yes on the link), and a shop session on `DELETE /v1/tenant/data` still answers 401; answering the
-   first-week questions from the app; and the desktop's screens for any of it, which wait for its switcher (slice 2).
+   first-week questions from the app. The desktop now reads the export and the routines with an owner session, shows the
+   shop whole and pauses and resumes its routines and its team (24 Nov 2026); its screens for what the team knows, the
+   consent, saving the export as a file and the helpers are still to come.
 5. **Done here (API):** ending a shop session from the app, `POST /v1/shops/session/end` (24 Nov 2026). It ends the one
    session it is called with, an owner's or a helper's, and the desktop calls it on sign-out for each shop session it holds.
    A sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
@@ -211,8 +218,12 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 
 ## Known limits of the desktop slice
 
-- A pilot shop's pages show only what waits there, since a shop session reads nothing else. Its tasks, schedules and
-  attention items need owner sessions on more routes (slice 4), and a helper's view of them is the owner's to decide.
+- A shop the person helps at shows only what waits there. Whether a helper sees more of it (its tasks, its team) is the
+  owner's to decide. A shop the person owns is read whole each minute, its export included, which carries every task's
+  history; a list route for a session's tasks would make that lighter (`docs/runtime-adapter.md`, "Next slices").
+- The owner's writes from the desktop are pausing and resuming a routine and Pause everyone. Making a routine, the shop's
+  own schedules, what the team knows, the consent and the helpers have routes an owner session reaches, and no screen on
+  the desktop that uses them yet.
 - A request that leaves a shop's open list with no answer from this computer closes as "Answered elsewhere", or as timed
   out once past its expiry: a shop session reads no tasks, so the app cannot tell a decision from a withdrawal there.
   Reading `GET /v1/approvals?state=recent` when an ask leaves would tell, at one more request.

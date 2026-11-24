@@ -1911,6 +1911,12 @@ tenant, and the operator key and no credential answer 401 there as before.
   the method (405 `method_not_allowed`), then the query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and
   the body (not exactly `{ enabled }` with a boolean: 400 `invalid_request`; not JSON: 400 `invalid_json`). 503
   `consent_unavailable` when the shop's consent cannot be read or written.
+- **Schedules and attention stay closed to a shop session.** `GET /v1/schedules` and `GET /v1/inbound/attention` answer a
+  shop session 401, owner's and helper's alike, as every lifted session route does. An owner has both through the export,
+  which carries the shop's schedules (the team's routine clocks among them, each naming its `routineId`) and its attention
+  items, so opening those two lifted routes would add a second way to the same lists, and the schedules path also takes
+  writes that must stay closed (`docs/decisions.md`). The desktop reads an owned shop's export and `GET /v1/routines`
+  together, with its owner session, each minute (`docs/runtime-adapter.md`, "A shop the person owns").
 
 ### Ending a shop session
 
