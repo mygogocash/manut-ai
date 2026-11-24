@@ -263,8 +263,9 @@ pub fn request(url: &str, method: &str, bearer: Option<&str>, body: Option<&str>
 }
 
 /// The largest answer `request_sealed` reads. A redeem's answer is a few hundred bytes: a username and a password of
-/// at most 1,024 characters, and five origins.
-const MAX_SEALED_ANSWER: usize = 64 * 1024;
+/// at most 1,024 characters, and five origins. An outpost's steps are read this way too (outpost/api.rs), and one ask
+/// hands out at most five, each write at most 12 KB as JSON, some 62 KB in all: twice that leaves room.
+const MAX_SEALED_ANSWER: usize = 128 * 1024;
 
 /// One request whose answer holds a secret, such as an outpost redeeming a sign-in (outpost/api.rs). The same checks
 /// and the same curl as `request`, but the answer is read into a buffer sized up front, so no reallocation leaves a

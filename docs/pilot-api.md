@@ -1026,6 +1026,10 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
   its kind needs, or a stop before the step began or, for a write, before anything was typed), `timed_out`,
   `browser_error`; and no text.
 
+This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
+nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the
+page shows, or `not_run` for a step it did nothing for.
+
 A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
 id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
 `selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`, `not_run`) is `failed`, and any other is

@@ -1,8 +1,9 @@
-//! One browser step, run in the outpost's browser (docs/browser-control.md, "The step channel"). Reading only: `open`
+//! One browser step, run in the outpost's browser (docs/browser-control.md, "The step channel"). Three read: `open`
 //! goes to a page, `read` reads the text of the page that is open (or of the part a selector names), and `sign_in`
 //! redeems a grant and types the sign-in into the page that is open, then submits that form, since signing in is how
-//! reading a shop's own site starts. Any other kind is failed: a step that submits anything else waits for
-//! approval-core (the next slice).
+//! reading a shop's own site starts. One writes: `submit` makes a write the owner approved through approval-core,
+//! exactly as approved ("Submitting through a browser"). Any other kind is not run at all (`not_run`), and neither is a
+//! step missing what its kind needs: nothing is opened, read, typed or pressed for it.
 //!
 //! The browser is a seam (`Browser`): browser.rs is the real one, a Tauri webview window of its own; tests stand a fake
 //! in for it. Everything that reads the page runs in the page's main frame in a JavaScript world of the outpost's own
@@ -14,8 +15,12 @@
 //! where the browser hands it to the page as an argument (never inside a script's text) and the Rust copy is wiped as
 //! soon as the page has it. The script checks the page's origin again in the same evaluation, and types nothing if it
 //! moved. Nothing here logs, reports or returns it: an outcome is a code from the fixed list, or what a read read.
+//!
+//! A write's values take the same road. They come only from the step the API handed out, which the begin gate filled
+//! from the approved copy; they go to the page only, as arguments of the scripts that type and check them, in a buffer
+//! wiped once WebKit has its own copy; and nothing is told what they were: not a report, not a note, not a log.
 
-use super::api::{Failure, OutpostApi, OutpostStep, Outcome, Redeemed, MAX_READ_TEXT_BYTES};
+use super::api::{Failure, OutpostApi, OutpostStep, Outcome, Redeemed, SubmitValue, MAX_READ_TEXT_BYTES};
 use super::origin;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +35,12 @@ pub struct Until<'a> {
 
 impl Until<'_> {
     pub fn over(&self) -> bool {
-        self.stop.load(Ordering::SeqCst) || Instant::now() >= self.deadline
+        self.stopped() || Instant::now() >= self.deadline
+    }
+
+    /// The outpost is stopping under the step.
+    pub fn stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
     }
 
     /// What a step whose waiting ended is reported as: it ran out of time, or the outpost stopped under it.
@@ -66,9 +76,13 @@ pub struct Pace {
     pub open: Duration,
     pub read: Duration,
     pub sign_in: Duration,
+    /// A write: loading its page, typing, pressing once and the site's answer.
+    pub submit: Duration,
+    /// How long a write waits for the page to turn its button on once the values are in.
+    pub press: Duration,
     /// How often a wait looks at the page again.
     pub poll: Duration,
-    /// How long the site's answer to a sign-in must stay the same before it is taken as its answer.
+    /// How long the site's answer to a sign-in or a write must stay the same before it is taken as its answer.
     pub settled: Duration,
 }
 
@@ -76,6 +90,8 @@ pub const PACE: Pace = Pace {
     open: Duration::from_secs(30),
     read: Duration::from_secs(15),
     sign_in: Duration::from_secs(40),
+    submit: Duration::from_secs(45),
+    press: Duration::from_secs(10),
     poll: Duration::from_millis(400),
     settled: Duration::from_secs(3),
 };
@@ -170,17 +186,130 @@ if (fields.length === 0) return JSON.stringify({ s: "in" });
 if (location.origin + location.pathname === a && fields.every((f) => f.value === "")) return JSON.stringify({ s: "refused" });
 return JSON.stringify({ s: "pending" });"#;
 
-/// The scripts as they are run: `VISIBLE` written into each one that uses it.
+/// What a write's scripts share: finding an element by a selector (null for one that names nothing or is not a selector),
+/// what kind of field an element is to a write, whether a field holds exactly a value, and whether the page marks a field
+/// as wrong, or its form holds a field the browser itself would refuse to send. A write fills only what a person types
+/// text into or chooses one item of a list from: an input of a text
+/// kind, a text area, or a list. Never a password field: passwords come only from the vault, through a sign-in step.
+/// A text area reads a line break as one "\n", so that is how its value is compared.
+const FIELDS: &str = r#"const find = (s) => { try { return document.querySelector(s); } catch (_) { return null; } };
+const TYPED = ["text", "search", "email", "tel", "url", "number", "date", "time", "datetime-local", "month", "week"];
+const kindOf = (el) => {
+  if (!visible(el) || el.readOnly) return null;
+  if (el.tagName === "TEXTAREA") return "text";
+  if (el.tagName === "INPUT") return TYPED.includes(el.type) ? "text" : null;
+  if (el.tagName === "SELECT") return el.multiple ? null : "choice";
+  return null;
+};
+const holds = (el, value) => el !== null && el.value === (el.tagName === "TEXTAREA" ? value.replace(/\r\n?/g, "\n") : value);
+const flagged = (el) => el.getAttribute("aria-invalid") === "true" || (el.form !== null && !el.form.noValidate && el.matches(":invalid"));
+const blocks = (target) => {
+  const form = target.tagName === "FORM" ? target : target.form ?? null;
+  return form !== null && !form.noValidate && !target.formNoValidate && form.matches(":invalid");
+};"#;
+
+/// `submit`: checks that the form `f` (or the button it names) and every field of `v` (`[[field, value], ...]`, in order)
+/// are on the page, and that each value can go into its field, before anything is typed; then sets each value in order,
+/// as a person's typing does: through the field's own setter, with the events typing fires, each field found again first,
+/// since a value typed may change the page. `{ r: "set" }`; `{ r: "form" }` for no form or button to press; `{ r: "field" }`
+/// for a field that is missing or takes no value of a write (or a list without that item); `{ r: "moved" }` for a field
+/// that went while typing; `{ r: "origin" }` for a page off the origins `o`, where nothing is typed. It answers nothing
+/// about the values.
+pub const SET: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
+VISIBLE
+FIELDS
+const pairs = JSON.parse(v);
+const target = find(f);
+const pressable = target !== null && target.getClientRects().length > 0 && (
+  target.tagName === "FORM" ? typeof target.requestSubmit === "function" :
+  target.tagName === "BUTTON" ? target.type !== "reset" :
+  target.tagName === "INPUT" ? ["submit", "button", "image"].includes(target.type) :
+  target.getAttribute("role") === "button");
+if (!pressable) return JSON.stringify({ r: "form" });
+for (const [s, value] of pairs) {
+  const el = find(s);
+  const kind = el === null ? null : kindOf(el);
+  if (kind === null) return JSON.stringify({ r: "field" });
+  if (kind === "choice" && !Array.from(el.options).some((x) => x.value === value && !x.disabled)) return JSON.stringify({ r: "field" });
+}
+const SETTERS = { INPUT: HTMLInputElement, TEXTAREA: HTMLTextAreaElement, SELECT: HTMLSelectElement };
+for (const [s, value] of pairs) {
+  const el = find(s);
+  if (el === null || kindOf(el) === null) return JSON.stringify({ r: "moved" });
+  el.focus();
+  Object.getOwnPropertyDescriptor(SETTERS[el.tagName].prototype, "value").set.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.blur();
+}
+return JSON.stringify({ r: "set" });"#;
+
+/// `submit`, once the values are in: presses once, only while every field still holds exactly its approved value and the
+/// page marks none of them as wrong. A form is submitted as its own submit does (`requestSubmit`, which runs the page's
+/// checks); a button is clicked once the page has turned it on. `{ r: "pressed", a }` with the address just before the
+/// press; `{ r: "wait" }` for a button not on yet (nothing pressed); `{ r: "changed" }` when the page changed a value since
+/// it was typed and `{ r: "flagged" }` when it marks one as wrong or the browser would refuse the form (nothing pressed);
+/// `{ r: "gone" }` when the form or button went; `{ r: "origin" }` off the origins `o`.
+pub const PRESS: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ r: "origin" });
+VISIBLE
+FIELDS
+const pairs = JSON.parse(v);
+const fields = pairs.map(([s, value]) => [find(s), value]);
+if (!fields.every(([el, value]) => holds(el, value))) return JSON.stringify({ r: "changed" });
+const target = find(f);
+if (target === null) return JSON.stringify({ r: "gone" });
+if (fields.some(([el]) => flagged(el)) || blocks(target)) return JSON.stringify({ r: "flagged" });
+const a = location.href;
+if (target.tagName === "FORM") {
+  target.requestSubmit();
+  return JSON.stringify({ r: "pressed", a });
+}
+if (!visible(target) || target.getAttribute("aria-disabled") === "true") return JSON.stringify({ r: "wait" });
+target.click();
+return JSON.stringify({ r: "pressed", a });"#;
+
+/// `submit`, after the press: how the site answered. `sent` when the page moved from `a`, the form or button `f` went,
+/// or every field given words is gone or emptied (a list back on its empty choice too), as a chat empties its box once it
+/// has sent, or a form clears itself once taken. `refused` when the page is where it was with the form, every value still
+/// as typed, and a field marked as wrong (or a form the browser refuses): the site kept the form with an error. Otherwise
+/// `pending`: still loading, or a site that keeps what was typed and says nothing. `away` off the step's origins `o`.
+pub const SENT: &str = r#"const origins = JSON.parse(o);
+if (!origins.includes(location.origin)) return JSON.stringify({ s: "away" });
+if (document.readyState !== "complete") return JSON.stringify({ s: "pending" });
+VISIBLE
+FIELDS
+const pairs = JSON.parse(v);
+if (location.href !== a || find(f) === null) return JSON.stringify({ s: "sent" });
+const given = pairs.filter(([, value]) => value !== "");
+if (given.length > 0 && given.every(([s]) => { const el = find(s); return el === null || el.value === ""; })) {
+  return JSON.stringify({ s: "sent" });
+}
+const fields = pairs.map(([s, value]) => [find(s), value]);
+if (fields.every(([el, value]) => holds(el, value)) && (fields.some(([el]) => flagged(el)) || blocks(find(f)))) return JSON.stringify({ s: "refused" });
+return JSON.stringify({ s: "pending" });"#;
+
+/// The scripts as they are run: `VISIBLE` and `FIELDS` written into each one that uses them.
 pub fn script(body: &'static str) -> String {
-    body.replace("VISIBLE", VISIBLE)
+    body.replace("FIELDS", FIELDS).replace("VISIBLE", VISIBLE)
 }
 
+/// The kinds this outpost runs. Any other is not run at all.
+pub const KINDS: [&str; 4] = ["open", "read", "sign_in", "submit"];
+
 /// Runs one step and answers how it went. A navigation the guard refused while it ran fails it whatever else
-/// happened (`origin_not_allowed`): the page went, or tried to go, off the step's origins.
+/// happened (`origin_not_allowed`): the page went, or tried to go, off the step's origins. A step it cannot run (a kind
+/// it does not know, or one missing what its kind needs) is `not_run`, which the API reads as nothing submitted: before,
+/// such a step was a browser error, which settles a write as not known.
 pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi, stop: &AtomicBool, pace: &Pace) -> Outcome {
+    if !KINDS.contains(&step.kind.as_str()) {
+        return Outcome::Failed(Failure::NotRun);
+    }
+    // With no origin its browser may be on, a step can run nowhere.
     let origins = origin::clean(&step.origins);
     if origins.is_empty() {
-        return Outcome::Failed(Failure::OriginNotAllowed);
+        return Outcome::Failed(Failure::NotRun);
     }
     // What the guard refused before this step began (between steps, say) is not this step's.
     browser.take_blocked();
@@ -189,7 +318,7 @@ pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi,
         "open" => open(step, &origins, browser, &Until { deadline: now + pace.open, stop }),
         "read" => read(step, &origins, browser, &Until { deadline: now + pace.read, stop }, pace),
         "sign_in" => sign_in(step, &origins, browser, api, &Until { deadline: now + pace.sign_in, stop }, pace),
-        _ => Err(Failure::BrowserError),
+        _ => submit(step, &origins, browser, &Until { deadline: now + pace.submit, stop }, pace),
     };
     if browser.take_blocked() {
         return Outcome::Failed(Failure::OriginNotAllowed);
@@ -201,7 +330,7 @@ pub fn run_step(step: &OutpostStep, browser: &dyn Browser, api: &dyn OutpostApi,
 }
 
 fn open(step: &OutpostStep, origins: &[String], browser: &dyn Browser, until: &Until) -> Result<Option<String>, Failure> {
-    let url = step.url.as_deref().ok_or(Failure::BrowserError)?;
+    let url = step.url.as_deref().ok_or(Failure::NotRun)?;
     if !origin::allowed(url, origins) {
         return Err(Failure::OriginNotAllowed);
     }
@@ -253,7 +382,7 @@ struct CheckWire {
 
 fn sign_in(step: &OutpostStep, origins: &[String], browser: &dyn Browser, api: &dyn OutpostApi, until: &Until, pace: &Pace)
     -> Result<Option<String>, Failure> {
-    let grant = step.grant_id.as_deref().ok_or(Failure::BrowserError)?;
+    let grant = step.grant_id.as_deref().ok_or(Failure::NotRun)?;
     on_page(origins, browser, until, pace)?;
     browser.keep_on(origins);
     // Is there a form to type into? Asked before the redeem, so a password is never fetched for a page it cannot go into.
@@ -322,6 +451,153 @@ fn settle(origins: &[String], at: &str, browser: &dyn Browser, until: &Until, pa
             _ => {}
         }
     }
+}
+
+#[derive(Deserialize)]
+struct SetWire {
+    r: String,
+}
+
+#[derive(Deserialize)]
+struct PressWire {
+    r: String,
+    a: Option<String>,
+}
+
+/// `submit`: makes the write the owner approved, exactly as approved, once. Nothing is typed until the approved page is
+/// open (loaded fresh, so the form holds only what the site put there), on the step's origin, with nothing refused on
+/// the way, and the form and every field are found on it; then each value is set in order, the form is submitted or its
+/// button pressed once, and the site's answer must hold before it is taken: `done` when it took the write,
+/// `submit_refused` when it kept the form with an error. Anything still undecided at the end of the step's time is
+/// `timed_out`, never a guess either way: the API then settles the write as not known.
+fn submit(step: &OutpostStep, origins: &[String], browser: &dyn Browser, until: &Until, pace: &Pace) -> Result<Option<String>, Failure> {
+    let (Some(url), Some(form), Some(values)) = (step.url.as_deref(), step.form.as_deref(), step.values.as_deref()) else {
+        return Err(Failure::NotRun);
+    };
+    if !origin::allowed(url, origins) {
+        return Err(Failure::OriginNotAllowed);
+    }
+    browser.open(url, origins, until).map_err(|failure| before_typing(failure, until))?;
+    // A page that went, or tried to go, off the step's origin on the way is not the page the owner approved.
+    if browser.take_blocked() {
+        return Err(Failure::OriginNotAllowed);
+    }
+    browser.keep_on(origins);
+    // The values as the scripts take them, written once; each script is handed a copy, wiped once WebKit has it. Without
+    // them nothing may be typed or pressed: a form pressed with none would be a write nobody approved.
+    let v = values_json(values).ok_or(Failure::NotRun)?;
+    let args = |extra: Option<&str>| {
+        let mut args = vec![("o", Zeroizing::new(origins_json(origins))), ("f", Zeroizing::new(form.to_owned())),
+            ("v", Zeroizing::new(v.as_str().to_owned()))];
+        if let Some(at) = extra {
+            args.push(("a", Zeroizing::new(at.to_owned())));
+        }
+        args
+    };
+    if until.over() {
+        return Err(before_typing(until.failure(), until));
+    }
+    let set: SetWire = serde_json::from_str(&browser.call(SET, args(None), until)?).map_err(|_| Failure::BrowserError)?;
+    match set.r.as_str() {
+        "set" => {}
+        "origin" => return Err(Failure::OriginNotAllowed),
+        "form" | "field" | "moved" => return Err(Failure::SelectorNotFound),
+        _ => return Err(Failure::BrowserError),
+    }
+    let at = press(browser, &args, until, pace)?;
+    sent(browser, &args, &at, until, pace)
+}
+
+/// A failure found before anything was typed, as a write step reports it: nothing was submitted, so it is said with a
+/// code the API reads that way wherever one is true. A page that did not load, in time or at all, is `page_unavailable`;
+/// the outpost stopping is `not_run`; a page that went off the step's origin stays `origin_not_allowed`.
+fn before_typing(failure: Failure, until: &Until) -> Failure {
+    if until.stopped() {
+        return Failure::NotRun;
+    }
+    match failure {
+        Failure::TimedOut | Failure::BrowserError => Failure::PageUnavailable,
+        other => other,
+    }
+}
+
+/// Presses once, and answers the address the page was at just before. A button the page has not turned on yet is asked
+/// for again until `pace.press` is over: one never turned on means the site would not take what was typed, so nothing
+/// was submitted. Only an answer that nothing was pressed is ever asked again; a press whose answer did not come back may
+/// have been made, so it fails the step, as not known, and is never made twice.
+fn press(browser: &dyn Browser, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, until: &Until, pace: &Pace)
+    -> Result<String, Failure> {
+    let waited = Instant::now() + pace.press;
+    loop {
+        // The page has a moment to take in what was typed, or to turn its button on.
+        std::thread::sleep(pace.poll);
+        if until.over() {
+            return Err(until.failure());
+        }
+        // Nothing is pressed on a page that went, or tried to go, off the step's origin since it opened.
+        if browser.take_blocked() {
+            return Err(Failure::OriginNotAllowed);
+        }
+        let wire: PressWire = serde_json::from_str(&browser.call(PRESS, args(None), until)?).map_err(|_| Failure::BrowserError)?;
+        match (wire.r.as_str(), wire.a) {
+            ("pressed", Some(at)) => return Ok(at),
+            ("wait", _) if Instant::now() < waited => {}
+            ("wait", _) | ("changed", _) | ("flagged", _) => return Err(Failure::SubmitRefused),
+            ("gone", _) => return Err(Failure::SelectorNotFound),
+            ("origin", _) => return Err(Failure::OriginNotAllowed),
+            _ => return Err(Failure::BrowserError),
+        }
+    }
+}
+
+/// Waits for the site's answer to a write: the same answer seen for `pace.settled` while nothing loads, as for a sign-in.
+fn sent(browser: &dyn Browser, args: &dyn Fn(Option<&str>) -> Vec<(&'static str, Zeroizing<String>)>, at: &str, until: &Until, pace: &Pace)
+    -> Result<Option<String>, Failure> {
+    let mut seen: Option<(String, Instant)> = None;
+    loop {
+        if until.over() {
+            return Err(until.failure());
+        }
+        std::thread::sleep(pace.poll);
+        if browser.loading() {
+            seen = None;
+            continue;
+        }
+        // A page between two loads cannot be read; it is looked at again.
+        let Some(state) = browser.call(SENT, args(Some(at)), until).ok().and_then(|s| serde_json::from_str::<CheckWire>(&s).ok()) else {
+            seen = None;
+            continue;
+        };
+        let now = Instant::now();
+        let since = match &seen {
+            Some((last, since)) if *last == state.s => *since,
+            _ => {
+                seen = Some((state.s.clone(), now));
+                now
+            }
+        };
+        if now.duration_since(since) < pace.settled {
+            continue;
+        }
+        match state.s.as_str() {
+            "sent" => return Ok(None),
+            "refused" => return Err(Failure::SubmitRefused),
+            "away" => return Err(Failure::OriginNotAllowed),
+            _ => {}
+        }
+    }
+}
+
+/// A write's values as its scripts take them, `[[field, value], ...]` in order, written once into a buffer sized up
+/// front, so no copy of a value is left behind that is not wiped. JSON writes no character as more than six bytes. None
+/// if they could not be written, which never leaves anything to be typed.
+fn values_json(values: &[SubmitValue]) -> Option<Zeroizing<String>> {
+    let pairs: Vec<(&str, &str)> = values.iter().map(|v| (v.field.as_str(), v.value.as_str())).collect();
+    let most = 2 + pairs.iter().map(|(field, value)| 6 * (field.len() + value.len()) + 8).sum::<usize>();
+    let mut out = Zeroizing::new(Vec::with_capacity(most));
+    serde_json::to_writer(&mut *out, &pairs).ok()?;
+    // serde_json writes UTF-8, so this moves the buffer into the String without copying it.
+    String::from_utf8(std::mem::take(&mut *out)).ok().map(Zeroizing::new)
 }
 
 /// The page is there to read and on the step's origins, once it has finished loading.
@@ -398,6 +674,12 @@ pub mod fake {
             "type"
         } else if body == CHECK {
             "check"
+        } else if body == SET {
+            "set"
+        } else if body == PRESS {
+            "press"
+        } else if body == SENT {
+            "sent"
         } else {
             "other"
         }
@@ -458,6 +740,8 @@ mod tests {
     use super::fake::FakeBrowser;
     use super::*;
     use crate::outpost::api::ApiError;
+    use serde_json::json;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex;
 
     const SHOP: &str = "https://seller.shopee.co.th";
@@ -467,6 +751,8 @@ mod tests {
         open: Duration::from_millis(500),
         read: Duration::from_millis(500),
         sign_in: Duration::from_millis(500),
+        submit: Duration::from_millis(500),
+        press: Duration::from_millis(40),
         poll: Duration::from_millis(1),
         settled: Duration::from_millis(5),
     };
@@ -502,8 +788,7 @@ mod tests {
     }
 
     fn step(kind: &str, origins: &[&str]) -> OutpostStep {
-        OutpostStep { step_id: "s-1".into(), kind: kind.into(), url: None, selector: None, grant_id: None,
-            origins: origins.iter().map(|o| o.to_string()).collect() }
+        OutpostStep { step_id: "s-1".into(), kind: kind.into(), origins: origins.iter().map(|o| o.to_string()).collect(), ..Default::default() }
     }
 
     fn run(step: &OutpostStep, browser: &FakeBrowser, api: &Vault) -> Outcome {
@@ -529,10 +814,10 @@ mod tests {
             assert_eq!(run(&open, &browser, &vault(&[])), Outcome::Failed(Failure::OriginNotAllowed), "{away}");
         }
         assert_eq!(browser.opened.lock().unwrap().len(), 1);
-        // A step with no origin the outpost can read opens nothing either.
+        // A step with no origin the outpost can read can run nowhere: it is not run.
         let mut none = step("open", &["https://Seller.shopee.co.th", "*"]);
         none.url = Some(format!("{SHOP}/"));
-        assert_eq!(run(&none, &browser, &vault(&[])), Outcome::Failed(Failure::OriginNotAllowed));
+        assert_eq!(run(&none, &browser, &vault(&[])), Outcome::Failed(Failure::NotRun));
         assert_eq!(browser.opened.lock().unwrap().len(), 1);
     }
 
@@ -713,16 +998,235 @@ mod tests {
     }
 
     #[test]
-    fn a_kind_it_does_not_know_is_not_run() {
+    fn a_kind_it_does_not_know_or_a_step_missing_what_its_kind_needs_is_not_run() {
+        // Not run is a code the API reads as nothing submitted (`NOTHING_SUBMITTED` in apps/api/src/browser-writes.ts):
+        // a write the outpost cannot run settles failed, not unknown.
+        assert_eq!(Failure::NotRun.code(), "not_run");
         let browser = FakeBrowser::at(Some(&format!("{SHOP}/")), Box::new(|_, _| unreachable!()));
-        assert_eq!(run(&step("submit", &[SHOP]), &browser, &vault(&[])), Outcome::Failed(Failure::BrowserError));
-        assert!(browser.calls.lock().unwrap().is_empty());
+        let api = vault(&[]);
+        for kind in ["upload", "", "SUBMIT", "submit "] {
+            let mut odd = write();
+            odd.kind = kind.into();
+            assert_eq!(run(&odd, &browser, &api), Outcome::Failed(Failure::NotRun), "{kind:?}");
+        }
         let mut open = step("open", &[SHOP]);
         open.url = None;
-        assert_eq!(run(&open, &browser, &vault(&[])), Outcome::Failed(Failure::BrowserError));
+        assert_eq!(run(&open, &browser, &api), Outcome::Failed(Failure::NotRun));
         let mut sign_in = sign_in_step();
         sign_in.grant_id = None;
-        assert_eq!(run(&sign_in, &browser, &vault(&[])), Outcome::Failed(Failure::BrowserError));
+        assert_eq!(run(&sign_in, &browser, &api), Outcome::Failed(Failure::NotRun));
+        for missing in ["url", "form", "values"] {
+            let mut short = write();
+            match missing {
+                "url" => short.url = None,
+                "form" => short.form = None,
+                _ => short.values = None,
+            }
+            assert_eq!(run(&short, &browser, &api), Outcome::Failed(Failure::NotRun), "{missing}");
+        }
+        // Nothing was opened, read, typed or pressed for any of them, and nothing redeemed.
+        assert!(browser.calls.lock().unwrap().is_empty());
+        assert!(browser.opened.lock().unwrap().is_empty());
+        assert!(api.redeemed.lock().unwrap().is_empty());
+    }
+
+    const PAGE: &str = "https://seller.shopee.co.th/portal/chat/2291";
+    /// A value nothing but the page may ever be given, with what JSON must escape in it.
+    const KNOWN: &str = "Known-ค่า \"quoted\"\nline two";
+
+    /// A write step as the API hands one out: the approved page, its form, and two values in order.
+    fn write() -> OutpostStep {
+        OutpostStep {
+            step_id: "s-9".into(),
+            kind: "submit".into(),
+            url: Some(PAGE.into()),
+            form: Some("form#chat".into()),
+            values: Some(vec![
+                SubmitValue { field: "textarea[name=\"reply\"]".into(), value: Zeroizing::new(KNOWN.into()) },
+                SubmitValue { field: "select#reason".into(), value: Zeroizing::new("damaged".into()) },
+            ]),
+            origins: vec![SHOP.into()],
+            ..Default::default()
+        }
+    }
+
+    /// The approved page, answering each script as a site would: the values go in, the press answers `presses` in order
+    /// (the last one again after that), and then the site answers `after` (SENT's `s`).
+    fn form_page(presses: Vec<&'static str>, after: &'static str) -> FakeBrowser {
+        let presses = Mutex::new(presses);
+        FakeBrowser::at(None, Box::new(move |name, _| match name {
+            "set" => json_answer(json!({ "r": "set" })),
+            "press" => {
+                let mut left = presses.lock().unwrap();
+                let r = if left.len() > 1 { left.remove(0) } else { left[0] };
+                json_answer(if r == "pressed" { json!({ "r": r, "a": PAGE }) } else { json!({ "r": r }) })
+            }
+            "sent" => json_answer(json!({ "s": after })),
+            _ => unreachable!("{name}"),
+        }))
+    }
+
+    #[test]
+    fn submits_the_approved_values_in_order_on_the_approved_page_once() {
+        let browser = form_page(vec!["pressed"], "sent");
+        assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Done(None));
+        // The approved page, opened fresh, the guard kept on the step's origin.
+        assert_eq!(*browser.opened.lock().unwrap(), [PAGE.to_string()]);
+        assert!(browser.kept.lock().unwrap().iter().all(|kept| kept == &[SHOP.to_string()]));
+        let names = browser.names();
+        assert_eq!(names[..2], ["set", "press"]);
+        assert!(names[2..].iter().all(|n| *n == "sent") && names.len() > 2);
+        let calls = browser.calls.lock().unwrap();
+        let set = &calls[0].1;
+        assert_eq!(set["o"], format!(r#"["{SHOP}"]"#));
+        assert_eq!(set["f"], "form#chat");
+        // Every value, in order, exactly as approved.
+        let pairs: Vec<(String, String)> = serde_json::from_str(&set["v"]).unwrap();
+        assert_eq!(pairs, [("textarea[name=\"reply\"]".to_string(), KNOWN.to_string()), ("select#reason".into(), "damaged".into())]);
+        // The site's answer is read against the address just before the press.
+        assert_eq!(calls[2].1["a"], PAGE);
+    }
+
+    #[test]
+    fn says_how_the_site_answered_a_write_and_never_guesses() {
+        let api = vault(&[]);
+        assert_eq!(run(&write(), &form_page(vec!["pressed"], "refused"), &api), Outcome::Failed(Failure::SubmitRefused));
+        assert_eq!(run(&write(), &form_page(vec!["pressed"], "away"), &api), Outcome::Failed(Failure::OriginNotAllowed));
+        // Still undecided at the end of its time (a site that keeps the form and says nothing): not known, never a refusal.
+        assert_eq!(run(&write(), &form_page(vec!["pressed"], "pending"), &api), Outcome::Failed(Failure::TimedOut));
+        // An answer is taken only once it has held.
+        let flips = AtomicUsize::new(0);
+        let flipping = FakeBrowser::at(None, Box::new(move |name, _| match name {
+            "set" => json_answer(json!({ "r": "set" })),
+            "press" => json_answer(json!({ "r": "pressed", "a": PAGE })),
+            _ => json_answer(json!({ "s": if flips.fetch_add(1, Ordering::SeqCst) % 2 == 0 { "refused" } else { "sent" } })),
+        }));
+        assert_eq!(run(&write(), &flipping, &api), Outcome::Failed(Failure::TimedOut));
+    }
+
+    #[test]
+    fn checks_the_form_and_every_field_before_typing_anything() {
+        for answer in ["form", "field", "moved"] {
+            let browser = FakeBrowser::at(None, Box::new(move |name, _| match name {
+                "set" => json_answer(json!({ "r": answer })),
+                _ => unreachable!("nothing is pressed"),
+            }));
+            assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Failed(Failure::SelectorNotFound), "{answer}");
+            assert_eq!(browser.names(), ["set"]);
+        }
+        // The script checks the form and every field before it sets its first value, and answers only in fixed words.
+        let first_set = SET.find(".set.call(").unwrap();
+        for check in ["return JSON.stringify({ r: \"form\" })", "return JSON.stringify({ r: \"field\" })"] {
+            assert!(SET.find(check).unwrap() < first_set, "{check}");
+        }
+        for answer in SET.match_indices("return ").map(|(at, _)| &SET[at..]) {
+            assert!(["origin", "form", "field", "moved", "set"].iter().any(|r| answer.starts_with(&format!("return JSON.stringify({{ r: \"{r}\" }})"))),
+                "{answer}");
+        }
+    }
+
+    #[test]
+    fn presses_once_waiting_for_the_page_to_turn_its_button_on() {
+        let browser = form_page(vec!["wait", "wait", "pressed"], "sent");
+        assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Done(None));
+        assert_eq!(browser.names().iter().filter(|n| **n == "press").count(), 3);
+        // A button never turned on: the site would not take what was typed, and nothing was pressed.
+        let never = form_page(vec!["wait"], "sent");
+        assert_eq!(run(&write(), &never, &vault(&[])), Outcome::Failed(Failure::SubmitRefused));
+        assert!(!never.names().contains(&"sent"));
+        // The page changed a value since it was typed, or marks one as wrong: nothing is pressed.
+        for answer in ["changed", "flagged"] {
+            let browser = form_page(vec![answer], "sent");
+            assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Failed(Failure::SubmitRefused), "{answer}");
+            assert_eq!(browser.names(), ["set", "press"]);
+        }
+        assert_eq!(run(&write(), &form_page(vec!["gone"], "sent"), &vault(&[])), Outcome::Failed(Failure::SelectorNotFound));
+    }
+
+    #[test]
+    fn never_presses_twice_when_a_press_got_no_answer() {
+        // The press may have been made: it is never made again, and the step ends as not known.
+        let browser = FakeBrowser::at(None, Box::new(|name, _| match name {
+            "set" => json_answer(json!({ "r": "set" })),
+            "press" => Err(Failure::BrowserError),
+            _ => unreachable!(),
+        }));
+        assert_eq!(run(&write(), &browser, &vault(&[])), Outcome::Failed(Failure::BrowserError));
+        assert_eq!(browser.names(), ["set", "press"]);
+    }
+
+    #[test]
+    fn types_nothing_off_the_approved_page() {
+        let api = vault(&[]);
+        // An address off the step's origin is never opened.
+        let browser = form_page(vec!["pressed"], "sent");
+        let mut away = write();
+        away.url = Some("https://evil.example/portal/chat/2291".into());
+        assert_eq!(run(&away, &browser, &api), Outcome::Failed(Failure::OriginNotAllowed));
+        assert!(browser.opened.lock().unwrap().is_empty() && browser.calls.lock().unwrap().is_empty());
+        // The site sent the page elsewhere on the way: the guard refused it, and nothing is typed.
+        let mut redirected = form_page(vec!["pressed"], "sent");
+        redirected.on_open = Box::new(|url| (Some(url.to_owned()), true, Ok(())));
+        assert_eq!(run(&write(), &redirected, &api), Outcome::Failed(Failure::OriginNotAllowed));
+        assert!(redirected.calls.lock().unwrap().is_empty());
+        // The script found the page off the origin when it came to type.
+        let moved = FakeBrowser::at(None, Box::new(|name, _| match name {
+            "set" => json_answer(json!({ "r": "origin" })),
+            _ => unreachable!(),
+        }));
+        assert_eq!(run(&write(), &moved, &api), Outcome::Failed(Failure::OriginNotAllowed));
+    }
+
+    #[test]
+    fn a_write_whose_page_does_not_load_submitted_nothing() {
+        let api = vault(&[]);
+        for failure in [Failure::PageUnavailable, Failure::TimedOut, Failure::BrowserError] {
+            let mut browser = form_page(vec!["pressed"], "sent");
+            browser.on_open = Box::new(move |_| (None, false, Err(failure)));
+            assert_eq!(run(&write(), &browser, &api), Outcome::Failed(Failure::PageUnavailable), "{failure:?}");
+            assert!(browser.calls.lock().unwrap().is_empty());
+        }
+        // The outpost stopping before anything was typed: not run.
+        let mut stopped = form_page(vec!["pressed"], "sent");
+        stopped.on_open = Box::new(|_| (None, false, Err(Failure::BrowserError)));
+        assert_eq!(run_step(&write(), &stopped, &vault(&[]), &AtomicBool::new(true), &QUICK), Outcome::Failed(Failure::NotRun));
+        assert!(stopped.calls.lock().unwrap().is_empty());
+        // Or once the page is open, before the values go in.
+        let loaded = form_page(vec!["pressed"], "sent");
+        assert_eq!(run_step(&write(), &loaded, &vault(&[]), &AtomicBool::new(true), &QUICK), Outcome::Failed(Failure::NotRun));
+        assert!(loaded.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_value_goes_to_the_page_and_nowhere_else() {
+        let browser = form_page(vec!["pressed"], "sent");
+        let step = write();
+        assert_eq!(run(&step, &browser, &vault(&[])), Outcome::Done(None));
+        // Only the scripts that type and check it were handed it, as an argument, never inside a script's own text.
+        for (name, args) in browser.calls.lock().unwrap().iter() {
+            let holds = args.values().any(|v| v.contains("Known-ค่า"));
+            assert_eq!(holds, ["set", "press", "sent"].contains(name), "{name}");
+        }
+        for body in [SET, PRESS, SENT] {
+            assert!(!script(body).contains("Known"));
+        }
+        // A step never prints it.
+        let printed = format!("{step:?} {step:#?}");
+        assert!(!printed.contains("Known") && printed.contains("textarea"), "{printed}");
+    }
+
+    #[test]
+    fn writes_the_values_as_json_in_order_with_nothing_lost() {
+        let values = write().values.unwrap();
+        let json = values_json(&values).unwrap();
+        let back: Vec<(String, String)> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].1, KNOWN);
+        assert_eq!(values_json(&[]).unwrap().as_str(), "[]");
+        // Every character JSON escapes, at the most it takes: the buffer was sized for it.
+        let odd = vec![SubmitValue { field: "\u{1}".repeat(50), value: Zeroizing::new("\u{1f}\"\\".repeat(40)) }];
+        let back: Vec<(String, String)> = serde_json::from_str(&values_json(&odd).unwrap()).unwrap();
+        assert_eq!(back, [("\u{1}".repeat(50), "\u{1f}\"\\".repeat(40))]);
     }
 
     #[test]
@@ -744,10 +1248,11 @@ mod tests {
 
     #[test]
     fn the_scripts_check_the_origin_first_and_type_through_arguments_only() {
-        for (body, names) in [(READ, &["o", "s", "m"][..]), (FORM, &["o"][..]), (TYPE, &["o", "u", "p"][..]), (CHECK, &["o", "a"][..])] {
+        for (body, names) in [(READ, &["o", "s", "m"][..]), (FORM, &["o"][..]), (TYPE, &["o", "u", "p"][..]), (CHECK, &["o", "a"][..]),
+            (SET, &["o", "f", "v"][..]), (PRESS, &["o", "f", "v"][..]), (SENT, &["o", "a", "f", "v"][..])] {
             let script = script(body);
             assert!(script.starts_with("const origins = JSON.parse(o);\nif (!origins.includes(location.origin)) return"), "{script}");
-            assert!(!script.contains("VISIBLE"));
+            assert!(!script.contains("VISIBLE") && !script.contains("FIELDS"));
             for name in names {
                 assert!(script.contains(name));
             }
