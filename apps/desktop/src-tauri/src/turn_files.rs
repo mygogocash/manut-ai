@@ -6,6 +6,12 @@
 //! turn; the page then asks the agent to take the chat back to that turn, and tells this module how that went
 //! ([`Book::settle`]): when the agent refused, the files go back as they were, so nothing is half done.
 //!
+//! Bring it back (the canvas's StatesCode "Reverted"): when the agent took the chat back, [`Book::settle`] keeps the
+//! files as they were just before the rewind (`back`), and the files as the rewind left them (`rest`, to tell what
+//! changed since), until the next turn starts. [`Book::back_preview`] says what [`Book::bring_back`] would put back,
+//! and the files changed by hand since the rewind stay as they are unless the person says otherwise, as in a rewind.
+//! Only the files come back: neither Claude Code nor Codex has a message that brings a rewound chat back.
+//!
 //! Where a snapshot lives:
 //! - In a git repository, in git's own objects: each file's bytes as a blob, exactly as they are on disk (no filter,
 //!   no line-ending conversion), and the snapshot as a tree kept alive by a ref of the app's own,
@@ -200,6 +206,14 @@ pub struct Restored {
     pub changed: usize,
     pub kept: usize,
     pub too_big: usize,
+}
+
+/// What [`Book::settle`] left behind. `back`: the files as they were just before a rewind that went through are kept, so
+/// Bring it back can put them back (until the next turn starts). Never set for a rewind the agent refused, which put the
+/// files back as they were itself.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct Settled {
+    pub back: bool,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -993,7 +1007,18 @@ impl<'a> Book<'a> {
         }
     }
 
-    /// Save snapshot `m` under `name` (`snaps/<n>`, `end`, `undo`), and keep its contents alive.
+    /// Where snapshot `name` is listed: a turn's start is `snaps/<n>.json`; the end of the last turn (`end`), the files as
+    /// they were before a rewind that waits for the agent (`undo`), and the two Bring it back keeps after one (`back`: as
+    /// they were just before it, `rest`: as it left them) are files of the session's folder.
+    fn snap_file(o: &Open, name: &str) -> PathBuf {
+        if matches!(name, "end" | "undo" | "back" | "rest") {
+            o.dir.join(format!("{name}.json"))
+        } else {
+            o.dir.join("snaps").join(format!("{name}.json"))
+        }
+    }
+
+    /// Save snapshot `m` under `name` (`snaps/<n>`, `end`, `undo`, `back`), and keep its contents alive.
     fn save(&self, o: &Open, session: &str, name: &str, m: &Manifest) -> Result<(), String> {
         if let Store::Git { git, dir } = &o.store {
             // the snapshot's tree, built in an index file of this module's own, under a ref of the app's own
@@ -1015,22 +1040,22 @@ impl<'a> Book<'a> {
             let tree = built?;
             run_git(git, self.home, dir, &["update-ref", &ref_name(session, name), &tree], &[("GIT_DIR", dir.as_os_str())], None)?;
         }
-        let file = if name == "end" || name == "undo" { o.dir.join(format!("{name}.json")) } else { o.dir.join("snaps").join(format!("{name}.json")) };
-        Self::write_json(&file, m)
+        Self::write_json(&Self::snap_file(o, name), m)
     }
 
-    /// Drop the snapshots named `names` (`<n>`, `end`, `undo`), and in the copy the contents nothing holds any more.
+    /// Drop the snapshots named `names` (`<n>`, `end`, `undo`, `back`, `rest`), and in the copy the contents nothing holds
+    /// any more.
     fn drop_named(&self, o: &Open, session: &str, names: &[String]) {
         for name in names {
-            let file = if name == "end" || name == "undo" { o.dir.join(format!("{name}.json")) } else { o.dir.join("snaps").join(format!("{name}.json")) };
-            let _ = fs::remove_file(file);
+            let _ = fs::remove_file(Self::snap_file(o, name));
             if let Store::Git { git, dir } = &o.store {
                 let _ = run_git(git, self.home, dir, &["update-ref", "-d", &ref_name(session, name)], &[("GIT_DIR", dir.as_os_str())], None);
             }
         }
         if let Store::Copy { blobs } = &o.store {
             let mut held = BTreeSet::new();
-            let all = Self::starts(o).into_iter().chain(["end.json", "undo.json"].iter().filter_map(|f| Self::read_manifest(&o.dir.join(f))));
+            // `rest.json` holds no copy: Bring it back only compares its content ids with the folder's, and never reads one
+            let all = Self::starts(o).into_iter().chain(["end.json", "undo.json", "back.json"].iter().filter_map(|f| Self::read_manifest(&o.dir.join(f))));
             for m in all {
                 held.extend(m.files.into_values().map(|e| e.o));
             }
@@ -1085,6 +1110,12 @@ impl<'a> Book<'a> {
         let kept: Vec<&Manifest> = starts.iter().filter(|s| s.turn != turn).collect();
         let over = (kept.len() + 1).saturating_sub(self.limits.snapshots);
         gone.extend(kept.iter().take(over).map(|s| s.n.to_string()));
+        // a turn starts: the work goes on from the files as they are, so what Bring it back would put back is no longer
+        // what the person would be bringing back. Dropped only when there is something (the copy's sweep reads every
+        // manifest).
+        if Self::snap_file(&o, "back").exists() || Self::snap_file(&o, "rest").exists() {
+            gone.extend(["back".to_string(), "rest".to_string()]);
+        }
         if !gone.is_empty() {
             self.drop_named(&o, session, &gone);
         }
@@ -1132,6 +1163,13 @@ impl<'a> Book<'a> {
         let now = scan(&o.store, self.home, Path::new(&o.meta.root), cache.as_ref(), false, &self.limits)?;
         let (acts, too_big) = plan(&target, &now, &BTreeSet::new());
         let hand = Self::hand_since(&o, target.n, &now);
+        Ok(Self::preview_of(&acts, &now, &hand, too_big, &target))
+    }
+
+    /// What putting `target` back over `now` (by `acts`) would do, for the person to read first: each file with what
+    /// happens to it, those of them in `hand` (changed outside the agent's turns) apart, and whether the branch moved
+    /// since `target` was kept.
+    fn preview_of(acts: &[Act], now: &Manifest, hand: &BTreeSet<String>, too_big: usize, target: &Manifest) -> Preview {
         let back: Vec<Change> = acts
             .iter()
             .map(|a| Change {
@@ -1144,7 +1182,7 @@ impl<'a> Book<'a> {
             })
             .collect();
         let hand = back.iter().filter(|c| hand.contains(&c.path)).map(|c| c.path.clone()).collect();
-        Ok(Preview { back, hand, too_big, head_moved: !target.head.is_empty() && !now.head.is_empty() && target.head != now.head })
+        Preview { back, hand, too_big, head_moved: !target.head.is_empty() && !now.head.is_empty() && target.head != now.head }
     }
 
     /// Rewind the files to before turn `turn`, every file in `keep` left as it is. The files as they were are kept
@@ -1175,14 +1213,29 @@ impl<'a> Book<'a> {
         Ok(Restored { changed: acts.len(), kept, too_big })
     }
 
+    /// Keep the files as they were just before a rewind that went through (`undo`) as `back`, and the files as the rewind
+    /// left them (`rest`) beside it. `rest` goes first, and both go when either fails, so there is never a `back` whose
+    /// changes made by hand since cannot be told.
+    fn keep_back(&self, o: &Open, session: &str, undo: &Manifest, rest: &Manifest) -> Result<(), String> {
+        let mut rest = rest.clone();
+        rest.turn = undo.turn.clone();
+        let kept = Self::write_json(&Self::snap_file(o, "rest"), &rest).and_then(|_| self.save(o, session, "back", undo));
+        if kept.is_err() {
+            self.drop_named(o, session, &["back".to_string(), "rest".to_string()]);
+        }
+        kept
+    }
+
     /// The agent answered the rewind of turn `turn`. `ok`: the chat went back too, so that turn and every later one are
-    /// gone, and the files as they are now are where the next turn starts from. Otherwise the chat stayed, and the
+    /// gone, and the files as they are now are where the next turn starts from; the files as they were just before the
+    /// rewind are kept for Bring it back (see [`Settled`]) until the next turn starts. Otherwise the chat stayed, and the
     /// files go back as they were before the rewind.
-    pub fn settle(&self, session: &str, turn: &str, ok: bool) -> Result<(), String> {
+    pub fn settle(&self, session: &str, turn: &str, ok: bool) -> Result<Settled, String> {
         let lock = session_lock(session);
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(o) = self.open(session)? else { return Ok(()) };
-        let Some(undo) = Self::read_manifest(&o.dir.join("undo.json")) else { return Ok(()) };
+        let nothing = Settled { back: false };
+        let Some(o) = self.open(session)? else { return Ok(nothing) };
+        let Some(undo) = Self::read_manifest(&o.dir.join("undo.json")) else { return Ok(nothing) };
         if undo.turn != turn {
             return Err("that rewind is not the one waiting".into());
         }
@@ -1195,10 +1248,13 @@ impl<'a> Book<'a> {
             let mut m = scan(&o.store, self.home, &root, Some(&undo), true, &self.limits)?;
             m.n = before.map(|b| b.n).unwrap_or(0);
             self.save(&o, session, "end", &m)?;
+            // kept before `undo` goes, for the same reason. A rewind that went through is settled even when these cannot be
+            // kept: the person is then only not offered Bring it back
+            let kept = self.keep_back(&o, session, &undo, &m).is_ok();
             let mut gone: Vec<String> = starts.iter().filter(|s| s.n >= undo.n).map(|s| s.n.to_string()).collect();
             gone.push("undo".to_string());
             self.drop_named(&o, session, &gone);
-            Ok(())
+            Ok(Settled { back: kept })
         } else {
             let now = scan(&o.store, self.home, &root, Some(&undo), false, &self.limits)?;
             let (back, _) = plan(&undo, &now, &BTreeSet::new());
@@ -1206,8 +1262,69 @@ impl<'a> Book<'a> {
             if done.is_ok() {
                 self.drop_named(&o, session, &["undo".to_string()]);
             }
-            done
+            done.map(|()| nothing)
         }
+    }
+
+    /// The files kept for Bring it back after the rewind to before turn `turn` (as they were just before it), and the
+    /// files as that rewind left them. A rewind to another turn, and a turn that has started since, have none.
+    fn kept_back(o: &Open, turn: &str) -> Result<(Manifest, Manifest), String> {
+        let back = Self::read_manifest(&Self::snap_file(o, "back")).filter(|b| b.turn == turn);
+        let rest = Self::read_manifest(&Self::snap_file(o, "rest")).filter(|r| r.turn == turn);
+        back.zip(rest).ok_or_else(|| "why:no_snapshot".to_string())
+    }
+
+    /// What Bring it back would put back for the rewind to before turn `turn`: the files as they were just before it, and
+    /// which of those files changed outside this module since the rewind (by hand: no turn has run). Writes nothing.
+    pub fn back_preview(&self, session: &str, turn: &str) -> Result<Preview, String> {
+        let lock = session_lock(session);
+        let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let o = self.open(session)?.ok_or("why:no_snapshot")?;
+        let (back, rest) = Self::kept_back(&o, turn)?;
+        let cache = Self::cache(&o);
+        let now = scan(&o.store, self.home, Path::new(&o.meta.root), cache.as_ref(), false, &self.limits)?;
+        let (acts, too_big) = plan(&back, &now, &BTreeSet::new());
+        Ok(Self::preview_of(&acts, &now, &diff(&rest, &now), too_big, &back))
+    }
+
+    /// Put the files back as they were just before the rewind to before turn `turn`, every file in `keep` left as it is.
+    /// The files as they are now are kept first (`undo`), so a bring-back that fails part way puts them back at once and
+    /// can be tried again. When it went through nothing is left to bring back, and the files as they are now are where
+    /// the next turn starts from, so what was put back does not read as changed by hand. Writes in the session's folder
+    /// only, and never through a link (see [`inside`]); no branch, index, stash or HEAD changes.
+    pub fn bring_back(&self, session: &str, turn: &str, keep: &[String]) -> Result<Restored, String> {
+        let lock = session_lock(session);
+        let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let o = self.open(session)?.ok_or("why:no_snapshot")?;
+        let (back, _) = Self::kept_back(&o, turn)?;
+        let root = PathBuf::from(&o.meta.root);
+        let cache = Self::cache(&o);
+        let mut now = scan(&o.store, self.home, &root, cache.as_ref(), true, &self.limits)?;
+        now.n = back.n;
+        now.turn = turn.to_string();
+        // no rewind waits while this runs (the page queues a session's calls), so `undo` is free to hold these
+        self.save(&o, session, "undo", &now)?;
+        let keep: BTreeSet<String> = keep.iter().filter(|p| safe_rel(p)).cloned().collect();
+        let (acts, too_big) = plan(&back, &now, &keep);
+        if let Err(e) = apply(&o.store, self.home, &root, &acts, &folders_of(&back)) {
+            // put back what was there: the files as they were over whatever the failed bring-back left
+            if let Ok(after) = scan(&o.store, self.home, &root, Some(&now), false, &self.limits) {
+                let (undone, _) = plan(&now, &after, &BTreeSet::new());
+                let _ = apply(&o.store, self.home, &root, &undone, &folders_of(&now));
+            }
+            self.drop_named(&o, session, &["undo".to_string()]);
+            return Err(e);
+        }
+        let kept = keep.iter().filter(|p| back.files.contains_key(*p) || now.files.contains_key(*p)).count();
+        // where the next turn starts from, as a rewind leaves it (`settle`); a read that fails only means a later turn
+        // lists these files as changed by hand, which keeps them rather than losing them
+        let end_n = Self::read_manifest(&Self::snap_file(&o, "end")).map(|e| e.n).or_else(|| Self::starts(&o).last().map(|s| s.n)).unwrap_or(0);
+        if let Ok(mut m) = scan(&o.store, self.home, &root, Some(&now), true, &self.limits) {
+            m.n = end_n;
+            let _ = self.save(&o, session, "end", &m);
+        }
+        self.drop_named(&o, session, &["undo".to_string(), "back".to_string(), "rest".to_string()]);
+        Ok(Restored { changed: acts.len(), kept, too_big })
     }
 
     fn drop_refs(&self, o: &Open, session: &str) {
@@ -1293,10 +1410,24 @@ pub async fn turn_files_restore(session: String, turn: String, keep: Vec<String>
     blocking(move |b| b.restore(&session, &turn, &keep)).await
 }
 
-/// The agent answered the rewind: `ok` = the chat went back too; otherwise the files go back as they were.
+/// The agent answered the rewind: `ok` = the chat went back too, and the files from before it are kept for Bring it back
+/// (the answer says so); otherwise the files go back as they were.
 #[tauri::command]
-pub async fn turn_files_settle(session: String, turn: String, ok: bool) -> Result<(), String> {
+pub async fn turn_files_settle(session: String, turn: String, ok: bool) -> Result<Settled, String> {
     blocking(move |b| b.settle(&session, &turn, ok)).await
+}
+
+/// What Bring it back would put back for session `session`'s rewind to before turn `turn`. Writes nothing.
+#[tauri::command]
+pub async fn turn_files_back_preview(session: String, turn: String) -> Result<Preview, String> {
+    blocking(move |b| b.back_preview(&session, &turn)).await
+}
+
+/// Put session `session`'s files back as they were just before its rewind to before turn `turn`, the files in `keep` left
+/// as they are. The chat is not touched.
+#[tauri::command]
+pub async fn turn_files_bring_back(session: String, turn: String, keep: Vec<String>) -> Result<Restored, String> {
+    blocking(move |b| b.bring_back(&session, &turn, &keep)).await
 }
 
 /// Drop every snapshot of session `session`.
@@ -1450,7 +1581,9 @@ mod tests {
         assert_eq!(fs::read(r.join("crlf.txt")).unwrap(), b"x\r\ny\r\n", "the bytes as they were, line endings and all");
         assert_eq!(read(r, "secret.txt").as_deref(), Some("still ignored\n"), "what git ignores is never touched");
         assert_eq!(state(r), before, "the rewind changed only the files");
-        assert_eq!(git(r, &["for-each-ref", "--format=%(refname)", "refs/manut/"]).trim(), "refs/manut/snapshots/s2/end");
+        // the files as they were just before the rewind stay beside the end, for Bring it back, until the next turn starts
+        let refs = git(r, &["for-each-ref", "--format=%(refname)", "refs/manut/"]);
+        assert_eq!(refs.lines().collect::<Vec<_>>(), ["refs/manut/snapshots/s2/back", "refs/manut/snapshots/s2/end"]);
         b.forget("s2").unwrap();
         assert_eq!(git(r, &["for-each-ref", "refs/manut/"]), "");
         assert!(!root_dir(&home.0).join("s2").exists());
@@ -1760,5 +1893,304 @@ mod tests {
         assert!(!same(&e(9_000_000_000), &e(9_000_000_000), read_ms), "changed just before it was read: read it again");
         assert!(!same(&e(1_000_000_000), &Entry { s: 4, ..e(1_000_000_000) }, read_ms));
         assert!(!same(&Entry { o: String::new(), ..e(1) }, &e(1), read_ms));
+    }
+
+    // ---- Bring it back: the files as they were just before a rewind -----------------------------------------------
+
+    #[test]
+    fn bring_it_back_puts_the_files_as_they_were_just_before_a_rewind_in_a_folder_that_is_not_a_repository() {
+        let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+        let r = &proj.0;
+        put(r, "a.txt", "one");
+        put(r, "src/b.ts", "two");
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s20", r, "local-s1").unwrap();
+        // the agent's turn: a change, a removal, a new file in a new folder
+        put(r, "a.txt", "ONE");
+        fs::remove_file(r.join("src/b.ts")).unwrap();
+        put(r, "made/new.txt", "new");
+        b.end("s20").unwrap();
+        assert_eq!(b.restore("s20", "local-s1", &[]).unwrap(), Restored { changed: 3, kept: 0, too_big: 0 });
+        // until the chat went back too the rewind is not settled, and there is nothing to bring back
+        assert_eq!(b.back_preview("s20", "local-s1").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.settle("s20", "local-s1", true).unwrap(), Settled { back: true });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("one"));
+        assert_eq!(read(r, "src/b.ts").as_deref(), Some("two"));
+        // the copy holds what the rewind put back over: each content once, in the app's data folder
+        let dir = root_dir(&home.0).join("s20");
+        let kept = Book::read_manifest(&dir.join("back.json")).unwrap();
+        assert_eq!(kept.files.keys().collect::<Vec<_>>(), ["a.txt", "made/new.txt"]);
+        for (p, e) in &kept.files {
+            assert!(dir.join("blobs").join(&e.o).is_file(), "{p}'s copy is gone");
+        }
+
+        let p = b.back_preview("s20", "local-s1").unwrap();
+        assert_eq!(p.back, vec![change("src/b.ts", "gone"), change("a.txt", "changed"), change("made/new.txt", "back")]);
+        assert!(p.hand.is_empty() && !p.head_moved && p.too_big == 0, "{p:?}");
+        assert_eq!(read(r, "a.txt").as_deref(), Some("one"), "looking at it changes nothing");
+
+        assert_eq!(b.bring_back("s20", "local-s1", &[]).unwrap(), Restored { changed: 3, kept: 0, too_big: 0 });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("ONE"));
+        assert!(!r.join("src").exists(), "the folder the rewind made goes with its file");
+        assert_eq!(read(r, "made/new.txt").as_deref(), Some("new"));
+        // once is all: nothing is left to bring back
+        assert_eq!(b.back_preview("s20", "local-s1").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.bring_back("s20", "local-s1", &[]).unwrap_err(), "why:no_snapshot");
+        // the next turn starts from the files as they are now: what was put back is not read as changed by hand
+        b.take("s20", r, "local-s2").unwrap();
+        assert!(Book::read_manifest(&dir.join("snaps").join("2.json")).unwrap().hand.is_empty());
+        for f in ["undo.json", "back.json", "rest.json"] {
+            assert!(!dir.join(f).exists(), "{f}");
+        }
+    }
+
+    #[test]
+    fn bringing_it_back_in_a_repository_keeps_the_files_in_git_and_its_branch_index_stash_and_head_never_change() {
+        let (home, repo) = (Temp::new("home"), Temp::new("repo"));
+        let r = &repo.0;
+        git(r, &["init", "-q"]);
+        put(r, ".gitignore", "secret.txt\n");
+        put(r, ".gitattributes", "* text=auto\n");
+        put(r, "a.txt", "one\n");
+        fs::write(r.join("crlf.txt"), b"x\r\ny\r\n").unwrap();
+        git(r, &["add", "-A"]);
+        git(r, &["commit", "-qm", "init"]);
+        // the developer's own stash entry, a staged file, an untracked one and an ignored one
+        put(r, "a.txt", "stashed\n");
+        git(r, &["stash", "push", "-q", "-m", "mine"]);
+        put(r, "staged.txt", "staged\n");
+        git(r, &["add", "staged.txt"]);
+        put(r, "untracked.txt", "u\n");
+        put(r, "secret.txt", "ignored\n");
+        // what only git's own bookkeeping holds: none of it may change, whatever happens to the files
+        let kept_state = |r: &Path| {
+            (
+                git(r, &["rev-parse", "HEAD"]),
+                git(r, &["symbolic-ref", "HEAD"]),
+                git(r, &["stash", "list"]),
+                fs::read(r.join(".git/index")).unwrap(),
+                git(r, &["rev-list", "--all", "--count"]),
+                git(r, &["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/tags/", "refs/stash"]),
+            )
+        };
+        let before = kept_state(r);
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s21", r, "local-s1").unwrap();
+        // the agent's turn
+        put(r, "a.txt", "agent\n");
+        fs::remove_file(r.join("untracked.txt")).unwrap();
+        put(r, "src/new.ts", "n\n");
+        fs::write(r.join("crlf.txt"), b"z\n").unwrap();
+        put(r, "secret.txt", "still ignored\n");
+        b.end("s21").unwrap();
+        b.restore("s21", "local-s1", &[]).unwrap();
+        assert_eq!(b.settle("s21", "local-s1", true).unwrap(), Settled { back: true });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("one\n"));
+        // the files as they were just before the rewind are a tree under a ref of the app's own, never a commit
+        assert_eq!(git(r, &["cat-file", "-t", "refs/manut/snapshots/s21/back"]).trim(), "tree");
+        let kept = git(r, &["ls-tree", "-r", "--name-only", "refs/manut/snapshots/s21/back"]);
+        assert_eq!(kept.lines().collect::<Vec<_>>(), [".gitattributes", ".gitignore", "a.txt", "crlf.txt", "src/new.ts", "staged.txt"]);
+        let refs = git(r, &["for-each-ref", "--format=%(refname)", "refs/manut/"]);
+        assert_eq!(refs.lines().collect::<Vec<_>>(), ["refs/manut/snapshots/s21/back", "refs/manut/snapshots/s21/end"]);
+        assert_eq!(kept_state(r), before, "keeping them changes nothing the developer has");
+
+        let p = b.back_preview("s21", "local-s1").unwrap();
+        assert_eq!(p.back, vec![change("untracked.txt", "gone"), change("a.txt", "changed"), change("crlf.txt", "changed"), change("src/new.ts", "back")]);
+        assert!(p.hand.is_empty() && !p.head_moved, "{p:?}");
+        assert_eq!(b.bring_back("s21", "local-s1", &[]).unwrap(), Restored { changed: 4, kept: 0, too_big: 0 });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("agent\n"));
+        assert!(!r.join("untracked.txt").exists());
+        assert_eq!(read(r, "src/new.ts").as_deref(), Some("n\n"));
+        assert_eq!(fs::read(r.join("crlf.txt")).unwrap(), b"z\n", "the bytes as they were, line endings and all");
+        assert_eq!(read(r, "secret.txt").as_deref(), Some("still ignored\n"), "what git ignores is never touched");
+        assert_eq!(kept_state(r), before, "putting the files back changed only the files");
+        let refs = git(r, &["for-each-ref", "--format=%(refname)", "refs/manut/"]);
+        assert_eq!(refs.trim(), "refs/manut/snapshots/s21/end", "nothing is left to bring back");
+        b.forget("s21").unwrap();
+        assert_eq!(git(r, &["for-each-ref", "refs/manut/"]), "");
+        assert_eq!(kept_state(r), before);
+    }
+
+    #[test]
+    fn a_commit_since_the_rewind_is_said_and_the_branch_stays_where_it_is() {
+        let (home, repo) = (Temp::new("home"), Temp::new("repo"));
+        let r = &repo.0;
+        git(r, &["init", "-q"]);
+        put(r, "a.txt", "one\n");
+        git(r, &["add", "-A"]);
+        git(r, &["commit", "-qm", "init"]);
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s22", r, "local-s1").unwrap();
+        put(r, "a.txt", "two\n");
+        b.end("s22").unwrap();
+        b.restore("s22", "local-s1", &[]).unwrap();
+        b.settle("s22", "local-s1", true).unwrap();
+        // the person commits after the rewind
+        put(r, "b.txt", "b\n");
+        git(r, &["add", "-A"]);
+        git(r, &["commit", "-qm", "after the rewind"]);
+        let head = git(r, &["rev-parse", "HEAD"]);
+        let p = b.back_preview("s22", "local-s1").unwrap();
+        assert!(p.head_moved);
+        assert_eq!(p.back, vec![change("b.txt", "gone"), change("a.txt", "changed")]);
+        assert_eq!(p.hand, ["b.txt"]);
+        b.bring_back("s22", "local-s1", &[]).unwrap();
+        assert_eq!(read(r, "a.txt").as_deref(), Some("two\n"));
+        assert_eq!(git(r, &["rev-parse", "HEAD"]), head, "the commit stays; only the files went back");
+    }
+
+    #[test]
+    fn a_file_changed_by_hand_after_the_rewind_is_listed_and_kept_unless_the_person_unticks_it() {
+        for (keep_theirs, session) in [(true, "s23"), (false, "s24")] {
+            let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+            let r = &proj.0;
+            for f in ["a", "b", "c"] {
+                put(r, &format!("{f}.txt"), f);
+            }
+            let b = Book::with_limits(&home.0, SMALL);
+            b.take(session, r, "local-s1").unwrap();
+            put(r, "a.txt", "A"); // the agent
+            put(r, "b.txt", "B");
+            b.end(session).unwrap();
+            b.restore(session, "local-s1", &[]).unwrap();
+            b.settle(session, "local-s1", true).unwrap();
+            // the person, after the rewind: edits a file the agent had changed, and makes a new one
+            put(r, "b.txt", "mine");
+            put(r, "new.txt", "new");
+            let p = b.back_preview(session, "local-s1").unwrap();
+            assert_eq!(p.back, vec![change("new.txt", "gone"), change("a.txt", "changed"), change("b.txt", "changed")]);
+            assert_eq!(p.hand, ["new.txt", "b.txt"], "listed, so the person can keep or untick them");
+            let keep: Vec<String> = if keep_theirs { p.hand.clone() } else { vec![] };
+            let done = b.bring_back(session, "local-s1", &keep).unwrap();
+            let files = ["a.txt", "b.txt", "c.txt", "new.txt"].map(|f| read(r, f));
+            let some = |x: &str| Some(x.to_string());
+            if keep_theirs {
+                assert_eq!((done.changed, done.kept), (1, 2));
+                assert_eq!(files, [some("A"), some("mine"), some("c"), some("new")], "only the file the person did not touch went back");
+            } else {
+                assert_eq!((done.changed, done.kept), (3, 0));
+                assert_eq!(files, [some("A"), some("B"), some("c"), None]);
+            }
+        }
+    }
+
+    #[test]
+    fn the_files_from_before_a_rewind_are_kept_only_until_the_next_turn_starts() {
+        let (home, repo) = (Temp::new("home"), Temp::new("repo"));
+        let r = &repo.0;
+        git(r, &["init", "-q"]);
+        put(r, "a.txt", "a");
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s25", r, "local-s1").unwrap();
+        put(r, "a.txt", "A");
+        b.end("s25").unwrap();
+        b.restore("s25", "local-s1", &[]).unwrap();
+        b.settle("s25", "local-s1", true).unwrap();
+        assert!(b.back_preview("s25", "local-s1").is_ok());
+        let dir = root_dir(&home.0).join("s25");
+        assert!(dir.join("back.json").is_file() && dir.join("rest.json").is_file());
+        // a message that starts a turn: the work goes on from the files as they are
+        b.take("s25", r, "local-s2").unwrap();
+        assert_eq!(b.back_preview("s25", "local-s1").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.bring_back("s25", "local-s1", &[]).unwrap_err(), "why:no_snapshot");
+        assert!(!dir.join("back.json").exists() && !dir.join("rest.json").exists());
+        let refs = git(r, &["for-each-ref", "--format=%(refname)", "refs/manut/"]);
+        assert_eq!(refs.lines().collect::<Vec<_>>(), ["refs/manut/snapshots/s25/2", "refs/manut/snapshots/s25/end"], "the ref of what was kept went with it");
+        assert_eq!(read(r, "a.txt").as_deref(), Some("a"), "looking for them never touched a file");
+    }
+
+    #[test]
+    fn a_second_rewind_replaces_what_the_first_kept_and_a_refused_one_leaves_it_alone() {
+        let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+        let r = &proj.0;
+        put(r, "a.txt", "0");
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s26", r, "local-s1").unwrap();
+        put(r, "a.txt", "1");
+        b.end("s26").unwrap();
+        b.take("s26", r, "local-s2").unwrap();
+        put(r, "a.txt", "2");
+        b.end("s26").unwrap();
+        // the first rewind, to before turn 2, goes through: a.txt as turn 2 left it is kept
+        b.restore("s26", "local-s2", &[]).unwrap();
+        assert_eq!(b.settle("s26", "local-s2", true).unwrap(), Settled { back: true });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("1"));
+        // a rewind to before turn 1 that the agent refuses puts the files back as they were, and keeps nothing of its own
+        b.restore("s26", "local-s1", &[]).unwrap();
+        assert_eq!(read(r, "a.txt").as_deref(), Some("0"));
+        assert_eq!(b.settle("s26", "local-s1", false).unwrap(), Settled { back: false });
+        assert_eq!(read(r, "a.txt").as_deref(), Some("1"));
+        assert_eq!(b.back_preview("s26", "local-s2").unwrap().back, vec![change("a.txt", "changed")], "the first rewind can still be taken back");
+        // the same rewind, answered this time: what it kept replaces the first's, which was of another rewind
+        b.restore("s26", "local-s1", &[]).unwrap();
+        assert_eq!(b.settle("s26", "local-s1", true).unwrap(), Settled { back: true });
+        assert_eq!(b.back_preview("s26", "local-s2").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.back_preview("s26", "local-s1").unwrap().back, vec![change("a.txt", "changed")]);
+        b.bring_back("s26", "local-s1", &[]).unwrap();
+        assert_eq!(read(r, "a.txt").as_deref(), Some("1"), "the files as they were just before the second rewind");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bringing_it_back_never_writes_through_a_link_or_outside_the_folder() {
+        use std::os::unix::fs::symlink;
+        let (home, proj, outside) = (Temp::new("home"), Temp::new("plain"), Temp::new("outside"));
+        let r = &proj.0;
+        put(r, "sub/x.txt", "x");
+        put(r, "keep.txt", "k");
+        let b = Book::with_limits(&home.0, SMALL);
+        b.take("s27", r, "local-s1").unwrap();
+        put(r, "sub/x.txt", "x as the turn left it");
+        b.end("s27").unwrap();
+        b.restore("s27", "local-s1", &[]).unwrap();
+        b.settle("s27", "local-s1", true).unwrap();
+        assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x"));
+        // after the rewind the person turns the folder into a link that leads out of the project
+        fs::remove_dir_all(r.join("sub")).unwrap();
+        symlink(&outside.0, r.join("sub")).unwrap();
+        // kept as it is, the link would be written through to bring x.txt back: refused, and every file is as it was
+        let err = b.bring_back("s27", "local-s1", &["sub".into()]).unwrap_err();
+        assert!(err.contains("sub is a link"), "{err}");
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0, "nothing was written outside the project");
+        assert_eq!(fs::read_link(r.join("sub")).unwrap(), outside.0);
+        assert_eq!(read(r, "keep.txt").as_deref(), Some("k"));
+        // what was kept stays, so it can be tried again: not kept, the link goes and the folder comes back in its place
+        assert!(b.back_preview("s27", "local-s1").is_ok());
+        b.bring_back("s27", "local-s1", &[]).unwrap();
+        assert!(fs::symlink_metadata(r.join("sub")).unwrap().is_dir());
+        assert_eq!(read(r, "sub/x.txt").as_deref(), Some("x as the turn left it"));
+        assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn nothing_is_brought_back_for_a_turn_that_was_not_rewound_or_a_rewind_the_agent_refused() {
+        let (home, proj) = (Temp::new("home"), Temp::new("plain"));
+        let r = &proj.0;
+        put(r, "a.txt", "a");
+        let b = Book::with_limits(&home.0, SMALL);
+        // no store at all, then a store with a turn that was never rewound
+        assert_eq!(b.back_preview("s28", "local-s1").unwrap_err(), "why:no_snapshot");
+        b.take("s28", r, "local-s1").unwrap();
+        put(r, "a.txt", "A");
+        b.end("s28").unwrap();
+        assert_eq!(b.back_preview("s28", "local-s1").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.bring_back("s28", "local-s1", &[]).unwrap_err(), "why:no_snapshot");
+        // a rewind the agent refused put the files back as they were: there is nothing to bring back
+        b.restore("s28", "local-s1", &[]).unwrap();
+        assert_eq!(b.settle("s28", "local-s1", false).unwrap(), Settled { back: false });
+        assert_eq!(b.back_preview("s28", "local-s1").unwrap_err(), "why:no_snapshot");
+        assert_eq!(read(r, "a.txt").as_deref(), Some("A"));
+        // a rewind that went through is brought back by its own turn only
+        b.restore("s28", "local-s1", &[]).unwrap();
+        b.settle("s28", "local-s1", true).unwrap();
+        assert_eq!(b.back_preview("s28", "local-s2").unwrap_err(), "why:no_snapshot");
+        assert_eq!(b.bring_back("s28", "local-s2", &["a.txt".into()]).unwrap_err(), "why:no_snapshot");
+        assert_eq!(read(r, "a.txt").as_deref(), Some("a"), "a refusal changes no file");
+        assert!(b.bring_back("x28", "local-s1", &[]).is_err(), "a session id is one plain word");
+    }
+
+    #[test]
+    fn what_the_page_is_told_when_a_rewind_is_settled() {
+        assert_eq!(serde_json::to_value(Settled { back: true }).unwrap(), serde_json::json!({ "back": true }));
     }
 }

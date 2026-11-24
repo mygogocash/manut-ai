@@ -16,6 +16,8 @@ describe("the shell's commands", () => {
     await host.preview("s1", "local-s1");
     await host.restore("s1", "local-s1", ["README.md"]);
     await host.settle("s1", "local-s1", false);
+    await host.backPreview("s1", "local-s1");
+    await host.bringBack("s1", "local-s1", ["README.md"]);
     await host.forget("s1");
     await host.prune(["s1", "s2"]);
     expect(sent).toEqual([
@@ -24,6 +26,8 @@ describe("the shell's commands", () => {
       ["turn_files_preview", { session: "s1", turn: "local-s1" }],
       ["turn_files_restore", { session: "s1", turn: "local-s1", keep: ["README.md"] }],
       ["turn_files_settle", { session: "s1", turn: "local-s1", ok: false }],
+      ["turn_files_back_preview", { session: "s1", turn: "local-s1" }],
+      ["turn_files_bring_back", { session: "s1", turn: "local-s1", keep: ["README.md"] }],
       ["turn_files_forget", { session: "s1" }],
       ["turn_files_prune", { keep: ["s1", "s2"] }],
     ]);
@@ -64,16 +68,64 @@ describe("the browser stand-in", () => {
     expect(await t.restore("s1", "local-s1", ["README.md"])).toEqual({ changed: 1, kept: 1, tooBig: 0 });
     expect(g.__manutMockFolders!["/w/shop"]["notes/turn-1.md"]).toBeUndefined();
     expect(g.__manutMockFolders!["/w/shop"]["README.md"]).toBe("# changed by hand\n");
-    // the chat did not go back: the files are as they were
-    await t.settle("s1", "local-s1", false);
+    // the chat did not go back: the files are as they were, and nothing is kept to bring back
+    expect(await t.settle("s1", "local-s1", false)).toEqual({ back: false });
     expect(g.__manutMockFolders!["/w/shop"]["notes/turn-1.md"]).toBe("What turn 1 did.\n");
+    await expect(t.backPreview("s1", "local-s1")).rejects.toThrow("why:no_snapshot");
     // it did: that turn is gone, and the files as they are are where the next turn starts
     await t.restore("s1", "local-s1", []);
-    await t.settle("s1", "local-s1", true);
+    expect(await t.settle("s1", "local-s1", true)).toEqual({ back: true });
     await expect(t.preview("s1", "local-s1")).rejects.toThrow("why:no_snapshot");
     await t.take("s1", "/w/shop", "local-s2");
     expect((await t.preview("s1", "local-s2")).hand).toEqual([]);
     await t.prune([]);
     await expect(t.preview("s1", "local-s2")).rejects.toThrow("why:no_snapshot");
+  });
+
+  it("keeps the files from before a rewind that went through, and brings them back as the shell does", async () => {
+    const g: MockTurnGlobals = {};
+    const t = new MockTurnFiles(g);
+    const folder = () => g.__manutMockFolders!["/w/shop"];
+    await t.take("s1", "/w/shop", "local-s1");
+    await t.end("s1");
+    await t.restore("s1", "local-s1", []);
+    // not before the agent has answered
+    await expect(t.backPreview("s1", "local-s1")).rejects.toThrow("why:no_snapshot");
+    await t.settle("s1", "local-s1", true);
+    expect(folder()["notes/turn-1.md"]).toBeUndefined();
+    // the person, by hand, after the rewind: one file the turn had also changed, and a new one
+    folder()["README.md"] = "# changed by hand\n";
+    folder()["mine.txt"] = "mine\n";
+    const p = await t.backPreview("s1", "local-s1");
+    expect(p.back).toEqual([
+      { path: "README.md", change: "changed" },
+      { path: "mine.txt", change: "gone" },
+      { path: "notes/turn-1.md", change: "back" },
+    ]);
+    expect(p.hand).toEqual(["README.md", "mine.txt"]);
+    // another turn's rewind has nothing kept
+    await expect(t.backPreview("s1", "local-s2")).rejects.toThrow("why:no_snapshot");
+    // kept as the panel offers them: only the turn's note comes back
+    expect(await t.bringBack("s1", "local-s1", p.hand)).toEqual({ changed: 1, kept: 2, tooBig: 0 });
+    expect(folder()["notes/turn-1.md"]).toBe("What turn 1 did.\n");
+    expect(folder()["README.md"]).toBe("# changed by hand\n");
+    expect(folder()["mine.txt"]).toBe("mine\n");
+    // once is all, and the next turn starts from the files as they are: what came back is not changed by hand
+    await expect(t.bringBack("s1", "local-s1", [])).rejects.toThrow("why:no_snapshot");
+    await t.take("s1", "/w/shop", "local-s2");
+    expect((await t.preview("s1", "local-s2")).hand).toEqual([]);
+  });
+
+  it("keeps them only until the next turn starts", async () => {
+    const g: MockTurnGlobals = {};
+    const t = new MockTurnFiles(g);
+    await t.take("s1", "/w/shop", "local-s1");
+    await t.end("s1");
+    await t.restore("s1", "local-s1", []);
+    await t.settle("s1", "local-s1", true);
+    expect((await t.backPreview("s1", "local-s1")).back).toHaveLength(1);
+    await t.take("s1", "/w/shop", "local-s2");
+    await expect(t.backPreview("s1", "local-s1")).rejects.toThrow("why:no_snapshot");
+    await expect(t.bringBack("s1", "local-s1", [])).rejects.toThrow("why:no_snapshot");
   });
 });

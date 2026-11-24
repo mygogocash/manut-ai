@@ -1142,6 +1142,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         turn_files::turn_files_preview,
         turn_files::turn_files_restore,
         turn_files::turn_files_settle,
+        turn_files::turn_files_back_preview,
+        turn_files::turn_files_bring_back,
         turn_files::turn_files_forget,
         turn_files::turn_files_prune,
         outpost::outpost_status,
