@@ -49,9 +49,14 @@ export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number): LaneReco
       return Array.isArray(ev.diff) && ev.diff.length > 0 ? changed(lane) : lane;
     case "tool.end": {
       const id = text(ev.tool_id);
-      const command = lane.steps[id];
-      if (command === undefined) return lane;
+      // the command the step began with, when that read as a test run; the shell cuts a step's detail short, so the
+      // step's end may carry the whole command, which is read in its place and may be a test run the start's was not
+      const began = lane.steps[id];
+      const command = text(ev.command) || began;
+      if (command === undefined || !runsTests(command)) return lane;
       const { [id]: _done, ...steps } = lane.steps;
+      // the person said no, so the command never ran: it is no test run, and an earlier result stands
+      if (ev.declined === true) return { ...lane, steps };
       const read = readTestOutput(typeof ev.output === "string" ? ev.output : undefined, { ok: typeof ev.ok === "boolean" ? ev.ok : undefined, runner: runnerOf(command) });
       return { ...lane, steps, run: { read: kept(read), at: now }, changed: false };
     }

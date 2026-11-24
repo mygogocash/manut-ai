@@ -44,6 +44,35 @@ describe("what a lane learns from its events", () => {
     expect(lane.run).toBeUndefined();
   });
 
+  it("reads a run from the whole command the step's end carries, when the start's was cut short", () => {
+    // the shell cuts a step's detail to 160 characters, and a long folder before the tests can take them away
+    const cut = `cd /Users/fon/work/baanmali-preorder/apps/storefront/packages/checkout/src/components/payments/promptpay/qr && ${"x".repeat(60)}…`;
+    const whole = "cd /Users/fon/work/baanmali-preorder/apps/storefront && pnpm exec vitest run src/checkout.test.ts";
+    expect(testState(feed([start("t1", cut)]))).toBe("none");
+    const lane = feed([start("t1", cut), { ...end("t1", true, out("vitest-pass")), command: whole }]);
+    expect(testState(lane)).toBe("passed");
+    expect(lane.run?.read).toEqual({ kind: "passed", passed: 2 });
+    // the runner the whole command names limits the reading, as it would have from the start
+    expect(feed([start("t1", cut), { ...end("t1", true, out("cargo-pass")), command: whole }]).run?.read).toMatchObject({ kind: "unknown" });
+  });
+
+  it("keeps no step whose whole command runs no tests, and the same object for a step that is no command", () => {
+    const lane = feed(ran("pnpm test", true, out("vitest-pass")));
+    expect(feed([start("t2", "pnpm build"), { ...end("t2", true, "built"), command: "pnpm build" }], lane)).toEqual(lane);
+    expect(noteLane(lane, { ...end("t9", true, "text") }, 9_999)).toBe(lane);
+    expect(noteLane(lane, { ...end("t9", true, "text"), command: "ls" }, 9_999)).toBe(lane);
+  });
+
+  it("counts no run for a step the person refused, which never ran", () => {
+    const refused = feed([start("t1", "pnpm test"), { event: "tool.end", tool_id: "t1", name: "", ok: false, ms: 0, declined: true }]);
+    expect(testState(refused)).toBe("none");
+    expect(refused.run).toBeUndefined();
+    // an earlier result stands, since nothing ran since
+    const before = feed(ran("pnpm test", true, out("vitest-pass")));
+    const after = feed([start("t2", "pnpm test"), { event: "tool.end", tool_id: "t2", name: "", ok: false, ms: 0, declined: true }], before);
+    expect(testState(after)).toBe("passed");
+  });
+
   it("is only a terminal step that runs tests, not a file tool whose detail happens to say so", () => {
     expect(testState(feed([start("t1", "pnpm test", "read_file")]))).toBe("none");
   });
