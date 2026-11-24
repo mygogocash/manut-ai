@@ -6,6 +6,8 @@ import { renderToString } from "react-dom/server";
 import { setLang } from "../i18n";
 import { DeveloperView, type DeveloperViewProps } from "./DeveloperPage";
 import { EmailSignInView } from "./EmailSignIn";
+import { MakeShopView } from "./MakeShop";
+import { MAKE_START } from "./makeShopFlow";
 import type { EmailFlowState } from "./emailFlow";
 
 const words = (html: string) =>
@@ -164,6 +166,17 @@ describe("Settings › Developer", () => {
     expect(words(html)).toContain("This computer cannot keep a session yet: only the macOS app uses the keychain so far.");
     expect(html).not.toContain('data-testid="dev-token"');
     expect(html).not.toContain('data-testid="dev-sign-in"');
+  });
+
+  it("draws Make your shop in a group of its own below the sign-in, only where the page offers it", () => {
+    const signedIn = { kind: "signed_in" as const, tenant: "apple:dao", signedInAt: 1 };
+    const make = <MakeShopView state={MAKE_START} practice={false} onName={noop} onOwnerName={noop} onKind={noop} onMake={noop} />;
+    const html = draw({ saved: CONNECTED, mode: "connected", signIn: signedIn, make });
+    const text = words(html);
+    expect(text.indexOf("Make your shop")).toBeGreaterThan(text.indexOf("Sign out"));
+    expect(html).toContain('data-testid="dev-make"');
+    expect(text).toContain("Make my shop");
+    expect(draw({ saved: CONNECTED, mode: "connected", signIn: signedIn })).not.toContain('data-testid="dev-make"');
   });
 
   it("speaks the app's language", () => {

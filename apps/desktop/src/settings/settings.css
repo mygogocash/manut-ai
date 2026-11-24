@@ -494,6 +494,42 @@
 .dev-mail .st-k span {
   overflow-wrap: anywhere;
 }
+/* Settings › Developer › Make your shop (MakeShop.tsx): the kinds of shop are a list of radio buttons under their row, each
+   kind's name and the line saying which shops it fits, since four long names do not fit a segmented control. */
+.dev-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 12px 10px;
+}
+.dev-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.dev-kind:hover {
+  background: var(--raise);
+}
+.dev-kind input {
+  margin: 2px 0 0;
+}
+.dev-kind > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dev-kind b {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.dev-kind b + span {
+  font-size: 11.5px;
+  color: var(--quiet);
+}
 /* Settings › General › Notifications: the two quiet-hours time fields (Settings.slot.tsx `QuietHoursView`). Wide enough for
    a 12-hour clock's "09:30 PM" and the field's own clock button. */
 .st-time {

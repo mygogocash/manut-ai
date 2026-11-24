@@ -157,6 +157,15 @@ write. No operator makes it, and no link code links it.
 - **Off.** Until the var `SELF_SERVE_SHOPS` is `"on"`, which no environment sets, the route answers `sign_ups_closed` and
   reads nothing. Who may sign up, the pilot's customers and any price are the owner's calls; a self-serve shop has no
   payment step while billing is parked.
+- **On the desktop** (`src/settings/MakeShop.tsx`, `makeShopFlow.ts`; the op `shops.make`, `src/runtime/makeShop.ts`).
+  Settings › Developer offers "Make your shop" in a group of its own below the sign-in, while a signed-in person is in no
+  shop: the shop's name, their own name, and which kind of shop it is (Handmade and gifts, Clothes and accessories,
+  Packaged food and drinks, or None of these). The connected runtime sends it with the sign-in, keeps the owner session
+  the API answers with the sign-in (the keychain item), reads the shop with the person's others and shows it, so it is in the
+  switcher by the time the answer arrives; the app then opens it, as choosing it in the switcher does. While the API
+  answers `sign_ups_closed` the page says so plainly: "Making your own shop isn't open yet. For now, Manut AI sets each shop
+  up with its owner." Practice offers the same form whenever it runs and makes the shop in memory, with nothing sent, up to
+  3 of them, listed after the person's own shop. The first run does not offer it: it does not sign in at all.
 
 ## How the desktop shows them
 
