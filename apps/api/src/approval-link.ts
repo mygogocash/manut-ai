@@ -25,10 +25,16 @@
 /// Minting is deterministic: the same claim always gives the same token,
 /// which is how the operator console re-mints a link on every read without
 /// extending it.
+///
+/// The same secret also keeps sign-in codes sent by email (email-code.ts),
+/// which are not links: a code is stored only as its HMAC under a fourth
+/// domain tag, `manut-ai/email-code/v1.`, so no new secret has to be set, and
+/// no code's MAC can pass as a link's, or the reverse.
 
 const APPROVAL_DOMAIN = "manut-ai/pilot-approval/v1.";
 const DELETION_DOMAIN = "manut-ai/pilot-deletion/v1.";
 const INVITE_DOMAIN = "manut-ai/pilot-invite/v1.";
+const EMAIL_CODE_DOMAIN = "manut-ai/email-code/v1.";
 /// A secret shorter than this is treated as unset. HMAC accepts any length,
 /// but a short secret is a guessable one, and a guessed secret approves
 /// anything.
@@ -91,7 +97,9 @@ function fromBase64url(text: string): Uint8Array | null {
   return base64url(bytes) === text ? bytes : null;
 }
 
-function usableSecret(secret: string | undefined): secret is string {
+/// Whether `secret` can sign: set, and long enough not to be guessed. Email sign-in asks it too, because without it no
+/// code can be kept (email-code.ts).
+export function usableSecret(secret: string | undefined): secret is string {
   return typeof secret === "string" && secret.length >= MIN_SECRET_LENGTH;
 }
 
@@ -200,6 +208,19 @@ export async function openInviteToken(secret: string | undefined, token: string)
   const [, tenant, inviteId, expiresAtMs] = fields;
   if (!bounded(tenant) || !bounded(inviteId) || !validExpiry(expiresAtMs)) return null;
   return { tenant, inviteId, expiresAtMs };
+}
+
+/// What a sign-in code sent by email is kept as (email-code.ts): never the code, but its HMAC under the secret. Six
+/// digits have only a million values, so a plain SHA-256 of a code is undone by trying them all; this needs the secret
+/// too. The MAC covers the address's account (the SHA-256 of the address) beside the code, so a code is good for the one
+/// address it was sent to, and it is signed under the code's own domain tag, so it can never pass as a link of any
+/// kind. Throws when the secret is unusable, as minting a link does. The auth object compares two of these in constant
+/// time inside the storage transaction that settles the try.
+export async function macEmailCode(secret: string | undefined, account: string, code: string): Promise<string> {
+  if (!usableSecret(secret)) throw new Error("approval_link_secret_unset");
+  const mac = await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"),
+    new TextEncoder().encode(EMAIL_CODE_DOMAIN + JSON.stringify([1, account, code])));
+  return base64url(new Uint8Array(mac));
 }
 
 /// Verifies a deletion token, with the same answers as `checkApprovalToken`.

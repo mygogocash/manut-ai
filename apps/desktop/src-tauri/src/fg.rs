@@ -246,13 +246,13 @@ fn parent_pid(_pid: u32) -> u32 {
 }
 
 #[cfg(target_os = "macos")]
-fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
+pub(crate) fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
     let n = unsafe { libc::proc_pidpath(pid as i32, buf.as_mut_ptr().cast(), buf.len() as u32) };
     (n > 0).then_some(n as usize)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
+pub(crate) fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
     use std::io::Write;
     let mut link = [0u8; 32];
     let mut w = &mut link[..];
@@ -264,7 +264,7 @@ fn exe_path(pid: u32, buf: &mut [u8; 4096]) -> Option<usize> {
 /// Process `pid`'s argv into `out`, NUL-separated (no trailing NUL). macOS: `KERN_PROCARGS2` (argc, the exec path,
 /// padding, argv, environment); the buffer is sized to `KERN_ARGMAX` once and reused.
 #[cfg(target_os = "macos")]
-fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
+pub(crate) fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
     out.clear();
     thread_local! {
         static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -309,7 +309,7 @@ fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
 
 /// Linux: `/proc/<pid>/cmdline`.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
+pub(crate) fn argv_bytes(pid: u32, out: &mut Vec<u8>) -> bool {
     use std::io::Read;
     out.clear();
     let Ok(mut f) = std::fs::File::open(format!("/proc/{pid}/cmdline")) else { return false };
@@ -697,7 +697,8 @@ mod tests {
 
     /// A parent pid of 0 is no answer: a loaded macOS can fail `proc_pidinfo` for a moment, and Linux never reads
     /// it. It never restarts the clock, so a failed read costs no extra argv read; a real new parent still does.
-    /// (CI's macOS runner read the argv 14 times over 60 probes instead of 13 because of exactly this.)
+    /// (One of two reasons CI's macOS runner read the argv 14 times over 60 probes instead of 13; the other, `/bin/sh`
+    /// re-execing as bash, is in the next test.)
     #[cfg(unix)]
     #[test]
     fn a_parent_that_could_not_be_read_never_restarts_the_clock() {
@@ -726,9 +727,15 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("manut-fg-argv-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let script = tmp.join("claude");
-        std::fs::write(&script, "sleep 30\n").unwrap();
+        let ready = tmp.join("claude.ready");
+        // macOS's `/bin/sh` re-execs itself as the shell `/private/var/select/sh` names (bash), under the same pid. A
+        // probe that saw `/bin/sh` and then bash rightly reads the argv again for the new program, which is one read
+        // more than this test counts (CI's macOS runner read 14). So the script first marks that the final shell is
+        // running it, and the counting starts only after the mark.
+        std::fs::write(&script, ": > \"$0.ready\"\nsleep 30\n").unwrap();
         let mut child = std::process::Command::new("/bin/sh").arg(&script).stdin(std::process::Stdio::null()).spawn().unwrap();
         let pid = child.id();
+        assert!(wait_for(|| ready.exists().then(String::new)).is_some(), "the script never started");
         assert_eq!(wait_for(|| Probe::default().agent(pid).map(String::from)).as_deref(), Some("claude"));
         let t0 = Instant::now();
         // the cache is what is under test, not the OS: read the real argv once (retrying, as a loaded macOS runner's

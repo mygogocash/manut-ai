@@ -7,7 +7,7 @@ export type VerifiedIdentity = {
   tenant: string;
   provider: "apple";
   exp: number;
-  /// The email Apple verified for the account, trimmed and lower-cased, when the signed token carries one with
+  /// The email Apple verified for the account, normalized by `normalizeEmail`, when the signed token carries one with
   /// `email_verified` true. It never names the tenant, so two Apple accounts are still never joined by an email; it
   /// only lets an email invite check who is signed in (docs/people.md).
   email?: string;
@@ -17,13 +17,21 @@ export type VerifiedIdentity = {
 const EMAIL_MAX = 254;
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+$/;
 
+/// An email address as a session keeps it: trimmed and lower-cased, at most 254 characters, with one `@` between two
+/// parts that hold no spaces. Undefined for anything else. It is the one rule for every address a session can carry:
+/// the email Apple verified, and the address a sign-in code was sent to (email-code.ts), so an invite matches either
+/// the same way. `@manut/people-rules` compares an invite's address trimmed and without case, which this agrees with.
+export function normalizeEmail(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim().toLowerCase();
+  return email.length <= EMAIL_MAX && EMAIL_SHAPE.test(email) ? email : undefined;
+}
+
 /// The email in Apple's signed claims if Apple says it verified it. Apple sends `email_verified` as a boolean or as the
 /// string "true", so both count, and anything else (absent, false, "false") leaves the session without an email.
 function verifiedEmail(payload: { email?: unknown; email_verified?: unknown }): string | undefined {
   if (payload.email_verified !== true && payload.email_verified !== "true") return undefined;
-  if (typeof payload.email !== "string") return undefined;
-  const email = payload.email.trim().toLowerCase();
-  return email.length <= EMAIL_MAX && EMAIL_SHAPE.test(email) ? email : undefined;
+  return normalizeEmail(payload.email);
 }
 
 export type AppleConfig = {

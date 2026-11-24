@@ -96,20 +96,33 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   smoke-tested: the console is behind Access and the approval page loads.
 - Dev's API was redeployed on 24 Nov at 10:41 from `edd9ae4`, with the operator's start keeping Pause everyone (API
   `0316e338`); the admin route is behind Access.
+- Dev's API was redeployed on 24 Nov at 12:12 from `fb889a2`, with sign-in by email code built and off, and its
+  `AUTH_CODE_LIMITER` (API `48d340ac`); smoke-tested: both email routes answer 400 `email_not_configured`, a malformed
+  body 400 `invalid_request`, Apple's exchange still refuses a bad token, and the console and admin routes are behind
+  Access. The pages are unchanged since 10:22.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov). Items 20, 21 and 24 stopped at the account's 5-hour usage limit at 08:15 and
-   were sent on again at 09:35 in their own threads (`t3_thread_send`, as for item 9), once a new helper (item 25)
-   showed the limit no longer held. They run, each on its own branch from `pilot/week-1`; review each, merge it after the
-   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 26, rewinding a turn, files and chat together (`feat/rewind-files`, Opus; a Rust build);
-   - item 29, a preview with sample values, and main moving while Kit worked (`feat/preview-and-main-moved`, Sonnet);
-   - item 27, Kit's lanes on their own branches, with Checked, Tests failed and Reverted (`feat/kit-lanes`, Sonnet);
-   - item 28, what keeps running, with its age, its port and Stop (`feat/what-keeps-running`, Sonnet).
-   Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
+1. Four helpers are running (24 Nov). Items 27, 28 and 29 stopped at the account's 5-hour usage limit at about 11:00
+   and were sent on again at 11:17 in their own threads (`t3_thread_send`), as items 20, 21 and 24 were at 09:35. A
+   helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
+   to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
+   the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   - item 32, the desktop's Settings › People (`feat/settings-people`, Sonnet);
+   - item 34, Google Sheets for Ton's books, built and off (`feat/sheets-books`, Opus);
+   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
+   - item 33, the desktop's sign-in by email code (`feat/desktop-email-sign-in`, Sonnet).
+   Next: item 10, the join page with the web's own sign-in (Opus); then item 36, self-serve onboarding.
+   Merged: 31 (sign-in by a code sent by email, built and off: both routes answer `email_not_configured` until
+   `EMAIL_SIGN_IN` is on, a sender is bound and `APPROVAL_LINK_SECRET` is set; the dev deploy check now refuses any `TEST_`
+   var), 26 (rewinding a turn, files and chat together: `turn_files.rs` keeps each turn's files as git trees under
+   `refs/manut/snapshots` or an owner-only copy, and never writes through a link; a lane now says when the files went
+   back), 28 (what keeps running, with its age, its ports and Stop; `running.rs` reads only the process trees under
+   the app's own sessions, and Stop checks each process again by its start time before each signal), 29 (a preview with sample values, and main moving while Kit worked, with Let Kit merge and Show me both;
+   the shell's `git_moved.rs` only reads), 27 (Kit's lanes on their own branches, with Checked, Tests failed and
+   Reverted; `lane.rs` makes a lane's branch with `git checkout -b`), items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a

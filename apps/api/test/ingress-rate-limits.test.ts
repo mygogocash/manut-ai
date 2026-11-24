@@ -4,6 +4,7 @@ import worker, { type Env } from "../src/index";
 
 type LimitedEnv = Env & {
   AUTH_EXCHANGE_LIMITER?: RateLimit;
+  AUTH_CODE_LIMITER?: RateLimit;
   AUTH_SESSION_LIMITER?: RateLimit;
   LINEAR_INBOUND_LIMITER?: RateLimit;
   OUTPOST_LIMITER?: RateLimit;
@@ -11,6 +12,9 @@ type LimitedEnv = Env & {
 const bindings = env as unknown as LimitedEnv;
 const routes = [
   ["/v1/auth/exchange", "POST", "AUTH_EXCHANGE_LIMITER"],
+  // Asking for a sign-in code by email sends an email, so it is limited per source IP before anything else, on its own
+  // bucket keyed and configured as the exchange's (email-code.ts).
+  ["/v1/auth/email/code", "POST", "AUTH_CODE_LIMITER"],
   ["/v1/auth/refresh", "POST", "AUTH_SESSION_LIMITER"],
   ["/v1/auth/session", "DELETE", "AUTH_SESSION_LIMITER"],
   ["/v1/inbound/linear", "POST", "LINEAR_INBOUND_LIMITER"],
@@ -30,7 +34,7 @@ function fixture(limit: (key: string) => Promise<boolean> = async () => true) {
     return { success: await limit(key) };
   } } as RateLimit;
   const target: LimitedEnv = { ...bindings,
-    AUTH_EXCHANGE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
+    AUTH_EXCHANGE_LIMITER: limiter, AUTH_CODE_LIMITER: limiter, AUTH_SESSION_LIMITER: limiter, LINEAR_INBOUND_LIMITER: limiter,
     OUTPOST_LIMITER: limiter,
     AUTH: { idFromName: (name: string) => bindings.AUTH.idFromName(name),
       get: () => ({ fetch: async () => { calls++; return Response.json({ fixture: true }); } }),
@@ -110,19 +114,21 @@ describe("public ingress rate limits", () => {
     const counter = fixture(async () => { throw new Error("must_not_limit"); });
     expect((await send(new Request("https://test/v1/health"), counter.target)).status).toBe(200);
     expect((await send(new Request("https://test/v1/auth/exchange"), counter.target)).status).toBe(404);
+    expect((await send(new Request("https://test/v1/auth/email/code"), counter.target)).status).toBe(404);
     expect((await send(new Request("https://test/v1/outposts/heartbeat"), counter.target)).status).toBe(404);
     expect(counter.keys).toEqual([]);
   });
 
   it.each([
-    ["AUTH_EXCHANGE_LIMITER", 10], ["AUTH_SESSION_LIMITER", 60], ["LINEAR_INBOUND_LIMITER", 300],
+    ["AUTH_EXCHANGE_LIMITER", 10], ["AUTH_CODE_LIMITER", 10], ["AUTH_SESSION_LIMITER", 60], ["LINEAR_INBOUND_LIMITER", 300],
     ["OUTPOST_LIMITER", 300],
   ] as const)("uses the real workerd %s binding at its configured boundary", async (binding, limit) => {
     const actual = bindings[binding];
     expect(actual).toBeDefined();
     const counter = fixture();
     counter.target[binding] = actual!;
-    const path = ({ AUTH_EXCHANGE_LIMITER: "/v1/auth/exchange", AUTH_SESSION_LIMITER: "/v1/auth/refresh",
+    const path = ({ AUTH_EXCHANGE_LIMITER: "/v1/auth/exchange", AUTH_CODE_LIMITER: "/v1/auth/email/code",
+      AUTH_SESSION_LIMITER: "/v1/auth/refresh",
       LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat" } as const)[binding];
     // Fills one address's real bucket to the limit and sends one more. The real limiter counts in 60-second windows,
     // so on a loaded machine the loop can cross into a new window and the extra request is rightly let through.

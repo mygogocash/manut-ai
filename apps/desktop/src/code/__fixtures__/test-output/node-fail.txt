@@ -1,0 +1,40 @@
+✔ adds the items up (0.311625ms)
+✔ keeps the order's currency (0.056959ms)
+▶ promptpay
+  ✔ builds the payload (0.275542ms)
+  ✖ locks the amount into the QR (1.271333ms)
+  ﹣ handles a refund (0.367167ms) # SKIP
+✖ promptpay (2.408625ms)
+ℹ tests 5
+ℹ suites 1
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 107.867083
+
+✖ failing tests:
+
+test at promptpay.test.js:6:3
+✖ locks the amount into the QR (1.271333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  '59.00' !== '590.00'
+  
+      at TestContext.<anonymous> (file:///work/shop/promptpay.test.js:6:53)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1905:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '59.00',
+    expected: '590.00',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

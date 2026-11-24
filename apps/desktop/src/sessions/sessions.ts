@@ -48,6 +48,8 @@ import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFi
 import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
 import { settleApproval } from "../chat/cards/respond";
 import { kitAnswer, noteChange } from "../code/kitAsks";
+import { planLaneBranch, type LaneBranch } from "../code/laneBranch";
+import { forgetLane, noteLaneEvent } from "../code/laneStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
@@ -58,6 +60,7 @@ import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./clos
 import { watchOpenFolder } from "./revealOpen";
 import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
+import { REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
 const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
@@ -408,6 +411,42 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       /* an older shell */
     }
   };
+  /** Session `id`'s lane works now or waits on the person: a turn runs, or one of its asks is open. */
+  const laneBusy = (id: string): boolean => {
+    const key = keys.get(id);
+    if (!key) return false;
+    const app = store().getState();
+    return !!app.chats[key]?.turn || selectAsks(app).some((a) => a.bot === key);
+  };
+
+  /** A lane's branch (src/code/laneBranch.ts). As a chat session starts, Kit makes a branch of its own for it, from the
+   *  branch the folder is on, so what the session changes never lands on the developer's own branch; a folder that
+   *  already has a working lane on its branch has one checkout, so the lane that starts second joins that branch. Never
+   *  fatal and never pushed: a lane with no branch (no repository, a shell older than lanes, git refusing) works where
+   *  the folder is, and its row shows no branch. */
+  const startLane = async (id: string) => {
+    const r = rec(id);
+    if (!r?.cwd || !host.laneBranch) return;
+    try {
+      const current = await host.branch(r.cwd);
+      const here = pathKey(r.cwd);
+      const others = state.list.filter((o) => o.id !== id && o.status !== "draft" && o.lane && pathKey(o.cwd) === here);
+      const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, others: others.map((o) => ({ branch: o.lane!.name, busy: laneBusy(o.id) })) });
+      if (plan.kind === "none") return;
+      let lane: LaneBranch;
+      if (plan.kind === "join") {
+        // the branch is the other lane's, made from the branch that lane was made from
+        lane = { name: plan.branch, base: others.find((o) => o.lane!.name === plan.branch)?.lane?.base ?? current, shared: true };
+      } else {
+        const made = await host.laneBranch(r.cwd, plan.names);
+        lane = { name: made.branch, base: made.base };
+      }
+      if (rec(id)) patchRec(id, { lane });
+    } catch {
+      /* no branch of its own */
+    }
+  };
+
   const note = (id: string, text: string | null) => {
     const notes = { ...state.notes };
     if (text) notes[id] = text;
@@ -544,6 +583,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (typeof ev.used === "number" && typeof ev.max === "number" && ev.max > 0) patchLive(id, { usage: { used: ev.used, max: ev.max } });
         return;
       case "session.error":
+        // a rewind to a turn that waits for the agent's answer: the agents' refusal ("Not taken back: …", agent_chat.rs),
+        // or the agent ending, fails it (rewind.ts puts the files back); any other note leaves it waiting
+        if (/^Not taken back/.test(String(ev.message ?? "")) || ev.kind === "signed_out" || ev.kind === "no_chat_mode") rewinding.get(id)?.fail(String(ev.message ?? ev.kind));
         if (ev.kind === "signed_out") {
           // not signed in: one line in the person's words with the agent's own sign-in command (its row in
           // acp_chat.rs), then the session ends; a turn already started fails with it first
@@ -574,6 +616,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         return;
       case "exit": {
         if (procs.get(id) === proc) procs.delete(id);
+        rewinding.get(id)?.fail(tr("ss.agentNotRunning", { agent: agentDef(rec(id)?.agent ?? "claude").label }));
         if (proc.stopping) return;
         endLiveTurn(id, "ended");
         const code = typeof ev.code === "number" ? ev.code : null;
@@ -588,14 +631,19 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         return;
       }
       case "rewound": {
-        // the agent took the person's last message back: the chat drops it and what came after, and the box offers
-        // its text again (the text the person typed; the agent's own copy when manut has none)
+        // the agent took the person's last message back, or (a rewind to a turn) the message it names with everything
+        // after it: the chat drops them, and the box offers that message's text again (the text the person typed; the
+        // agent's own copy when manut has none)
         const key = keys.get(id);
         const items = key ? (store().getState().chats[key]?.items ?? []) : [];
-        const last = [...items].reverse().find((i) => i.kind === "user");
+        const named = typeof ev.id === "string" && ev.id ? items.find((i) => i.kind === "user" && i.id === ev.id) : undefined;
+        const last = named ?? [...items].reverse().find((i) => i.kind === "user");
         const text = last && last.kind === "user" ? last.text : typeof ev.text === "string" ? ev.text : "";
+        // the lane's turn is taken back: it reads Reverted, and what its tests said is of work that is gone
+        noteLaneEvent(key ?? "", ev);
         dispatchChat(id, ev);
         if (key && text) store().dispatch({ type: "ui.draft", bot: key, text });
+        rewinding.get(id)?.done();
         return;
       }
       default:
@@ -608,7 +656,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         dispatchChat(id, ev, !!kit);
         if (kit) void kit();
         if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
+        // what the lane's work has shown: its test runs read from their output, and the files that changed
+        noteLaneEvent(keys.get(id) ?? "", ev);
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
+        // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
+        if (ev.event === "turn.end") turns.afterTurn(id);
         if (ev.event === "turn.end" && proc.signedOut) {
           endSignedOut(id, proc);
           return;
@@ -644,6 +696,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     procs.set(id, proc);
     // a new process can take back only what it was sent itself (its own rewind)
     if (state.live[id]?.rewind) patchLive(id, { rewind: false });
+    // and so no turn kept before it can be rewound: their snapshots go
+    turns.forget(id);
     try {
       proc.hostId = await host.chatStart(r.agent, r.cwd, onAgentEvent(id, proc), resume, accountOf(r), id);
       // it said it is not signed in before manut knew its id: it is ended already, so only the process goes
@@ -761,6 +815,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!proc || !r) throw new Error(tr("ss.agentNotRunning", { agent: r ? agentDef(r.agent).label : tr("ss.theAgent") }));
     if (proc.kind === "agent") {
       if (proc.hostId === undefined) throw new Error(tr("ss.stillStarting"));
+      // a message that starts a turn of a coding session: its files are kept first, so the turn can be rewound
+      // (rewind.ts); a message that joins a running turn starts none
+      const key = keys.get(id);
+      if (i.kind === "send" && i.id && REWINDS.includes(r.agent) && !(key && store().getState().chats[key]?.turn)) await turns.beforeSend(id, r.cwd, i.id);
       await host.chatInput(proc.hostId, i);
       return;
     }
@@ -773,6 +831,32 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     else if (i.kind === "approve") await a.folderApprove(bot, fid, i.request_id, i.choice);
     else if (i.kind === "clarify") await a.folderClarify(bot, fid, i.request_id, i.answer);
   };
+
+  // ---- rewind to before a turn ----------------------------------------------------------------
+  //
+  // A coding session's files are kept as each turn begins and ends (rewind.ts, turnFiles.ts). Rewind to before a turn
+  // puts them back, then takes the chat back with the agent's own rewind to that message (`rewind_to`), waited for here.
+
+  /** A rewind to a turn waiting for the agent's answer, by session. */
+  const rewinding = new Map<string, { done: () => void; fail: (why: string) => void }>();
+  /** How long the agent may take to answer before the files go back as they were (it answers at once when it can). */
+  const REWIND_WAIT_MS = 30_000;
+  /** The agent's own rewind to before message `bubble`, waited for: its `rewound` event, or its refusal, its end, or no
+   *  answer in time (the turn book then puts the files back). */
+  const chatRewind = (sid: string, bubble: string) =>
+    new Promise<void>((resolve, reject) => {
+      const end = (ok: boolean, why = "") => {
+        clearTimeout(timer);
+        if (rewinding.get(sid) === waiter) rewinding.delete(sid);
+        if (ok) resolve();
+        else reject(new Error(why));
+      };
+      const waiter = { done: () => end(true), fail: (why: string) => end(false, why) };
+      const timer = setTimeout(() => end(false, tr("rw.to.noAnswer", { agent: agentDef(rec(sid)?.agent ?? "claude").label })), REWIND_WAIT_MS);
+      rewinding.set(sid, waiter);
+      input(sid, { kind: "rewind_to", id: bubble }).catch((e) => end(false, errText(e)));
+    });
+  const turns = new TurnBook({ host: host.turnFiles, chatRewind });
 
   // ---- steer queue sessions ------------------------------------------------------------------
   //
@@ -1326,6 +1410,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       registerRoute(id);
       openChat(id);
       if (!text && !withFiles) {
+        await startLane(id);
         await startAgentChat(id);
         return true;
       }
@@ -1334,6 +1419,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const key = keys.get(id)!;
       const lid = withFiles ? showWithFiles(id, key, text, withFiles) : `local-s${++localSeq}`;
       if (!withFiles) st.dispatch({ type: "local.user", bot: key, id: lid, text, now: Date.now() });
+      // the lane's own branch is there before the agent has a chance to change a file
+      await startLane(id);
       await startAgentChat(id);
       try {
         await input(id, withFiles ? { ...withFiles.input, id: lid } : { kind: "send", text, id: lid });
@@ -2051,6 +2138,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     restored = true;
     if (!saved.length) {
       void ready().then(() => host.pruneFiles([]).catch(() => undefined));
+      void ready().then(() => turns.prune([]));
       void ready().then(() => pruneHistory(host, savedPanelKeys()));
       saveSentFiles({});
       return;
@@ -2165,6 +2253,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // the saved copies of sessions that are gone go; the ones kept show again in their bubbles
     const ids = list.map((r) => r.id);
     void ready().then(() => host.pruneFiles(ids).catch(() => undefined));
+    // and the kept turns of sessions that are gone
+    void ready().then(() => turns.prune(ids));
     // the kept history of terminals that are gone goes (the bottom panel's tabs keep theirs)
     void ready().then(() => pruneHistory(host, [...ids, ...savedPanelKeys()]));
     saveSentFiles(Object.fromEntries(Object.entries(sentFiles).filter(([sid]) => ids.includes(sid))));
@@ -2325,11 +2415,13 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (r && isTerminalRec(state.agents, { ...r, status: "exited" })) forgetHistory(host, id);
     disposeTerm(id);
     void stopChat(id).then(() => host.removeFiles(id).catch(() => undefined));
+    turns.forget(id);
     forgetSentFiles(id);
     const key = keys.get(id);
     if (key) {
       setChatRoute(key, null);
       store().dispatch({ type: "chat.forget", bot: key }); // its asks leave the Needs-you strip with it
+      forgetLane(key);
     }
     keys.delete(id);
     const was = state.list;
@@ -2483,6 +2575,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     setSessionFg,
     /** The pty id session `id`'s terminal runs on (the `session-fg` event's id), null before it started. */
     ptyOf: (id: string): number | null => terms.get(id)?.hostId ?? null,
+    /** The id the shell gave session `id`'s chat (what `chat_start` answered), null before it started or for a session that is no
+     *  coding chat of the shell's: what keeps running names its commands by it, as `ptyOf` names a terminal's. */
+    chatIdOf: (id: string): number | null => procs.get(id)?.hostId ?? null,
     /** The native folder dialog (TERMINALS + menu's "Choose folder…"); null when cancelled. */
     pickFolder: (at: string) => host.pickFolder(at),
     continuePast,
@@ -2524,6 +2619,18 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     queuePick,
     /** Esc / Stop: the agent's own interrupt. */
     interrupt: (id: string) => input(id, { kind: "interrupt" }).catch(() => undefined),
+    /** Rewind to before a turn: each coding session's kept turns and their snapshots (rewind.ts). */
+    turns,
+    /** Rewind session `id` to before turn `turn` (the id of the message that began it): the files, every file in `keep`
+     *  left as it is, then the chat; the chat then says what went back. Throws a RewindError when it did not happen. */
+    rewindTo: async (id: string, turn: string, keep: string[]) => {
+      const key = keys.get(id);
+      const item = key ? store().getState().chats[key]?.items.find((i) => i.kind === "user" && i.id === turn) : undefined;
+      const title = item && item.kind === "user" ? turnTitle(item.text) : "";
+      const done = await turns.rewind(id, turn, keep);
+      if (key) store().dispatch({ type: "system.note", bot: key, text: rewoundNote(title, done.changed), now: Date.now() });
+      return done;
+    },
     /** Edit and resend: the agent takes back the last message (its own rewind), then the box holds its text. */
     rewind: async (id: string) => {
       try {

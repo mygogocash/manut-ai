@@ -15,8 +15,9 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   signs in with to the shop, and that account then decides with an owner session, and with it manages what the team
   knows, the shop's consent and export, and its helpers ("Several shops", below).
 - **Helper**: someone the owner trusts with conversations (the canvas's Mint). Invited by the operator on the owner's
-  word, signs in with Apple, and approves private messages and replies with a helper session, never money, public
-  posts, payment confirmations or commands ("Helpers", below; `docs/people.md`).
+  word, signs in with Apple (or with a code sent by email, once the owner turns that on: "Signing in by email", below),
+  and approves private messages and replies with a helper session, never money, public posts, payment confirmations or
+  commands ("Helpers", below; `docs/people.md`).
 - **Shop**: one tenant in the backend. `tenant` is its id. A shop is **live** once its owner has answered about consent
   (`cloudWork`), giving it or withdrawing it from their session later, or a LINE connection exists.
 
@@ -33,6 +34,9 @@ All bodies are JSON. Times are ISO 8601 strings in UTC. Money is in satang (inte
   confirmation's id and its expiry. It names exactly one confirmation and expires after 24 hours, with it. Each
   kind of link is signed under its own domain tag (`manut-ai/pilot-approval/v1.`, `manut-ai/pilot-deletion/v1.`),
   so a reply link can never delete a shop and a deletion link can never approve a reply or record consent.
+- A sign-in code sent by email, once the owner turns that on, is kept only as an HMAC-SHA256 with the same secret under
+  a domain tag of its own (`manut-ai/email-code/v1.`), never as the code, so no code's MAC can pass as a link's
+  ("Signing in by email", below).
 - Deleting a live shop's data needs its owner's yes through the deletion link (owner's decision, 23 Nov 2026). The
   confirmation runs through `packages/approval-core`: an owner-only kind (`command`), opened and decided by its
   transitions in one AuthObject storage transaction each, so it settles once however many answers arrive, and
@@ -1512,6 +1516,87 @@ Answers:
 `result` is approval-core's `DecideResult` as the task object answered it. Every refusal of approval-core's also
 carries `action`, where the action stands, so a second decision can show what happened to it.
 
+## Signing in by email
+
+Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an
+address and gives it back to `POST /v1/auth/exchange`, which signs them in with the lifted auth's own session, as Sign
+in with Apple does (`apps/api/src/email-code.ts`, `email-sender.ts`, `auth-object.ts`). The app's screens for it (the
+desktop's first run, the web pages) are not built.
+
+**Off unless configured.** Both routes answer 400 `{ error: "email_not_configured" }`, as Apple's exchange answers
+`identity_not_configured` without a client id, unless all three hold: the var `EMAIL_SIGN_IN` is exactly `"on"`; a
+sender is bound, which is Cloudflare Email Service's `send_email` binding named `EMAIL` and the var `EMAIL_FROM_ADDRESS`
+(an address on the sending domain), with `EMAIL_FROM_NAME`, "Manut AI" when unset; and `APPROVAL_LINK_SECRET` is set.
+No environment sets any of them. A body that is not the route's is answered 400 `invalid_request` first, as Apple's
+exchange checks its body before its configuration. The Worker answers both without waking the auth object, which
+checks both again.
+
+Turning it on needs the owner's yes, the Workers Paid plan, and a sending domain the owner controls, onboarded to Email
+Service. Then the environment's block in `wrangler.jsonc` gets `"send_email": [{ "name": "EMAIL" }]`, `EMAIL_FROM_ADDRESS`,
+`EMAIL_FROM_NAME` and `EMAIL_SIGN_IN: "on"`.
+
+### `POST /v1/auth/email/code`
+
+Body exactly `{ email }`. It is limited per source IP before anything is read (`AUTH_CODE_LIMITER`, 10 a minute, keyed
+and configured as the exchange's limiter): 429 `rate_limited` with `retry-after: 60`, or 503 `rate_limit_unavailable`
+without the binding. The address is normalized as Apple's verified email is: trimmed and lower-cased, at most 254
+characters, one `@` between two parts with no spaces.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ sent: true, expiresIn: 600, resendIn: 60 }` | A code went to the email service for the address. The same for every address: nothing here looks the address up, so the answer cannot say whether Manut AI or any shop knows it, and it never waits for the email or says what the service did with it |
+| 429 | `{ error: "too_many_codes", retryAfter }`, with `retry-after` | The address had a code in the last minute, or ten in the last 24 hours. `retryAfter` is whole seconds until it may have another |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly `{ email }` with an address |
+| 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+| 411, 413 | `length_required`, `body_too_large` | As the exchange |
+
+A new code replaces the one before, which stops working. The email is plain English: the subject "Your Manut AI sign-in
+code", never with the code in it, so a lock screen does not show it; the body gives the code, says it works for 10
+minutes and not to share it, and that the person can ignore the email if they did not ask. Thai waits for the owner's
+writer.
+
+### `POST /v1/auth/exchange` with `provider: "email"`
+
+Body exactly `{ provider: "email", email, code, deviceId }`: `code` is six digits as a string, and `deviceId` 1 to 128
+characters, as Apple's.
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{ accessToken, refreshToken, csrf, expiresIn: 3600, tenant }` | The right code within its 10 minutes. The session is Apple's in every way: the same tokens, lifetimes, refresh (`POST /v1/auth/refresh`), sign-out (`DELETE /v1/auth/session`) and tenant wipe |
+| 401 | `{ error: "wrong_code", triesLeft }` | A wrong code. `triesLeft` is how many more tries this code takes; at 0 it has ended |
+| 401 | `{ error: "code_ended" }` | No code to try: none was asked for, it was used, its 10 minutes passed, or five wrong tries ended it. Ask for a new one |
+| 400 | `{ error: "invalid_request" }` | The body is not exactly that, or the code is not six digits, which does not count as a try |
+| 400 | `{ error: "email_not_configured" }` | Email sign-in is off, above |
+
+- **The identity.** The tenant is `email:` and the SHA-256, in hex, of the normalized address, so it never equals an
+  Apple tenant (`apple:<sub>`) and the address itself names nothing that is stored. The session's email is the
+  address, carried through every refresh, so an email invite matches it (`POST /v1/people/accept`, below).
+- **One code, one session.** A right code is used up in the same storage transaction that stores the session, so of
+  several devices racing with one code, one is signed in and the others are answered `code_ended`.
+- **Apple and email are two identities, even for one address** (`docs/decisions.md`, 24 Nov 2026), as two Apple
+  accounts are never joined by an email. What the owner sees: their own shop answers to the one account the operator
+  linked, so signing in the other way opens no owner session and lists none of their shops. A helper is known in a shop
+  by the address the owner invited, so either sign-in that verified it opens their helper sessions: the owner sees one
+  helper, the other sign-in arrives as a new device ("Mint signed in on a new device"), and removing the helper ends
+  both. The helper's own list of shops (`GET /v1/shops`) is per sign-in until they open the shop with the other.
+- **What answers can tell.** Every answer is the same for an address Manut AI or a shop knows as for one nobody knows.
+  What they do show is whether someone asked for a code for the address lately (a 429, or `wrong_code` rather than
+  `code_ended`), whoever asked.
+
+### What is kept, and where the code never is
+
+- In the auth object, under `email-code:<SHA-256 of the address>`: the live code's HMAC-SHA256 under
+  `APPROVAL_LINK_SECRET`, in a domain tag of its own (`manut-ai/email-code/v1.`, over the address's hash and the code),
+  when it ends and its wrong tries; and when each code of the last 24 hours was sent. Never the code, never the address.
+  The alarm deletes the record a day after its last send, and a tenant wipe of the email identity deletes it with the
+  sessions. Changing `APPROVAL_LINK_SECRET` ends every live code, as it ends every link.
+- The code is never in a log, the audit log, an error, an answer or a URL: it goes only into the email. A send the email
+  service refuses is logged as the service's error code alone (`E_RECIPIENT_SUPPRESSED` and the like), never its
+  message, which may name the address.
+- The test configuration sends to an in-memory outbox instead (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`), as the test
+  Apple key stands in for Apple's. The dev deploy check refuses any config that sets a `TEST_` var
+  (`.github/scripts/check-dev-deploys.mjs`).
+
 ## Helpers
 
 The owner's helpers (`docs/people.md`): an invite for one LINE account or email, once, for 7 days; joining as that
@@ -1631,8 +1716,10 @@ type Devices = { devices: { id: string; helperId: string; name: string; openedAt
 
 **`POST /v1/people/accept`** with `{ token }` (the invite link's last segment, in the body, never in a URL) and a
 signed-in session of the lifted auth. Today that is Sign in with Apple (`POST /v1/auth/exchange`): the session keeps
-the email Apple verified, and that email is the account the invite is checked against. Nothing signs in as a LINE
-account yet, so a LINE invite answers `wrong_account` to every session until a LINE sign-in exists.
+the email Apple verified, and that email is the account the invite is checked against. A code sent by email does the
+same once the owner turns it on: its session keeps the address the code went to ("Signing in by email", above).
+Nothing signs in as a LINE account yet, so a LINE invite answers `wrong_account` to every session until a LINE sign-in
+exists.
 
 | Status | Body | When |
 | --- | --- | --- |

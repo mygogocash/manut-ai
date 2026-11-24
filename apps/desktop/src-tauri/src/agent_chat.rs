@@ -57,6 +57,12 @@ pub enum Input {
     /// Take back the person's last message and what came after it, through the agent's own rewind (Claude Code
     /// `rewind_conversation`, Codex `thread/revert`); the UI then offers its text again. Files stay as they are.
     Rewind,
+    /// Take back the person's message `id` (its bubble's id) and everything after it, through the same rewinds:
+    /// Claude Code goes back to before that message, Codex to before the turn it went into. Rewind to before a turn
+    /// (src/sessions/rewind.ts) puts the session's files back first ([`crate::turn_files`]). Only messages this process
+    /// took can be named; every other agent refuses it.
+    #[serde(rename = "rewind_to")]
+    RewindTo { id: String },
     /// Hand a message the person held in manut (its bubble `id`) to the running turn without stopping it, through
     /// the agent's own mid-turn input: Codex `turn/steer`, pi / oh-my-pi / OmO `steer`, Claude Code a stream-json
     /// user message written mid-turn (read into the turn after the running tool). Every other agent refuses it.
@@ -122,13 +128,14 @@ impl Waiting {
             st.emit(ev("message.dropped", json!({"id": id})));
         }
     }
-    /// The agent took its oldest message.
-    fn take(&mut self, st: &mut Step) {
-        if let Some((id, true)) = self.sent.pop_front() {
-            if !id.is_empty() {
-                st.emit(ev("message.taken", json!({"id": id})));
-            }
+    /// The agent took its oldest message: its id ("" when it had none), so an adapter can tell which message the
+    /// agent's own copy is.
+    fn take(&mut self, st: &mut Step) -> Option<String> {
+        let (id, busy) = self.sent.pop_front()?;
+        if busy && !id.is_empty() {
+            st.emit(ev("message.taken", json!({"id": id})));
         }
+        Some(id)
     }
     /// The agent took a message by id (Codex's `clientId`); older ones were taken before it.
     fn take_id(&mut self, st: &mut Step, id: &str) {
@@ -898,6 +905,62 @@ pub(crate) fn tool_kind(name: &str) -> &str {
     }
 }
 
+/// What the shell tells an agent when the person says no to a step. A result that is exactly this is a step that never
+/// ran, not one that failed.
+const DENIED: &str = "The person denied this in Manut AI.";
+
+/// Whether a Claude Code step's result says the step never ran: the shell's own refusal, or Claude Code's words when a
+/// turn is stopped with the step waiting (claude-4-stopped.jsonl).
+fn never_ran(text: &str) -> bool {
+    let t = text.trim();
+    t == DENIED || t.starts_with("The user doesn't want to proceed with this tool use")
+}
+
+/// How much of the end of a command's output goes with its step's `tool.end` (`output`). The page reads a test run's
+/// result from it (`src/code/testRun.ts`) and keeps none of it; a test run's summary is printed last, so the end is what
+/// is kept, and a long output loses only its head.
+const OUTPUT_TAIL: usize = 8 * 1024;
+
+/// The last `OUTPUT_TAIL` bytes of `text`, starting at a character.
+pub(crate) fn output_tail(text: &str) -> &str {
+    if text.len() <= OUTPUT_TAIL {
+        return text;
+    }
+    let mut at = text.len() - OUTPUT_TAIL;
+    while !text.is_char_boundary(at) {
+        at += 1;
+    }
+    &text[at..]
+}
+
+/// A tool result's text: its `content` when that is a string, else the text of each of its blocks, one to a line.
+fn result_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(t)) => t.clone(),
+        Some(Value::Array(list)) => list.iter().filter(|b| s(b, "type") == "text").map(|b| s(b, "text")).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// The longest command line that goes with a step's end.
+const COMMAND_MAX: usize = 4 * 1024;
+
+/// The `tool.end` of a step that ran a command. `command` is its whole line (the step's start cut it to one short line),
+/// for the page to tell a test run by; `output` is what it printed, when there was something and it is not the shell's own
+/// refusal; `declined`: the person said no, so the command never ran.
+fn command_end(tool_id: &str, ok: bool, ms: u64, command: &str, output: &str, declined: bool) -> Value {
+    let mut end = json!({"tool_id": tool_id, "name": "", "ok": ok, "ms": ms});
+    if !command.trim().is_empty() {
+        end["command"] = json!(command.chars().take(COMMAND_MAX).collect::<String>());
+    }
+    if declined {
+        end["declined"] = json!(true);
+    } else if !output.trim().is_empty() {
+        end["output"] = json!(output_tail(output));
+    }
+    end
+}
+
 /// A file tool call as `path +a -d` (path relative to the session folder), from the arguments every agent
 /// sends: Claude Code `Write {file_path, content}` / `Edit {file_path, old_string, new_string}` /
 /// `MultiEdit {file_path, edits}`, pi `write {path, content}` / `edit {path, edits:[{oldText,newText}]}`.
@@ -1041,9 +1104,17 @@ pub struct Claude {
     /// the uuids of the person's messages Claude Code echoed back in this process, oldest first: what a rewind
     /// takes back (the last one)
     sent_uuids: Vec<String>,
+    /// the bubble id of each of those messages, in step with `sent_uuids` ("" when manut gave it none): what a rewind to
+    /// a turn names
+    sent_ids: Vec<String>,
+    /// where a rewind to a turn asked Claude Code to go back to (an index in `sent_uuids`), until it answers
+    rewind_to: Option<usize>,
     /// its own todo list (TaskCreate / TaskUpdate, or TodoWrite): (task id or the call's id until it has one, text,
     /// status)
     tasks: Vec<(String, String, String)>,
+    /// the commands (`Bash`) it has started and not heard the result of, by tool_use id, each with its whole line: their
+    /// results carry the output a step's `tool.end` hands on
+    commands: HashMap<String, String>,
 }
 
 /// Claude Code's todo tools: shown as the turn's checklist (`plan`), never as steps.
@@ -1393,11 +1464,24 @@ impl Adapter for Claude {
                         st.emit(ev("session.error", json!({"message": format!("{what} not changed: {}", s(r, "error"))})));
                     }
                 } else if id.starts_with("manut-rewind-") {
-                    // the conversation is back to before the person's last message: the chat takes that message
-                    // back and offers its text again
+                    // the conversation is back to before the person's last message, or to before the message a rewind
+                    // to a turn named (`id` on the event): the chat takes that message and what came after back, and
+                    // offers its text again
+                    let to = self.rewind_to.take();
                     if s(r, "subtype") == "success" && body.get("rewound").and_then(Value::as_bool) == Some(true) {
-                        self.sent_uuids.pop();
-                        st.emit(ev("rewound", json!({"text": s(body, "prefillText")})));
+                        match to {
+                            Some(at) => {
+                                let gone = self.sent_ids.get(at).cloned().unwrap_or_default();
+                                self.sent_uuids.truncate(at);
+                                self.sent_ids.truncate(at);
+                                st.emit(ev("rewound", json!({"text": s(body, "prefillText"), "id": gone})));
+                            }
+                            None => {
+                                self.sent_uuids.pop();
+                                self.sent_ids.pop();
+                                st.emit(ev("rewound", json!({"text": s(body, "prefillText")})));
+                            }
+                        }
                     } else {
                         let why = if s(r, "error").is_empty() { s(body, "error") } else { s(r, "error") };
                         st.emit(ev("session.error", json!({"message": clip(&format!("Not taken back: {}", if why.is_empty() { "Claude Code refused" } else { &why }), 200)})));
@@ -1552,6 +1636,9 @@ impl Adapter for Claude {
                                 continue;
                             }
                             st.emit(ev("tool.start", json!({"tool_id": s(b, "id"), "name": tool_kind(&name), "detail": call_detail(&name, &input, &self.cwd)})));
+                            if tool_kind(&name) == "terminal" {
+                                self.commands.insert(s(b, "id"), s(&input, "command"));
+                            }
                             // a file edit: the change it asks for, until its result says what it did
                             if let Some(f) = input_diff(&name, &input, &self.cwd) {
                                 st.emit(ev("tool.diff", json!({"tool_id": s(b, "id"), "files": [f]})));
@@ -1581,13 +1668,17 @@ impl Adapter for Claude {
             // Claude Code took a message the person sent (`--replay-user-messages`): a queued one is not waiting now
             "user" if !sub && v.get("isReplay").and_then(Value::as_bool) == Some(true) => {
                 let uuid = s(&v, "uuid");
-                if !uuid.is_empty() {
+                let echoed = !uuid.is_empty();
+                if echoed {
                     self.sent_uuids.push(uuid);
                     if self.sent_uuids.len() == 1 {
                         st.emit(ev("session.info", json!({"rewind": true})));
                     }
                 }
-                self.waiting.take(&mut st);
+                let taken = self.waiting.take(&mut st).unwrap_or_default();
+                if echoed {
+                    self.sent_ids.push(taken);
+                }
                 // a message queued behind a stopped turn starts its own
                 self.begin(&mut st, false);
             }
@@ -1611,7 +1702,13 @@ impl Adapter for Claude {
                                 st.emit(ev("tool.diff", json!({"tool_id": tid, "files": [f]})));
                             }
                         }
-                        st.emit(ev("tool.end", json!({"tool_id": tid, "name": "", "ok": ok, "ms": 0})));
+                        // a command's step carries what it printed, for the page to read a test run's result from
+                        if let Some(command) = self.commands.remove(&tid) {
+                            let text = result_text(b);
+                            st.emit(ev("tool.end", command_end(&tid, ok, 0, &command, &text, !ok && never_ran(&text))));
+                        } else {
+                            st.emit(ev("tool.end", json!({"tool_id": tid, "name": "", "ok": ok, "ms": 0})));
+                        }
                         // a subagent's hand-back: its own words (`tool_use_result.content`), not the frame around them;
                         // a background one only launched here and ends with its task notification
                         if self.subs.has(&tid) && matches!(s(&tur, "status").as_str(), "async_launched" | "teammate_spawned") {
@@ -1706,7 +1803,7 @@ impl Adapter for Claude {
                 let Some(ClaudeAsk::Tool(name, input, suggestions)) = self.pending.remove(&request_id) else { return Err("no such request".into()) };
                 self.ask_subs.remove(&request_id);
                 let response = match choice.as_str() {
-                    "deny" => json!({"behavior": "deny", "message": "The person denied this in Manut AI."}),
+                    "deny" => json!({"behavior": "deny", "message": DENIED}),
                     "once" => json!({"behavior": "allow", "updatedInput": input}),
                     "session" => {
                         // Claude Code suggests rules saved to the project's .claude/settings.local.json and a switch
@@ -1767,6 +1864,17 @@ impl Adapter for Claude {
                     return Err("wait until the turn ends".into());
                 }
                 let Some(uuid) = self.sent_uuids.last().cloned() else { return Err("nothing to take back".into()) };
+                self.rewind_to = None;
+                self.control(&mut st, "rewind", json!({"subtype": "rewind_conversation", "target_message_uuid": uuid}));
+            }
+            // a rewind to a turn: back to before the message that began it, however many came after
+            Input::RewindTo { id } => {
+                if self.turn {
+                    return Err("wait until the turn ends".into());
+                }
+                let Some(at) = self.sent_ids.iter().rposition(|x| !id.is_empty() && *x == id) else { return Err("Claude Code cannot take that message back here".into()) };
+                let uuid = self.sent_uuids[at].clone();
+                self.rewind_to = Some(at);
                 self.control(&mut st, "rewind", json!({"subtype": "rewind_conversation", "target_message_uuid": uuid}));
             }
             // Claude Code's own switch; it answers with a status line carrying the new mode
@@ -1840,6 +1948,11 @@ pub struct Codex {
     helpers: Subagents,
     /// the person's turns Codex named in this process, oldest first: a rewind reverts the thread to before the last
     turns: Vec<String>,
+    /// the turn each of the person's messages went into, by its bubble id (Codex's `clientId`), oldest first: what a
+    /// rewind to a turn names
+    msg_turns: Vec<(String, String)>,
+    /// where a rewind to a turn asked Codex to go back to (an index in `turns`), until it answers
+    revert_to: Option<usize>,
     /// reasoning items that streamed a summary: their raw text is not shown as well
     summarized: std::collections::HashSet<String>,
     /// turn/steer request id -> the steered message's bubble id
@@ -1875,6 +1988,8 @@ impl Codex {
             waiting: Waiting::default(),
             helpers: Subagents::new("codex"),
             turns: Vec::new(),
+            msg_turns: Vec::new(),
+            revert_to: None,
             summarized: Default::default(),
             steers: HashMap::new(),
         }
@@ -2144,6 +2259,7 @@ impl Adapter for Codex {
                     let cwd = self.cwd.clone();
                     self.call(&mut st, "thread/start", json!({"cwd": cwd}));
                 } else if what == "thread/revert" {
+                    self.revert_to = None;
                     st.emit(ev("session.error", json!({"message": clip(&format!("Not taken back: {msg}"), 200)})));
                 } else if what == "turn/start" {
                     self.end(&mut st, "error", Some(clip(&msg, 200)));
@@ -2227,8 +2343,20 @@ impl Adapter for Codex {
                     self.steers.remove(&n);
                 }
                 "thread/revert" => {
-                    self.turns.pop();
-                    st.emit(ev("rewound", json!({})));
+                    match self.revert_to.take() {
+                        // a rewind to a turn: the chat goes back to before the first message of the turn that went
+                        Some(at) => {
+                            let gone = self.turns.get(at).and_then(|t| self.msg_turns.iter().find(|(_, x)| x == t)).map(|(b, _)| b.clone()).unwrap_or_default();
+                            self.turns.truncate(at);
+                            st.emit(ev("rewound", json!({"id": gone})));
+                        }
+                        None => {
+                            self.turns.pop();
+                            st.emit(ev("rewound", json!({})));
+                        }
+                    }
+                    let turns = &self.turns;
+                    self.msg_turns.retain(|(_, t)| turns.contains(t));
                     st.emit(ev("session.info", json!({"rewind": !self.turns.is_empty()})));
                 }
                 "model/list" => {
@@ -2400,6 +2528,12 @@ impl Adapter for Codex {
                     "userMessage" => {
                         let cid = s(&item, "clientId");
                         if !cid.is_empty() {
+                            // the turn it went into (Codex names the turn before it records the message)
+                            if let Some(t) = self.turn_id.clone() {
+                                if !self.msg_turns.iter().any(|(b, _)| *b == cid) {
+                                    self.msg_turns.push((cid.clone(), t));
+                                }
+                            }
                             self.waiting.take_id(&mut st, &cid);
                         }
                     }
@@ -2456,7 +2590,13 @@ impl Adapter for Codex {
                         }
                         let status = s(&item, "status");
                         let ok = !matches!(status.as_str(), "failed" | "declined");
-                        st.emit(ev("tool.end", json!({"tool_id": iid, "name": "", "ok": ok, "ms": item.get("durationMs").and_then(Value::as_u64).unwrap_or(0)})));
+                        let ms = item.get("durationMs").and_then(Value::as_u64).unwrap_or(0);
+                        if s(&item, "type") == "commandExecution" {
+                            // a command's step carries what it printed, for the page to read a test run's result from
+                            st.emit(ev("tool.end", command_end(&iid, ok, ms, &Codex::command_of(&item), &s(&item, "aggregatedOutput"), status == "declined")));
+                        } else {
+                            st.emit(ev("tool.end", json!({"tool_id": iid, "name": "", "ok": ok, "ms": ms})));
+                        }
                     }
                     _ => {}
                 }
@@ -2611,6 +2751,18 @@ impl Adapter for Codex {
                     return Err("wait until the turn ends".into());
                 }
                 let (Some(thread), Some(turn)) = (self.thread.clone(), self.turns.last().cloned()) else { return Err("nothing to take back".into()) };
+                self.revert_to = None;
+                self.call(&mut st, "thread/revert", json!({"threadId": thread, "beforeTurnId": turn}));
+            }
+            // a rewind to a turn: the thread goes back to before the turn the named message went into
+            Input::RewindTo { id } => {
+                if self.turn {
+                    return Err("wait until the turn ends".into());
+                }
+                let at = self.msg_turns.iter().find(|(b, _)| !id.is_empty() && *b == id).and_then(|(_, t)| self.turns.iter().position(|x| x == t));
+                let (Some(thread), Some(at)) = (self.thread.clone(), at) else { return Err("Codex cannot take that message back here".into()) };
+                self.revert_to = Some(at);
+                let turn = self.turns[at].clone();
                 self.call(&mut st, "thread/revert", json!({"threadId": thread, "beforeTurnId": turn}));
             }
             Input::Effort { effort } => {
@@ -3114,7 +3266,9 @@ impl Adapter for Pi {
                 }
             }
             // the agent took the person's message (a follow-up leaves its queue here)
-            "message_end" if s(&v["message"], "role") == "user" => self.waiting.take(&mut st),
+            "message_end" if s(&v["message"], "role") == "user" => {
+                self.waiting.take(&mut st);
+            }
             "thinking_level_changed" => st.emit(ev("session.info", json!({"effort": s(&v, "level")}))),
             "commands_changed" => st.emit(pi_commands(&v)),
             "message_start" if s(&v["message"], "role") == "custom" => {
@@ -3326,7 +3480,7 @@ impl Adapter for Pi {
                 self.read(&mut st, "get_available_thinking_levels");
             }
             Input::Mode { mode } => return Err(format!("{} has no permission mode here ({mode})", self.label)),
-            Input::Rewind => return Err(format!("{} cannot take a message back here", self.label)),
+            Input::Rewind | Input::RewindTo { .. } => return Err(format!("{} cannot take a message back here", self.label)),
             Input::Effort { effort } => {
                 if !self.levels.contains(&effort) {
                     return Err(format!("unknown thinking level {effort}"));
@@ -3365,6 +3519,8 @@ struct ChatLive {
     /// the program and everything it started (`cmd.exe` and its `node.exe` on Windows)
     tree: Arc<Option<ProcessTree>>,
     exited: Arc<AtomicBool>,
+    /// the folder it started in (what keeps running names its commands by it: [`ChatSessions::roots`])
+    cwd: PathBuf,
 }
 
 /// Every running chat session of this app. [`ChatSessions::close_all`] runs on exit.
@@ -3800,8 +3956,16 @@ impl ChatSessions {
             });
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
-        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited });
+        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited, cwd: cwd.to_path_buf() });
         Ok(id)
+    }
+
+    /// The program of every chat still running, with its id and the folder it started in: what the commands that keep
+    /// running are read from ([`crate::running`]), as [`crate::sessions::Sessions::roots`] gives it for the terminals. A DSH
+    /// chat has no process between its messages, so it is not here; a chat that ended is not listed.
+    pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
+        let g = self.live.lock().unwrap();
+        g.iter().filter(|(_, c)| !c.exited.load(Ordering::SeqCst)).map(|(id, c)| (*id, c.pid, c.cwd.clone())).collect()
     }
 
     /// One thing the person did in chat `id`.
@@ -4157,7 +4321,10 @@ mod tests {
         let st = run(&mut x, &lines[at + 1..]);
         assert_eq!(text_of(&st.events, "delta").concat(), "All 12 tests pass.");
         assert_eq!(text_of(&st.events, "message"), ["All 12 tests pass."]);
-        assert_eq!(st.events.iter().find(|e| s(e, "event") == "tool.end").unwrap()["ok"], true);
+        let end = st.events.iter().find(|e| s(e, "event") == "tool.end").unwrap();
+        assert_eq!(end["ok"], true);
+        // a command's step hands on what it printed, for the page to read the test run's result from
+        assert_eq!(end["output"], "12 passed\n");
         assert_eq!(st.events.last().unwrap(), &json!({"event": "turn.end", "outcome": "done"}));
     }
 
@@ -4468,6 +4635,27 @@ mod tests {
         let work = home.join(".manut").join("accounts").join("claude").join("work");
         assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), format!("cfg={}", work.display()));
         let _ = (std::fs::remove_file(mark), std::fs::remove_dir_all(home));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn roots_name_each_running_chat_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {
+        let c = ChatSessions::default();
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let (_out, sink) = collect();
+        let running = c.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 69".into()], &tmp, None, &[], Box::new(Pi::default()), sink).unwrap();
+        let (ended_out, ended_sink) = collect();
+        c.spawn(vec!["/bin/sh".into(), "-c".into(), "exit 0".into()], &tmp, None, &[], Box::new(Pi::default()), ended_sink).unwrap();
+        assert!(wait_for(|| ended_out.lock().unwrap().iter().any(|o| matches!(o, ChatOut::Exit(..))), 10));
+        // the one that ended is not listed: its number may be someone else's by now
+        let roots = c.roots();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let (id, pid, folder) = &roots[0];
+        assert_eq!(*id, running);
+        assert!(*pid > 1);
+        assert_eq!(folder, &tmp);
+        c.close(running);
+        assert!(c.roots().is_empty());
     }
 
     #[cfg(unix)]
@@ -7347,6 +7535,69 @@ mod tests {
     }
 
     #[test]
+    fn claude_rewind_to_a_turn_goes_back_to_before_the_message_that_began_it() {
+        // claude-12-rewind's two turns, each message echoed back as Claude Code does, then a rewind to the first:
+        // rewind_conversation names that message's uuid, and its answer takes back both turns
+        // the page sends it as `{kind: "rewind_to", id}` (ChatInput in src/sessions/host.ts)
+        assert_eq!(serde_json::from_value::<Input>(json!({"kind": "rewind_to", "id": "local-s1"})).unwrap(), Input::RewindTo { id: "local-s1".into() });
+        let mut c = claude_up();
+        assert!(c.on_input(Input::RewindTo { id: "local-s1".into() }).is_err(), "nothing sent yet");
+        let lines = real("claude-12-rewind.jsonl");
+        c.on_input(sent_with("Remember the word ORCHID. Reply only: ok", "local-s1")).unwrap();
+        run(&mut c, &lines[..5]);
+        c.on_input(sent_with("Did I ask you to remember a word earlier in this conversation?", "local-s2")).unwrap();
+        run(&mut c, &lines[6..11]);
+        let st = c.on_input(Input::RewindTo { id: "local-s1".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(w[0]["request"], json!({"subtype": "rewind_conversation", "target_message_uuid": "de0a73ab-5879-4e81-b093-fb2cdb29704a"}));
+        let rid = s(&w[0], "request_id");
+        let st = c.on_line(&lines[5].replace("manut-rewind-REQ", &rid));
+        assert_eq!(st.events[0], json!({"event": "rewound", "text": "Remember the word ORCHID. Reply only: ok", "id": "local-s1"}));
+        assert_eq!(st.events[1], json!({"event": "session.info", "rewind": false}), "both messages went");
+        assert!(c.on_input(Input::RewindTo { id: "local-s2".into() }).is_err(), "a message taken back cannot be named again");
+        assert!(c.on_input(Input::RewindTo { id: String::new() }).is_err());
+    }
+
+    #[test]
+    fn codex_rewind_to_a_turn_reverts_to_before_the_turn_the_message_went_into() {
+        let mut x = codex_up();
+        assert!(x.on_input(Input::RewindTo { id: "local-s1".into() }).is_err());
+        let turn = |x: &mut Codex, id: &str, t: &str| {
+            x.on_input(sent_with("go", id)).unwrap();
+            run(
+                x,
+                &[
+                    format!(r#"{{"method":"turn/started","params":{{"turn":{{"id":"{t}","status":"inProgress","items":[]}}}}}}"#),
+                    format!(r#"{{"method":"item/started","params":{{"item":{{"type":"userMessage","id":"u-{t}","clientId":"{id}","content":[]}}}}}}"#),
+                    format!(r#"{{"method":"turn/completed","params":{{"turn":{{"id":"{t}","status":"completed"}}}}}}"#),
+                ],
+            );
+        };
+        turn(&mut x, "local-s1", "T1");
+        turn(&mut x, "local-s2", "T2");
+        turn(&mut x, "local-s3", "T3");
+        let st = x.on_input(Input::RewindTo { id: "local-s2".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(s(&w[0], "method"), "thread/revert");
+        assert_eq!(w[0]["params"]["beforeTurnId"], json!("T2"));
+        let id = w[0]["id"].as_u64().unwrap();
+        let st = x.on_line(&format!(r#"{{"id":{id},"result":{{"thread":{{"id":"01a1c3b9-4b7f-7542-900c-c5f4dc80eefa"}}}}}}"#));
+        assert_eq!(st.events, vec![json!({"event": "rewound", "id": "local-s2"}), json!({"event": "session.info", "rewind": true})]);
+        // turn 3 went with turn 2; turn 1 is still there
+        assert!(x.on_input(Input::RewindTo { id: "local-s3".into() }).is_err());
+        let st = x.on_input(Input::RewindTo { id: "local-s1".into() }).unwrap();
+        let w = written(&st);
+        assert_eq!(w[0]["params"]["beforeTurnId"], json!("T1"));
+        // a refusal says so; the turn stays
+        let id = w[0]["id"].as_u64().unwrap();
+        let st = x.on_line(&format!(r#"{{"id":{id},"error":{{"code":-32600,"message":"busy"}}}}"#));
+        assert_eq!(st.events, vec![json!({"event": "session.error", "message": "Not taken back: busy"})]);
+        assert!(x.on_input(Input::RewindTo { id: "local-s1".into() }).is_ok());
+        // the other agents refuse it
+        assert!(Pi::new("/w/proj", "OmO").on_input(Input::RewindTo { id: "local-s1".into() }).is_err());
+    }
+
+    #[test]
     fn diff_lines_are_capped_and_counted() {
         let big: String = (0..450).map(|i| format!("line {i}\n")).collect();
         let f = input_diff("Write", &json!({"file_path": "/w/proj/big.txt", "content": big}), "/w/proj").unwrap();
@@ -7497,5 +7748,130 @@ mod tests {
         assert_eq!((rec["status"].clone(), rec["source"].clone()), (json!("allowed"), json!("chat")));
         assert_eq!(tapped.name(), plain.name());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ---- a command's output on its step's end: what the page reads a test run's result from ----------
+
+    /// Claude Code's lines for one `Bash` step: the call, then its result.
+    fn claude_bash(id: &str, tool: &str, content: Value, is_error: bool) -> Vec<String> {
+        vec![
+            json!({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": id, "name": tool, "input": {"command": "pnpm test", "file_path": "/w/proj/a.txt"}}]}}).to_string(),
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": content, "is_error": is_error}]}}).to_string(),
+        ]
+    }
+
+    fn claude_ready() -> Claude {
+        let mut c = Claude::new("/w/proj");
+        c.start();
+        c.on_input(Input::send("run the tests")).unwrap();
+        c
+    }
+
+    #[test]
+    fn a_claude_command_hands_on_its_output_with_its_end() {
+        let out = " Test Files  1 passed (1)\n      Tests  14 passed (14)\n";
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(out), false));
+        let end = of(&st.events, "tool.end");
+        assert_eq!(end.len(), 1);
+        assert_eq!((end[0]["ok"].clone(), end[0]["output"].clone()), (json!(true), json!(out)));
+        assert!(end[0].get("declined").is_none());
+        // and the whole line it ran, which the step's start cuts to one short line
+        assert_eq!(end[0]["command"], "pnpm test");
+    }
+
+    #[test]
+    fn a_failed_claude_command_hands_on_its_output_too() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("Exit code 1\n FAIL  a.test.ts > a\n      Tests  1 failed (1)\n"), true));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!(end["ok"], false);
+        assert!(s(end, "output").contains("Tests  1 failed (1)"));
+    }
+
+    #[test]
+    fn a_claude_result_in_blocks_is_one_text() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!([{"type": "text", "text": "a"}, {"type": "image", "source": {}}, {"type": "text", "text": "b"}]), false));
+        assert_eq!(of(&st.events, "tool.end")[0]["output"], "a\nb");
+    }
+
+    #[test]
+    fn no_other_claude_step_hands_on_its_result() {
+        // a file read's result is the file, and no step's is kept but a command's
+        let st = run(&mut claude_ready(), &claude_bash("toolu_2", "Read", json!("the whole file"), false));
+        let end = &of(&st.events, "tool.end")[0];
+        assert!(end.get("output").is_none() && end.get("declined").is_none(), "{end}");
+    }
+
+    #[test]
+    fn a_command_the_person_refused_never_ran_and_says_so_instead_of_its_refusal() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(DENIED), true));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["declined"].clone()), (json!(false), json!(true)));
+        assert!(end.get("output").is_none());
+        // so does Claude Code's own result when a turn is stopped with the step waiting (a real recording's words)
+        let stopped = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(stopped), true));
+        assert_eq!(of(&st.events, "tool.end")[0]["declined"], json!(true));
+        // a command that ran and failed is no refusal, even if it printed those words
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("Exit code 1\nThe user doesn't want to proceed with this tool use"), true));
+        assert!(of(&st.events, "tool.end")[0].get("declined").is_none());
+        // the words the shell sends the agent are the ones it recognises
+        assert!(DENIED.starts_with("The person denied"));
+    }
+
+    #[test]
+    fn a_long_command_goes_with_its_end_whole_up_to_a_limit() {
+        let long = format!("cd /w/{} && pnpm test", "deep/".repeat(60));
+        assert!(long.len() > 160);
+        let lines = vec![
+            json!({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": long}}]}}).to_string(),
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok", "is_error": false}]}}).to_string(),
+        ];
+        let st = run(&mut claude_ready(), &lines);
+        // the start's line is cut and the end's is not
+        assert!(s(&of(&st.events, "tool.start")[0], "detail").ends_with('…'));
+        assert_eq!(of(&st.events, "tool.end")[0]["command"], json!(long));
+        let huge = "x".repeat(COMMAND_MAX + 500);
+        let end = command_end("t", true, 0, &huge, "", false);
+        assert_eq!(s(&end, "command").len(), COMMAND_MAX);
+    }
+
+    #[test]
+    fn a_command_with_no_output_sends_none() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("  \n"), false));
+        assert!(of(&st.events, "tool.end")[0].get("output").is_none());
+    }
+
+    #[test]
+    fn only_the_end_of_a_long_output_is_handed_on_and_it_starts_at_a_character() {
+        let long = format!("{}{}", "é".repeat(10_000), "\n      Tests  3 passed (3)\n");
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(long), false));
+        let out = s(&of(&st.events, "tool.end")[0], "output");
+        assert!(out.len() <= OUTPUT_TAIL && out.len() > OUTPUT_TAIL - 4, "{}", out.len());
+        assert!(out.ends_with("Tests  3 passed (3)\n"));
+        assert!(long.ends_with(&out));
+        // a short one is not cut
+        assert_eq!(output_tail("short"), "short");
+        assert_eq!(output_tail(""), "");
+    }
+
+    #[test]
+    fn a_codex_command_the_person_declined_says_so_and_a_file_change_sends_no_output() {
+        let mut x = Codex::new("/w", None);
+        x.start();
+        run(&mut x, &fixture("codex-turn.jsonl")[..2]);
+        x.on_input(Input::send("go")).unwrap();
+        x.on_line(r#"{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_9","status":"inProgress","items":[]}}}"#);
+        let mut done = |item: Value| x.on_line(&json!({"method": "item/completed", "params": {"threadId": "thr_1", "turnId": "turn_9", "item": item}}).to_string());
+        let st = done(json!({"type": "commandExecution", "id": "c1", "command": "pnpm test", "status": "declined", "aggregatedOutput": "", "exitCode": null}));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["declined"].clone()), (json!(false), json!(true)));
+        assert!(end.get("output").is_none());
+        let st = done(json!({"type": "commandExecution", "id": "c2", "command": "/bin/zsh -lc 'cd /w && pnpm test'", "status": "failed", "aggregatedOutput": "Tests  1 failed (1)\n", "exitCode": 1}));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["output"].clone()), (json!(false), json!("Tests  1 failed (1)\n")));
+        // the command is the script inside Codex's shell wrapper, as the person would type it
+        assert_eq!(end["command"], "cd /w && pnpm test");
+        let st = done(json!({"type": "mcpToolCall", "id": "c3", "status": "completed", "aggregatedOutput": "not for the page"}));
+        assert!(of(&st.events, "tool.end")[0].get("output").is_none());
     }
 }
