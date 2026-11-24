@@ -107,6 +107,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev was redeployed on 24 Nov at 13:45 from `a0e2fe5`, with the join page (pages `93c91c45`, API `c735118e`);
   smoke-tested: `/join/{token}` answers 200 with `no-store` and `no-referrer` (header and meta), the served bundle is the
   one just built, the approval page loads, and the console is behind Access.
+- Dev's pages were redeployed on 24 Nov at 14:24 from `5dd244c`, with the owner's pages fitted to phones (pages
+  `9d595c7b`); smoke-tested: every page serves the new bundle and loads, and the console is behind Access. For about a
+  minute after a pages deploy a plain URL can still name the old bundle (the static assets' edge copy shows
+  `cf-cache-status: HIT` whatever the page's `no-store`); a URL with a query string shows the new one at once.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -119,10 +123,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus);
    - item 17, the owner's pages as an installable web app (`feat/owner-web-app`, Opus);
    - item 37, Google Sheets on the desktop and its two guards (`feat/sheets-desktop`, Sonnet).
-   Merged: 35 (the owner's pages on phones: Playwright in `apps/web/e2e` on four phones, run in CI as "Web on phones";
+   Merged: 36 (self-serve onboarding, built and off: `POST /v1/shops/new`, three shops an account, `sign_ups_closed`
+   until `SELF_SERVE_SHOPS` is on, left out of the pilot gate unless an operator counts it in), 35 (the owner's pages on phones: Playwright in `apps/web/e2e` on four phones, run in CI as "Web on phones";
    it found and fixed a 34px button and a long name that widened the page; the join page's states are added by item
    17), 10 (the join page at `/join/{token}`, with the web's sign-in by email code kept in the page's memory
    only, `no-referrer` and `no-store`, and no request to another origin), 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
@@ -171,6 +175,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
 
 ## Needs the owner
+
+Every switch that turns a built part on, and what each needs from the owner, is in `docs/turning-on.md`.
 
 - **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
   paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
