@@ -1,0 +1,6 @@
+--- FAIL: TestLocksTheAmountIntoTheQR (0.00s)
+    promptpay_test.go:14: expected "590.00", got "59.00"
+FAIL
+FAIL	example.com/shop/promptpay	0.004s
+ok  	example.com/shop/checkout	0.003s
+FAIL

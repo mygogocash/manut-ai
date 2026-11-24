@@ -12,6 +12,8 @@ import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
+import { readView, type GitView } from "../code/moved";
+import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -107,6 +109,16 @@ export interface SessionHost extends HistoryHost {
   /** The git branch checked out in `cwd` (read from its `.git/HEAD`; no program runs), "" when it is not a
    *  repository, a short commit id when detached. */
   branch(cwd: string): Promise<string>;
+  /** Make a branch of its own for a lane (src/code/laneBranch.ts): the first of `names` that no branch has yet, made from
+   *  the branch `cwd` is on, and switch the folder to it. The files stay as they are, and nothing is pushed or merged.
+   *  Rejects with a short code (`not_a_repository`, `no_commit`, `taken`, `git_missing`) or git's own words. Absent in a
+   *  shell that is older than lanes: the session then starts on the branch the folder is on. */
+  laneBranch?(cwd: string, names: string[]): Promise<{ branch: string; base: string }>;
+  /** The main branch moving while Kit worked (src/code/moved.ts): what the person's own `git` says of `cwd`, read-only
+   *  (src-tauri/src/git_moved.rs): its branch, the branch it started from, and the files each side changed since. `show`
+   *  are the paths whose two diffs are wanted; `base` names the branch it started from (none: `origin/HEAD`'s, else
+   *  `main`, else `master`). null when there is nothing to say: not a repository, a detached HEAD, no git, the base itself. */
+  mainMoved(cwd: string, o?: { base?: string | null; show?: string[] }): Promise<GitView | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -250,6 +262,14 @@ export class TauriHost implements SessionHost {
     const { invoke } = await this.core();
     return invoke<string>("session_branch", { cwd });
   }
+  async laneBranch(cwd: string, names: string[]) {
+    const { invoke } = await this.core();
+    return invoke<{ branch: string; base: string }>("lane_branch", { cwd, names });
+  }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    const { invoke } = await this.core();
+    return readView(await invoke<unknown>("session_main_moved", { cwd, base: o.base ?? null, show: o.show ?? [] }));
+  }
   async reveal(cwd: string) {
     const { invoke } = await this.core();
     await invoke("session_reveal", { cwd });
@@ -382,11 +402,13 @@ export interface MockCall {
     | "import.read"
     | "reveal"
     | "terminal"
+    | "main.moved"
     | "custom.preview"
     | "custom.botPreview"
     | "custom.confirm"
     | "custom.remove"
-    | "power.busy";
+    | "power.busy"
+    | "lane.branch";
   id?: number;
   /** power.busy: the edge, and whether the shell lets go at once (the setting went off) */
   busy?: boolean;
@@ -408,6 +430,11 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
+  /** lane.branch: the branch the shell made for a lane, and the one it was made from */
+  branch?: string;
+  base?: string;
+  /** main.moved: the paths whose two diffs were asked for */
+  show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
   key?: string;
 }
@@ -463,6 +490,11 @@ type MockGlobals = {
   __manutMockImport?: Partial<Record<ImportApp, ImportProfile[]>>;
   /** e2e: the branch of each folder (none = not a repository) */
   __manutBranches?: Record<string, string>;
+  /** e2e: the names of branches that exist already, so a lane's branch of that name is made with a number after it */
+  __manutMockTaken?: string[];
+  /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
+   *  lane whose main moved; a folder left out: nothing to say) */
+  __manutMoved?: Record<string, GitView>;
   /** e2e: these agents are an old version that never answers in chat mode (the shell's start deadline ends them) */
   __manutMockNoChat?: AgentId[];
   /** ACP agents the mock host treats as signed in (the others of MOCK_SIGNED_OUT answer -32000). */
@@ -890,6 +922,29 @@ export class MockHost implements SessionHost {
     const b = this.g.__manutBranches ?? { "/home/you/code/manut": "feat/session-controls" };
     return b[cwd] ?? "";
   }
+  /** As the shell does it: the first name no branch has, made from the branch the folder is on, which the folder then
+   *  is on. `__manutBranches` is where the folders' branches are (a folder with none is not a repository), and
+   *  `__manutMockTaken` the names that exist already. */
+  async laneBranch(cwd: string, names: string[]) {
+    const folders = (this.g.__manutBranches ??= { "/home/you/code/manut": "feat/session-controls" });
+    const base = folders[cwd];
+    if (!base) throw new Error("not_a_repository");
+    const taken = (this.g.__manutMockTaken ??= []);
+    const branch = names.find((n) => !taken.includes(n));
+    if (!branch) throw new Error("taken");
+    taken.push(branch);
+    folders[cwd] = branch;
+    this.log({ op: "lane.branch", cwd, branch, base });
+    return { branch, base };
+  }
+  async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+    this.log({ op: "main.moved", cwd, show: o.show ?? [] });
+    const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
+    if (!v) return null;
+    // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
+    const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
+    return { ...v, both };
+  }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });
   }
@@ -1040,6 +1095,30 @@ const MOCK_WORK = {
   ],
   answer: "Done. `add` has a docstring, `mul(a, b)` is in calc.py, and README.md lists the functions:\n\n```python\ndef mul(a, b):\n    return a * b\n```",
 };
+
+/** What vitest prints for the canvas's project when its 14 tests pass, and when one of them fails (`/kit pass`, `/kit fail`). */
+const MOCK_TESTS_PASS = [
+  " ✓ tests/checkout.test.ts (6 tests) 8ms",
+  " ✓ tests/promptpay.test.ts (8 tests) 11ms",
+  "",
+  " Test Files  2 passed (2)",
+  "      Tests  14 passed (14)",
+  "   Duration  2.1s",
+  "",
+].join("\n");
+const MOCK_TESTS_FAIL = [
+  " ❯ tests/promptpay.test.ts (8 tests | 1 failed) 14ms",
+  "   × promptpay > locks the amount into the QR 3ms",
+  "     → expected '59.00' to be '590.00' // Object.is equality",
+  "",
+  " FAIL  tests/promptpay.test.ts > promptpay > locks the amount into the QR",
+  "AssertionError: expected '59.00' to be '590.00' // Object.is equality",
+  "",
+  " Test Files  1 failed | 1 passed (2)",
+  "      Tests  1 failed | 13 passed (14)",
+  "   Duration  2.3s",
+  "",
+].join("\n");
 
 /** The plan Claude Code 2.1.323 wrote in plan mode (claude-14-plan-deny.jsonl), in English here. */
 const MOCK_PLAN =
@@ -1260,7 +1339,8 @@ class MockChat {
       }
       if (text.startsWith("/kit ")) {
         // Kit's states on the Code page (src/code/): an ask as the shell writes it (agent_chat.rs), a key typed into a
-        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key
+        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key; `/kit shop` a change that reads
+        // the shop ID from the environment
         const word = text.slice(5).trim();
         if (word === "key") {
           const lines = ["@@ -1,2 +1,3 @@", " export const CURRENCY = 'THB';", '+export const PROMPTPAY_KEY = "sk-FAKE0000000000000000TEST";'];
@@ -1269,12 +1349,42 @@ class MockChat {
           this.at(400, () => this.end("done"));
           return;
         }
+        if (word === "shop") {
+          // a change whose code reads the PromptPay shop ID from the environment, as the canvas's checkout needs (src/code/preview.ts)
+          const lines = ["@@ -12,3 +12,4 @@", "   const total = order.items.reduce(sum, 0);", "+  const qr = promptPayQR(process.env.PROMPTPAY_SHOP_ID, total);", "   return <PayPanel amount={total} qr={qr} />;"];
+          this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/checkout.tsx", kind: "update", lines, added: 1, removed: 0 }] }));
+          this.say("The QR code reads the shop ID from PROMPTPAY_SHOP_ID.", 120);
+          this.at(400, () => this.end("done"));
+          return;
+        }
         // each names what it is as the shell does from Claude Code's own request (`tool`, src-tauri/src/ask_tool.rs)
         const cwd = this.cwd;
         const run = (line: string) => ({ title: "Run this command?", command: line, tool: { kind: "command" as const, name: "Bash", line, cwd } });
+        // a lane's work as its events show it (src/code/lane.ts): a file edit, then a test run whose output comes with the
+        // step's end (`tool.end`'s `output`, as the shell sends it). `pass`: 14 tests passed; `fail`: 1 of 14 failed;
+        // `unread`: an output no runner printed; `slow`: the run goes on for a few seconds, so the lane is seen working.
+        const runs: Record<string, { ok: boolean; output: string; say: string; ms: number }> = {
+          pass: { ok: true, output: MOCK_TESTS_PASS, say: "I replaced bank transfer with a PromptPay QR. All 14 tests pass.", ms: 500 },
+          slow: { ok: true, output: MOCK_TESTS_PASS, say: "The tests pass. Nothing is live.", ms: 3_000 },
+          fail: { ok: false, output: MOCK_TESTS_FAIL, say: "One test fails: the QR holds 59.00 where it should hold 590.00.", ms: 500 },
+          unread: { ok: true, output: "Done in 2.1s\n", say: "I ran the tests.", ms: 500 },
+        };
+        if (runs[word]) {
+          const r = runs[word];
+          const lines = ["@@ -12,3 +12,9 @@", "   const total = order.items.reduce(sum, 0);", "-  return <PayByTransfer amount={total} />;", "+  const qr = promptPayQR(SHOP_ID, total);"];
+          this.at(60, () => this.emit({ event: "tool.start", tool_id: "t-edit", name: "patch", detail: "src/checkout.tsx +6 -1" }));
+          this.at(80, () => this.emit({ event: "tool.diff", tool_id: "t-edit", files: [{ path: "src/checkout.tsx", kind: "update", lines, added: 6, removed: 1 }] }));
+          this.at(120, () => this.emit({ event: "tool.end", tool_id: "t-edit", name: "", ok: true, ms: 60 }));
+          this.at(200, () => this.emit({ event: "tool.start", tool_id: "t-test", name: "terminal", detail: "pnpm test" }));
+          this.at(200 + r.ms, () => this.emit({ event: "tool.end", tool_id: "t-test", name: "", ok: r.ok, ms: r.ms, output: r.output }));
+          this.say(r.say, 260 + r.ms);
+          this.at(700 + r.ms, () => this.end("done"));
+          return;
+        }
         const asks: Record<string, { title: string; command: string; tool: AskTool }> = {
           install: run("pnpm add qrcode"),
           test: run("pnpm test"),
+          merge: run("git merge main"),
           commit: run("git commit -m 'Add a PromptPay QR'"),
           deploy: run("wrangler deploy"),
           edit: { title: "Allow Edit to change src/checkout.tsx?", command: "", tool: { kind: "edit", name: "Edit", paths: [`${cwd}/src/checkout.tsx`], cwd } },

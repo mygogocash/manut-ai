@@ -14,6 +14,7 @@ import { appSounds } from "../lib/sounds";
 import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
 import { ruleMatches, type Rule, type Say } from "./command";
+import { noteReads, resetPreview } from "./preview";
 import { kitProjects, noteBlocked, projectOf, updateKitProjects } from "./project";
 import { keyFiles, keysAfter } from "./secrets";
 import type { KitLevel } from "@manut/member-grants";
@@ -116,8 +117,9 @@ const keys = new Map<string, Record<string, number>>();
 const listeners = new Set<() => void>();
 let version = 0;
 
-/** A session's change arrived (`tool.diff`): its keys are counted again. */
+/** A session's change arrived (`tool.diff`): its keys are counted again, and so are the secrets its code reads (preview.ts). */
 export function noteChange(chat: string, files: readonly DiffFile[]): void {
+  noteReads(chat, files);
   const before = keys.get(chat) ?? {};
   const after = keysAfter(before, files);
   if (JSON.stringify(after) === JSON.stringify(before)) return;
@@ -147,5 +149,6 @@ export function useKeysVersion(): number {
 export function resetKitAsks(): void {
   answered.clear();
   keys.clear();
+  resetPreview();
   version++;
 }

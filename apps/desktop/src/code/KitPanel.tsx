@@ -5,14 +5,19 @@
 // The project is a folder the Code page lists (a session's or an added one). `KitPanelView` takes everything it shows
 // as props and uses no hooks, so a test can draw it; `KitPanel` reads the stores.
 import "./kit.css";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { KIT_LEVELS, type KitLevel } from "@manut/member-grants";
 import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
 import { useSessions } from "../sessions/sessions";
 import { getStore } from "../state/store";
+import { useNow } from "../elsewhere/useNow";
+import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
+import { LanesView, openLane, useLaneRows, type LaneRow } from "./Lanes";
+import { MainMoved } from "./MainMoved";
+import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
 /** A session of this project whose changes hold a key. */
@@ -28,12 +33,19 @@ export interface KitPanelProps {
   project: KitProject;
   keys: KeyNote[];
   home: string | null;
+  /** The project's lanes (Lanes.tsx): none draws no Lanes band. */
+  lanes?: LaneRow[];
+  /** The time now (ms), for the time each working lane's turn has run. */
+  now?: number;
+  onOpenLane?: (id: string) => void;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
   onDropRule: (rule: Rule) => void;
   onDropFolder: (folder: string) => void;
   onOpenSession: (id: string) => void;
+  /** What the project's own state adds under the keys: a preview on a sample, the main branch moving (KitPanel fills it). */
+  children?: ReactNode;
 }
 
 /** A folder as the developer reads it: `~` for the home folder. */
@@ -44,6 +56,8 @@ export function KitPanelView(p: KitPanelProps) {
   const name = projectName(root);
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
+      {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} />
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
         {p.projects.length > 1 ? (
@@ -80,6 +94,8 @@ export function KitPanelView(p: KitPanelProps) {
           </button>
         </div>
       ))}
+
+      {p.children}
 
       {project.blocked.length > 0 && (
         <>
@@ -159,23 +175,36 @@ export function KitPanel() {
   const [picked, setPicked] = useState<string | null>(null);
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
+  const lanes = useLaneRows(root);
+  // the time a turn has run moves while one does
+  const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
   if (!root) return null;
   const keys: KeyNote[] = sessionsWithKeys()
     .map((k) => ({ session: k.chat.slice("agent:".length), files: k.files }))
     .filter((k) => pathKey(ss.list.find((r) => r.id === k.session)?.cwd ?? "") === root);
   return (
-    <KitPanelView
-      root={root}
-      projects={projects}
-      project={project}
-      keys={keys}
-      home={ss.home}
-      onProject={setPicked}
-      onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
-      onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}
-      onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
-      onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
-      onOpenSession={(id) => getStore().actions.openSession(id)}
-    />
+    <>
+      <KitPanelView
+        root={root}
+        projects={projects}
+        project={project}
+        keys={keys}
+        home={ss.home}
+        lanes={lanes}
+        now={now}
+        onOpenLane={openLane}
+        onProject={setPicked}
+        onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}
+        onAllow={(folder) => updateKitProjects((x) => allowFolder(x, root, folder))}
+        onDropRule={(rule) => updateKitProjects((x) => dropRule(x, root, rule))}
+        onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
+        onOpenSession={(id) => getStore().actions.openSession(id)}
+      >
+        <PreviewSample root={root} />
+        <MainMoved root={root} />
+      </KitPanelView>
+      {/* what keeps running (src/running/) for the project the panel shows, right under it */}
+      <RunningPanel project={root} />
+    </>
   );
 }

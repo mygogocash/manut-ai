@@ -898,6 +898,62 @@ pub(crate) fn tool_kind(name: &str) -> &str {
     }
 }
 
+/// What the shell tells an agent when the person says no to a step. A result that is exactly this is a step that never
+/// ran, not one that failed.
+const DENIED: &str = "The person denied this in Manut AI.";
+
+/// Whether a Claude Code step's result says the step never ran: the shell's own refusal, or Claude Code's words when a
+/// turn is stopped with the step waiting (claude-4-stopped.jsonl).
+fn never_ran(text: &str) -> bool {
+    let t = text.trim();
+    t == DENIED || t.starts_with("The user doesn't want to proceed with this tool use")
+}
+
+/// How much of the end of a command's output goes with its step's `tool.end` (`output`). The page reads a test run's
+/// result from it (`src/code/testRun.ts`) and keeps none of it; a test run's summary is printed last, so the end is what
+/// is kept, and a long output loses only its head.
+const OUTPUT_TAIL: usize = 8 * 1024;
+
+/// The last `OUTPUT_TAIL` bytes of `text`, starting at a character.
+pub(crate) fn output_tail(text: &str) -> &str {
+    if text.len() <= OUTPUT_TAIL {
+        return text;
+    }
+    let mut at = text.len() - OUTPUT_TAIL;
+    while !text.is_char_boundary(at) {
+        at += 1;
+    }
+    &text[at..]
+}
+
+/// A tool result's text: its `content` when that is a string, else the text of each of its blocks, one to a line.
+fn result_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(t)) => t.clone(),
+        Some(Value::Array(list)) => list.iter().filter(|b| s(b, "type") == "text").map(|b| s(b, "text")).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// The longest command line that goes with a step's end.
+const COMMAND_MAX: usize = 4 * 1024;
+
+/// The `tool.end` of a step that ran a command. `command` is its whole line (the step's start cut it to one short line),
+/// for the page to tell a test run by; `output` is what it printed, when there was something and it is not the shell's own
+/// refusal; `declined`: the person said no, so the command never ran.
+fn command_end(tool_id: &str, ok: bool, ms: u64, command: &str, output: &str, declined: bool) -> Value {
+    let mut end = json!({"tool_id": tool_id, "name": "", "ok": ok, "ms": ms});
+    if !command.trim().is_empty() {
+        end["command"] = json!(command.chars().take(COMMAND_MAX).collect::<String>());
+    }
+    if declined {
+        end["declined"] = json!(true);
+    } else if !output.trim().is_empty() {
+        end["output"] = json!(output_tail(output));
+    }
+    end
+}
+
 /// A file tool call as `path +a -d` (path relative to the session folder), from the arguments every agent
 /// sends: Claude Code `Write {file_path, content}` / `Edit {file_path, old_string, new_string}` /
 /// `MultiEdit {file_path, edits}`, pi `write {path, content}` / `edit {path, edits:[{oldText,newText}]}`.
@@ -1044,6 +1100,9 @@ pub struct Claude {
     /// its own todo list (TaskCreate / TaskUpdate, or TodoWrite): (task id or the call's id until it has one, text,
     /// status)
     tasks: Vec<(String, String, String)>,
+    /// the commands (`Bash`) it has started and not heard the result of, by tool_use id, each with its whole line: their
+    /// results carry the output a step's `tool.end` hands on
+    commands: HashMap<String, String>,
 }
 
 /// Claude Code's todo tools: shown as the turn's checklist (`plan`), never as steps.
@@ -1552,6 +1611,9 @@ impl Adapter for Claude {
                                 continue;
                             }
                             st.emit(ev("tool.start", json!({"tool_id": s(b, "id"), "name": tool_kind(&name), "detail": call_detail(&name, &input, &self.cwd)})));
+                            if tool_kind(&name) == "terminal" {
+                                self.commands.insert(s(b, "id"), s(&input, "command"));
+                            }
                             // a file edit: the change it asks for, until its result says what it did
                             if let Some(f) = input_diff(&name, &input, &self.cwd) {
                                 st.emit(ev("tool.diff", json!({"tool_id": s(b, "id"), "files": [f]})));
@@ -1611,7 +1673,13 @@ impl Adapter for Claude {
                                 st.emit(ev("tool.diff", json!({"tool_id": tid, "files": [f]})));
                             }
                         }
-                        st.emit(ev("tool.end", json!({"tool_id": tid, "name": "", "ok": ok, "ms": 0})));
+                        // a command's step carries what it printed, for the page to read a test run's result from
+                        if let Some(command) = self.commands.remove(&tid) {
+                            let text = result_text(b);
+                            st.emit(ev("tool.end", command_end(&tid, ok, 0, &command, &text, !ok && never_ran(&text))));
+                        } else {
+                            st.emit(ev("tool.end", json!({"tool_id": tid, "name": "", "ok": ok, "ms": 0})));
+                        }
                         // a subagent's hand-back: its own words (`tool_use_result.content`), not the frame around them;
                         // a background one only launched here and ends with its task notification
                         if self.subs.has(&tid) && matches!(s(&tur, "status").as_str(), "async_launched" | "teammate_spawned") {
@@ -1706,7 +1774,7 @@ impl Adapter for Claude {
                 let Some(ClaudeAsk::Tool(name, input, suggestions)) = self.pending.remove(&request_id) else { return Err("no such request".into()) };
                 self.ask_subs.remove(&request_id);
                 let response = match choice.as_str() {
-                    "deny" => json!({"behavior": "deny", "message": "The person denied this in Manut AI."}),
+                    "deny" => json!({"behavior": "deny", "message": DENIED}),
                     "once" => json!({"behavior": "allow", "updatedInput": input}),
                     "session" => {
                         // Claude Code suggests rules saved to the project's .claude/settings.local.json and a switch
@@ -2456,7 +2524,13 @@ impl Adapter for Codex {
                         }
                         let status = s(&item, "status");
                         let ok = !matches!(status.as_str(), "failed" | "declined");
-                        st.emit(ev("tool.end", json!({"tool_id": iid, "name": "", "ok": ok, "ms": item.get("durationMs").and_then(Value::as_u64).unwrap_or(0)})));
+                        let ms = item.get("durationMs").and_then(Value::as_u64).unwrap_or(0);
+                        if s(&item, "type") == "commandExecution" {
+                            // a command's step carries what it printed, for the page to read a test run's result from
+                            st.emit(ev("tool.end", command_end(&iid, ok, ms, &Codex::command_of(&item), &s(&item, "aggregatedOutput"), status == "declined")));
+                        } else {
+                            st.emit(ev("tool.end", json!({"tool_id": iid, "name": "", "ok": ok, "ms": ms})));
+                        }
                     }
                     _ => {}
                 }
@@ -3365,6 +3439,8 @@ struct ChatLive {
     /// the program and everything it started (`cmd.exe` and its `node.exe` on Windows)
     tree: Arc<Option<ProcessTree>>,
     exited: Arc<AtomicBool>,
+    /// the folder it started in (what keeps running names its commands by it: [`ChatSessions::roots`])
+    cwd: PathBuf,
 }
 
 /// Every running chat session of this app. [`ChatSessions::close_all`] runs on exit.
@@ -3800,8 +3876,16 @@ impl ChatSessions {
             });
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
-        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited });
+        self.live.lock().unwrap().insert(id, ChatLive { stdin, adapter, sink, child, pid, tree, exited, cwd: cwd.to_path_buf() });
         Ok(id)
+    }
+
+    /// The program of every chat still running, with its id and the folder it started in: what the commands that keep
+    /// running are read from ([`crate::running`]), as [`crate::sessions::Sessions::roots`] gives it for the terminals. A DSH
+    /// chat has no process between its messages, so it is not here; a chat that ended is not listed.
+    pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
+        let g = self.live.lock().unwrap();
+        g.iter().filter(|(_, c)| !c.exited.load(Ordering::SeqCst)).map(|(id, c)| (*id, c.pid, c.cwd.clone())).collect()
     }
 
     /// One thing the person did in chat `id`.
@@ -4157,7 +4241,10 @@ mod tests {
         let st = run(&mut x, &lines[at + 1..]);
         assert_eq!(text_of(&st.events, "delta").concat(), "All 12 tests pass.");
         assert_eq!(text_of(&st.events, "message"), ["All 12 tests pass."]);
-        assert_eq!(st.events.iter().find(|e| s(e, "event") == "tool.end").unwrap()["ok"], true);
+        let end = st.events.iter().find(|e| s(e, "event") == "tool.end").unwrap();
+        assert_eq!(end["ok"], true);
+        // a command's step hands on what it printed, for the page to read the test run's result from
+        assert_eq!(end["output"], "12 passed\n");
         assert_eq!(st.events.last().unwrap(), &json!({"event": "turn.end", "outcome": "done"}));
     }
 
@@ -4468,6 +4555,27 @@ mod tests {
         let work = home.join(".manut").join("accounts").join("claude").join("work");
         assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), format!("cfg={}", work.display()));
         let _ = (std::fs::remove_file(mark), std::fs::remove_dir_all(home));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn roots_name_each_running_chat_with_its_program_and_folder_and_drop_one_that_ended_or_was_closed() {
+        let c = ChatSessions::default();
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let (_out, sink) = collect();
+        let running = c.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 69".into()], &tmp, None, &[], Box::new(Pi::default()), sink).unwrap();
+        let (ended_out, ended_sink) = collect();
+        c.spawn(vec!["/bin/sh".into(), "-c".into(), "exit 0".into()], &tmp, None, &[], Box::new(Pi::default()), ended_sink).unwrap();
+        assert!(wait_for(|| ended_out.lock().unwrap().iter().any(|o| matches!(o, ChatOut::Exit(..))), 10));
+        // the one that ended is not listed: its number may be someone else's by now
+        let roots = c.roots();
+        assert_eq!(roots.len(), 1, "{roots:?}");
+        let (id, pid, folder) = &roots[0];
+        assert_eq!(*id, running);
+        assert!(*pid > 1);
+        assert_eq!(folder, &tmp);
+        c.close(running);
+        assert!(c.roots().is_empty());
     }
 
     #[cfg(unix)]
@@ -7497,5 +7605,130 @@ mod tests {
         assert_eq!((rec["status"].clone(), rec["source"].clone()), (json!("allowed"), json!("chat")));
         assert_eq!(tapped.name(), plain.name());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ---- a command's output on its step's end: what the page reads a test run's result from ----------
+
+    /// Claude Code's lines for one `Bash` step: the call, then its result.
+    fn claude_bash(id: &str, tool: &str, content: Value, is_error: bool) -> Vec<String> {
+        vec![
+            json!({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": id, "name": tool, "input": {"command": "pnpm test", "file_path": "/w/proj/a.txt"}}]}}).to_string(),
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": content, "is_error": is_error}]}}).to_string(),
+        ]
+    }
+
+    fn claude_ready() -> Claude {
+        let mut c = Claude::new("/w/proj");
+        c.start();
+        c.on_input(Input::send("run the tests")).unwrap();
+        c
+    }
+
+    #[test]
+    fn a_claude_command_hands_on_its_output_with_its_end() {
+        let out = " Test Files  1 passed (1)\n      Tests  14 passed (14)\n";
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(out), false));
+        let end = of(&st.events, "tool.end");
+        assert_eq!(end.len(), 1);
+        assert_eq!((end[0]["ok"].clone(), end[0]["output"].clone()), (json!(true), json!(out)));
+        assert!(end[0].get("declined").is_none());
+        // and the whole line it ran, which the step's start cuts to one short line
+        assert_eq!(end[0]["command"], "pnpm test");
+    }
+
+    #[test]
+    fn a_failed_claude_command_hands_on_its_output_too() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("Exit code 1\n FAIL  a.test.ts > a\n      Tests  1 failed (1)\n"), true));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!(end["ok"], false);
+        assert!(s(end, "output").contains("Tests  1 failed (1)"));
+    }
+
+    #[test]
+    fn a_claude_result_in_blocks_is_one_text() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!([{"type": "text", "text": "a"}, {"type": "image", "source": {}}, {"type": "text", "text": "b"}]), false));
+        assert_eq!(of(&st.events, "tool.end")[0]["output"], "a\nb");
+    }
+
+    #[test]
+    fn no_other_claude_step_hands_on_its_result() {
+        // a file read's result is the file, and no step's is kept but a command's
+        let st = run(&mut claude_ready(), &claude_bash("toolu_2", "Read", json!("the whole file"), false));
+        let end = &of(&st.events, "tool.end")[0];
+        assert!(end.get("output").is_none() && end.get("declined").is_none(), "{end}");
+    }
+
+    #[test]
+    fn a_command_the_person_refused_never_ran_and_says_so_instead_of_its_refusal() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(DENIED), true));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["declined"].clone()), (json!(false), json!(true)));
+        assert!(end.get("output").is_none());
+        // so does Claude Code's own result when a turn is stopped with the step waiting (a real recording's words)
+        let stopped = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(stopped), true));
+        assert_eq!(of(&st.events, "tool.end")[0]["declined"], json!(true));
+        // a command that ran and failed is no refusal, even if it printed those words
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("Exit code 1\nThe user doesn't want to proceed with this tool use"), true));
+        assert!(of(&st.events, "tool.end")[0].get("declined").is_none());
+        // the words the shell sends the agent are the ones it recognises
+        assert!(DENIED.starts_with("The person denied"));
+    }
+
+    #[test]
+    fn a_long_command_goes_with_its_end_whole_up_to_a_limit() {
+        let long = format!("cd /w/{} && pnpm test", "deep/".repeat(60));
+        assert!(long.len() > 160);
+        let lines = vec![
+            json!({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": long}}]}}).to_string(),
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok", "is_error": false}]}}).to_string(),
+        ];
+        let st = run(&mut claude_ready(), &lines);
+        // the start's line is cut and the end's is not
+        assert!(s(&of(&st.events, "tool.start")[0], "detail").ends_with('…'));
+        assert_eq!(of(&st.events, "tool.end")[0]["command"], json!(long));
+        let huge = "x".repeat(COMMAND_MAX + 500);
+        let end = command_end("t", true, 0, &huge, "", false);
+        assert_eq!(s(&end, "command").len(), COMMAND_MAX);
+    }
+
+    #[test]
+    fn a_command_with_no_output_sends_none() {
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!("  \n"), false));
+        assert!(of(&st.events, "tool.end")[0].get("output").is_none());
+    }
+
+    #[test]
+    fn only_the_end_of_a_long_output_is_handed_on_and_it_starts_at_a_character() {
+        let long = format!("{}{}", "é".repeat(10_000), "\n      Tests  3 passed (3)\n");
+        let st = run(&mut claude_ready(), &claude_bash("toolu_1", "Bash", json!(long), false));
+        let out = s(&of(&st.events, "tool.end")[0], "output");
+        assert!(out.len() <= OUTPUT_TAIL && out.len() > OUTPUT_TAIL - 4, "{}", out.len());
+        assert!(out.ends_with("Tests  3 passed (3)\n"));
+        assert!(long.ends_with(&out));
+        // a short one is not cut
+        assert_eq!(output_tail("short"), "short");
+        assert_eq!(output_tail(""), "");
+    }
+
+    #[test]
+    fn a_codex_command_the_person_declined_says_so_and_a_file_change_sends_no_output() {
+        let mut x = Codex::new("/w", None);
+        x.start();
+        run(&mut x, &fixture("codex-turn.jsonl")[..2]);
+        x.on_input(Input::send("go")).unwrap();
+        x.on_line(r#"{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_9","status":"inProgress","items":[]}}}"#);
+        let mut done = |item: Value| x.on_line(&json!({"method": "item/completed", "params": {"threadId": "thr_1", "turnId": "turn_9", "item": item}}).to_string());
+        let st = done(json!({"type": "commandExecution", "id": "c1", "command": "pnpm test", "status": "declined", "aggregatedOutput": "", "exitCode": null}));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["declined"].clone()), (json!(false), json!(true)));
+        assert!(end.get("output").is_none());
+        let st = done(json!({"type": "commandExecution", "id": "c2", "command": "/bin/zsh -lc 'cd /w && pnpm test'", "status": "failed", "aggregatedOutput": "Tests  1 failed (1)\n", "exitCode": 1}));
+        let end = &of(&st.events, "tool.end")[0];
+        assert_eq!((end["ok"].clone(), end["output"].clone()), (json!(false), json!("Tests  1 failed (1)\n")));
+        // the command is the script inside Codex's shell wrapper, as the person would type it
+        assert_eq!(end["command"], "cd /w && pnpm test");
+        let st = done(json!({"type": "mcpToolCall", "id": "c3", "status": "completed", "aggregatedOutput": "not for the page"}));
+        assert!(of(&st.events, "tool.end")[0].get("output").is_none());
     }
 }

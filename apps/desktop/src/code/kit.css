@@ -97,6 +97,40 @@
   font-size: 12.5px;
 }
 
+/* Kit's lanes (Lanes.tsx): the canvas's Lanes band. A row is one lane: its title, who works on it, the branch Kit made for
+   it as a mono tag, and its state as a tag, with a line under it for what the state means. The desktop's own: a row is a
+   button, and the working tag carries the time its turn has run. */
+.kitp .lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* The desktop's own: the lanes stand apart from the dial's band under them. */
+  margin-bottom: 10px;
+}
+.kitp .lane .who {
+  font-size: 13px;
+}
+.kitp .lane .tag.mono {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kitp .lane .tag .when {
+  font-weight: 400;
+}
+.kitp .lane .lline {
+  padding: 0 10px 2px;
+}
+/* The failing tests the line names: a few, in mono, each on its own line. */
+.kitp .lane .lnames {
+  margin: 0;
+  padding: 0 10px 4px 28px;
+  list-style: disc;
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+  color: var(--aui-muted);
+}
+
 /* A coding session's ask: what the step does in words, under the command, and a key in the change. */
 .card-kit-say {
   margin: 0;
@@ -108,4 +142,65 @@
   font-size: 11.5px;
   font-weight: 600;
   color: var(--danger);
+}
+
+/* The main branch moving while Kit worked (MainMoved.tsx, the canvas's "The main branch moved"): the line, the files in
+   mono, the two buttons, then both sides of each file. The desktop's own: the canvas draws the card on a stage; here it is
+   the panel's banner stood up as a column. */
+.kitp .banner.kitm {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.kitp .kitm p {
+  margin: 0;
+}
+.kitp .kitm-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kitp .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kitp .kitm-both {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+.kitp .kitm-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kitp .kitm-pair h4,
+.kitp .kitm-pair h5 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.kitp .kitm-pair h5 {
+  margin-bottom: 4px;
+  color: var(--aui-muted);
+  font-weight: 500;
+}
+/* two columns while each has room, one under the other when it does not */
+.kitp .kitm-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+.kitp .kitm-cols > div {
+  min-width: 0;
+}
+/* the pair's own heading names the file, so each side's diff header keeps only its counts */
+.kitp .kitm-cols .dv-path {
+  display: none;
 }

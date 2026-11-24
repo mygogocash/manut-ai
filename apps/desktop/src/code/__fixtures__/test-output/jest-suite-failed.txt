@@ -1,0 +1,15 @@
+FAIL tests/broken.test.ts
+  ● Test suite failed to run
+
+    SyntaxError: Unexpected token, expected "," (4:12)
+
+      2 | import { qr } from "../src/promptpay";
+      3 |
+    > 4 | describe("broken" () => {
+        |            ^
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        0.884 s
+Ran all test suites.

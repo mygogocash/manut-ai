@@ -16,10 +16,10 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part: coding sessions in folder groups, with the agent's mark and what it is doing; no lane words, effort word or status tag | `sessions/SessionsSection.tsx`, `pages/CodePage.tsx` |
-| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Part: the folder's branch is shown, read from `HEAD`; Kit makes no branch of its own | `src-tauri/src/git_branch.rs`, `sessions/SessionView.tsx` (`LiveFoot`) |
-| "Checked: 14 tests passed" | Lacks | |
-| Revert this turn | Part: the agent's own rewind takes back the last message; the files stay as they are | `sessions/sessions.ts` (`rewind`), `agent_chat.rs` (`Rewind`) |
+| Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band, a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. No New lane and no effort word | `code/Lanes.tsx`, `code/KitPanel.tsx` |
+| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the folder is on, so the developer's branch is not written to. The row and the composer's foot show it. Nothing is pushed or merged from here | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
+| "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
+| Revert this turn | Part (this branch): the agent's own rewind takes back the last message, and the lane says Reverted; the files stay as they are | `sessions/sessions.ts` (`rewind`), `agent_chat.rs` (`Rewind`), `code/lane.ts` |
 | Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one | `tasks/` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff | `chat/activity/Work.tsx` (`DiffView`) |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer, files and modes | `sessions/SessionView.tsx` |
@@ -31,11 +31,11 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 
 | State | Desktop | Where |
 | --- | --- | --- |
-| Working: the pill names the real step, with the time | Part: the session row's activity and the timeline's live step | `sessions/termActivity.ts`, `chat/activity/Activity.slot.tsx` |
-| Needs you: Kit asks a question, "Answer Kit" | Has: the agent's questions are cards, and Needs you lists them | `chat/cards/Cards.slot.tsx`, `pages/NeedsPage.tsx` |
-| Checked, and Tests failed ("1 of 14 tests failed", the test and the wrong value) | Lacks | |
-| Reverted, and Bring it back | Lacks | |
-| Test output, passing and failing | Part: the terminal and the step show it; nothing reads it | |
+| Working: the pill names the real step, with the time | Has (this branch): the lane's tag names the agent's own step ("Running tests" while a test run runs) with the time, and its line says Kit works on a separate branch and nothing is live | `code/Lanes.tsx`, `chat/activity/Activity.slot.tsx` |
+| Needs you: Kit asks a question, "Answer Kit" | Has: the agent's questions are cards, and Needs you lists them. The lane says "Kit asks: …" with Answer Kit (this branch) | `chat/cards/Cards.slot.tsx`, `pages/NeedsPage.tsx`, `code/Lanes.tsx` |
+| Checked, and Tests failed ("1 of 14 tests failed", the test and the wrong value) | Has (this branch): "14 tests passed" and "1 of 14 tests failed. Nothing is live.", with the failing tests named. The wrong value is in the terminal; the lane does not keep a test's output | `code/lane.ts`, `code/Lanes.tsx` |
+| Reverted, and Bring it back | Part (this branch): Reverted, with the time and "The files stay as they are". Bring it back lacks, since the files were never taken back | `code/lane.ts` |
+| Test output, passing and failing | Part: the terminal and the step show it; the lane reads its result and keeps none of it | `code/testRun.ts` |
 | Artifacts: Building, Private preview, Needs you, Live, Rolled back, Failed | Lacks: the Artifacts page is empty. Going live reaches customers (Owner) | `pages/ArtifactsPage.tsx` |
 
 ## StatesCodeDev: for developers
@@ -54,14 +54,14 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | --- | --- | --- |
 | Kit needs a secret: typed once into the vault, Kit uses it without seeing it | Lacks on the desktop. The API's vault keeps the shop's sign-ins; the desktop keeps only its own session in the keychain (Owner: real secrets) | `apps/api/src/sign-in-vault.ts`, `src-tauri/src/api_link.rs` |
 | A secret found in the code: moved out, never committed | Part (this branch): a key in Kit's changes is found and named, a commit or push then asks at every level, and no diff shows it. Moving it to a vault lacks | `code/secrets.ts`, `code/kitAsks.ts`, `chat/activity/Work.tsx` |
-| No secret in the preview: a sample until the owner adds one | Lacks: there is no preview | |
+| No secret in the preview: a sample until the owner adds one | Part (this branch): the state and its words. A secret Kit's changed code reads by name (`process.env.PROMPTPAY_SHOP_ID`) shows as Sample, "The preview has no shop ID yet, so the QR code is a sample", with Add the shop ID, which says the vault comes later. The rule for what a preview runs with (a sample unless the owner added that secret) is `previewEnv`. There is no preview to run with it yet, and nothing adds a secret: the owner has not said where a developer's secrets live (Owner: real secrets) | `code/preview.ts`, `code/PreviewSample.tsx` |
 
 ### The project and its history
 
 | State | Desktop | Where |
 | --- | --- | --- |
 | Open an existing project: from GitHub or a folder on this Mac; Kit reads it first and changes nothing | Part: a folder can be added and sessions start in it, and plan mode reads without changing. From GitHub lacks (Owner: a real GitHub account) | `sessions/folders.ts` |
-| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Lacks | |
+| The main branch moved: "1 file needs both changes", Let Kit merge, Show me both | Has (this branch): the Code page says "main changed while Kit worked. 1 file needs both changes." under Kit's dial, with the files. Show me both draws what main changed beside what Kit changed. Let Kit merge sends Kit the ask as a message (no running lane: a new session with the ask in its box); Kit's steps then ask through their own cards. Per project, not per lane row: lanes are not on the page yet | `src-tauri/src/git_moved.rs`, `code/moved.ts`, `code/MainMoved.tsx`, `code/askKit.ts` |
 | A check failed after the pull request: "Pull request 12: lint failed. Tests passed." | Part: Tasks reads a pull request's checks through `gh`; the lane does not show them (Owner: a real GitHub account to try it) | `tasks/TasksPage.tsx` |
 | Rewind: pick a turn; the files and the chat go back together | Part: the chat only, through the agent's rewind | `sessions/sessions.ts` |
 
@@ -78,18 +78,20 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | The terminal: Kit runs commands here, and you can type too | Has | `sessions/term/`, `terminal/Panel.tsx` |
-| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Part: a terminal row shows its program's last line and age; there is no list of what keeps running | `sessions/termActivity.ts` |
+| Something that keeps running: "Dev server, 42 minutes, port 3000", Stop | Has (this branch): a list under Kit's panel, for the project it shows, of each command a terminal or a chat started that still runs, with the command, how long it has run, its port and Stop (see "What keeps running" below). Not on Windows | `running/RunningPanel.tsx`, `src-tauri/src/running.rs` |
 
 ## KitCode: the parts
 
-Has: the diff (`DiffView`), the terminal output and the code block (the timeline's markdown). Lacks: the lane row, the
-mono tags for test results ("Checked: 14 tests passed", "Failed: 1 of 15 tests", "Running tests", "Not run yet") and
-the trace with tokens and baht per call.
+Has: the diff (`DiffView`), the terminal output and the code block (the timeline's markdown), and (this branch) the lane
+row and its mono branch tag. Part: the test results are the lane's own tags ("Checked", "Tests failed", "Not run yet",
+and "Running tests" in the working tag) with their counts in the line under the row, not the canvas's one tag
+("Checked: 14 tests passed"). Lacks: the trace with tokens and baht per call.
 
 ## Needs the owner
 
 - Whether Kit's lanes run as chats in the app, as the canvas's Code board draws them, or only in terminals, as decided
-  on 16 November. The dial's asks reach only the first.
+  on 16 November. The dial's asks reach only the first, and so do the lanes: the + menu starts terminals only, so the
+  Lanes band is empty until a chat session exists.
 
 - Adding a project from GitHub, and a check that fails after a pull request: a real GitHub account.
 - Your plan at its limit, and using the AI budget for a job: money, and a real plan.
@@ -114,8 +116,28 @@ The states whose rules are pure functions, with their tests, then the screens th
 - `apps/desktop/src/code/kitAsks.ts`: the dial at work on a session's asks, through the asks' own cards.
 - `apps/desktop/src/code/KitCardParts.tsx`, `KitPanel.tsx`, `kit.css`: Kit's words on an ask's card, and Kit on the
   Code page.
-- The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `commit` and
-  `deploy`, so each state can be seen in a browser; `e2e/kit-code.spec.ts` walks them.
+- `apps/desktop/src/code/testRun.ts`: a test run read from its words (does a command run tests, and which runner it
+  names) and from its output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`): passed, failed with how
+  many and which, or unknown.
+- `apps/desktop/src/code/laneBranch.ts` and `src-tauri/src/lane.rs`: a lane's branch named from its work, planned, and
+  made by the shell with `git checkout -b`.
+- `apps/desktop/src/code/lane.ts`, `laneStore.ts`: what a lane's events showed, the state the owner reads from it, and
+  the line under the row. `Lanes.tsx` draws the band in the Kit panel.
+- `src-tauri/src/agent_chat.rs`: a command's step hands on the end of what it printed with its `tool.end` (Claude Code
+  and Codex), or says `declined` when the person said no and it never ran.
+- `apps/desktop/src-tauri/src/git_moved.rs`: the main branch moving, read with the person's own `git`: the folder's
+  branch, the branch it started from, and the files each side changed since. It only reads; `lane.rs` is the one place
+  the shell changes a repository (it makes a lane's branch).
+- `apps/desktop/src/code/moved.ts`: what that means. The files both sides changed, the shell's answer checked before it is
+  believed, one side's diff as the diff view draws it, and the ask Let Kit merge sends. `useMoved.ts` reads it again while
+  the page is open, `askKit.ts` sends the ask, `MainMoved.tsx` draws it.
+- `apps/desktop/src/code/preview.ts`: the secrets Kit's changed code reads, by name, and `previewEnv`, the one rule for
+  what a preview runs with. `PreviewSample.tsx` draws the Sample row.
+- The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
+  `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
+  state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
+  `/kit pass`, `fail`, `unread` and `slow`: an edit, then a test run whose output comes with the step's end, and
+  `e2e/kit-lanes.spec.ts` walks each lane state.
 
 ### How an ask is read
 
@@ -138,6 +160,43 @@ then `git push origin main` asks at every level; by its card it read as the test
 match the whole line; a long list of files is read whole, with where a move takes a file; and a file change that
 deletes a file is a delete, which only Everything in this project lets Kit do alone.
 
+### How a lane is read
+
+A lane is a coding session that runs as a chat. `laneStatus` (`code/lane.ts`) alone decides its state, from what the
+session's events showed and what the app already knows:
+
+| State | When | The row says |
+| --- | --- | --- |
+| Needs you | an ask of the lane waits | "Kit asks: …" and Answer Kit |
+| Working | a turn runs | Kit works on a separate branch. Nothing is live. The tag names the step and the time, or Running tests |
+| Failed | the session could not start, or ended in an error | its own words |
+| Reverted | the person took the last turn back and no turn has started since | when, and that the files stay as they are |
+| Checked | the last test run passed, and no file changed after it | "14 tests passed." |
+| Tests failed | the last test run failed | "1 of 14 tests failed. Nothing is live." and the failing tests |
+| Not confirmed | the last test run could not be read | that the result could not be read, and that nothing is marked as passed |
+| Not run yet | no test ran, or a file changed after the last run | nothing, or that the code changed after the last run |
+
+A test run is a command step whose words run tests (`runsTests`: `pnpm test`, `vitest run`, `cd app && go test ./...`).
+The dial's own reading of a command is stricter, since it decides what Kit may do alone, and is not used for this. When
+the step ends, its output is read and thrown away: only the counts and the failing tests' names are kept, with a key
+masked. A run is read as passed only when its output says tests ran, says none failed, and its command did not end in an
+error. Anything else the parser cannot read is Not confirmed. A failure is read from the output whatever the exit status
+says, since `vitest run || true` hides it from the status and not from the output. A file that changes after a run makes
+its result old: the lane then says Not run yet, whatever the run said.
+
+The shell hands on the last 8 KiB of a command's output with its step's `tool.end` (`output`), for Claude Code and Codex,
+and the whole command line (`command`: the step's start cuts it to 160 characters, and a long folder before `pnpm test`
+would hide it). The other agents hand on none, so their test runs are Not confirmed. A step the person refused says
+`declined`, and is no test run.
+
+A lane's branch is made by the shell (`lane_branch`, `src-tauri/src/lane.rs`) as the session starts and before the agent
+runs: `git checkout -b kit/<words>` from the branch the folder is on, with a fixed argument list and a name checked
+against the one form Kit makes. No file changes, and nothing is pushed, fetched, merged or deleted. It refuses a
+folder that is not a repository, one with no commit, one in the middle of a rebase, merge, cherry-pick, revert or
+bisect, and one whose index is locked; the lane then has no branch of its own and its row says it works on the folder's.
+A folder has one checkout, so a lane that starts while another is working or waiting in the folder joins that lane's
+branch, and its row says so. If the folder is on some other branch when a lane's turn ends, the row shows that branch.
+
 Kit's dial acts on the asks of a coding session that runs as a chat in the app, whose asks arrive as cards: the
 canvas's Code board draws Kit's lane that way ("Tell Kit what to change", Kit's note). Since 16 November the Code
 page's + menu starts agents in their own terminal only, where an agent's prompts stay inside the terminal, so the dial
@@ -146,19 +205,120 @@ does not reach those sessions yet. The Code page shows the dial for every projec
 Words the shell would expand are never read as what they look like: an unquoted pattern (`*`, `?`, `[`) or brace
 list (`{a,b}`, `{1..3}`) makes a command unreadable, so it asks at every level (`lex` in `src/code/command.ts`).
 
+### How the main branch moving is read
+
+Before the lanes and this note the shell ran no `git`: `git_branch.rs` reads `.git/HEAD` as a file and `tasks.rs` runs `gh`.
+Now two places run the person's own `git`: `lane.rs` makes a lane's branch (`git checkout -b`), and `git_moved.rs` only
+reads. Which files changed on both sides needs git's own object store, so `session_main_moved` runs `git` through the runner
+Tasks already uses for `gh` (`tasks::run_env`: no shell, nothing on stdin, 20 seconds, a cap on the output). Every call only
+reads (`symbolic-ref`, `rev-parse`, `merge-base`, `diff`, `ls-files`), none takes the index lock (`GIT_OPTIONAL_LOCKS=0`, so
+Kit's own `git commit` never meets it), a path is never a pathspec (`GIT_LITERAL_PATHSPECS=1`), and a branch name from the
+page is checked before it reaches an argument. The shell answers with names and commit ids; a diff only when asked, for a
+path both sides changed, with keys masked as every CLI answer in `tasks.rs` is.
+
+- The lane is the branch the folder has checked out. The branch it started from is the one `origin/HEAD` points at, else
+  `main`, else `master` (a local branch before its copy from `origin`). The page may name one (`base`).
+- Since the two parted, the lane's side is what its commits, the staging area and the work tree changed, with files git does
+  not track yet; the other side is what the base changed. A rename counts as a delete and an add, so a file one side moved and
+  the other edited needs both changes.
+- The note shows when at least one file needs both changes. A base that moved without touching the lane's files shows nothing:
+  git merges that by itself.
+- Read when a project opens on the Code page, when the window is looked at again, and once a minute.
+
+Let Kit merge sends Kit a message, `mergeAsk`: merge the base into the branch, these files changed on both sides, fix any
+clash, run the tests, show the result as a diff, and push nothing until told. It goes to the project's newest session that
+runs as a chat (`send`), so every step Kit takes arrives as an ask card and is answered through `settleApproval` at the level
+the developer chose; `git merge` is a change that rewinding takes back, a push is a push. With no such session, a new session
+opens in the project with the ask in its box and nothing starts until the person presses Start (a session in its own terminal
+keeps its agent's prompts in the terminal, so the ask is never typed into one).
+
+### How a preview with no secret is read
+
+A project needs a secret to show something when a line Kit changes reads one from the environment by a name that says what
+it is: a shop ID (`PROMPTPAY_SHOP_ID`, `SHOP_ID`, `MERCHANT_ID`) or a key, token, secret or password. Only the name is kept,
+never a value, and only code Kit changed (its `tool.diff` events). `previewEnv` is the one rule for what a preview runs with:
+a sample for every secret unless the owner added that very secret. Nothing else can put a real one in: not this computer's
+environment, not a value found in the code. The sample for a shop ID is all zeros, so no payment can reach an account.
+
+The app has no preview of its own yet, so nothing runs with `previewEnv` today; a preview started by the app must use it. And
+nothing saves a secret: Add the shop ID says the vault comes later.
+
+## What keeps running
+
+The Code page lists the commands that this app's own terminals and chats started and that still run, under Kit's
+panel and for the project that panel shows (`src/running/`, mounted by `code/KitPanel.tsx`, so picking another project
+there switches the list). Each row has the command, how long it has run, the port it listens on if there is one, and
+Stop. A line under the list counts what runs in the other projects, so a dev server left in one is never out of sight. The canvas draws it in StatesCodeDev, "Watching it run": a Running tag, "Dev server, 42 minutes, port 3000" and
+a Stop button. It draws no question before Stop, so there is none.
+
+**Where it comes from.** The shell holds the program of each terminal (`Sessions`) and each chat (`ChatSessions`).
+Nothing it already sent says what they started: `session-fg` names only an agent, and a chat's `background` is a
+count. So `src-tauri/src/running.rs` walks down from those programs through the processes they started (libproc on
+macOS, `/proc` on Linux, no program run) and reads nothing else. The page asks (`running_list`, nothing sent) every 3
+seconds while the Code page shows and the window is visible, and the shell answers with each command's session,
+folder, process id, start time, arguments and ports. A process's environment is never kept or sent.
+
+**What is a command.** Under a login shell (a Shell terminal), whatever its person ran from it; a shell they started
+inside it is not one, but what it ran is. Under an agent (a chat, or an agent in a terminal), only what it ran through
+its own shell, `sh -c …`, which is how Claude Code (seen in a live process list) and Codex (`zsh -lc '…'`) run a command;
+an agent that runs commands another way is not read yet. An agent run from a Shell terminal is an agent, not a command. The MCP servers an agent keeps for its whole session, its language servers and its other
+helpers are not commands: a list that showed them, with a Stop, would be a list nobody trusts. A command is listed once
+it has run 5 seconds, so a `git status` never flickers in; a dev server is listed 5 seconds after it starts.
+
+**What a row shows.** The command as a person recognises it: a program by its own name and arguments, a node script by
+its package (`pnpm dev`, not `node …/pnpm.cjs dev`), a shell's `-c` as the script it was given, and Claude Code's wrapper
+(`source snapshot … && eval '<the command>' < /dev/null && pwd -P >| …`) as the command inside it. Any key in it is
+hidden with the cards' masker (`maskSecrets`), and only then is a long command cut at 160 characters, so a cut cannot
+leave the front of a key too short for the masker to know. Then how long it has run (the system's own start time; the
+app's `elapsed` and `duration` words), and the ports: the TCP ports the command, or anything it started, listens on
+(`pnpm dev` listens through the `node` two levels down), as "port 3000" or "ports 5173, 24678", with the rest counted.
+A command names the session it runs in, which opens it: a terminal as its row is named, and a chat, which is a lane, as
+its lane is (`chatIdOf` beside `ptyOf` gives the shell's id for each). A shell of the bottom panel has no session here, so
+its commands name none. Rows are oldest first, and stay in that order.
+
+**Stop** ends the command and everything it started: SIGTERM to each, parent first, and SIGKILL three seconds later to
+whatever still runs. The page tells the shell only which command it is (kind of session, session id, process id, start
+time), never its words. The shell finds that command under that session again before it signals, and signals each
+process only if it is still the one it listed (same program, same start time), so a number the page made up, a process
+that took a finished one's number, a session's own shell, a process deeper in a command's tree, and anything outside the
+app's own sessions are never touched. After Stop the row says Stopping until the command is gone; if it is still there
+after 10 seconds the button comes back, with "Could not stop it. Try again."
+
+**Files.** `src-tauri/src/running.rs` (the walk, its tests with a table of processes and with real ones, `running_list`
+and `running_stop` in `lib.rs`; `Sessions::roots` and `ChatSessions::roots` give the programs; `fg.rs` lends its readers).
+`src/running/model.ts` (the words of a row), `feed.ts` (the polling and Stop's states), `host.ts` (the shell, and a mock
+for a browser: `window.__manutMockRunning` seeds it and `window.__manutRunningCalls` records each stop),
+`RunningPanel.tsx` and `running.css`. `e2e/running.spec.ts` walks it in a browser, with Kit's panel and its project picker.
+
 ## Left for later (no owner needed)
 
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
   commands the dial gives (Claude Code's `--permission-mode` and `--allowedTools`). That is Rust, and it widens the
   shell's fixed list of arguments, so it wants its own review.
 
-- Rewinding a turn, files and chat together: the agents' own rewind takes back the chat only. The shell needs to keep
-  the files as they were when a turn starts (a stash-like snapshot) and put them back; that is Rust.
-- Lanes on a branch of their own, and the lane's states (Checked, Tests failed, Reverted), with a test run's result
-  read from its output.
-- The main branch moving while Kit worked, with Let Kit merge and Show me both.
-- Something that keeps running: the commands still running, with their age, port and Stop.
-- A preview with sample values until the owner adds a real one.
+- Rewinding a turn, files and chat together, and the lane's Bring it back: the agents' own rewind takes back the chat
+  only. The shell needs to keep the files as they were when a turn starts (a stash-like snapshot) and put them back; that
+  is Rust.
+- Lanes that work at once in one folder, each on its own branch: a working folder for each lane (a git worktree). Today a
+  second lane joins the branch of the first while that one works, and a lane that starts after it is made from where the
+  folder is, so it stacks on the earlier lane's work.
+- The developer's own uncommitted changes in the folder come along when a lane's branch is made (a new branch has the
+  same tree). Saying so on the lane, or asking first, wants a decision.
+- Test output from OpenCode and the other ACP agents, and from pi: their steps hand on none, so their runs are Not
+  confirmed. More runners than the six (mocha, Playwright, `unittest`).
+- Open pull request and Ask Kit to fix it on a lane, a tests view beside it, the effort word and New lane. A pull request
+  needs a push, which asks; New lane waits on the owner's call on chats and terminals.
+- A lane after a restart: a chat session that comes back has no lane, since chat sessions are not listed after one.
+- The main-moved note on the lane's row: each lane now records the branch it was made from (its `base`), which
+  `session_main_moved` takes as `base`, so the note can sit on the lane's row instead of under the project's dial.
+- The main branch moving: the merge's result shown by the app as a diff after Kit merges (today Kit is asked to show it, and
+  asked not to push), and a file both sides changed in the very same way is still counted as needing both changes.
+- What keeps running, inside an open session: the list is on the Code page, for the project Kit's panel shows, and an
+  open session does not show its own commands. Also: Windows has no reader, so the page draws nothing there; a command
+  that left its parent for good (a daemon) is no longer found; a long-lived `sh -c` that an agent keeps for its own use
+  would be listed as a command; and so might a helper a shell's startup file leaves running (not seen yet).
+- The preview itself: the project run beside the lane, started with `previewEnv`, so a secret it reads is a sample. Reading
+  what a project needs from its `.env.example` as well as from Kit's changes.
 - Where Claude Code's shell is. Its ask does not say, and a `cd` in one command carries to the next inside the project
   and the session's attachments folder (the shell adds it with `--add-dir`), so the dial reads a command from the
   session's folder. It does check the path Claude Code itself found outside. Starting Claude Code with

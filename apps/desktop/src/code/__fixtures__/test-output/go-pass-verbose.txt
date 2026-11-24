@@ -1,0 +1,6 @@
+=== RUN   TestBuildsThePayload
+--- PASS: TestBuildsThePayload (0.00s)
+=== RUN   TestAddsTheItemsUp
+--- PASS: TestAddsTheItemsUp (0.00s)
+PASS
+ok  	example.com/shop/promptpay	0.004s
