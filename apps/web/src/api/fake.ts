@@ -11,6 +11,7 @@ import {
   type AwayView,
   type CreatedInvite,
   type DeletedShop,
+  type Deleting,
   type DeletionGoes,
   type DeletionRequest,
   type DeletionState,
@@ -56,7 +57,9 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// An in-memory stand-in for apps/api that keeps the contract's rules: one decision per request, approving
 /// needs the shop's consent, a send settles `confirmed`, `failed` or `unknown`, admin calls need a key, and
 /// lists come back newest first. Deleting a live shop asks its owner through a link that settles once, as the
-/// API does. The pilot gate is measured by the API's rules (gate.ts): a trial starts at the shop's first LINE
+/// API does. A practice deletion wipes a shop in one step, so it never stops part way; a shop whose deletion started
+/// and did not finish, in a world saved that way, is listed `deleting` and finished by the same request, as the API
+/// lists and finishes one. The pilot gate is measured by the API's rules (gate.ts): a trial starts at the shop's first LINE
 /// connection, and the owner's decisions are the times recorded on its replies. It lets every screen run and be
 /// tested with no backend.
 ///
@@ -451,6 +454,16 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return view;
   }
 
+  /// The API's rule for a deletion under way: one recorded for a shop that never went live, which starts as it is
+  /// recorded, or one its owner said yes to, and not finished.
+  function startedDeletionOf(tenant: string): FakeDeletionRecord | undefined {
+    const record = recordOf(tenant);
+    if (!record || record.deletedAt) return undefined;
+    if (!record.confirmationId) return record;
+    const confirmation = currentConfirmation(record);
+    return confirmation?.status === "decided" && confirmation.approved ? record : undefined;
+  }
+
   function deletionRequestOf(tenant: string): DeletionRequest | undefined {
     const confirmation = currentConfirmation(recordOf(tenant));
     if (!confirmation) return undefined;
@@ -723,9 +736,11 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     listShops: () =>
       run(() => {
         admin();
-        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, ...shop }) => {
+        return db.shops.map(({ trialStartedAt: _trial, questions: _questions, ...shop }): Shop => {
           const deletion = deletionRequestOf(shop.tenant);
-          return deletion ? { ...shop, deletion } : shop;
+          // A shop here still has its record: a practice wipe takes the record and the rest in one step.
+          const deleting: Deleting | undefined = startedDeletionOf(shop.tenant) ? { shopRecord: true } : undefined;
+          return { ...shop, ...(deletion ? { deletion } : {}), ...(deleting ? { deleting } : {}) };
         });
       }),
 
@@ -919,7 +934,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       }),
 
     // As the API: the name first; then a deletion the owner already said yes to is finished without asking again;
-    // a live shop's owner is asked; a shop that never went live is deleted at once.
+    // a live shop's owner is asked; a stopped deletion of a shop that never went live is finished as it was asked
+    // for, keeping who asked and when; any other shop that never went live is deleted at once.
     deleteShop: (input) =>
       run((): DeletedShop | AwaitingOwner => {
         admin();
@@ -929,6 +945,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         const current = currentConfirmation(record);
         if (record && current?.status === "decided" && current.approved) return wipe(record);
         if (isLiveShop(shop)) return askOwner(shop, record);
+        const started = startedDeletionOf(shop.tenant);
+        if (started) return wipe(started);
         // Recorded and then wiped with the rest of the shop, as the API does.
         audit(shop.tenant, PRACTICE_OPERATOR, "deletion.requested", {});
         return wipe(writeRecord({ tenant: shop.tenant, name: shop.name, requestedAt: iso(now()), deletedBy: null }));

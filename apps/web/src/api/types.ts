@@ -57,6 +57,12 @@ export type DeletionRequest = {
   decidedAt?: string;
 };
 
+/// A shop's deletion that started and has not finished: it is running, or it stopped part way. The same deletion
+/// request finishes it, and the API keeps the shop on its list until it has. `shopRecord` is false once the deletion
+/// has removed the shop's own record: the row then holds only its tenant and the name the deletion recorded, with no
+/// owner name and no consent, and the shop can no longer be opened.
+export type Deleting = { shopRecord: boolean };
+
 export type Shop = {
   tenant: string;
   name: string;
@@ -66,6 +72,7 @@ export type Shop = {
   template?: string;
   consent: boolean;
   deletion?: DeletionRequest;
+  deleting?: Deleting;
 };
 
 export type InboundMessage = {

@@ -16,11 +16,12 @@ function fakeApi() {
 }
 
 /// Opens the Shop data tab of `shop`: Baan Mali, the first shop, is live (its LINE account is connected); Sabai
-/// Tea never went live.
-async function openShopData(api: PilotApi, shop: "Baan Mali" | "Sabai Tea" = "Baan Mali"): Promise<HTMLElement> {
+/// Tea never went live. `menu` is the shop's name in the side menu, which marks a shop whose deletion has not finished.
+async function openShopData(api: PilotApi, shop: "Baan Mali" | "Sabai Tea" = "Baan Mali", menu: string = shop):
+  Promise<HTMLElement> {
   sessionStorage.setItem("manut.pilot.operatorKey", "op-key-123");
   renderWithApi(<OpsConsole />, api);
-  const inMenu = await screen.findByRole("button", { name: shop });
+  const inMenu = await screen.findByRole("button", { name: menu });
   if (shop !== "Baan Mali") fireEvent.click(inMenu);
   await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(shop));
   fireEvent.click(screen.getByRole("tab", { name: "Shop data" }));
@@ -191,8 +192,8 @@ describe("deleting a shop", () => {
 
   it("keeps the way to finish a partial wipe after the shop has left the list", async () => {
     const api = fakeApi();
-    // The API drops the shop's registry row before its last step, so a partial wipe can take the shop off
-    // the list while some of its data is still stored.
+    // The console keeps its own note of a deletion that stopped part way, whatever the list says next. Here the
+    // shop is not listed at all, as the API left such a shop before it kept it listed until the deletion finished.
     const listAll = api.listShops;
     let offTheList = false;
     vi.spyOn(api, "listShops").mockImplementation(async () =>
@@ -420,24 +421,134 @@ describe("deleting a live shop: waiting for its owner", () => {
   it("offers to finish a deletion the owner said yes to that did not finish", async () => {
     const api = fakeApi();
     const listAll = api.listShops;
+    // As the API lists it: the owner's yes, and the deletion that has not finished.
     vi.spyOn(api, "listShops").mockImplementation(async () => (await listAll()).map((shop) =>
       shop.tenant === "shop_baanmali"
         ? { ...shop, deletion: { state: "deleting" as const, confirmUrl: "https://web.test/delete/yes",
-          expiresAt: "2026-11-24T02:00:00Z", decidedAt: "2026-11-23T02:30:00Z" } }
+          expiresAt: "2026-11-24T02:00:00Z", decidedAt: "2026-11-23T02:30:00Z" }, deleting: { shopRecord: true } }
         : shop));
     const done: DeletedShop = { tasksWiped: 1, connectionsWiped: 1, schedulesWiped: 0, occurrencesWiped: 0,
       sessionsWiped: 0, deletedAt: "2026-11-23T03:00:00Z" };
     const remove = vi.spyOn(api, "deleteShop").mockResolvedValueOnce(done);
-    const panel = await openShopData(api);
+    const panel = await openShopData(api, "Baan Mali", "Baan Mali Deleting");
 
     expect(screen.getByText("Deletion not finished")).toBeTruthy();
     const alert = within(panel).getByRole("alert");
     expect(alert.textContent).toMatch(
       /^Fon said yes (at|on 23 November at) 09:30, but deleting Baan Mali did not finish\. Part of its data is still stored\./);
+    // One way to finish it, not a second note above the tabs.
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     fireEvent.click(within(alert).getByRole("button", { name: "Finish deleting" }));
 
     expect((await screen.findByRole("status")).textContent).toMatch(
       /^Deleted Baan Mali (at|on 23 November at) 10:00\. Removed 1 task with its replies, 1 LINE connection and the shop's messages and payments\.$/);
     expect(remove).toHaveBeenCalledWith({ tenant: "shop_baanmali", confirmName: "Baan Mali" });
+  });
+});
+
+describe("a deletion that stopped part way, as the shop list reports it", () => {
+  it("marks a shop that never went live as deleting, and finishes its deletion with the same request", async () => {
+    const api = fakeApi();
+    const listAll = api.listShops;
+    let stopped = true;
+    vi.spyOn(api, "listShops").mockImplementation(async () => (await listAll()).map((shop) =>
+      stopped && shop.tenant === "shop_sabaitea" ? { ...shop, deleting: { shopRecord: true } } : shop));
+    const remove = vi.spyOn(api, "deleteShop");
+    const panel = await openShopData(api, "Sabai Tea", "Sabai Tea Deleting");
+
+    // The side menu, the shop's header and its data tab all say the deletion has not finished.
+    expect(within(screen.getByRole("button", { name: "Sabai Tea Deleting" })).getByText("Deleting")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Baan Mali" })).toBeTruthy();
+    expect(screen.getByText("Deletion not finished")).toBeTruthy();
+    const alert = within(panel).getByRole("alert");
+    expect(alert.textContent).toBe(
+      "Deleting Sabai Tea did not finish. Part of its data is deleted and the rest is still stored. Run it again to finish the job.Finish deleting",
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    stopped = false;
+    fireEvent.click(within(alert).getByRole("button", { name: "Finish deleting" }));
+
+    expect((await screen.findByRole("status")).textContent).toMatch(DELETED_SABAI_TEA);
+    expect(remove).toHaveBeenCalledWith({ tenant: "shop_sabaitea", confirmName: "Sabai Tea" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Sabai Tea/ })).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says it once when this console's own deletion stopped part way and the list then says so too", async () => {
+    const api = fakeApi();
+    const listAll = api.listShops;
+    let stopped = false;
+    vi.spyOn(api, "listShops").mockImplementation(async () => (await listAll()).map((shop) =>
+      stopped && shop.tenant === "shop_sabaitea" ? { ...shop, deleting: { shopRecord: true } } : shop));
+    vi.spyOn(api, "deleteShop").mockImplementationOnce(async () => {
+      stopped = true;
+      throw new ApiError(500, "wipe_incomplete", undefined, { failed: ["index"] });
+    });
+    const panel = await openShopData(api, "Sabai Tea");
+
+    typeNameAndSend(openDeletion(panel, "Sabai Tea"), "Sabai Tea");
+
+    await screen.findByRole("button", { name: "Sabai Tea Deleting" });
+    expect(screen.getByText("Deletion not finished")).toBeTruthy();
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.textContent).toContain("Deleting Sabai Tea did not finish.");
+    expect(within(panel).queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a shop whose own record is gone off the pages, and offers to finish its deletion above them", async () => {
+    const api = fakeApi();
+    const listAll = api.listShops;
+    let stopped = true;
+    // The API lists such a shop from its record of the deletion: its tenant and name, and nothing of its data.
+    vi.spyOn(api, "listShops").mockImplementation(async () => [...(await listAll()),
+      ...(stopped ? [{ tenant: "shop_khaosoi", name: "Khao Soi Nimman", ownerName: "", consent: false,
+        deleting: { shopRecord: false } }] : [])]);
+    const done: DeletedShop = { tasksWiped: 0, connectionsWiped: 0, schedulesWiped: 0, occurrencesWiped: 0,
+      sessionsWiped: 0, deletedAt: "2026-11-23T03:00:00Z" };
+    const remove = vi.spyOn(api, "deleteShop").mockImplementationOnce(async () => {
+      stopped = false;
+      return done;
+    });
+    await openShopData(api);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      "Deleting Khao Soi Nimman did not finish. Part of its data is deleted and the rest is still stored. Run it again to finish the job.Finish deleting",
+    );
+    // It cannot be opened, so it is in no list of shops to open.
+    expect(screen.queryByRole("button", { name: /Khao Soi Nimman/ })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Baan Mali");
+    fireEvent.click(within(alert).getByRole("button", { name: "Finish deleting" }));
+
+    expect((await screen.findByRole("status")).textContent).toMatch(
+      /^Deleted Khao Soi Nimman (at|on 23 November at) 10:00\. Removed the shop's messages and payments\.$/);
+    expect(remove).toHaveBeenCalledWith({ tenant: "shop_khaosoi", confirmName: "Khao Soi Nimman" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    // Baan Mali, the shop on screen, stays where it was.
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Baan Mali");
+  });
+
+  it("shows one note, with the latest answer, when finishing such a deletion stops again", async () => {
+    const api = fakeApi();
+    const listAll = api.listShops;
+    vi.spyOn(api, "listShops").mockImplementation(async () => [...(await listAll()),
+      { tenant: "shop_khaosoi", name: "Khao Soi Nimman", ownerName: "", consent: false, deleting: { shopRecord: false } }]);
+    const remove = vi.spyOn(api, "deleteShop")
+      .mockRejectedValue(new ApiError(500, "wipe_incomplete", undefined, { failed: ["registry"] }));
+    await openShopData(api);
+    // The button is named "Deleting" while a run is on its way, so finding it by its own name waits that out.
+    const finish = () => within(screen.getByRole("alert")).getByRole("button", { name: "Finish deleting" });
+
+    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Finish deleting" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((finish() as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(finish());
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(
+      "Deleting Khao Soi Nimman still did not finish after 2 tries."));
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenLastCalledWith({ tenant: "shop_khaosoi", confirmName: "Khao Soi Nimman" });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 });

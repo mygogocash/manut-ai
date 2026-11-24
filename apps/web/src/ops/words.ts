@@ -115,6 +115,9 @@ export const shopDataWords = {
   linkLabel: "Deletion link",
   waitingTag: (owner: string) => `Deletion waiting for ${owner}`,
   unfinishedTag: "Deletion not finished",
+  /// The mark beside a shop's name in the side menu while its deletion has not finished. The menu is narrow, so it is
+  /// one word; the shop's header says the rest.
+  listTag: "Deleting",
 } as const;
 
 /// How to send the owner the deletion link, and until when it works.
@@ -174,13 +177,15 @@ export function deletedText(name: string, result: DeletedShop | null, now: numbe
 }
 
 /// A deletion that stopped part way (`partial`, from the API's wipe_incomplete) or whose answer never
-/// arrived. Either way the same request, sent again, finishes the job, so that is what the words offer.
+/// arrived. Either way the same request, sent again, finishes the job, so that is what the words offer. A
+/// deletion the shop list reports as not finished comes with no answer of this console's (`error` null), so
+/// there is nothing more to say about why.
 export function unfinishedText(deletion: { name: string; partial: boolean; tries: number; error: unknown }): string {
   const { name, partial, tries, error } = deletion;
   if (partial) {
     const head =
       tries > 1 ? `Deleting ${name} still did not finish after ${tries} tries.` : `Deleting ${name} did not finish.`;
-    const latest = isWipeIncomplete(error) ? "" : ` ${deleteAnswerText(error)}`;
+    const latest = error === null || isWipeIncomplete(error) ? "" : ` ${deleteAnswerText(error)}`;
     return `${head} Part of its data is deleted and the rest is still stored.${latest} Run it again to finish the job.`;
   }
   const head =

@@ -319,6 +319,11 @@ type DeletedShop = {
     had removed the shop's own record, the row is only what the record of the deletion kept (`Deleting`, above),
     the same request still finishes it, and `confirmName` is checked against the name that record kept. A shop
     whose record or deletion cannot be read fails the list with 503 `shops_unavailable` rather than drop off it.
+  - The console shows such a shop as the list does: "Deleting" under its name in the side menu, "Deletion not
+    finished" in its header, and in its Shop data tab what stopped with "Finish deleting", which sends the same
+    request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page
+    says its deletion did not finish and offers the same button. The practice fake lists and finishes a deletion
+    that did not finish by the same rules, though a practice wipe never stops part way.
   - Every step answers again after its own wipe: the task index reads as empty once the shop's own object is wiped,
     and each wipe finds nothing more to remove. So the same request runs to the end after a stop at any step,
     including one after the tombstone, when only taking the shop off the list is left.

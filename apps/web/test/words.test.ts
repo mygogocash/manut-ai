@@ -112,6 +112,10 @@ describe("the words for deleting a shop", () => {
     expect(unfinishedText({ name: "Baan Mali", partial: false, tries: 3, error: new ApiError(0, "network") })).toBe(
       "After 3 tries, it is still not clear whether Baan Mali was deleted. Could not reach the API. Check the connection and try again. Running it again is safe, and finishes the job if anything is left.",
     );
+    // The shop list reports a deletion that did not finish with no answer of this console's to quote.
+    expect(unfinishedText({ name: "Baan Mali", partial: true, tries: 0, error: null })).toBe(
+      "Deleting Baan Mali did not finish. Part of its data is deleted and the rest is still stored. Run it again to finish the job.",
+    );
   });
 
   it("says nothing was deleted when the API refuses", () => {

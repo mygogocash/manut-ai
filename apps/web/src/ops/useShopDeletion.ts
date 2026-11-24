@@ -11,9 +11,31 @@ import {
 import { isWipeIncomplete } from "./words";
 
 /// A deletion that stopped part way (`partial`), or whose answer never arrived. It is kept here, apart from
-/// the shop list, on purpose: the API takes a shop off the list before its last step, so a partial wipe can
-/// leave the list while data is still stored, and sending the same request again is the only way to finish.
+/// the shop list, on purpose: an answer may never arrive, and though the API keeps a shop on its list until its
+/// deletion has finished, one whose own record the deletion removed can no longer be opened. Sending the same
+/// request again is the way to finish either, so it is offered above every shop.
 export type UnfinishedDeletion = { tenant: string; name: string; partial: boolean; tries: number; error: unknown };
+
+/// Every deletion to show as not finished, each once: this console's own, with what the API answered it, then those
+/// the shop list reports for shops that can no longer be opened (`deleting.shopRecord` false), which come with no
+/// answer to quote. A shop this console has just seen deleted is left out until the list is read again.
+export function unfinishedDeletions(
+  deletion: Pick<ShopDeletion, "gone" | "unfinished">,
+  shops: readonly Shop[] | null,
+): UnfinishedDeletion[] {
+  const own = deletion.unfinished;
+  const listed = (shops ?? [])
+    .filter((shop) => shop.deleting?.shopRecord === false && !deletion.gone.has(shop.tenant) &&
+      !own.some((entry) => entry.tenant === shop.tenant))
+    .map((shop): UnfinishedDeletion => ({ tenant: shop.tenant, name: shop.name, partial: true, tries: 0, error: null }));
+  return [...own, ...listed];
+}
+
+/// Whether the shop's deletion has started and not finished, by the list's own word or by the owner's yes that the
+/// wipe has not finished.
+export function isDeleting(shop: Shop): boolean {
+  return Boolean(shop.deleting) || shop.deletion?.state === "deleting";
+}
 
 /// A deletion the API confirmed. `result` is null when the shop was already gone.
 export type FinishedDeletion = { name: string; result: DeletedShop | null };

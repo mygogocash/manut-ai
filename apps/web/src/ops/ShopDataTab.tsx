@@ -11,6 +11,7 @@ import {
   deletionRequestText,
   errorText,
   shopDataWords as W,
+  unfinishedText,
 } from "./words";
 
 /// The selected shop's data, exported or deleted at the shop's request. Laid out like "Privacy and data" on
@@ -22,11 +23,15 @@ import {
 export function ShopDataTab({
   shop,
   request,
+  noted = false,
   onDelete,
   onFinish,
 }: {
   shop: Shop;
   request: DeletionRequest | null;
+  /// The note above the tabs already says this shop's deletion did not finish, with what the API last answered this
+  /// console, so the tab does not say it a second time.
+  noted?: boolean;
   onDelete: (name: string) => Promise<unknown>;
   /// Sends the deletion the owner already said yes to again, which finishes a wipe that stopped part way.
   onFinish: () => Promise<unknown>;
@@ -122,7 +127,16 @@ export function ShopDataTab({
               <span className="grow">{W.exported(exported, shop.ownerName)}</span>
             </div>
           )}
-          {request && <DeletionRequestPanel shop={shop} request={request} onFinish={onFinish} />}
+          {request && !(noted && request.state === "deleting") && (
+            <DeletionRequestPanel shop={shop} request={request} onFinish={onFinish} />
+          )}
+          {/* A shop that never went live has no owner's answer to show, only that its deletion did not finish. */}
+          {shop.deleting && request?.state !== "deleting" && !noted && (
+            <FinishDeletion
+              text={unfinishedText({ name: shop.name, partial: true, tries: 0, error: null })}
+              onFinish={onFinish}
+            />
+          )}
           {deleting && (
             <DeleteShopForm
               shop={shop}
@@ -253,18 +267,6 @@ function DeletionRequestPanel({
   request: DeletionRequest;
   onFinish: () => Promise<unknown>;
 }) {
-  const [busy, setBusy] = useState(false);
-
-  async function finish() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await onFinish();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (request.state === "awaiting_owner") {
     return (
       <div className="box rise" role="status" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -286,26 +288,42 @@ function DeletionRequestPanel({
       </div>
     );
   }
-  if (request.state === "deleting") {
-    return (
-      <div className="banner err" role="alert">
-        <span className="grow">{deletionRequestText(request, shop)}</span>
-        <button
-          type="button"
-          className="btn danger solid"
-          disabled={busy}
-          aria-busy={busy ? true : undefined}
-          onClick={() => void finish()}
-        >
-          {busy ? W.deleting : W.finish}
-        </button>
-      </div>
-    );
-  }
+  if (request.state === "deleting") return <FinishDeletion text={deletionRequestText(request, shop)} onFinish={onFinish} />;
   if (request.state === "deleted") return null;
   return (
     <div className={request.state === "declined" ? "banner info" : "banner warn"}>
       <span className="grow">{deletionRequestText(request, shop)}</span>
+    </div>
+  );
+}
+
+/// A deletion that started and did not finish, with the one thing to do: send the same request again, which
+/// finishes it. It is the last step of something that can't be undone, so it is a `btn danger solid`.
+function FinishDeletion({ text, onFinish }: { text: string; onFinish: () => Promise<unknown> }) {
+  const [busy, setBusy] = useState(false);
+
+  async function finish() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onFinish();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="banner err" role="alert">
+      <span className="grow">{text}</span>
+      <button
+        type="button"
+        className="btn danger solid"
+        disabled={busy}
+        aria-busy={busy ? true : undefined}
+        onClick={() => void finish()}
+      >
+        {busy ? W.deleting : W.finish}
+      </button>
     </div>
   );
 }
