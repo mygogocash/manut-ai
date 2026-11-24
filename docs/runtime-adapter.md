@@ -254,6 +254,12 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
 - **Switching.** `shops.list` gives the shops (owned first), the one viewed and the ones whose place ended this run;
   `shops.switch` changes the one viewed and sends `shops.update`. Nothing new is read for a switch. The store then drops
   what the last shop's pages showed (chats but for the shops' asks, threads, schedules, places) and reads every page again.
+- **Making a shop** (`shops.make`, `src/runtime/makeShop.ts`; `docs/several-shops.md`, "A shop its owner makes"). `POST
+  /v1/shops/new` with the sign-in and exactly `{ name, ownerName, template }`; a name or a kind the API would refuse is
+  refused here with nothing sent. The owner session the API answers is kept in the keychain item with the sign-in, as an
+  opened shop's is, the new shop becomes the one viewed, and the read that follows lists it before the op answers. A refusal
+  keeps the API's code (`sign_ups_closed`, `too_many_shops` and the rest), and a request that got no answer is never sent
+  again. Practice makes the shop in memory, with nothing sent.
 - **A place that ended.** 401 `removed` or `unlinked` from a shop's session drops its session and kept read at once and
   closes its asks in words that say when. Each read also looks once, with its own session, at a shop it holds a session
   for that the list no longer has, to say why and when, then drops it. `shops.update` follows either.

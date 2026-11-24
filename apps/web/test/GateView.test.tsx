@@ -77,6 +77,49 @@ describe("the Pilot gate view", () => {
     ]);
   });
 
+  it("lists a shop its owner made in the app as not counted, past its day 14 and paid, and says when an operator added one", async () => {
+    const own = shop({ tenant: "t5", name: "Khao Hom", trialStartedAt: "2026-12-07T03:00:00.000Z", day: 16, trialEnded: true,
+      paid: true, paidAt: "2026-12-21T05:00:00.000Z", paidSatang: 49900, activeOnDay14: "yes", selfServe: true, inCohort: false });
+    const added = shop({ tenant: "t6", name: "Baan Fon", selfServe: true, inCohort: true });
+    renderGate(gateOf([BAAN_MALI, own, added], { counted: 1, paid: measure(1, 100, 25, true), active: measure(1, 100, 50, true),
+      status: "on_track" }));
+    expect(await screen.findByText("1 of 3 counted")).toBeTruthy();
+    const rows = tableRows();
+    expect(rows[0]![0]).toBe("Baan Mali");
+    expect(rows[1]![0]).toBe("Khao HomMade by its ownerNot counted: its owner made it in the app, and no operator has added itCount it");
+    expect(rows[2]![0]).toBe("Baan FonMade by its ownerCounted: an operator added itLeave it out");
+    // A shop an operator made has nothing to add or leave out.
+    expect(screen.queryByRole("button", { name: "Count Baan Mali in the pilot gate" })).toBeNull();
+  });
+
+  it("counts a shop its owner made when the operator adds it, reads the gate again, and says so when the change fails", async () => {
+    const own = shop({ tenant: "t5", name: "Khao Hom", selfServe: true, inCohort: false });
+    const left = gateOf([own], { counted: 0, paid: measure(0, null, 25, false), active: measure(0, null, 50, false),
+      status: "not_enough_data" });
+    const added = gateOf([{ ...own, inCohort: true }], left.cohort);
+    const getGate = vi.fn().mockResolvedValueOnce(left).mockResolvedValue(added);
+    const setGateCohort = vi.fn().mockRejectedValueOnce(new ApiError(503, "shop_unavailable")).mockResolvedValue({ tenant: "t5", counted: true });
+    renderWithApi(<GateView onForget={() => {}} />, stubApi({ getGate, setGateCohort, listSubscriptionPayments: () => Promise.resolve([]) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Count Khao Hom in the pilot gate" }));
+    expect(await screen.findByText("Khao Hom could not be changed. Try again.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Count Khao Hom in the pilot gate" }));
+    expect(await screen.findByRole("button", { name: "Leave Khao Hom out of the pilot gate" })).toBeTruthy();
+    expect(setGateCohort.mock.calls).toEqual([["t5", true], ["t5", true]]);
+    expect(getGate).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Counted: an operator added it")).toBeTruthy();
+  });
+
+  it("counts a shop its owner made only once an operator adds it, in practice as on the API", async () => {
+    const { pilotGate } = await import("../src/api/gate");
+    const ended = { name: "Khao Hom", trialStartedAt: "2026-12-07T03:00:00.000Z", decisions: ["2026-12-18T05:00:00.000Z"],
+      subscriptionPayments: [] };
+    const now = Date.parse("2027-01-10T03:00:00.000Z");
+    const left = pilotGate([{ tenant: "t1", ...ended }, { tenant: "t2", ...ended, selfServe: true }], now);
+    expect(left.shops.map((one) => [one.selfServe, one.inCohort])).toEqual([[undefined, true], [true, false]]);
+    expect(left.cohort.counted).toBe(1);
+    expect(pilotGate([{ tenant: "t2", ...ended, selfServe: true, addedToCohort: true }], now).cohort.counted).toBe(1);
+  });
+
   it("says which share is under its line when the pilot is below the line", async () => {
     renderGate(gateOf([SABAI_TEA], { counted: 1, paid: measure(0, 0, 25, false), active: measure(0, 0, 50, false),
       status: "below_line" }));

@@ -288,6 +288,16 @@ export const gateWords = {
   notYet: "Not yet",
   active: { yes: "Yes", no: "No", not_yet: "Not yet" },
   noDecision: "None yet",
+  /// A shop its owner made in the app: listed, and counted only once an operator adds it.
+  selfServe: "Made by its owner",
+  leftOut: "Not counted: its owner made it in the app, and no operator has added it",
+  addedIn: "Counted: an operator added it",
+  /// What adding it does, for the operator who has spoken with its owner as the pilot's owners were spoken with.
+  countIt: "Count it",
+  countItLabel: (shop: string) => `Count ${shop} in the pilot gate`,
+  leaveItOut: "Leave it out",
+  leaveItOutLabel: (shop: string) => `Leave ${shop} out of the pilot gate`,
+  cohortFailed: (shop: string) => `${shop} could not be changed. Try again.`,
 
   // Recording the shop's payment to Manut AI
   formTitle: "Record a subscription payment",
@@ -454,11 +464,19 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   // The owner's linked account and the shop sessions (docs/several-shops.md). The log holds the link's id only, never the
   // account itself, so the words say whose account by the shop's owner. A device signing in or out is the account's or the
   // helper's own doing, so it is said of them.
-  "owner.linked": (_entry, { ownerName }) => `linked ${ownerName}'s account to the shop`,
+  // An operator links the owner's account on a code; an owner who made the shop themselves is linked as they make it.
+  "owner.linked": (entry, { ownerName }) =>
+    entry.actor.kind === "owner" ? "became the shop's owner as they made it" : `linked ${ownerName}'s account to the shop`,
   "owner.unlinked": (_entry, { ownerName }) => `unlinked ${ownerName}'s account from the shop`,
   "owner.session_opened": () => "signed in to the shop on a device",
   "owner.session_ended": () => "signed out of the shop on a device",
   "helper.session_ended": () => "signed out on a device",
+  // A shop its owner made in the app, signed in, with no operator (docs/several-shops.md, "A shop its owner makes"). The
+  // log names the owner's account by its id, which the actor says.
+  "shop.made_by_owner": () => "made the shop themselves in the app, with no operator",
+  // The pilot gate's cohort (docs/pilot-api.md, "The pilot gate"): a shop its owner made counts once an operator adds it.
+  "cohort.added": () => "counted the shop in the pilot gate's cohort",
+  "cohort.removed": () => "left the shop out of the pilot gate's cohort again",
   // Browser control (docs/browser-control.md): the vault's site sign-ins and the outposts that type them. The log holds
   // ids only, never a username or a password.
   "signin.created": () => "added a site sign-in to the vault",
@@ -1619,6 +1637,9 @@ export const shopsWords = {
   noShops: "No shops yet.",
   noShopsHint: "Add a shop with POST /v1/admin/pilot/shops, then connect its LINE account.",
   tableLabel: "Every shop",
+  /// A shop its owner made in the app, with no operator (docs/pilot-api.md, "Making a shop of your own").
+  selfServe: "Made by its owner",
+  selfServeHelp: "Its owner made it in the app, signed in, with no operator. The pilot gate leaves it out unless an operator adds it.",
   unreadable: "Could not be read",
   nothingRecorded: "Nothing recorded",
   gateFailed: "The pilot gate could not be read, so trials, payments and activity are not shown. Try again.",

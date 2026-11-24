@@ -387,9 +387,10 @@ describe("the fake's pilot gate, measured as the API measures it", () => {
     expect(gate.asOf).toBe("2026-11-23T03:00:00.000Z");
     expect(gate.shops).toEqual([
       { tenant: "shop_baanmali", name: "Baan Mali", trialStartedAt: "2026-11-10T03:00:00.000Z", day: 14,
-        trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "yes", lastDecisionAt: "2026-11-22T22:18:00.000Z" },
+        trialEnded: false, paid: false, paidSatang: 0, activeOnDay14: "yes", lastDecisionAt: "2026-11-22T22:18:00.000Z",
+        inCohort: true },
       { tenant: "shop_sabaitea", name: "Sabai Tea", trialStartedAt: null, day: null, trialEnded: false, paid: false,
-        paidSatang: 0, activeOnDay14: "not_yet" },
+        paidSatang: 0, activeOnDay14: "not_yet", inCohort: true },
     ]);
     expect(gate.cohort).toEqual({ counted: 0, paid: { count: 0, percent: null, thresholdPercent: 25, met: false },
       active: { count: 0, percent: null, thresholdPercent: 50, met: false }, status: "not_enough_data" });
@@ -1824,5 +1825,14 @@ describe("the fake's sample audit log, for what the API added this week", () => 
     const api = createFakeApi({ now: () => NOW, storage });
     expect(await api.getApproval(DEMO_TOKENS.longThai)).toMatchObject({ state: "proposed" });
     expect(await api.getDeletion(DEMO_DELETION_TOKENS.longName)).toMatchObject({ state: "awaiting_owner" });
+  });
+});
+
+// An operator counting a shop its owner made in the pilot gate, in practice as on the API (docs/pilot-api.md, "The pilot gate").
+describe("the fake's pilot gate cohort", () => {
+  it("refuses a shop an operator made, which is always counted", async () => {
+    const api = createFakeApi({ now: () => Date.parse("2026-11-24T03:00:00Z") });
+    await expect(api.setGateCohort("shop_baanmali", true)).rejects.toMatchObject({ status: 409, code: "not_self_serve" });
+    await expect(api.setGateCohort("shop_nobody", true)).rejects.toMatchObject({ status: 404 });
   });
 });

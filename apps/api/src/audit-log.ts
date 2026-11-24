@@ -88,6 +88,12 @@ export const AUDIT_ACTIONS = [
   "owner.session_opened",
   "owner.session_ended",
   "helper.session_ended",
+  // A shop its owner made, signed in, with no operator (self-serve.ts): written with `shop.created`, `owner.linked` and
+  // `owner.session_opened` in the one write that makes the shop, by the owner's linked account, named by its id.
+  "shop.made_by_owner",
+  // An operator adds a shop its owner made to the pilot gate's cohort, or leaves it out again (pilot.ts). No id: the shop.
+  "cohort.added",
+  "cohort.removed",
   // Browser control (browser-control.ts): the vault's site sign-ins and the outposts that type them. Each names the
   // sign-in or the outpost by its id, never an account, a password or a credential.
   "signin.created",
@@ -311,14 +317,15 @@ function missedAfter(prior: AuditMissed | undefined, action: string, nowMs: numb
 
 /// The storage entries that record `record` in the same write as the record it describes: the entry, or when the
 /// entry cannot be kept as given, the shop's miss count raised by one. Spread into that write's `put`, so the two
-/// land together or not at all; never throws, so the action never fails for its entry.
+/// land together or not at all; never throws, so the action never fails for its entry. `nowMs` is the write's own moment
+/// when it has one, so a record and its entries say the same time.
 export async function auditPut(
   storage: DurableObjectStorage,
   tenant: string,
   record: AuditRecord | null,
   missedAction: AuditAction,
+  nowMs: number = Date.now(),
 ): Promise<Record<string, unknown>> {
-  const nowMs = Date.now();
   if (record !== null && isAuditRecord(record)) {
     const entry = entryOf(record, nowMs);
     return { [keys.entry(tenant, entry.id)]: entry };

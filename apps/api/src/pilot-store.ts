@@ -34,6 +34,7 @@ import { DELETION_LINK_TTL_MS } from "./approval-link";
 import { actorOr, auditPut, type AuditActor, type AuditRecord } from "./audit-log";
 import { readJsonBody } from "./body";
 import { LINE_USER_ID } from "./connectors/line";
+import { ownerMadeRecord } from "./people-store";
 import { bangkokDay } from "./pilot-gate";
 import { isExpired, RETENTION } from "./retention";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
@@ -65,6 +66,12 @@ export type PilotShopRecord = {
   /// The shop template it was made from (`@manut/shop-templates`), when it was: its team, routines and first-week
   /// questions are the routines' records (routine-store.ts).
   template?: string;
+  /// The shop was made by its owner, signed in, with no operator (self-serve.ts), rather than by an operator in the
+  /// console. The console marks it, and the pilot gate leaves it out of the cohort (pilot-gate.ts). Absent for every shop
+  /// an operator made.
+  selfServe?: true;
+  /// When an operator added this self-serve shop to the pilot gate's cohort (pilot-gate.ts); absent while it is left out.
+  addedToCohortAt?: string;
 };
 
 export type InboundMessage = {
@@ -184,9 +191,9 @@ async function values<T>(storage: DurableObjectStorage, prefix: string, options:
 /// Worker named: the operator's Access identity for the console's writes, the owner for the owner's link. A write
 /// that names nobody is the system's. An actor the log cannot keep becomes a counted miss rather than a wrong name.
 function audited(storage: DurableObjectStorage, tenant: string, actor: unknown, fallback: AuditActor,
-  record: Omit<AuditRecord, "actor">): Promise<Record<string, unknown>> {
+  record: Omit<AuditRecord, "actor">, nowMs?: number): Promise<Record<string, unknown>> {
   const who = actorOr(actor, fallback);
-  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action);
+  return auditPut(storage, tenant, who ? { ...record, actor: who } : null, record.action, nowMs);
 }
 
 /// `/pilot/*` on a TenantObject. Reads need only the tenant; writes need the
@@ -253,6 +260,8 @@ export async function pilotTenantRoute(storage: DurableObjectStorage, request: R
       return createShop(storage, tenant, body);
     case "POST /pilot/shop-connection":
       return setShopConnection(storage, tenant, body);
+    case "POST /pilot/shop-cohort":
+      return setShopCohort(storage, tenant, body);
     case "POST /pilot/messages":
       return storeMessages(storage, tenant, body);
     case "POST /pilot/names":
@@ -280,20 +289,54 @@ async function createShop(storage: DurableObjectStorage, tenant: string, body: R
     return json({ error: "invalid_request" }, 400);
   }
   if (await storage.get(keys.shop(tenant))) return json({ error: "already_exists" }, 409);
+  // A shop its owner makes (self-serve.ts) starts owned: the owner's account linked and their device's first owner session,
+  // in the people record (people-store.ts), go into this same put, so the shop never exists without its owner. Anything
+  // that is not a whole owner makes no shop.
+  const nowMs = Date.now();
+  const owned = body.owner === undefined ? null : ownerMadeRecord(tenant, body.owner, nowMs);
+  if (body.owner !== undefined && !owned) return json({ error: "invalid_request" }, 400);
   const shop: PilotShopRecord = {
     tenant,
     name: body.name,
     ownerName: body.ownerName,
     taskId: body.taskId,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(nowMs).toISOString(),
     ...(typeof body.template === "string" ? { template: body.template } : {}),
+    ...(owned ? { selfServe: true as const } : {}),
   };
-  await storage.put({
-    [keys.shop(tenant)]: shop,
-    ...(await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
-      outcome: "ok" })),
-  });
+  // Each entry is minted after the one before, so the log reads them in this order (audit-log.ts), and every one of them
+  // says the write's own moment, the shop's `createdAt`. The owner's entries name the account by its link id only, as
+  // `owner.linked` does when an operator links one: never its subject or an email.
+  const byOwner = owned ? { kind: "owner" as const, id: owned.accountId } : null;
+  const about = owned ? { ownerAccountId: owned.accountId } : {};
+  const entries = [await audited(storage, tenant, body.actor, { kind: "system" }, { action: "shop.created", subject: {},
+    outcome: "ok" }, nowMs)];
+  if (byOwner) {
+    for (const action of ["shop.made_by_owner", "owner.linked", "owner.session_opened"] as const) {
+      entries.push(await audited(storage, tenant, byOwner, { kind: "system" }, { action, subject: about, outcome: "ok" }, nowMs));
+    }
+  }
+  await storage.put(Object.assign({ [keys.shop(tenant)]: shop }, owned ? { [owned.key]: owned.record } : {}, ...entries));
   return json({ shop });
+}
+
+/// An operator adds a self-serve shop to the pilot gate's cohort, or leaves it out again (`{ counted, actor }`), in one write
+/// with its audit entry. Only a shop its owner made can be added or left out: every shop an operator made is counted. Asking
+/// for what already holds changes and records nothing.
+async function setShopCohort(storage: DurableObjectStorage, tenant: string, body: Record<string, unknown>) {
+  if (typeof body.counted !== "boolean") return json({ error: "invalid_request" }, 400);
+  const shop = await storage.get<PilotShopRecord>(keys.shop(tenant));
+  if (!shop) return json({ error: "not_found" }, 404);
+  if (!shop.selfServe) return json({ error: "not_self_serve" }, 409);
+  if (body.counted === (shop.addedToCohortAt !== undefined)) return json({ shop });
+  const { addedToCohortAt: _left, ...rest } = shop;
+  const next: PilotShopRecord = body.counted ? { ...rest, addedToCohortAt: new Date().toISOString() } : rest;
+  await storage.put({
+    [keys.shop(tenant)]: next,
+    ...(await audited(storage, tenant, body.actor, { kind: "system" }, {
+      action: body.counted ? "cohort.added" : "cohort.removed", subject: {}, outcome: "ok" })),
+  });
+  return json({ shop: next });
 }
 
 /// Points the shop at its LINE connection and answers with the one it

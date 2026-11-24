@@ -66,6 +66,7 @@ import {
   type StoredDeletion,
   type SubscriptionPayment,
 } from "./pilot-store";
+import type { ShopTemplate } from "@manut/shop-templates";
 import { applyTemplate, checkedTemplate } from "./routine-setup";
 import { REPLY_REVISION, type ActionProposalJSON } from "./task-object";
 import { authCall, credStub, tenantCall, tenantDelete, tenantExport, type TenantDataEnv } from "./tenant-data";
@@ -780,6 +781,7 @@ async function operatorRoute(request: Request, url: URL, env: PilotEnv, flags: F
   if (route === "POST /v1/admin/pilot/replies") return proposeReply(env, shop, body, flags, actor);
   if (route === "POST /v1/admin/pilot/payments") return recordPayment(env, shop, body, actor);
   if (route === "POST /v1/admin/pilot/subscription-payments") return recordSubscriptionPayment(env, shop, body, actor);
+  if (route === "POST /v1/admin/pilot/gate/cohort") return setCohort(env, shop, body, actor);
   return json({ error: "not_found" }, 404);
 }
 
@@ -1014,18 +1016,10 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
   const asked = body.template ?? null;
   const template = asked === null ? null : checkedTemplate(asked);
   if (asked !== null && !template) return json({ error: "unknown_template" }, 400);
-  const tenant = `pilot:${crypto.randomUUID()}`;
-  const created = await pilotWrite(env, tenant, "/pilot/shop", {
-    name,
-    ownerName,
-    taskId: `pilot-task-${crypto.randomUUID()}`,
-    ...(template ? { template: template.id } : {}),
-    actor,
-  });
-  if (!created.ok) return json({ error: "shop_unavailable" }, 503);
-  // Set up before it is listed: a shop whose setup could not be written is never registered, as one whose registry row
-  // could not be written is not, so the console never shows a shop half made, and asking again makes a whole one.
-  if (template && !(await applyTemplate(env, tenant, template, actor))) return json({ error: "shop_unavailable" }, 503);
+  const tenant = newShopTenant();
+  if (!(await writeNewShop(env, tenant, { name, ownerName, template }, actor))) {
+    return json({ error: "shop_unavailable" }, 503);
+  }
   const registered = await authCall(env, "/pilot-shops", {
     method: "POST",
     headers: { "content-type": "application/json", "x-admin": "1" },
@@ -1033,6 +1027,39 @@ async function createShop(env: PilotEnv, body: Record<string, unknown>, actor: A
   });
   if (!registered.ok) return json({ error: "shop_unavailable" }, 503);
   return json({ tenant, name, ownerName, ...(template ? { template: template.id } : {}) });
+}
+
+/// A new pilot shop's tenant. See `createShop`.
+export function newShopTenant(): string {
+  return `pilot:${crypto.randomUUID()}`;
+}
+
+/// The owner a shop is made with when its owner makes it (self-serve.ts): the account's link id and verified subject, and
+/// the hash, id and end of their device's first owner session, whose token only the Worker ever holds.
+export type NewShopOwner = { accountId: string; subject: string; sessionId: string; tokenHash: string; expiresAt: number };
+
+/// Writes a new shop's own records, as the operator's route and the owner's own both make one: the shop with its
+/// `shop.created` entry in one write (and, for a shop its owner makes, `owner`'s link and first session with their entries
+/// in that same write, pilot-store.ts), then the template's setup, applied the one way (routine-setup.ts). Answers whether
+/// all of it was written. It does not list the shop: each caller does that last, so a shop whose setup could not be
+/// written is never listed, and asking again makes a whole one.
+export async function writeNewShop(env: PilotEnv, tenant: string,
+  shop: { name: string; ownerName: string; template: ShopTemplate | null }, actor: AuditActor, owner?: NewShopOwner):
+  Promise<boolean> {
+  const created = await pilotWrite(env, tenant, "/pilot/shop", {
+    name: shop.name,
+    ownerName: shop.ownerName,
+    taskId: `pilot-task-${crypto.randomUUID()}`,
+    ...(shop.template ? { template: shop.template.id } : {}),
+    ...(owner ? { owner } : {}),
+    actor,
+  }).catch(() => null);
+  if (!created?.ok) {
+    await created?.body?.cancel();
+    return false;
+  }
+  await created.body?.cancel();
+  return !shop.template || (await applyTemplate(env, tenant, shop.template, actor));
 }
 
 /// Every pilot shop, with its latest deletion request when it has one, so the
@@ -1074,6 +1101,7 @@ async function listShops(env: PilotEnv): Promise<Response> {
         ownerName: shop.ownerName,
         ...(shop.lineConnectionId ? { lineConnectionId: shop.lineConnectionId } : {}),
         ...(shop.template ? { template: shop.template } : {}),
+        ...(shop.selfServe ? { selfServe: true } : {}),
         consent,
         ...(deletion ? { deletion } : {}),
         ...(started ? { deleting: { shopRecord: true } } : {}),
@@ -1408,6 +1436,25 @@ async function recordSubscriptionPayment(env: PilotEnv, shop: PilotShopRecord, b
   return json(((await recorded.json()) as { payment: SubscriptionPayment }).payment);
 }
 
+/// `POST /v1/admin/pilot/gate/cohort` with exactly `{ tenant, counted }`: an operator adds a shop its owner made to the pilot
+/// gate's cohort (`counted: true`), or leaves it out again, after speaking with its owner as the pilot's owners were spoken
+/// with. Answers `{ tenant, counted }`. A shop an operator made is always counted, so it answers 409 `not_self_serve`.
+async function setCohort(env: PilotEnv, shop: PilotShopRecord, body: Record<string, unknown>, actor: AuditActor):
+  Promise<Response> {
+  const keys = Object.keys(body);
+  if (keys.length !== 2 || !keys.includes("counted") || typeof body.counted !== "boolean") {
+    return json({ error: "invalid_request" }, 400);
+  }
+  if (!shop.selfServe) return json({ error: "not_self_serve" }, 409);
+  const written = await pilotWrite(env, shop.tenant, "/pilot/shop-cohort", { counted: body.counted, actor }).catch(() => null);
+  if (!written?.ok) {
+    await written?.body?.cancel();
+    return written?.status === 409 ? json({ error: "not_self_serve" }, 409) : json({ error: "shop_unavailable" }, 503);
+  }
+  const { shop: stored } = (await written.json()) as { shop: PilotShopRecord };
+  return json({ tenant: shop.tenant, counted: stored.addedToCohortAt !== undefined });
+}
+
 /// `GET /v1/admin/pilot/gate`: every pilot shop's trial, payment and activity,
 /// and the cohort's two shares against the gate's lines. A shop whose records
 /// cannot be read fails the whole answer rather than leaving the cohort: a
@@ -1436,6 +1483,8 @@ async function gateInput(env: PilotEnv, tenant: string): Promise<GateShopInput |
     trialStartedAt: records.shop.trialStartedAt ?? (legacy ? await firstLineConnection(env, tenant) : null),
     decisions: records.decisions,
     subscriptionPayments: records.subscriptionPayments,
+    ...(records.shop.selfServe ? { selfServe: true } : {}),
+    ...(records.shop.addedToCohortAt ? { addedToCohort: true } : {}),
   };
 }
 
