@@ -322,6 +322,11 @@ The outpost running write steps, this Mac (24 Nov 2026):
   once into a buffer of its own that is wiped with the step, and goes to the page only, as an argument of the scripts
   that type and check it. No step prints a value, and no report, note or log holds one; a test puts a known value
   through a fake browser and a fake API and finds it nowhere else.
+- **The scripts themselves** run against test pages the spec serves (`e2e/outpost-scripts.spec.ts` in Chromium, as CI
+  runs the suite, and `e2e/outpost-scripts-webkit.spec.ts` in WebKit, the macOS webview's engine, on a Mac): nothing is
+  typed until every field is found, every value goes in exactly, a button the page turns on later is waited for, nothing
+  is pressed that the page or the browser would refuse, and the site's answer reads as sent, kept with an error, or
+  pending. They run in the page's own world there, not the outpost's content world.
 
 ## Choices made so far
 
