@@ -16,8 +16,8 @@ Code: `apps/api/src/sign-in-vault.ts` (the records, kept in the shop's vault obj
 `apps/api/src/browser-control.ts` (the operator, owner and outpost routes) and `apps/api/src/browser-writes.ts`
 (submitting: the write step, its table of kinds, and its hand-out and report). The worker's side is six methods on
 the job flow's port (`apps/api/src/job-flow.ts`). Tests: `apps/api/test/vault-sign-ins.test.ts`, `outposts.test.ts`,
-`outpost-register.test.ts`, `owner-vault.test.ts`, `owner-sign-ins.test.ts`, `sign-in-grants.test.ts`,
-`browser-steps.test.ts` and `browser-submit.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
+`outpost-register.test.ts`, `owner-vault.test.ts`, `owner-sign-ins.test.ts`, `sign-in-changes.test.ts`,
+`sign-in-grants.test.ts`, `browser-steps.test.ts` and `browser-submit.test.ts`. The routes are in `docs/pilot-api.md`, "Vault sign-ins and outposts". This Mac's outpost is
 `apps/desktop/src-tauri/src/outpost/` (the shell runs it) and `apps/desktop/src/pages/OutpostPane.tsx`; the rest of
 Customize › Connections, for the owner, is `apps/desktop/src/pages/ConnectionsPane.tsx` and `connections.ts`, over
 `src/runtime/http/connections.ts` (the API) or `src/runtime/mock/vault.ts` (Practice).
@@ -42,9 +42,10 @@ connections, sealed with the same AES-GCM keys, `cred-crypto.ts`):
 - `site`: the name people use, "Shopee Seller Centre".
 - `origins`: the web origins the sign-in belongs to, one to five, `https` only, such as
   `https://seller.shopee.co.th` and `https://accounts.shopee.co.th`. This is the site's allowlist: the vault types
-  the password only into a page on one of them, and the outpost browses only them for this sign-in.
+  the password only into a page on one of them, and the outpost browses only them for this sign-in. The owner may take
+  some away; adding or changing one needs the password typed again in the same change ("Changing a sign-in", below).
 - `username`: the account's name on the site. The owner sees it, so they can tell which account it is. It is not
-  given to the model.
+  given to the model. Changing it needs the password typed again too.
 - the password: sealed at rest, and answered by one route only, the redeem, to the outpost a grant names. The owner
   sees only that it is set.
 - `members`: who may use it. Members come from `@manut/member-grants`' roster, and only those whose jobs run through
@@ -154,6 +155,28 @@ When a site refuses the saved password, the outpost tells the worker, and the me
 then reads "Needs a new password", no grant is issued for it, and an unredeemed grant for it is refused. The owner
 types a new password in Customize › Connections (or an operator types one the owner relays); the sign-in is working
 again, and the next grant gives the new password.
+
+### Changing or removing a sign-in
+
+The owner can change a sign-in's account or its addresses, and remove it, from Customize › Connections. The danger in a
+change is someone holding a stolen owner session pointing a password they never knew at an address of their own, where a
+member's sign-in step would type it into their page. So a password is typed only into the account and the addresses it was
+given with:
+
+- Adding or changing any address, or changing the account, needs the password typed again in the same change. The vault
+  seals it as adding does, so a sign-in's account, addresses and password always came together from someone who knew the
+  password; if that is the person with the stolen session, the password the vault types is theirs, and the owner's is
+  gone from the vault rather than sent anywhere new.
+- Taking addresses away, keeping at least one, and changing nothing else, may go without it: the password then goes to
+  fewer of the places it was given for, never to a new one.
+- Anything else is refused (`password_required`), and a change of nothing too (`no_change`): a new password alone is the
+  password route's.
+
+A password typed again mends a broken sign-in, as a new password does. Who may use it and when it was last used stay.
+
+A removal is the operator's removal: the record keeps no account and no seal, a grant already issued for it is refused at
+its redeem, none is issued after, and no step goes to its addresses. A redeem that had already read the sign-in as a
+change or a removal lands finishes with what it read, which was a password given for those addresses.
 
 ### The step channel
 
@@ -422,6 +445,44 @@ The owner adding a sign-in and choosing who may use one, from the desktop (24 No
 - **Practice** changes its sample vault by the same rules, up to 50 sign-ins, and Ran Pa Noi, where the person helps,
   refuses both as a helper's session is refused. `apps/desktop/e2e/vault-sign-ins.spec.ts` walks both there.
 
+The owner removing a sign-in and changing its account or addresses, and the operator choosing who may use one (24 Nov
+2026; "Next slices" items 3 and 4):
+
+- **Two owner routes** (`ownerVaultRoute` in `browser-control.ts`), with the order and refusals of the others.
+  `POST /v1/vault/sign-ins/remove` goes through the vault's own removal, the operator's. `POST /v1/vault/sign-ins/change`
+  goes through a new vault operation (`/sign-ins/change` in `sign-in-vault.ts`) that checks the addresses, the account and
+  the password with the rules adding uses, seals a password typed again as adding does, and keeps the rule above
+  ("Changing or removing a sign-in"). Its body is exactly `{ signInId, origins, username, password }`, the password a
+  string or null for the one sealed. Each is logged by the owner with the sign-in's id only: `signin.removed`, and the new
+  `signin.changed` (the password typed again) and `signin.narrowed` (addresses only taken away), which the console's Audit
+  page has words for.
+- **The operator's members route**, `POST /v1/admin/vault/sign-ins/members`, an exact `ADMIN_METHODS` entry, through the
+  vault operation the owner's route uses, with its refusals, logged `signin.members_changed` by the operator. The console
+  has no sign-ins view, so nothing there changed but the Audit page's words. The operator still has no route to change a
+  sign-in's account or addresses: an operator removes it and adds it again.
+- **Tests** (`sign-in-changes.test.ts`, and every owner route in `owner-vault.test.ts`'s list): a helper refused, a
+  person's own sign-in answered 404, a removal refusing a grant issued before it at its redeem and at its open, a new or
+  swapped address and another account refused without the password, a change with it sealed under the vault's key and
+  typed for a grant issued before it at the new addresses only, narrowing, a change of nothing, adding's refusals value by
+  value, a password kept out of every answer, entry and log line, and the operator's members route refusing what the
+  owner's refuses. Each rule was broken in turn to see a test fail.
+- **Customize › Connections** (`ConnectionsPane.tsx`, `connections.ts`). Each sign-in's row has Remove beside Change and
+  Who uses it, which asks in the row first: "Remove the sign-in to Carrier portal as baanmali? Your team can no longer sign
+  in there. This cannot be undone: to use it again, add it again with its password.", with Keep holding the focus.
+  Change keeps the canvas's word and grows: the password first, as "Needs a new password" asks, then the account's name
+  and the addresses as the vault has them, each address read as Add a sign-in reads it. Save waits for something new the
+  vault would take, and the words under the password say when it must be typed again. A new password alone goes as it
+  always went (`connections.password`); anything else is a change (`connections.change`). The row still shows the canvas's
+  lines only; the account and the addresses are in the tab's own state, for Remove's question and Change's fields. Every
+  word in en, ko, ja and zh.
+- **The rule on the desktop** is said once for every runtime (`signInChangeRefusal` in
+  `apps/desktop/src/runtime/connections.ts`). The connected runtime checks a change's values, then reads the sign-ins with
+  the same session and checks the change against the account and addresses listed, so a change the vault would refuse is
+  refused with nothing sent; a change carrying a password then crosses once, with no second try after a 401.
+- **Practice** changes and removes its sample sign-ins by the same rule, and `apps/desktop/e2e/vault-sign-ins.spec.ts`
+  walks both there: a new address waiting for the password, an address taken away without it, and a removal kept, then
+  made.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -439,8 +500,8 @@ Each can be undone later; none is the owner's to make, so none waited.
 - A sign-in's origins are kept exactly as a browser writes an origin, so the outpost's check is a plain comparison.
 - A grant asks for an online outpost: one that is asleep could not use it within a minute.
 - The members on a sign-in are set when it is added; changing them means removing it and adding it again. The redeem
-  still checks the member against the sign-in, ready for when they can change. (Replaced on 24 Nov 2026 for the owner, who
-  now chooses who may use a sign-in from the app; the operator still removes it and adds it again.)
+  still checks the member against the sign-in, ready for when they can change. (Replaced on 24 Nov 2026: the owner chooses
+  who may use a sign-in from the app, and the operator has a route to it too.)
 - Grants are not exported: they live a minute, and the audit log keeps their history. Dead grants are deleted ten
   minutes after their minute ends, when the next grant is issued.
 
@@ -557,7 +618,8 @@ The owner's Connections (24 Nov 2026), each in `docs/decisions.md`:
   credential and ingress limit.
 - Each owner change goes through the vault's own operation, the operator's where there is one, so there is one way to
   each record. The owner may remove any outpost of the shop, a cloud outpost included, and adds or removes no sign-in yet.
-  (Adding one, and choosing who may use one, came later the same day, below; removing one is still the operator's.)
+  (Adding one, and choosing who may use one, came later the same day, below; removing one, and changing its account or
+  addresses, later still.)
 - A rename changes the name only, with registration's rule for a name, and is logged by id, never by the name typed.
 - The new password crosses once: a read first with the same session, then one send with no second try after a 401.
 - This Mac's row stays the shell's, and the list below shows every outpost of the shop, this Mac's own record included:
@@ -587,13 +649,32 @@ The owner's sign-ins (24 Nov 2026), each in `docs/decisions.md`:
 - Adding goes through the operator's own operation, and the route checks only that the body is exactly its five keys:
   every value is the vault's to check, so the two routes refuse one sign-in the same way.
 - Who may use a sign-in is a vault operation of its own that changes nothing else, logged as `signin.members_changed` with
-  the sign-in's id only. The operator has no route to it yet.
+  the sign-in's id only. The operator has no route to it yet. (It has since: below.)
 - Neither route is behind an ingress limit, as none of the owner's vault routes is.
 - The form keeps a page's address as its site's origin and says so. It does not check that several addresses are one
   site's: the API does not either, and telling sites apart needs the public suffix list, so the hint asks for the site's
   own addresses.
 - The account's name goes without the spaces a paste brings at its ends; the vault keeps what it is sent exactly.
 - Nobody is ticked when Add a sign-in opens, so the owner says who; a full vault closes the form and says why.
+
+Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
+
+- The rule: adding or changing any address, or changing the account, needs the password typed again in the same change;
+  only taking addresses away, keeping at least one, may go without it. A change of nothing is refused, so `signin.changed`
+  always means the account or the addresses moved, and a new password alone stays the password route's.
+- One vault operation for a change, which checks every value with adding's rules and seals as adding does. A change's body
+  is exactly four keys, the password a string or null: keeping the sealed one is said, never read from a key left out.
+- Two audit actions for a change, `signin.changed` and `signin.narrowed`, chosen by whether the body carried a password,
+  so the log shows the rule held for each. A removal is `signin.removed`, as the operator's is.
+- The owner's removal is the operator's removal, unchanged: every grant, redeem and step already reads the sign-in as it
+  happens, so nothing issued before it can be used after it.
+- The operator gets the members route, not a change route: an operator who must change an account or an address removes
+  the sign-in and adds it again, with the password the owner relays.
+- Neither new owner route is behind an ingress limit, as none of the owner's vault routes is; no new limiter.
+- On the desktop, Change keeps the canvas's word and grows to the account and the addresses, the password first; Remove
+  asks in the row, naming the site and the account; the row shows neither. The account and the addresses are decoded into
+  the tab's own state only. An account typed with a paste's spaces at its ends is sent trimmed, unless it then matches the
+  account the vault keeps, which is sent exactly as kept.
 
 ## Next slices
 
@@ -625,13 +706,13 @@ The owner's sign-ins (24 Nov 2026), each in `docs/decisions.md`:
    state already says.
 3. **The rest of Customize › Connections on the desktop** (built 24 Nov 2026: the shop's sign-ins with Change, the
    shop's outposts with Rename and Remove, and the owner's routes for them, above; adding a sign-in from the app and
-   choosing who may use one, above). Left of it: the canvas's left pane (the shop's channels and the AI models), and
-   removing a sign-in, or changing its account or addresses, from the app (an operator removes it, and it is added
-   again). (Built 24 Nov 2026: this Mac's own record folded into its row, and this Mac's outpost for the shop the
-   switcher shows, above.)
+   choosing who may use one, above; removing a sign-in and changing its account or addresses, above). Left of it: the
+   canvas's left pane (the shop's channels and the AI models), and renaming a sign-in's site, which only removing it and
+   adding it again does. (Built 24 Nov 2026: this Mac's own record folded into its row, and this Mac's outpost for the
+   shop the switcher shows, above.)
 4. **Smaller gaps**: (built 24 Nov 2026: re-sealing a shop's sign-ins and connection secrets after a vault key
    rotation, `POST /v1/admin/vault/reseal`, `docs/pilot-api.md`);
-   (built 24 Nov 2026: changing a sign-in's members, by the owner from the app, above; an operator's route to it is left);
+   (built 24 Nov 2026: changing a sign-in's members, by the owner from the app and by the operator, above);
    (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
    as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the

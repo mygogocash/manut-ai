@@ -114,7 +114,8 @@ function heartbeat(tenant: string, outpostId: string, credential: string) {
 }
 
 /// Every route here with a body it would take, so a refusal can be shown on each. Adding a sign-in and choosing who may
-/// use one are tested for what they do in owner-sign-ins.test.ts.
+/// use one are tested for what they do in owner-sign-ins.test.ts, and changing one's account or addresses and removing one
+/// in sign-in-changes.test.ts.
 function everyRoute(signInId: string, outpostId: string): [string, string, unknown][] {
   return [
     ["GET", "/v1/vault/sign-ins", undefined],
@@ -122,6 +123,10 @@ function everyRoute(signInId: string, outpostId: string): [string, string, unkno
       username: "baan.mali", password: NEW_PASSWORD, members: ["nam"] }],
     ["POST", "/v1/vault/sign-ins/password", { signInId, password: NEW_PASSWORD }],
     ["POST", "/v1/vault/sign-ins/members", { signInId, members: ["kit"] }],
+    ["POST", "/v1/vault/sign-ins/change", { signInId, origins: ["https://track.carrier.example"], username: "baan.mali",
+      password: NEW_PASSWORD }],
+    ["POST", "/v1/vault/sign-ins/change", { signInId, origins: [ORIGINS[0]], username: USERNAME, password: null }],
+    ["POST", "/v1/vault/sign-ins/remove", { signInId }],
     ["GET", "/v1/vault/outposts", undefined],
     ["POST", "/v1/vault/outposts/rename", { outpostId, name: "Fon's MacBook" }],
     ["POST", "/v1/vault/outposts/remove", { outpostId }],
@@ -260,13 +265,15 @@ describe("the owner's view of the shop's vault and outposts", () => {
     // The shop's sign-ins take two: `GET` lists them and `POST` adds one. Every other route takes one.
     for (const [method, path] of [["PUT", "/v1/vault/sign-ins"], ["DELETE", "/v1/vault/sign-ins"],
       ["PATCH", "/v1/vault/sign-ins"], ["GET", "/v1/vault/sign-ins/password"], ["GET", "/v1/vault/sign-ins/members"],
-      ["PUT", "/v1/vault/sign-ins/members"], ["POST", "/v1/vault/outposts"], ["PUT", "/v1/vault/outposts"],
-      ["GET", "/v1/vault/outposts/rename"], ["GET", "/v1/vault/outposts/remove"]] as const) {
+      ["PUT", "/v1/vault/sign-ins/members"], ["GET", "/v1/vault/sign-ins/change"], ["PATCH", "/v1/vault/sign-ins/change"],
+      ["GET", "/v1/vault/sign-ins/remove"], ["DELETE", "/v1/vault/sign-ins/remove"], ["POST", "/v1/vault/outposts"],
+      ["PUT", "/v1/vault/outposts"], ["GET", "/v1/vault/outposts/rename"], ["GET", "/v1/vault/outposts/remove"]] as const) {
       const answer = await send(owner, method, path, method === "GET" || method === "DELETE" ? undefined : {});
       expect(answer, `${method} ${path}`).toEqual({ status: 405, text: JSON.stringify({ error: "method_not_allowed" }) });
     }
     // Paths beside them are not routes at all, and the outposts' own namespace takes no owner's list.
-    for (const path of ["/v1/vault", "/v1/vault/sign-ins/remove", "/v1/vault/outposts/credential", "/v1/outposts"]) {
+    for (const path of ["/v1/vault", "/v1/vault/sign-ins/reseal", "/v1/vault/sign-ins/broken", "/v1/vault/outposts/credential",
+      "/v1/outposts"]) {
       expect((await send(owner, "POST", path, {})).status, path).toBe(404);
     }
   });

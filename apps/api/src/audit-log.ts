@@ -102,9 +102,14 @@ export const AUDIT_ACTIONS = [
   "signin.broken",
   "signin.requested",
   "signin.redeemed",
-  // The owner choosing who may use a sign-in, from Customize › Connections. Its subject is the sign-in's id only: who may
-  // use it is on the sign-in's own record.
+  // The owner choosing who may use a sign-in, from Customize › Connections, or an operator on the owner's word. Its subject
+  // is the sign-in's id only: who may use it is on the sign-in's own record.
   "signin.members_changed",
+  // The owner changing a sign-in's account or its addresses, from Customize › Connections: `changed` with its password typed
+  // again in the same change, as anything that could send the password somewhere new must be; `narrowed` with addresses
+  // only taken away and the password kept. The subject is the sign-in's id only: never the account or an address.
+  "signin.changed",
+  "signin.narrowed",
   // The shop's vault sealed again under the current key after a rotation (vault-reseal.ts). It names no id: it is the
   // shop's whole vault, and the counts are in the operator's answer.
   "vault.resealed",

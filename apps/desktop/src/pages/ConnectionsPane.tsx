@@ -1,8 +1,10 @@
 // Customize › Connections for the shop's owner, around this Mac's Outposts box (OutpostPane.tsx): the canvas's Vault box
-// above it, with each site sign-in, who may use it, whether it works, when it was added, its Change and Who uses it, and the
-// canvas's Add a sign-in under them; and below it, every outpost the shop has, each with Rename and Remove. The words and the
-// rows are connections.ts's; the boards are Connections.dc.html and StatesCustomize.dc.html, which draw Add a sign-in as a
-// link and no form, so the form is the tab's own in-place question, as Change is.
+// above it, with each site sign-in, who may use it, whether it works, when it was added, its Change, Who uses it and Remove,
+// and the canvas's Add a sign-in under them; and below it, every outpost the shop has, each with Rename and Remove. The words
+// and the rows are connections.ts's; the boards are Connections.dc.html and StatesCustomize.dc.html, which draw Add a sign-in
+// as a link and no form, and Change as a link, so each form is the tab's own in-place question. Change keeps the canvas's word
+// and grows to the sign-in's account and addresses as well as its password; Remove asks once, naming the site and the
+// account, before anything is removed.
 //
 // This Mac's own row stays the shell's, with its Start and Stop. The shell gives the page the id this Mac's outpost has on
 // the shop's list (src-tauri/src/outpost/mod.rs, `View`), never its credential, so this Mac's record is folded into that row
@@ -11,7 +13,7 @@
 //
 // The views use no hooks, so a test calls them as plain functions to read their handlers. `useConnections` feeds them through
 // a client of the runtime of the tab's own: nothing the tab sends passes through the store, and the password typed into
-// Change goes from the field to that client once and is then gone from the page (connections.ts says how).
+// Change or Add a sign-in goes from the field to that client once and is then gone from the page (connections.ts says how).
 import { useEffect, useReducer, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { Op, OpParams, OpResult } from "../lib/protocol";
@@ -31,6 +33,7 @@ import {
   addedLine,
   addFields,
   addressProblem,
+  changeTodo,
   CONN_START,
   connectionsDo,
   connReduce,
@@ -38,13 +41,14 @@ import {
   membersReady,
   nameReady,
   outpostLine,
-  passwordReady,
+  passwordNeeded,
   readAddresses,
   refusalText,
   signInLine,
   siteProblem,
   usernameProblem,
   type AddDraft,
+  type ChangeDraft,
   type ConnAction,
   type ConnectionsCalls,
   type ConnUi,
@@ -61,7 +65,7 @@ export interface ConnectionsProps {
   dispatch: (a: ConnAction) => void;
   /** Save, in the open Change, Who uses it or Rename; Add, in Add a sign-in */
   onSave: () => void;
-  /** Remove, in the open question */
+  /** Remove, in the open question about a sign-in or an outpost */
   onRemove: () => void;
 }
 
@@ -86,46 +90,144 @@ export function Said({ ui, at }: { ui: ConnUi; at: ConnUi["at"] }) {
 
 // ---- the vault ----------------------------------------------------------------------------------------------------------
 
-/** Change, in the sign-in's own row: a password field and Save. Nothing is sent until Save, and what was typed leaves the
- *  field as it is sent. */
-function PasswordForm({ s, p, draft }: { s: VaultSignIn; p: ConnectionsProps; draft: string }) {
+/** A sign-in's address fields, in Add a sign-in (`prefix` "add") or Change ("change"): one field for each address, each
+ *  read as the vault would keep it and said under it when it cannot be (not https, an account in it, a repeat) or when only
+ *  its site's part is kept, with Remove beside each while there is more than one, and room for up to five. */
+function AddressesField({ addresses, p, prefix }: { addresses: readonly string[]; p: ConnectionsProps; prefix: "add" | "change" }) {
   const { ui, dispatch } = p;
-  const ready = passwordReady(draft);
+  const reads = readAddresses(addresses);
+  return (
+    <fieldset className="field" data-testid={`${prefix}-addresses`}>
+      <legend>{t("vault.add.addresses")}</legend>
+      <p className="help">{t("vault.add.addressesHint")}</p>
+      {addresses.map((text, i) => {
+        const read = reads[i];
+        const problem = read?.kind === "problem";
+        return (
+          <div key={i} className="address" data-testid={`${prefix}-address-row`}>
+            <div className="address-row">
+              <input
+                className="input"
+                type="text"
+                inputMode="url"
+                value={text}
+                placeholder={t("vault.add.addressExample")}
+                aria-label={t("vault.add.addressN", { n: i + 1 })}
+                aria-invalid={problem || undefined}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                disabled={ui.busy}
+                onChange={(e) => dispatch({ type: "address", index: i, text: e.target.value })}
+                data-testid={`${prefix}-address`}
+              />
+              {addresses.length > 1 && (
+                <button
+                  type="button"
+                  className="lk"
+                  disabled={ui.busy}
+                  onClick={() => dispatch({ type: "addressLess", index: i })}
+                  aria-label={t("vault.add.addressRemove", { n: i + 1 })}
+                  data-testid={`${prefix}-address-remove`}
+                >
+                  {t("outposts.remove")}
+                </button>
+              )}
+            </div>
+            {read?.kind === "problem" && (
+              <p className="help err" data-testid={`${prefix}-address-problem`}>
+                {addressProblem(read.problem)}
+              </p>
+            )}
+            {read?.kind === "origin" && read.changed && (
+              <p className="help" data-testid={`${prefix}-address-kept`}>
+                {t("vault.add.kept", { origin: read.origin })}
+              </p>
+            )}
+          </div>
+        );
+      })}
+      {addresses.length < MAX_ORIGINS && (
+        <button type="button" className="lk more" disabled={ui.busy} onClick={() => dispatch({ type: "addressMore" })} data-testid={`${prefix}-address-more`}>
+          {t("vault.add.addressMore")}
+        </button>
+      )}
+    </fieldset>
+  );
+}
+
+/** Change, in the sign-in's own row: its password first, as "Needs a new password" asks, then the account's name and the
+ *  addresses as the vault has them. Save waits for something new the vault would take: a new password, or a new account or
+ *  address with the password typed again (addresses only taken away need none), and says under the password when it is
+ *  needed. Nothing is sent until Save, and what was typed into the password leaves the page's state as it is sent. */
+function ChangeForm({ s, p, draft }: { s: VaultSignIn; p: ConnectionsProps; draft: ChangeDraft }) {
+  const { ui, dispatch } = p;
+  const ready = changeTodo(s, draft) !== null;
+  const needed = draft.password === "" && passwordNeeded(s, draft);
+  const badUser = usernameProblem(draft);
   const cancel = () => dispatch({ type: "cancel" });
+  const set = (field: "username" | "password") => (e: { target: { value: string } }) => dispatch({ type: "field", field, text: e.target.value });
   return (
     <form
-      className="ask"
-      data-testid="password-form"
+      className="ask change-signin"
+      data-testid="change-form"
       onKeyDown={formKeys(cancel)}
       onSubmit={(e) => {
         e.preventDefault();
         if (ready && !ui.busy) p.onSave();
       }}
     >
-      <label className="small" htmlFor={`password-${s.id}`}>
-        {t("vault.newPassword", { site: s.site })}
-      </label>
-      <input
-        id={`password-${s.id}`}
-        className="input"
-        type="password"
-        value={draft}
-        maxLength={MAX_PASSWORD}
-        autoFocus
-        autoComplete="new-password"
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-        disabled={ui.busy}
-        onChange={(e) => dispatch({ type: "draft", text: e.target.value })}
-        data-testid="password-input"
-      />
-      <p className="help">{t("vault.changeHint")}</p>
+      <div className="field">
+        <label className="small" htmlFor={`password-${s.id}`}>
+          {t("vault.change.password", { site: s.site })}
+        </label>
+        <input
+          id={`password-${s.id}`}
+          className="input"
+          type="password"
+          value={draft.password}
+          maxLength={MAX_PASSWORD}
+          autoFocus
+          autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={ui.busy}
+          aria-invalid={needed || undefined}
+          onChange={set("password")}
+          data-testid="password-input"
+        />
+        <p className={needed ? "help err" : "help"} data-testid="change-password-help">
+          {needed ? t("vault.change.again") : t("vault.changeHint")}
+        </p>
+      </div>
+      <div className="field">
+        <label htmlFor={`change-username-${s.id}`}>{t("vault.add.username")}</label>
+        <input
+          id={`change-username-${s.id}`}
+          className="input"
+          type="text"
+          value={draft.username}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={ui.busy}
+          aria-invalid={badUser || undefined}
+          onChange={set("username")}
+          data-testid="change-username"
+        />
+        <p className={badUser ? "help err" : "help"} data-testid="change-username-help">
+          {badUser ? t("conn.err.username", { max: MAX_USERNAME }) : t("vault.add.usernameHint")}
+        </p>
+      </div>
+      <AddressesField addresses={draft.addresses} p={p} prefix="change" />
       <div className="chips">
-        <button type="submit" className="btn dark" disabled={ui.busy || !ready} data-testid="password-save">
+        <button type="submit" className="btn dark" disabled={ui.busy || !ready} data-testid="change-save">
           {ui.busy ? t("conn.saving") : t("conn.save")}
         </button>
-        <button type="button" className="btn" disabled={ui.busy} onClick={cancel} data-testid="password-cancel">
+        <button type="button" className="btn" disabled={ui.busy} onClick={cancel} data-testid="change-cancel">
           {t("conn.cancel")}
         </button>
       </div>
@@ -181,9 +283,34 @@ function MembersForm({ s, p, chosen }: { s: VaultSignIn; p: ConnectionsProps; ch
   );
 }
 
+/** Remove, asked in the sign-in's own row: the site and the account named, that the team can no longer sign in there, and
+ *  that it cannot be undone but by adding it again with its password, with the safe answer holding the focus. Nothing is
+ *  removed until the owner says so. Its buttons have keys of their own, so they are new elements rather than the row's links
+ *  reused: `autoFocus` acts only on an element as it first appears. */
+function RemoveSignInQuestion({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
+  const { ui, dispatch } = p;
+  const cancel = () => dispatch({ type: "cancel" });
+  return (
+    <div className="tr signin" data-testid="signin" data-signin={s.id} onKeyDown={formKeys(cancel)}>
+      <span className="grow">
+        <span className="conn-name">{s.site}</span>
+        <span className="conn-line" data-testid="signin-remove-question">
+          {t("vault.removeAsk", { site: s.site, account: s.username })}
+        </span>
+      </span>
+      <button key="remove-yes" type="button" className="btn danger solid" disabled={ui.busy} onClick={p.onRemove} data-testid="signin-remove-yes">
+        {t("outposts.remove")}
+      </button>
+      <button key="remove-keep" type="button" className="btn" autoFocus disabled={ui.busy} onClick={cancel} data-testid="signin-remove-keep">
+        {t("outposts.keep")}
+      </button>
+    </div>
+  );
+}
+
 function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
-  const ask = p.ui.ask?.kind === "password" && p.ui.ask.signIn === s.id ? p.ui.ask : null;
-  const who = p.ui.ask?.kind === "members" && p.ui.ask.signIn === s.id ? p.ui.ask : null;
+  const asked = p.ui.ask !== null && "signIn" in p.ui.ask && p.ui.ask.signIn === s.id ? p.ui.ask : null;
+  if (asked?.kind === "removeSignIn") return <RemoveSignInQuestion s={s} p={p} />;
   const broken = s.state === "broken";
   const locked = p.ui.busy || p.ui.ask !== null;
   return (
@@ -200,13 +327,13 @@ function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
       <span className={broken ? "tag warn" : "tag ok"} data-testid="signin-tag">
         {broken ? t("vault.needsPassword") : t("vault.working")}
       </span>
-      {!ask && !who && (
+      {!asked && (
         <span className="signin-acts">
           <button
             type="button"
             className={broken ? "btn" : "lk"}
             disabled={locked}
-            onClick={() => p.dispatch({ type: "change", signIn: s.id })}
+            onClick={() => p.dispatch({ type: "change", signIn: s.id, username: s.username, origins: s.origins })}
             aria-label={`${t("vault.change")}: ${s.site}`}
             data-testid="signin-change"
           >
@@ -222,10 +349,20 @@ function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
           >
             {t("vault.who")}
           </button>
+          <button
+            type="button"
+            className="lk"
+            disabled={locked}
+            onClick={() => p.dispatch({ type: "removeSignIn", signIn: s.id })}
+            aria-label={`${t("outposts.remove")}: ${s.site}`}
+            data-testid="signin-remove"
+          >
+            {t("outposts.remove")}
+          </button>
         </span>
       )}
-      {ask && <PasswordForm s={s} p={p} draft={ask.draft} />}
-      {who && <MembersForm s={s} p={p} chosen={who.members} />}
+      {asked?.kind === "change" && <ChangeForm s={s} p={p} draft={asked.draft} />}
+      {asked?.kind === "members" && <MembersForm s={s} p={p} chosen={asked.members} />}
     </div>
   );
 }
@@ -235,10 +372,9 @@ function SignInRow({ s, p }: { s: VaultSignIn; p: ConnectionsProps }) {
  *  until everything is there. The password leaves the page's state as Add is pressed, and is never shown. */
 function AddSignInForm({ p, draft }: { p: ConnectionsProps; draft: AddDraft }) {
   const { ui, dispatch } = p;
-  const reads = readAddresses(draft.addresses);
   const ready = addFields(draft) !== null;
   const cancel = () => dispatch({ type: "cancel" });
-  const set = (field: "site" | "username" | "password") => (e: { target: { value: string } }) => dispatch({ type: "addField", field, text: e.target.value });
+  const set = (field: "site" | "username" | "password") => (e: { target: { value: string } }) => dispatch({ type: "field", field, text: e.target.value });
   const longSite = siteProblem(draft);
   const badUser = usernameProblem(draft);
   return (
@@ -276,63 +412,7 @@ function AddSignInForm({ p, draft }: { p: ConnectionsProps; draft: AddDraft }) {
           </p>
         )}
       </div>
-      <fieldset className="field" data-testid="add-addresses">
-        <legend>{t("vault.add.addresses")}</legend>
-        <p className="help">{t("vault.add.addressesHint")}</p>
-        {draft.addresses.map((text, i) => {
-          const read = reads[i];
-          const problem = read?.kind === "problem";
-          return (
-            <div key={i} className="address" data-testid="add-address-row">
-              <div className="address-row">
-                <input
-                  className="input"
-                  type="text"
-                  inputMode="url"
-                  value={text}
-                  placeholder={t("vault.add.addressExample")}
-                  aria-label={t("vault.add.addressN", { n: i + 1 })}
-                  aria-invalid={problem || undefined}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={ui.busy}
-                  onChange={(e) => dispatch({ type: "address", index: i, text: e.target.value })}
-                  data-testid="add-address"
-                />
-                {draft.addresses.length > 1 && (
-                  <button
-                    type="button"
-                    className="lk"
-                    disabled={ui.busy}
-                    onClick={() => dispatch({ type: "addressLess", index: i })}
-                    aria-label={t("vault.add.addressRemove", { n: i + 1 })}
-                    data-testid="add-address-remove"
-                  >
-                    {t("outposts.remove")}
-                  </button>
-                )}
-              </div>
-              {read?.kind === "problem" && (
-                <p className="help err" data-testid="add-address-problem">
-                  {addressProblem(read.problem)}
-                </p>
-              )}
-              {read?.kind === "origin" && read.changed && (
-                <p className="help" data-testid="add-address-kept">
-                  {t("vault.add.kept", { origin: read.origin })}
-                </p>
-              )}
-            </div>
-          );
-        })}
-        {draft.addresses.length < MAX_ORIGINS && (
-          <button type="button" className="lk more" disabled={ui.busy} onClick={() => dispatch({ type: "addressMore" })} data-testid="add-address-more">
-            {t("vault.add.addressMore")}
-          </button>
-        )}
-      </fieldset>
+      <AddressesField addresses={draft.addresses} p={p} prefix="add" />
       <div className="field">
         <label htmlFor="add-username">{t("vault.add.username")}</label>
         <input
@@ -662,6 +742,8 @@ export function useConnections(active: boolean, viewing: string | null): Connect
     add: (shop, fields) => ask("connections.add", { shop, ...fields }),
     password: (shop, signIn, password) => ask("connections.password", { shop, signIn, password }),
     members: (shop, signIn, members) => ask("connections.members", { shop, signIn, members }),
+    change: (shop, signIn, change) => ask("connections.change", { shop, signIn, ...change }),
+    removeSignIn: (shop, signIn) => ask("connections.removeSignIn", { shop, signIn }),
     rename: (shop, outpost, name) => ask("connections.rename", { shop, outpost, name }),
     remove: (shop, outpost) => ask("connections.remove", { shop, outpost }),
   };
@@ -682,8 +764,13 @@ export function useConnections(active: boolean, viewing: string | null): Connect
     onSave: () => {
       const open = ui.ask;
       if (ui.busy || !open) return;
-      // A typed password is read once, here, and `begin` takes it out of the page's state before anything is sent.
-      if (open.kind === "password" && passwordReady(open.draft)) void run({ what: "password", signIn: open.signIn, password: open.draft });
+      // A typed password is read once, here, and `begin` takes it out of the page's state before anything is sent. Change
+      // sends a new password alone as one, and a new account or addresses as a change (`changeTodo`).
+      if (open.kind === "change" && state.kind === "ready") {
+        const now = state.value.signIns.find((s) => s.id === open.signIn);
+        const todo = now ? changeTodo(now, open.draft) : null;
+        if (todo) void run(todo);
+      }
       if (open.kind === "add") {
         const fields = addFields(open.draft);
         if (fields) void run({ what: "add", fields });
@@ -700,6 +787,7 @@ export function useConnections(active: boolean, viewing: string | null): Connect
     onRemove: () => {
       const open = ui.ask;
       if (!ui.busy && open?.kind === "remove") void run({ what: "remove", outpost: open.outpost });
+      if (!ui.busy && open?.kind === "removeSignIn") void run({ what: "removeSignIn", signIn: open.signIn });
     },
   };
 }

@@ -70,6 +70,8 @@ const API_AUDIT_ACTIONS = [
   "signin.requested",
   "signin.redeemed",
   "signin.members_changed",
+  "signin.changed",
+  "signin.narrowed",
   "vault.resealed",
   "outpost.registered",
   "outpost.removed",

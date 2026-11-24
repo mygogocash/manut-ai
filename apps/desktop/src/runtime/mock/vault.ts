@@ -4,20 +4,25 @@
 // own shop; at Ran Pa Noi, the sample shop they help at, a helper sees none (host.ts).
 //
 // The rules are the API's (apps/api/src/sign-in-vault.ts), said again for Practice: a password is 1 to 1,024 characters, an
-// outpost's name is 1 to 80 letters once trimmed, with no control characters, and a new sign-in and who may use one follow
-// the vault's own rules (`newSignInRefusal` and `membersOf` in ../connections.ts), up to 50 sign-ins. A password is never
-// kept, not even here: Add and Change keep only when it was set, and the value is dropped. Nothing here is real, and
-// nothing leaves the app.
+// outpost's name is 1 to 80 letters once trimmed, with no control characters, and a new sign-in, who may use one and a
+// change of its account or addresses follow the vault's own rules (`newSignInRefusal`, `membersOf` and
+// `signInChangeRefusal` in ../connections.ts), up to 50 sign-ins: a change that could send the password somewhere new
+// needs it typed again. A password is never kept, not even here: Add and Change keep only when it was set, and the value
+// is dropped. Nothing here is real, and nothing leaves the app.
 import {
+  changeShapeRefusal,
   MAX_OUTPOST_NAME,
   MAX_PASSWORD,
   MAX_SIGN_INS,
   membersOf,
   newSignInRefusal,
+  originsOf,
+  signInChangeRefusal,
   siteOf,
   type NewSignIn,
   type ShopConnections,
   type ShopOutpost,
+  type SignInChange,
   type VaultSignIn,
 } from "../connections";
 
@@ -31,6 +36,9 @@ const DAY = 24 * HOUR;
 
 const refused = (code: string, message: string): VaultResult<never> => ({ ok: false, code, message });
 
+/** A sign-in the caller cannot change the vault through: its lists are copies too. */
+const copyOf = (s: VaultSignIn): VaultSignIn => ({ ...s, origins: [...s.origins], members: [...s.members] });
+
 /** Practice's words for what the vault refuses: the runtime's own, which the page replaces with its own words by code. */
 const REFUSED: Record<string, string> = {
   invalid_site: "A site's name is 1 to 80 letters.",
@@ -38,7 +46,10 @@ const REFUSED: Record<string, string> = {
   invalid_username: "The account's name is 1 to 256 characters.",
   invalid_password: `A password is 1 to ${MAX_PASSWORD} characters.`,
   invalid_members: "Choose who may use it: Nam, Pim, Ton or Kit.",
+  no_change: "That is the account and the addresses it has now.",
+  password_required: "Type its password again to give it a new account or a new address.",
 };
+const GONE = "That sign-in is not in the vault.";
 
 export class PracticeVault {
   private signIns: VaultSignIn[];
@@ -53,6 +64,8 @@ export class PracticeVault {
       {
         id: "practice-signin-shopee",
         site: "Shopee Seller Centre",
+        username: "baan.mali@example.com",
+        origins: ["https://seller.shopee.co.th", "https://accounts.shopee.co.th"],
         members: ["nam", "ton"],
         state: "working",
         passwordSetAt: now - 20 * DAY,
@@ -65,6 +78,8 @@ export class PracticeVault {
       {
         id: "practice-signin-carrier",
         site: "Carrier portal",
+        username: "baanmali",
+        origins: ["https://track.carrier.example"],
         members: ["nam"],
         state: "broken",
         passwordSetAt: now - 12 * DAY,
@@ -83,7 +98,7 @@ export class PracticeVault {
 
   /** The shop's sign-ins and outposts, oldest first, each a copy the caller cannot change the vault through. */
   list(shop: string): ShopConnections {
-    return { shop, signIns: this.signIns.map((s) => ({ ...s, members: [...s.members] })), outposts: this.outposts.map((o) => ({ ...o })) };
+    return { shop, signIns: this.signIns.map(copyOf), outposts: this.outposts.map((o) => ({ ...o })) };
   }
 
   /** A new sign-in, added at `now` by the vault's rules, working and never used yet. The password is checked and then
@@ -96,6 +111,9 @@ export class PracticeVault {
     const signIn: VaultSignIn = {
       id: `practice-signin-added-${this.added}`,
       site: siteOf(fields.site)!,
+      // Kept exactly as sent, as the vault keeps the account's name.
+      username: fields.username as string,
+      origins: originsOf(fields.origins)!,
       members: membersOf(fields.members)!,
       state: "working",
       passwordSetAt: now,
@@ -106,7 +124,7 @@ export class PracticeVault {
       createdAt: now,
     };
     this.signIns.push(signIn);
-    return { ok: true, value: { ...signIn, members: [...signIn.members] } };
+    return { ok: true, value: copyOf(signIn) };
   }
 
   /** Who may use a sign-in from now on, by the vault's rule for members. Nothing else about it changes. */
@@ -114,10 +132,41 @@ export class PracticeVault {
     const chosen = membersOf(members);
     if (!chosen) return refused("invalid_members", REFUSED.invalid_members!);
     const at = this.signIns.findIndex((s) => s.id === signIn);
-    if (at < 0) return refused("sign_in_not_found", "That sign-in is not in the vault.");
+    if (at < 0) return refused("sign_in_not_found", GONE);
     const changed: VaultSignIn = { ...this.signIns[at]!, members: chosen };
     this.signIns[at] = changed;
-    return { ok: true, value: { ...changed, members: [...changed.members] } };
+    return { ok: true, value: copyOf(changed) };
+  }
+
+  /** A sign-in's account and addresses from now on, at `now`, by the vault's rule for a change: the values first, as adding
+   *  checks them, then the sign-in, then that a change which could send the password somewhere new has it typed again. A
+   *  password typed again mends a broken sign-in, as a new password does, and is then dropped; addresses only taken away
+   *  leave it as it was. Who may use it stays. */
+  change(signIn: unknown, fields: Partial<Record<keyof SignInChange, unknown>>, now: number): VaultResult<VaultSignIn> {
+    const shape = changeShapeRefusal(fields);
+    if (shape) return refused(shape, REFUSED[shape] ?? shape);
+    const at = this.signIns.findIndex((s) => s.id === signIn);
+    if (at < 0) return refused("sign_in_not_found", GONE);
+    const current = this.signIns[at]!;
+    const code = signInChangeRefusal(current, fields);
+    if (code) return refused(code, REFUSED[code] ?? code);
+    const typed = typeof fields.password === "string";
+    const changed: VaultSignIn = {
+      ...current,
+      origins: originsOf(fields.origins)!,
+      username: fields.username as string,
+      ...(typed ? { state: "working" as const, passwordSetAt: now, brokenAt: null, brokenBy: null } : {}),
+    };
+    this.signIns[at] = changed;
+    return { ok: true, value: copyOf(changed) };
+  }
+
+  /** Removes a sign-in, as the vault's removal does: nothing of it is kept to bring back. Its id is what the answer names. */
+  removeSignIn(signIn: unknown): VaultResult<string> {
+    const found = this.signIns.find((s) => s.id === signIn);
+    if (!found) return refused("sign_in_not_found", GONE);
+    this.signIns = this.signIns.filter((s) => s !== found);
+    return { ok: true, value: found.id };
   }
 
   /** A new password for a sign-in, at `now`. It mends a broken sign-in, as the vault's does. The password itself is checked
@@ -127,10 +176,10 @@ export class PracticeVault {
       return refused("invalid_password", `A password is 1 to ${MAX_PASSWORD} characters.`);
     }
     const at = this.signIns.findIndex((s) => s.id === signIn);
-    if (at < 0) return refused("sign_in_not_found", "That sign-in is not in the vault.");
-    const mended: VaultSignIn = { ...this.signIns[at], state: "working", passwordSetAt: now, brokenAt: null, brokenBy: null };
+    if (at < 0) return refused("sign_in_not_found", GONE);
+    const mended: VaultSignIn = { ...this.signIns[at]!, state: "working", passwordSetAt: now, brokenAt: null, brokenBy: null };
     this.signIns[at] = mended;
-    return { ok: true, value: { ...mended, members: [...mended.members] } };
+    return { ok: true, value: copyOf(mended) };
   }
 
   /** A new name for an outpost, trimmed. Only the name changes. */

@@ -1,26 +1,31 @@
 // What the Customize page's Connections tab asks of a runtime about the shop's vault and outposts (docs/browser-control.md,
 // "The owner's Connections"): the site sign-ins the team may use, a new one added, a new password for one, who may use one,
-// and the shop's outposts, each renamed or removed by the owner. Like the memory and routine ops (memory.ts, routines.ts),
-// the shapes live here, beside the runtime, and `OpMap` in lib/protocol.ts extends them, so a runtime that does not answer
-// one does not compile.
+// its account or its addresses changed, one removed, and the shop's outposts, each renamed or removed by the owner. Like the
+// memory and routine ops (memory.ts, routines.ts), the shapes live here, beside the runtime, and `OpMap` in lib/protocol.ts
+// extends them, so a runtime that does not answer one does not compile.
 //
 // The rules are the API's (apps/api/src/browser-control.ts, `ownerVaultRoute`; apps/api/src/sign-in-vault.ts for what a
 // sign-in may hold): only the shop's owner sees or changes these, and the shop is the session's. A runtime answers for the
 // shop the switcher shows, and every change names the shop its row was read for, so a change never lands on another shop
-// because the switcher moved meanwhile. The vault's rules for a new sign-in are said once more below, so a runtime refuses
-// with nothing sent what the vault would refuse, and Practice keeps the same rules.
+// because the switcher moved meanwhile. The vault's rules for a new sign-in and for a change to one are said once more
+// below, so a runtime refuses with nothing sent what the vault would refuse, and Practice keeps the same rules.
 //
-// A password crosses the protocol once, in `connections.add` or `connections.password`, and no answer ever holds one: a
-// sign-in says only when its password was set. A runtime sends it on to the vault and keeps it nowhere. Times are seconds
-// since the epoch, as everywhere in the protocol.
+// A password crosses the protocol once, in `connections.add`, `connections.password` or `connections.change`, and no answer
+// ever holds one: a sign-in says only when its password was set. A runtime sends it on to the vault and keeps it nowhere.
+// Times are seconds since the epoch, as everywhere in the protocol.
 import { DEFAULT_ROSTER } from "@manut/member-grants";
 
-/** A site sign-in in the shop's vault, as the Connections tab shows it. Never its password, and not its account's name or
- *  its sites' addresses, which the tab does not show. */
+/** A site sign-in in the shop's vault, as the Connections tab shows it. Never its password. Its account's name and its
+ *  sites' addresses are the owner's to see, as the API answers them to the owner (never to a model): Remove names the
+ *  account, and Change starts from both. */
 export interface VaultSignIn {
   id: string;
   /** the name people use: "Shopee Seller Centre" */
   site: string;
+  /** the account's name on the site, exactly as the vault keeps it */
+  username: string;
+  /** where its password may be typed: one to five https origins, as a browser writes them */
+  origins: string[];
   /** who may use it, by member id ("nam", "ton"), in the order the vault keeps them */
   members: string[];
   /** `broken`: a member reported that the site refused the saved password, and nobody uses it until the owner types a new one */
@@ -136,6 +141,51 @@ export function newSignInRefusal(p: Partial<Record<keyof NewSignIn, unknown>>): 
   return null;
 }
 
+/** A change to a sign-in in Change: its addresses and its account's name from now on, and its password typed again, or
+ *  null to keep the one the vault has sealed. */
+export interface SignInChange {
+  /** https origins, as `isOrigin` takes them */
+  origins: string[];
+  username: string;
+  password: string | null;
+}
+
+/** Where a sign-in's password goes now: the account it is typed for, at the addresses it may be typed into. */
+export type SignInPlace = Pick<VaultSignIn, "origins" | "username">;
+
+/** Whether `next` keeps the account and only addresses `now` already has, so the password the vault keeps goes to fewer of
+ *  the places it was given for and never a new one. Only such a change may go without the password typed again. */
+export function onlyTakesAway(now: SignInPlace, next: SignInPlace): boolean {
+  return next.username === now.username && next.origins.every((o) => now.origins.includes(o));
+}
+
+/** Whether `next` is the same account at the same addresses, in any order. The addresses are distinct on both sides, so
+ *  keeping only old ones and as many of them is keeping them all. */
+export const samePlace = (now: SignInPlace, next: SignInPlace): boolean => onlyTakesAway(now, next) && next.origins.length === now.origins.length;
+
+/** The vault's first refusal of a change's values, by the rules adding uses, in the order the vault checks them, or null.
+ *  These need no sign-in: a runtime refuses them before it reads one. */
+export function changeShapeRefusal(p: Partial<Record<keyof SignInChange, unknown>>): string | null {
+  if (originsOf(p.origins) === null) return "invalid_origins";
+  if (!usernameOk(p.username)) return "invalid_username";
+  if (p.password !== null && p.password !== undefined && !passwordOk(p.password)) return "invalid_password";
+  return null;
+}
+
+/** The vault's first refusal of a change to the sign-in `now`, or null when it would take it (`changeSignIn` in
+ *  apps/api/src/sign-in-vault.ts): its values by the rules adding uses; `no_change` for the same account at the same
+ *  addresses, since a new password alone is `connections.password`'s; and `password_required` for any change that could
+ *  send the password somewhere new (a new or swapped address, another account) without it typed again. Only addresses taken
+ *  away, at least one kept, may go without it. */
+export function signInChangeRefusal(now: SignInPlace, p: Partial<Record<keyof SignInChange, unknown>>): string | null {
+  const shape = changeShapeRefusal(p);
+  if (shape) return shape;
+  const next = { origins: originsOf(p.origins)!, username: p.username as string };
+  if (samePlace(now, next)) return "no_change";
+  if ((p.password === null || p.password === undefined) && !onlyTakesAway(now, next)) return "password_required";
+  return null;
+}
+
 export interface ConnectionOps {
   /** The sign-ins and outposts of the shop the switcher shows. Refused `owner_only` for a helper there. */
   "connections.list": { params: Record<string, never>; result: ShopConnections };
@@ -150,6 +200,15 @@ export interface ConnectionOps {
   /** Who may use one sign-in of `shop` from now on. Nothing else about it changes. Refused `invalid_members`,
    *  `sign_in_not_found`. */
   "connections.members": { params: { shop: string | null; signIn: string; members: string[] }; result: { signIn: VaultSignIn } };
+  /** One sign-in of `shop` at a new account or new addresses, by the vault's rule (`signInChangeRefusal`): its password
+   *  typed again with the change, or `password` null to keep the one sealed, which only taking addresses away may do. Who may
+   *  use it stays. Refused `invalid_origins`, `invalid_username`, `invalid_password`, `no_change`, `password_required`,
+   *  `sign_in_not_found`, `vault_not_configured`, and `not_saved` when a send carrying a password found the session ended,
+   *  with nothing sent again. */
+  "connections.change": { params: { shop: string | null; signIn: string } & SignInChange; result: { signIn: VaultSignIn } };
+  /** Removes one sign-in of `shop`: its team can no longer sign in there, and the vault keeps no account or password of it
+   *  to bring back. Refused `sign_in_not_found`. */
+  "connections.removeSignIn": { params: { shop: string | null; signIn: string }; result: { signIn: string } };
   /** A new name for one outpost of `shop`. Only the name changes. Refused `invalid_name`, `outpost_not_found`. */
   "connections.rename": { params: { shop: string | null; outpost: string; name: string }; result: { outpost: ShopOutpost } };
   /** Removes one outpost of `shop`: its work stops at once, and it must be registered again to work. */

@@ -197,8 +197,11 @@ describe("vault sign-ins", () => {
 
   it("is reached only through the exact operator routes behind the admin gate", async () => {
     const tenant = fresh("vault:shop");
+    // Who may use a sign-in takes `POST` only, and a sign-in's account or addresses are the owner's to change: an operator
+    // removes it and adds it again.
     for (const [method, path] of [["PUT", "/v1/admin/vault/sign-ins"], ["DELETE", "/v1/admin/vault/sign-ins"],
       ["GET", "/v1/admin/vault/sign-ins/password"], ["POST", "/v1/admin/vault/sign-ins/broken"],
+      ["GET", "/v1/admin/vault/sign-ins/members"], ["POST", "/v1/admin/vault/sign-ins/change"],
       ["GET", "/v1/admin/vault"]] as const) {
       const response = await adminFetch(`${API}${path}?tenant=${encodeURIComponent(tenant)}`, { method,
         headers: OPERATOR, ...(method === "GET" ? {} : { body: "{}" }) });
