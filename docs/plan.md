@@ -124,6 +124,7 @@ Mac; each starts when a slot frees and what it waits on has merged.
 | done | 48. Approvals found without reading every task: a lookup kept per shop says which task holds each request and which may still be open, written before a request opens, so `GET /v1/approvals` reads only those tasks and deciding finds its task in one read; approval-core's records in each task stay the only truth, and a backfill builds the lookup for shops from before | | Opus |
 | running | 49. The outpost's steps on real-world forms (`docs/browser-control.md`, "Next slices" 1 and 4): a sign-in over two pages, fields in a page's open shadow DOM, check boxes, radio buttons, select menus and editors that are not form fields, a settings page that keeps its form, and a frame's navigation told from the page's own; tested on local fixture pages in a browser engine, nothing run on a real site | | Opus |
 | done | 50. The console's Connections page for operators: a shop's sign-ins (working or broken, who may use them, last used) and outposts (online, last heartbeat), with the operator's existing actions behind a question (remove a sign-in, change who may use it, remove an outpost, replace its credential, shown once); no password is typed in the console (merged 25 Nov; the helper stopped when the API went silent, after the page and its tests, and the lead wrote its docs) | | Sonnet |
+| running | 51. The pane beside a lane (the canvas's Code board, "What to look at"): Diff from the session's changes, Preview with the Sample rows until a preview runs in the app, and Tests from what the lane keeps (its last run's result, command and time, no output kept); and mocha, Playwright and Python's `unittest` read by `testRun.ts` with the same pass rule | | Sonnet |
 | done | 32. The desktop's Settings › People for the owner (the canvas's People board): the helpers, invites with Copy link and Cancel, Remove with its confirmation, and away dates, through the owner routes the API has; the new-device alert's "remove access" opens it | | Sonnet |
 | done | 23. Browser control's smaller gaps: re-sealing after a vault key rotation, for sign-ins and connections alike (`POST /v1/admin/vault/reseal`), and a worker's list of the sign-ins its member may use (`port.signIns()`) | | Opus (coordinator) |
 | done | 21. Customize › Connections for the owner (`docs/browser-control.md`, "Next slices"): the shop's sign-ins, with "Change" typing a new password into the vault from the app, and the owner renaming or removing an outpost, through owner routes a helper's session cannot reach | | Opus |
@@ -484,3 +485,58 @@ Done when: each line form above and each secret rule is tested, with Thai text i
 endings, a repeated name, an empty file and a file of only comments.
 
 Done on cloud/env-example, 24 Nov 2026: `packages/env-example` with `readEnvExample`, `looksSecret` and `sampleEnv` (44 tests).
+
+### dev-url
+`packages/dev-url` (`@manut/dev-url`). Finds the address a project's dev server says it serves on, in the lines it
+prints, for the code editor's preview (`docs/code-editor.md`, "Left for later": "The preview itself").
+
+- `findDevUrl(lines)` takes the output as lines and answers the first address that is on this machine:
+  - `url`: the address, with `0.0.0.0`, `[::]` and `127.0.0.1` shown as `localhost`;
+  - `port`;
+  - `line`: the 1-based line it was found on.
+  Or it answers null.
+- It reads the forms these servers print, each with a sample in the tests:
+  - Vite (`➜  Local:   http://localhost:5173/`);
+  - Next.js (`- Local:        http://localhost:3000`);
+  - webpack-dev-server (`Loopback: http://localhost:8080/`);
+  - Astro (`┃ Local    http://localhost:4321/`);
+  - wrangler dev (`Ready on http://localhost:8787`);
+  - Python's `http.server` (`Serving HTTP on :: port 8000 (http://[::]:8000/) ...`);
+  - Django (`Starting development server at http://127.0.0.1:8000/`);
+  - Flask (` * Running on http://127.0.0.1:5000`);
+  - Rails / Puma (`* Listening on http://127.0.0.1:3000`).
+- Terminal colours and cursor escapes are stripped first.
+- Only `http` and `https` addresses whose host is this machine count: `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0`
+  or `[::]`. A network address (`Network: http://192.168.1.5:5173/`) or any other host is never answered.
+- A port must be between 1 and 65535.
+- Text in, value out: it never opens a connection.
+
+Done when: each server's sample above is found, a network-only output answers null, a line with two addresses
+answers the local one, the escapes are stripped, a port out of range is refused, and an empty output answers null.
+
+### preview-command
+`packages/preview-command` (`@manut/preview-command`). Chooses the command that starts a JavaScript project's
+preview, from its `package.json` text and the names of the files at its root, for the code editor's preview.
+
+- `previewCommand({ packageJson, files })` answers one of two things:
+  - `{ argv, manager, script }`: the command as a list of words (never one string for a shell), the package manager,
+    and the script it runs;
+  - `{ none: why }`, with `why` one of `no_package_json`, `unreadable`, `no_script` or `refused`.
+- **The package manager** is read from the lockfile in `files`, first match wins:
+  - `pnpm-lock.yaml` → pnpm;
+  - `yarn.lock` → yarn;
+  - `bun.lock` or `bun.lockb` → bun;
+  - `package-lock.json` → npm;
+  - none → npm.
+
+  A `packageManager` field (`"pnpm@9.1.0"`) wins over the lockfile.
+- **The script** is the first of `dev`, `start`, `preview` and `serve` that `scripts` has, and the argv is
+  `[manager, "run", script]`.
+- **A refused script.** A script whose text looks like it publishes is refused and never answered, so the preview
+  never deploys anything: it contains `deploy`, `publish` or `release`, `vercel` with `--prod`, `netlify` with
+  `--prod`, `firebase deploy`, `gh-pages`, or `npm publish`. The next script on the list is then tried.
+- Text in, value out: it reads no file and runs nothing.
+
+Done when: each lockfile, the `packageManager` field, each script name in order, each refused form (and the next
+script answered after one), a broken `package.json`, an empty `scripts` and a project with no `package.json` are
+tested.

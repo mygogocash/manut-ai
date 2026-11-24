@@ -149,6 +149,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's API was redeployed on 24 Nov at 20:53 from `9224fb1`, with item 48's approval lookup (API `4c340b5d`, deployed
   whole, not as a gradual rollout); smoke-tested: `GET /v1/approvals?state=open` and a decision answer 401 without a
   session, and the approval page, `/app/` and the console's Access load. The pages are unchanged since 19:38.
+- Dev's pages were redeployed on 25 Nov at 02:39 from `1ea1207`, with item 50's Connections page (pages `7821c338`;
+  the API is unchanged since 20:53); smoke-tested: `/` and `/app/` answer 200, and `/ops` and the admin vault and
+  outpost routes answer 302 to Cloudflare Access without a key.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -167,6 +170,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
      buttons, select menus and editors, settings pages that keep their form, and frames told from the page
      (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
+   - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
+     Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -244,8 +249,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
-2. The night build's queue has one task, `env-example` (added 24 Nov, for the code editor's preview); add pure
-   packages to `docs/plan.md` as the phases need them.
+2. The night build's queue has two tasks, `dev-url` and `preview-command` (added 25 Nov, for the code editor's preview
+   itself, with `env-example`, which landed on `cloud/env-example` and was merged on 25 Nov, `9fa8151`; nothing
+   imports it yet). Add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
