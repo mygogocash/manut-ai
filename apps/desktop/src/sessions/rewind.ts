@@ -11,6 +11,11 @@
 //
 // A rewind writes files in the session's folder only: nothing pushed, merged or deployed changes. When a step since
 // the turn pushed or published, the panel says that rewinding does not take it back (`wentLive`).
+//
+// Bring it back (the canvas's StatesCode "Reverted"): once the agent took the chat back, the shell keeps the files as they
+// were just before the rewind until the next turn starts, and the book remembers which rewind they are of (`backs`). The lane
+// offers them back (src/code/BringBack.tsx). Only the files come back: neither Claude Code nor Codex has a message that
+// brings a rewound chat back, so the chat stays where the rewind left it.
 import type { AgentId } from "./agents";
 import type { TimelineItem } from "../state/store";
 import { readCommand, type Where } from "../code/command";
@@ -113,6 +118,17 @@ export function rewoundNote(title: string, changed: number): string {
   return t(changed === 0 ? "rw.to.done0" : changed === 1 ? "rw.to.done1" : "rw.to.doneN", { title, n: changed });
 }
 
+/** What a finished Bring it back says in the chat: how many files came back, and that the chat did not. */
+export function broughtBackNote(changed: number): string {
+  return t(changed === 0 ? "bb.done0" : changed === 1 ? "bb.done1" : "bb.doneN", { n: changed });
+}
+
+/** A refusal of Bring it back in the person's words: that the files from before the rewind are no longer kept (the next turn
+ *  started, or they were brought back already), else as `whyText` says it. */
+export function backWhyText(e: unknown): string {
+  return whyOf(e) === "no_snapshot" ? t("bb.why.gone") : whyText(e);
+}
+
 /** A rewind that did not happen. `filesBack`: the files were put back as they were before it (else some could not be,
  *  and the message says which went wrong). */
 export class RewindError extends Error {
@@ -129,6 +145,9 @@ export interface TurnBookState {
   marks: Record<string, TurnMark[]>;
   /** why a session's newest turn has no snapshot */
   whyNot: Record<string, WhyNot>;
+  /** each session's last rewind whose files the shell keeps for Bring it back, by the turn it went back to; until the next
+   *  turn starts, the files are brought back, or the session goes */
+  backs: Record<string, string>;
 }
 
 export interface TurnBookDeps {
@@ -145,7 +164,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e ?? ""
 
 /** Each coding session's kept turns, and the calls that keep and put back their files, one at a time per session. */
 export class TurnBook {
-  private state: TurnBookState = { marks: {}, whyNot: {} };
+  private state: TurnBookState = { marks: {}, whyNot: {}, backs: {} };
   private chains = new Map<string, Promise<unknown>>();
   private fns = new Set<() => void>();
 
@@ -169,7 +188,22 @@ export class TurnBook {
     else delete m[session];
     if (why) w[session] = why;
     else delete w[session];
-    this.state = { marks: m, whyNot: w };
+    this.state = { ...this.state, marks: m, whyNot: w };
+    for (const f of this.fns) f();
+  }
+
+  /** The turn session `session`'s last rewind went back to, while its files can still be brought back. */
+  backOf(session: string): string | undefined {
+    return this.state.backs[session];
+  }
+
+  /** The files of a rewind are kept for Bring it back (`turn`), or no longer are (null). */
+  private setBack(session: string, turn: string | null) {
+    if (turn === null ? !(session in this.state.backs) : this.state.backs[session] === turn) return;
+    const backs = { ...this.state.backs };
+    if (turn === null) delete backs[session];
+    else backs[session] = turn;
+    this.state = { ...this.state, backs };
     for (const f of this.fns) f();
   }
 
@@ -190,6 +224,9 @@ export class TurnBook {
   async beforeSend(session: string, cwd: string, id: string): Promise<void> {
     const host = this.deps.host;
     if (!host || !cwd || !id) return;
+    // the turn that starts now is where the work goes on from: the shell drops what Bring it back would put back as it
+    // keeps the files, and the lane stops offering it at once
+    this.setBack(session, null);
     let late = false;
     const kept = this.queue(session, async () => {
       try {
@@ -224,10 +261,17 @@ export class TurnBook {
     void this.queue(session, () => host.end(session)).catch(() => undefined);
   }
 
+  /** A turn of session `session` began, a message of the person's or one the agent started itself: the work goes on from
+   *  the files as they are, so the rewind before it can no longer be brought back. */
+  turnStarted(session: string): void {
+    this.setBack(session, null);
+  }
+
   /** Session `session` was removed, or its agent starts again (a new process takes back only what it is sent itself):
    *  its snapshots go. */
   forget(session: string): void {
     if (session in this.state.marks || session in this.state.whyNot) this.put(session, [], null);
+    this.setBack(session, null);
     const host = this.deps.host;
     if (host) void this.queue(session, () => host.forget(session)).catch(() => undefined);
   }
@@ -272,7 +316,35 @@ export class TurnBook {
       const list = this.marksOf(session);
       const at = list.findIndex((m) => m.id === id);
       this.put(session, at >= 0 ? list.slice(0, at) : list, this.state.whyNot[session] ?? null);
-      await host.settle(session, id, true).catch(() => undefined);
+      const settled = await host.settle(session, id, true).catch(() => undefined);
+      // the files as they were just before this rewind stay for Bring it back, in place of an earlier rewind's, until the
+      // next turn starts; when the shell could not keep them, none is offered
+      this.setBack(session, settled?.back ? id : null);
+      return done;
+    });
+  }
+
+  /** What Bring it back would put back for session `session`: the files as they were just before its last rewind, and which
+   *  of them changed by hand since. Writes nothing. Rejects with `why:no_snapshot` when none are kept. */
+  backPreview(session: string): Promise<TurnPreview> {
+    const host = this.deps.host;
+    const turn = this.state.backs[session];
+    if (!host || turn === undefined) return Promise.reject(new Error("why:no_snapshot"));
+    return this.queue(session, () => host.backPreview(session, turn));
+  }
+
+  /** Put session `session`'s files back as they were just before its last rewind. Every file changed since the rewind stays as
+   *  it is unless it is in `overwrite` (the ones the person saw listed and unticked). The chat stays where the rewind left it.
+   *  Once it is done, nothing is left to bring back; when it fails, the files are as they were and it can be tried again. */
+  bringBack(session: string, overwrite: string[]): Promise<TurnRestored> {
+    const host = this.deps.host;
+    const turn = this.state.backs[session];
+    if (!host || turn === undefined) return Promise.reject(new Error("why:no_snapshot"));
+    return this.queue(session, async () => {
+      // a turn that started while this waited has taken what was kept
+      if (this.state.backs[session] !== turn) throw new Error("why:no_snapshot");
+      const done = await host.bringBack(session, turn, overwrite);
+      this.setBack(session, null);
       return done;
     });
   }

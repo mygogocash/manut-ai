@@ -1,7 +1,9 @@
 // "main changed while Kit worked. 1 file needs both changes." with the files, Let Kit merge and Show me both (the canvas's
-// StatesCodeDev board, "The main branch moved"): the Code page's note for a project whose lane started from a branch that
-// has since changed the files the lane changed. `MainMovedView` takes everything it shows as props and uses no hooks, so a
-// test can draw it; `MainMoved` reads the project's git and sends the ask.
+// StatesCodeDev board, "The main branch moved"): the Code page's note for a lane that started from a branch that has since
+// changed the files the lane changed. It sits on the lane's own row in the Lanes band, read for that lane's own base
+// (`base`) while the folder is on its branch; a folder that no lane's row covers (a session with no branch of its own) keeps
+// it under Kit's dial, read for the project's default base. `MainMovedView` takes everything it shows as props and uses no
+// hooks, so a test can draw it; `MainMoved` reads the git and sends the ask, to the row's own lane first (`lane`).
 import "./kit.css";
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
@@ -87,8 +89,18 @@ export function MainMovedView({ moved, both, onMerge, onShow }: MainMovedProps) 
   );
 }
 
-export function MainMoved({ root }: { root: string }) {
-  const moved = useMoved(root);
+/** `root`: the folder. `base`, `branch`: a lane's own base and the branch it works on (none: the project's default base, and
+ *  whichever branch the folder has checked out). `lane`: the session the ask goes to first. `off`: another row shows it. */
+export interface MainMovedWhere {
+  root: string;
+  base?: string;
+  branch?: string;
+  lane?: string;
+  off?: boolean;
+}
+
+export function MainMoved({ root, base, branch, lane, off }: MainMovedWhere) {
+  const moved = useMoved(root, getHost(), { base, branch, off });
   const [open, setOpen] = useState(false);
   const [both, setBoth] = useState<Both>({ state: "closed" });
   const key = moved ? `${moved.branch}\n${moved.base}\n${moved.files.join("\n")}` : "";
@@ -102,7 +114,7 @@ export function MainMoved({ root }: { root: string }) {
     }
     let live = true;
     setBoth((was) => (was.state === "open" ? was : { state: "loading" }));
-    readSides(getHost(), root, moved.files).then(
+    readSides(getHost(), root, moved.files, base).then(
       (sides) => {
         if (live) setBoth(sides ? { state: "open", sides } : { state: "failed" });
       },
@@ -114,7 +126,7 @@ export function MainMoved({ root }: { root: string }) {
       live = false;
     };
     // `key` stands for `moved`: the files, not the object a new read makes
-  }, [open, root, key]);
+  }, [open, root, base, key]);
 
   if (!moved) return null;
   return (
@@ -123,8 +135,8 @@ export function MainMoved({ root }: { root: string }) {
       both={both}
       onShow={() => setOpen((o) => !o)}
       onMerge={() => {
-        // to Kit as a message: each step Kit takes then asks through its own card
-        void askKit(getSessions(), root, mergeAsk(moved)).then((a) => getStore().actions.openSession(a.session));
+        // to Kit as a message, to this row's lane first: each step Kit takes then asks through its own card
+        void askKit(getSessions(), root, mergeAsk(moved), lane).then((a) => getStore().actions.openSession(a.session));
       }}
     />
   );

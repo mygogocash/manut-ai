@@ -35,6 +35,12 @@ export interface TurnRestored {
   tooBig: number;
 }
 
+/** What settling a rewind left behind (`turn_files_settle`). `back`: the files as they were just before a rewind that went
+ *  through are kept, so Bring it back can put them back until the next turn starts. */
+export interface TurnSettled {
+  back: boolean;
+}
+
 /** The shell's snapshot book for coding sessions, by SESSIONS id. A refusal rejects with `why:<code>` for the reasons
  *  the page words itself (`too_many`, `too_big`, `too_broad`, `no_snapshot`), else with the shell's own line. */
 export interface TurnFilesHost {
@@ -46,9 +52,18 @@ export interface TurnFilesHost {
   preview(session: string, turn: string): Promise<TurnPreview>;
   /** Put the files back as they were before `turn`, every path in `keep` left as it is. */
   restore(session: string, turn: string, keep: string[]): Promise<TurnRestored>;
-  /** The agent answered the rewind: `ok` = the chat went back too; otherwise the files go back as they were before
-   *  `restore`. */
-  settle(session: string, turn: string, ok: boolean): Promise<void>;
+  /** The agent answered the rewind: `ok` = the chat went back too, and the files from before the rewind are kept for Bring
+   *  it back (the answer says so); otherwise the files go back as they were before `restore`. */
+  settle(session: string, turn: string, ok: boolean): Promise<TurnSettled>;
+  /** What Bring it back would do after the rewind to before `turn`: put back the files as they were just before it, and
+   *  which of them changed by hand since the rewind. Writes nothing. A refusal is `why:no_snapshot` when no such rewind is
+   *  kept (the next turn started, or it was brought back already). */
+  backPreview(session: string, turn: string): Promise<TurnPreview>;
+  /** Put the files back as they were just before the rewind to before `turn`. Every file changed since the rewind stays as it
+   *  is unless it is in `overwrite` (the ones the person saw listed and unticked), so a file changed after the list was read,
+   *  which they never saw, is not lost. The chat is not touched: neither Claude Code nor Codex has a message that brings a
+   *  rewound chat back. */
+  bringBack(session: string, turn: string, overwrite: string[]): Promise<TurnRestored>;
   /** Drop every snapshot of `session` (it was removed, or its agent started again). */
   forget(session: string): Promise<void>;
   /** Drop the snapshots of every session not in `keep` (the app started). */
@@ -65,7 +80,9 @@ export function tauriTurnFiles(invoke: () => Promise<Invoke>): TurnFilesHost {
     end: (session) => call<void>("turn_files_end", { session }),
     preview: (session, turn) => call<TurnPreview>("turn_files_preview", { session, turn }),
     restore: (session, turn, keep) => call<TurnRestored>("turn_files_restore", { session, turn, keep }),
-    settle: (session, turn, ok) => call<void>("turn_files_settle", { session, turn, ok }),
+    settle: (session, turn, ok) => call<TurnSettled>("turn_files_settle", { session, turn, ok }),
+    backPreview: (session, turn) => call<TurnPreview>("turn_files_back_preview", { session, turn }),
+    bringBack: (session, turn, overwrite) => call<TurnRestored>("turn_files_bring_back", { session, turn, overwrite }),
     forget: (session) => call<void>("turn_files_forget", { session }),
     prune: (keep) => call<void>("turn_files_prune", { keep }),
   };
@@ -90,6 +107,9 @@ interface MockBook {
   starts: MockSnap[];
   end?: { n: number; files: MockFiles };
   undo?: { turn: string; files: MockFiles };
+  /** after a rewind that went through, until the next turn starts: the files as they were just before it (`files`) and as
+   *  it left them (`rest`) */
+  back?: { turn: string; files: MockFiles; rest: MockFiles };
 }
 
 export interface MockTurnGlobals {
@@ -132,6 +152,8 @@ export class MockTurnFiles implements TurnFilesHost {
     const books = this.books();
     if (books[session]?.cwd !== cwd) books[session] = { cwd, next: 1, starts: [] };
     const b = books[session];
+    // a turn starts: what Bring it back would put back is no longer where the work goes on from
+    b.back = undefined;
     const files = { ...this.folder(cwd) };
     const last = b.starts.at(-1);
     const hand = b.end && b.end.n === (last?.n ?? 0) ? differ(b.end.files, files) : last ? differ(last.files, files) : [];
@@ -174,19 +196,54 @@ export class MockTurnFiles implements TurnFilesHost {
     return { changed: changed.length, kept: keep.length, tooBig: 0 };
   }
 
-  async settle(session: string, turn: string, ok: boolean): Promise<void> {
+  async settle(session: string, turn: string, ok: boolean): Promise<TurnSettled> {
     const b = this.books()[session];
-    if (!b?.undo) return;
+    if (!b?.undo) return { back: false };
     if (b.undo.turn !== turn) throw new Error("that rewind is not the one waiting");
     const target = this.start(session, turn);
     if (ok) {
       const before = b.starts.filter((s) => s.n < target.n).at(-1);
       b.starts = b.starts.filter((s) => s.n < target.n);
       b.end = { n: before?.n ?? 0, files: { ...this.folder(b.cwd) } };
+      // the files as they were just before the rewind stay for Bring it back, with where the rewind left them
+      b.back = { turn, files: { ...b.undo.files }, rest: { ...this.folder(b.cwd) } };
     } else {
       (this.g.__manutMockFolders ??= {})[b.cwd] = { ...b.undo.files };
     }
     b.undo = undefined;
+    return { back: ok };
+  }
+
+  /** The files kept for Bring it back after the rewind to before `turn`; a rewind to another turn has none. */
+  private kept(session: string, turn: string) {
+    const b = this.book(session);
+    if (!b.back || b.back.turn !== turn) throw new Error("why:no_snapshot");
+    return { b, back: b.back };
+  }
+
+  async backPreview(session: string, turn: string): Promise<TurnPreview> {
+    const { b, back } = this.kept(session, turn);
+    const now = this.folder(b.cwd);
+    const list = differ(back.files, now).map((path) => ({ path, change: path in back.files ? (path in now ? "changed" : "back") : "gone" }) as const);
+    const hand = new Set(differ(back.rest, now));
+    return { back: list, hand: list.map((c) => c.path).filter((p) => hand.has(p)), tooBig: 0, headMoved: false };
+  }
+
+  async bringBack(session: string, turn: string, overwrite: string[]): Promise<TurnRestored> {
+    const { b, back } = this.kept(session, turn);
+    const now = this.folder(b.cwd);
+    // every file changed since the rewind stays as it is unless it is named: one changed after the list was read was never seen
+    const hand = new Set(differ(back.rest, now).filter((p) => !overwrite.includes(p)));
+    const all = differ(back.files, now);
+    const changed = all.filter((p) => !hand.has(p));
+    for (const p of changed) {
+      if (p in back.files) now[p] = back.files[p];
+      else delete now[p];
+    }
+    // the next turn starts from the files as they are now: what was put back is not read as changed by hand
+    b.end = { n: b.end?.n ?? b.starts.at(-1)?.n ?? 0, files: { ...now } };
+    b.back = undefined;
+    return { changed: changed.length, kept: all.length - changed.length, tooBig: 0 };
   }
 
   async forget(session: string): Promise<void> {

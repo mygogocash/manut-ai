@@ -60,7 +60,7 @@ import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./clos
 import { watchOpenFolder } from "./revealOpen";
 import { getSplit, groupOf, leaveIn, setSplit } from "./splitState";
 import { folderGroups, getFolderPrefs, orderFolders, pathKey, ranElsewhere, revealFolder as openFolderGroup, setFolderGone } from "./folders";
-import { REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
+import { broughtBackNote, REWINDS, rewoundNote, TurnBook, turnTitle } from "./rewind";
 
 /** The Accounts CLI a session of `agent` signs in as (mirrors `session_cli` in src-tauri/src/accounts.rs). */
 const ACCOUNT_CLI: Partial<Record<AgentId, AccountCli>> = { claude: "claude", codex: "codex", grok: "grok" };
@@ -661,6 +661,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         // the files as the turn left them: what changes before the next turn reads as changed by hand (rewind.ts)
         if (ev.event === "turn.end") turns.afterTurn(id);
+        // a turn began, the person's or the agent's own: the rewind before it can no longer be brought back
+        if (ev.event === "turn.start") turns.turnStarted(id);
         if (ev.event === "turn.end" && proc.signedOut) {
           endSignedOut(id, proc);
           return;
@@ -2629,6 +2631,20 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       const title = item && item.kind === "user" ? turnTitle(item.text) : "";
       const done = await turns.rewind(id, turn, keep);
       if (key) store().dispatch({ type: "system.note", bot: key, text: rewoundNote(title, done.changed), now: Date.now() });
+      return done;
+    },
+    /** Bring it back (the lane's Reverted state): put session `id`'s files back as they were just before its last rewind. Every
+     *  file changed since the rewind stays as it is unless it is in `overwrite` (the ones the person saw listed and unticked).
+     *  The chat stays where the rewind left it, since neither Claude Code nor Codex has a message that brings a rewound chat
+     *  back; the chat says what came back, and the lane reads by its tests again. Throws when the files could not be put back
+     *  (they are as they were) or are no longer kept. */
+    bringBack: async (id: string, overwrite: string[]) => {
+      const key = keys.get(id);
+      const done = await turns.bringBack(id, overwrite);
+      if (key) {
+        store().dispatch({ type: "system.note", bot: key, text: broughtBackNote(done.changed), now: Date.now() });
+        noteLaneEvent(key, { event: "files.back" });
+      }
       return done;
     },
     /** Edit and resend: the agent takes back the last message (its own rewind), then the box holds its text. */

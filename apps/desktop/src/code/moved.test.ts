@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DICT, setLang, t } from "../i18n";
 import fixture from "./mainMoved.fixture.json";
-import { MAX_ASKED, MAX_SHOWN, bothSides, diffOf, mergeAsk, movedOf, readSides, readView, type GitView, type Moved } from "./moved";
+import { MAX_ASKED, MAX_SHOWN, bothSides, diffOf, mergeAsk, movedOf, readMoved, readSides, readView, type GitView, type Moved } from "./moved";
 
 const view = (over: Partial<GitView> = {}): GitView => ({
   branch: "kit/promptpay-qr",
@@ -65,6 +65,52 @@ describe("whether the main branch moved under the lane", () => {
   it("counts every file, and names them in order", () => {
     const m = movedOf(view({ ours: ["b.ts", "a.ts", "c.ts"], theirs: ["c.ts", "a.ts"] }));
     expect(m?.files).toEqual(["a.ts", "c.ts"]);
+  });
+
+  it("says nothing for a lane whose branch the folder has left: the shell answers for the checked-out branch", () => {
+    expect(movedOf(view(), "kit/promptpay-qr")).toEqual({ branch: "kit/promptpay-qr", base: "main", files: ["src/checkout.tsx"] });
+    expect(movedOf(view(), "kit/thai-date-format")).toBeNull();
+    // with no lane named (the project's note), the branch the folder is on is the answer's own
+    expect(movedOf(view({ branch: "feature/x" }))?.branch).toBe("feature/x");
+  });
+});
+
+describe("reading a lane's own state", () => {
+  function host(v: GitView | null, fail = false) {
+    const asked: { cwd: string; base?: string | null; show?: string[] }[] = [];
+    return {
+      asked,
+      async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
+        asked.push({ cwd, ...o });
+        if (fail) throw new Error("git did not answer");
+        return v;
+      },
+    };
+  }
+
+  it("asks the shell for the lane's own base, and for the project's default when none is named", async () => {
+    const h = host(view({ base: "develop" }));
+    expect(await readMoved(h, "/p", { base: "develop", branch: "kit/promptpay-qr" })).toEqual({ branch: "kit/promptpay-qr", base: "develop", files: ["src/checkout.tsx"] });
+    expect(h.asked).toEqual([{ cwd: "/p", base: "develop" }]);
+    await readMoved(h, "/p");
+    expect(h.asked[1]).toEqual({ cwd: "/p", base: null });
+  });
+
+  it("says nothing while the folder is on another branch than the lane's", async () => {
+    expect(await readMoved(host(view({ branch: "kit/thai-date-format" })), "/p", { base: "main", branch: "kit/promptpay-qr" })).toBeNull();
+    expect(await readMoved(host(null), "/p", { base: "main", branch: "kit/promptpay-qr" })).toBeNull();
+  });
+
+  it("lets a read that failed reject, so a note that was shown is kept", async () => {
+    await expect(readMoved(host(null, true), "/p", { base: "main" })).rejects.toThrow("git did not answer");
+  });
+
+  it("reads both sides for the same base the note was read for", async () => {
+    const h = host(view());
+    await readSides(h, "/p", ["src/checkout.tsx"], "develop");
+    expect(h.asked).toEqual([{ cwd: "/p", base: "develop", show: ["src/checkout.tsx"] }]);
+    await readSides(h, "/p", ["src/checkout.tsx"]);
+    expect(h.asked[1]).toEqual({ cwd: "/p", base: null, show: ["src/checkout.tsx"] });
   });
 });
 

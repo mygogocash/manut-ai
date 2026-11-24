@@ -437,7 +437,7 @@ export interface MockCall {
   size?: number;
   path?: string;
   keep?: string[];
-  /** lane.branch: the branch the shell made for a lane, and the one it was made from */
+  /** lane.branch: the branch the shell made for a lane, and the one it was made from (main.moved: the one the page named) */
   branch?: string;
   base?: string;
   /** main.moved: the paths whose two diffs were asked for */
@@ -951,12 +951,15 @@ export class MockHost implements SessionHost {
     return { branch, base };
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
-    this.log({ op: "main.moved", cwd, show: o.show ?? [] });
+    this.log({ op: "main.moved", cwd, show: o.show ?? [], ...(o.base ? { base: o.base } : {}) });
     const v = (this.g.__manutMoved ?? { [MOCK_MOVED_ROOT]: MOCK_MOVED })[cwd];
     if (!v) return null;
     // the diffs of the paths asked for, as the shell gives them (only a path both sides changed)
     const both = (o.show ?? []).flatMap((p) => v.both.filter((b) => b.path === p));
-    return { ...v, both };
+    // as the shell reads it: the branch the folder has checked out now (a lane's own, once Kit made it), against the branch the
+    // page names as the base, else the answer's own
+    const branch = this.g.__manutBranches?.[cwd] || v.branch;
+    return { ...v, branch, base: o.base || v.base, both };
   }
   async reveal(cwd: string) {
     this.log({ op: "reveal", cwd });
@@ -1278,6 +1281,11 @@ class MockChat {
     this.bg = n;
     this.emit({ event: "session.info", background: n });
   }
+  /** The agent took the person's message `id`: its own rewind can take it back (agent_chat.rs keeps each message it took). */
+  private took(id?: string) {
+    this.sent++;
+    this.sentIds.push(id ?? "");
+  }
   private say(text: string, at: number) {
     const parts = [text.slice(0, Math.ceil(text.length / 2)), text.slice(Math.ceil(text.length / 2))];
     this.at(at, () => this.emit({ event: "delta", text: parts[0] }));
@@ -1355,7 +1363,9 @@ class MockChat {
       if (text.startsWith("/kit ")) {
         // Kit's states on the Code page (src/code/): an ask as the shell writes it (agent_chat.rs), a key typed into a
         // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key; `/kit shop` a change that reads
-        // the shop ID from the environment
+        // the shop ID from the environment. Each is a whole turn like any other: the agent took its message, so Rewind
+        // (src/sessions/rewind.ts) can take the turn back
+        this.took(i.id);
         const word = text.slice(5).trim();
         if (word === "key") {
           const lines = ["@@ -1,2 +1,3 @@", " export const CURRENCY = 'THB';", '+export const PROMPTPAY_KEY = "sk-FAKE0000000000000000TEST";'];
@@ -1628,8 +1638,7 @@ class MockChat {
         for (let k = 0; k < 40; k++) this.at(100 + k * 250, () => this.emit({ event: "delta", text: `line ${k + 1}\n` }));
         return;
       }
-      this.sent++;
-      this.sentIds.push(i.id ?? "");
+      this.took(i.id);
       if (text.startsWith("/work")) {
         // the events the Claude adapter emitted for a real two-file edit (Claude Code 2.1.322, claude-12-work.jsonl):
         // thinking text, its todo list (TaskCreate, then TaskUpdate per item), an Edit per file with its change,

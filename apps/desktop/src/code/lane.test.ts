@@ -147,6 +147,25 @@ describe("what a lane learns from its events", () => {
     expect(next.revertedFiles).toBeUndefined();
   });
 
+  it("knows Bring it back put the files back, and reads by its tests again until the next turn starts", () => {
+    const rewound = feed([...ran("pnpm test", true, out("vitest-pass")), { event: "rewound", id: "m-2", text: "Thai date format" }]);
+    const back = feed([{ event: "files.back" }], rewound);
+    // no longer reverted: the files are as they were before the rewind
+    expect(back.revertedAt).toBeUndefined();
+    expect(back.revertedFiles).toBeUndefined();
+    expect(back.backAt).toBe(1_000);
+    // what the rewind took away stays away: the files that came back are of no run
+    expect(testState(back)).toBe("none");
+    // a turn that starts ends it, and a new rewind starts over
+    expect(feed([{ event: "turn.start" }], back).backAt).toBeUndefined();
+    const again = feed([{ event: "rewound", id: "m-1" }], back);
+    expect(again.backAt).toBeUndefined();
+    expect(again.revertedFiles).toBe(true);
+    // a lane that was not reverted has no files to bring back: nothing changes
+    const plain = feed(ran("pnpm test", true, out("vitest-pass")));
+    expect(noteLane(plain, { event: "files.back" }, 9_999)).toBe(plain);
+  });
+
   it("leaves the record as it was for an event it does not use", () => {
     const lane = feed(ran("pnpm test", true, out("vitest-pass")));
     for (const ev of [{ event: "delta", text: "hi" }, { event: "message", id: "m", text: "done" }, { event: "approval.request", request_id: "r" }, { event: "turn.start" }, { event: "turn.end", outcome: "done" }, { event: "session.info" }]) {
@@ -257,12 +276,21 @@ describe("the line under a lane's row", () => {
     expect(line("reverted", lane, { time: "09:40" })).toEqual({ key: "lane.line.revertedFiles", vars: { time: "09:40" } });
   });
 
+  it("says the files were brought back and the chat was not, until the next turn", () => {
+    const lane = { ...emptyLane(), backAt: 1 };
+    expect(line("not_run", lane, { time: "10:02" })).toEqual({ key: "lane.line.broughtBack", vars: { time: "10:02" } });
+    // the lane then reads by its tests (Not run yet), not as Reverted
+    expect(laneStatus({ ended: false, working: false, asks: 0, reverted: false, test: testState(lane) })).toBe("not_run");
+    // once a turn started, nothing is said
+    expect(line("not_run", emptyLane(), { time: "10:02" })).toBeNull();
+  });
+
   it("leaves a failed session's own words to the row", () => {
     expect(line("failed", emptyLane(), { error: "boom" })).toBeNull();
   });
 
   it("is in every language, with the same slots", () => {
-    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.shared", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.moreNames"] as const;
+    const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.shared", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.broughtBack", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.back", "lane.moreNames"] as const;
     for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
   });
 });

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
 import { KitPanelView, codeProjects, type KitPanelProps } from "./KitPanel";
 import { laneRowOf } from "./Lanes";
-import { emptyLane } from "./lane";
+import { emptyLane, noteLane } from "./lane";
 import { emptyProject } from "./project";
 
 const root = "/Users/fon/baanmali-preorder";
@@ -153,5 +153,19 @@ describe("the lanes", () => {
       expect(byId(p, "lanes")).toHaveLength(0);
       expect(out).toContain("How much Kit does alone");
     }
+  });
+
+  it("carry what the page puts under a row and the link that opens Bring it back, on to the band", () => {
+    const rewound = [{ event: "rewound", id: "m-1", text: "PromptPay QR at checkout" }].reduce((l, ev, i) => noteLane(l, ev, 1_000 + i), emptyLane());
+    const reverted = laneRowOf({ rec: { id: "s1", agent: "claude", cwd: root, status: "running", promptTitle: "PromptPay QR at checkout", lane: { name: "kit/promptpay-qr", base: "main" } }, agent: "Claude Code", lane: rewound, turn: null, asks: [], canBringBack: true });
+    const onBack = vi.fn();
+    const p = props({ lanes: [reverted], laneBack: { backOpen: "s1", onBack, below: (r) => createElement("p", { "data-testid": "under" }, `panel of ${r.id}`) } });
+    expect(byId(p, "under").map((e) => e.props.children)).toEqual(["panel of s1"]);
+    const link = byId(p, "lane-back")[0];
+    expect(link.props["aria-expanded"]).toBe(true);
+    (link.props.onClick as () => void)();
+    expect(onBack).toHaveBeenCalledWith("s1");
+    // the panel's own words come from the page: with none given, the band is as it was
+    expect(byId(props({ lanes: [reverted] }), "under")).toHaveLength(0);
   });
 });

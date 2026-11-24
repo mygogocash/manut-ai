@@ -24,6 +24,9 @@ export interface LaneRecord {
    *  asks the agent to take the chat back to a named message, so its `rewound` names that message (`id`); the agent's own
    *  rewind of the last message names none and leaves the files as they are. */
   revertedFiles?: boolean;
+  /** The person brought the files back (Bring it back, sessions/rewind.ts) at this time (ms), and no turn has started since: the
+   *  files are as they were just before the rewind, and the chat is still where the rewind left it. */
+  backAt?: number;
 }
 
 export const emptyLane = (): LaneRecord => ({ steps: {}, changed: false });
@@ -65,7 +68,12 @@ export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number): LaneReco
       return { ...lane, steps, run: { read: kept(read), at: now }, changed: false };
     }
     case "turn.start":
-      return lane.revertedAt === undefined ? lane : { ...lane, revertedAt: undefined, revertedFiles: undefined };
+      return lane.revertedAt === undefined && lane.backAt === undefined ? lane : { ...lane, revertedAt: undefined, revertedFiles: undefined, backAt: undefined };
+    case "files.back":
+      // Bring it back put the files as they were just before the rewind back: the lane is no longer reverted. Its tests were
+      // cleared by the rewind and the files that came back are of no run, so it reads by its tests again (Not run yet); the
+      // chat did not come back, and its line says so
+      return lane.revertedAt === undefined ? lane : { ...lane, revertedAt: undefined, revertedFiles: undefined, backAt: now };
     case "turn.end":
       // a run still in flight when its turn ended (Stop) has no end that counts
       return Object.keys(lane.steps).length > 0 ? { ...lane, steps: {} } : lane;
@@ -158,7 +166,7 @@ export interface LaneLineInput {
   branch: boolean;
   /** The words of the ask that waits first. */
   ask?: string;
-  /** When the turn was reverted, as the person reads a time. */
+  /** When the turn was reverted, or its files brought back, as the person reads a time. */
   time?: string;
   /** The session's own words for how it ended; the row shows them, not a line of this one's. */
   error?: string;
@@ -185,6 +193,8 @@ export function laneLine(i: LaneLineInput): Say | null {
     case "unconfirmed":
       return { key: "lane.line.unconfirmed" };
     case "not_run":
+      // the files came back after a rewind and the chat did not: said until the next turn starts
+      if (i.lane.backAt !== undefined) return { key: "lane.line.broughtBack", vars: { time: i.time ?? "" } };
       return testState(i.lane) === "stale" ? { key: "lane.line.stale" } : null;
     case "failed":
       return null;

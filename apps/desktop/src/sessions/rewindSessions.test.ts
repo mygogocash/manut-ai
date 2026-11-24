@@ -68,7 +68,9 @@ async function setup(agent = "claude", answer: "rewound" | "refused" | "noted" =
     sink({ event: "turn.end", outcome: "done" });
     await tick();
   };
-  return { ss, id, key, chat, row, inputs, calls, end, tick, store, folder: () => g.__manutMockFolders!["/w/shop"] };
+  /** An event of the agent that nothing the person did caused (a turn it starts itself). */
+  const emit = (e: ChatEvent) => sink(e);
+  return { ss, id, key, chat, row, inputs, calls, end, emit, tick, store, folder: () => g.__manutMockFolders!["/w/shop"] };
 }
 
 test("each turn keeps its files before its message goes out; Rewind puts back the files, then the chat", async () => {
@@ -121,6 +123,59 @@ test("a note the agent sends while a rewind waits is not taken for its answer", 
   expect(done.changed).toBe(1);
   expect(t.folder()["notes/turn-1.md"]).toBeUndefined();
   expect(t.chat().items.filter((i) => i.kind === "user")).toEqual([]);
+});
+
+test("Bring it back puts the files back as they were just before the rewind, and the chat stays where the rewind left it", async () => {
+  const t = await setup();
+  await t.end();
+  await t.ss.send(t.id, "PromptPay QR at checkout");
+  await t.end();
+  const first = t.row("Fix stock sync with Shopee")!.id;
+  const before = { ...t.folder() };
+  expect(t.ss.turns.backOf(t.id)).toBeUndefined();
+  await t.ss.rewindTo(t.id, first, []);
+  // the files as they were just before the rewind are kept for this rewind
+  expect(t.ss.turns.backOf(t.id)).toBe(first);
+  expect(t.folder()).not.toEqual(before);
+  const sent = t.inputs.length;
+  // by hand, after the rewind
+  t.folder()["mine.txt"] = "mine\n";
+  const p = await t.ss.turns.backPreview(t.id);
+  expect(p.back.map((c) => c.path)).toEqual(["mine.txt", "notes/turn-1.md", "notes/turn-2.md"]);
+  expect(p.hand).toEqual(["mine.txt"]);
+  // the file changed by hand stays as it is unless it is named to be put back over
+  const done = await t.ss.bringBack(t.id, []);
+  expect(done.changed).toBe(2);
+  expect(t.folder()).toEqual({ ...before, "mine.txt": "mine\n" });
+  // the chat is where the rewind left it: no message came back, and the agent was asked nothing
+  expect(t.chat().items.filter((i) => i.kind === "user")).toEqual([]);
+  expect(t.inputs.length).toBe(sent);
+  expect(t.chat().items.at(-1)).toMatchObject({ kind: "system", text: "2 files are back as they were just before the rewind. The chat stays where the rewind left it." });
+  // once is all
+  expect(t.ss.turns.backOf(t.id)).toBeUndefined();
+  await expect(t.ss.bringBack(t.id, [])).rejects.toThrow("why:no_snapshot");
+});
+
+test("the files from before a rewind are not offered once a turn starts: the person's message, or one the agent starts itself", async () => {
+  for (const starts of ["message", "agent"] as const) {
+    const t = await setup();
+    await t.end();
+    const first = t.row("Fix stock sync with Shopee")!.id;
+    await t.ss.rewindTo(t.id, first, []);
+    expect(t.ss.turns.backOf(t.id)).toBe(first);
+    if (starts === "message") await t.ss.send(t.id, "Thai date format");
+    else t.emit({ event: "turn.start" });
+    expect(t.ss.turns.backOf(t.id), starts).toBeUndefined();
+    await expect(t.ss.bringBack(t.id, [])).rejects.toThrow("why:no_snapshot");
+  }
+});
+
+test("a rewind the agent refused leaves nothing to bring back", async () => {
+  const t = await setup("codex", "refused");
+  await t.end();
+  const first = t.row("Fix stock sync with Shopee")!.id;
+  await t.ss.rewindTo(t.id, first, []).catch(() => undefined);
+  expect(t.ss.turns.backOf(t.id)).toBeUndefined();
 });
 
 test("an agent that cannot take its chat back keeps no turn's files, and closing a session drops its turns", async () => {

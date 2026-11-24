@@ -59,6 +59,23 @@ describe("Let Kit merge", () => {
     expect(calls).toEqual([["send", "s2", ASK]]);
   });
 
+  it("sends the ask to the lane of the row it was pressed on, not the project's newest", async () => {
+    const { s, calls } = lanes([rec("s2"), rec("s1")]);
+    expect(await askKit(s, ROOT, ASK, "s1")).toEqual({ how: "sent", session: "s1" });
+    expect(calls).toEqual([["send", "s1", ASK]]);
+  });
+
+  it("hands it to the project's newest lane when the row's own cannot take it: it ended, runs in a terminal or another folder, or is gone", async () => {
+    const list = [rec("s5"), rec("s4", { status: "exited" }), rec("s3"), rec("s2", { cwd: "/Users/fon/storefront" }), rec("s1", { status: "draft" })];
+    // s3 has no chat: it runs in its own terminal
+    const { s, calls } = lanes(list, { chats: ["s1", "s2", "s4", "s5"] });
+    for (const row of ["s4", "s3", "s2", "s1", "s0"]) {
+      calls.length = 0;
+      expect(await askKit(s, ROOT, ASK, row), row).toEqual({ how: "sent", session: "s5" });
+      expect(calls, row).toEqual([["send", "s5", ASK]]);
+    }
+  });
+
   it("with no lane opens a new session in the project with the ask in its box, and starts nothing", async () => {
     const { s, calls } = lanes([rec("s1", { cwd: "/Users/fon/storefront" })]);
     expect(await askKit(s, ROOT, ASK)).toEqual({ how: "drafted", session: "s9" });

@@ -5,8 +5,11 @@
 // `LanesView` takes everything it shows as props and uses no hooks, so a test can draw it; `useLaneRows` reads the stores.
 //
 // The canvas's Open pull request, Revert this turn and New lane are not here. A lane cannot push or open a pull request from
-// the app (going live always asks, and Tasks is where pull requests are), the agent's own rewind is the way to take a turn
-// back (the session's composer), and the Code page's + menu starts agents in their own terminal only (docs/code-editor.md).
+// the app (going live always asks, and Tasks is where pull requests are), Rewind (the session's line under the box) is the way
+// to take a turn back, and the Code page's + menu starts agents in their own terminal only (docs/code-editor.md). A lane that
+// was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
+// next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
+import { useSyncExternalStore, type ReactNode } from "react";
 import { elapsed, hhmm } from "../app/time";
 import { t } from "../i18n";
 import { maskSecrets } from "../lib/secrets";
@@ -43,6 +46,9 @@ export interface LaneRow {
   testing: boolean;
   /** The session's own words for how it ended in an error. */
   error: string;
+  /** The lane is Reverted by a rewind that put the files back, and the shell still keeps the files from before it: the row
+   *  offers Bring it back. */
+  canBringBack: boolean;
 }
 
 export interface LaneRowInput {
@@ -54,6 +60,16 @@ export interface LaneRowInput {
   turn: { status: string; startedAt: number } | null;
   /** The words of each ask that waits, oldest first. */
   asks: string[];
+  /** The shell keeps the files as they were just before the session's last rewind (the turn book's `backs`). */
+  canBringBack?: boolean;
+}
+
+/** The branch a lane works on and the branch it was made from (`lane.base`), while the folder is on that branch: what the lane's
+ *  main-moved note reads (MainMoved.tsx). None for a lane with no branch of its own, and for one whose branch the folder has left,
+ *  since the shell answers for the checked-out branch and has nothing to say about this lane's. */
+export function laneBase(row: Pick<LaneRow, "branch">): { branch: string; base: string } | null {
+  const b = row.branch;
+  return b && (b.kind === "own" || b.kind === "shared") ? { branch: b.name, base: b.base } : null;
 }
 
 /** The row of one lane. `time` writes a time of day. */
@@ -68,6 +84,8 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
   const ended = rec.status === "failed" || (rec.status === "exited" && !!rec.error);
   const status = laneStatus({ ended, working: !!turn, asks: i.asks.length, reverted: lane.revertedAt !== undefined, test: testState(lane) });
   const error = rec.error ?? "";
+  // when the turn was rewound, or its files brought back
+  const at = lane.revertedAt ?? lane.backAt;
   return {
     id: rec.id,
     title: pickTitle(rec, folderName(rec.cwd)).title,
@@ -75,12 +93,14 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
     branch,
     status,
     // a lane works on a separate branch only while the folder is on it
-    line: laneLine({ status, lane, branch: branch?.kind === "own" || branch?.kind === "shared", ask: i.asks[0], time: lane.revertedAt === undefined ? undefined : time(lane.revertedAt), error }),
+    line: laneLine({ status, lane, branch: branch?.kind === "own" || branch?.kind === "shared", ask: i.asks[0], time: at === undefined ? undefined : time(at), error }),
     failed: status === "tests_failed" ? failedNames(lane) : { names: [], more: 0 },
     step: turn?.status ?? "",
     since: turn?.startedAt ?? null,
     testing: testState(lane) === "running",
     error,
+    // only a rewind that put the files back has files to bring back: the agent's own rewind of the last message left them
+    canBringBack: status === "reverted" && lane.revertedFiles === true && i.canBringBack === true,
   };
 }
 
@@ -89,10 +109,13 @@ export function useLaneRows(root: string): LaneRow[] {
   const ss = useSessions();
   const app = useStore();
   useLanesVersion();
+  const sessions = getSessions();
+  // the sessions whose last rewind's files the shell still keeps (the turn book): a lane offers Bring it back for those
+  const book = sessions.turns;
+  const { backs } = useSyncExternalStore(book.subscribe, book.getState, book.getState);
   if (!root) return [];
   const here = pathKey(root);
   const asks = selectAsks(app);
-  const sessions = getSessions();
   return ss.list.flatMap((rec) => {
     if (rec.status === "draft" || pathKey(rec.cwd) !== here) return [];
     // a session in its own terminal has no chat to read a lane from, and a Hermes folder chat is not a coding agent's
@@ -108,6 +131,7 @@ export function useLaneRows(root: string): LaneRow[] {
         turn: turn ? { status: turn.status, startedAt: turn.startedAt } : null,
         // the ask as plain words: its command sits between backticks for a place that draws markdown
         asks: asks.filter((a) => a.bot === key).map((a) => maskSecrets(askText(a.item)).replaceAll("`", "")),
+        canBringBack: backs[rec.id] !== undefined,
       }),
     ];
   });
@@ -121,6 +145,11 @@ export interface LanesProps {
   /** The time now (ms), for the time a turn has run. */
   now: number;
   onOpen: (id: string) => void;
+  /** The lane whose Bring it back is open, and the link on its line that opens or closes it. */
+  backOpen?: string | null;
+  onBack?: (id: string) => void;
+  /** What a row shows under its line: Bring it back's panel (the Code page fills it, since the panel reads the stores). */
+  below?: (row: LaneRow) => ReactNode;
 }
 
 function branchTitle(b: LaneBranchTag): string {
@@ -136,7 +165,7 @@ function branchTitle(b: LaneBranchTag): string {
   }
 }
 
-function LaneItem({ row, now, onOpen }: { row: LaneRow; now: number; onOpen: (id: string) => void }) {
+function LaneItem({ row, now, onOpen, backOpen, onBack, below }: { row: LaneRow; now: number; onOpen: (id: string) => void } & Pick<LanesProps, "onBack" | "below"> & { backOpen: boolean }) {
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
@@ -171,6 +200,14 @@ function LaneItem({ row, now, onOpen }: { row: LaneRow; now: number; onOpen: (id
               </button>
             </>
           )}
+          {row.canBringBack && (
+            <>
+              {" "}
+              <button type="button" className="lk" aria-expanded={backOpen} onClick={() => onBack?.(row.id)} data-testid="lane-back">
+                {t("lane.back")}
+              </button>
+            </>
+          )}
         </p>
       )}
       {row.failed.names.length > 0 && (
@@ -181,11 +218,12 @@ function LaneItem({ row, now, onOpen }: { row: LaneRow; now: number; onOpen: (id
           {row.failed.more > 0 && <li className="mut">{t("lane.moreNames", { n: row.failed.more })}</li>}
         </ul>
       )}
+      {below?.(row)}
     </div>
   );
 }
 
-export function LanesView({ rows, now, onOpen }: LanesProps) {
+export function LanesView({ rows, now, onOpen, backOpen = null, onBack, below }: LanesProps) {
   if (rows.length === 0) return null;
   return (
     <>
@@ -194,7 +232,7 @@ export function LanesView({ rows, now, onOpen }: LanesProps) {
       </div>
       <div className="lanes" data-testid="lanes">
         {rows.map((r) => (
-          <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} />
+          <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} />
         ))}
       </div>
     </>

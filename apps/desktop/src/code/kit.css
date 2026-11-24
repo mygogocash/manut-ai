@@ -204,3 +204,27 @@
 .kitp .kitm-cols .dv-path {
   display: none;
 }
+
+/* Bring it back (BringBack.tsx, the canvas's StatesCode "Reverted"): the panel under a Reverted lane's row. The desktop's own:
+   the canvas draws only the link, and the panel is where the person sees which files come back and which they changed by hand,
+   as Rewind's panel shows them. The words, ticks and notes are Rewind's (rewind.css's rw-* classes); this is the box that holds
+   them, as the main-moved note's banner is stood up as a column. It starts where the row's line does. */
+.kitp .bb {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 10px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-subtle);
+  font-size: 13.5px;
+}
+.kitp .bb p {
+  margin: 0;
+}
+/* The main-moved note on a lane's row (MainMoved.tsx): the same banner as under the dial, indented to where the row's line
+   starts, as Bring it back's panel is. */
+.kitp .lane .banner.kitm {
+  margin: 4px 10px 8px;
+}

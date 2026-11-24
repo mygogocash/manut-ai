@@ -2,7 +2,7 @@
 // the turn book's order of calls against a stand-in for the shell. The store's `rewound` with a message's id is
 // checked here too, with the reducer itself.
 import { afterEach, describe, expect, it } from "vitest";
-import { KEPT_TURNS, rewindable, RewindError, rewoundNote, TurnBook, turnTitle, wentLive, whyOf, whyText, type TurnMark } from "./rewind";
+import { backWhyText, broughtBackNote, KEPT_TURNS, rewindable, RewindError, rewoundNote, TurnBook, turnTitle, wentLive, whyOf, whyText, type TurnMark } from "./rewind";
 import type { TurnFilesHost, TurnPreview } from "./turnFiles";
 import { initialState, reduce, type Action, type AppState, type TimelineItem } from "../state/store";
 import type { BridgeEvent } from "../lib/protocol";
@@ -95,6 +95,18 @@ describe("the words", () => {
     setLang("ko");
     expect(rewoundNote("태국 날짜", 2)).toBe("“태국 날짜” 이전으로 되감았어요. 파일 2개가 원래대로 돌아갔어요.");
   });
+
+  it("say what Bring it back put back, and always that the chat stayed where the rewind left it", () => {
+    const stays = "The chat stays where the rewind left it.";
+    expect(broughtBackNote(3)).toBe(`3 files are back as they were just before the rewind. ${stays}`);
+    expect(broughtBackNote(1)).toBe(`1 file is back as it was just before the rewind. ${stays}`);
+    expect(broughtBackNote(0)).toBe(`No file came back. ${stays}`);
+    expect(backWhyText(new Error("why:no_snapshot"))).toBe("The files from before the rewind are no longer kept.");
+    expect(backWhyText(new Error("why:too_many"))).toMatch(/too many files/);
+    expect(backWhyText(new Error("sub is a link, so nothing is written through it"))).toBe("sub is a link, so nothing is written through it");
+    setLang("ko");
+    expect(broughtBackNote(2)).toBe("파일 2개가 되감기 직전 상태로 돌아왔어요. 채팅은 되감기가 남긴 자리에 그대로 있어요.");
+  });
 });
 
 /** A stand-in for the shell that records each call, in order, and lets a test hold a call open. */
@@ -115,7 +127,18 @@ function fakeHost(over: Partial<TurnFilesHost> = {}) {
       calls.push(`restore ${s} ${turn} [${keep.join(",")}]`);
       return { changed: 1, kept: keep.length, tooBig: 0 };
     },
-    settle: async (s, turn, ok) => void calls.push(`settle ${s} ${turn} ${ok}`),
+    settle: async (s, turn, ok) => {
+      calls.push(`settle ${s} ${turn} ${ok}`);
+      return { back: ok };
+    },
+    backPreview: async (s, turn) => {
+      calls.push(`backPreview ${s} ${turn}`);
+      return preview;
+    },
+    bringBack: async (s, turn, overwrite) => {
+      calls.push(`bringBack ${s} ${turn} [${overwrite.join(",")}]`);
+      return { changed: 1, kept: 0, tooBig: 0 };
+    },
     forget: async (s) => void calls.push(`forget ${s}`),
     prune: async (keep) => void calls.push(`prune [${keep.join(",")}]`),
     ...over,
@@ -265,6 +288,131 @@ describe("the turn book", () => {
     await none.beforeSend("s1", "/w/shop", "local-s1");
     expect(none.marksOf("s1")).toEqual([]);
     await expect(none.preview("s1", "local-s1")).rejects.toThrow("why:no_snapshot");
+  });
+});
+
+describe("Bring it back, in the turn book", () => {
+  /** A book with turns `local-s1` and `local-s2` kept, whose chat goes back when told to (`answer`). */
+  async function bookWith(over: Partial<TurnFilesHost> = {}) {
+    const { host, calls } = fakeHost(over);
+    const state = { answer: "ok" as "ok" | "refuse", asked: [] as string[] };
+    const book = new TurnBook({
+      host,
+      chatRewind: async (s, id) => {
+        state.asked.push(`${s} ${id}`);
+        if (state.answer === "refuse") throw new Error("Not taken back: busy");
+      },
+    });
+    for (const id of ["local-s1", "local-s2"]) await book.beforeSend("s1", "/w/shop", id);
+    return { book, calls, state };
+  }
+
+  it("is offered once the agent took the chat back, for the turn that rewind went back to", async () => {
+    const { book, calls } = await bookWith();
+    expect(book.backOf("s1")).toBeUndefined();
+    let seen = 0;
+    book.subscribe(() => seen++);
+    await book.rewind("s1", "local-s2", []);
+    expect(book.backOf("s1")).toBe("local-s2");
+    expect(book.getState().backs).toEqual({ s1: "local-s2" });
+    expect(seen).toBeGreaterThan(0);
+    const p = await book.backPreview("s1");
+    expect(p.back).toHaveLength(1);
+    expect(calls.at(-1)).toBe("backPreview s1 local-s2");
+  });
+
+  it("is not offered after a rewind the agent refused, and one it refuses later leaves the earlier one's files kept", async () => {
+    const { book, state } = await bookWith();
+    state.answer = "refuse";
+    await book.rewind("s1", "local-s2", []).catch(() => undefined);
+    expect(book.backOf("s1")).toBeUndefined();
+    state.answer = "ok";
+    await book.rewind("s1", "local-s2", []);
+    expect(book.backOf("s1")).toBe("local-s2");
+    state.answer = "refuse";
+    await book.rewind("s1", "local-s1", []).catch(() => undefined);
+    expect(book.backOf("s1")).toBe("local-s2");
+    // answered this time: the files kept are of this rewind, in place of the first's
+    state.answer = "ok";
+    await book.rewind("s1", "local-s1", []);
+    expect(book.backOf("s1")).toBe("local-s1");
+  });
+
+  it("is not offered when the shell could not keep the files", async () => {
+    const { book } = await bookWith({ settle: async () => ({ back: false }) });
+    await book.rewind("s1", "local-s2", []);
+    expect(book.backOf("s1")).toBeUndefined();
+    await expect(book.backPreview("s1")).rejects.toThrow("why:no_snapshot");
+    // nor from a shell that answers with nothing
+    const old = await bookWith({ settle: async () => undefined as never });
+    await old.book.rewind("s1", "local-s2", []);
+    expect(old.book.backOf("s1")).toBeUndefined();
+  });
+
+  it("puts the files back with the person's choices (the files to put back over), asks the agent nothing, and leaves nothing to bring back", async () => {
+    const { book, calls, state } = await bookWith();
+    await book.rewind("s1", "local-s2", []);
+    state.asked.length = 0;
+    expect(await book.bringBack("s1", ["b.txt"])).toEqual({ changed: 1, kept: 0, tooBig: 0 });
+    expect(calls.at(-1)).toBe("bringBack s1 local-s2 [b.txt]");
+    expect(state.asked, "the chat is not brought back: neither agent has a message for it").toEqual([]);
+    expect(book.backOf("s1")).toBeUndefined();
+    await expect(book.bringBack("s1", [])).rejects.toThrow("why:no_snapshot");
+  });
+
+  it("keeps what it holds when the files could not be put back, so it can be tried again", async () => {
+    let fail = true;
+    const { book } = await bookWith({
+      bringBack: async () => {
+        if (fail) throw new Error("sub is a link, so nothing is written through it");
+        return { changed: 1, kept: 0, tooBig: 0 };
+      },
+    });
+    await book.rewind("s1", "local-s2", []);
+    await expect(book.bringBack("s1", ["sub"])).rejects.toThrow("sub is a link");
+    expect(book.backOf("s1")).toBe("local-s2");
+    fail = false;
+    await book.bringBack("s1", []);
+    expect(book.backOf("s1")).toBeUndefined();
+  });
+
+  it("stops being offered when a turn begins (the person's message or one the agent began itself) and when the session goes", async () => {
+    for (const end of [
+      (b: TurnBook) => b.beforeSend("s1", "/w/shop", "local-s3"),
+      (b: TurnBook) => b.turnStarted("s1"),
+      (b: TurnBook) => b.forget("s1"),
+    ]) {
+      const { book } = await bookWith();
+      await book.rewind("s1", "local-s2", []);
+      expect(book.backOf("s1")).toBe("local-s2");
+      await end(book);
+      expect(book.backOf("s1")).toBeUndefined();
+      await expect(book.backPreview("s1")).rejects.toThrow("why:no_snapshot");
+      await expect(book.bringBack("s1", [])).rejects.toThrow("why:no_snapshot");
+    }
+  });
+
+  it("does not put back files that a turn which began meanwhile has taken", async () => {
+    let release: () => void = () => {};
+    const { book, calls } = await bookWith({
+      end: () => new Promise<void>((r) => (release = r)),
+    });
+    await book.rewind("s1", "local-s2", []);
+    // a turn's end is still being kept; the call waits behind it, and a turn begins before it runs
+    book.afterTurn("s1");
+    const pending = book.bringBack("s1", []);
+    book.turnStarted("s1");
+    // the held call has started by now
+    await flush();
+    release();
+    await expect(pending).rejects.toThrow("why:no_snapshot");
+    expect(calls.some((c) => c.startsWith("bringBack"))).toBe(false);
+  });
+
+  it("does nothing without a shell", async () => {
+    const none = new TurnBook({ chatRewind: async () => {} });
+    await expect(none.backPreview("s1")).rejects.toThrow("why:no_snapshot");
+    await expect(none.bringBack("s1", [])).rejects.toThrow("why:no_snapshot");
   });
 });
 
