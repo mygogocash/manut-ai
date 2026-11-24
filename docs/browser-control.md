@@ -380,8 +380,9 @@ Submitting's (24 Nov 2026):
   write.
 - A write settles from its step's report even when the report cannot land in the attempt (an attempt that ended, consent
   withdrawn): what was done on the site is a fact, and the action's record says what was done. The failures that mean
-  nothing was submitted are the ones an outpost finds before it submits; `origin_not_allowed`, `timed_out` and
-  `browser_error` may come after, so they settle unknown.
+  nothing was submitted are the ones an outpost finds before it submits, and `not_run`, a step it did not run at all (a
+  kind it does not know, a step missing what its kind needs, or a stop before anything was typed); `origin_not_allowed`,
+  `timed_out` and `browser_error` may come after, so they settle unknown.
 - A write's proposal names its sign-in as both its connection and its account, its page's origin as its target, and a
   grant revision of 1: a sign-in has no grant revisions.
 - No new audit actions, so the console's Audit page has words for every entry without a change to it.

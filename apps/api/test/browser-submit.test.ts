@@ -776,6 +776,11 @@ describe("reporting a write step", () => {
     expect(await outcome(nam, missing.step.stepId)).toMatchObject({ state: "failed", code: "selector_not_found" });
     const refusedBySite = await run("two", { outcome: "failed", code: "submit_refused" });
     expect((await stored(s, refusedBySite.requestId)).action.state).toBe("failed");
+    // An outpost that did not run the step (a kind it does not know, a step missing what its kind needs, or a stop
+    // before anything was typed) submitted nothing.
+    const notRun = await run("two and a half", { outcome: "failed", code: "not_run" });
+    expect((await stored(s, notRun.requestId)).action.state).toBe("failed");
+    expect(await outcome(nam, notRun.step.stepId)).toMatchObject({ state: "failed", code: "not_run" });
     // A timeout or a browser fault may have come after the submit: nobody can say it was not made.
     const timedOut = await run("three", { outcome: "failed", code: "timed_out" });
     expect((await stored(s, timedOut.requestId)).action.state).toBe("unknown");
@@ -789,7 +794,7 @@ describe("reporting a write step", () => {
     await refusal(await mac.report(step.stepId, { outcome: "done", text: "Sent" }), 400, "invalid_report");
     expect((await stored(s, texted)).action.state).toBe("dispatching");
     expect((await audit(s.tenant)).filter((entry) => entry.action === "dispatch.settled").map((entry) => entry.outcome))
-      .toEqual(["failed", "failed", "unknown", "unknown"]);
+      .toEqual(["failed", "failed", "failed", "unknown", "unknown"]);
   });
 
   it("records what the outpost did even when its outcome can no longer land in the attempt", async () => {

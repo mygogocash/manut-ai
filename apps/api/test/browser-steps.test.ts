@@ -336,7 +336,8 @@ describe("browser steps", () => {
     const nam = await attempt(s, "nam");
     const open = await queued(nam, { kind: "open", outpostId: mac.id, url: ORDERS });
     const read = await queued(nam, { kind: "read", outpostId: mac.id });
-    expect(await mac.take()).toHaveLength(2);
+    const skipped = await queued(nam, { kind: "open", outpostId: mac.id, url: ORDERS });
+    expect(await mac.take()).toHaveLength(3);
     for (const report of [{}, { outcome: "skipped" }, { outcome: "failed" }, { outcome: "failed", code: "it_broke" },
       { outcome: "failed", code: "timed_out", text: "partial" }, { outcome: "done", code: "timed_out" },
       { outcome: "done", text: 42 }]) {
@@ -353,6 +354,10 @@ describe("browser steps", () => {
     // An empty page is still a read.
     expect((await mac.report(read.stepId, { outcome: "done", text: "" })).status).toBe(200);
     expect(await outcome(nam, read.stepId)).toEqual({ ...read, state: "done", text: "" });
+    // A step the outpost did not run at all says so, and carries no text.
+    await refusal(await mac.report(skipped.stepId, { outcome: "failed", code: "not_run", text: "" }), 400, "invalid_report");
+    expect((await mac.report(skipped.stepId, { outcome: "failed", code: "not_run" })).status).toBe(200);
+    expect(await outcome(nam, skipped.stepId)).toEqual({ ...skipped, state: "failed", code: "not_run" });
   });
 
   it("signs in with a grant, and a site's refusal leads the worker to report the sign-in broken", async () => {
