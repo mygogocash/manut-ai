@@ -66,7 +66,7 @@ describe("connecting", () => {
     expect(host.link).toBe("open");
     expect(statuses).toEqual(["connecting", "open"]);
     // the person's shops first (none here), then the signed-in tenant's four reads, as before shops
-    expect(gets(api).sort()).toEqual(["/v1/approvals", "/v1/inbound/attention", "/v1/schedules", "/v1/shops", "/v1/tenant/export"]);
+    expect(gets(api).sort()).toEqual(["/v1/approvals", "/v1/inbound/attention", "/v1/schedules", "/v1/shops", "/v1/tasks"]);
     for (const call of api.calls) expect(call.bearer).toBe("access-1");
   });
 
@@ -124,12 +124,12 @@ describe("connecting", () => {
 
   it("shows a 5xx as an API that is not answering, and backs off between tries", async () => {
     const { api, rt, host } = setup();
-    serveShop(api).on("GET", "/v1/tenant/export", { status: 503, json: { error: "storage_unavailable" } });
+    serveShop(api).on("GET", "/v1/tasks", { status: 503, json: { error: "tasks_unavailable" } });
     void rt.connect();
     await settle();
     expect(host.link).toBe("unavailable");
     expect(await refusal(rt.request("bots.list", {}))).toEqual({ code: "unavailable", message: t("rt.unavailable") });
-    const tries = () => api.to("GET", "/v1/tenant/export").length;
+    const tries = () => api.to("GET", "/v1/tasks").length;
     expect(tries()).toBe(1);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(tries()).toBe(2);
@@ -345,7 +345,7 @@ describe("staying current", () => {
     const { api, rt, events, statuses, host } = setup();
     serveShop(api);
     await rt.connect();
-    api.on("GET", "/v1/tenant/export", { status: 500, json: { error: "export_incomplete", failed: ["index"] } });
+    api.on("GET", "/v1/tasks", { status: 503, json: { error: "tasks_unavailable" } });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(host.link).toBe("unavailable");
     // the last good read stands in for the shop, so the screens keep what they show (offline.test.ts)

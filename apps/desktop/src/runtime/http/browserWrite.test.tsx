@@ -66,7 +66,7 @@ function action(): ShopAction {
 }
 
 function snap(over: Partial<ShopSnapshot> = {}): ShopSnapshot {
-  const task: ShopTask = { id: "task-1", title: "Answer Khun Mali in the shop's chat", objective: "", state: "waitingForAuthorization", createdAt: 0, updatedAt: 0, events: 1, actions: [action()], attempts: [], draft: null, raw: {} };
+  const task: ShopTask = { id: "task-1", title: "Answer Khun Mali in the shop's chat", objective: "", state: "waitingForAuthorization", createdAt: 0, updatedAt: 0, actions: [action()], attempts: [], draft: null, raw: {} };
   return { tasks: [task], approvals: decodeApprovals({ approvals: [write()] }, []), schedules: [], attention: [], attentionOff: false, unreadable: [], readAt: 0, ...over };
 }
 

@@ -690,11 +690,12 @@ describe("the shop and the role", () => {
   it("an owner's shop session opens only the shop's routes that learn who is calling from the session", async () => {
     const { fon, mali } = await fonsShops();
     const asOwnerOfMali = await shopSession(fon, mali, "owner");
-    // The shop's approvals, routines, memory, consent, export and people take it (owner-session-routes.test.ts). Deleting
-    // the shop stays with the owner's confirmation link, and the connections, schedules and the person's own routes take
-    // no shop session at all.
-    for (const [method, path] of [["DELETE", "/v1/tenant/data"], ["GET", "/v1/connections"], ["GET", "/v1/schedules"],
-      ["GET", "/v1/shops"], ["POST", "/v1/shops/owner-code"]] as const) {
+    // The shop's approvals, routines, memory, consent, export and people take it (owner-session-routes.test.ts), and so
+    // do its tasks, schedules and attention items, read only (task-list.test.ts). Deleting the shop stays with the owner's
+    // confirmation link, and the connections, one schedule by its id and the person's own routes take no shop session at
+    // all.
+    for (const [method, path] of [["DELETE", "/v1/tenant/data"], ["GET", "/v1/connections"],
+      ["GET", "/v1/schedules/sched-1"], ["GET", "/v1/shops"], ["POST", "/v1/shops/owner-code"]] as const) {
       expect((await asSession(asOwnerOfMali, method, path)).status).toBe(401);
     }
     expect((await asSession(asOwnerOfMali, "POST", "/v1/shops/session", { shop: mali.tenant })).status).toBe(401);

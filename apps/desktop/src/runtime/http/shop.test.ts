@@ -1,11 +1,11 @@
-// Reading one shop from apps/api: its tasks with their exact actions (the tenant export, the only session route that
-// lists a tenant's own tasks), what waits for the owner (approval-core's records, `GET /v1/approvals?state=open`), its
+// Reading one shop from apps/api: its tasks with their exact actions (the task list, `GET /v1/tasks`, newest first, a page
+// at a time; never the export), what waits for the owner (approval-core's records, `GET /v1/approvals?state=open`), its
 // schedules and its inbound attention items. Decoding never throws, and what this app does not know is kept as the API
 // wrote it.
 import { describe, expect, it } from "vitest";
 import { ApiSession, type StoredSession } from "./session";
-import { readShop } from "./shop";
-import { approvalJson, attentionJson, clock, fakeApi, iso, memoryVault, ORIGIN, scheduleJson, T0, taskJson, type FakeApi } from "./testkit";
+import { LISTED_TASKS, readShop, TASK_PAGE } from "./shop";
+import { approvalJson, attentionJson, clock, fakeApi, iso, listedJson, memoryVault, ORIGIN, scheduleJson, T0, taskJson, taskPage, type FakeApi } from "./testkit";
 
 const TASK = taskJson();
 const SCHEDULE = scheduleJson();
@@ -29,9 +29,9 @@ function setup() {
   return { api, c, session };
 }
 
-function serve(api: FakeApi, over: { tasks?: unknown; schedules?: unknown; attention?: Parameters<FakeApi["on"]>[2]; approvals?: unknown } = {}) {
+function serve(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown; attention?: Parameters<FakeApi["on"]>[2]; approvals?: unknown } = {}) {
   api
-    .on("GET", "/v1/tenant/export", { status: 200, json: { tenant: "apple:owner-1", exportedAt: iso(T0), tasks: over.tasks ?? [TASK], schedules: [], attention: [] } })
+    .on("GET", "/v1/tasks", (req) => taskPage(over.tasks ?? [TASK], req))
     .on("GET", "/v1/schedules", { status: 200, json: { schedules: over.schedules ?? [SCHEDULE] } })
     .on("GET", "/v1/inbound/attention", over.attention ?? { status: 200, json: { items: [ATTENTION] } })
     .on("GET", "/v1/approvals", { status: 200, json: { state: "open", approvals: over.approvals ?? [APPROVAL] } });
@@ -46,9 +46,10 @@ describe("readShop", () => {
       ["GET", "/v1/approvals", "access-1"],
       ["GET", "/v1/inbound/attention", "access-1"],
       ["GET", "/v1/schedules", "access-1"],
-      ["GET", "/v1/tenant/export", "access-1"],
+      ["GET", "/v1/tasks", "access-1"],
     ]);
     expect(api.to("GET", "/v1/approvals")[0].url).toBe(`${ORIGIN}/v1/approvals?state=open`);
+    expect(api.to("GET", "/v1/tasks")[0].url).toBe(`${ORIGIN}/v1/tasks?limit=25`);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     const { snapshot } = out;
@@ -61,7 +62,6 @@ describe("readShop", () => {
         state: "waitingForAuthorization",
         createdAt: T0,
         updatedAt: T0 + 120_000,
-        events: 2,
         actions: [
           {
             id: "action-1",
@@ -81,7 +81,7 @@ describe("readShop", () => {
         ],
         attempts: [],
         draft: null,
-        raw: TASK,
+        raw: listedJson(TASK),
       },
     ]);
     expect(snapshot.schedules).toEqual([
@@ -126,7 +126,9 @@ describe("readShop", () => {
     if (!out.ok) throw new Error("expected a snapshot");
     const [t] = out.snapshot.tasks;
     expect(t.state).toBe("waitingForWeather");
-    expect(t.raw).toEqual(task);
+    // the list carries the document whole, a field this app does not know included
+    expect(t.raw).toEqual(listedJson(task));
+    expect((t.raw as { task: { mood: string } }).task.mood).toBe("sunny");
     expect(t.actions[0]).toMatchObject({ operationType: "shopee.price.set", state: "superseded", raw: task.actions[0] });
     // weekday numbers outside 1 to 7 are left out of the days, but the schedule keeps them in `raw`
     expect(out.snapshot.schedules[0]).toMatchObject({ weekdays: [1], raw: schedule });
@@ -138,7 +140,9 @@ describe("readShop", () => {
     const noId = { task: { title: "no id" } };
     const badAction = { ...TASK, actions: [{ state: "proposed" }] };
     const noRequestId = approvalJson({ id: "" });
-    serve(api, { tasks: [noId, badAction, 7], schedules: [{ name: "no id" }], approvals: [noRequestId, APPROVAL] });
+    serve(api, { schedules: [{ name: "no id" }], approvals: [noRequestId, APPROVAL] });
+    // the list as an API that sent what this app cannot read would answer it: newest first, so the oldest last
+    api.on("GET", "/v1/tasks", { status: 200, json: { tasks: [7, listedJson(badAction), noId], next: null } });
     const out = await readShop(session, c.now);
     if (!out.ok) throw new Error("expected a snapshot");
     expect(out.snapshot.tasks.map((t) => [t.id, t.actions.length])).toEqual([["task-1", 0]]);
@@ -149,7 +153,7 @@ describe("readShop", () => {
   it("reads odd shapes as empty rather than failing", async () => {
     const { api, session, c } = setup();
     api
-      .on("GET", "/v1/tenant/export", { status: 200, json: { tasks: "none" } })
+      .on("GET", "/v1/tasks", { status: 200, json: { tasks: "none", next: 7 } })
       .on("GET", "/v1/schedules", { status: 200, json: [] })
       .on("GET", "/v1/inbound/attention", { status: 200, json: { items: null } })
       .on("GET", "/v1/approvals", { status: 200, json: { approvals: "none" } });
@@ -167,7 +171,7 @@ describe("readShop", () => {
   it("reads a deleted tenant as one with no tasks", async () => {
     const { api, session, c } = setup();
     serve(api);
-    api.on("GET", "/v1/tenant/export", { status: 404, json: { error: "tenant_deleted", deletedAt: iso(T0) } });
+    api.on("GET", "/v1/tasks", { status: 404, json: { error: "tenant_deleted", deletedAt: iso(T0) } });
     const out = await readShop(session, c.now);
     expect(out).toMatchObject({ ok: true, snapshot: { tasks: [] } });
   });
@@ -184,16 +188,15 @@ describe("readShop", () => {
       return readShop(session, c.now);
     };
     expect(await run({ "GET /v1/schedules": { status: 500, json: {} } })).toEqual({ ok: false, failure: "unavailable" });
-    expect(await run({ "GET /v1/tenant/export": { status: 500, json: { error: "export_incomplete", failed: ["index"] } } })).toEqual({
-      ok: false,
-      failure: "unavailable",
-    });
+    expect(await run({ "GET /v1/tasks": { status: 503, json: { error: "tasks_unavailable" } } })).toEqual({ ok: false, failure: "unavailable" });
+    // an API from before the list answers it 404: the read fails rather than show a shop with no tasks
+    expect(await run({ "GET /v1/tasks": { status: 404, json: { error: "not_found" } } })).toEqual({ ok: false, failure: "unavailable" });
     expect(await run({ "GET /v1/schedules": { status: 400, json: { error: "tenant_required" } } })).toEqual({ ok: false, failure: "unavailable" });
     // what waits for the owner is never shown half read: the API answers 503 rather than leave one out
     expect(await run({ "GET /v1/approvals": { status: 503, json: { error: "approvals_unavailable" } } })).toEqual({ ok: false, failure: "unavailable" });
     expect(await run({ "GET /v1/approvals": { status: 400, json: { error: "invalid_state" } } })).toEqual({ ok: false, failure: "unavailable" });
     expect(await run({ "GET /v1/approvals": "offline" })).toEqual({ ok: false, failure: "offline" });
-    expect(await run({ "GET /v1/schedules": "offline", "GET /v1/tenant/export": { status: 503, json: {} } })).toEqual({ ok: false, failure: "offline" });
+    expect(await run({ "GET /v1/schedules": "offline", "GET /v1/tasks": { status: 503, json: {} } })).toEqual({ ok: false, failure: "offline" });
     expect(
       await run({
         "GET /v1/inbound/attention": "offline",
@@ -201,5 +204,32 @@ describe("readShop", () => {
         "POST /v1/auth/refresh": { status: 401, json: { error: "invalid_grant" } },
       }),
     ).toEqual({ ok: false, failure: "signed_out" });
+  });
+
+  it("reads the newest tasks a page at a time with the cursor each page gives, at most two pages, and keeps them oldest first", async () => {
+    const tasks = (n: number) => Array.from({ length: n }, (_, i) => taskJson({ task: { id: `task-${i}`, title: `Task ${i}` }, actions: [] }));
+    const ids = (out: Awaited<ReturnType<typeof readShop>>) => (out.ok ? out.snapshot.tasks.map((t) => t.id) : out.failure);
+    // a shop of fewer than a page reads one page
+    const one = setup();
+    serve(one.api, { tasks: tasks(3) });
+    expect(ids(await readShop(one.session, one.c.now))).toEqual(["task-0", "task-1", "task-2"]);
+    expect(one.api.to("GET", "/v1/tasks").map((r) => r.url)).toEqual([`${ORIGIN}/v1/tasks?limit=25`]);
+    // more than a page: the next page from the first page's cursor
+    const two = setup();
+    serve(two.api, { tasks: tasks(30) });
+    expect(ids(await readShop(two.session, two.c.now))).toEqual(tasks(30).map((t) => t.task.id));
+    expect(two.api.to("GET", "/v1/tasks").map((r) => r.url)).toEqual([`${ORIGIN}/v1/tasks?limit=25`, `${ORIGIN}/v1/tasks?limit=25&cursor=task-5`]);
+    // more than the screens show: the newest fifty, and no third page
+    const many = setup();
+    serve(many.api, { tasks: tasks(70) });
+    expect(ids(await readShop(many.session, many.c.now))).toEqual(tasks(70).slice(20).map((t) => t.task.id));
+    expect(many.api.to("GET", "/v1/tasks")).toHaveLength(LISTED_TASKS / TASK_PAGE);
+    // a page that fails fails the whole read: half a list is never shown as the whole one
+    const broken = setup();
+    serve(broken.api, { tasks: tasks(30) });
+    broken.api.on("GET", "/v1/tasks", (req) => (new URL(req.url).searchParams.has("cursor") ? { status: 503, json: { error: "tasks_unavailable" } } : taskPage(tasks(30), req)));
+    expect(await readShop(broken.session, broken.c.now)).toEqual({ ok: false, failure: "unavailable" });
+    // it never reads the export, which holds every task's whole history
+    for (const { api } of [one, two, many, broken]) expect(api.to("GET", "/v1/tenant/export")).toEqual([]);
   });
 });

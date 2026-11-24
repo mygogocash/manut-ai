@@ -31,7 +31,6 @@ function snapshot(over: Partial<ShopSnapshot> = {}): ShopSnapshot {
         state: "waitingForAuthorization",
         createdAt: NOW - 600_000,
         updatedAt: NOW - 120_000,
-        events: 2,
         actions: [
           {
             id: "action-1",
@@ -103,10 +102,10 @@ describe("what is kept", () => {
     const text = encodeSnapshot(snapshot());
     const file = JSON.parse(text);
     expect(Object.keys(file).sort()).toEqual(["snapshot", "v"]);
-    expect(file.v).toBe(4);
-    expect(CACHE_VERSION).toBe(4);
+    expect(file.v).toBe(5);
+    expect(CACHE_VERSION).toBe(5);
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
-    expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "attempts", "createdAt", "draft", "events", "id", "objective", "state", "title", "updatedAt"]);
+    expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "attempts", "createdAt", "draft", "id", "objective", "state", "title", "updatedAt"]);
     expect(Object.keys(file.snapshot.tasks[0].actions[0]).sort()).toEqual([
       "approvedAt",
       "approvedBy",
@@ -330,7 +329,7 @@ describe("the saved file", () => {
   });
 });
 
-describe("a shop the person owns (version 4)", () => {
+describe("a shop the person owns", () => {
   const work = (): ShopWork => ({
     tasks: [
       {
@@ -340,7 +339,6 @@ describe("a shop the person owns (version 4)", () => {
         state: "draft",
         createdAt: NOW - 60_000,
         updatedAt: NOW - 30_000,
-        events: 4,
         actions: [],
         attempts: [{ id: "a1", executor: "pim", status: "done", outcome: "done", reason: "", claimedAt: NOW - 50_000, finishedAt: NOW - 45_000, deadline: NOW + 1_000_000, leaseUntil: NOW + 300_000, handedTo: null, costSatang: 52, tokens: 900, model: "claude-haiku-5-5" }],
         draft: { member: "pim", job: "post", text: "New candles are in!", at: NOW - 45_000 },
@@ -390,18 +388,27 @@ describe("a shop the person owns (version 4)", () => {
     expect(decodeCached(edit((f) => (f.snapshot.shops[1].work = f.snapshot.shops[0].work)), NOW).kind).toBe("none");
   });
 
-  it("still reads a file of version 3, which kept no runs, drafts or approval times: those are none", () => {
-    const file = JSON.parse(encodeSnapshot(snapshot()));
-    file.v = 3;
-    for (const task of file.snapshot.tasks) {
+  it("reads a file any earlier version kept as nothing kept: shown no more, never half read", () => {
+    // Version 4 is this one but for the count of each task's log entries, which the task list does not carry.
+    const four = JSON.parse(encodeSnapshot(snapshot()));
+    four.v = 4;
+    for (const task of four.snapshot.tasks) task.events = 2;
+    expect(decodeCached(JSON.stringify(four), NOW)).toEqual({ kind: "none" });
+    // 3 kept no runs, drafts or approval times, and 2 the signed-in tenant's own read alone.
+    const three = JSON.parse(JSON.stringify(four));
+    three.v = 3;
+    for (const task of three.snapshot.tasks) {
       delete task.attempts;
       delete task.draft;
       for (const action of task.actions) for (const key of ["approvedAt", "approvedBy", "dispatchedAt"]) delete action[key];
     }
-    const read = decodeCached(JSON.stringify(file), NOW);
-    expect(read.kind).toBe("usable");
-    if (read.kind !== "usable") return;
-    expect(read.snapshot.tasks[0]).toMatchObject({ attempts: [], draft: null });
-    expect(read.snapshot.tasks[0].actions[0]).toMatchObject({ approvedAt: null, approvedBy: "", dispatchedAt: null });
+    expect(decodeCached(JSON.stringify(three), NOW)).toEqual({ kind: "none" });
+    const two = JSON.parse(JSON.stringify(three));
+    two.v = 2;
+    delete two.snapshot.shops;
+    delete two.snapshot.viewing;
+    expect(decodeCached(JSON.stringify(two), NOW)).toEqual({ kind: "none" });
+    // The same file at this version is read whole.
+    expect(decodeCached(encodeSnapshot(snapshot()), NOW).kind).toBe("usable");
   });
 });

@@ -28,7 +28,7 @@ function attempt(over: Partial<ShopAttempt> = {}): ShopAttempt {
 }
 
 function task(over: Partial<ShopTask> = {}): ShopTask {
-  return { id: "t1", title: "A reply to a customer", objective: "Draft a reply.", state: "draft", createdAt: T - 20_000, updatedAt: T - 10_000, events: 4, actions: [], attempts: [attempt()], draft: null, raw: null, ...over };
+  return { id: "t1", title: "A reply to a customer", objective: "Draft a reply.", state: "draft", createdAt: T - 20_000, updatedAt: T - 10_000, actions: [], attempts: [attempt()], draft: null, raw: null, ...over };
 }
 
 const snap = (tasks: ShopTask[], over: Partial<ShopSnapshot> = {}): ShopSnapshot => ({ tasks, approvals: [], schedules: [], attention: [], attentionOff: false, unreadable: [], readAt: T, ...over });

@@ -63,7 +63,7 @@ function setup(opts: Options = {}) {
   return { api, store, cache, vault, session, host, rt, events, statuses };
 }
 
-const allOffline = (api: FakeApi) => api.on("GET", "/v1/tenant/export", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
+const allOffline = (api: FakeApi) => api.on("GET", "/v1/tasks", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
 const ask = (rt: HttpRuntime) => rt.request.bind(rt) as unknown as (op: string, p?: unknown) => Promise<unknown>;
 const refusal = (p: Promise<unknown>) => p.then(() => null, (e: BridgeError) => e);
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -145,7 +145,7 @@ describe("when the API cannot be reached", () => {
     const { api, rt, host } = setup();
     serveShop(api);
     await rt.connect();
-    api.on("GET", "/v1/tenant/export", { status: 503, json: { error: "storage_unavailable" } });
+    api.on("GET", "/v1/tasks", { status: 503, json: { error: "tasks_unavailable" } });
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(host.link).toBe("unavailable");
     expect(host.cache).toEqual({ kind: "showing", at: NOW });
@@ -348,13 +348,13 @@ describe("forgetting what was kept", () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     const { api, rt, host, store, session } = setup({
       fetch: (a) => async (url, init) => {
-        if (new URL(url).pathname === "/v1/tenant/export") await held;
+        if (new URL(url).pathname === "/v1/tasks") await held;
         return a.fetch(url, init);
       },
     });
     serveShop(api).on("DELETE", "/v1/auth/session", { status: 200, json: {} });
     start(rt);
-    await settle(); // the export's answer is held back
+    await settle(); // the task list's answer is held back
     await session.signOut();
     expect(host.link).toBe("signed_out");
     release();

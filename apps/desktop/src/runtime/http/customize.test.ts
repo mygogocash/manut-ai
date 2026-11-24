@@ -185,7 +185,7 @@ describe("the Customize page's ops while only a kept read of the shop is shown",
   /** An earlier run kept a read five minutes ago, and now the API cannot be reached, so the kept read stands in for the shop. */
   async function keptOnly() {
     const api = fakeApi();
-    api.on("GET", "/v1/tenant/export", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
+    api.on("GET", "/v1/tasks", "offline").on("GET", "/v1/schedules", "offline").on("GET", "/v1/inbound/attention", "offline");
     const kept = await savedRead(NOW - 300_000, { schedules: [scheduleJson({ nextFire: NOW + 3600_000 })] });
     const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(NOW)), deviceId: () => "device-2" });
     const host = new HttpHost({ session, cache: new ShopCache(memoryCacheStore(kept)) });

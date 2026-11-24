@@ -137,6 +137,15 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `19fb6c3d`, API `0dca257c`); smoke-tested: every page has a strict script policy (`script-src 'self'`; the join
   page names no other origin), self-serve answers `sign_ups_closed`, `DELETE /v1/tenant/data` answers 401 without a
   session, a `text/plain` POST 415, and the console is behind Access.
+- Dev was redeployed on 24 Nov at 19:00 from `ce301c5`, with items 45 and 43 (pages `b3dba5ac`, API `9ef0a514`);
+  smoke-tested: `POST /v1/vault/sign-ins/remove` and `/change` answer 401 without a session and 415 for `text/plain`,
+  `GET /v1/admin/model/alerts` and `POST /v1/admin/vault/sign-ins/members` are behind Access, `/v1/google` still
+  answers `google_not_configured`, and the pages, `/app/` and the join page load. The shops' TenantObjects now set an
+  alarm (the model sweep); one with no alarm sets it when it next starts.
+- Dev was redeployed on 24 Nov at 19:38 from `e9e9a71`, with item 44's task list (API `282a481c` first, then pages
+  `ef7f070f`, since the desktop needs the new route); smoke-tested: `GET /v1/tasks`, `/v1/schedules` and
+  `/v1/inbound/attention` answer 401 without a session and with a session that is not one, before any query check,
+  `POST /v1/tasks` still 401, and the pages, `/app/` and the console's Access load.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -152,14 +161,23 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 43, the model gateway's alerts and sweep (`feat/model-alerts`, Opus);
-   - item 45, removing a sign-in and changing its account or addresses from the app (`feat/sign-in-changes`, Opus).
-   Item 44 (a task list route, so the desktop stops reading the whole export each minute) starts when one of them
-   finishes: two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
+   - item 46, the owner's memory and routines writes on the connected desktop, through the API's existing owner routes
+     (`feat/connected-memory-routines`, Sonnet), started when item 43 finished.
+   - item 47, each coding lane in a git worktree of its own (`feat/lane-worktrees`, Opus), started when item 44
+     finished. Two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 39 (Bring it back after a rewind: `turn_files.rs` keeps the files from just before a rewind the agent agreed
+   Merged: 44 (`GET /v1/tasks`, the session's own tasks newest first, 25 a page with a stable cursor, each task
+   answering for itself in its own object; an owner's shop session also reads `/v1/schedules` and
+   `/v1/inbound/attention`; the connected desktop reads the newest 50 tasks instead of the export, with cache version
+   5, and a screens test pinned from the export-based code), 43 (the model gateway's sweep and alerts: the shop's TenantObject now has an alarm, a list of jobs, which
+   charges a reservation nothing settled a minute after it expires; each month notes 80% and 100% of its cap once, from
+   charged spend only, with `model.cap_near` and `model.cap_reached` in the audit log; the console's Model spend page lists
+   the shops near or at their caps from rows kept in AuthObject beside the registry, `GET /v1/admin/model/alerts`), 45 (the owner removes a sign-in, and changes its account or addresses, from the app: `POST /v1/vault/sign-ins/remove`
+   and `/change` through the vault's own operations; a change that could send a saved password somewhere new needs it typed
+   again in the same change, and only taking addresses away may keep it; the operator's `POST /v1/admin/vault/sign-ins/members`
+   through the owner's vault operation), 39 (Bring it back after a rewind: `turn_files.rs` keeps the files from just before a rewind the agent agreed
    to until the next turn starts, puts them back with no file changed by hand since overwritten unless the person
    unticks it, and never through a link; the chat is not brought back, since neither agent has a message for it; the
    main-moved note reads each lane's own base and shows on its row), 42 (the review's sessions and self-serve: 20 self-serve shops a Bangkok day, a self-serve shop's team waiting
@@ -206,7 +224,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
-2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
+2. The night build's queue has one task, `env-example` (added 24 Nov, for the code editor's preview); add pure
+   packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
