@@ -89,17 +89,18 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 
 1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 16, a shop whose deletion stopped stays listed and can be finished (`fix/deletion-stays-listed`, Opus);
    - item 18, the code editor's states for developers: a gap list, then the states that need no owner
      (`feat/code-editor-states`, Opus);
    - item 12, the desktop showing a browser write word for word, then its outpost submitting it
      (`feat/outpost-submits`, Opus; a Rust build in the shared target folder);
-   - item 15, a helper's new device as an alert to the owner (`feat/new-device-alert`, Sonnet).
+   - item 15, a helper's new device as an alert to the owner (`feat/new-device-alert`, Sonnet);
+   - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
+     Opus).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
-   (the outpost's step channel), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
+   (the outpost's step channel), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
    9 (desktop leftovers), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
@@ -117,8 +118,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 4. The dry run on dev with two test shops: a LINE message in, a draft, approval on the web, the reply out, an
    audit row. It waits for a test LINE Official Account. Turn on `officeInbound`, `officeCloud` and
    `officeExternalWrites` for dev only when that exists. Redeploy dev after the next merges.
-5. Deletion follow-up: a shop whose wipe stopped after its registry row went leaves the console's list; only
-   the owner's page then shows it as deleting.
+5. Deletion: a stopped wipe now keeps the shop listed (item 16). Left: a deletion run through the session route keeps
+   no pilot deletion record, and a shop mid-deletion still counts in the pilot gate (the owner's call).
 6. Keep these docs, and where a session can reach them, the plan doc and the design canvas, in step with what lands.
 
 ## Needs the owner
