@@ -1800,6 +1800,7 @@ export const en = {
   "lane.madeFrom": "Made from {base}. Kit never pushes or merges from here.",
   "lane.shared": "This folder has one checkout, so this lane works on the branch of a lane that was already working in it.",
   "lane.moved": "Kit made {branch} for this lane, but the folder is on {now} now.",
+  "lane.noBranch": "This lane has no branch of its own, so it works on the branch the folder is on.",
   "lane.testing": "Running tests",
   "lane.tag.checked": "Checked",
   "lane.tag.testsFailed": "Tests failed",

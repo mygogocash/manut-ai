@@ -1794,6 +1794,7 @@ export const ko: Record<Key, string> = {
   "lane.madeFrom": "{base}에서 만들었어요. Kit은 여기서 푸시하거나 병합하지 않아요.",
   "lane.shared": "이 폴더에는 체크아웃이 하나뿐이라, 이 레인은 이미 작업 중이던 레인의 브랜치에서 작업해요.",
   "lane.moved": "Kit이 이 레인을 위해 {branch}을(를) 만들었지만, 폴더는 지금 {now}에 있어요.",
+  "lane.noBranch": "이 레인에는 자기만의 브랜치가 없어서, 폴더가 있는 브랜치에서 작업해요.",
   "lane.testing": "테스트 실행 중",
   "lane.tag.checked": "확인됨",
   "lane.tag.testsFailed": "테스트 실패",

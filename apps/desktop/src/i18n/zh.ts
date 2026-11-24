@@ -1794,6 +1794,7 @@ export const zh: Record<Key, string> = {
   "lane.madeFrom": "从 {base} 创建。Kit 不会从这里推送或合并。",
   "lane.shared": "这个文件夹只有一个检出，所以这个泳道使用先前已在工作的泳道的分支。",
   "lane.moved": "Kit 为这个泳道创建了 {branch}，但文件夹现在在 {now} 上。",
+  "lane.noBranch": "这个泳道没有自己的分支，所以在文件夹当前所在的分支上工作。",
   "lane.testing": "正在运行测试",
   "lane.tag.checked": "已检查",
   "lane.tag.testsFailed": "测试未通过",

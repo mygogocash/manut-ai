@@ -1794,6 +1794,7 @@ export const ja: Record<Key, string> = {
   "lane.madeFrom": "{base} から作成しました。Kit はここからプッシュやマージをしません。",
   "lane.shared": "このフォルダのチェックアウトは 1 つだけなので、このレーンは先に作業していたレーンのブランチで作業します。",
   "lane.moved": "Kit はこのレーンのために {branch} を作成しましたが、フォルダは今 {now} にあります。",
+  "lane.noBranch": "このレーンには専用のブランチがないため、フォルダのあるブランチで作業します。",
   "lane.testing": "テストを実行中",
   "lane.tag.checked": "確認済み",
   "lane.tag.testsFailed": "テスト失敗",
