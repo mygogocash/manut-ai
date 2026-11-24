@@ -23,7 +23,9 @@ import { readJsonBody } from "./body";
 import { handOutSubmit, settleSubmitReport, submitTitle } from "./browser-writes";
 import { isValidTenant } from "./companies";
 import { workGate, type JobFlags } from "./job-flow";
-import { callerOf, hasExactly, OWNER_SESSION, ownerActor, queryNamesSession, type Caller, type PeopleEnv } from "./people";
+import {
+  callerOf, hasExactly, OWNER_SESSION, ownerActor, queryNamesSession, readShop, type Caller, type PeopleEnv,
+} from "./people";
 import { operatorIdentity } from "./pilot";
 import { base64url } from "./relay";
 import {
@@ -482,6 +484,18 @@ async function registerOutpost(request: Request, env: VaultEnv, ctx: ExecutionCo
   return credentialAnswer(outpost, credential);
 }
 
+/// The refusal for a session whose tenant is no pilot shop, or null for a shop. A person's own sign-in is the owner of its own
+/// tenant (`callerOf`), which is no shop: a vault, its sign-ins and its outposts are a shop's, so the owner's routes answer it
+/// 404 `not_found`, as the owner's people and Google answer it, and keep nothing for it. Otherwise anyone signed in by email
+/// could store sign-ins and register outposts in a vault of their own (the security review of 24 Nov 2026).
+async function shopRefusal(env: PeopleEnv, tenant: string): Promise<Response | null> {
+  try {
+    return (await readShop(env, tenant)) ? null : json({ error: "not_found" }, 404);
+  } catch {
+    return json({ error: "vault_unavailable" }, 503);
+  }
+}
+
 /// `POST /v1/outposts/register` with `{ name, kind: "this_mac" }` and the owner's session: the desktop registers the
 /// Mac it runs on as one of the shop's outposts, and answers `{ tenant, outpost, credential }`, the credential this once
 /// and only its digest kept, as at the operator's registration. Answers null for any other method or path, so those
@@ -490,7 +504,8 @@ async function registerOutpost(request: Request, env: VaultEnv, ctx: ExecutionCo
 /// - **Who.** The shop and the role come from the session alone (`callerOf`, people.ts): an owner session of the shop's
 ///   linked account, or the shop's own signed-in session. A helper's session is refused (`owner_only`): an outpost
 ///   receives the shop's passwords, so only the owner may add one. A body that names a shop is refused rather than read
-///   as another shop.
+///   as another shop. A person's own sign-in, whose tenant is no shop, is answered 404 `not_found` after its body is
+///   checked, and nothing is registered (`shopRefusal`).
 /// - **What.** `this_mac` only: a cloud outpost is a machine the operator runs, and registers.
 /// - **The log.** `outpost.registered` with the outpost's id, by the owner's linked account, or by the shop's own
 ///   session (`owner-session`), as the owner's other changes are logged.
@@ -508,6 +523,8 @@ export async function ownerOutpostRoute(request: Request, url: URL, env: VaultEn
   if (!isRecord(parsed.value) || "tenant" in parsed.value) return json({ error: "invalid_request" }, 400);
   if (parsed.value.kind !== "this_mac") return json({ error: "invalid_kind" }, 400);
   const tenant = caller.shop;
+  const shop = await shopRefusal(env, tenant);
+  if (shop) return shop;
   const credential = mintCredential();
   const answer = await askVault(env, tenant, "/outposts",
     { name: parsed.value.name, kind: "this_mac", credentialHash: await sha256Hex(credential) });
@@ -629,7 +646,8 @@ const OWNER_SIGN_IN_CHANGES: Readonly<Record<string, { path: string; action: Aud
 ///   linked account, or the shop's own signed-in session. A helper's session is refused (`owner_only`): the vault holds
 ///   the shop's passwords, and an outpost receives them, so only the owner sees or changes either. The order is who is
 ///   asking (401 or 503), then the role (403), the method (405), the query and the body (400), as on the owner's other
-///   routes, so a caller with no session learns nothing about a route, not even its methods.
+///   routes, so a caller with no session learns nothing about a route, not even its methods; and only then whether the
+///   tenant is a shop: a person's own sign-in, whose tenant is none, is answered 404 `not_found` (`shopRefusal`).
 /// - **Lists.** `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts` answer what the operator's lists answer for the shop: each
 ///   sign-in's public view, which says only that its password is set, and each outpost without its credential's digest.
 /// - **Changes.** Adding a sign-in (`POST /v1/vault/sign-ins`), a new password (`POST /v1/vault/sign-ins/password`), who may
@@ -657,6 +675,8 @@ export async function ownerVaultRoute(request: Request, url: URL, env: VaultEnv 
   if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
   const tenant = caller.shop;
   if (route === LIST) {
+    const shop = await shopRefusal(env, tenant);
+    if (shop) return shop;
     return url.pathname === "/v1/vault/sign-ins"
       ? ownerList(env, tenant, "/sign-ins", "signIns")
       : ownerList(env, tenant, "/outposts", "outposts");
@@ -667,6 +687,8 @@ export async function ownerVaultRoute(request: Request, url: URL, env: VaultEnv 
   if (!isRecord(body) || !hasExactly(body, route.keys) || !route.strings.every((key) => typeof body[key] === "string")) {
     return json({ error: "invalid_request" }, 400);
   }
+  const shop = await shopRefusal(env, tenant);
+  if (shop) return shop;
   const change = OWNER_SIGN_IN_CHANGES[url.pathname];
   if (change) return ownerSignInChange(env, tenant, caller, change, body, route.keys);
   if (url.pathname === "/v1/vault/outposts/rename") return ownerOutpostChange(env, tenant, caller, "/outposts/rename", body);

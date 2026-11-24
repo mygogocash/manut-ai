@@ -30,6 +30,7 @@
 /// never asked for.
 
 import type { AppendRequest } from "@manut/sheets-rows";
+import { TEST_ORIGIN } from "./test-origin";
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -72,7 +73,6 @@ export type GoogleEnv = {
   PUBLIC_API_ORIGIN?: string;
 };
 
-const TEST_ORIGIN = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.test$/;
 
 function originOf(value: string | undefined): string | null {
   if (!value) return null;

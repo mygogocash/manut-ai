@@ -27,6 +27,7 @@ import { shopsRoute } from "./shops";
 import { TaskObject, type TaskRecordJSON } from "./task-object";
 import { authCall, credStub, scheduleStub, tenantCall, tenantDelete, tenantExport, tenantPrune } from "./tenant-data";
 import { TenantObject } from "./tenant-object";
+import { testWorker } from "./test-origin";
 import { isValidCompanyId, isValidSharedItemId, isValidTenant, GRANTS } from "./companies";
 import { workersAdminRoute } from "./workers";
 import { webSessionRoute } from "./web-session";
@@ -58,7 +59,9 @@ export interface Env {
   CLOUD_API_KEY?: string;
   /// Expected protected admin Access application audience. Unset denies admin.
   ADMIN_ACCESS_AUD?: string;
-  /// Explicit local test key source; production leaves this unset.
+  /// TEST-ONLY: the test Apple key's public half. Only wrangler.test.json sets it, the deploy check refuses every config
+  /// with a `TEST_` var, and it is honoured only on a test Worker, whose PUBLIC_API_ORIGIN is under `.test`
+  /// (test-origin.ts): its private half is committed.
   TEST_JWKS_JSON?: string;
   /// Signing in by a code sent by email (email-code.ts; docs/pilot-api.md, "Signing in by email"). Built and off: both
   /// of its routes answer `email_not_configured` until EMAIL_SIGN_IN is exactly "on", a sender is bound and
@@ -70,7 +73,8 @@ export interface Env {
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
   /// TEST-ONLY: "on" sends codes to an in-memory outbox the workerd tests read (email-sender.ts). Only
-  /// wrangler.test.json sets it, and the dev deploy check refuses every config with a `TEST_` var.
+  /// wrangler.test.json sets it, the deploy check refuses every config with a `TEST_` var, and it is honoured only on a
+  /// test Worker (test-origin.ts).
   TEST_EMAIL_OUTBOX?: string;
   /// Capability defaults. New capabilities ship off; an environment opts in
   /// explicitly. Dynamic flags (below) override these without a redeploy.
@@ -145,16 +149,39 @@ function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
 }
 
+/// The methods whose bodies the API reads as JSON.
+const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
+
+/// A body the API reads is JSON, and it must say so: every POST, PUT and PATCH under /v1/ that carries a body takes only
+/// `application/json` (a `charset` or other parameter is fine), or answers 415 `json_required` before anything is
+/// counted, read or woken. A page on another site can make a visitor's browser send a POST without asking first only
+/// as `text/plain`, a form or a multipart upload (a CORS "simple" request, with `mode: "no-cors"`), so with this no
+/// other site can make a browser ask for a sign-in code, spend a code's tries or send anything else here; a JSON body
+/// from another origin needs a CORS preflight, which this API answers only on the owner's link routes (pilot.ts). The
+/// webhooks under /v1/inbound/ are left to their senders, who sign the exact body and choose its type, and no browser
+/// can sign one. A request with no body has nothing to read and passes. The desktop's shell and page and apps/web send
+/// `application/json` with every body.
+function jsonBodyRefusal(request: Request, pathname: string): Response | null {
+  if (!BODY_METHODS.has(request.method) || pathname.startsWith("/v1/inbound/")) return null;
+  if (request.body === null || request.headers.get("content-length") === "0") return null;
+  const media = (request.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return media === "application/json" ? null : json({ error: "json_required" }, 415);
+}
+
 /// These unauthenticated routes must be limited before parsing or waking AUTH.
 /// Cloudflare supplies this source IP; client forwarding headers and body fields
 /// never choose a bucket. Per-location limits are abuse control, not accounting.
+/// Every bucket is a source group, as the relay's always were: an IPv4 address, or
+/// an IPv6 /64 and never a whole IPv6 address, because one subscriber holds a whole
+/// /64 and rotating addresses inside it would otherwise give a fresh bucket each
+/// time. A source that cannot be read is refused, never given a bucket of its own.
 async function ingressRateGate(request: Request, pathname: string, env: Env): Promise<Response | null> {
   let binding: RateLimit | undefined;
-  let key = request.headers.get("cf-connecting-ip")?.trim();
+  const key = relaySourceGroup(request.headers.get("cf-connecting-ip"));
   const relay = relayPath(pathname);
   if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
-  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source IP as the
-  // exchange's is. The limits per email address are the auth object's (email-code.ts).
+  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source group as the
+  // exchange's is. The limits per email address and per source are the auth object's (email-code.ts).
   else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
@@ -184,12 +211,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   // anything is read; but only while sign-ups are open: while they are closed the route answers sign_ups_closed and
   // touches nothing at all (self-serve.ts).
   else if (pathname === "/v1/shops/new" && signUpsOpen(env)) binding = env.SELF_SERVE_SHOP_LIMITER;
-  else if (relay) {
-    // Relay upgrades count per source group, an IPv4 address or an IPv6 /64, so
-    // rotating addresses inside one prefix gains nothing (RT-1). Any method counts.
-    binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
-    key = relaySourceGroup(key) ?? undefined;
-  }
+  // Relay upgrades count per source group like everything above, so rotating addresses inside one prefix gains nothing
+  // (RT-1). Any method counts.
+  else if (relay) binding = relay.role === "socket" ? env.RELAY_HOST_LIMITER : env.RELAY_PHONE_LIMITER;
   else return null;
 
   if (!binding || !key) return json({ error: "rate_limit_unavailable" }, 503);
@@ -220,9 +244,29 @@ type RequestContext =
   /// Only protected admin connection provisioning constructs this context.
   | { tenant: null; operator: true };
 
+/// The person's sign-ins the lifted routes refuse: an address's hash (`email:`, email-code.ts), since anyone can sign in
+/// by email once it is on. A shop's tenant (`pilot:`) is never a sign-in's. Apple's (`apple:`, auth.ts) keeps the lifted
+/// routes for now: Apple sign-in is on in no environment and needs the owner's Apple team, and the lifted routes' own tests
+/// sign in with it. docs/turning-on.md says to add it here before Apple is turned on.
+const REFUSED_PERSON = /^email:/;
+
+/// Who may use a lifted route: every session, or every session but a person's own email sign-in.
+type People = "allowed" | "refused";
+
 /// Tenant routes accept only revocable device sessions. The operator key is
 /// explicitly refused here, so it cannot bypass tenant or company checks.
-async function contextOf(request: Request, env: Env): Promise<RequestContext | null> {
+///
+/// A person's own email sign-in is refused too, as a shop session already is
+/// (people.ts), on every lifted route but the three reads the desktop makes
+/// for a person in no shop: `GET /v1/tenant/export`, `GET /v1/schedules` and
+/// `GET /v1/inbound/attention` (`people: "allowed"`). These routes act for a
+/// tenant's own cloud tasks, schedules, connections, consent, data and
+/// companies, and a person's tenant is no shop: nothing of a shop's is ever
+/// there. Since anyone can sign in by email once it is on, they would
+/// otherwise give every stranger cloud tasks, schedules that fire, a stored
+/// Linear token read through this API, and the tenant wipe. A shop's owner
+/// and helpers act for it with shop sessions, which these routes refuse.
+async function contextOf(request: Request, env: Env, people: People = "refused"): Promise<RequestContext | null> {
   const header = request.headers.get("authorization") ?? "";
   const prefix = "Bearer ";
   if (!header.startsWith(prefix)) return null;
@@ -240,6 +284,7 @@ async function contextOf(request: Request, env: Env): Promise<RequestContext | n
   if (!verify.ok) return null;
   const result = (await verify.json()) as { ok?: boolean; tenant?: string };
   if (!result.ok || !result.tenant) return null;
+  if (people === "refused" && REFUSED_PERSON.test(result.tenant)) return null;
   return { tenant: result.tenant, operator: false };
 }
 
@@ -610,6 +655,9 @@ export default {
     // pages Worker. This Worker keeps no static assets of its own: Cloudflare runs a Worker with assets behind a
     // router that does not pass ctx.access, and the admin gate below needs it (pages.ts).
     if (!isApiPath(url.pathname)) return env.WEB ? env.WEB.fetch(request) : json({ error: "not_found" }, 404);
+    // Before the limits, so a request another site makes a browser send never spends that visitor's bucket.
+    const typeDenial = jsonBodyRefusal(request, url.pathname);
+    if (typeDenial) return typeDenial;
     const rateDenial = await ingressRateGate(request, url.pathname, env);
     if (rateDenial) return rateDenial;
     const adminDenial = adminGate(request, url.pathname, env, ctx);
@@ -660,7 +708,7 @@ export default {
       }
       if (url.pathname === "/v1/auth/exchange" && parsed.value.provider === "apple" &&
           typeof parsed.value.identityToken === "string" &&
-          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON))) {
+          !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON) && testWorker(env))) {
         return json({ error: "invalid_identity" }, 401);
       }
       // Signing in by email (email-code.ts): a body that is not exactly the route's, and any request while email sign-in
@@ -673,14 +721,16 @@ export default {
         if (!emailSignIn(env)) return json({ error: "email_not_configured" }, 400);
       }
       const target = codeRoute ? "email-code" : url.pathname.endsWith("exchange") ? "exchange" : "refresh";
+      const headers = new Headers({ "content-type": "application/json" });
+      // A code is counted against where it was asked from as well as the address (email-code.ts): the object is told
+      // the source group the ingress limit counted, and nothing else about the request.
+      if (codeRoute) {
+        const source = relaySourceGroup(request.headers.get("cf-connecting-ip"));
+        if (!source) return json({ error: "rate_limit_unavailable" }, 503);
+        headers.set("x-code-source", source);
+      }
       const stub = env.AUTH.get(env.AUTH.idFromName("auth"));
-      return stub.fetch(
-        new Request(`https://auth/${target}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: parsed.raw,
-        }),
-      );
+      return stub.fetch(new Request(`https://auth/${target}`, { method: "POST", headers, body: parsed.raw }));
     }
     if (request.method === "DELETE" && url.pathname === "/v1/auth/session") {
       const authorization = request.headers.get("authorization");
@@ -976,7 +1026,8 @@ export default {
     // own verified tenant. Gated like
     // the webhook: with officeInbound off there is nothing to read.
     if (url.pathname === "/v1/inbound/attention" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant has no feed, so it reads empty.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (!(await featureFlags(env)).officeInbound) {
         return json({ error: "feature_disabled", feature: "officeInbound" }, 403);
@@ -1029,7 +1080,8 @@ export default {
     // A shop session's export is answered above (shops.ts); no shop session
     // deletes here, which stays with the owner's confirmation link.
     if (url.pathname === "/v1/tenant/export" && request.method === "GET") {
-      const context = await contextOf(request, env);
+      // One of the desktop's reads for a person in no shop (contextOf): their own tenant's export holds nothing of a shop's.
+      const context = await contextOf(request, env, "allowed");
       if (!context) return json({ error: "unauthorized" }, 401);
       const tenant = context.tenant ?? url.searchParams.get("tenant") ?? "";
       if (!tenant) return json({ error: "tenant_required" }, 400);
@@ -1085,7 +1137,8 @@ export default {
     // its own alarm, so one tenant's sweep never touches another's, and
     // occurrence claims stay singular per schedule.
     if (url.pathname === "/v1/schedules") {
-      const context = await contextOf(request, env);
+      // Listing is one of the desktop's reads for a person in no shop (contextOf); making a schedule is not theirs.
+      const context = await contextOf(request, env, request.method === "GET" ? "allowed" : "refused");
       if (!context) return json({ error: "unauthorized" }, 401);
       if (request.method === "POST") {
         // Creating a schedule arms future cloud work, so both switches guard

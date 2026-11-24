@@ -284,6 +284,7 @@ const REFUSALS = new Map<string, () => string>([
   ["invalid_members", () => t("conn.err.members")],
   ["too_many_sign_ins", () => t("conn.err.tooMany", { max: MAX_SIGN_INS })],
   ["vault_not_configured", () => t("conn.err.vaultKey")],
+  ["no_shop", () => t("conn.err.noShop")],
 ]);
 
 export function refusalText(code: string, message: string): string {

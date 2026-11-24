@@ -12,7 +12,7 @@ import { emptyState, usable, type Fact, type FactSource, type Refusal } from "@m
 import type { AuditActor } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
-import { callerOf, hasExactly, ownerActor, queryNamesSession, type PeopleEnv } from "./people";
+import { callerOf, hasExactly, ownerActor, queryNamesSession, readShop, type PeopleEnv } from "./people";
 import { operatorIdentity } from "./pilot";
 import { tenantCall, type TenantDataEnv } from "./tenant-data";
 
@@ -115,18 +115,28 @@ async function operatorChange(request: Request, env: MemoryEnv, ctx: ExecutionCo
 /// it ended, as on the team's routines: what the team knows can hold the owner's costs and suppliers, and a helper's
 /// work is the conversations.
 ///
-/// The order is who is asking (401 or 503), then the role (403), the method (405), and the query and the body (400).
+/// The order is who is asking (401 or 503), then the role (403), the method (405), the query and the body (400), and
+/// only then the shop's record: what the team knows is a pilot shop's, so a person's own sign-in, whose tenant is no shop,
+/// is answered 404 `not_found`, as the owner's people and Google answer it, and nothing is kept for it.
 async function sessionRoute(request: Request, url: URL, env: PeopleEnv, change: Change | null): Promise<Response> {
   const caller = await callerOf(request, env);
   if (caller instanceof Response) return caller;
   if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
   if (request.method !== (change ? "POST" : "GET")) return json({ error: "method_not_allowed" }, 405);
   if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
-  if (!change) return readMemory(env, caller.shop);
-  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
-  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
-  const body = parsed.value;
-  if (!isRecord(body) || !hasExactly(body, change.keys)) return json({ error: "invalid_request" }, 400);
+  let body: Record<string, unknown> | null = null;
+  if (change) {
+    const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+    if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+    if (!isRecord(parsed.value) || !hasExactly(parsed.value, change.keys)) return json({ error: "invalid_request" }, 400);
+    body = parsed.value;
+  }
+  try {
+    if (!(await readShop(env, caller.shop))) return json({ error: "not_found" }, 404);
+  } catch {
+    return json({ error: "memory_unavailable" }, 503);
+  }
+  if (!change || !body) return readMemory(env, caller.shop);
   return writeMemory(env, caller.shop, change, body, ownerActor(caller));
 }
 

@@ -178,6 +178,31 @@ describe("reading the shop's vault and outposts", () => {
     expect([...api.to("GET", SIGN_INS_PATH), ...api.to("GET", OUTPOSTS_PATH)].map((c) => c.bearer)).toEqual(["access-1", "access-1"]);
   });
 
+  it("says no shop is linked when the API answers a person in no shops' sign-in 404, and sends no password", async () => {
+    // Since 24 Nov 2026 a vault is a pilot shop's: apps/api answers a person's own sign-in 404 not_found on every vault
+    // route, since its tenant is no shop. The tab says so in its own words instead of "not found".
+    const { api, ask } = await setup({ shops: false });
+    const noShop = { status: 404, json: { error: "not_found" } };
+    for (const path of [SIGN_INS_PATH, OUTPOSTS_PATH]) api.on("GET", path, noShop);
+    for (const path of [SIGN_INS_PATH, PASSWORD_PATH, MEMBERS_PATH, RENAME_PATH, REMOVE_PATH]) api.on("POST", path, noShop);
+    const said = { code: "no_shop", message: t("conn.err.noShop") };
+    expect(await refusal(ask("connections.list", {}))).toEqual(said);
+    expect(await refusal(ask("connections.add", { shop: null, ...NEW_SIGN_IN }))).toEqual(said);
+    expect(await refusal(ask("connections.password", { shop: null, signIn: "signin-1", password: PASSWORD }))).toEqual(said);
+    expect(await refusal(ask("connections.members", { shop: null, signIn: "signin-1", members: ["kit"] }))).toEqual(said);
+    expect(await refusal(ask("connections.rename", { shop: null, outpost: "outpost-1", name: "Counter Mac" }))).toEqual(said);
+    expect(await refusal(ask("connections.remove", { shop: null, outpost: "outpost-1" }))).toEqual(said);
+    // A password goes only after a read of the sign-ins that works, so neither a new one nor a changed one was sent.
+    expect(api.to("POST", SIGN_INS_PATH)).toEqual([]);
+    expect(api.to("POST", PASSWORD_PATH)).toEqual([]);
+    expect(JSON.stringify(api.calls)).not.toContain(PASSWORD);
+    // A shop session's 404 is still the shop's own answer, not "no shop".
+    const inShops = await setup({ shops: true });
+    inShops.api.on("POST", RENAME_PATH, noShop);
+    expect((await refusal(inShops.ask("connections.rename", { shop: SHOP_A.id, outpost: "outpost-a", name: "Mac" })))?.code)
+      .toBe("not_found");
+  });
+
   it("reads the shop the switcher shows with that shop's own session, and the next one after a switch", async () => {
     const { api, ask } = await setup({ shops: true });
     const listed = await ask("connections.list", {});

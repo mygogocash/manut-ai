@@ -3,7 +3,7 @@
 // written here, and read what it prints.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -63,6 +63,52 @@ describe("the dev deploy check", () => {
     assert.equal(run.status, 1);
     assert.match(run.out, /clean\.jsonc with --env dev deploys manut-api-dev/);
     assert.match(run.out, /::error::.*outbox\.jsonc sets TEST_EMAIL_OUTBOX/);
+  });
+
+  for (const env of ["staging", "prod", "production"]) {
+    it(`refuses a TEST_ var in the ${env} environment, which this workflow never deploys`, () => {
+      const run = check(config(`${env}-test-var`, { ...BASE, env: { ...BASE.env,
+        [env]: { name: `manut-api-${env}`, vars: { TEST_JWKS_JSON: "{}" } } } }));
+      assert.equal(run.status, 1, run.out);
+      assert.match(run.out, new RegExp(`::error::.* sets TEST_JWKS_JSON for its ${env} environment: ` +
+        "a TEST_ var belongs in wrangler\\.test\\.json only\\. Nothing was deployed\\."));
+      assert.doesNotMatch(run.out, /deploys manut-api-dev/);
+    });
+  }
+
+  it("refuses a public origin under .test in any block, where the API would honour the test-only settings", () => {
+    const blocks = {
+      top: { ...BASE, vars: { PUBLIC_API_ORIGIN: "https://api.manut.test" } },
+      dev: { ...BASE, env: { dev: { name: "manut-api-dev", vars: { PUBLIC_API_ORIGIN: "https://dev.manut.test" } } } },
+      prod: { ...BASE, env: { ...BASE.env,
+        prod: { name: "manut-api-prod", vars: { PUBLIC_API_ORIGIN: "https://manut.test" } } } },
+    };
+    for (const [where, value] of Object.entries(blocks)) {
+      const run = check(config(`origin-${where}`, value));
+      assert.equal(run.status, 1, run.out);
+      assert.match(run.out,
+        /::error::.* sets PUBLIC_API_ORIGIN to https:\/\/[a-z.]+\.test for its .*: an origin under \.test is a test Worker's/);
+    }
+    // A real origin, and one that only looks like a test one, are deployed as before.
+    for (const origin of ["https://dev.manut.xyz", "https://manut.test.example", "http://api.manut.test"]) {
+      const run = check(config(`origin-ok-${origin.replace(/\W/g, "-")}`, { ...BASE,
+        env: { dev: { name: "manut-api-dev", vars: { PUBLIC_API_ORIGIN: origin } } } }));
+      assert.equal(run.status, 0, run.out);
+    }
+  });
+
+  it("knows a test Worker's origin by the API's own pattern", () => {
+    // The script cannot import the API's TypeScript, so it keeps its own copy of the pattern; this keeps the two the same.
+    const pattern = (file) => /TEST_ORIGIN = (\/.+\/);/.exec(readFileSync(file, "utf8"))?.[1];
+    const api = pattern(join(here, "..", "..", "apps", "api", "src", "test-origin.ts"));
+    assert.ok(api);
+    assert.equal(pattern(script), api);
+  });
+
+  it("passes a config whose staging and production blocks set no test-only var, as the repository's own do", () => {
+    const run = check(config("with-staging", { ...BASE, env: { ...BASE.env, staging: { name: "manut-api-staging" },
+      prod: { name: "manut-api-prod", vars: { PUBLIC_API_ORIGIN: "https://manut.example" } } } }));
+    assert.equal(run.status, 0, run.out);
   });
 
   it("lets other vars through, the sign-in switch among them", () => {

@@ -4,8 +4,10 @@
 //
 // Rules this module keeps:
 // - The list is of the shop the switcher shows, read with that shop's own session (shops.ts), or with the sign-in while the
-//   person is in no shops, whose tenant is then their shop. A change goes to the shop its row was read for, never to the
-//   one the switcher shows now, as an answer to an ask goes to the ask's own shop.
+//   person is in no shops. A change goes to the shop its row was read for, never to the one the switcher shows now, as an
+//   answer to an ask goes to the ask's own shop. A vault is a pilot shop's, so the API answers a person's own sign-in 404
+//   `not_found` (24 Nov 2026), which is read here as `no_shop`: "No shop is linked to your account yet". A shop's own
+//   signed-in session, whose tenant is the shop, is answered as before.
 // - Only the owner sees or changes these. A shop the person helps at is refused here (`owner_only`) with nothing sent, as
 //   the API would refuse it, so a helper's session never carries a password anywhere.
 // - A password, a new sign-in's or a new one for a sign-in, is sent once, over the shell's request command, and kept
@@ -99,6 +101,7 @@ const REFUSED: Record<string, () => string> = {
   too_many_sign_ins: () => t("conn.err.tooMany", { max: MAX_SIGN_INS }),
   vault_not_configured: () => t("conn.err.vaultKey"),
   not_found: () => t("rt.notFound"),
+  no_shop: () => t("conn.err.noShop"),
 };
 
 export const refusal = (code: string): OpError => new OpError(code, (REFUSED[code] ?? (() => t("conn.err.failed")))());
@@ -131,10 +134,14 @@ type Handlers = { [K in keyof ConnectionOps]: (p: ConnectionOps[K]["params"]) =>
 
 /** The six Connections ops over `link`. */
 export function connectionHandlers(link: OwnerLink): Handlers {
-  /** The JSON of an answer that did what it said, or the refusal to throw. */
+  /** The JSON of an answer that did what it said, or the refusal to throw. The sign-in's 404 `not_found` (`shop` null) is a
+   *  person in no shops, whose own tenant has no vault. */
   const ok = (answer: ShopAnswer, shop: string | null): unknown => {
     if (answer.kind === "ok") return answer.json;
     if (answer.kind === "left") throw shop !== null ? link.departed(shop, answer.departure) : refusal("not_found");
+    if (answer.kind === "refused" && shop === null && answer.status === 404 && answer.code === "not_found") {
+      throw refusal("no_shop");
+    }
     if (answer.kind === "refused") throw refusal(answer.code);
     if (answer.kind === "signed_out") throw new OpError("signed_out", t("rt.signedOut"));
     if (answer.kind === "offline") throw new OpError("offline", t("rt.offline"));

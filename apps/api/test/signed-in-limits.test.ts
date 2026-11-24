@@ -1,9 +1,9 @@
 import { createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { MAX_HELPER_SESSIONS } from "@manut/people-rules";
 import { describe, expect, it } from "vitest";
-import { testOutbox } from "../src/email-sender";
 import worker, { type Env } from "../src/index";
 import { MAX_OWNER_SESSIONS, type PeopleRecord } from "../src/people-store";
+import { relaySourceGroup } from "../src/relay";
 import { tenantStub } from "../src/tenant-data";
 import { asSession, bindings, joinHelper, setupShop, signIn, type SignedIn } from "./people-fixtures";
 import { sourceWorker } from "./source-worker";
@@ -40,21 +40,6 @@ function fakeLimiter(allow: (key: string) => boolean) {
   return { limiter, keys };
 }
 
-/// Signs `email` in through the real email code exchange, as a stranger with any address can.
-async function emailSignIn(email: string): Promise<SignedIn> {
-  const asked = await sourceWorker.fetch(`${API}/v1/auth/email/code`, { method: "POST",
-    headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
-  expect(asked.status).toBe(200);
-  const sent = testOutbox().filter((one) => one.to === email);
-  const code = /sign-in code is (\d{6})\./.exec(sent[sent.length - 1]?.text ?? "")?.[1];
-  const deviceId = `device-${crypto.randomUUID()}`;
-  const exchanged = await sourceWorker.fetch(`${API}/v1/auth/exchange`, { method: "POST",
-    headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "email", email, code, deviceId }) });
-  expect(exchanged.status).toBe(200);
-  const body = (await exchanged.json()) as { tenant: string; accessToken: string; refreshToken: string };
-  return { ...body, deviceId, headers: { authorization: `Bearer ${body.accessToken}` } };
-}
-
 /// A shop the person made themselves, and the owner session it came with.
 async function ownShop(person: SignedIn): Promise<{ shop: string; owner: { authorization: string } }> {
   const made = await asSession<{ shop: { id: string }; session: { accessToken: string } }>(person.headers, "POST",
@@ -84,7 +69,8 @@ describe("deleting one's own data", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("60");
     expect(await response.json()).toEqual({ error: "rate_limited" });
-    expect(keys).toEqual([ip]);
+    // The bucket is the address's source group, an IPv6 /64 here, as every ingress limit's is.
+    expect(keys).toEqual([relaySourceGroup(ip)]);
     expect(woken).toBe(0);
     // Without the binding nothing is deleted either.
     const unbound = await send(deletion({ authorization: "Bearer any-session" }, ip),
@@ -95,12 +81,12 @@ describe("deleting one's own data", () => {
   });
 
   it("lets one address delete strangers' own data 10 times a minute, and no more", async () => {
-    // Each deletion ends every session of its person, so each try needs a sign-in of its own: strangers with addresses of
-    // their own, as anyone can sign in by email once it is on.
+    // Each deletion ends every session of its person, so each try needs a sign-in of its own. An email sign-in is refused
+    // on this route altogether (index.ts, `REFUSED_PERSON`), so the strangers sign in with Apple, which keeps it for now.
     const fill = async () => {
       const ip = address();
       const strangers: SignedIn[] = [];
-      for (let n = 0; n < 11; n++) strangers.push(await emailSignIn(`stranger-${crypto.randomUUID()}@anywhere.example`));
+      for (let n = 0; n < 11; n++) strangers.push(await signIn());
       const statuses: number[] = [];
       for (const stranger of strangers) statuses.push((await send(deletion(stranger.headers, ip))).status);
       return { statuses, last: strangers[10]! };

@@ -1928,6 +1928,7 @@ export const en = {
   "outpost.err.keychain": "This Mac's key could not be kept in the keychain, so it is not set up. Try again.",
   "outpost.err.failed": "That did not work. Try again.",
   "outpost.err.left": "You no longer have access to this shop, so this Mac was not added.",
+  "outpost.err.noShop": "No shop is linked to your account yet, so this Mac has no shop to work for.",
   // Customize › Connections, for the shop's owner: the vault's sign-ins and the shop's outposts (src/pages/ConnectionsPane.tsx,
   // src/pages/connections.ts, src/runtime/http/connections.ts)
   "vault.title": "Vault",
@@ -1964,6 +1965,7 @@ export const en = {
   "conn.saving": "Saving…",
   "conn.cancel": "Cancel",
   "conn.err.ownerOnly": "Only the shop's owner sees and changes its sign-ins and outposts.",
+  "conn.err.noShop": "No shop is linked to your account yet, so there are no sign-ins or outposts to manage here.",
   "conn.err.password": "A password is 1 to {max} characters.",
   "conn.err.signInGone": "That sign-in is no longer in the vault.",
   "conn.err.name": "A name is 1 to {max} letters.",

@@ -12,6 +12,7 @@ import {
   asSession,
   auditEntries,
   bindings,
+  emailSignIn,
   joinHelper,
   setupShop,
   shopConsents,
@@ -258,7 +259,7 @@ describe("making, reading and changing routines", () => {
   });
 
   it("keeps a routine's schedule out of reach of the public schedule routes", async () => {
-    const tenant = `routines-session-${crypto.randomUUID()}`;
+    const tenant = (await shop()).tenant;
     const owner = await tenantSession(tenant);
     const created = await asSession<{ routine: RoutineView }>(owner, "POST", "/v1/routines",
       { name: "Morning brief", action: "brief", trigger: { kind: "daily", at: "08:00" } });
@@ -316,7 +317,7 @@ describe("making, reading and changing routines", () => {
   });
 
   it("lets the shop's own session read and change its own routines, and nobody else", async () => {
-    const tenant = `routines-session-${crypto.randomUUID()}`;
+    const tenant = (await shop()).tenant;
     const owner = await tenantSession(tenant);
     const created = await asSession<{ routine: RoutineView }>(owner, "POST", "/v1/routines",
       { name: "Weekly growth brief", action: "brief", trigger: { kind: "weekly", weekdays: [1], at: "08:00" } });
@@ -334,7 +335,7 @@ describe("making, reading and changing routines", () => {
     expect(logged).toMatchObject({ actor: { kind: "owner", id: "owner-session" }, subject: { routineId: id } });
 
     // Another shop's session finds nothing by that id, and changes nothing.
-    const other = await tenantSession(`routines-session-${crypto.randomUUID()}`);
+    const other = await tenantSession((await shop()).tenant);
     expect((await asSession(other, "POST", "/v1/routines/resume", { routineId: id })).body).toEqual({ error: "not_found" });
     expect((await asSession<RoutinesView>(owner, "GET", "/v1/routines")).body.routines[0]).toMatchObject({ paused: true });
     // No session, or the operator key where a session belongs: nobody.
@@ -348,6 +349,27 @@ describe("making, reading and changing routines", () => {
       expect(answer.status).toBe(403);
       expect(answer.body).toEqual({ error: "owner_only" });
     }
+  });
+
+  it("answers a person's own sign-in not_found, and sets no clock for its tenant, which is no shop", async () => {
+    // The review (24 Nov 2026): a stranger signed in by email was the owner of their own tenant here, and could set
+    // routine clocks that fire, and fail, for good.
+    const person = await emailSignIn(`routine-stranger-${crypto.randomUUID()}@example.org`);
+    const routine = { name: "Every minute", action: "brief", trigger: { kind: "daily", at: "08:00" } };
+    for (const [method, path, body] of [["GET", "/v1/routines", undefined], ["POST", "/v1/routines", routine],
+      ["POST", "/v1/routines/pause", { routineId: "routine-x" }], ["POST", "/v1/routines/resume", { routineId: "routine-x" }],
+      ["POST", "/v1/routines/remove", { routineId: "routine-x" }], ["POST", "/v1/team/pause", {}],
+      ["POST", "/v1/team/resume", {}]] as const) {
+      expect([path, await asSession(person.headers, method, path, body)]).toEqual([path,
+        { status: 404, body: { error: "not_found" } }]);
+    }
+    await runInDurableObject(scheduleStub(bindings, person.tenant), async (_instance, state) => {
+      expect([...(await state.storage.list()).keys()]).toEqual([]);
+      expect(await state.storage.getAlarm()).toBeNull();
+    });
+    // A body that names a shop is still refused as one, before the shop is read.
+    expect(await asSession(person.headers, "POST", "/v1/routines", { ...routine, tenant: "pilot:x" })).toEqual({
+      status: 400, body: { error: "invalid_request" } });
   });
 });
 

@@ -296,7 +296,8 @@ function vaultUnreachable(): Env {
 /// A public request with its own source address, so the link routes' rate limit never trips across tests.
 async function call(path: string, init: RequestInit = {}): Promise<Response> {
   const request = new Request(`https://api.manut.test${path}`, init);
-  request.headers.set("cf-connecting-ip", `2001:db8::${crypto.randomUUID().slice(0, 4)}`);
+  // A /64 of its own: the ingress limits count a whole IPv6 /64 as one source.
+  request.headers.set("cf-connecting-ip", `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}::1`);
   const context = createExecutionContext();
   const response = await worker.fetch(request, bindings, context);
   await waitOnExecutionContext(context);

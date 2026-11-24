@@ -85,9 +85,10 @@ async function lifted(email: string): Promise<SignedIn> {
   return { ...body, deviceId, headers: { authorization: `Bearer ${body.accessToken}` } };
 }
 
-/// A POST from the app's page straight to the Worker with `env`, from `ip` when given (the limiter's key).
-async function direct(path: string, body: unknown, env: Env = bindings, ip = `2001:db8::${Math.floor(Math.random() * 65535).toString(16)}`):
-  Promise<Response> {
+/// A POST from the app's page straight to the Worker with `env`, from `ip` when given (the limiter's key), else from a /64
+/// of its own, since the limiter counts a whole IPv6 /64 as one source.
+async function direct(path: string, body: unknown, env: Env = bindings,
+  ip = `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}::1`): Promise<Response> {
   const context = createExecutionContext();
   const response = await worker.fetch(new Request(`${API}${path}`, { method: "POST", headers: { "x-manut-web": "1", origin: API,
     "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify(body) }), env, context);

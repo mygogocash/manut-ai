@@ -108,6 +108,8 @@ describe("registering this Mac", () => {
       [{ status: 409, json: { error: "too_many_outposts" } }, undefined, "too_many"],
       [{ status: 400, json: { error: "invalid_name" } }, undefined, "failed"],
       [{ status: 503, json: { error: "vault_unavailable" } }, undefined, "failed"],
+      // Since 24 Nov 2026 apps/api answers a person's own sign-in 404 not_found: its tenant is no shop to work for.
+      [{ status: 404, json: { error: "not_found" } }, undefined, "no_shop"],
       ["offline", undefined, "offline"],
       ["failed", "keychain", "keychain"],
       ["failed", undefined, "failed"],

@@ -7,20 +7,27 @@
 // It also refuses a config that sets a test-only var: any var whose name starts with TEST_, which only
 // apps/api/wrangler.test.json may set. TEST_JWKS_JSON is the test Apple key's public half, and with it deployed anyone
 // holding the committed private half could sign in as anyone; TEST_EMAIL_OUTBOX keeps every sign-in code in memory
-// instead of sending it. Both the dev environment and the top level are read, since vars are not inherited and a
-// command without --env deploys the top level. A secret of that name set with `wrangler secret put` is not in any
-// config, so this cannot see one; none should exist.
+// instead of sending it. Every block of a config is read: its top level and each environment it defines (dev, staging
+// and prod in this repository), since vars are not inherited, a command without --env deploys the top level, and a
+// staging or production deploy, which this workflow never makes, reads its own block. A secret of that name set with
+// `wrangler secret put` is not in any config, so this cannot see one. So the API honours the test-only settings only on
+// a Worker whose PUBLIC_API_ORIGIN is an https origin under .test (apps/api/src/test-origin.ts), and this refuses such
+// an origin in every block too: with it, a secret named TEST_JWKS_JSON would work again.
 //
 // Usage, from apps/api: node ../../.github/scripts/check-dev-deploys.mjs <wrangler config>...
 // Wrangler comes from the working directory's package (apps/api), at the version pnpm-lock.yaml pins. Its own
-// config reader resolves each config, environment names included, the way `wrangler deploy` does.
+// config readers resolve each config, environment names included, the way `wrangler deploy` does.
 // .github/scripts/check-dev-deploys.test.mjs runs it as the workflow does.
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
 // pnpm's strict layout puts wrangler in apps/api/node_modules only, so it is resolved from there, not from here.
-const { unstable_readConfig } = createRequire(join(process.cwd(), "package.json"))("wrangler");
+const { experimental_readRawConfig, unstable_readConfig } = createRequire(join(process.cwd(), "package.json"))("wrangler");
+
+/// An https origin under .test: a test Worker's, on which the API honours the test-only settings. The same pattern as
+/// TEST_ORIGIN in apps/api/src/test-origin.ts, which the test checks by their text.
+const TEST_ORIGIN = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.test$/;
 
 const refuse = (message) => {
   // A workflow command on stdout, so the reason shows on the run's page as well as in its log.
@@ -31,6 +38,9 @@ const refuse = (message) => {
 /// The names of the test-only vars a resolved config sets.
 const testVars = (resolved) => Object.keys(resolved.vars ?? {}).filter((key) => key.startsWith("TEST_"));
 
+/// The names of the environments a config defines, as Wrangler reads the file.
+const environments = (config) => Object.keys(experimental_readRawConfig({ config }).rawConfig.env ?? {});
+
 const configs = process.argv.slice(2);
 if (configs.length === 0) refuse("No wrangler config was named to check.");
 for (const config of configs) {
@@ -40,11 +50,18 @@ for (const config of configs) {
   if (typeof name !== "string" || !name.endsWith("-dev")) {
     refuse(`${config} with --env dev would deploy "${name}", which is not a dev Worker (its name must end in -dev).`);
   }
-  const top = unstable_readConfig({ config }, { hideWarnings: true });
-  for (const [where, resolved] of [["its dev environment", dev], ["its top level", top]]) {
+  const blocks = [["its top level", unstable_readConfig({ config }, { hideWarnings: true })],
+    ...environments(config).map((env) => [`its ${env} environment`,
+      env === "dev" ? dev : unstable_readConfig({ config, env }, { hideWarnings: true })])];
+  for (const [where, resolved] of blocks) {
     const named = testVars(resolved);
     if (named.length > 0) {
       refuse(`${config} sets ${named.join(", ")} for ${where}: a TEST_ var belongs in wrangler.test.json only.`);
+    }
+    const origin = resolved.vars?.PUBLIC_API_ORIGIN;
+    if (typeof origin === "string" && TEST_ORIGIN.test(origin)) {
+      refuse(`${config} sets PUBLIC_API_ORIGIN to ${origin} for ${where}: an origin under .test is a test Worker's, ` +
+        "where the test-only settings work.");
     }
   }
   console.log(`${config} with --env dev deploys ${name}`);

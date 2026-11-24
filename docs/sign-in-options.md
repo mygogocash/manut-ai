@@ -31,8 +31,9 @@ verified email becomes the person's identity, as Apple's verified email is match
 (`docs/people.md`). Sending needs the plan and a sending domain the owner controls.
 
 **Built, off until the owner turns it on (24 Nov 2026).** The backend has it as that paragraph says, with the code kept
-as an HMAC rather than a plain hash (six digits have only a million values) and at most ten codes an address in any 24
-hours: `POST /v1/auth/email/code`, and `POST /v1/auth/exchange` with `provider: "email"` (`docs/pilot-api.md`,
+as an HMAC rather than a plain hash (six digits have only a million values), at most ten codes an address in any 24
+hours asked from one network and thirty from all of them, and at most twenty a day from one network and three hundred a
+day in all (24 Nov 2026): `POST /v1/auth/email/code`, and `POST /v1/auth/exchange` with `provider: "email"` (`docs/pilot-api.md`,
 "Signing in by email"). Both answer `email_not_configured` in every environment today. Turning it on needs:
 
 - the owner's yes;
