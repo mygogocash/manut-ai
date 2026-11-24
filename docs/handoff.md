@@ -115,6 +115,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `SELF_SERVE_SHOP_LIMITER` (pages `8d55119a`, API `2b70c478`); smoke-tested: `POST /v1/shops/new` answers 403
   `sign_ups_closed`, Google and email sign-in still answer that they are not on, every page serves the new bundle, and
   the console is behind Access.
+- Dev was redeployed on 24 Nov at 15:22 from `754495b`, with the owner's web app and the shop-making journal (pages
+  `03a467f6`, API `2a59734e`); smoke-tested: `/app/` loads with its own-origin script policy and `no-referrer`, its
+  manifest is served, `POST /v1/web/shops` answers 403 `csrf_required` without `x-manut-web`, 403 `origin_forbidden`
+  from another origin and 401 `signed_out` (with `emailSignIn: false`) from this one, and email sign-in and self-serve
+  still answer that they are off.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -127,11 +132,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 37, Google Sheets on the desktop and its two guards (`feat/sheets-desktop`, Sonnet);
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
    - a security review of the API surface added on 24 Nov as a whole (email sign-in, self-serve, Google, the web
-     session, the join page, the making journal, test-only paths), findings only (Opus).
-   Merged: 38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until
+     session, the join page, the making journal, test-only paths), findings only (Opus);
+   - item 40, the owner adds a sign-in and changes who may use it, from the app (`feat/owner-sign-ins`, Opus).
+   Merged: 37 (Google Sheets on the desktop: Customize › Connections' row, the append shown whole before Approve, a
+   month already sent asked again only with words that say so, and a shop's deletion revoking its Google token first),
+   38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until
    whole, and a self-serve slot is never lost; `docs/pilot-api.md`, "A make that stops part way"), 17 (the owner's web app at `/app/`: `__Host-` HttpOnly SameSite=Strict cookies read only by five routes
    under `/v1/web/`, which need `x-manut-web` and this origin; a service worker that caches the shell only, never `/v1`;
    `docs/web-app.md`), 36 (self-serve onboarding, built and off: `POST /v1/shops/new`, three shops an account, `sign_ups_closed`
