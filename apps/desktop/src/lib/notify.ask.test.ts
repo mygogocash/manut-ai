@@ -120,7 +120,9 @@ describe("which asks a notification may approve", () => {
       refund_partial: "manut:look_first+later",
     });
     expect(h.sent).toHaveLength(kinds.length);
-  });
+    // Seven asks read and shown at once take well under a second alone, but several times that while other work loads
+    // the Mac; at 5 seconds this timed out there, and the notifications it was still sending landed in the next test.
+  }, 30_000);
 
   it("names who asks and the exact action, as the card does", async () => {
     await opened({ approvals: [await ofKind("reply")], tasks: [] });
