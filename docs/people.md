@@ -141,6 +141,27 @@ device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_
 `requestId`, `taskId`). Never a name, a note or an identity's value. A decision from a session is the job flow's
 `approval.decided` entry, naming the owner or the helper.
 
+## A helper's new device
+
+The canvas tells the owner on LINE when a helper signs in on a new device ("Mint signed in on a new device"), even in
+quiet hours. LINE is parked, so the owner's desktop says it instead (`docs/runtime-adapter.md`, "Several shops").
+
+Every helper session that is opened, a join (the helper's first device) or opening the shop on another device, writes one
+sign-in to the shop's people record in the same change: the session's id, whose it is and when, by the shop's clock. It is
+not the session and gives no access: nothing that checks a session reads it. The owner's session reads them with
+`GET /v1/people/devices` (`docs/pilot-api.md`, "The owner's own routes"): the helper's id and the name the owner gave them,
+when, and the session's id, and nothing else. A helper's session is refused (403 `owner_only`), as on the owner's other
+routes.
+
+- **Signed out is not unseen.** A sign-in stays listed after its device signs out, for 30 days (as long as a session
+  lasts) and up to the newest 50, so an owner whose app was closed still hears that someone signed in as Mint. The
+  sign-ins of a helper the owner removed are not listed.
+- **A device is a session.** The backend cannot tell two devices from one device that signed in twice, so signing in
+  again (after signing out, or after the 30 days) is a new device here, as it is in `devices` of the people list.
+- **A join counts.** Accepting an invite is the helper's first device, so the owner hears of it as of any other.
+- **Not in the export.** The sign-ins are not part of the shop's export. The audit log, which the export carries, already
+  has each one as `helper.joined` or `helper.session_opened`, with the time.
+
 ## Not built yet
 
 - (Built since, 24 Nov 2026: a helper's list of the shops they help is `GET /v1/shops`, with a session per shop from

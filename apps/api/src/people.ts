@@ -6,7 +6,9 @@
 ///   cover on the owner's word, whether or not the owner has an account linked (an owner without one, or one who lost
 ///   their phone, still asks the operator).
 /// - The owner's own routes for the same changes, from their shop session (docs/several-shops.md, slice 4). Both kinds
-///   of route make each change through the same operation of the shop's record, so there is one way to make it.
+///   of route make each change through the same operation of the shop's record, so there is one way to make it. One more
+///   is theirs alone: the sign-ins helpers made lately (`GET /v1/people/devices`), which the owner's app reads to tell
+///   them once of a new device (docs/people.md, "A helper's new device").
 /// - A helper's own two routes, which need a signed-in session of the lifted auth: joining through an invite, and opening
 ///   the shop on another device. Each gives that device a helper session for the one shop.
 /// - `callerOf`, who is calling a shop's session routes (approvals.ts, routines.ts, memory.ts, shops.ts and the owner's
@@ -318,12 +320,22 @@ async function peopleList(env: PeopleEnv, shop: PilotShopRecord, view: PeopleVie
   };
 }
 
+/// `GET /v1/people/devices` for the owner's session: each sign-in a helper made lately, newest first, so the owner's app
+/// can tell them once of a new device (docs/people.md, "A helper's new device"). Only the helper's id and the name the
+/// owner gave them, when the session was opened, and the session's own id, which the app keeps to know it has already said
+/// so. That id is no credential: a session is its token, which only its device holds, and the shop's record keeps only the
+/// token's hash. Never a token, a hash, an email, a LINE id or the account a helper signed in with.
+function deviceList(_env: PeopleEnv, _shop: PilotShopRecord, view: PeopleView) {
+  return { devices: view.signIns.map((signIn) => ({ id: signIn.sessionId, helperId: signIn.helperId,
+    name: view.names[signIn.helperId] ?? "", openedAt: iso(signIn.at) })) };
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
-/// `/v1/admin/people*` (after the admin gate), the owner's own `/v1/people` and its changes, and a helper's own
-/// `/v1/people/accept` and `/v1/people/session`. Answers null for any other path.
+/// `/v1/admin/people*` (after the admin gate), the owner's own `/v1/people`, its devices and its changes, and a helper's
+/// own `/v1/people/accept` and `/v1/people/session`. Answers null for any other path.
 export async function peopleRoute(request: Request, url: URL, env: PeopleEnv, ctx: ExecutionContext):
   Promise<Response | null> {
   if (url.pathname === "/v1/admin/people" || url.pathname.startsWith("/v1/admin/people/")) {
@@ -334,6 +346,7 @@ export async function peopleRoute(request: Request, url: URL, env: PeopleEnv, ct
     return url.pathname === "/v1/people/accept" ? acceptInvite(request, env) : openSession(request, env);
   }
   if (url.pathname === "/v1/people") return ownerRoute(request, url, env, null);
+  if (url.pathname === "/v1/people/devices") return ownerRoute(request, url, env, null, deviceList);
   const change = url.pathname.startsWith("/v1/people/") ? changeAt(url.pathname.slice("/v1/people/".length)) : null;
   return change ? ownerRoute(request, url, env, change) : null;
 }
@@ -428,7 +441,11 @@ async function operatorRoute(request: Request, url: URL, env: PeopleEnv, ctx: Ex
   }
 }
 
-/// `GET /v1/people` and `POST /v1/people/<change>` (`change` null for the list): the owner managing the shop's helpers
+/// What an owner's session reads of the shop's people: the whole list (`peopleList`), or only the sign-ins helpers made
+/// (`deviceList`). Both are read from the one view of the shop's record, behind the same checks.
+type Read = (env: PeopleEnv, shop: PilotShopRecord, view: PeopleView) => unknown;
+
+/// `GET /v1/people` and `POST /v1/people/<change>` (`change` null for a read): the owner managing the shop's helpers
 /// from their own session (docs/several-shops.md, slice 4). The shop and the role come from the session alone
 /// (`callerOf`), so the body names neither, and a session of another shop never reaches this one's people. A helper's
 /// session is told the route is the owner's rather than that it ended, as on the team's routines. The log names the
@@ -436,7 +453,8 @@ async function operatorRoute(request: Request, url: URL, env: PeopleEnv, ctx: Ex
 ///
 /// The order is who is asking (401 or 503), then the role (403), the method (405), the query and the body (400), and only
 /// then the shop's record.
-async function ownerRoute(request: Request, url: URL, env: PeopleEnv, change: Change | null): Promise<Response> {
+async function ownerRoute(request: Request, url: URL, env: PeopleEnv, change: Change | null, read: Read = peopleList):
+  Promise<Response> {
   const caller = await callerOf(request, env);
   if (caller instanceof Response) return caller;
   if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
@@ -448,7 +466,7 @@ async function ownerRoute(request: Request, url: URL, env: PeopleEnv, change: Ch
       // People exist for pilot shops: a person's own sign-in acts for their own tenant, which has none.
       if (!shop) return json({ error: "not_found" }, 404);
       const view = await readPeople(env, shop.tenant);
-      return view ? json(await peopleList(env, shop, view)) : json({ error: "people_unavailable" }, 503);
+      return view ? json(await read(env, shop, view)) : json({ error: "people_unavailable" }, 503);
     }
     const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
     if (!parsed.ok) return json({ error: parsed.error }, parsed.status);

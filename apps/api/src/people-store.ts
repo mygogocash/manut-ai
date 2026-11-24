@@ -17,6 +17,12 @@
 /// - `ownerAccount` and `ownerSessions`: the account the shop's owner signs in with, once the operator linked it, and
 ///   every owner shop session, by the SHA-256 of its token (docs/several-shops.md). Unlinking the account marks each of
 ///   its sessions ended in the same write, as removal does for a helper's. Both are absent until an account is linked.
+/// - `signIns`: the sign-ins helpers made lately, newest first, one for each helper session opened, so the owner's app can
+///   tell them once of a new device (docs/people.md, "A helper's new device"). A sign-in is only a session's id, whose it
+///   is and when, never the token or its hash, and it is not a session: nothing that checks a session reads it. It is
+///   written in the same change as the session it names, and signing out or removing the helper leaves it, so the owner
+///   still hears of a sign-in that was over before their app looked. It is dropped when it is older than a session lasts
+///   and beyond the newest `MAX_SIGN_INS`, at the next change.
 ///
 /// Atomicity. As in memory-store.ts, every change runs inside `transactionSync` with the synchronous KV API of
 /// SQLite-backed objects: it reads the record, applies one rule and writes the result and its audit entry without a
@@ -60,6 +66,15 @@ export type OwnerAccount = { id: string; subject: string; linkedAt: number };
 /// One owner shop session: the linked account it belongs to, when it runs out, and when unlinking ended it.
 export type OwnerSession = { sessionId: string; accountId: string; expiresAt: number; endedAt?: number };
 
+/// One sign-in a helper made: the id of the session it opened, whose it is, and when, by the object's own clock.
+export type HelperSignIn = { sessionId: string; helperId: string; at: number };
+
+/// How long a sign-in is listed: as long as a session lasts (`HELPER_SESSION_TTL_MS`, people.ts, which a test keeps equal),
+/// since what the owner is told is that a session was opened that could still be open.
+export const SIGN_IN_LISTED_MS = 30 * 24 * 3600 * 1000;
+/// The most sign-ins the record keeps, the newest ones, so a helper who signs in over and over cannot grow it.
+export const MAX_SIGN_INS = 50;
+
 export type PeopleRecord = {
   state: PeopleState;
   names: Record<string, string>;
@@ -68,12 +83,14 @@ export type PeopleRecord = {
   ownerAccount?: OwnerAccount;
   /// Absent on a record no owner session was ever opened for.
   ownerSessions?: Record<string, OwnerSession>;
+  /// Newest first. Absent on a record written before sign-ins were kept, which lists none.
+  signIns?: HelperSignIn[];
 };
 
-/// What the Worker reads: the rules' state, the names, how many sessions each helper has running now, and the owner's
-/// linked account with how many of its sessions run now. Never a hash.
+/// What the Worker reads: the rules' state, the names, how many sessions each helper has running now, the owner's linked
+/// account with how many of its sessions run now, and the sign-ins to tell the owner of (`listedSignIns`). Never a hash.
 export type PeopleView = { state: PeopleState; names: Record<string, string>; devices: Record<string, number>;
-  ownerAccount: OwnerAccount | null; ownerDevices: number };
+  ownerAccount: OwnerAccount | null; ownerDevices: number; signIns: HelperSignIn[] };
 
 /// What checking a helper session answers.
 export type SessionCheck =
@@ -151,6 +168,23 @@ function ownerDevicesOf(record: PeopleRecord, nowMs: number): number {
   return Object.values(record.ownerSessions ?? {}).filter((session) => ownerSessionLive(record, session, nowMs)).length;
 }
 
+/// The sign-ins worth keeping at `nowMs`: the newest ones, and none older than a session lasts. `signIns` is newest first.
+function recentSignIns(signIns: readonly HelperSignIn[], nowMs: number): HelperSignIn[] {
+  return signIns.filter((one) => one.at > nowMs - SIGN_IN_LISTED_MS).slice(0, MAX_SIGN_INS);
+}
+
+/// The sign-ins to tell the owner of at `nowMs`: the recent ones of helpers the shop still has. A removed helper's are
+/// left out (the owner has just dealt with them), and so is any entry whose helper the record does not know.
+function listedSignIns(record: PeopleRecord, nowMs: number): HelperSignIn[] {
+  const helpers = new Set(record.state.helpers.map((helper) => helper.id));
+  return recentSignIns(record.signIns ?? [], nowMs).filter((one) => helpers.has(one.helperId));
+}
+
+/// The record's sign-ins with the one `session` just made in front. The central write trims them (`recentSignIns`).
+function withSignIn(record: PeopleRecord, session: HelperSession, nowMs: number): HelperSignIn[] {
+  return [{ sessionId: session.sessionId, helperId: session.helperId, at: nowMs }, ...(record.signIns ?? [])];
+}
+
 /// What a session that is not one this record holds, or no longer works, is answered. Both kinds of check answer it.
 const UNAUTHORIZED = { ok: false, error: "unauthorized" } as const;
 
@@ -189,7 +223,8 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
     if (route === "GET /people") {
       const nowMs = Date.now();
       return json({ state: record.state, names: record.names, devices: devicesOf(record, nowMs),
-        ownerAccount: record.ownerAccount ?? null, ownerDevices: ownerDevicesOf(record, nowMs) } satisfies PeopleView);
+        ownerAccount: record.ownerAccount ?? null, ownerDevices: ownerDevicesOf(record, nowMs),
+        signIns: listedSignIns(record, nowMs) } satisfies PeopleView);
     }
     // The export carries who the people are, the owner's linked account and what helpers passed on, never a session's
     // hash.
@@ -212,9 +247,10 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
     const before = readRecord(kv, tenant);
     const done = operation(before, body, nowMs);
     if (done.next) {
-      const { ownerSessions } = done.next;
+      const { ownerSessions, signIns } = done.next;
       kv.put(key(tenant), { ...done.next, sessions: livingSessions(done.next.sessions, nowMs),
-        ...(ownerSessions ? { ownerSessions: livingSessions(ownerSessions, nowMs) } : {}) } satisfies PeopleRecord);
+        ...(ownerSessions ? { ownerSessions: livingSessions(ownerSessions, nowMs) } : {}),
+        ...(signIns ? { signIns: recentSignIns(signIns, nowMs) } : {}) } satisfies PeopleRecord);
       const { record, missed } = done.audit ?? {};
       if (missed) auditPutSync(kv, tenant, record ?? null, missed);
     }
@@ -315,6 +351,8 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
         state: answered.state,
         names: { ...record.names, [answered.helper.id]: name },
         sessions: { ...record.sessions, [fresh.hash]: fresh.session },
+        // A join is the helper's first device, and the owner is told of it as of any other (docs/people.md).
+        signIns: withSignIn(record, fresh.session, nowMs),
       },
       audit: entry({ kind: "helper", id: answered.helper.id }, SYSTEM, "helper.joined",
         { inviteId: body.inviteId, helperId: answered.helper.id }),
@@ -323,7 +361,7 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 
   /// `{ account, sessionId, tokenHash, expiresAt }`: a helper opens the shop on another device, signed in as the
   /// identity they joined with (`rules.addSession`). Anyone else is not a helper of this shop.
-  "POST /people/open-session": (record, body) => {
+  "POST /people/open-session": (record, body, nowMs) => {
     const account = keptIdentity(body.account);
     const helper = account ? record.state.helpers.find((one) => rules.sameIdentity(one.identity, account)) : undefined;
     if (!helper) return refused(403, "not_a_helper");
@@ -333,7 +371,8 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     if (!added.ok) return refused(403, added.refused);
     return {
       answer: { status: 200, body: { helperId: helper.id, name: record.names[helper.id] ?? "" } },
-      next: { ...record, state: added.state, sessions: { ...record.sessions, [fresh.hash]: fresh.session } },
+      next: { ...record, state: added.state, sessions: { ...record.sessions, [fresh.hash]: fresh.session },
+        signIns: withSignIn(record, fresh.session, nowMs) },
       audit: entry({ kind: "helper", id: helper.id }, SYSTEM, "helper.session_opened", { helperId: helper.id }),
     };
   },
