@@ -76,13 +76,26 @@ refresh. That email is the verified identity an email invite is checked against.
 is `TEST_JWKS_JSON` in `wrangler.test.json`, go through the real exchange, so the claims, including the email, are
 checked exactly as Apple's would be.
 
+**Built, off until the owner turns it on: a code sent by email** (`docs/pilot-api.md`, "Signing in by email"). A
+helper asks for a code at their address and gives it back to the same exchange. Their session is the lifted auth's, as
+Apple's is, and keeps the address as its email, so an email invite matches it. Turning it on needs the owner's yes, the
+Workers Paid plan and a sending domain the owner controls; until then both of its routes answer `email_not_configured`.
+
+- **Two identities, one helper.** Signing in by email gives a tenant of its own (`email:` and the address's SHA-256),
+  never the Apple one, even for the same address, as two Apple accounts are never joined. The shop knows its helper by
+  the address the owner invited, so whichever of the two verified it opens the helper's sessions: the owner sees one
+  helper, the other sign-in as a new device, and removal ends both. Each sign-in has its own list of shops until the
+  helper opens the shop with it.
+- **In tests:** the code goes to an in-memory outbox (`TEST_EMAIL_OUTBOX` in `wrangler.test.json`) that the tests read,
+  as the test key stands in for Apple's.
+
 **What needs the owner: a real sign-in for helpers.** The canvas has helpers sign in "with their own LINE or email".
 
 - An invite to a LINE account can be made, but no one can accept it yet: nothing verifies a LINE account. That needs
   LINE Login (a LINE Login channel on the owner's LINE account), and LINE work is parked by the owner.
 - An email invite works only for a helper whose Apple ID verifies that same address. Someone who chose Apple's "Hide My
-  Email" signs in with a relay address and sees `wrong_account`. Signing in by email itself (a code or a link sent by
-  email) needs an email sending service, which may cost money.
+  Email" signs in with a relay address and sees `wrong_account`. Signing in by email itself is built, off until the
+  owner turns it on (above): it needs the owner's yes, the Workers Paid plan and a sending domain the owner controls.
 
 ## The helper's session
 
@@ -108,7 +121,8 @@ same signed-in identity, gives a new one.
 An invite is for one LINE account id (compared exactly) or one email (compared without case), works once, and lasts
 7 days. The owner makes it from their session, or the operator on the owner's word, with a name and that identity, and
 gets a link to copy: `${WEB_ORIGIN}/join/<token>`. The API never sends it: LINE and email sending are parked by the
-owner, so the owner sends the link themselves. The token is an HMAC-SHA256 under
+owner, so the owner sends the link themselves. (The only email the API can send is a sign-in code, and only once the
+owner turns signing in by email on.) The token is an HMAC-SHA256 under
 `APPROVAL_LINK_SECRET` in its own domain, `manut-ai/pilot-invite/v1.`, over the shop's tenant, the invite's id and its
 expiry, so no approval or deletion link can pass for an invite, and the reverse. Minting is deterministic, so the
 console shows the same link again for a pending invite.
@@ -169,9 +183,57 @@ person is a helper. It tells the owner once of each sign-in it has not told befo
 `@manut/notify-rules`' `new_device` alert rules on: "Mint signed in on a new device", then the shop, the time and the
 canvas's "If this was not Mint, remove access." (the app writes these words, since the package has no helper to name).
 Quiet hours never silence it, and with Hide details on it names no one. Look first
-brings the app forward on that shop, and Later only dismisses. The first time the app looks at a shop it tells nothing, so
+(or a click on the notification) brings the app forward, shows that shop and opens Settings › People, where the owner can
+remove access ("The People screen on the desktop", below), and Later only dismisses. The first time the app looks at a shop it tells nothing, so
 a first run does not ring for every helper; what it has seen is kept per shop on that computer and goes with the shop.
 Each sign-in has a notification of its own. Switching Notify me off switches this off too.
+
+## The People screen on the desktop
+
+The owner sees and manages who can use Manut AI for a shop in Settings, under **Shop**, in **People**
+(`apps/desktop/src/pages/PeoplePane.tsx` and `people.ts`; the design is the canvas's "Settings: people" board). It reads and
+changes, for the shop the switcher shows, with that shop's own owner session (`docs/runtime-adapter.md`, "Settings › People"):
+
+- **The list.** The owner first, marked "(you)", with how many devices they are signed in on; each helper with when they
+  joined, the account they signed in with and on how many devices (and "Covering" while the cover is theirs); then the invites
+  that wait, each with Copy link and Cancel invite, and the ones that ran out, marked Expired, with neither (the API gives no link
+  for them and refuses to cancel them). An invite that was used is a helper now, and one that was cancelled is gone, so neither
+  is listed.
+- **Only the owner.** A shop the person only helps at has a People page that says whose it is ("Only Noi can see and change who
+  can use Manut AI for Ran Pa Noi. Ask Noi if someone should be added or removed.") and nothing else: nothing is read for it and
+  nothing sent, so a helper's session never carries a name, a LINE ID or an email to the API (it would answer 403 `owner_only`).
+  A person in no shops has no shop to manage here ("No shop is linked to your account yet").
+- **Invite a helper.** A name and a LINE ID or an email in one box. **Manut AI does not send the invite**: the API makes a link
+  (`inviteUrl`) and the page shows it with Copy link, and says plainly that the owner sends it themselves ("Send this link to Mint
+  yourself. Manut AI does not send it."). Where it matters the page says that an invite for a LINE ID cannot be opened yet,
+  because nothing signs in as a LINE account until LINE Login exists: in the form as soon as a LINE ID is typed, and in the invite's
+  row. For an email it says the invite opens only for someone who signs in with an Apple ID that uses that address. The link is
+  held by the page while it is open and nowhere else.
+- **Remove.** Asks first in the helper's row ("Remove Mint?", with Remove Mint and Keep Mint, the safe answer holding the focus),
+  then says that Mint "was removed and signed out on every device", with the invites for them and the cover that the API says it
+  also ended. **There is no Undo**: removing a helper ends every session of theirs in one write and the API has no way to bring
+  them back, so the page says they can be invited again (a new invite makes a new helper). What they approved stays as it was, and
+  Manut AI keeps their name with it.
+- **While you are away.** One current helper covers messages until a day (the end of that day on this computer's calendar), and
+  End cover ends it. The API's own refusals are said in words: a day that has passed (`bad_date`), a person who is no longer a
+  helper (`not_a_helper`). Cover adds no power: money, public posts and settings still wait, as the line under the heading says.
+- **What each role can do.** Only rows that are true of the app as built. The four approval rows are read from approval-core's
+  `mayDecide`, so they cannot drift from it: a helper approves messages and replies, and asks the owner about money, public posts
+  and payments. A helper's session reads the requests that wait and nothing of what the team knows, its past work, the team, its
+  routines, the connections, the consent, the export or the people (403 `owner_only`), which are the last three rows. The canvas's
+  "Helpers are free, up to 3 (example)", "Use Code", "See sales, the AI budget and the plan", "See customer chats and orders" and
+  "Usually online 18:00 to 22:00" are not there: pricing and limits are the owner's call, Code is on the person's own computer
+  whatever their role, the app shows no sales or plan yet, a helper sees requests and not chats or orders, and the API does not
+  know when a helper is online.
+- **Sign-in and safety.** "Everyone signs in with their own Apple ID. Nobody shares a password. Signing in with LINE is not
+  available yet." and "Every approval is recorded with who made it." The canvas's row about a helper's devices being listed in
+  Security is gone (there is no Security page; each helper's row says on how many devices they are signed in). Signing in by an
+  email code is built and switched off (see "What a helper signs in with"): the line, and the note under an email invite, name
+  Apple only until the owner turns it on, and then they should say so too.
+- **The new-device notification** is as it was; Look first, or a click on it, now shows that shop and opens this page, where the
+  owner can remove access.
+- **Practice** shows the canvas's sample (Fon the owner, Mint a helper, Beam invited by LINE ID) and changes by the same rules,
+  because it runs `@manut/people-rules` itself. Its invite links end in `.invalid` and go nowhere.
 
 ## Not built yet
 
@@ -179,11 +241,13 @@ Each sign-in has a notification of its own. Switching Notify me off switches thi
   `POST /v1/shops/session`; see `docs/several-shops.md`. A helper who joined before it is listed once they open the
   shop again.)
 - (Built since, 24 Nov 2026: the owner manages helpers from their own shop session, `GET /v1/people` and the changes
-  under it; see `docs/pilot-api.md`, "The owner's own routes". The API is there; the app's screens for it are not yet.)
+  under it; see `docs/pilot-api.md`, "The owner's own routes". The app's screens for it are built too, above.)
 - (Built since, 24 Nov 2026: the owner's desktop tells them about a helper's new device, as above. The canvas does it on
   LINE, which is parked, so that is still not done.)
-- The People screens in the app: seeing the helpers, and removing one from the notification's "remove access". The
-  notification only says it; today the owner asks their operator, or removes the helper from a People screen when the
-  app has one.
+- (Built since, 24 Nov 2026: the People screens in the app, Settings › Shop › People: seeing the helpers, inviting one,
+  cancelling an invite, removing a helper, and cover while the owner is away, as in "The People screen on the desktop"
+  above. The notification's "If this was not Mint, remove access" now opens that page for the shop. Not built: an Undo after
+  a removal (the API has none: invite them again), sending an invite (LINE and email sending are parked, so the owner
+  sends the link), and opening an invite made for a LINE ID, which waits for LINE Login.)
 - (Built since, 24 Nov 2026: the owner's link page names the helper who approved or declined a reply, as the canvas's
   "Approved by Mint at 19:42." and "Mint approved this at 19:42", from `decidedByHelper` in `docs/pilot-api.md`.)

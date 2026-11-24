@@ -32,6 +32,7 @@ import { FindBar } from "./term/find-bar";
 import { FIND_EVENT, type FindRequest } from "./term/engine-find";
 import { sessionAccountSuffix } from "./SessionsSection";
 import { PanelToggle } from "../chat/parts/PanelButton";
+import { RewindButton } from "./RewindPanel";
 import { workingSubagents } from "./SessionPlans";
 import { waitingSubs } from "../chat/activity/Subagents";
 import { subagentEnded } from "../state/store";
@@ -386,6 +387,8 @@ function LiveFoot({ rec }: { rec: SessionRec }) {
           <span className="ss-branch-n">{live.branch}</span>
         </span>
       ) : null}
+      {/* Rewind to before a turn: the files and the chat go back together (rewind.ts) */}
+      <RewindButton rec={rec} />
       {u && (
         <span className="ss-usage" title={t("ctl.contextTip", { agent: agentDef(rec.agent).label })} data-testid="session-usage" data-pct={u.pct}>
           <span className="ss-ring" style={{ ["--p" as string]: `${u.pct}%` }} aria-hidden="true" />

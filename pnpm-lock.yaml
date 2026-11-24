@@ -232,6 +232,9 @@ importers:
       '@manut/notify-rules':
         specifier: workspace:*
         version: link:../../packages/notify-rules
+      '@manut/people-rules':
+        specifier: workspace:*
+        version: link:../../packages/people-rules
       '@manut/routine-rules':
         specifier: workspace:*
         version: link:../../packages/routine-rules

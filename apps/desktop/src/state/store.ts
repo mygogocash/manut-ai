@@ -760,9 +760,10 @@ function doneWaiting(c: Chat): Chat {
 }
 
 /** The agent took back the person's last message: it and everything after it leave the chat. */
-function rewind(c: Chat): Chat {
-  let at = -1;
-  for (let i = c.items.length - 1; i >= 0; i--) {
+function rewind(c: Chat, id?: string): Chat {
+  // a rewind to a turn names the message it took back; the agent's own rewind of the last message names none
+  let at = id ? c.items.findIndex((i) => i.kind === "user" && i.id === id) : -1;
+  for (let i = c.items.length - 1; at < 0 && i >= 0; i--) {
     if (c.items[i].kind === "user") {
       at = i;
       break;
@@ -1200,7 +1201,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
     case "plan":
       return touchChat(state, bot, (c) => patchTurn(c, (t) => ({ ...t, plan: parsePlan(ev.items) })));
     case "rewound":
-      return touchChat(state, bot, (c) => rewind(c));
+      return touchChat(state, bot, (c) => rewind(c, ev.id));
     case "tool.start":
       return touchChat(state, bot, (c0) => {
         // the note written before this call is the bot's first word on a steer it read
@@ -3506,10 +3507,11 @@ const noteGate = createNoteGate();
  *  waits for a texted one (8 s); an error notifies only with "Also notify on errors". */
 export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pick<Store, "getState" | "actions">): void {
   if (!notifyEnabled()) return;
-  // A helper signed in on a new device at a shop the person owns: Look first shows that shop (notify.ts `showNewDevice`)
+  // A helper signed in on a new device at a shop the person owns: Look first (and a click on the notification) opens Settings ›
+  // People for that shop, where its owner can remove access, as the notification's words say (notify.ts `showNewDevice`)
   if (ev.event === "device.new") {
     const shop = ev.shop.id;
-    void showNewDevice({ id: ev.id, helper: ev.helper, shop: ev.shop.name, at: ev.at * 1000 }, () => void (store ?? singleton)?.actions.switchShop(shop));
+    void showNewDevice({ id: ev.id, helper: ev.helper, shop: ev.shop.name, at: ev.at * 1000 }, () => void openPeopleOf(shop, store ?? singleton));
     return;
   }
   const watching = (bot: string) => watchingChat(state, bot);
@@ -3539,6 +3541,17 @@ export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pic
         }
       : undefined;
   noteGate.offer(note.bot, empty ? "empty" : asks ? "ask" : "plain", () => void showNote(note, open, ev.event === "message" && !!ev.watch, approve));
+}
+
+/** Shows Settings › People for `shop`: the shop's own page of who can use Manut AI for it, which is where a helper's new device
+ *  is dealt with. The shop is shown first, since the page lists the people of the shop every page shows. If the shop cannot be
+ *  shown (it left the person's list meanwhile, or the switch was refused), the page is not opened on another shop's people: the
+ *  app comes forward as it is, and says why as any failed switch does. */
+export async function openPeopleOf(shop: string, store: Pick<Store, "getState" | "actions"> | null | undefined): Promise<void> {
+  if (!store) return;
+  await store.actions.switchShop(shop);
+  if (store.getState().shops.current !== shop) return;
+  store.actions.openSettings("people");
 }
 
 /** Approve pressed on a notification: the card's own Allow once, through the card's own path (`settleApproval`, the one way

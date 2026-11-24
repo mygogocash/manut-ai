@@ -6,6 +6,7 @@ import type { HistoryHost } from "./term/history";
 import { AGENTS, acpRow, agentDef, HERMES_LABEL, type AcpRow, type AgentId, type AgentInfo } from "./agents";
 import { mockPtyOut, nextMockPty } from "./fg";
 import mockAcpAgents from "./mockAcpAgents.json";
+import { MockTurnFiles, tauriTurnFiles, type MockTurnGlobals, type TurnFilesHost } from "./turnFiles";
 import { botRefusal, mockCheck, mockNewId, type CustomEntry, type CustomList, type CustomPreview, type CustomWhy } from "./custom";
 import type { ApprovalChoice, AskTool, ClarifyAnswers } from "../lib/protocol";
 import { t } from "../i18n";
@@ -29,6 +30,9 @@ export type ChatInput =
   | { kind: "effort"; effort: string }
   /** take back the last message, through the agent's own rewind (Claude Code and Codex) */
   | { kind: "rewind" }
+  /** take back message `id` (its bubble's id) and everything after it, through the same rewinds: Rewind to before a
+   *  turn (rewind.ts) */
+  | { kind: "rewind_to"; id: string }
   /** a message manut held while a turn ran, handed to the running turn without stopping it (the agent's own
    *  mid-turn input; only the agents in controls.ts STEERS) */
   | { kind: "steer"; id: string; text: string };
@@ -106,6 +110,8 @@ export interface SessionHost extends HistoryHost {
   removeFiles(session: string): Promise<void>;
   /** Remove the saved files of every session not in `keep`. */
   pruneFiles(keep: string[]): Promise<void>;
+  /** A coding session's files as they were when each turn began, for Rewind to before a turn (turnFiles.ts). */
+  readonly turnFiles?: TurnFilesHost;
   /** The git branch checked out in `cwd` (read from its `.git/HEAD`; no program runs), "" when it is not a
    *  repository, a short commit id when detached. */
   branch(cwd: string): Promise<string>;
@@ -168,6 +174,7 @@ export interface SessionHost extends HistoryHost {
 
 export class TauriHost implements SessionHost {
   readonly kind = "tauri" as const;
+  readonly turnFiles: TurnFilesHost = tauriTurnFiles(async () => (await this.core()).invoke);
   /** The shell's command bridge (a test stands in for it by overriding this). */
   protected async core(): Promise<Pick<typeof import("@tauri-apps/api/core"), "invoke" | "Channel">> {
     return import("@tauri-apps/api/core");
@@ -471,7 +478,7 @@ const utf8 = new TextEncoder();
  *  (`COALESCE_BYTES` in src-tauri/src/sessions.rs). */
 const FLOOD_MESSAGE = `${"build output ".repeat(5).slice(0, 62)}\r\n`.repeat(1024);
 
-type MockGlobals = {
+type MockGlobals = MockTurnGlobals & {
   /** Free bytes the mock's disk watch reads (src/lib/disk.ts); unset = 100 GB. */
   __manutDiskFree?: number;
   __manutPickFolder?: string | null;
@@ -575,6 +582,12 @@ export class MockHost implements SessionHost {
     }
   }
   constructor(private g: MockGlobals = globalThis as MockGlobals) {}
+
+  private turns?: TurnFilesHost;
+  /** Pretend folders and their snapshots (turnFiles.ts), made the first time a session keeps one. */
+  get turnFiles(): TurnFilesHost {
+    return (this.turns ??= new MockTurnFiles(this.g));
+  }
 
   private log(c: MockCall) {
     (this.g.__manutSessionCalls ??= []).push(c);
@@ -1160,6 +1173,8 @@ class MockChat {
   private dead = false;
   /** messages this process took, for a rewind (Claude Code and Codex only) */
   private sent = 0;
+  /** their bubble ids, in step, for a rewind to a turn */
+  private sentIds: string[] = [];
   constructor(
     private agent: AgentId,
     private emit: (ev: ChatEvent) => void,
@@ -1614,6 +1629,7 @@ class MockChat {
         return;
       }
       this.sent++;
+      this.sentIds.push(i.id ?? "");
       if (text.startsWith("/work")) {
         // the events the Claude adapter emitted for a real two-file edit (Claude Code 2.1.322, claude-12-work.jsonl):
         // thinking text, its todo list (TaskCreate, then TaskUpdate per item), an Edit per file with its change,
@@ -1646,8 +1662,21 @@ class MockChat {
       if (this.turn) throw new Error("wait until the turn ends");
       if (this.sent < 1) throw new Error("nothing to take back");
       this.sent--;
+      this.sentIds.pop();
       this.at(30, () => {
         this.emit({ event: "rewound" });
+        this.emit({ event: "session.info", rewind: this.sent > 0 });
+      });
+    } else if (i.kind === "rewind_to") {
+      // agent_chat.rs `Input::RewindTo`: back to before the named message, and everything after it goes too
+      if (!MOCK_REWINDS.includes(this.agent)) throw new Error(`${agentDef(this.agent).label} cannot take a message back here`);
+      if (this.turn) throw new Error("wait until the turn ends");
+      const at = i.id ? this.sentIds.lastIndexOf(i.id) : -1;
+      if (at < 0) throw new Error(`${agentDef(this.agent).label} cannot take that message back here`);
+      this.sentIds = this.sentIds.slice(0, at);
+      this.sent = at;
+      this.at(30, () => {
+        this.emit({ event: "rewound", id: i.id });
         this.emit({ event: "session.info", rewind: this.sent > 0 });
       });
     } else if (i.kind === "interrupt") {

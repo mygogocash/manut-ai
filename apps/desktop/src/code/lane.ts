@@ -18,8 +18,12 @@ export interface LaneRecord {
   run?: { read: TestRead; at: number };
   /** A file changed after that run, so what it said is of older code. */
   changed: boolean;
-  /** The person took a turn back (the agent's own rewind) at this time (ms), and none has started since. */
+  /** The person took a turn back at this time (ms), and none has started since. */
   revertedAt?: number;
+  /** That rewind put the files back too. Rewind to before a turn (sessions/rewind.ts) puts the folder's files back before it
+   *  asks the agent to take the chat back to a named message, so its `rewound` names that message (`id`); the agent's own
+   *  rewind of the last message names none and leaves the files as they are. */
+  revertedFiles?: boolean;
 }
 
 export const emptyLane = (): LaneRecord => ({ steps: {}, changed: false });
@@ -61,13 +65,13 @@ export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number): LaneReco
       return { ...lane, steps, run: { read: kept(read), at: now }, changed: false };
     }
     case "turn.start":
-      return lane.revertedAt === undefined ? lane : { ...lane, revertedAt: undefined };
+      return lane.revertedAt === undefined ? lane : { ...lane, revertedAt: undefined, revertedFiles: undefined };
     case "turn.end":
       // a run still in flight when its turn ended (Stop) has no end that counts
       return Object.keys(lane.steps).length > 0 ? { ...lane, steps: {} } : lane;
     case "rewound":
       // the work the turn did is taken back, so what its tests said is of nothing that is there now
-      return { steps: {}, changed: false, revertedAt: now };
+      return text(ev.id) ? { steps: {}, changed: false, revertedAt: now, revertedFiles: true } : { steps: {}, changed: false, revertedAt: now };
     default:
       return lane;
   }
@@ -169,7 +173,7 @@ export function laneLine(i: LaneLineInput): Say | null {
     case "working":
       return { key: i.branch ? "lane.line.working" : "lane.line.workingHere" };
     case "reverted":
-      return { key: "lane.line.reverted", vars: { time: i.time ?? "" } };
+      return { key: i.lane.revertedFiles ? "lane.line.revertedFiles" : "lane.line.reverted", vars: { time: i.time ?? "" } };
     case "checked":
       if (read?.kind !== "passed" || read.passed === null) return { key: "lane.line.checkedSome" };
       return read.passed === 1 ? { key: "lane.line.checked1" } : { key: "lane.line.checkedN", vars: { n: read.passed } };

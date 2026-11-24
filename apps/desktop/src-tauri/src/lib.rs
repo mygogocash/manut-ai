@@ -33,6 +33,7 @@ mod term_link;
 mod term_share;
 mod this_host;
 mod tray;
+mod turn_files;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1136,6 +1137,13 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_clear,
         term_link::term_link_take,
         disk::disk_watch,
+        turn_files::turn_files_take,
+        turn_files::turn_files_end,
+        turn_files::turn_files_preview,
+        turn_files::turn_files_restore,
+        turn_files::turn_files_settle,
+        turn_files::turn_files_forget,
+        turn_files::turn_files_prune,
         outpost::outpost_status,
         outpost::outpost_signed_in,
         outpost::outpost_signed_out,

@@ -2,6 +2,7 @@ import { auditAdminRoute } from "./audit-log";
 import { approvalsRoute } from "./approvals";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
+import { codeRequestAddress, emailExchange, emailSignIn } from "./email-code";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
 import { isOutpostRoute, outpostRoute, ownerOutpostRoute, ownerVaultRoute, vaultAdminRoute } from "./browser-control";
@@ -41,6 +42,8 @@ export interface Env {
   RELAY: DurableObjectNamespace;
   /// Public ingress limits. Missing bindings fail closed before body or object work.
   AUTH_EXCHANGE_LIMITER?: RateLimit;
+  /// Asking for a sign-in code by email (email-code.ts), keyed and configured as the exchange's limit.
+  AUTH_CODE_LIMITER?: RateLimit;
   AUTH_SESSION_LIMITER?: RateLimit;
   LINEAR_INBOUND_LIMITER?: RateLimit;
   /// Relay upgrade gates, keyed per source group: an IPv4 address or an IPv6 /64.
@@ -55,6 +58,18 @@ export interface Env {
   ADMIN_ACCESS_AUD?: string;
   /// Explicit local test key source; production leaves this unset.
   TEST_JWKS_JSON?: string;
+  /// Signing in by a code sent by email (email-code.ts; docs/pilot-api.md, "Signing in by email"). Built and off: both
+  /// of its routes answer `email_not_configured` until EMAIL_SIGN_IN is exactly "on", a sender is bound and
+  /// APPROVAL_LINK_SECRET can sign. EMAIL is Cloudflare Email Service's `send_email` binding, and EMAIL_FROM_ADDRESS
+  /// and EMAIL_FROM_NAME the sender owners see (email-sender.ts). No environment sets any of them yet: turning it on
+  /// waits for the owner, the Workers Paid plan and a sending domain.
+  EMAIL_SIGN_IN?: string;
+  EMAIL?: SendEmail;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_FROM_NAME?: string;
+  /// TEST-ONLY: "on" sends codes to an in-memory outbox the workerd tests read (email-sender.ts). Only
+  /// wrangler.test.json sets it, and the dev deploy check refuses every config with a `TEST_` var.
+  TEST_EMAIL_OUTBOX?: string;
   /// Capability defaults. New capabilities ship off; an environment opts in
   /// explicitly. Dynamic flags (below) override these without a redeploy.
   OFFICE_CLOUD?: string;
@@ -126,6 +141,9 @@ async function ingressRateGate(request: Request, pathname: string, env: Env): Pr
   let key = request.headers.get("cf-connecting-ip")?.trim();
   const relay = relayPath(pathname);
   if (request.method === "POST" && pathname === "/v1/auth/exchange") binding = env.AUTH_EXCHANGE_LIMITER;
+  // Asking for a sign-in code sends an email, so it counts in a bucket of its own, keyed by the source IP as the
+  // exchange's is. The limits per email address are the auth object's (email-code.ts).
+  else if (request.method === "POST" && pathname === "/v1/auth/email/code") binding = env.AUTH_CODE_LIMITER;
   else if ((request.method === "POST" && pathname === "/v1/auth/refresh") ||
            (request.method === "DELETE" && pathname === "/v1/auth/session")) binding = env.AUTH_SESSION_LIMITER;
   else if (request.method === "POST" && pathname === "/v1/inbound/linear") binding = env.LINEAR_INBOUND_LIMITER;
@@ -601,8 +619,8 @@ export default {
 
     // Identity endpoints mint sessions, so they stand outside task auth.
     // Bound actual bytes before an object call, even when the declared length lies.
-    if (request.method === "POST" &&
-        (url.pathname === "/v1/auth/exchange" || url.pathname === "/v1/auth/refresh")) {
+    if (request.method === "POST" && (url.pathname === "/v1/auth/exchange" || url.pathname === "/v1/auth/refresh" ||
+        url.pathname === "/v1/auth/email/code")) {
       const length = request.headers.get("content-length");
       if (length === null) return json({ error: "length_required" }, 411);
       if (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length))) return json({ error: "invalid_request" }, 400);
@@ -617,9 +635,19 @@ export default {
           !hasAppleTokenShape(parsed.value.identityToken, Boolean(env.TEST_JWKS_JSON))) {
         return json({ error: "invalid_identity" }, 401);
       }
+      // Signing in by email (email-code.ts): a body that is not exactly the route's, and any request while email sign-in
+      // is off, is answered here, so neither wakes AUTH. The object checks both again before it keeps or sends anything.
+      const codeRoute = url.pathname === "/v1/auth/email/code";
+      if (codeRoute || (url.pathname === "/v1/auth/exchange" && parsed.value.provider === "email")) {
+        if (!(codeRoute ? codeRequestAddress(parsed.value) : emailExchange(parsed.value))) {
+          return json({ error: "invalid_request" }, 400);
+        }
+        if (!emailSignIn(env)) return json({ error: "email_not_configured" }, 400);
+      }
+      const target = codeRoute ? "email-code" : url.pathname.endsWith("exchange") ? "exchange" : "refresh";
       const stub = env.AUTH.get(env.AUTH.idFromName("auth"));
       return stub.fetch(
-        new Request(`https://auth/${url.pathname.endsWith("exchange") ? "exchange" : "refresh"}`, {
+        new Request(`https://auth/${target}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: parsed.raw,

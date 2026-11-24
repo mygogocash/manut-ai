@@ -76,8 +76,9 @@ export function bearer(request: Request): string {
   return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
 }
 
-/// Constant-time comparison, as index.ts compares the operator key.
-function timingSafeEqual(a: string, b: string): boolean {
+/// Constant-time comparison, as index.ts compares the operator key. Email sign-in compares a code's HMAC with it too
+/// (auth-object.ts).
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -120,12 +121,13 @@ function usableSecret(secret: string | undefined): secret is string {
 // Who is calling
 // ---------------------------------------------------------------------------
 
-/// A person signed in with the lifted auth: their tenant, which is the verified provider subject, and the email Apple
-/// verified when the session has one.
+/// A person signed in with the lifted auth: their tenant, which is the verified provider subject (or, signed in by email,
+/// `email:` and the address's hash), and the email the sign-in verified when the session has one.
 export type SignedInPerson = { tenant: string; email?: string };
 
-/// Who is signed in with the lifted auth: the tenant, and the email Apple verified when the session has one
-/// (auth-object.ts). Null for no session, an ended one, a shop session and the operator key, which is never a session.
+/// Who is signed in with the lifted auth: the tenant, and the email the sign-in verified when the session has one: the
+/// one Apple verified, or the address a sign-in code went to (auth-object.ts, email-code.ts). Null for no session, an
+/// ended one, a shop session and the operator key, which is never a session.
 export async function signedInPerson(token: string, env: PeopleEnv): Promise<SignedInPerson | null> {
   if (!token || (env.CLOUD_API_KEY && timingSafeEqual(token, env.CLOUD_API_KEY))) return null;
   const response = await authCall(env, "/verify", { method: "POST", headers: { "content-type": "application/json" },
@@ -136,7 +138,8 @@ export async function signedInPerson(token: string, env: PeopleEnv): Promise<Sig
   return { tenant: result.tenant, ...(typeof result.email === "string" ? { email: result.email } : {}) };
 }
 
-/// The identity a signed-in person can show an invite: the email Apple verified, or none. Nothing signs in as a LINE
+/// The identity a signed-in person can show an invite: the email their sign-in verified, or none. A helper is known in
+/// the shop by that address, so either sign-in that verified it opens their helper sessions. Nothing signs in as a LINE
 /// account yet (docs/people.md, "What needs the owner").
 function accountOf(person: { email?: string }): Identity | null {
   return person.email ? { kind: "email", address: person.email } : null;

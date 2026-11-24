@@ -467,6 +467,33 @@
   outline: none;
   border-color: var(--line-strong);
 }
+/* Settings › Developer › Sign in by email (EmailSignIn.tsx): the code box reads as six digits (the indent keeps them
+   centred, since the spacing after the last one is part of the line), a line about what went wrong is in the danger
+   colour where the rest of Settings keeps its notes quiet, and the box and its button wrap when the page is narrow. */
+.dev-code {
+  width: 118px;
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* the address box leaves room for Send code beside it in a window of the usual width */
+.dev-addr {
+  width: 232px;
+}
+.st-k span.dev-err {
+  color: var(--danger);
+}
+.dev-mail .st-pair {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* an address is one long word, and it is said back in a row's note: it breaks anywhere rather than leave its row */
+.dev-mail .st-k span {
+  overflow-wrap: anywhere;
+}
 /* Settings › General › Notifications: the two quiet-hours time fields (Settings.slot.tsx `QuietHoursView`). Wide enough for
    a 12-hour clock's "09:30 PM" and the field's own clock button. */
 .st-time {

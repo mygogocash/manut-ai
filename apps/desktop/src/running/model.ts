@@ -52,8 +52,9 @@ const base = (path: string): string => path.replace(/[\\/]+$/, "").split(/[\\/]/
 /** A program's own name: a login shell's argv[0] has a dash in front of it, a Windows one an extension. */
 const programName = (word: string): string => base(word).replace(/^-/, "").replace(/\.exe$/i, "");
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-/** An argument as it reads on a line: one that holds a space is quoted, so it is still one word. */
-const word = (arg: string): string => (/\s/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg);
+/** An argument as it reads on a line: one that holds a space is quoted, so it is still one word. A backslash in it is
+ *  doubled before a quote is escaped, so `a b\` reads `"a b\\"` and not `"a b\"`, whose quote would seem escaped. */
+const word = (arg: string): string => (/\s/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg);
 
 /** The quoted word after the first `eval` of `script`: how Claude Code's Bash tool runs a command (`… && eval '<the
  *  command>' < /dev/null && pwd -P >| …`, a quote inside the command written `'"'"'`). Null when there is no `eval`

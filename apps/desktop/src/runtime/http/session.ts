@@ -7,6 +7,11 @@
 // takes an identity token and its nonce by hand, which is enough to run the whole path against a local API that trusts
 // the test key. Everything after the exchange is the real path.
 //
+// The other way in is a code sent by email (docs/pilot-api.md, "Signing in by email"): `requestCode` asks the API to
+// send six digits to an address, and `signInWithCode` gives them back to the same exchange. The session that comes
+// back is Apple's in every way, so it is kept, refreshed and ended by the same code below (`keep`). The API answers
+// both calls `email_not_configured` until the owner turns the sign-in on, and this module says so plainly.
+//
 // Rules this module keeps:
 // - The session lives in the keychain (`SessionVault`), as one JSON value that names the origin it belongs to. It is
 //   never sent to another origin, never put in an address, and never logged or shown.
@@ -19,6 +24,9 @@
 //   shop id (shops.ts opens and uses them). Every change to the item, a refresh's new tokens or a shop session kept or
 //   dropped, is written in turn and writes everything held at that moment, so no write ever puts back what a later one
 //   replaced. Signing out ends every shop session on the API too, and forgets them here whatever the API said.
+// - A sign-in code is never kept, logged or put in an error or an address: it goes once in a request body and nowhere
+//   else, and no answer is read for more than its fields. The address it was asked for is not kept either; the session
+//   keeps only the tenant the API made of it (`email:` and a hash).
 import { LinkDown, VaultUnavailable, type FetchLike, type SessionVault } from "./shell";
 
 /** How long before expiry the access token is replaced. */
@@ -28,6 +36,15 @@ const MAX_IDENTITY = 16 * 1024;
 const MAX_NONCE = 1024;
 /** The longest shop id the API makes or takes (`isValidTenant` in apps/api). */
 const MAX_SHOP_ID = 256;
+/** A sign-in code as the API takes it: exactly six digits (`CODE_SHAPE` in apps/api/src/email-code.ts). */
+export const CODE_LENGTH = 6;
+const CODE_SHAPE = /^\d{6}$/;
+/** The longest address an email can be, and the shape the API accepts, as `normalizeEmail` in apps/api/src/auth.ts has them. */
+const EMAIL_MAX = 254;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+$/;
+/** The longest wait or life of a code an answer may name: a day, which is the most the API ever asks (ten codes in 24
+ *  hours). An answer that names more is not one this build can read. */
+const MAX_SECONDS = 24 * 60 * 60;
 
 /** One shop session as the keychain keeps it: the bearer token the API gave for that one shop, the role that shop's record
  *  gives this person there, and when it ends. It lasts 30 days and has no refresh; the app opens the shop again with the
@@ -45,7 +62,8 @@ export interface StoredSession {
   v: 1 | 2;
   /** the API it belongs to; it is never sent anywhere else */
   origin: string;
-  /** the backend's tenant for this identity (`apple:<subject>`) */
+  /** the backend's tenant for this identity: `apple:<subject>`, or `email:` and the SHA-256 of the address for a sign-in
+   *  by a code sent by email, which is a separate identity even for the same address (docs/decisions.md, 24 Nov 2026) */
   tenant: string;
   /** the device id the grant was issued to; `/refresh` checks it */
   deviceId: string;
@@ -69,6 +87,33 @@ export type SignInState =
   | { kind: "signed_in"; tenant: string; signedInAt: number }
   /** `failure`: why the last sign-in did not happen; `ended`: the API ended the session */
   | { kind: "signed_out"; failure?: SignInFailure; ended?: "expired" };
+
+/** Why asking for a code, or signing in with one, did not happen, in the words the screen finds for each. `not_configured`
+ *  is the API's `email_not_configured`: signing in by email is not turned on there yet. `invalid_request` is the API's
+ *  own, or this module's refusal to send what the API would refuse (an address that is not one, a code that is not six
+ *  digits). `rate_limited` is the API's limit on how often one computer may ask the route at all, which is not the
+ *  limit on codes for an address (that is `wait`). `no_keychain` is a computer whose shell keeps no session, so a code
+ *  sent to it could not be used. `busy` is another sign-in still running, which the screen already shows. */
+export type EmailFailure = "not_configured" | "invalid_request" | "rate_limited" | "offline" | "unavailable" | "keychain" | "no_keychain" | "busy";
+
+/** What asking for a code came to. */
+export type CodeAsk =
+  /** `POST /v1/auth/email/code` answered 200: the code is on its way. `expiresIn` is how long it works and `resendIn` how
+   *  long before another may be asked for, both in seconds as the API said them. */
+  | { kind: "sent"; expiresIn: number; resendIn: number }
+  /** 429 `too_many_codes`: this address had a code in the last minute or ten in the last 24 hours. `retryAfter` is the
+   *  seconds until it may have another, as the API said it. */
+  | { kind: "wait"; retryAfter: number }
+  | { kind: "failed"; failure: EmailFailure };
+
+/** What signing in with a code came to. */
+export type CodeTry =
+  | { kind: "signed_in"; tenant: string; signedInAt: number }
+  /** 401 `wrong_code`: `triesLeft` more tries before the code ends, as the API said it; at 0 it has ended */
+  | { kind: "wrong_code"; triesLeft: number }
+  /** 401 `code_ended`: no code to try (none asked for, used, ten minutes passed, or five wrong tries): ask for a new one */
+  | { kind: "code_ended" }
+  | { kind: "failed"; failure: EmailFailure };
 
 /** What an authorised read came back with. */
 export type Answer =
@@ -149,6 +194,78 @@ function exchangeFailure(status: number, body: string): SignInFailure {
   return "unavailable";
 }
 
+/** An address as the API takes it, which is how the API reads one (`normalizeEmail` in apps/api/src/auth.ts): trimmed and
+ *  lower-cased, at most 254 characters, one `@` between two parts that hold no spaces. Null for anything else. The screen
+ *  and this module both use it, so an address is refused here before the API is asked to refuse it. */
+export function normalizeEmail(value: string): string | null {
+  const email = value.trim().toLowerCase();
+  return email.length <= EMAIL_MAX && EMAIL_SHAPE.test(email) ? email : null;
+}
+
+type Pair = NonNullable<ReturnType<typeof decodePair>>;
+
+/** A JSON object's fields, or null for anything else (an array, a number, text that is not JSON). */
+function fields(body: string): Record<string, unknown> | null {
+  const v = parse(body);
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/** The API's `error` code of a refusal, or "" when it sent none this build can read. */
+function codeOf(body: Record<string, unknown> | null): string {
+  return typeof body?.error === "string" ? body.error : "";
+}
+
+/** A number of seconds an answer names: finite, at least `min`, and no more than a day. */
+function secondsOf(v: unknown, min: number): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= min && v <= MAX_SECONDS;
+}
+
+/** What `POST /v1/auth/email/code` answered, read field by field. Anything this build cannot read is `unavailable`, which
+ *  the screen words as the API not answering: nothing is guessed from an answer that is not whole. */
+function readCodeAsk(res: Raw): CodeAsk {
+  if (res.kind !== "answer") return { kind: "failed", failure: res.kind };
+  const body = fields(res.text);
+  const error = codeOf(body);
+  if (res.status === 200) {
+    if (body?.sent === true && secondsOf(body.expiresIn, 1) && secondsOf(body.resendIn, 0)) {
+      return { kind: "sent", expiresIn: body.expiresIn, resendIn: body.resendIn };
+    }
+    return { kind: "failed", failure: "unavailable" };
+  }
+  if (res.status === 429) {
+    // Two different 429s: the address's own limits (`too_many_codes`, with the seconds to wait) and the ingress limit on
+    // the route (`rate_limited`), which names no seconds in its body.
+    if (error === "too_many_codes") {
+      return secondsOf(body?.retryAfter, 1) ? { kind: "wait", retryAfter: body.retryAfter } : { kind: "failed", failure: "unavailable" };
+    }
+    return { kind: "failed", failure: error === "rate_limited" ? "rate_limited" : "unavailable" };
+  }
+  if (res.status === 400 && error === "email_not_configured") return { kind: "failed", failure: "not_configured" };
+  if (res.status === 400 && error === "invalid_request") return { kind: "failed", failure: "invalid_request" };
+  return { kind: "failed", failure: "unavailable" };
+}
+
+/** What `POST /v1/auth/exchange` with `provider: "email"` answered: the session's tokens, or why not. */
+function readCodeTry(res: Raw): { kind: "pair"; pair: Pair } | Exclude<CodeTry, { kind: "signed_in" }> {
+  if (res.kind !== "answer") return { kind: "failed", failure: res.kind };
+  if (res.status === 200) {
+    const pair = decodePair(res.text);
+    return pair ? { kind: "pair", pair } : { kind: "failed", failure: "unavailable" };
+  }
+  const body = fields(res.text);
+  const error = codeOf(body);
+  if (res.status === 401 && error === "wrong_code") {
+    const left = body?.triesLeft;
+    return typeof left === "number" && Number.isSafeInteger(left) && left >= 0 ? { kind: "wrong_code", triesLeft: left } : { kind: "failed", failure: "unavailable" };
+  }
+  if (res.status === 401 && error === "code_ended") return { kind: "code_ended" };
+  if (res.status === 400 && error === "email_not_configured") return { kind: "failed", failure: "not_configured" };
+  if (res.status === 400 && error === "invalid_request") return { kind: "failed", failure: "invalid_request" };
+  // The exchange has no 429 of its own beyond the ingress limit, as Apple's reads it.
+  if (res.status === 429) return { kind: "failed", failure: "rate_limited" };
+  return { kind: "failed", failure: "unavailable" };
+}
+
 export class ApiSession {
   readonly origin: string;
   state: SignInState = { kind: "loading" };
@@ -170,6 +287,9 @@ export class ApiSession {
   private loading: Promise<void> | null = null;
   private refreshing: Promise<Refreshed> | null = null;
   private signingIn: Promise<SignInState> | null = null;
+  /** The sign-in by a code that is being tried. Only one sign-in runs at a time, of either kind: a second press of the
+   *  same one gets its answer, and the other kind is turned away while it runs. */
+  private trying: Promise<CodeTry> | null = null;
   /** The keychain item's changes, one after another in the order they were asked (`inTurn`). */
   private vaultTail: Promise<unknown> = Promise.resolve();
   private listeners = new Set<(s: SignInState) => void>();
@@ -214,6 +334,8 @@ export class ApiSession {
     await this.load();
     if (this.state.kind === "no_keychain") return this.state;
     if (this.signingIn) return this.signingIn;
+    // A code is being tried: that sign-in is the one running, and this one waits for the person to press again.
+    if (this.trying) return { kind: "signing_in" };
     const token = identityToken.trim();
     const raw = nonce.trim();
     if (!token || !raw || token.length > MAX_IDENTITY || raw.length > MAX_NONCE) return this.set({ kind: "signed_out", failure: "invalid_identity" });
@@ -225,6 +347,44 @@ export class ApiSession {
       this.signingIn = null;
     });
     return this.signingIn;
+  }
+
+  /** Asks the API to send a code of six digits to `email` (`POST /v1/auth/email/code`, exactly `{ email }`, with no
+   *  bearer: nobody is signed in yet). The answer says how long the code works and how long before another may be
+   *  asked for, or that this address has had too many. It changes nothing here: the address is not kept, and no state
+   *  moves. A computer whose shell keeps no session is not asked: a code sent to it could not be used, and each one
+   *  counts against the address's ten a day. */
+  async requestCode(email: string): Promise<CodeAsk> {
+    await this.load();
+    if (this.state.kind === "no_keychain") return { kind: "failed", failure: "no_keychain" };
+    const address = normalizeEmail(email);
+    // The API refuses what is not an address, and the refusal would cost one of the route's ten requests a minute.
+    if (!address) return { kind: "failed", failure: "invalid_request" };
+    return readCodeAsk(await this.send("POST", "/v1/auth/email/code", null, { email: address }));
+  }
+
+  /** Gives the API the code from the email (`POST /v1/auth/exchange`, exactly `{ provider: "email", email, code,
+   *  deviceId }`) and, if it is right, keeps the session it answers exactly as `signIn` keeps Apple's: the one keychain
+   *  item, the same shape, refreshed the same way. The session the keychain held before (this origin's or another's) is
+   *  ended first, as for Apple's. A wrong code says how many tries are left; the code itself is in no state, no
+   *  answer and no error. */
+  async signInWithCode(email: string, code: string): Promise<CodeTry> {
+    await this.load();
+    if (this.state.kind === "no_keychain") return { kind: "failed", failure: "no_keychain" };
+    const address = normalizeEmail(email);
+    const digits = code.trim();
+    // Not six digits cannot be right, and the API would refuse it as a request: it is not asked.
+    if (!address || !CODE_SHAPE.test(digits)) return { kind: "failed", failure: "invalid_request" };
+    if (this.trying) return this.trying;
+    if (this.signingIn) return { kind: "failed", failure: "busy" };
+    this.trying = (async () => {
+      if (this.record) await this.signOut();
+      else if (this.foreign) await this.endForeign(this.foreign);
+      return this.exchangeCode(address, digits);
+    })().finally(() => {
+      this.trying = null;
+    });
+    return this.trying;
   }
 
   /** Ends the session on the API, with every shop session held with it, then forgets them all here whatever the API
@@ -401,6 +561,27 @@ export class ApiSession {
     if (res.status !== 200) return this.set({ kind: "signed_out", failure: exchangeFailure(res.status, res.text) });
     const pair = decodePair(res.text);
     if (!pair) return this.set({ kind: "signed_out", failure: "unavailable" });
+    return this.keep(pair, deviceId);
+  }
+
+  /** The same exchange by a code sent by email. A try that does not sign in leaves the state signed out with no
+   *  `failure`: the words for why belong to the screen that asked (a wrong code is no failure of the session), and the
+   *  keychain's own failure is the one thing both ways in say the same. */
+  private async exchangeCode(address: string, code: string): Promise<CodeTry> {
+    this.set({ kind: "signing_in" });
+    const deviceId = this.newDeviceId();
+    const out = readCodeTry(await this.send("POST", "/v1/auth/exchange", null, { provider: "email", email: address, code, deviceId }));
+    if (out.kind !== "pair") {
+      this.set({ kind: "signed_out" });
+      return out;
+    }
+    const state = await this.keep(out.pair, deviceId);
+    return state.kind === "signed_in" ? { kind: "signed_in", tenant: state.tenant, signedInAt: state.signedInAt } : { kind: "failed", failure: "keychain" };
+  }
+
+  /** Keeps the session an exchange answered, whichever way the person signed in: in the keychain first, then here. A
+   *  session this computer cannot keep is ended at once, so no live token is left behind. */
+  private async keep(pair: Pair, deviceId: string): Promise<SignInState> {
     const now = this.now();
     const rec: StoredSession = {
       v: 2,

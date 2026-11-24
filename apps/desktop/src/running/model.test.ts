@@ -40,6 +40,12 @@ describe("the command a row names", () => {
     expect(commandText(["/usr/bin/open", "-a", "Visual Studio Code"])).toBe('open -a "Visual Studio Code"');
   });
 
+  it("escapes a quote and a backslash inside a quoted argument, so where it ends is never in doubt", () => {
+    expect(commandText(["/usr/bin/grep", 'say "hi"', "a b\\"])).toBe('grep "say \\"hi\\"" "a b\\\\"');
+    // an argument without a space is shown as it is, backslash and all
+    expect(commandText(["/usr/bin/grep", "a\\b"])).toBe("grep a\\b");
+  });
+
   it("is the script of a shell's -c, in any spelling of the flag", () => {
     expect(commandText(["/bin/zsh", "-lc", "pnpm dev"])).toBe("pnpm dev");
     expect(commandText(["bash", "-c", "npm run dev"])).toBe("npm run dev");

@@ -29,6 +29,9 @@ plist = "1"
 # Tasks › 나: a non-active GitHub account's token is wiped from memory when its one `gh` call ends (gh_me.rs); already in
 # the tree via tauri
 zeroize = "1"
+# A rewind's copy of a folder that is not a git repository keeps each content once, under its sha256
+# (turn_files.rs); already in the tree via tauri
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
