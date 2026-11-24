@@ -100,6 +100,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `AUTH_CODE_LIMITER` (API `48d340ac`); smoke-tested: both email routes answer 400 `email_not_configured`, a malformed
   body 400 `invalid_request`, Apple's exchange still refuses a bad token, and the console and admin routes are behind
   Access. The pages are unchanged since 10:22.
+- Dev's API was redeployed on 24 Nov at 13:38 from `fe23fbe`, with Google Sheets for Ton's books built and off, and its
+  `GOOGLE_CALLBACK_LIMITER` (API `c8f3f5b0`); smoke-tested: `/v1/google`, `/v1/google/connect` and the callback answer
+  503 `google_not_configured`, email sign-in still answers `email_not_configured`, and the console and admin routes are
+  behind Access. The pages are unchanged since 10:22.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -113,10 +117,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
-   - item 10, the join page with the web's own sign-in by email code (`feat/join-page`, Opus);
-   - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus).
-   Next: item 17, the installable web app (after item 10).
-   Merged: 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
+   - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus);
+   - item 17, the owner's pages as an installable web app (`feat/owner-web-app`, Opus).
+   Merged: 10 (the join page at `/join/{token}`, with the web's sign-in by email code kept in the page's memory
+   only, `no-referrer` and `no-store`, and no request to another origin), 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
    append asked as an owner-only command and sent once; the broker now sends an operation only through a connection of
    its own provider; turning it on is in `docs/connectors.md` 4b), 33 (the desktop's sign-in by email code in Settings › Developer, kept and refreshed as Apple's is), 32
    (Settings › People for the owner: helpers, invite links to copy, Cancel, Remove, cover dates; the
