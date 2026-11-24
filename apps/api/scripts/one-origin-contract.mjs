@@ -116,15 +116,19 @@ try {
   // 2. The pages Worker on its own.
   const pagesBase = await pages.url;
   let home = "";
-  for (const path of ["/approve/tok_123", "/delete/tok_123", "/ops", "/", "/no-such-page"]) {
+  for (const path of ["/approve/tok_123", "/delete/tok_123", "/join/inv_123", "/ops", "/", "/no-such-page"]) {
     for (const headers of NAVIGATIONS) {
       const html = await assertPage(await pages.fetch(new URL(path, pagesBase), { headers }), `pages ${path}`);
       if (path === "/") home = html;
+      // The built page names nothing on another origin, so the join page, whose path carries an invite token, asks no
+      // other origin for anything (the brand's fonts are linked by the app on the other pages, docs/people.md).
+      assert.doesNotMatch(html, /(?:href|src)="(?:https?:)?\/\//, `pages ${path} links nothing on another origin`);
     }
     checked++;
   }
-  // The pages the owner's two kinds of link open each name one thing to decide, so neither is ever stored.
-  for (const path of ["/approve/tok_123", "/delete/tok_123"]) {
+  // The pages the owner's two kinds of link open each name one thing to decide, and the page an invite link opens
+  // carries the invite's token in its path, so none of them is ever stored.
+  for (const path of ["/approve/tok_123", "/delete/tok_123", "/join/inv_123"]) {
     const linked = await pages.fetch(new URL(path, pagesBase), { headers: NAVIGATIONS[0] });
     assert.equal(linked.headers.get("cache-control"), "no-store", `${path} is never stored`);
     await linked.arrayBuffer();
