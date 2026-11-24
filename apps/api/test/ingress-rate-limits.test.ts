@@ -109,7 +109,7 @@ describe("public ingress rate limits", () => {
     expect(counter.keys).toEqual(["192.0.2.17"]);
     expect(counter.calls()).toBe(1);
     const headerless = new Request("https://test/v1/auth/exchange", { method: "POST",
-      headers: { "cf-connecting-ip": "192.0.2.17" }, body: "{}" });
+      headers: { "cf-connecting-ip": "192.0.2.17", "content-type": "application/json" }, body: "{}" });
     expect((await send(headerless, counter.target)).status).toBe(411);
     expect(counter.calls()).toBe(1);
   });
@@ -148,32 +148,88 @@ describe("public ingress rate limits", () => {
       AUTH_SESSION_LIMITER: "/v1/auth/refresh",
       LINEAR_INBOUND_LIMITER: "/v1/inbound/linear", OUTPOST_LIMITER: "/v1/outposts/heartbeat",
       SELF_SERVE_SHOP_LIMITER: "/v1/shops/new" } as const)[binding];
-    // Fills one address's real bucket to the limit and sends one more. The real limiter counts in 60-second windows,
-    // so on a loaded machine the loop can cross into a new window and the extra request is rightly let through.
-    // That is the window moving, not a missing limit, so the run is repeated once from a fresh address, which starts
-    // its count in a window that has only just begun; the assertions below then hold on that run.
+    // Fills one /64's real bucket to the limit, each request from another address inside it, and sends one more from
+    // yet another: a whole IPv6 /64 is one source, so rotating addresses inside it gains nothing. The real limiter
+    // counts in 60-second windows, so on a loaded machine the loop can cross into a new window and the extra request is
+    // rightly let through. That is the window moving, not a missing limit, so the run is repeated once from a fresh /64,
+    // which starts its count in a window that has only just begun; the assertions below then hold on that run.
     const fill = async () => {
-      const ip = `2001:db8::${crypto.randomUUID().replaceAll("-", "").slice(0, 4)}`;
+      const prefix = `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}`;
       for (let index = 0; index < limit; index++) {
         // Refresh and revoke deliberately consume the same real bucket.
         const revoke = binding === "AUTH_SESSION_LIMITER" && index % 2 === 1;
-        const response = await send(request(revoke ? "/v1/auth/session" : path, revoke ? "DELETE" : "POST", ip).request,
-          counter.target);
+        const response = await send(request(revoke ? "/v1/auth/session" : path, revoke ? "DELETE" : "POST",
+          `${prefix}::${(index + 1).toString(16)}`).request, counter.target);
         expect(response.status).not.toBe(429);
         expect(response.status).not.toBe(503);
       }
       const calls = counter.calls();
-      const blocked = request(path, "POST", ip);
+      const blocked = request(path, "POST", `${prefix}:ffff:ffff:ffff:ffff`);
       const response = await send(blocked.request, counter.target);
-      return { ip, calls, blocked, response };
+      return { prefix, calls, blocked, response };
     };
     let run = await fill();
     if (run.response.status !== 429) run = await fill();
-    const { ip, calls, blocked, response } = run;
+    const { prefix, calls, blocked, response } = run;
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("60");
     expect(blocked.pulls()).toBe(0);
     expect(counter.calls()).toBe(calls);
-    expect((await send(request(path, "POST", `${ip}:1`).request, counter.target)).status).not.toBe(429);
+    // The /64 next door is another source.
+    const [, , third = "0", fourth = "0"] = prefix.split(":");
+    const next = `2001:db8:${third}:${(parseInt(fourth, 16) ^ 1).toString(16)}::1`;
+    expect((await send(request(path, "POST", next).request, counter.target)).status).not.toBe(429);
+  });
+
+  it("keys every bucket by the source group: an IPv4 address, or an IPv6 /64 however it is written", async () => {
+    const counter = fixture();
+    const sources = [
+      ["192.0.2.17", "192.0.2.17"],
+      ["::ffff:192.0.2.17", "192.0.2.17"],
+      ["2001:db8:aaaa:bbbb::1", "2001:db8:aaaa:bbbb::/64"],
+      ["2001:DB8:AAAA:BBBB:0:0:0:2", "2001:db8:aaaa:bbbb::/64"],
+      ["2001:0db8:aaaa:bbbb:ffff:ffff:ffff:ffff", "2001:db8:aaaa:bbbb::/64"],
+      [" 2001:db8:aaaa:bbbc::1 ", "2001:db8:aaaa:bbbc::/64"],
+    ] as const;
+    for (const [path, method] of routes) {
+      for (const [ip] of sources) await send(request(path, method, ip).request, counter.target);
+      expect(counter.keys.splice(0)).toEqual(sources.map(([, key]) => key));
+    }
+    // An address that cannot be read is refused before anything counts or wakes, never given a bucket of its own.
+    const woken = counter.calls();
+    for (const ip of ["unknown", "192.0.2.256", "2001:db8::1]/x", "2001:db8:::1", "203.0.113.99, 192.0.2.17"]) {
+      const input = request("/v1/auth/email/code", "POST", ip);
+      const response = await send(input.request, counter.target);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "rate_limit_unavailable" });
+      expect(input.pulls()).toBe(0);
+    }
+    expect(counter.keys).toEqual([]);
+    expect(counter.calls()).toBe(woken);
+  });
+
+  it("stops one /64 asking for codes at the limit, however many of its addresses it rotates through", async () => {
+    // The review's proof (24 Nov 2026): fifteen asks for codes in a minute, each from another address of one /64, all
+    // went out, while one address was stopped at ten. Now the /64 is the source, so both are stopped at ten. The real
+    // limiter counts in 60-second windows, so a run that crosses one is tried once more from a fresh /64.
+    const ask = async (ip: string) => {
+      const body = JSON.stringify({ email: `rotate-${crypto.randomUUID()}@spam.example` });
+      const context = createExecutionContext();
+      const response = await worker.fetch(new Request("https://api.manut.test/v1/auth/email/code", { method: "POST",
+        headers: { "content-type": "application/json", "content-length": String(body.length), "cf-connecting-ip": ip },
+        body }), bindings, context);
+      await waitOnExecutionContext(context);
+      await response.body?.cancel();
+      return response.status;
+    };
+    const run = async () => {
+      const prefix = `2001:db8:${crypto.randomUUID().replaceAll("-", "").slice(0, 8).match(/.{4}/g)!.join(":")}`;
+      const statuses: number[] = [];
+      for (let index = 1; index <= 15; index++) statuses.push(await ask(`${prefix}::${index.toString(16)}`));
+      return statuses;
+    };
+    let statuses = await run();
+    if (statuses.slice(10).some((status) => status !== 429)) statuses = await run();
+    expect(statuses).toEqual([...Array<number>(10).fill(200), ...Array<number>(5).fill(429)]);
   });
 });

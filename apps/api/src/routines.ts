@@ -6,8 +6,9 @@
 /// Routes. An operator's, under the admin gate's exact `ADMIN_METHODS` entries (index.ts), name the shop in the query
 /// or the body, and a change needs an existing pilot shop, as the console's other writes do. The shop's own session,
 /// or the owner session of the account linked to the shop (docs/several-shops.md), reads and changes its own routines
-/// and pauses its own team; a helper's session is refused, because the team's routines are the owner's. Making, pausing, resuming or removing a routine needs neither a switch nor consent:
-/// nothing runs then. Each run reads both again.
+/// and pauses its own team, and only a pilot shop's: a person's own sign-in, whose tenant is no shop, is answered
+/// `not_found`. A helper's session is refused, because the team's routines are the owner's. Making, pausing, resuming
+/// or removing a routine needs neither a switch nor consent: nothing runs then. Each run reads both again.
 ///
 /// A run, start to end (`runRoutineOccurrence`):
 ///
@@ -91,11 +92,21 @@ export async function routinesRoute(request: Request, url: URL, env: RoutineEnv,
   if (caller instanceof Response) return caller;
   if (caller.role !== "owner") return json({ error: "owner_only" }, 403);
   const tenant = caller.shop;
-  if (route === "GET /v1/routines") return listRoutines(env, tenant);
-  const body = await bodyOf(request);
-  if (body instanceof Response) return body;
-  // The shop is the session's: a body that names one is refused rather than read as another shop.
-  if ("tenant" in body) return json({ error: "invalid_request" }, 400);
+  let body: Record<string, unknown> | null = null;
+  if (route !== "GET /v1/routines") {
+    const read = await bodyOf(request);
+    if (read instanceof Response) return read;
+    // The shop is the session's: a body that names one is refused rather than read as another shop.
+    if ("tenant" in read) return json({ error: "invalid_request" }, 400);
+    body = read;
+  }
+  // Routines are a pilot shop's. A person's own sign-in is the owner of its own tenant, which is no shop: it has no team,
+  // and a routine made for it would set a clock that fires for nothing, every time, for good. It is answered 404
+  // `not_found`, as the owner's people and Google answer it, and nothing is read or written.
+  const shop = await readShop(env, tenant);
+  if (shop === undefined) return json({ error: "shop_unavailable" }, 503);
+  if (shop === null) return json({ error: "not_found" }, 404);
+  if (!body) return listRoutines(env, tenant);
   // The log names the owner's linked account when an owner session made the change, as the owner's decisions do
   // (docs/several-shops.md), and the shop's own session otherwise.
   return change(route, env, tenant, body, ownerActor(caller));

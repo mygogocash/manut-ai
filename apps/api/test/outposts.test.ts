@@ -269,7 +269,8 @@ describe("outposts", () => {
         body: JSON.stringify({ tenant, outpostId: crypto.randomUUID() }) })).status).toBe(403);
     }
     expect((await SELF.fetch(`${API}/v1/outposts/heartbeat`)).status).toBe(404);
-    expect((await SELF.fetch(`${API}/v1/outposts`, { method: "POST", body: "{}" })).status).toBe(404);
+    expect((await SELF.fetch(`${API}/v1/outposts`, { method: "POST", headers: { "content-type": "application/json" },
+      body: "{}" })).status).toBe(404);
     // Without Cloudflare Access the operator key alone registers nothing.
     expect((await SELF.fetch(`${API}/v1/admin/outposts`, { method: "POST", headers: OPERATOR,
       body: JSON.stringify({ tenant, name: "This Mac", kind: "this_mac" }) })).status).toBe(403);

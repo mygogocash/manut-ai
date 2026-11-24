@@ -9,9 +9,10 @@
 ///   binds it yet: sending needs the Workers Paid plan and a sending domain the owner controls.
 /// - A test-only outbox that the workerd tests read the code from. Only `TEST_EMAIL_OUTBOX`, which wrangler.test.json
 ///   sets and no deploy config may (.github/scripts/check-dev-deploys.mjs refuses every `TEST_` var), reaches it, as
-///   `TEST_JWKS_JSON` is the only way to the test Apple key.
+///   `TEST_JWKS_JSON` is the only way to the test Apple key, and only on a test Worker (test-origin.ts).
 
 import { normalizeEmail } from "./auth";
+import { testWorker } from "./test-origin";
 
 /// One email: a plain subject and body to one address.
 export type CodeEmail = { to: string; subject: string; text: string };
@@ -31,8 +32,11 @@ export type SenderEnv = {
   /// domain onboarded to Email Service; without it nothing is sent.
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
-  /// TEST-ONLY: "on" sends every email to the in-memory outbox below. Only wrangler.test.json sets it.
+  /// TEST-ONLY: "on" sends every email to the in-memory outbox below, on a test Worker only (test-origin.ts). Only
+  /// wrangler.test.json sets it.
   TEST_EMAIL_OUTBOX?: string;
+  /// This Worker's public origin, which says whether it is a test Worker.
+  PUBLIC_API_ORIGIN?: string;
 };
 
 /// The name an email comes from when the owner sets an address but no name: the product's own.
@@ -81,12 +85,13 @@ function outboxSender(from: Sender): EmailSender {
   };
 }
 
-/// The sender email sign-in uses, or null when none is bound. A configuration that names the test outbox gets it even
-/// beside a real binding, as the test Apple key wins over Apple's endpoint, so a test run can never send real mail.
+/// The sender email sign-in uses, or null when none is bound. On a test Worker (test-origin.ts) a configuration that names
+/// the test outbox gets it even beside a real binding, as the test Apple key wins over Apple's endpoint, so a test run can
+/// never send real mail. Anywhere else the switch does nothing: the binding is the sender, or there is none.
 export function senderFor(env: SenderEnv): EmailSender | null {
   const from = senderOf(env);
   if (!from) return null;
-  if (env.TEST_EMAIL_OUTBOX === "on") return outboxSender(from);
+  if (env.TEST_EMAIL_OUTBOX === "on" && testWorker(env)) return outboxSender(from);
   return env.EMAIL ? cloudflareSender(env.EMAIL, from) : null;
 }
 

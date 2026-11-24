@@ -29,12 +29,14 @@
 /// The same secret also keeps sign-in codes sent by email (email-code.ts),
 /// which are not links: a code is stored only as its HMAC under a fourth
 /// domain tag, `manut-ai/email-code/v1.`, so no new secret has to be set, and
-/// no code's MAC can pass as a link's, or the reverse.
+/// no code's MAC can pass as a link's, or the reverse. Where the asks for codes
+/// come from is counted under a fifth, `manut-ai/email-code-source/v1.`.
 
 const APPROVAL_DOMAIN = "manut-ai/pilot-approval/v1.";
 const DELETION_DOMAIN = "manut-ai/pilot-deletion/v1.";
 const INVITE_DOMAIN = "manut-ai/pilot-invite/v1.";
 const EMAIL_CODE_DOMAIN = "manut-ai/email-code/v1.";
+const EMAIL_SOURCE_DOMAIN = "manut-ai/email-code-source/v1.";
 /// A secret shorter than this is treated as unset. HMAC accepts any length,
 /// but a short secret is a guessable one, and a guessed secret approves
 /// anything.
@@ -220,6 +222,19 @@ export async function macEmailCode(secret: string | undefined, account: string, 
   if (!usableSecret(secret)) throw new Error("approval_link_secret_unset");
   const mac = await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"),
     new TextEncoder().encode(EMAIL_CODE_DOMAIN + JSON.stringify([1, account, code])));
+  return base64url(new Uint8Array(mac));
+}
+
+/// What a source of asks for sign-in codes is counted as (email-code.ts): never its address, but an HMAC under the secret
+/// of its source group (an IPv4 address or an IPv6 /64, relay.ts), in a domain of its own. A plain hash of an IPv4
+/// address is undone by trying all four billion; this needs the secret too. With an `account` (the SHA-256 of an
+/// address) the tag counts that source's asks for that one address, and differs for every address, so two addresses'
+/// records cannot be joined by where their asks came from; without one it counts the source's asks for every address,
+/// in the day's record. Throws when the secret is unusable, as `macEmailCode` does.
+export async function macCodeSource(secret: string | undefined, group: string, account?: string): Promise<string> {
+  if (!usableSecret(secret)) throw new Error("approval_link_secret_unset");
+  const mac = await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"),
+    new TextEncoder().encode(EMAIL_SOURCE_DOMAIN + JSON.stringify([1, account ?? null, group])));
   return base64url(new Uint8Array(mac));
 }
 

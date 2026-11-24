@@ -1,20 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { macEmailCode } from "../src/approval-link";
+import { macCodeSource, macEmailCode } from "../src/approval-link";
 import { normalizeEmail, sha256Hex } from "../src/auth";
 import {
-  CODE_TTL_SECONDS, codeEmail, codeRequestAddress, DAILY_CODES, DAY_SECONDS, emailAccount, emailExchange, emailSignIn,
-  emailTenant, MAX_WRONG_TRIES, purgeAt, readCodeRecord, RESEND_SECONDS, sendCode, sixDigitCode, tryCode,
-  type CodeRecord, type EmailSignInEnv,
+  ADDRESS_DAILY_CODES, ALL_DAILY_CODES, CODE_DAY_KEY, CODE_KEY_PREFIX, CODE_TTL_SECONDS, codeDayOf, codeEmail,
+  codeRequestAddress, codeSource, countCodeDay, DAILY_CODES, DAY_SECONDS, emailAccount, emailExchange, emailSignIn,
+  emailTenant, MAX_WRONG_TRIES, purgeAt, readCodeDay, readCodeRecord, RESEND_SECONDS, sendCode, sixDigitCode,
+  SOURCE_DAILY_CODES, tryCode, type CodeDay, type CodeRecord, type EmailSignInEnv,
 } from "../src/email-code";
 import { deliver, senderFor, senderOf, testOutbox } from "../src/email-sender";
 
 // The rules of signing in by email (email-code.ts) and its sender port (email-sender.ts), without storage: a code of six
-// digits with no bias, one send a minute and ten a day per address, ten minutes per code, five tries, the HMAC it is
-// kept as, the one rule for an address, and when the route counts as configured. The routes are in auth-email.test.ts.
+// digits with no bias; one send a minute to an address, ten a day to it from one source and thirty from all of them;
+// twenty a day from one source and three hundred in all; ten minutes per code, five tries, the HMACs a code and a source
+// are kept as, the one rule for an address, and when the route counts as configured. The routes are in
+// auth-email.test.ts.
 
 const SECRET = "test-approval-link-secret-0123456789abcdef";
 const T0 = 1_790_000_000;
 const MAC = "fixture-mac";
+/// Sources' tags, shaped as `macCodeSource` makes them.
+const tag = (name: string) => name.padEnd(43, "x");
+const HERE = tag("here");
+const THERE = tag("there");
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -60,44 +67,188 @@ describe("a code", () => {
   });
 });
 
+/// Sends `count` codes a minute apart from `start`, each asked from the source `from(i)`, and the record they leave.
+function sends(count: number, from: (i: number) => string, start = T0, record: CodeRecord | null = null): CodeRecord {
+  for (let i = 0; i < count; i++) {
+    const decided = sendCode(record, MAC, start + i * 60, from(i));
+    expect(decided.ok).toBe(true);
+    record = (decided as { record: CodeRecord }).record;
+  }
+  return record!;
+}
+
 describe("sending a code", () => {
   it("sends one a minute to an address, and a new one replaces the one before", () => {
-    const first = sendCode(null, MAC, T0);
-    expect(first).toEqual({ ok: true, record: { code: { mac: MAC, exp: T0 + CODE_TTL_SECONDS, wrong: 0 }, sent: [T0] } });
+    const first = sendCode(null, MAC, T0, HERE);
+    expect(first).toEqual({ ok: true,
+      record: { code: { mac: MAC, exp: T0 + CODE_TTL_SECONDS, wrong: 0 }, sent: [{ at: T0, from: HERE }] } });
     const record = (first as { record: CodeRecord }).record;
-    expect(sendCode(record, "next", T0 + 0.5)).toEqual({ ok: false, retryAfter: 60 });
-    expect(sendCode(record, "next", T0 + 59)).toEqual({ ok: false, retryAfter: 1 });
-    expect(sendCode(record, "next", T0 + 59.9)).toEqual({ ok: false, retryAfter: 1 });
-    expect(sendCode(record, "next", T0 + RESEND_SECONDS)).toEqual({ ok: true,
-      record: { code: { mac: "next", exp: T0 + 60 + CODE_TTL_SECONDS, wrong: 0 }, sent: [T0, T0 + 60] } });
+    // The minute is the address's, wherever the next ask comes from.
+    for (const from of [HERE, THERE]) {
+      expect(sendCode(record, "next", T0 + 0.5, from)).toEqual({ ok: false, retryAfter: 60 });
+      expect(sendCode(record, "next", T0 + 59, from)).toEqual({ ok: false, retryAfter: 1 });
+      expect(sendCode(record, "next", T0 + 59.9, from)).toEqual({ ok: false, retryAfter: 1 });
+    }
+    expect(sendCode(record, "next", T0 + RESEND_SECONDS, THERE)).toEqual({ ok: true,
+      record: { code: { mac: "next", exp: T0 + 60 + CODE_TTL_SECONDS, wrong: 0 },
+        sent: [{ at: T0, from: HERE }, { at: T0 + 60, from: THERE }] } });
   });
 
-  it("sends ten in any 24 hours, then waits until the oldest is a day old", () => {
-    let record: CodeRecord | null = null;
-    for (let i = 0; i < DAILY_CODES; i++) {
-      const decided = sendCode(record, MAC, T0 + i * 60);
-      expect(decided.ok).toBe(true);
-      record = (decided as { record: CodeRecord }).record;
+  it("sends ten in any 24 hours asked from one source, then that source waits until the oldest of them is a day old",
+    () => {
+      expect(DAILY_CODES).toBe(10);
+      const record = sends(DAILY_CODES, () => HERE);
+      expect(sendCode(record, MAC, T0 + 600, HERE)).toEqual({ ok: false, retryAfter: DAY_SECONDS - 600 });
+      expect(sendCode(record, MAC, T0 + DAY_SECONDS - 1, HERE)).toEqual({ ok: false, retryAfter: 1 });
+      // A stranger's ten from their own network leave the address's owner asking from theirs.
+      expect(sendCode(record, MAC, T0 + 600, THERE).ok).toBe(true);
+      // At a day, the oldest send no longer counts, and it is dropped from the record.
+      const next = sendCode(record, MAC, T0 + DAY_SECONDS, HERE);
+      expect(next.ok).toBe(true);
+      expect((next as { record: CodeRecord }).record.sent).toHaveLength(DAILY_CODES);
+      expect((next as { record: CodeRecord }).record.sent[0]).toEqual({ at: T0 + 60, from: HERE });
+    });
+
+  it("sends an address thirty in any 24 hours from every source together, then waits for the oldest of them", () => {
+    expect(ADDRESS_DAILY_CODES).toBe(30);
+    // Ten from each of three sources: none is past its own ten, and the address is at its thirty.
+    const record = sends(ADDRESS_DAILY_CODES, (i) => tag(`source-${i % 3}`));
+    const last = T0 + (ADDRESS_DAILY_CODES - 1) * 60;
+    expect(sendCode(record, MAC, last + 60, tag("a-fourth-source"))).toEqual({ ok: false,
+      retryAfter: DAY_SECONDS - ADDRESS_DAILY_CODES * 60 });
+    // When the oldest is a day old, one more may go, from anywhere.
+    expect(sendCode(record, MAC, T0 + DAY_SECONDS, tag("a-fourth-source")).ok).toBe(true);
+  });
+
+  it("waits for the longest of the limits that hold", () => {
+    // Ten from here, the last a moment ago: the minute is shorter than here's day, and here's day is what it waits for.
+    const record = sends(DAILY_CODES, () => HERE);
+    const justAfter = T0 + (DAILY_CODES - 1) * 60 + 1;
+    expect(sendCode(record, MAC, justAfter, HERE)).toEqual({ ok: false, retryAfter: DAY_SECONDS - (justAfter - T0) });
+    expect(sendCode(record, MAC, justAfter, THERE)).toEqual({ ok: false, retryAfter: 59 });
+  });
+
+  it("answers the same whatever the address, since nothing here can know it", () => {
+    // The rules read only the record, the time and the source's tag: two addresses with the same history get the same
+    // answers, whoever knows either.
+    const one = sends(DAILY_CODES, () => HERE);
+    const other = sends(DAILY_CODES, () => HERE);
+    for (const at of [T0 + 600, T0 + 3600, T0 + DAY_SECONDS - 1]) {
+      expect(sendCode(one, MAC, at, HERE)).toEqual(sendCode(other, MAC, at, HERE));
     }
-    expect(DAILY_CODES).toBe(10);
-    expect(sendCode(record, MAC, T0 + 600)).toEqual({ ok: false, retryAfter: DAY_SECONDS - 600 });
-    expect(sendCode(record, MAC, T0 + DAY_SECONDS - 1)).toEqual({ ok: false, retryAfter: 1 });
-    // At a day, the oldest send no longer counts, and it is dropped from the record.
-    const next = sendCode(record, MAC, T0 + DAY_SECONDS);
-    expect(next.ok).toBe(true);
-    expect((next as { record: CodeRecord }).record.sent).toHaveLength(DAILY_CODES);
-    expect((next as { record: CodeRecord }).record.sent[0]).toBe(T0 + 60);
+  });
+});
+
+describe("the day's codes across every address", () => {
+  const today = (sent: number, from: Record<string, number> = {}): CodeDay => ({ day: codeDayOf(T0), sent, from });
+  /// Seconds from T0 until the next midnight in Bangkok.
+  const toMidnight = (codeDayOf(T0) + 1) * DAY_SECONDS - 7 * 3600 - T0;
+
+  it("is Bangkok's day, which starts at midnight there", () => {
+    // 2026-11-24T16:59:59Z is 23:59:59 in Bangkok, and a second later the next day has begun there.
+    const lastSecond = Date.UTC(2026, 10, 24, 16, 59, 59) / 1000;
+    expect(codeDayOf(lastSecond + 1)).toBe(codeDayOf(lastSecond) + 1);
+    expect(codeDayOf(Date.UTC(2026, 10, 24, 0, 0, 0) / 1000)).toBe(codeDayOf(lastSecond));
+    expect(toMidnight).toBeGreaterThan(0);
+    expect(toMidnight).toBeLessThanOrEqual(DAY_SECONDS);
+  });
+
+  it("counts every code sent today, and each source's", () => {
+    const first = countCodeDay(readCodeDay(undefined, T0), HERE, T0);
+    expect(first).toEqual({ ok: true, today: { day: codeDayOf(T0), sent: 1, from: { [HERE]: 1 } } });
+    const second = countCodeDay((first as { today: CodeDay }).today, THERE, T0 + 1);
+    expect(second).toEqual({ ok: true, today: { day: codeDayOf(T0), sent: 2, from: { [HERE]: 1, [THERE]: 1 } } });
+  });
+
+  it("sends a source twenty a day across every address, then it waits until midnight in Bangkok", () => {
+    expect(SOURCE_DAILY_CODES).toBe(20);
+    const day = today(SOURCE_DAILY_CODES, { [HERE]: SOURCE_DAILY_CODES });
+    expect(countCodeDay(day, HERE, T0)).toEqual({ ok: false, status: 429, error: "too_many_codes",
+      retryAfter: toMidnight });
+    expect(countCodeDay(day, THERE, T0).ok).toBe(true);
+  });
+
+  it("pauses every code once three hundred went out today, until midnight in Bangkok", () => {
+    expect(ALL_DAILY_CODES).toBe(300);
+    expect(countCodeDay(today(ALL_DAILY_CODES - 1), HERE, T0).ok).toBe(true);
+    for (const from of [HERE, THERE]) {
+      expect(countCodeDay(today(ALL_DAILY_CODES), from, T0)).toEqual({ ok: false, status: 503, error: "codes_paused",
+        retryAfter: toMidnight });
+    }
+    // The next day starts again.
+    const tomorrow = T0 + toMidnight;
+    expect(readCodeDay(today(ALL_DAILY_CODES), tomorrow)).toEqual({ day: codeDayOf(T0) + 1, sent: 0, from: {} });
+    expect(countCodeDay(readCodeDay(today(ALL_DAILY_CODES), tomorrow), HERE, tomorrow).ok).toBe(true);
+  });
+
+  it("reads only what the rules wrote, and starts the day again from anything else", () => {
+    const stored = { day: codeDayOf(T0), sent: 3, from: { [HERE]: 2, [THERE]: 1 } };
+    expect(readCodeDay(stored, T0)).toEqual(stored);
+    for (const value of [undefined, null, "day", { ...stored, day: codeDayOf(T0) - 1 }, { ...stored, sent: -1 },
+      { ...stored, sent: 1.5 }, { ...stored, from: [] }, { ...stored, from: { [HERE]: -1 } },
+      { ...stored, from: { "not a tag": 1 } }, { ...stored, from: { toString: 1 } }]) {
+      expect(readCodeDay(value, T0)).toEqual({ day: codeDayOf(T0), sent: 0, from: {} });
+    }
+  });
+
+  it("never mistakes a name an object has for a source's count", () => {
+    for (const from of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      expect(countCodeDay(today(0), from, T0)).toMatchObject({ ok: true, today: { sent: 1 } });
+    }
+  });
+
+  it("is kept under a key the alarm never reads as an address's record", () => {
+    expect(CODE_DAY_KEY.startsWith(CODE_KEY_PREFIX)).toBe(false);
+  });
+});
+
+describe("where an ask came from", () => {
+  it("is the source group the Worker names, or nothing", () => {
+    expect(codeSource("2001:db8:aaaa:bbbb::/64")).toBe("2001:db8:aaaa:bbbb::/64");
+    expect(codeSource("192.0.2.17")).toBe("192.0.2.17");
+    for (const value of [null, undefined, "", "x".repeat(65)]) expect(codeSource(value)).toBeNull();
+  });
+
+  it("is kept as an HMAC under the link secret in its own domain, one for each address and one for none", async () => {
+    const account = await emailAccount("mint@baanmali.example");
+    const group = "2001:db8:aaaa:bbbb::/64";
+    const forAddress = await macCodeSource(SECRET, group, account);
+    const forDay = await macCodeSource(SECRET, group);
+    for (const mac of [forAddress, forDay]) {
+      expect(mac).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(mac).not.toContain("2001");
+    }
+    expect(forAddress).toBe(await macCodeSource(SECRET, group, account));
+    expect(forDay).toBe(await macCodeSource(SECRET, group));
+    // The same HMAC made by hand: the domain tag, then the account (or none) and the group.
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET), { name: "HMAC", hash: "SHA-256" },
+      false, ["sign"]);
+    const sign = async (text: string) => btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("HMAC", key,
+      new TextEncoder().encode(text))))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(forAddress).toBe(await sign(`manut-ai/email-code-source/v1.${JSON.stringify([1, account, group])}`));
+    expect(forDay).toBe(await sign(`manut-ai/email-code-source/v1.${JSON.stringify([1, null, group])}`));
+    // Two addresses' records never share a source's tag, nor does the day's record with either; nor do two sources.
+    expect(await macCodeSource(SECRET, group, await emailAccount("fon@baanmali.example"))).not.toBe(forAddress);
+    expect(forDay).not.toBe(forAddress);
+    expect(await macCodeSource(SECRET, "2001:db8:aaaa:bbbc::/64", account)).not.toBe(forAddress);
+    // Nor is one a code's MAC, nor made without the secret.
+    expect(await macEmailCode(SECRET, account, group)).not.toBe(forAddress);
+    expect(await sha256Hex(group)).not.toBe(forDay);
+    expect(await macCodeSource(`${SECRET}-other`, group, account)).not.toBe(forAddress);
+    await expect(macCodeSource(undefined, group)).rejects.toThrow("approval_link_secret_unset");
+    await expect(macCodeSource("too-short", group)).rejects.toThrow("approval_link_secret_unset");
   });
 });
 
 describe("trying a code", () => {
-  const live = (wrong = 0): CodeRecord => ({ code: { mac: MAC, exp: T0 + CODE_TTL_SECONDS, wrong }, sent: [T0] });
+  const SENT = [{ at: T0, from: HERE }];
+  const live = (wrong = 0): CodeRecord => ({ code: { mac: MAC, exp: T0 + CODE_TTL_SECONDS, wrong }, sent: SENT });
   const right = (mac: string) => mac === MAC;
   const wrongly = () => false;
 
   it("uses the right code up, keeping only the sends", () => {
-    expect(tryCode(live(), right, T0 + 1)).toEqual({ kind: "right", record: { sent: [T0] } });
-    expect(tryCode({ sent: [T0] }, right, T0 + 2)).toEqual({ kind: "ended" });
+    expect(tryCode(live(), right, T0 + 1)).toEqual({ kind: "right", record: { sent: SENT } });
+    expect(tryCode({ sent: SENT }, right, T0 + 2)).toEqual({ kind: "ended" });
   });
 
   it("ends a code at its fifth wrong try, after which even the right code is refused", () => {
@@ -111,7 +262,7 @@ describe("trying a code", () => {
       record = (tried as { record: CodeRecord }).record;
     }
     expect(left).toEqual([4, 3, 2, 1, 0]);
-    expect(record).toEqual({ sent: [T0] });
+    expect(record).toEqual({ sent: SENT });
     expect(tryCode(record, right, T0 + 2)).toEqual({ kind: "ended" });
   });
 
@@ -130,19 +281,26 @@ describe("trying a code", () => {
 });
 
 describe("the record kept per address", () => {
+  const SENT = [{ at: T0, from: HERE }];
+
   it("reads only what the rules wrote, so anything else holds no code", () => {
-    expect(readCodeRecord({ code: { mac: MAC, exp: T0, wrong: 2 }, sent: [T0] }))
-      .toEqual({ code: { mac: MAC, exp: T0, wrong: 2 }, sent: [T0] });
+    expect(readCodeRecord({ code: { mac: MAC, exp: T0, wrong: 2 }, sent: SENT }))
+      .toEqual({ code: { mac: MAC, exp: T0, wrong: 2 }, sent: SENT });
     expect(readCodeRecord({ sent: [] })).toEqual({ sent: [] });
-    for (const value of [undefined, null, "record", [], { sent: "x" }, { sent: [-1] }, { sent: [T0], code: "123456" },
-      { sent: [T0], code: { mac: MAC, exp: T0, wrong: -1 } }, { sent: [T0], code: { mac: 7, exp: T0, wrong: 0 } },
-      { sent: [T0], code: { mac: MAC, exp: Number.NaN, wrong: 0 } }]) {
+    // Nothing but a send's time and its source's tag is read back.
+    expect(readCodeRecord({ sent: [{ at: T0, from: HERE, address: "mint@baanmali.example" }] })).toEqual({ sent: SENT });
+    for (const value of [undefined, null, "record", [], { sent: "x" }, { sent: [-1] }, { sent: [T0] },
+      { sent: [{ at: -1, from: HERE }] }, { sent: [{ at: T0 }] }, { sent: [{ at: T0, from: "192.0.2.17" }] },
+      { sent: [{ at: T0, from: 7 }] }, { sent: SENT, code: "123456" },
+      { sent: SENT, code: { mac: MAC, exp: T0, wrong: -1 } }, { sent: SENT, code: { mac: 7, exp: T0, wrong: 0 } },
+      { sent: SENT, code: { mac: MAC, exp: Number.NaN, wrong: 0 } }]) {
       expect(readCodeRecord(value)).toBeNull();
     }
   });
 
   it("is kept a day after its last send, when that send no longer counts", () => {
-    expect(purgeAt({ code: { mac: MAC, exp: T0 + 600, wrong: 0 }, sent: [T0 - 100, T0] })).toBe(T0 + DAY_SECONDS);
+    expect(purgeAt({ code: { mac: MAC, exp: T0 + 600, wrong: 0 },
+      sent: [{ at: T0 - 100, from: THERE }, { at: T0, from: HERE }] })).toBe(T0 + DAY_SECONDS);
     expect(purgeAt({ sent: [] })).toBe(DAY_SECONDS);
   });
 });
@@ -186,7 +344,7 @@ describe("the address and the identity", () => {
 
 describe("off unless configured", () => {
   const on: EmailSignInEnv = { EMAIL_SIGN_IN: "on", APPROVAL_LINK_SECRET: SECRET, EMAIL_FROM_ADDRESS: "codes@manut.test",
-    TEST_EMAIL_OUTBOX: "on" };
+    TEST_EMAIL_OUTBOX: "on", PUBLIC_API_ORIGIN: "https://api.manut.test" };
 
   it("is on only with the switch, a sender and the secret", () => {
     expect(emailSignIn(on)).not.toBeNull();
@@ -195,6 +353,10 @@ describe("off unless configured", () => {
       { ...on, EMAIL_SIGN_IN: "true" }, { ...on, EMAIL_SIGN_IN: "ON" },
       { ...on, APPROVAL_LINK_SECRET: undefined }, { ...on, APPROVAL_LINK_SECRET: "short" },
       { ...on, TEST_EMAIL_OUTBOX: undefined }, { ...on, TEST_EMAIL_OUTBOX: "1" },
+      // The test outbox works only on a test Worker, whose public origin is under .test (test-origin.ts); with no binding
+      // beside it, a real environment that set it by mistake has no sender at all.
+      { ...on, PUBLIC_API_ORIGIN: undefined }, { ...on, PUBLIC_API_ORIGIN: "https://dev.manut.xyz" },
+      { ...on, PUBLIC_API_ORIGIN: "http://api.manut.test" }, { ...on, PUBLIC_API_ORIGIN: "https://api.manut.test.example" },
       { ...on, EMAIL_FROM_ADDRESS: undefined }, { ...on, EMAIL_FROM_ADDRESS: "codes" },
       { ...on, EMAIL_FROM_NAME: "Manut AI\nBcc: someone@example.com" }, { ...on, EMAIL_FROM_NAME: "  " },
     ]) {
@@ -227,15 +389,26 @@ describe("the sender port", () => {
     expect(senderFor({ EMAIL: email })).toBeNull();
   });
 
-  it("sends to the test outbox whenever the test switch is on, even beside a binding", async () => {
+  it("sends to the test outbox whenever the test switch is on in a test Worker, even beside a binding", async () => {
     const email = binding(async () => ({ messageId: "fixture-message" }));
     const before = testOutbox().length;
-    await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on" })!
-      .send(codeEmail("outbox@baanmali.example", "654321"));
+    await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on",
+      PUBLIC_API_ORIGIN: "https://api.manut.test" })!.send(codeEmail("outbox@baanmali.example", "654321"));
     expect(email.send).not.toHaveBeenCalled();
     expect(testOutbox().length).toBe(before + 1);
     expect(testOutbox().at(-1)).toMatchObject({ to: "outbox@baanmali.example",
       from: { email: "codes@manut.test", name: "Manut AI" } });
+  });
+
+  it("ignores the test switch anywhere but a test Worker, so a code set to go there is sent for real", async () => {
+    const email = binding(async () => ({ messageId: "fixture-message" }));
+    const before = testOutbox().length;
+    for (const origin of [undefined, "https://dev.manut.xyz", "http://api.manut.test", "https://api.manut.test:8443"]) {
+      await senderFor({ EMAIL: email, EMAIL_FROM_ADDRESS: "codes@manut.test", TEST_EMAIL_OUTBOX: "on",
+        ...(origin === undefined ? {} : { PUBLIC_API_ORIGIN: origin }) })!.send(codeEmail("real@baanmali.example", "654321"));
+    }
+    expect(email.send).toHaveBeenCalledTimes(4);
+    expect(testOutbox().length).toBe(before);
   });
 
   it("keeps a refused send to itself: the log names the service's error code, never the address or the code", async () => {

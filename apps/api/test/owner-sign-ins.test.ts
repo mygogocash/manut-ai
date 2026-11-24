@@ -142,7 +142,7 @@ describe("the owner adding a sign-in to the shop's vault", () => {
   });
 
   it("names the shop's own session in the log when it is the one that added it", async () => {
-    const tenant = `apple:vault-add-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const headers = await tenantSession(tenant, false);
     const added = await add(headers, NEW_SIGN_IN);
     expect(added.status).toBe(200);
@@ -349,7 +349,7 @@ describe("the owner choosing who may use a sign-in", () => {
   });
 
   it("names the shop's own session in the log when it is the one that chose", async () => {
-    const tenant = `apple:vault-members-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const headers = await tenantSession(tenant, false);
     const added = await operatorAdd(tenant, NEW_SIGN_IN);
     expect((await choose(headers, { signInId: added.body.signIn!.id, members: ["ton"] })).body.signIn?.members).toEqual(["ton"]);

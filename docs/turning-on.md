@@ -7,18 +7,23 @@ one place. Every route behind a switch answers plainly that it is not on (for ex
 
 Secrets go in with `wrangler secret put <NAME>` from `apps/api`, for one environment at a time (`--env dev`, and later
 staging and production). They never go in a file in the repository. Vars go in that environment's `vars` in
-`apps/api/wrangler.jsonc`. The dev deploy check refuses any config that sets a test-only var (`TEST_…`).
+`apps/api/wrangler.jsonc`. The dev deploy check refuses any config that sets a test-only var (`TEST_…`), or a
+`PUBLIC_API_ORIGIN` under `.test`, in any block, staging and production included; and the API honours the test-only
+settings only where `PUBLIC_API_ORIGIN` is under `.test`, so one set as a secret does nothing.
 
 ## Built, and off until the owner says
 
 **Not yet, whatever the owner decides:** a security review of the API surface added on 24 Nov 2026 found ways a stranger
 could misuse email sign-in and self-serve once they are on (sending codes without a real limit, making shops without
-one, and more). Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until December items 41 and 42 have merged.
+one, and more). December item 41 fixed the front door: a body must be JSON, every limit counts per address or IPv6 /64,
+codes are capped per address, per source and in all (`docs/pilot-api.md`, "Signing in by email"), an email sign-in is
+refused on the lifted routes and on every shop route of its own tenant, and the test keys work only on a `.test`
+origin. Leave `EMAIL_SIGN_IN` and `SELF_SERVE_SHOPS` off until item 42 (sessions and self-serve) has merged too.
 
 | What | The switch | What it needs from the owner | Details |
 | --- | --- | --- | --- |
 | Sign-in by a code sent by email (the API, the desktop's Settings › Developer, the web's join page) | var `EMAIL_SIGN_IN` set to `"on"`, the `send_email` binding `EMAIL`, and vars `EMAIL_FROM_ADDRESS` and `EMAIL_FROM_NAME` | A yes; the Workers Paid plan; a sending domain onboarded to Cloudflare Email Service, with the sender's address and name; the Thai words for the email | `docs/sign-in-options.md`; `docs/pilot-api.md`, "Signing in by email" |
-| Sign in with Apple | var `APPLE_CLIENT_ID` | The Apple Developer Program as an organization ($99 a year), the app's identifier, and the Mac app signed by that team | `docs/sign-in-options.md` |
+| Sign in with Apple | var `APPLE_CLIENT_ID` | The Apple Developer Program as an organization ($99 a year), the app's identifier, and the Mac app signed by that team. Before it is turned on, Apple's sign-ins (`apple:`) must be refused on the lifted routes as email's are (`REFUSED_PERSON` in `apps/api/src/index.ts`), with the lifted routes' own tests moved off Apple tenants: anyone with an Apple ID could otherwise use them | `docs/sign-in-options.md`; `docs/pilot-api.md`, "What a person's own sign-in reaches" |
 | Self-serve onboarding (a person makes their own shop) | var `SELF_SERVE_SHOPS` set to `"on"` | Who may sign up; whether self-serve shops are their own cohort, and their price; the Thai words. Sign-in must be on first | `docs/several-shops.md`; `docs/pilot-api.md` |
 | Google Sheets for Ton's books | secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` | A Google Cloud project of the owner's: the Sheets API on; the consent screen named Manut AI and published out of Testing (in Testing, refresh tokens end after 7 days); a Web client whose one redirect is `https://<API host>/v1/google/callback` | `docs/connectors.md`, 4b |
 | Real models for the AI team | secret `ANTHROPIC_API_KEY`; vars `MODEL_SATANG_PER_USD` (default 3500, ฿35.00 a dollar) and `MODEL_DEFAULT_CAP_SATANG` (default 20000, ฿200 a shop a month) | A paid Anthropic account; the exchange rate; each shop's monthly cap | `docs/model-gateway.md` |

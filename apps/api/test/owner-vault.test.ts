@@ -11,6 +11,7 @@ import {
   bindings,
   call,
   callWith,
+  emailSignIn,
   failingWhere,
   joinHelper,
   linkedOwner,
@@ -170,12 +171,29 @@ describe("the owner's view of the shop's vault and outposts", () => {
   });
 
   it("lists them to the shop's own signed-in session, for its own tenant", async () => {
-    const tenant = `apple:vault-owner-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const headers = await tenantSession(tenant, false);
     const signIn = await addSignIn(tenant);
     const { outpost } = await addOutpost(tenant);
     expect(await listSignIns(headers)).toEqual({ status: 200, body: { tenant, signIns: [signIn] } });
     expect(await listOutposts(headers)).toEqual({ status: 200, body: { tenant, outposts: [outpost] } });
+  });
+
+  it("answers a person's own sign-in not_found on every route, and keeps nothing for its tenant, which is no shop", async () => {
+    // The review (24 Nov 2026): once email sign-in is on, a stranger would own a vault of their own `email:` tenant here,
+    // storing sign-ins in it. Apple's sign-in is answered the same: neither tenant is a shop.
+    for (const person of [await emailSignIn(`vault-stranger-${crypto.randomUUID()}@example.org`), await appleSignIn()]) {
+      for (const [method, path, body] of everyRoute("signin-x", "outpost-x")) {
+        expect([path, await send(person.headers, method, path, body)]).toEqual([path,
+          { status: 404, text: JSON.stringify({ error: "not_found" }) }]);
+      }
+      expect(await operatorSignIns(person.tenant)).toEqual([]);
+      expect(await operatorOutposts(person.tenant)).toEqual([]);
+      expect(await vaultEntries(person.tenant)).toEqual([]);
+      // Its body is still read first, so a body that names a shop is refused as one.
+      expect(await send(person.headers, "POST", "/v1/vault/sign-ins/password", { signInId: "x", password: "y",
+        tenant: "pilot:x" })).toEqual({ status: 400, text: JSON.stringify({ error: "invalid_request" }) });
+    }
   });
 
   it("answers an empty vault with empty lists", async () => {
@@ -293,7 +311,7 @@ describe("the owner typing a new password into the vault", () => {
   });
 
   it("names the shop's own session in the log when it is the one that typed it", async () => {
-    const tenant = `apple:vault-change-${crypto.randomUUID()}`;
+    const tenant = (await setupShop()).tenant;
     const headers = await tenantSession(tenant, false);
     const signIn = await addSignIn(tenant);
     expect((await changePassword(headers, { signInId: signIn.id, password: NEW_PASSWORD })).status).toBe(200);
