@@ -18,6 +18,7 @@ import {
   outpostLine,
   passwordReady,
   signInLine,
+  thisMacRecord,
   type ConnAction,
   type ConnectionsCalls,
   type ConnUi,
@@ -26,6 +27,7 @@ import { ShopOutpostsPane, VaultPane, type ConnectionsProps } from "./Connection
 import { LOADING } from "./load";
 import { MEMORY_START } from "./memory";
 import { outpostRow } from "./outpost";
+import type { OutpostPaneProps } from "./OutpostPane";
 import { ROUTINES_START } from "./routines";
 
 /** 24 November 2026, 10:00 on this computer's clock. */
@@ -337,5 +339,91 @@ describe("the Connections tab", () => {
     expect(html).toContain('data-testid="outposts"');
     expect(html).not.toContain('data-testid="vault"');
     expect(html).not.toContain('data-testid="shop-outposts"');
+  });
+});
+
+describe("this Mac, folded into its own row", () => {
+  const memory: MemoryPaneProps = { state: LOADING, ui: MEMORY_START, nowMs: 0, dispatch: () => {}, onRemember: () => {}, onConfirm: () => {}, onCorrect: () => {}, onForget: () => {} };
+  const routines: RoutinesPaneProps = { state: LOADING, ui: ROUTINES_START, nowMs: 0, dispatch: () => {}, onAdd: () => {}, onSwitch: () => {} };
+  /** This Mac's Outposts box with what the shell said: running, and the id this Mac's outpost has on the shop's list. */
+  const running = (id: string | null): OutpostPaneProps => ({
+    row: outpostRow({ kind: "signed_in", view: { state: "running", online: true, steps: 2, name: "This Mac", id } }),
+    busy: false,
+    error: null,
+    onAction: () => {},
+    thisMac: id,
+  });
+  const draw = (connections: OutpostPaneProps, p: ConnectionsProps) =>
+    renderToString(<CustomizeView memory={memory} routines={routines} tab="connections" onTab={() => {}} connections={connections} vault={p} />);
+  /** The words of one part of the tab, by its test id. */
+  const part = (html: string, id: string) => {
+    const from = html.indexOf(`data-testid="${id}"`);
+    return from < 0 ? "" : words(html.slice(html.lastIndexOf("<section", from), html.indexOf("</section>", from)));
+  };
+
+  it("shows this Mac's record in its own row and leaves it out of the shop's list, so it is never shown twice", () => {
+    const html = draw(running("outpost-mac"), props());
+    expect(part(html, "outposts")).toBe(
+      "Outposts The machines your team works on. This Mac Running 2 steps Online Stop Named Front desk Mac Rename Remove " +
+        "While your team works here, its browser opens in a window of its own and goes only to your shop's own sites. The vault types passwords in. The AI never sees them.",
+    );
+    expect(part(html, "shop-outposts")).not.toContain("Front desk Mac");
+    expect(part(html, "shop-outposts")).toContain("Cloud outpost");
+    expect(words(html).split("Front desk Mac")).toHaveLength(2);
+  });
+
+  it("lists every outpost while the shell has not said which is this Mac, or names one the list does not have", () => {
+    for (const id of [null, "outpost-gone", "outpost-cloud"]) {
+      const html = draw(running(id), props());
+      expect(html, String(id)).not.toContain('data-testid="this-mac-record"');
+      expect(part(html, "shop-outposts"), String(id)).toContain("Front desk Mac");
+      expect(part(html, "shop-outposts"), String(id)).toContain("Cloud outpost");
+    }
+    expect(thisMacRecord({ kind: "ready", value: DATA }, "outpost-mac")).toEqual(mac);
+    expect(thisMacRecord({ kind: "ready", value: DATA }, "outpost-cloud")).toBeNull();
+    expect(thisMacRecord(LOADING, "outpost-mac")).toBeNull();
+  });
+
+  it("says no other outposts are listed when this Mac was the only one", () => {
+    const only = props({ state: { kind: "ready", value: { ...DATA, outposts: [mac] } } });
+    expect(part(draw(running("outpost-mac"), only), "shop-outposts")).toContain("No other outposts yet.");
+    expect(part(draw(running(null), props({ state: { kind: "ready", value: { ...DATA, outposts: [] } } })), "shop-outposts")).toContain("No outposts yet.");
+  });
+
+  it("asks Rename and Remove in this Mac's row, and says what they did there", () => {
+    const dispatch = vi.fn();
+    const box = () => CustomizeView({ memory, routines, tab: "connections", onTab: () => {}, connections: running("outpost-mac"), vault: props({ dispatch }) }) as ReactNode;
+    const record = byTestId(box(), "this-mac-record")[0]!;
+    const [rename, remove] = [byTestId(record, "outpost-rename")[0]!, byTestId(record, "outpost-remove")[0]!];
+    (rename.props.onClick as () => void)();
+    (remove.props.onClick as () => void)();
+    expect(dispatch.mock.calls).toEqual([
+      [{ type: "rename", outpost: "outpost-mac", name: "Front desk Mac", at: "this_mac" }],
+      [{ type: "remove", outpost: "outpost-mac", at: "this_mac" }],
+    ]);
+    // The question opens in this Mac's row, and the shop's list stays as it was.
+    const renaming = draw(running("outpost-mac"), props({ ui: reduce({ type: "rename", outpost: "outpost-mac", name: "Front desk Mac", at: "this_mac" }) }));
+    expect(part(renaming, "outposts")).toContain("New name for Front desk Mac");
+    expect(part(renaming, "shop-outposts")).not.toContain("New name for");
+    const removing = draw(running("outpost-mac"), props({ ui: reduce({ type: "remove", outpost: "outpost-mac", at: "this_mac" }) }));
+    expect(part(removing, "outposts")).toContain("Remove Front desk Mac? Its work stops at once");
+    // Its words stay with the row through the change, and show there, not in the list.
+    expect(connReduce(reduce({ type: "rename", outpost: "outpost-mac", name: "Front desk Mac", at: "this_mac" }), { type: "begin" }).at).toBe("this_mac");
+    expect(connReduce(reduce({ type: "rename", outpost: "outpost-cloud", name: "Cloud outpost" }), { type: "begin" }).at).toBe("outposts");
+    const sent = connReduce(reduce({ type: "remove", outpost: "outpost-mac", at: "this_mac" }), { type: "begin" });
+    expect(sent.at).toBe("this_mac");
+    const said = draw(running(null), props({ ui: connReduce(sent, { type: "done", notice: "Removed. Front desk Mac no longer works for your team." }) }));
+    expect(part(said, "outposts")).toContain("Removed. Front desk Mac no longer works for your team.");
+    expect(part(said, "shop-outposts")).not.toContain("Removed.");
+  });
+
+  it("has its words in ko, ja and zh, never the English", () => {
+    const english = [part(draw(running("outpost-mac"), props()), "outposts"), part(draw(running("outpost-mac"), props({ state: { kind: "ready", value: { ...DATA, outposts: [mac] } } })), "shop-outposts")];
+    for (const lang of LANGS.filter((l) => l !== "en")) {
+      setLang(lang);
+      expect(part(draw(running("outpost-mac"), props()), "outposts"), lang).not.toBe(english[0]);
+      expect(part(draw(running("outpost-mac"), props()), "outposts"), lang).toContain("Front desk Mac");
+      expect(part(draw(running("outpost-mac"), props({ state: { kind: "ready", value: { ...DATA, outposts: [mac] } } })), "shop-outposts"), lang).not.toBe(english[1]);
+    }
   });
 });

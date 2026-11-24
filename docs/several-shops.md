@@ -180,6 +180,12 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 - **Practice** lists two sample shops: the person's own (the demo team's, named as the first-run setup named it) and Ran
   Pa Noi, where they help Noi. Typing `/shops` in a chat puts both shops' requests in Needs you; viewing Ran Pa Noi shows
   Buddy alone with them, as a helper's shop shows when connected.
+- **This Mac as a shop's outpost** (`docs/browser-control.md`, "This Mac for the shop the switcher shows"). Register this
+  Mac goes with the owner session of the shop the switcher shows, so a pilot shop can have this Mac as its outpost; a shop
+  the person helps at is refused with nothing sent. The outpost runs while the person holds a live owner session of the
+  shop it is registered for, or is signed in to it, and stops when they no longer do: at sign-out, an unlinking, a shop
+  gone from their list, or an owner session that ended and was not opened again. A helper's session never runs it.
+  Customize › Connections knows which of the shop's outposts is this Mac and shows it once, in its own row.
 
 ## The slices that follow
 
@@ -206,6 +212,8 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
    A sign-out that cannot reach the API leaves that session to its 30 days, or to an unlink or a removal.
 6. **Co-owners:** more than one linked owner account per shop, if the owner wants it.
 7. **LINE Login as an identity**, parked with the rest of LINE.
+8. **Done here (desktop):** this Mac as a pilot shop's outpost, registered and run through the owner session of the shop
+   (24 Nov 2026), above. The API needed no change: `POST /v1/outposts/register` already took an owner session.
 
 ## Known limits of the first slice
 
@@ -232,3 +240,6 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 - The shop viewed and the dismissed notices are not kept between starts.
 - One shop whose read fails (offline, or the API answering 5xx) fails the whole read, so the kept read stands in for every
   shop until it answers again: one shop's asks never vanish because its read did not answer.
+- At the app's start, a shop session kept in the keychain counts as live for this Mac's outpost before the API is asked.
+  An owner unlinked while the app was closed sees the outpost start for that shop and stop again at the first read,
+  seconds later.

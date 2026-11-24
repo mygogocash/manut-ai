@@ -19,6 +19,7 @@ import type { ShopRole, ShopRow } from "../../lib/protocol";
 import { decodeApprovals } from "./approvals";
 import { decodeWork, type ReadFailure, type ShopPart, type ShopWork } from "./shop";
 import type { Answer, ApiSession, ShopSessionRecord } from "./session";
+import type { FetchLike } from "./shell";
 
 export type { ShopRole, ShopRow } from "../../lib/protocol";
 
@@ -212,13 +213,20 @@ export class ShopSessions {
     return this.request(shop, "POST", path, body);
   }
 
+  /** `write`, with the same rules, sent through `through` instead of the session's own `fetch`, as `ApiSession.writeVia` is
+   *  for the sign-in: registering this Mac for a shop goes through the shell's own command, which keeps the credential its
+   *  answer holds (outpost.ts). Opening the shop still goes the usual way, since its answer is a session the page keeps. */
+  writeVia(shop: string, path: string, body: unknown, through: FetchLike): Promise<ShopAnswer> {
+    return this.request(shop, "POST", path, body, through);
+  }
+
   /** Forgets these shops' sessions here: they left the person's list. Nothing is sent: a shop the person was removed from
    *  or unlinked from, or that was deleted, holds no session to end. */
   drop(shops: readonly string[]): Promise<void> {
     return this.session.dropShopSessions(shops);
   }
 
-  private async request(shop: string, method: "GET" | "POST", path: string, body?: unknown): Promise<ShopAnswer> {
+  private async request(shop: string, method: "GET" | "POST", path: string, body?: unknown, through?: FetchLike): Promise<ShopAnswer> {
     await this.session.load();
     let held = this.session.shopSession(shop);
     let reopened = false;
@@ -228,13 +236,13 @@ export class ShopSessions {
       held = opened.held;
       reopened = true;
     }
-    let answer = await this.session.sendAs(held.accessToken, method, path, body);
+    let answer = await this.session.sendAs(held.accessToken, method, path, body, through);
     let ended = departureOf(answer);
     if (!ended && !reopened && answer.kind === "refused" && answer.status === 401) {
       // The session ended (its 30 days, or this device signed out of the shop elsewhere): open the shop again once.
       const opened = await this.open(shop, held.accessToken);
       if (opened.kind !== "open") return opened;
-      answer = await this.session.sendAs(opened.held.accessToken, method, path, body);
+      answer = await this.session.sendAs(opened.held.accessToken, method, path, body, through);
       ended = departureOf(answer);
     }
     if (ended) {

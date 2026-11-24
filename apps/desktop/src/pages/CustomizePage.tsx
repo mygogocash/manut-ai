@@ -25,6 +25,7 @@ import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } from "./ConnectionsPane";
+import { thisMacRecord } from "./connections";
 import { OutpostPane, useOutpost, type OutpostPaneProps } from "./OutpostPane";
 import { correctionReady, groupFacts, MEMORY_START, memoryDo, memoryReduce, rememberReady, sourceLine, type MemoryAction, type MemoryDo, type MemoryUi } from "./memory";
 import {
@@ -524,6 +525,9 @@ export function CustomizeView({
     </div>
   );
   const showConnections = tab === "connections" && connections !== undefined;
+  // This Mac's own record on the shop's list, which its row takes in once the shell says which outpost it is (the list then
+  // leaves it out), so the owner never sees this Mac twice.
+  const fold = vault ? { p: vault, record: thisMacRecord(vault.state, connections?.thisMac ?? null) } : undefined;
   return (
     <MenuPageFrame
       page="customize"
@@ -536,8 +540,8 @@ export function CustomizeView({
         <div className="brain conn" data-testid="connections">
           <div className="conncol">
             {vault && <VaultPane p={vault} />}
-            <OutpostPane {...connections} />
-            {vault && <ShopOutpostsPane p={vault} />}
+            <OutpostPane {...connections} fold={fold} />
+            {vault && <ShopOutpostsPane p={vault} thisMac={fold?.record?.id ?? null} />}
           </div>
         </div>
       ) : (
@@ -553,7 +557,7 @@ export function CustomizeView({
 export function CustomizePage() {
   const s = useStore();
   const [tab, setTab] = useState<CustomizeTab>("memory");
-  const outpost = useOutpost();
+  const outpost = useOutpost(s.shops.current, s.shops.list);
   const vault = useConnections(tab === "connections", s.shops.current);
   const [facts, setFacts] = useState<Load<MemoryFact[]>>(LOADING);
   const [rows, setRows] = useState<Load<RoutineRow[]>>(LOADING);

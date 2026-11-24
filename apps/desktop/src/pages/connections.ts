@@ -11,7 +11,7 @@
 import { hhmm, sameDay } from "../app/time";
 import { listText, t } from "../i18n";
 import { MAX_OUTPOST_NAME, MAX_PASSWORD, type ShopConnections, type ShopOutpost, type VaultSignIn } from "../runtime/connections";
-import { unavailable } from "./load";
+import { unavailable, type Load } from "./load";
 import { dayText } from "./memory";
 
 /** A member as the team is named everywhere: "nam" is Nam. The names are the same in every language. */
@@ -40,6 +40,14 @@ export const addedLine = (s: VaultSignIn, nowMs: number): string => t("vault.add
 /** The quiet line under an outpost's name: the canvas's words for a cloud outpost, and for a Mac what it is and when it came. */
 export const outpostLine = (o: ShopOutpost, nowMs: number): string => (o.kind === "cloud" ? t("outposts.cloud") : t("outposts.mac", { day: dayText(o.createdAt, nowMs) }));
 
+/** This Mac's own record among the shop's outposts as the tab read them: the one with the id the shell gives this Mac's
+ *  outpost (src/runtime/http/outpost.ts), and only a Mac's. Null until the vault was read, while the shell has not said, or
+ *  when the shop's list does not have it (removed meanwhile): then nothing is folded and the list shows every one. */
+export function thisMacRecord(state: Load<ShopConnections>, id: string | null): ShopOutpost | null {
+  if (state.kind !== "ready" || !id) return null;
+  return state.value.outposts.find((o) => o.id === id && o.kind === "this_mac") ?? null;
+}
+
 /** The one question open in the tab: a new password for a sign-in, a new name for an outpost, or whether to remove one.
  *  Nothing is changed until the owner answers it. */
 export type ConnAsk = { kind: "password"; signIn: string; draft: string } | { kind: "rename"; outpost: string; draft: string } | { kind: "remove"; outpost: string } | null;
@@ -48,8 +56,9 @@ export interface ConnUi {
   ask: ConnAsk;
   /** a change is on its way: nothing else can be asked or typed */
   busy: boolean;
-  /** which part of the tab the last change was in, so its words show there */
-  at: "vault" | "outposts" | null;
+  /** which part of the tab the last change was in, so its words show there: this Mac's own row (`this_mac`) for its record,
+   *  which the shop's list leaves out once the shell says which outpost is this Mac */
+  at: "vault" | "outposts" | "this_mac" | null;
   /** why the last change did not happen, in the page's words; never a word of what was typed */
   error: string | null;
   /** what the last change did */
@@ -60,8 +69,8 @@ export const CONN_START: ConnUi = { ask: null, busy: false, at: null, error: nul
 
 export type ConnAction =
   | { type: "change"; signIn: string }
-  | { type: "rename"; outpost: string; name: string }
-  | { type: "remove"; outpost: string }
+  | { type: "rename"; outpost: string; name: string; at?: "this_mac" }
+  | { type: "remove"; outpost: string; at?: "this_mac" }
   | { type: "draft"; text: string }
   | { type: "cancel" }
   | { type: "begin" }
@@ -69,25 +78,25 @@ export type ConnAction =
   | { type: "failed"; message: string; close: boolean }
   | { type: "reset" };
 
-const placeOf = (ask: ConnAsk): ConnUi["at"] => (ask === null ? null : ask.kind === "password" ? "vault" : "outposts");
-
 /** Moves the tab between asking, waiting on the runtime and done. One question at a time, and none while a change is on its
- *  way, so the owner cannot ask twice. */
+ *  way, so the owner cannot ask twice. A change's words show where its question was asked: the vault, the shop's list, or
+ *  this Mac's own row. */
 export function connReduce(s: ConnUi, a: ConnAction): ConnUi {
   switch (a.type) {
     case "change":
       return s.busy ? s : { ...s, ask: { kind: "password", signIn: a.signIn, draft: "" }, at: "vault", error: null, notice: null };
     case "rename":
-      return s.busy ? s : { ...s, ask: { kind: "rename", outpost: a.outpost, draft: a.name }, at: "outposts", error: null, notice: null };
+      return s.busy ? s : { ...s, ask: { kind: "rename", outpost: a.outpost, draft: a.name }, at: a.at ?? "outposts", error: null, notice: null };
     case "remove":
-      return s.busy ? s : { ...s, ask: { kind: "remove", outpost: a.outpost }, at: "outposts", error: null, notice: null };
+      return s.busy ? s : { ...s, ask: { kind: "remove", outpost: a.outpost }, at: a.at ?? "outposts", error: null, notice: null };
     case "draft":
       return !s.busy && (s.ask?.kind === "password" || s.ask?.kind === "rename") ? { ...s, ask: { ...s.ask, draft: a.text } } : s;
     case "cancel":
       return s.busy ? s : { ...s, ask: null, error: null };
-    // The password leaves the page's state here, as it is sent: whatever comes back, nothing keeps it to send again.
+    // The password leaves the page's state here, as it is sent: whatever comes back, nothing keeps it to send again. The
+    // words stay where the question was asked, which opening it set.
     case "begin":
-      return { ...s, busy: true, at: placeOf(s.ask), error: null, notice: null, ask: s.ask?.kind === "password" ? { ...s.ask, draft: "" } : s.ask };
+      return { ...s, busy: true, at: s.ask === null ? null : s.at, error: null, notice: null, ask: s.ask?.kind === "password" ? { ...s.ask, draft: "" } : s.ask };
     case "done":
       return { ask: null, busy: false, at: s.at, error: null, notice: a.notice };
     // A refusal keeps the question open, so the owner can read why and try again (a password typed again, a name fixed),
