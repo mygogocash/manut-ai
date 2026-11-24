@@ -1744,9 +1744,10 @@ for a shop with its owner or helper session (`POST /v1/shops/session`, `POST /v1
 session, an owner's link code, joining by invite and making a shop. Anyone can sign in by email once it is on, so the
 security review of 24 Nov 2026 asked that nothing else take it (`docs/decisions.md`):
 
-- **The lifted routes answer it 401 `unauthorized`**, as they answer a shop session, but for the three reads the desktop
-  makes for a person in no shop, which find nothing: `GET /v1/tenant/export`, `GET /v1/schedules` and
-  `GET /v1/inbound/attention`. Refused, and why:
+- **The lifted routes answer it 401 `unauthorized`**, as they answer a shop session, but for the reads the desktop makes
+  for a person in no shop, which find nothing: `GET /v1/tasks` (their own tenant's list, "The shop's tasks, a page at a
+  time", below), `GET /v1/schedules` and `GET /v1/inbound/attention`, and `GET /v1/tenant/export`, which the desktop read
+  before the task list. Refused, and why:
   - `/v1/connections` (`GET`, `POST`), `DELETE /v1/connections/{id}` and `GET /v1/connections/{id}/linear/issues`: a
     shop's connections are the operator's (LINE) or the owner's (Google); these would store a Linear token for anyone
     and read Linear through this API with it.
@@ -1755,8 +1756,8 @@ security review of 24 Nov 2026 asked that nothing else take it (`docs/decisions.
     tenant wipe, which reads every session.
   - `POST /v1/schedules`, and `GET` and `DELETE /v1/schedules/{id}`: a schedule that fires mints cloud tasks; the team's
     routines are its shop's (below).
-  - `/v1/tasks` and everything under `/v1/tasks/{id}` (the task, its commands, attempts, actions, decisions, dispatch and
-    events): cloud tasks and their executor's protocol; the team's work runs in the Worker's job flow, never here.
+  - `POST /v1/tasks` and everything under `/v1/tasks/{id}` (the task, its commands, attempts, actions, decisions, dispatch
+    and events): cloud tasks and their executor's protocol; the team's work runs in the Worker's job flow, never here.
   - `/v1/companies` and everything under it: the lifted product's companies, not a shop's.
 - **The shop's routes answer it 404 `not_found`**, as the owner's people and Google already did, after its body is
   checked and with nothing kept: the team's routines and Pause everyone (`/v1/routines`, `/v1/team/*`, "Routines"), what
@@ -2403,6 +2404,9 @@ keeps three reads there ("What a person's own sign-in reaches", below), and the 
 | `GET /v1/consent/cloud` | none | `{ cloudWork, updatedAt }`, or `{ cloudWork: false }` before the owner ever answered |
 | `PUT /v1/consent/cloud` | `{ enabled }`, true or false | `{ cloudWork, updatedAt }`; the log gets `consent.given` or `consent.withdrawn`, naming the account by its id |
 | `GET /v1/tenant/export` | none | `ShopExport`, the same export the operator's `GET /v1/admin/pilot/export` gives, with `cache-control: no-store` |
+| `GET /v1/tasks` | none | `{ tasks, next }`: the shop's tasks, newest first, a page at a time, with `cache-control: no-store` ("The shop's tasks, a page at a time", below) |
+| `GET /v1/schedules` | none | `{ schedules }`: the shop's schedules, as the export carries them, the team's routine clocks among them |
+| `GET /v1/inbound/attention` | none | `{ items }`: the shop's attention items, newest first, as the export carries them, whatever the inbound switch |
 
 - **Consent.** The owner gives it or withdraws it, in one write to the shop's consent record with its audit entry, the
   same record the owner's link writes. Giving it lets the team work; every external write still waits for its own
@@ -2412,21 +2416,83 @@ keeps three reads there ("What a person's own sign-in reaches", below), and the 
 - **The export** is the answer's body: the app reads it with the session in the `Authorization` header and saves the file
   itself (a save dialog on the Mac), so no download link is made and no token is ever put in a URL, a history or a log.
   A part it cannot read answers 500 `export_incomplete` naming it, as the operator's does; an object it cannot reach at
-  all, 503 `export_unavailable`. It is not written to the audit log, as no export is: the desktop reads the export as
-  its task list.
+  all, 503 `export_unavailable`. It is not written to the audit log, as no export is. The desktop read it as its task list
+  every minute until 24 Nov 2026; it reads the task list, the schedules and the attention items instead (below).
 - **Deletion stays with the owner's link.** `DELETE /v1/tenant/data` answers a shop session 401, as before. To delete a
   live shop's data, the operator asks and the owner says yes on the confirmation link ("Export and deletion", above).
 - **Who and in what order.** Who is asking comes first (401 `unauthorized`, `unlinked` or `removed`; 503
   `people_unavailable` when the session cannot be checked), then the role (a helper's session: 403 `owner_only`), then
-  the method (405 `method_not_allowed`), then the query (a `shop`, `tenant` or `role` in it: 400 `invalid_request`) and
-  the body (not exactly `{ enabled }` with a boolean: 400 `invalid_request`; not JSON: 400 `invalid_json`). 503
-  `consent_unavailable` when the shop's consent cannot be read or written.
-- **Schedules and attention stay closed to a shop session.** `GET /v1/schedules` and `GET /v1/inbound/attention` answer a
-  shop session 401, owner's and helper's alike, as every lifted session route does. An owner has both through the export,
-  which carries the shop's schedules (the team's routine clocks among them, each naming its `routineId`) and its attention
-  items, so opening those two lifted routes would add a second way to the same lists, and the schedules path also takes
-  writes that must stay closed (`docs/decisions.md`). The desktop reads an owned shop's export and `GET /v1/routines`
+  the method (405 `method_not_allowed`: each of these paths takes `GET` alone but consent, which takes `PUT` too, so a
+  shop session never makes a task or a schedule here), then the query (a `shop`, `tenant` or `role` in it: 400
+  `invalid_request`) and the body (not exactly `{ enabled }` with a boolean: 400 `invalid_request`; not JSON: 400
+  `invalid_json`). 503 `consent_unavailable` when the shop's consent cannot be read or written, `schedules_unavailable`
+  or `attention_unavailable` when those cannot be read.
+- **Schedules and attention, read only.** Since 24 Nov 2026 (December item 44) an owner's session reads the shop's
+  schedules and attention items on the lifted routes' own paths, as it reads its consent and export, because the desktop
+  no longer reads the export every minute, and the export was where it read both. Each answers what the export carries:
+  the schedules (the team's routine clocks among them, each naming its `routineId`), and the attention items whatever the
+  inbound switch, which gates what comes in and not what the owner may read of what was kept. Making, reading one by its
+  id and deleting a schedule stay closed to a shop session (405 here, and 401 on `/v1/schedules/{id}`), since a schedule
+  that fires mints work. The desktop reads an owned shop's task list, schedules, attention items and `GET /v1/routines`
   together, with its owner session, each minute (`docs/runtime-adapter.md`, "A shop the person owns").
+
+### The shop's tasks, a page at a time
+
+`GET /v1/tasks` (`apps/api/src/task-list.ts`, `task-listing.ts`): the tasks of the session's own tenant, newest first, a
+page at a time. It is what the desktop reads every minute in place of the export, which carries every task with its whole
+log, every run and every draft, and so grew without bound (`docs/runtime-adapter.md`, "A shop the person owns").
+
+| Query | |
+| --- | --- |
+| `limit` | How many tasks the page looks at: a whole number from 1 to 25, 25 when absent. Anything else is 400 `invalid_limit`, 26 and more included: the hard most a page reads is 25 tasks |
+| `cursor` | The `next` of the page before, unchanged. Absent for the first page. 400 `invalid_cursor` when empty, longer than 256 characters, or naming no task of this tenant's list (another shop's task above all) |
+| `state` | Only tasks in this state among the ones the page looks at: one of `draft`, `queued`, `running`, `verifying`, `waitingForInput`, `waitingForAuthorization`, `waitingForProvider`, `paused`, `recovering`, `failed`, `completed`, `cancelled`. Any other is 400 `invalid_state` |
+
+The answer is `{ tasks, next }` with `cache-control: no-store`, since a page holds customers' words and members' drafts.
+`next` is the cursor of the page after, or `null` on the last. Each task is:
+
+```ts
+type ListedTask = {
+  task: TaskDocJSON;                 // the document, whole, as GET /v1/tasks/{id} gives it
+  events: TaskEventJSON[];           // only the entries of its log the lists read, oldest first: the one that made the
+                                     // task, each run's claim (via "attempt:claim:<id>"), and each handoffNote and spend
+                                     // report a run made (kind "agent")
+  actions: ActionProposalJSON[];     // every proposal, as the export lists them; another tenant's planted in it left out
+  attempts: {                        // each run, the first 200 as the export keeps them, without its steps, fencing
+    id: string; executorId: string;  // token, revision or step budget, which only its executor uses
+    status: "active" | "done"; outcome?: string; reason?: string; finishedAt?: number;
+    deadline: number; leaseUntil: number;
+  }[];
+  attemptsTruncated: boolean;
+  drafts: DraftJSON[];               // the newest draft a member wrote on it, as a list of at most one
+};
+```
+
+- **Order and cursor.** Newest first is the order of the shop's task index backwards. The index only ever appends a task's
+  id when the task is made, so a page is a run of tasks before the cursor: a task made while someone pages lands before
+  the first page and moves nothing they have still to read, and no task is skipped or listed twice. The cursor is the id
+  of the last task the page looked at. With a `state`, a page holds only the matching tasks among those it looked at, so
+  it can be short or empty while `next` says there is more.
+- **What it reads.** The tenant's index once, and one listing per task the page looks at, built inside each task object
+  (`/listing`) from its own storage, so the rest of a task's log, its runs' steps and its older drafts never leave it. A
+  page never reads more than `limit` tasks, whatever the shop holds, and never the export. The tombstone is read only when
+  the index is empty.
+- **Whose.** A shop session's tenant is its shop; a person's own sign-in's, Apple's or email's, is their own tenant, which
+  holds no shop's tasks, as the export answers it (an email sign-in's lists none). Each task is read with only that
+  tenant, so a task of another planted in the index answers 404 and is passed over, as the export passes it over, and so
+  is an id the create route indexed for a task that never came to exist.
+- **Refusals, in order.** Who is asking (401 `unauthorized`, `unlinked` or `removed`; 503 `people_unavailable` when a shop
+  session cannot be checked); the role (a helper's session: 403 `owner_only`, which the desktop reads as "asks only");
+  the method (405 `method_not_allowed` for a shop session; with any other credential `POST /v1/tasks` is the lifted create
+  route, as before); the query (a `shop`, `tenant` or `role`: 400 `invalid_request`; then `invalid_limit`,
+  `invalid_state`, `invalid_cursor`); then the index (503 `tasks_unavailable` when it cannot be read), a deleted tenant
+  (404 `tenant_deleted` with `deletedAt`, as the export answers it: its index is empty and its tombstone kept), a cursor
+  the index does not hold (400 `invalid_cursor`), and the page's tasks (503 `tasks_unavailable` when any cannot be read,
+  rather than leave it out: a task missing from the list would read as gone).
+- **What the lists do not carry.** A task's whole log stays in the task: the job view, History and the activity log show
+  each run's claim, handoff and spend, which the list carries, and nothing else of the log. The lifted
+  `GET /v1/tasks/{id}/events` (cursor, floor and tip) and its long poll keep the whole log for a lifted session; neither
+  takes a shop session yet (`docs/decisions.md`).
 
 ### Ending a shop session
 

@@ -143,7 +143,7 @@ describe("answering an ask", () => {
     await settleApproval(store, "buddy", asks(store)[0], "once");
     await settled();
     expect(reads()).toBe(2);
-    expect(api.to("GET", "/v1/tenant/export")).toHaveLength(2);
+    expect(api.to("GET", "/v1/tasks")).toHaveLength(2);
     expect(asks(store)).toEqual([]);
     // the task's notes say where the action stands now, as the API holds it
     const threads = rt.request.bind(rt) as unknown as (op: string, p: unknown) => Promise<{ messages: { text: string }[] }>;

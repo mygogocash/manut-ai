@@ -1,5 +1,5 @@
 // A shop the person owns, whole, on the connected runtime (docs/runtime-adapter.md, "A shop the person owns"): its tasks,
-// threads and history from its export, read with its own owner session; its team as `GET /v1/routines` says it; Mission
+// threads and history from its task list, read with its own owner session, with its schedules and attention items; its team as `GET /v1/routines` says it; Mission
 // Control's jobs and activity log from its tasks and their runs; and the owner's everyday writes, pausing and resuming a
 // routine and Pause everyone, each through apps/api's routines routes with that shop's session and nothing else. A shop
 // the person helps at stays its asks only, and every other write stays "not yet".
@@ -100,11 +100,12 @@ afterEach(() => {
 });
 
 describe("what an owner's shop session reads", () => {
-  it("reads the shop's export and routines with its own owner session, and a helped shop's asks only", async () => {
+  it("reads the shop's tasks, routines, schedules and attention items with its own owner session, and a helped shop's asks only", async () => {
     const { api } = await opened();
-    for (const path of ["/v1/tenant/export", "/v1/routines"]) expect(api.to("GET", path).map((c) => c.bearer), path).toEqual([OWNER_A]);
-    // never the lifted routes the API answers a shop session 401 on
-    for (const path of ["/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path)).toEqual([]);
+    for (const path of ["/v1/tasks", "/v1/routines", "/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path).map((c) => c.bearer), path).toEqual([OWNER_A]);
+    // the newest tasks, a page of the most the list gives; never the export, which holds every task's whole history
+    expect(api.to("GET", "/v1/tasks").map((c) => c.url)).toEqual([`${ORIGIN}/v1/tasks?limit=25`]);
+    expect(api.to("GET", "/v1/tenant/export")).toEqual([]);
     expect(writes(api).every(([, path]) => path === "/v1/shops/session")).toBe(true);
   });
 
@@ -325,19 +326,38 @@ describe("the owner's everyday writes", () => {
 });
 
 describe("reading an owned shop's work", () => {
-  it("fails the whole read rather than show half a shop when its export cannot be read", async () => {
-    const { api, host } = await opened();
-    api.on("GET", "/v1/tenant/export", { status: 500, json: { error: "export_incomplete", failed: ["audit"] } });
+  it("fails the whole read rather than show half a shop when its tasks, schedules or attention items cannot be read", async () => {
+    for (const [path, answer] of [
+      ["/v1/tasks", { status: 503, json: { error: "tasks_unavailable" } }],
+      ["/v1/tasks", { status: 400, json: { error: "invalid_cursor" } }],
+      ["/v1/schedules", { status: 503, json: { error: "schedules_unavailable" } }],
+      ["/v1/inbound/attention", { status: 503, json: { error: "attention_unavailable" } }],
+    ] as const) {
+      const { api, host } = await opened();
+      api.on("GET", path, answer);
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(host.link, path).toBe("unavailable");
+    }
+  });
+
+  it("reads a deleted shop's list as no tasks, as its export was read", async () => {
+    const { api, req } = await opened();
+    api.on("GET", "/v1/tasks", { status: 404, json: { error: "tenant_deleted", deletedAt: iso(T0) } });
     await vi.advanceTimersByTimeAsync(61_000);
-    expect(host.link).toBe("unavailable");
+    expect((await req("thread.list", { bot: "buddy" })).threads).toEqual([]);
+    expect((await req("jobs.list", {})).jobs).toEqual([]);
+    // its team and routines still show: they are another read
+    expect((await req("bots.list", {})).bots.map((b: { name: string }) => b.name)).toEqual(["buddy", "nam", "pim", "ton"]);
   });
 
   it("shows the shop's asks only when its session may not read its work (403 owner_only)", async () => {
-    const { api, req } = await opened();
-    api.on("GET", "/v1/routines", { status: 403, json: { error: "owner_only" } });
-    await vi.advanceTimersByTimeAsync(61_000);
-    expect((await req("bots.list", {})).bots.map((b: { name: string }) => b.name)).toEqual(["buddy"]);
-    expect((await req("thread.list", { bot: "buddy" })).threads).toEqual([]);
+    for (const path of ["/v1/routines", "/v1/tasks", "/v1/schedules", "/v1/inbound/attention"]) {
+      const { api, req } = await opened();
+      api.on("GET", path, { status: 403, json: { error: "owner_only" } });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect((await req("bots.list", {})).bots.map((b: { name: string }) => b.name), path).toEqual(["buddy"]);
+      expect((await req("thread.list", { bot: "buddy" })).threads, path).toEqual([]);
+    }
   });
 
   it("keeps each owned shop's work under its own id, and shows it while the API cannot be reached", async () => {

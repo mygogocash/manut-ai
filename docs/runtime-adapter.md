@@ -12,7 +12,9 @@ tested on `feat/desktop-offline-cache`, on top of it. Answering approvals (below
 `feat/desktop-answers-approvals`, 24 Nov 2026, with fakes of the API and no real sign-in yet. Several shops (below) is
 built and tested on `feat/desktop-shop-switcher`, 24 Nov 2026, the same way. A shop the person owns, whole (below), is
 built and tested on `feat/connected-whole-shop`, 24 Nov 2026, the same way: its tasks, its team, Mission Control's jobs
-and activity log, and the owner's routine and pause writes.
+and activity log, and the owner's routine and pause writes. The task list (below) is built and tested on `feat/task-list`,
+24 Nov 2026 (December item 44): every read takes the newest tasks from `GET /v1/tasks`, a page at a time, and never the
+export, which carries every task's whole history.
 
 ## Choosing it
 
@@ -32,11 +34,12 @@ It is not drawn for a WebSocket runtime, which only the Playwright suite configu
 ## What it reads, and how each call maps to the API
 
 Each read first asks which shops the person is in (`GET /v1/shops`; Several shops, below). In none, as before shops, the
-read is the signed-in tenant's, four requests made together through the session (`src/runtime/http/shop.ts`):
+read is the signed-in tenant's, four reads made together through the session, the task list's pages one after the other
+(`src/runtime/http/shop.ts`):
 
 | Request | Gives | Notes |
 | --- | --- | --- |
-| `GET /v1/tenant/export` | the tasks, each with its event log and its exact-action proposals | The only route a session can use today that lists its own tasks. It is heavy (every task's history), so it is read once a minute, or when a screen asks for a list more than 15 seconds after the last read; a list route is the first API ask below. `404 tenant_deleted` reads as no tasks. |
+| `GET /v1/tasks?limit=25`, then `&cursor=` | the newest 50 tasks, each with its exact-action proposals, its runs, its newest draft and the entries of its log the screens read | The task list (`docs/pilot-api.md`, "The shop's tasks, a page at a time"): two pages at most, each from the cursor the page before gave, so no task is read twice or skipped while tasks are made. The screens keep the tasks oldest first, as the export listed them, so a sort with ties shows as before. A shop with more than 50 shows its newest 50 (Next slices, below). Until 24 Nov 2026 this was `GET /v1/tenant/export`, every task with its whole history, read whole every minute; nothing reads the export now. `404 tenant_deleted` reads as no tasks, as the export's did. |
 | `GET /v1/approvals?state=open` | approval-core's requests still waiting for an answer, each with where it stands and any note a helper passed on | Read with `@manut/approval-core`'s own decoders (Answering approvals, below). These are the asks. Any refusal fails the read: the API answers 503 rather than leave one out, and a missing ask would read as nobody having asked. |
 | `GET /v1/schedules` | the schedules | |
 | `GET /v1/inbound/attention` | the inbound attention items | `403 feature_disabled` (the API's inbound flag is off) reads as "no feed", not as a failure. |
@@ -78,10 +81,12 @@ was decided, with the API's own words in `note` when the person's answer here wa
 `thread.added` or `thread.removed`; a
 new attention item is a `message` in Buddy's chat; a schedule or team routine change is `routines.update`; the team
 changing (a member starting or stopping work, Pause everyone, a member switched on or off) is `bots.update`. A task already listed changes its row only when the list is read again (after a reconnect or a
-restart); following tasks live is the streaming slice below.
+restart); following tasks live is the streaming slice below. A task that falls out of the newest 50 as newer ones are made
+is `thread.removed`, as a task that is gone.
 
 Not read in this slice: `/v1/consent/cloud`, `/v1/tasks/:id` and its events and actions one by one, `/v1/companies/*`,
-`/v1/health`. A shop the person owns is read differently: below.
+`/v1/health`, and since the task list `/v1/tenant/export`, which the desktop has no page to ask for. A shop the person owns
+is read differently: below.
 
 ## Answering approvals
 
@@ -92,12 +97,13 @@ The API side is `apps/api/src/approvals.ts` (docs/pilot-api.md, "Approvals for a
 
 - **approval-core's records, decoded by approval-core.** Each entry of `GET /v1/approvals?state=open` is read with
   `decodeRecord` and `decodeStanding` from `@manut/approval-core`, and answered with `toKnownRequest`, never by hand.
-  Each request still open is one ask in Buddy's chat, so Needs you and Home show it. An action the export lists as
+  Each request still open is one ask in Buddy's chat, so Needs you and Home show it. An action a task lists as
   proposed but no request decides is not an ask: nothing on this path could decide it (it still shows in its task's
   notes, "waiting for you").
 - **The exact action.** A reply's ask says the reply's own words from its request ("Send on LINE: “…”"). A worker's
-  request carries no words, so its ask says its action's, from the export ("Create a Linear issue: “…”"). Otherwise it
-  says the operation and where it goes, as the API wrote them. A request's `detail` is cut down to the words the card
+  request carries no words, so its ask says its action's, from its task in the task list ("Create a Linear issue: “…”"),
+  as it said them from the export before. Otherwise, a task older than the newest 50 among them, it says the operation and
+  where it goes, as the API wrote them. A request's `detail` is cut down to the words the card
   shows (the action id, the operation, where it goes, the customer it goes to, the text) before anything keeps it.
 - **The revision the person saw.** An ask's id is `<requestId>@<revision>`. The store keeps one card per id, so a
   request revised since is a new card, and the old one closes with "It changed since you saw it. Answer the new
@@ -197,9 +203,9 @@ badge and Look first need `core:window:allow-set-badge-count`, `allow-show`, `al
 
 As before: an ask from the kept read is shown with its exact action, cannot be answered ("Connect to answer this"),
 and nothing is queued or sent later. The cache keeps the open requests as approval-core's wire JSON, their detail cut to
-the card's words, with any note passed on, and reads them back with the same decoders as the live read; its version is
-2, and a file of version 1, which holds no requests, is not read. An ask this build cannot answer says "Update the app
-to answer this" offline too.
+the card's words, with any note passed on, and reads them back with the same decoders as the live read; every version of
+the file since 2 keeps them, and the current one is 5 (The offline cache, below). An ask this build cannot answer says
+"Update the app to answer this" offline too.
 
 ### What a real owner needs
 
@@ -232,8 +238,8 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
   opened again once and the request sent once more, a decision too, since the API answers 401 from the credential before
   it reads the body. Two requests that find it ended open it once.
 - **What a shop reads.** `GET /v1/approvals?state=open`, with its own session. A shop the person owns is read whole as
-  well (A shop the person owns, below): its export and its routines, with the same session, and its helpers' devices (A
-  helper's new device, below). A shop they help at is read for its asks and nothing else: what a helper sees is the
+  well (A shop the person owns, below): its task list, schedules, attention items and routines, with the same session,
+  and its helpers' devices (A helper's new device, below). A shop they help at is read for its asks and nothing else: what a helper sees is the
   owner's call, so it shows Buddy, its asks, no tasks (History is empty), no schedules and no notes. Every listed shop is
   read each time, at once; one shop that fails (offline, 5xx) fails the whole read, and the kept read stands in for all of
   them.
@@ -297,14 +303,22 @@ Built on `feat/connected-whole-shop` (`src/runtime/http/shop.ts`, `shops.ts`, `v
 asks, Mission Control showed Buddy alone, and every write but an answer was "not yet".
 
 - **What it reads.** Each read asks a shop the person owns, with its own owner session (`mos1.`) and at once, for what
-  waits there (`GET /v1/approvals?state=open`), its export (`GET /v1/tenant/export`: its tasks, each with its event log,
-  its actions, each member's run and the drafts they wrote; its schedules; its attention items) and its team with its
-  routines (`GET /v1/routines`). The API answers a shop session 401 on `GET /v1/schedules` and
-  `GET /v1/inbound/attention`, and the export carries both, so those two are never sent with one (`docs/decisions.md`). A
-  schedule that names a `routineId` is that routine's clock and is not listed twice. A shop the person helps at is read for
-  its asks only, and the export and the routines answer a helper's session 403 `owner_only`, which reads as "asks only"
-  rather than a failure. Anything else that fails (offline, a 5xx, `export_incomplete`) fails the whole read, as before:
-  half a shop is never shown as the whole one. A deleted shop's export (404 `tenant_deleted`) reads as no tasks.
+  waits there (`GET /v1/approvals?state=open`), its newest tasks from the task list (`GET /v1/tasks`, two pages of 25 at
+  most: each task with its actions, each member's run, the newest draft one wrote, and the entries of its log the screens
+  read), its schedules (`GET /v1/schedules`), its attention items (`GET /v1/inbound/attention`) and its team with its
+  routines (`GET /v1/routines`). Until 24 Nov 2026 the tasks, schedules and attention items came from the shop's export,
+  every task's whole history read every minute; the API now answers an owner session on the schedules and attention
+  routes with what the export carried, and the desktop never reads the export (`docs/decisions.md`). A schedule that names
+  a `routineId` is that routine's clock and is not listed twice. A shop the person helps at is read for its asks only,
+  and every one of those reads answers a helper's session 403 `owner_only`, which reads as "asks only" rather than a
+  failure. Anything else that fails (offline, a 5xx, a page of the list that cannot be read) fails the whole read, as
+  before: half a shop is never shown as the whole one. A deleted shop's list (404 `tenant_deleted`) reads as no tasks.
+- **What the list carries, and what it does not.** Every screen shows what it showed from the export, for a shop of 50
+  tasks or fewer (`screens.test.ts` pins each one as the export showed it): Mission Control's team and jobs, the job view,
+  History's rows and chips, each task's notes, the activity log and Needs you's words. A job view shows each run's claim,
+  handoff, model, tokens and cost, which the list carries from the log, so opening it reads nothing more; the log itself
+  stays in the task. The activity log is the listed tasks' drafts and actions, so its span is the newest 50 tasks; it reads
+  nothing of its own.
 - **Its pages.** The shop being viewed shows its tasks as Buddy's threads in History and Recent, as the signed-in tenant's
   are; opening one shows Buddy's notes, now with the draft a member wrote on it ("Nam's draft, for you to read. Nothing was
   sent."). Buddy's chat shows its attention items and every shop's asks.
@@ -344,13 +358,17 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   Needs you keep waiting until they expire." for the API's (`pause.ts` `pauseWords`). Practice keeps the canvas's.
 - **Offline.** Each shop's record in the kept read holds that shop's own read under its id: its asks, and for a shop the
   person owns its tasks (with each run and the newest draft), schedules, attention items, team and routines, copied field
-  by field (version 4 of the file; files of 3 and 2 are still read, a task from them with no runs or draft and a shop with
-  no work). The viewed shop's work is its record's alone. A record of a shop the person helps at that claims any work, or
+  by field (version 5 of the file, since the task list: a task no longer keeps how many entries its log holds, which the
+  list does not carry. A file of 4 or earlier reads as nothing kept, never half read, and the next good read writes over
+  it). The viewed shop's work is its record's alone. A record of a shop the person helps at that claims any work, or
   work that is not whole, makes the whole file ignored.
 - **Tests.** `owned.test.ts` (the shop whole, its team, its routines, Mission Control, the writes and their refusals, a
   helper's view, offline, and under the app's own store), `work.test.ts` (how a task reads as a job), `mission.test.ts`
-  (the signed-in tenant's Mission Control), `cache.test.ts` (version 4), and `serveShops` in `testkit.ts`, which answers an
-  owner's export, routines and team writes, and a helper's 403, as apps/api does.
+  (the signed-in tenant's Mission Control), `screens.test.ts` (every screen as the export showed it, kept in
+  `screens.export.json`, now from the list), `shop.test.ts` (the list's pages and cursor, the newest 50, a page that fails),
+  `cache.test.ts` (version 5, and every earlier version read as nothing kept), and `serveShops` and `serveShop` in
+  `testkit.ts`, which answer the task list as apps/api does (`listedJson`, `taskPage`), an owner's schedules, attention
+  items, routines and team writes, and a helper's 403. The API's side is `apps/api/test/task-list.test.ts`.
 
 ## Customize › Connections
 
@@ -548,17 +566,18 @@ Built. When a read fails because the API is offline or not answering, the app sh
 instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`, `shop_cache.rs`).
 
 - **What is kept.** After every good read, the minute's poll included: the tasks with their actions, the requests
-  waiting for an answer (so what waits for the owner; approval-core's wire JSON, version 2 of the file), the schedules,
+  waiting for an answer (so what waits for the owner; approval-core's wire JSON, since version 2 of the file), the schedules,
   the inbound attention items, whether that feed is off, and the time of the read, copied field by field as the runtime
   already decodes them. The API's whole objects and the entries it could not read are left
   out. Never a token, a refresh token, the device id or anything else from the keychain, and not the origin or the tenant
   either: the file's name is the only link to them. It does hold the shop's own words in plain text: task titles, the
   exact words of replies waiting for the owner and the LINE ids they go to, and schedule prompts. The file is the owner's
   alone (0600), so it is as private as the rest of the app's folder, and no more; it is not encrypted.
-- **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one sign-in. With several shops (version 3 of the file),
-  every shop's record in it is under that shop's id, with its name, owner and the person's role, so a shop's asks are only
-  ever read back as that shop's (version 4 adds each owned shop's work, A shop the person owns, above); the shell needs no change, since it keeps one file per sign-in and removes any other. A
-  file of version 2 is read as the signed-in tenant's own. The key is the SHA-256, in hex, of the
+- **Where.** `~/.manut/shop-cache/<key>.json`, one file for the one sign-in. With several shops (since version 3 of the
+  file), every shop's record in it is under that shop's id, with its name, owner and the person's role, so a shop's asks
+  are only ever read back as that shop's (each owned shop's work too, A shop the person owns, above); the shell needs no
+  change, since it keeps one file per sign-in and removes any other. The current version is 5, and a file of any other is
+  read as nothing kept. A file written while the person was in no shop is the signed-in tenant's own. The key is the SHA-256, in hex, of the
   origin and the tenant, made by the page (`cacheKey`, with a small synchronous SHA-256 in `sha256.ts`, because the Web
   Crypto digest is asynchronous and exists only in a secure context); the shell accepts nothing but 64 hex digits as a
   name, never a path. It is written to a temporary file and renamed, so a crash never leaves half a file; at most 8 MiB;
@@ -597,16 +616,18 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
 2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
    shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
    re-read and lets a task's row change live.
-3. **Asks of the API**, none built here: a list route for a session's own tasks (`GET /v1/tasks`, with state, paged) to
-   replace the export, which an owned shop is now read through every minute (A shop the person owns, above); a way for
-   Pause everyone to stop a job already running, and for a request to wait while the team is paused, if the owner wants
+3. **Asks of the API**, none built here: an index of a shop's open requests in its object, since
+   `GET /v1/approvals?state=open` still reads every task's requests on every read, as the export read every task before
+   the task list (A shop the person owns, above); a way for Pause everyone to stop a job already running, and for a request to wait while the team is paused, if the owner wants
    the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
    provider; a tenant-wide event feed; a helper's name with a decision (so "Already decided by Mint" does not depend on
    a note she passed on), and a way to say how a request that left on its own was decided (reading
    `GET /v1/approvals?state=recent` when an ask leaves would do it, at one more request).
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
-   already); a helper's own session on the desktop.
+   already); a helper's own session on the desktop; older tasks than the newest 50 when a screen asks for them (History,
+   Mission Control and the activity log saying there are more, and reading the list's next page from the cursor the
+   minute's read stopped at).
 
 ## Undoing it
 
@@ -636,6 +657,14 @@ and the nullable `keptMonths` in `src/runtime/mission.ts` with the pages' uses o
 `TeamPage.tsx`, `job.ts`, `teamLine.ts`, `ActivityPage.tsx`), `serveShops`' work in `testkit.ts`, and the `rt.taskDraft`,
 `rt.ownerOnly`, `rt.change.*`, `rt.ev.*`, `pause.r.*`, `job.step.drafted` and `act.st.drafted` keys; and give `rt.notYet`
 its earlier words.
+
+To read the export again in place of the task list (December item 44): read `GET /v1/tenant/export` in `readShop`
+(`shop.ts`) and in `ShopSessions.readShop` (`shops.ts`) instead of `readTaskList`, `SHOP_SCHEDULES` and `SHOP_ATTENTION`,
+and decode its `tasks`, `schedules` and `attention` in `decodeWork` again; keep the tasks in the export's order, which is
+the order `decodeTasks` restores; put version 4 of the cache back with each task's `events` count (`cache.ts`); serve the
+export again in `testkit.ts`; and move `screens.test.ts` back onto it, where it must still pass. The API's list
+(`apps/api/src/task-list.ts`, `task-listing.ts`, the task object's `/listing`) and the owner's schedules and attention
+reads in `shops.ts` can stay or go on their own.
 
 To take only the buttons out of notifications: pass no `approve` handler in `notifySessionEvent` (`store.ts`) and remove
 `approveFromNotification`, `src/chat/cards/askNote.ts` and its use in `Cards.slot.tsx`; notifications then carry Look first and

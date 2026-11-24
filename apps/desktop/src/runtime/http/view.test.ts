@@ -41,7 +41,6 @@ function task(over: Partial<ShopTask> = {}): ShopTask {
     state: "waitingForAuthorization",
     createdAt: T0,
     updatedAt: T0 + 120_000,
-    events: 2,
     actions: [action()],
     attempts: [],
     draft: null,
@@ -105,7 +104,7 @@ describe("tasks as Buddy's threads", () => {
     ]);
   });
 
-  it("marks a task as waiting for the owner by its requests, not by the actions the export lists as proposed", () => {
+  it("marks a task as waiting for the owner by its requests, not by the actions its task lists as proposed", () => {
     expect(threadRows(snap({ approvals: [] }))[0].needs).toBe(false);
     expect(threadRows(snap({ tasks: [task({ actions: [] })] }))[0].needs).toBe(true);
     // a request this build cannot answer still waits for someone
@@ -162,7 +161,7 @@ describe("what waits for the owner", () => {
     expect(pendingAsks(snap({ approvals: [approval({ kind: "refund_partial", detail: {} })] })).map((a) => a.kind)).toEqual(["refund_partial"]);
   });
 
-  it("is never an action the export lists as proposed with no request to decide it: that is not the owner's to answer here", () => {
+  it("is never an action a task lists as proposed with no request to decide it: that is not the owner's to answer here", () => {
     expect(pendingAsks(snap({ approvals: [] }))).toEqual([]);
   });
 

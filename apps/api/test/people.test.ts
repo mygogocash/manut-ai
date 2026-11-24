@@ -229,13 +229,15 @@ describe("helper sessions", () => {
     expect(open.status).toBe(200);
     expect(open.body.approvals.map((entry) => entry.record.request.id)).toEqual([reply.actionId]);
     // Every route of the lifted session API that takes no shop session refuses it: a helper never acts as the shop.
-    for (const [method, path] of [["DELETE", "/v1/tenant/data"], ["GET", "/v1/connections"], ["GET", "/v1/schedules"]] as const) {
+    for (const [method, path] of [["DELETE", "/v1/tenant/data"], ["GET", "/v1/connections"]] as const) {
       expect((await asSession(helper.headers, method, path)).status).toBe(401);
     }
-    // The shop's consent and export take the owner's shop session, so they tell a helper's session they are the owner's,
-    // as the team's routines do, rather than that it ended; and they read and write nothing for it.
+    // The shop's consent, export, tasks, schedules and attention items take the owner's shop session, so they tell a
+    // helper's session they are the owner's, as the team's routines do, rather than that it ended; and they read and
+    // write nothing for it.
     for (const [method, path, body] of [["GET", "/v1/tenant/export"], ["GET", "/v1/consent/cloud"],
-      ["PUT", "/v1/consent/cloud", { enabled: false }]] as const) {
+      ["PUT", "/v1/consent/cloud", { enabled: false }], ["GET", "/v1/tasks"], ["GET", "/v1/schedules"],
+      ["GET", "/v1/inbound/attention"]] as const) {
       expect(await asSession(helper.headers, method, path, body)).toEqual({ status: 403, body: { error: "owner_only" } });
     }
   });

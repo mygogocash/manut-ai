@@ -27,12 +27,12 @@ import { decodeApprovals, shownRecord, type ShopApproval } from "./approvals";
 import { sha256Hex } from "./sha256";
 import type { Attention, ShopAction, ShopAttempt, ShopDraft, ShopPart, ShopSchedule, ShopSnapshot, ShopTask, ShopTeam, ShopWork, TeamRoutine } from "./shop";
 
-/** 4 since each shop the person owns keeps its own work (tasks with their runs and drafts, schedules, attention items,
- *  team and routines) under its id, and each action when it was approved and sent. Files of 3 (several shops, asks only)
- *  and 2 (the signed-in tenant's own read, as before shops) are still read, as what they hold: a task from them has no
- *  runs and no draft, and a shop no work. A file of 1 holds no requests, so it is not read: what waits for the owner would
- *  be missing from it. */
-export const CACHE_VERSION = 4;
+/** 5 since the tasks come from the task list (`GET /v1/tasks`), which carries only the entries of a task's log the screens
+ *  read, so a task no longer keeps how many entries its log holds. A file of any earlier version reads as nothing kept: it
+ *  is shown no more, never half read, and the next good read writes this version over it. 4 kept each shop the person
+ *  owns with its own work (tasks with their runs and drafts, schedules, attention items, team and routines) under its id,
+ *  and each action when it was approved and sent; 3 several shops' asks; 2 the signed-in tenant's own read; 1 no requests. */
+export const CACHE_VERSION = 5;
 /** A kept read is shown for this long after it was read. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** A read dated this far ahead of the clock is not believed (a clock that is a little behind is only a clock). */
@@ -92,7 +92,6 @@ function taskOf(task: ShopTask) {
     state: task.state,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
-    events: task.events,
     actions: task.actions.map((a) => ({
       id: a.id,
       taskId: a.taskId,
@@ -197,20 +196,13 @@ const numOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const intIn = (v: unknown, lo: number, hi: number): v is number => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 const intOrNull = (v: unknown, lo: number, hi: number): v is number | null => v === null || intIn(v, lo, hi);
 
-/** A file of an earlier version, which kept no runs, no drafts and no approval or send times: what it did keep is read,
- *  and what it did not is none. A file of this version must hold every field. */
-type Version = 2 | 3 | 4;
-
-function readAction(v: unknown, version: Version): ShopAction | null {
+/** An action as the file keeps it, whole, or null. Every field must be there: a file of this version keeps them all. */
+function readAction(v: unknown): ShopAction | null {
   if (!isObj(v)) return null;
-  const { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt } = v;
+  const { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt, approvedAt, approvedBy, dispatchedAt } = v;
   if (!isId(id) || !isStr(taskId) || !isStr(operationType) || !isStr(targetResourceId) || !isStr(state)) return null;
   if (!Array.isArray(recipients) || !recipients.every(isStr) || !isObj(payload)) return null;
   if (!numOrNull(proposedAt) || !numOrNull(expiresAt)) return null;
-  const old = version < 4;
-  const approvedAt = old ? null : v.approvedAt;
-  const approvedBy = old ? "" : v.approvedBy;
-  const dispatchedAt = old ? null : v.dispatchedAt;
   if (!numOrNull(approvedAt) || !isStr(approvedBy) || !numOrNull(dispatchedAt)) return null;
   return { id, taskId, operationType, targetResourceId, recipients, payload, state, proposedAt, expiresAt, approvedAt, approvedBy, dispatchedAt, raw: null };
 }
@@ -230,15 +222,15 @@ function readDraft(v: unknown): ShopDraft | null | undefined {
   return { member: v.member, job: v.job, text: v.text, at: v.at };
 }
 
-function readTask(v: unknown, version: Version): ShopTask | null {
+function readTask(v: unknown): ShopTask | null {
   if (!isObj(v)) return null;
-  const { id, title, objective, state, createdAt, updatedAt, events } = v;
-  if (!isId(id) || !isStr(title) || !isStr(objective) || !isStr(state) || !numOrNull(createdAt) || !numOrNull(updatedAt) || !isNum(events)) return null;
-  const actions = every(v.actions, (a) => readAction(a, version));
-  const attempts = version < 4 ? [] : every(v.attempts, readAttempt);
-  const draft = version < 4 ? null : readDraft(v.draft);
+  const { id, title, objective, state, createdAt, updatedAt } = v;
+  if (!isId(id) || !isStr(title) || !isStr(objective) || !isStr(state) || !numOrNull(createdAt) || !numOrNull(updatedAt)) return null;
+  const actions = every(v.actions, readAction);
+  const attempts = every(v.attempts, readAttempt);
+  const draft = readDraft(v.draft);
   if (!actions || !attempts || draft === undefined) return null;
-  return { id, title, objective, state, createdAt, updatedAt, events, actions, attempts, draft, raw: null };
+  return { id, title, objective, state, createdAt, updatedAt, actions, attempts, draft, raw: null };
 }
 
 function readSchedule(v: unknown): ShopSchedule | null {
@@ -287,7 +279,7 @@ function readRoutine(v: unknown): TeamRoutine | null {
 /** A shop's work, whole, or null when any part of it is not. */
 function readWork(v: unknown): ShopWork | null {
   if (!isObj(v)) return null;
-  const tasks = every(v.tasks, (x) => readTask(x, 4));
+  const tasks = every(v.tasks, readTask);
   const schedules = every(v.schedules, readSchedule);
   const attention = every(v.attention, readAttention);
   const team = readTeam(v.team);
@@ -297,13 +289,13 @@ function readWork(v: unknown): ShopWork | null {
 
 /** One shop of the file, whole: its id, name, owner, the person's role there, its requests, and for a shop the person
  *  owns, its work. Only a shop they own has work, as only an owner's session reads it. */
-function readPart(v: unknown, version: Version): ShopPart | null {
+function readPart(v: unknown): ShopPart | null {
   if (!isObj(v)) return null;
   const { id, name, owner, role, approvals } = v;
   if (!isId(id) || !isStr(name) || !isStr(owner) || (role !== "owner" && role !== "helper")) return null;
   const read = every(approvals, readApproval);
   if (!read) return null;
-  if (version < 4 || v.work === undefined) return { shop: { id, name, owner, role }, approvals: read };
+  if (v.work === undefined) return { shop: { id, name, owner, role }, approvals: read };
   const work = role === "owner" ? readWork(v.work) : null;
   return work ? { shop: { id, name, owner, role }, approvals: read, work } : null;
 }
@@ -324,17 +316,17 @@ export function decodeCached(text: string | null, now: number): CachedRead {
   } catch {
     return NONE;
   }
-  if (!isObj(file) || (file.v !== 4 && file.v !== 3 && file.v !== 2) || !isObj(file.snapshot)) return NONE;
-  const version: Version = file.v;
+  // A file of another version, an earlier one above all, is not read: what it kept is not what this build shows.
+  if (!isObj(file) || file.v !== CACHE_VERSION || !isObj(file.snapshot)) return NONE;
   const s = file.snapshot;
-  const tasks = every(s.tasks, (x) => readTask(x, version));
+  const tasks = every(s.tasks, readTask);
   const approvals = every(s.approvals, readApproval);
   const schedules = every(s.schedules, readSchedule);
   const attention = every(s.attention, readAttention);
   if (!tasks || !approvals || !schedules || !attention || typeof s.attentionOff !== "boolean" || !isNum(s.readAt)) return NONE;
-  // Several shops, each under its id; a file of 2, or one written while the person was in no shop, has none.
-  const several = version >= 3 && s.shops !== undefined;
-  const shops = several ? every(s.shops, (x) => readPart(x, version)) : null;
+  // Several shops, each under its id; a file written while the person was in no shop has none.
+  const several = s.shops !== undefined;
+  const shops = several ? every(s.shops, readPart) : null;
   if (several && (!shops || new Set(shops.map((p) => p.shop.id)).size !== shops.length)) return NONE;
   const readAt = s.readAt;
   if (readAt > now + CLOCK_SLACK_MS) return NONE;

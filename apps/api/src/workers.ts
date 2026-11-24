@@ -573,8 +573,9 @@ function jobsQuery(url: URL): { before: string | null; limit: number } | null {
   return { before, limit };
 }
 
-/// The ids of the shop's tasks, oldest first as the index keeps them, or null when the index cannot be read.
-async function readIndex(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<string[] | null> {
+/// The ids of the shop's tasks, oldest first as the index keeps them, or null when the index cannot be read. The task
+/// list reads it too (task-list.ts).
+export async function readIndex(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<string[] | null> {
   try {
     const response = await tenantCall(env, tenant, `/index?tenant=${enc(tenant)}`);
     if (!response.ok) {

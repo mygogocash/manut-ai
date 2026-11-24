@@ -116,10 +116,10 @@ describe("one Needs you across the shops", () => {
       [`${ORIGIN}/v1/approvals?state=open`, OWNER_A],
       [`${ORIGIN}/v1/approvals?state=open`, HELPER_B],
     ]);
-    // the owner's session of Baan Mali also reads its export and its routines; the helper's session of Ran Pa Noi reads
-    // nothing but what waits there; and no shop session is sent where the API answers it 401
-    for (const path of ["/v1/tenant/export", "/v1/routines"]) expect(api.to("GET", path).map((c) => c.bearer)).toEqual([OWNER_A]);
-    for (const path of ["/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path)).toEqual([]);
+    // the owner's session of Baan Mali also reads its tasks, routines, schedules and attention items; the helper's session
+    // of Ran Pa Noi reads nothing but what waits there; and no session reads the export
+    for (const path of ["/v1/tasks", "/v1/routines", "/v1/schedules", "/v1/inbound/attention"]) expect(api.to("GET", path).map((c) => c.bearer)).toEqual([OWNER_A]);
+    expect(api.to("GET", "/v1/tenant/export")).toEqual([]);
     for (const call of api.calls) expect(call.url, call.url).not.toMatch(/mos1|mhs1|access-/);
   });
 

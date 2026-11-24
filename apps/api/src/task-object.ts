@@ -27,6 +27,7 @@ import {
 import { isValidCompanyId } from "./companies";
 import { isValidLinePushProposal, LINE_PUSH_OPERATION, lineReplyText } from "./connectors/line";
 import { isPrunableAction, isPrunableAttempt } from "./retention";
+import { listingOf, MAX_LISTED_ATTEMPTS } from "./task-listing";
 
 export type TaskCriterionJSON = {
   id: string;
@@ -175,7 +176,8 @@ const TRANSITIONS: Record<string, string[]> = {
   cancelled: ["cancelled"],
 };
 
-const KNOWN_STATES = new Set(Object.keys(TRANSITIONS));
+/// Every state a task can be in. The task list (task-list.ts) refuses a filter on any other.
+export const KNOWN_STATES: ReadonlySet<string> = new Set(Object.keys(TRANSITIONS));
 const KNOWN_FUNDING = new Set(["localProvider", "cloudBYOK", "managedAI"]);
 
 function canTransition(from: string, to: string): boolean {
@@ -681,6 +683,27 @@ export class TaskObject extends DurableObject {
         requests,
         drafts: await this.drafts(),
       });
+    }
+    if (request.method === "GET" && url.pathname === "/listing") {
+      // One task as the shop's task list gives it (task-listing.ts): what the lists show, built here so the rest of the
+      // log, the runs' steps and every older draft never leave the task. One tenancy check covers it, and proposals of
+      // another tenant are left out, as in the export. Runs are read no further than the list keeps, so a task claimed
+      // again and again costs a page no more than the export's cap; the ones kept are the export's, in the same order.
+      const doc = await this.load();
+      if (!doc || this.foreign(doc, request)) return Response.json({ error: "not_found" }, { status: 404 });
+      const actions: ActionProposalJSON[] = [];
+      for (const [, value] of await this.ctx.storage.list({ prefix: "action:" })) {
+        const action = value as ActionProposalJSON;
+        if (!this.foreignAction(action, request)) actions.push(action);
+      }
+      const attempts = await this.ctx.storage.list<AttemptJSON>({ prefix: "attempt:", limit: MAX_LISTED_ATTEMPTS + 1 });
+      return Response.json(listingOf({
+        task: doc,
+        events: (await this.ctx.storage.get<TaskEventJSON[]>("events")) ?? [],
+        actions,
+        attempts: [...attempts.values()],
+        drafts: await this.drafts(),
+      }));
     }
     if (request.method === "GET" && url.pathname === "/events") {
       return this.replay(request, url);
