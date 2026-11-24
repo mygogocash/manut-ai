@@ -104,6 +104,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `GOOGLE_CALLBACK_LIMITER` (API `c8f3f5b0`); smoke-tested: `/v1/google`, `/v1/google/connect` and the callback answer
   503 `google_not_configured`, email sign-in still answers `email_not_configured`, and the console and admin routes are
   behind Access. The pages are unchanged since 10:22.
+- Dev was redeployed on 24 Nov at 13:45 from `a0e2fe5`, with the join page (pages `93c91c45`, API `c735118e`);
+  smoke-tested: `/join/{token}` answers 200 with `no-store` and `no-referrer` (header and meta), the served bundle is the
+  one just built, the approval page loads, and the console is behind Access.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -116,10 +119,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 35, the owner's pages on phones, checked in CI (`feat/owner-pages-on-phones`, Sonnet);
    - item 36, self-serve onboarding, built and off (`feat/self-serve-shop`, Opus);
-   - item 17, the owner's pages as an installable web app (`feat/owner-web-app`, Opus).
-   Merged: 10 (the join page at `/join/{token}`, with the web's sign-in by email code kept in the page's memory
+   - item 17, the owner's pages as an installable web app (`feat/owner-web-app`, Opus);
+   - item 37, Google Sheets on the desktop and its two guards (`feat/sheets-desktop`, Sonnet).
+   Merged: 35 (the owner's pages on phones: Playwright in `apps/web/e2e` on four phones, run in CI as "Web on phones";
+   it found and fixed a 34px button and a long name that widened the page; the join page's states are added by item
+   17), 10 (the join page at `/join/{token}`, with the web's sign-in by email code kept in the page's memory
    only, `no-referrer` and `no-store`, and no request to another origin), 34 (Google Sheets for Ton's books, built and off: the owner's Google sign-in with `drive.file` only, the
    append asked as an owner-only command and sent once; the broker now sends an operation only through a connection of
    its own provider; turning it on is in `docs/connectors.md` 4b), 33 (the desktop's sign-in by email code in Settings › Developer, kept and refreshed as Apple's is), 32
