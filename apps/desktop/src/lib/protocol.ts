@@ -672,6 +672,25 @@ export type SubagentState = "queued" | "running" | "thinking" | "done" | "failed
 /** The subagent an approval or question came from. */
 export type AskSubagent = { id: string; name: string };
 
+/** What a coding agent asked to do, as the shell read it from the agent's own message (src-tauri/src/ask_tool.rs:
+ *  Claude Code's permission request, Codex's request and its file change, an ACP agent's tool call, oh-my-pi's tool
+ *  call), never from the ask's title. A part the shell could not read whole is left out. Kit's dial reads it
+ *  (src/code/ask.ts). `line` can hold a key: it is never shown, logged or sent anywhere; the card shows `command`,
+ *  masked. */
+export type AskTool = {
+  /** A shell command, a file edit, a file write, a file read or a search, a delete, a web fetch, or anything else. A
+   *  newer shell may name a kind this build does not know, which is read as anything else. */
+  kind: "command" | "edit" | "write" | "read" | "delete" | "fetch" | "other";
+  /** The agent's own name for the tool (`Bash`, `Edit`, `write`). */
+  name?: string;
+  /** A command's whole line as the agent runs it: never cut, its line breaks kept. */
+  line?: string;
+  /** Every path the step names, as the agent wrote it. */
+  paths?: string[];
+  /** The folder the step runs in. */
+  cwd?: string;
+};
+
 export type BridgeEvent =
   | (EventBase & { event: "turn.start" })
   /** `retry`: the agent tries the turn again by itself (OmO's `auto_retry_start`); the line says which try. */
@@ -737,6 +756,9 @@ export type BridgeEvent =
       timeout_s?: number;
       /** The plan the agent asks to start on (Claude Code's plan mode), as the markdown it wrote. */
       plan?: string;
+      /** What the agent asked to do, from its own message: a coding session's asks carry it, and Kit's dial reads it
+       *  before `title` and `command`, which are for the person. */
+      tool?: AskTool;
       /** This app cannot answer it: its kind, an answer it offers or where it stands is one this version does not know.
        *  It is shown, with no answer offered, and says to update the app (the connected runtime's approvals). */
       outdated?: boolean;
