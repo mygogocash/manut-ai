@@ -514,6 +514,8 @@ prints, for the code editor's preview (`docs/code-editor.md`, "Left for later": 
 Done when: each server's sample above is found, a network-only output answers null, a line with two addresses
 answers the local one, the escapes are stripped, a port out of range is refused, and an empty output answers null.
 
+Done on cloud/dev-url, 24 Nov 2026: `packages/dev-url` with `findDevUrl` reading nine servers' output, local hosts only, escapes stripped, ports checked (25 tests).
+
 ### preview-command
 `packages/preview-command` (`@manut/preview-command`). Chooses the command that starts a JavaScript project's
 preview, from its `package.json` text and the names of the files at its root, for the code editor's preview.

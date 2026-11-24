@@ -1,0 +1,15 @@
+{
+  "name": "@manut/dev-url",
+  "private": true,
+  "type": "module",
+  "description": "Finds the local address a dev server prints, for the code editor preview.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
