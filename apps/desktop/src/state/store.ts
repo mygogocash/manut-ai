@@ -3506,10 +3506,11 @@ const noteGate = createNoteGate();
  *  waits for a texted one (8 s); an error notifies only with "Also notify on errors". */
 export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pick<Store, "getState" | "actions">): void {
   if (!notifyEnabled()) return;
-  // A helper signed in on a new device at a shop the person owns: Look first shows that shop (notify.ts `showNewDevice`)
+  // A helper signed in on a new device at a shop the person owns: Look first (and a click on the notification) opens Settings ›
+  // People for that shop, where its owner can remove access, as the notification's words say (notify.ts `showNewDevice`)
   if (ev.event === "device.new") {
     const shop = ev.shop.id;
-    void showNewDevice({ id: ev.id, helper: ev.helper, shop: ev.shop.name, at: ev.at * 1000 }, () => void (store ?? singleton)?.actions.switchShop(shop));
+    void showNewDevice({ id: ev.id, helper: ev.helper, shop: ev.shop.name, at: ev.at * 1000 }, () => void openPeopleOf(shop, store ?? singleton));
     return;
   }
   const watching = (bot: string) => watchingChat(state, bot);
@@ -3539,6 +3540,17 @@ export function notifySessionEvent(ev: BridgeEvent, state: AppState, store?: Pic
         }
       : undefined;
   noteGate.offer(note.bot, empty ? "empty" : asks ? "ask" : "plain", () => void showNote(note, open, ev.event === "message" && !!ev.watch, approve));
+}
+
+/** Shows Settings › People for `shop`: the shop's own page of who can use Manut AI for it, which is where a helper's new device
+ *  is dealt with. The shop is shown first, since the page lists the people of the shop every page shows. If the shop cannot be
+ *  shown (it left the person's list meanwhile, or the switch was refused), the page is not opened on another shop's people: the
+ *  app comes forward as it is, and says why as any failed switch does. */
+export async function openPeopleOf(shop: string, store: Pick<Store, "getState" | "actions"> | null | undefined): Promise<void> {
+  if (!store) return;
+  await store.actions.switchShop(shop);
+  if (store.getState().shops.current !== shop) return;
+  store.actions.openSettings("people");
 }
 
 /** Approve pressed on a notification: the card's own Allow once, through the card's own path (`settleApproval`, the one way
