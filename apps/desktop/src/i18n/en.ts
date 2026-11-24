@@ -1755,6 +1755,15 @@ export const en = {
   "kit.keyFound": "A key was typed into {file}. Kit does not save it to the project's history without asking.",
   "kit.keyFoundMany": "Keys were typed into {n} files. Kit does not save them to the project's history without asking.",
   "kit.seeChange": "See the change",
+  // StatesCodeDev's "No secret in the preview" (src/code/preview.ts, PreviewSample.tsx): the project reads a value only the
+  // owner has, and the preview runs on a sample until the owner adds one
+  "kit.sample.title": "Preview",
+  "kit.sample.tag": "Sample",
+  "kit.sample.shop_id": "The preview has no shop ID yet, so the QR code is a sample.",
+  "kit.sample.key": "The preview has no value for {name} yet, so what needs it is a sample.",
+  "kit.sample.add.shop_id": "Add the shop ID",
+  "kit.sample.add.key": "Add the value",
+  "kit.sample.vault": "The vault for a project's secrets comes later. Until then the preview keeps its sample, so a test payment can't reach your account.",
   // StatesCodeDev's "The main branch moved" (src/code/moved.ts, MainMoved.tsx), and the ask Let Kit merge sends Kit
   "kit.moved.one": "{base} changed while Kit worked. 1 file needs both changes.",
   "kit.moved.many": "{base} changed while Kit worked. {n} files need both changes.",

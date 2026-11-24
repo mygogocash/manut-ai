@@ -14,6 +14,7 @@ import { getStore } from "../state/store";
 import { ruleText, type Rule } from "./command";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
 import { MainMoved } from "./MainMoved";
+import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
 /** A session of this project whose changes hold a key. */
@@ -182,6 +183,7 @@ export function KitPanel() {
       onDropFolder={(folder) => updateKitProjects((x) => removeFolder(x, root, folder))}
       onOpenSession={(id) => getStore().actions.openSession(id)}
     >
+      <PreviewSample root={root} />
       <MainMoved root={root} />
     </KitPanelView>
   );

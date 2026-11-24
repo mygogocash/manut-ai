@@ -1285,12 +1285,21 @@ class MockChat {
       }
       if (text.startsWith("/kit ")) {
         // Kit's states on the Code page (src/code/): an ask as the shell writes it (agent_chat.rs), a key typed into a
-        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key
+        // change (`tool.diff`), each from a word; `/kit key` uses a plainly fake key; `/kit shop` a change that reads
+        // the shop ID from the environment
         const word = text.slice(5).trim();
         if (word === "key") {
           const lines = ["@@ -1,2 +1,3 @@", " export const CURRENCY = 'THB';", '+export const PROMPTPAY_KEY = "sk-FAKE0000000000000000TEST";'];
           this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/config.ts", kind: "update", lines, added: 1, removed: 0 }] }));
           this.say("I put the PromptPay key in src/config.ts.", 120);
+          this.at(400, () => this.end("done"));
+          return;
+        }
+        if (word === "shop") {
+          // a change whose code reads the PromptPay shop ID from the environment, as the canvas's checkout needs (src/code/preview.ts)
+          const lines = ["@@ -12,3 +12,4 @@", "   const total = order.items.reduce(sum, 0);", "+  const qr = promptPayQR(process.env.PROMPTPAY_SHOP_ID, total);", "   return <PayPanel amount={total} qr={qr} />;"];
+          this.at(60, () => this.emit({ event: "tool.diff", tool_id: "t-kit", files: [{ path: "src/checkout.tsx", kind: "update", lines, added: 1, removed: 0 }] }));
+          this.say("The QR code reads the shop ID from PROMPTPAY_SHOP_ID.", 120);
           this.at(400, () => this.end("done"));
           return;
         }

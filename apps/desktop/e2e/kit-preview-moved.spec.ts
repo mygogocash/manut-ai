@@ -1,6 +1,7 @@
-// The Code page's "The main branch moved" from the design canvas's StatesCodeDev board, in a browser (src/code/): main
-// changed while Kit worked: the file, Let Kit merge, Show me both. There is no shell in a browser, so the mock host answers
-// what git would say for the canvas's project (src/code/mockMoved.ts).
+// Two states of the Code page from the design canvas's StatesCodeDev board, in a browser (src/code/): "The main branch
+// moved" (main changed while Kit worked: the file, Let Kit merge, Show me both) and "No secret in the preview" (a sample
+// until the owner adds one). There is no shell in a browser, so the mock host answers what git would say for the canvas's
+// project (src/code/mockMoved.ts), and the stand-in coding agent writes a change that reads the shop ID (`/kit shop`).
 // The lane runs as a chat, as the canvas's Code board draws it; the + menu starts agents in their own terminal only
 // (docs/code-editor.md), so the spec starts it through the sessions store.
 import { expect, test, type Page } from "@playwright/test";
@@ -111,12 +112,32 @@ test("a project whose main has not moved under it says nothing, and the note goe
   await expect(page.getByTestId("kit-moved")).toHaveCount(0);
 });
 
+test("a secret the code reads is a sample until the owner adds one, and Add the shop ID says the vault comes later", async ({ page }) => {
+  await startIn(page, "/kit shop");
+  await expect(page.getByText("The QR code reads the shop ID from PROMPTPAY_SHOP_ID.")).toBeVisible();
+  await openCode(page);
+  const row = page.getByTestId("kit-sample");
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".tag")).toHaveText("Sample");
+  await expect(row).toContainText("The preview has no shop ID yet, so the QR code is a sample.");
+  await expect(row.getByTestId("kit-sample-add")).toHaveText("Add the shop ID");
+  await expect(page.getByTestId("kit-sample-vault")).toHaveCount(0);
+
+  await row.getByTestId("kit-sample-add").click();
+  await expect(page.getByTestId("kit-sample-vault")).toContainText("The vault for a project's secrets comes later.");
+  await expect(page.getByTestId("kit-sample-vault")).toContainText("a test payment can't reach your account");
+  // only the name of the secret is ever on the page: not a value, not the sample
+  const text = await page.evaluate(() => document.body.innerText);
+  expect(text).not.toContain("0000000000");
+});
+
 test("the words are the person's language", async ({ page }) => {
   await page.evaluate(() => localStorage.setItem("manut.lang", "ko"));
   await page.reload();
   await openCode(page);
-  await startIn(page, "/kit test");
+  await startIn(page, "/kit shop");
   await openCode(page);
   await expect(page.getByTestId("kit-moved-merge")).toHaveText("Kit이 병합하게 하기");
   await expect(page.getByTestId("kit-moved-show")).toHaveText("양쪽 다 보기");
+  await expect(page.getByTestId("kit-sample-add")).toHaveText("가게 ID 추가");
 });
