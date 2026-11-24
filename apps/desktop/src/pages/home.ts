@@ -110,13 +110,16 @@ export function canApproveHere(item: ApprovalItem | ClarifyItem): item is Approv
 }
 
 /** An ask in the words of its chat card: an approval's title (or the card's own words for an untitled one, or for one
- *  that starts on a plan) over the exact action it names; a question as asked, or an interview's count and first
+ *  that starts on a plan) over the exact action it names, and whether that action must be shown whole (a browser write's
+ *  sentence, never cut or scrolled away, as its card shows it); a question as asked, or an interview's count and first
  *  question. */
-export function askLines(item: ApprovalItem | ClarifyItem): { title: string; action: string | null } {
-  if (item.kind === "clarify") return { title: askText(item), action: null };
+export function askLines(item: ApprovalItem | ClarifyItem): { title: string; action: string | null; whole: boolean } {
+  if (item.kind === "clarify") return { title: askText(item), action: null, whole: false };
+  const action = item.command.trim() ? item.command : null;
   return {
     title: item.plan ? t("card.startPlan") : item.title || t("card.approvalNeeded"),
-    action: item.command.trim() ? item.command : null,
+    action,
+    whole: action !== null && !!item.whole,
   };
 }
 

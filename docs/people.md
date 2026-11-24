@@ -141,6 +141,36 @@ device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_
 `requestId`, `taskId`). Never a name, a note or an identity's value. A decision from a session is the job flow's
 `approval.decided` entry, naming the owner or the helper.
 
+## A helper's new device
+
+The canvas tells the owner on LINE when a helper signs in on a new device ("Mint signed in on a new device"), even in
+quiet hours. LINE is parked, so the owner's desktop says it instead (`docs/runtime-adapter.md`, "Several shops").
+
+Every helper session that is opened, a join (the helper's first device) or opening the shop on another device, writes one
+sign-in to the shop's people record in the same change: the session's id, whose it is and when, by the shop's clock. It is
+not the session and gives no access: nothing that checks a session reads it. The owner's session reads them with
+`GET /v1/people/devices` (`docs/pilot-api.md`, "The owner's own routes"): the helper's id and the name the owner gave them,
+when, and the session's id, and nothing else. A helper's session is refused (403 `owner_only`), as on the owner's other
+routes.
+
+- **Signed out is not unseen.** A sign-in stays listed after its device signs out, for 30 days (as long as a session
+  lasts) and up to the newest 50, so an owner whose app was closed still hears that someone signed in as Mint. The
+  sign-ins of a helper the owner removed are not listed.
+- **A device is a session.** The backend cannot tell two devices from one device that signed in twice, so signing in
+  again (after signing out, or after the 30 days) is a new device here, as it is in `devices` of the people list.
+- **A join counts.** Accepting an invite is the helper's first device, so the owner hears of it as of any other.
+- **Not in the export.** The sign-ins are not part of the shop's export. The audit log, which the export carries, already
+  has each one as `helper.joined` or `helper.session_opened`, with the time.
+
+The owner's desktop reads the route for each shop it owns, with that shop's own session, and never for a shop where the
+person is a helper. It tells the owner once of each sign-in it has not told before, as a notification that
+`@manut/notify-rules`' `new_device` alert rules on: "Mint signed in on a new device", then the shop, the time and the
+canvas's "If this was not Mint, remove access." (the app writes these words, since the package has no helper to name).
+Quiet hours never silence it, and with Hide details on it names no one. Look first
+brings the app forward on that shop, and Later only dismisses. The first time the app looks at a shop it tells nothing, so
+a first run does not ring for every helper; what it has seen is kept per shop on that computer and goes with the shop.
+Each sign-in has a notification of its own. Switching Notify me off switches this off too.
+
 ## Not built yet
 
 - (Built since, 24 Nov 2026: a helper's list of the shops they help is `GET /v1/shops`, with a session per shop from
@@ -148,6 +178,10 @@ device signs out, `helper.removed`, `away.set`, `away.cleared`, `request.passed_
   shop again.)
 - (Built since, 24 Nov 2026: the owner manages helpers from their own shop session, `GET /v1/people` and the changes
   under it; see `docs/pilot-api.md`, "The owner's own routes". The API is there; the app's screens for it are not yet.)
-- Telling the owner about a helper's new device (the canvas does it on LINE, which is parked). The audit log has it.
+- (Built since, 24 Nov 2026: the owner's desktop tells them about a helper's new device, as above. The canvas does it on
+  LINE, which is parked, so that is still not done.)
+- The People screens in the app: seeing the helpers, and removing one from the notification's "remove access". The
+  notification only says it; today the owner asks their operator, or removes the helper from a People screen when the
+  app has one.
 - (Built since, 24 Nov 2026: the owner's link page names the helper who approved or declined a reply, as the canvas's
   "Approved by Mint at 19:42." and "Mint approved this at 19:42", from `decidedByHelper` in `docs/pilot-api.md`.)

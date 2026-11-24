@@ -41,10 +41,12 @@ import {
   queueBrowserStep,
   readBrowserStep,
   reportSignInBroken,
+  signInsFor,
   type AttemptRef,
   type BrowserStepView,
   type NewBrowserStep,
   type SignInGrant,
+  type WorkerSignIn,
 } from "./sign-in-vault";
 import {
   JOB_REQUEST_OPTIONS,
@@ -136,6 +138,9 @@ export interface WorkerPort {
   /// Browser control (docs/browser-control.md): a one-time grant for the outpost named to type one of the shop's site
   /// sign-ins in this attempt's browser step. It names the grant and never holds an account or a password.
   signIn(signInId: string, outpostId: string): Promise<PortAnswer<SignInGrant>>;
+  /// The shop's site sign-ins this attempt's member is named on, oldest first, each by its id, its site's name, its
+  /// origins and whether it works, so the worker can choose one to ask `signIn` for. Never an account or a password.
+  signIns(): Promise<PortAnswer<{ signIns: WorkerSignIn[] }>>;
   /// The site refused a sign-in's saved password: nobody uses it until the owner types a new one.
   signInBroken(signInId: string): Promise<PortAnswer<{ signInId: string; state: "broken" }>>;
   /// A browser step for one of the shop's online outposts to run in this attempt: open a page, read it, or sign in with
@@ -487,6 +492,12 @@ export function workerPort(env: JobFlowEnv, job: Job, options: JobOptions): Work
     async signIn(signInId, outpostId) {
       const at = await browserControlAt();
       return at.ok ? issueSignInGrant(env, at.value, signInId, outpostId) : at;
+    },
+
+    /// The vault's live sign-ins, only those naming this attempt's member, and only what a worker needs of each.
+    async signIns() {
+      const at = await browserControlAt();
+      return at.ok ? signInsFor(env, at.value) : at;
     },
 
     async signInBroken(signInId) {

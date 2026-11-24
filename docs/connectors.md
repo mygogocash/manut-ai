@@ -84,6 +84,46 @@ One provider for many shops: a module channel attaches to many accounts through 
 - Review: an App Review decision "within a week" [M9]. Business verification time: not stated [M2].
 - Limits: Messenger allows 200 calls per engaged user per 24 hours; Instagram's Send API allows 100 text calls a second [M10]. Fee per message: none stated.
 
+## 4a. FlowAccount (the books)
+
+Checked 24 Nov 2026 on FlowAccount's developer pages [F1-F4]. Ton's "Send the books to FlowAccount" needs it.
+
+- **Access is not self-serve.** A company asks for Open API access through a form (form.flowaccount.com/request-openapi).
+  FlowAccount's staff answer in 1 to 2 business days and set up a sandbox account with client credentials. The sandbox
+  works for 30 days from when it is made [F2].
+- **Production costs money.** The company subscribes to a package through FlowAccount's staff, who email the client
+  credentials to the business's main owner within 3 business days [F2]. Each FlowAccount user who connects through
+  the OpenID flow must hold an annual Pro Business subscription; the pricing page lists Pro Business at ฿457 a month,
+  or ฿5,490 a year paid annually, with a 30-day free trial, and names "Connect your business with FlowAccount via Open
+  API" among its features [F2, F4].
+- **Two ways to connect.** Client credentials, for a company connecting its own system (`grant_type`
+  `client_credentials`, scope `flowaccount-api`, a token that lasts about a day; sandbox token URL
+  `https://openapi.flowaccount.com/test/token`) [F1]. Or the OpenID flow, for a partner app: the user signs in to
+  FlowAccount, picks a business, and the app receives a code, with `offline_access` for a refresh token that lasts
+  about 30 days from the last use [F3]. Partners apply through OpenAPI support with their scope of use and redirect URL
+  [F2]. The client-credentials page's example sends `grant_type=refresh_token` while its table says
+  `client_credentials`; confirm with FlowAccount before building. No page read gives the production token URL.
+- **Documents.** The Document API creates tax invoices, receipts, quotations, billing notes, cash invoices, purchase
+  orders and receiving inventory, by `documentType` (tax invoice 7, receipt 9, cash invoice 35) [F2]. No page read lists
+  an expense document, though the product has expense notes; the "Supplier Invoice" pages may be the nearest.
+- **For Manut AI:** the partner route (the OpenID flow) fits many shops: each shop signs in to its own FlowAccount and
+  picks its business, and no shop's client secret is ever typed into Manut AI. It needs the owner to apply as an app
+  partner, and each shop needs its own Pro Business plan. Until then Ton only drafts the books.
+
+## 4b. Google Sheets (Ton's rows)
+
+Checked 24 Nov 2026 on Google's pages [G1, G2]. `@manut/sheets-rows` already builds the append request.
+
+- **The scope decides the review.** The read-write scope `https://www.googleapis.com/auth/spreadsheets` is sensitive:
+  no ordinary account can grant it until Google has verified the app, which needs every scope declared, a written
+  reason and a demo video for each sensitive one, and can take up to 10 days after a brand check [G1, G2].
+- **`drive.file` avoids it.** Google recommends the non-sensitive `https://www.googleapis.com/auth/drive.file`, which
+  reaches only the files the user opens or makes with the app [G1]. With the Google Picker, the owner picks the one
+  sheet Ton writes to, and Manut AI can reach that sheet and nothing else in their Drive. That is also the smaller
+  promise to make an owner.
+- **For Manut AI:** an OAuth client in a Google Cloud project of the owner's, with `drive.file` only, an OAuth consent
+  screen naming Manut AI, and the Picker's API key. The token goes into the credential vault, as LINE's does.
+
 ## 5. Comparison
 
 | Channel | Read | Send after a delay | Approval | Stated lead time | Cost per message | Biggest risk |
@@ -99,6 +139,10 @@ One provider for many shops: a module channel attaches to many accounts through 
 2. Lazada (open.lazada.com/apps/user/register): company registration document, legal name, owner's name, address, a mobile number and email never used for a Lazada store, a 200 by 200 logo [Z1, Z2]. Then apply for ERP IM Chat and the Service Market qualification, with an English service description [Z7].
 3. Meta (developers.facebook.com): start business verification, then submit App Review for the permissions above and Human Agent: a screen recording and description for each, a privacy policy URL, a 1024 by 1024 icon [M9].
 4. Shopee (open.shopee.com), orders and products only: business documents, a live product with a trial account, later a penetration test report [S1, S6]. Ask Shopee in writing whether any chat route exists.
+5. FlowAccount (form.flowaccount.com/request-openapi): ask for Open API access as an app partner, with the scope of use
+   and the redirect URL, for the OpenID flow; a sandbox comes first, and each shop needs its own Pro Business plan.
+6. Google Cloud: a project of the owner's with an OAuth client and consent screen for `drive.file` only (no
+   verification needed for that scope), and the Google Picker's API key.
 
 ## Sources
 
@@ -148,3 +192,9 @@ Shopee and Lazada pages are JavaScript apps; their text was read from the data e
 - M8 https://developers.facebook.com/documentation/business-messaging/messenger-platform/send-messages
 - M9 https://developers.facebook.com/docs/resp-plat-initiatives/individual-processes/app-review/submission-guide
 - M10 https://developers.facebook.com/docs/graph-api/overview/rate-limiting
+- F1 https://developers.flowaccount.com/tutorial/connect/client-credentials-flow
+- F2 https://developers.flowaccount.com/tutorial/connect-open-api, https://developers.flowaccount.com/tutorial/document-api/ and https://developers.flowaccount.com/tutorial/document-type/
+- F3 https://developers.flowaccount.com/tutorial/connect/open-id-flow
+- F4 https://flowaccount.com/en/developers and https://flowaccount.com/en/pricing
+- G1 https://developers.google.com/workspace/sheets/api/scopes
+- G2 https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification

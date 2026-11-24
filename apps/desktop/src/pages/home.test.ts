@@ -134,18 +134,21 @@ describe("an ask in its card's words", () => {
   afterEach(() => setLang("en"));
 
   it("is an approval's title over the exact action it names", () => {
-    expect(askLines(approval())).toEqual({ title: "Send a reply to a customer", action: 'Reply to Khun Mali on LINE: "Your order ships tomorrow morning."' });
+    expect(askLines(approval())).toEqual({ title: "Send a reply to a customer", action: 'Reply to Khun Mali on LINE: "Your order ships tomorrow morning."', whole: false });
+    // a browser write's sentence is shown whole, as its card shows it
+    expect(askLines(approval({ whole: true })).whole).toBe(true);
+    expect(askLines(approval({ whole: true, command: " " }))).toMatchObject({ action: null, whole: false });
   });
 
   it("uses the card's own words for an approval with no title, or one that starts on a plan", () => {
     setLang("en");
     expect(askLines(approval({ title: "" })).title).toBe("Approval needed");
-    expect(askLines(approval({ plan: "1. Change the checkout", command: "" }))).toEqual({ title: "Start working on this plan?", action: null });
+    expect(askLines(approval({ plan: "1. Change the checkout", command: "" }))).toEqual({ title: "Start working on this plan?", action: null, whole: false });
   });
 
   it("is a question as asked, or an interview's count and first question", () => {
     setLang("en");
-    expect(askLines(clarify())).toEqual({ title: "Which page should the post go on?", action: null });
+    expect(askLines(clarify())).toEqual({ title: "Which page should the post go on?", action: null, whole: false });
     const questions = [
       { qid: "a", question: "Who is the promotion for?" },
       { qid: "b", question: "Where should it run?" },

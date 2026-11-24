@@ -6,7 +6,9 @@
 // come into `presentOutside`. Only the two settings below are read from this computer's storage.
 //
 // - Money and public posts never get Approve, and neither does anything this build does not know: notify-rules decides
-//   that from the request's approval-core kind. Approve is also dropped when the card itself offers no Allow once.
+//   that from the request's approval-core kind. Approve is also dropped when the card itself offers no Allow once, and
+//   when the body is not the request's exact action shown whole (cut to fit, changed on the way, or too long to be seen):
+//   notify-rules treats that as a hidden detail.
 // - macOS folds two or more buttons into an "Options" menu and reports the FIRST button for a click on the menu button
 //   itself (tauri-plugin-notification, desktop.rs), so the system gets the buttons with Approve last: a stray click can
 //   only look, never approve.
@@ -21,6 +23,7 @@ import {
   type NotifyEvent,
   type QuietHours,
 } from "@manut/notify-rules";
+import { dayTime } from "../app/time";
 import { t } from "../i18n";
 
 /** The product's name, as notify-rules writes it for a notification that hides its details. The same in every language. */
@@ -37,8 +40,11 @@ export interface RequestInfo {
   approval: string;
   /** Who asks. */
   member: string;
-  /** The exact action, in one line. */
+  /** The exact action, in one line, as the body says it. */
   summary: string;
+  /** The exact action, whole, as the card shows it. Approve is offered only when `summary` is this text, unchanged, and
+   *  notify-rules finds it short enough to be shown whole: an owner must not approve what they cannot read. */
+  action?: string;
   /** The card offers Allow once: this build can answer the request. */
   canApprove: boolean;
 }
@@ -49,8 +55,10 @@ export type Outside =
   | { kind: "notice"; title: string; body: string }
   /** A live page that stopped working. No source in the app yet. */
   | { kind: "page_down"; page?: string }
-  /** A sign-in from a new device. No source in the app yet. */
-  | { kind: "new_device"; device?: string }
+  /** A sign-in from a new device. With `helper`, a helper signed in at one of the person's own shops, which is the owner's
+   *  alert (docs/people.md, "A helper's new device"): the helper's name as the owner gave it ("" when none), the shop's name,
+   *  and when (ms). Without it, someone signed in to the person's own account from `device`; nothing reports that yet. */
+  | { kind: "new_device"; device?: string; helper?: { name: string; shop: string; at: number } }
   /** Work that waited while the Mac slept, and when it woke (ms). */
   | { kind: "slept"; count: number; wokeAt: number };
 
@@ -58,7 +66,7 @@ export type Outside =
 export function eventOf(src: Outside): NotifyEvent | null {
   switch (src?.kind) {
     case "request":
-      return { type: "request", kind: src.approval, member: src.member, summary: src.summary };
+      return { type: "request", kind: src.approval, member: src.member, summary: src.summary, ...(src.action === undefined ? {} : { action: src.action }) };
     case "notice":
       return { type: "notice", title: src.title, body: src.body };
     case "page_down":
@@ -150,9 +158,21 @@ const LABEL = { approve: "out.approve", look_first: "out.look", later: "out.late
 const countOf = (n: number): number => (Number.isInteger(n) && n >= 1 ? n : 1);
 const blank = (v: unknown): boolean => typeof v !== "string" || v.trim() === "";
 
+/** What the owner is told of a helper's new device, in the canvas's words ("Mint signed in on a new device", "If this was not
+ *  Mint, remove access.") with the shop and when. notify-rules rules on whether it shows, rings and which buttons it has, as
+ *  for any new sign-in; it has no helper to name, so these words are the app's own. A name or shop that is blank is said as
+ *  "Helper" and "a shop"; a time that cannot be read is the hour of the alert. */
+function helperDeviceWords(helper: { name: string; shop: string; at: number }, now: number): { title: string; body: string } {
+  const who = blank(helper.name) ? t("shops.helper") : helper.name.trim();
+  const shop = blank(helper.shop) ? t("shops.aShop") : helper.shop.trim();
+  const when = dayTime(Number.isFinite(helper.at) ? helper.at : now, now);
+  return { title: t("out.helperDeviceTitle", { helper: who }), body: t("out.helperDeviceBody", { shop, when, helper: who }) };
+}
+
 /** The words, in the app's language, for what notify-rules says in English. Its English and these are the same (a test
- *  keeps them so), so a change of its words shows up as a failing test, not as a silent difference. */
-function words(src: Outside, hidden: boolean, waiting: number): { title: string; body: string } {
+ *  keeps them so), so a change of its words shows up as a failing test, not as a silent difference. A helper's new device is
+ *  the one exception: notify-rules has no name to give it (`helperDeviceWords`). */
+function words(src: Outside, hidden: boolean, waiting: number, now: number): { title: string; body: string } {
   const waitingBody = (n: number) => (n === 1 ? t("out.waitingOne") : t("out.waitingMany", { n }));
   switch (src.kind) {
     case "request":
@@ -166,6 +186,7 @@ function words(src: Outside, hidden: boolean, waiting: number): { title: string;
         ? { title: APP_NAME, body: t("out.somethingNeedsYou") }
         : { title: t("out.pageDownTitle"), body: t("out.pageDownBody", { page: blank(src.page) ? t("out.aLivePage") : src.page!.trim() }) };
     case "new_device":
+      if (!hidden && src.helper) return helperDeviceWords(src.helper, now);
       return hidden
         ? { title: APP_NAME, body: t("out.somethingNeedsYou") }
         : { title: t("out.newDeviceTitle"), body: t("out.newDeviceBody", { device: blank(src.device) ? t("out.aNewDevice") : src.device!.trim() }) };
@@ -188,7 +209,7 @@ export function presentOutside(src: Outside, c: PresentContext): Shown | null {
   const buttons = rule.buttons.filter((b) => b.id !== "approve" || approvable);
   // the button that does something goes last (macOS reports the first for a click on its "Options" button itself)
   const ordered = [...buttons.filter((b) => b.id !== "approve"), ...buttons.filter((b) => b.id === "approve")];
-  const { title, body } = words(src, c.hideDetails, c.waiting);
+  const { title, body } = words(src, c.hideDetails, c.waiting, c.now);
   return {
     title,
     body,

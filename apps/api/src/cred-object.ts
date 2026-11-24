@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { readJsonBody } from "./body";
 import { keyTag, openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { resealStore, sameSeal, type ResealStore } from "./reseal";
 import { isSignInVaultPath, signInVaultRoute, wipeSignInVault } from "./sign-in-vault";
 
 type CredEnv = {
@@ -42,7 +43,7 @@ type ConnectionRec = {
 
 /// What the vault may actually hold: records sealed before granted scope
 /// existed carry none of the grant fields, and read with safe defaults.
-type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsActions" | "grantRevision"> & {
+export type StoredConnectionRec = Omit<ConnectionRec, "resourceIds" | "allowsActions" | "grantRevision"> & {
   resourceIds?: string[];
   allowsActions?: boolean;
   grantRevision?: number;
@@ -53,6 +54,20 @@ const REFRESH_LEASE_SECONDS = 60;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESOURCE_IDS = 100;
 const MAX_RESOURCE_ID_LENGTH = 256;
+
+/// The shop's live connections as re-sealing reaches them (reseal.ts). A revoked connection keeps no secret, so it is
+/// never one of them, and one revoked while its secret was being sealed again is read back as gone and left revoked.
+export function connectionResealStore(storage: DurableObjectStorage, tenant: string):
+  ResealStore<StoredConnectionRec> {
+  const live = (record: StoredConnectionRec | undefined) =>
+    record && record.tenant === tenant && !record.revokedAt ? record : undefined;
+  return {
+    live: async () => [...(await storage.list<StoredConnectionRec>({ prefix: "conn:" })).values()]
+      .filter((record) => live(record) !== undefined),
+    reread: async (id) => live(await storage.get<StoredConnectionRec>(`conn:${id}`)),
+    write: (record) => storage.put(`conn:${record.id}`, record),
+  };
+}
 
 /// Broker-only credential store. Provider secrets enter sealed and leave
 /// only through the broker's internal read: listing and revocation expose
@@ -96,6 +111,9 @@ export class CredObject extends DurableObject {
     }
     if (request.method === "POST" && url.pathname === "/use") {
       return this.use(request);
+    }
+    if (request.method === "POST" && url.pathname === "/connections/reseal") {
+      return this.reseal(request);
     }
     if (request.method === "POST" && url.pathname === "/rekey") {
       return this.rekey(request);
@@ -309,8 +327,36 @@ export class CredObject extends DurableObject {
       return Response.json({ error: "unseal_failed" }, { status: 500 });
     }
     const sealed = await sealSecret(plaintext, key);
-    await this.ctx.storage.put(`conn:${record.id}`, { ...record, sealed });
+    // Unsealing and sealing let other requests in. A connection revoked, refreshed or replaced meanwhile is left as it
+    // now is: writing the record read before would bring a revoked secret back, or undo a new one.
+    const now = await this.ctx.storage.get<StoredConnectionRec>(`conn:${record.id}`);
+    if (!now || now.revokedAt || now.tenant !== record.tenant || !sameSeal(now.sealed, record.sealed)) {
+      return Response.json({ error: "changed" }, { status: 409 });
+    }
+    await this.ctx.storage.put(`conn:${record.id}`, { ...now, sealed });
     return Response.json({ rekeyed: true, keyTag: sealed.keyTag });
+  }
+
+  /// `POST /connections/reseal` with exactly `{}`: after an operator rotates the vault's key, every live connection of
+  /// the shop whose secret is sealed under another key is sealed again under the current one, so the previous key can
+  /// be retired (reseal.ts). It answers how many it sealed, how many already were, any it could not open, and how many
+  /// still need the previous key.
+  private async reseal(request: Request): Promise<Response> {
+    const key = this.keyOrVaultError();
+    if (typeof key !== "string") return key;
+    const tenant = this.tenantOf(request);
+    if (!tenant) return Response.json({ error: "not_found" }, { status: 404 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "invalid_json" }, { status: 400 });
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length > 0) {
+      return Response.json({ error: "invalid_request" }, { status: 400 });
+    }
+    return Response.json(await resealStore(connectionResealStore(this.ctx.storage, tenant),
+      { CRED_KEY: key, CRED_KEY_PREVIOUS: this.credEnv.CRED_KEY_PREVIOUS }));
   }
 
   private async tenantWipe(request: Request): Promise<Response> {

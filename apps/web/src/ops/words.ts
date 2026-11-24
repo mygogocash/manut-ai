@@ -460,6 +460,8 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "outpost.credential_rotated": () => "gave an outpost a new credential",
   // The owner's own Connections: the log keeps the outpost's id, never the name the owner typed.
   "outpost.renamed": () => "renamed an outpost",
+  // The whole vault sealed again under a new key after a rotation (no ids: the counts were in the operator's answer).
+  "vault.resealed": () => "sealed the shop's vault again under a new key",
   // The step channel: a worker's browser steps, by id only, never a page or what it read.
   "browser_step.queued": () => "asked an outpost to run a browser step",
   "browser_step.fetched": () => "picked up a browser step",
@@ -565,6 +567,8 @@ const AUDIT_REASONS: Readonly<Record<string, string>> = {
   selector_not_found: "Nothing on the page matched what it was to read.",
   sign_in_refused: "The site refused the saved password.",
   grant_refused: "There was no sign-in to type.",
+  submit_refused: "The site refused what was submitted and kept the form.",
+  not_run: "The outpost did not run the step, so nothing was submitted.",
   timed_out: "The step took too long.",
   browser_error: "The browser stopped part way.",
 };

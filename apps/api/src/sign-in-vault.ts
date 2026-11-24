@@ -16,6 +16,7 @@
 /// - `POST /sign-ins/password` `{ signInId, password }`: a new password, which also mends a broken sign-in.
 /// - `POST /sign-ins/broken` `{ signInId, member }`: a member named on it reports that the site refused the password.
 /// - `POST /sign-ins/remove` `{ signInId }`: removes it, leaving a tombstone with no account and no secret.
+/// - `POST /sign-ins/reseal` `{}`: every live sign-in sealed again under the current key, after a rotation (reseal.ts).
 /// - `GET /outposts`: the outposts, oldest first, each online or asleep as of now.
 /// - `POST /outposts` `{ name, kind, credentialHash }`: a new outpost.
 /// - `POST /outposts/heartbeat` `{ outpostId, credentialHash }`: its beat, refused 401 unless the digest is its own.
@@ -52,6 +53,7 @@ import { appendAudit, type AuditActor, type AuditSubject } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
 import { openSecret, sealSecret, type SealedSecret } from "./cred-crypto";
+import { resealStore, type ResealStore } from "./reseal";
 import { credStub, type TenantDataEnv } from "./tenant-data";
 
 export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
@@ -60,7 +62,7 @@ export type SignInVaultKeys = { CRED_KEY?: string; CRED_KEY_PREVIOUS?: string };
 export type VaultEnv = Pick<TenantDataEnv, "CRED" | "TENANT">;
 
 /// What the vault keeps for one sign-in. `sealed` is the password; the rest is what the owner sees.
-type SignInRecord = {
+export type SignInRecord = {
   id: string;
   tenant: string;
   /// The name people use: "Shopee Seller Centre".
@@ -346,6 +348,8 @@ export async function signInVaultRoute(
       return markBroken(storage, tenant, body);
     case "POST /sign-ins/remove":
       return removeSignIn(storage, tenant, body);
+    case "POST /sign-ins/reseal":
+      return resealSignIns(storage, vaultKeys, tenant, body);
     case "POST /outposts":
       return registerOutpost(storage, tenant, body);
     case "POST /outposts/heartbeat":
@@ -694,6 +698,29 @@ async function removeSignIn(storage: DurableObjectStorage, tenant: string, body:
   return json({ removed: true, signInId: record.id });
 }
 
+/// The shop's live sign-ins as re-sealing reaches them (reseal.ts). A removed sign-in keeps no password, so it is never
+/// one of them, and one removed while its password was being sealed again is read back as gone and left removed.
+export function signInResealStore(storage: DurableObjectStorage, tenant: string): ResealStore<SignInRecord> {
+  return {
+    live: () => liveSignIns(storage, tenant),
+    reread: async (id) => (await liveSignIn(storage, tenant, id)) ?? undefined,
+    write: (record) => storage.put(keys.signIn(record.id), record),
+  };
+}
+
+/// `POST /sign-ins/reseal` with exactly `{}`: after an operator rotates the vault's key, every live sign-in of the shop
+/// whose password is sealed under another key is sealed again under the current one, so the previous key can be retired
+/// (reseal.ts). It answers how many it sealed, how many already were, any it could not open, and how many still need
+/// the previous key.
+async function resealSignIns(storage: DurableObjectStorage, vaultKeys: SignInVaultKeys, tenant: string,
+  body: Record<string, unknown>): Promise<Response> {
+  if (Object.keys(body).length > 0) return json({ error: "invalid_request" }, 400);
+  const key = vaultKeys.CRED_KEY;
+  if (!key) return json({ error: "vault_not_configured" }, 503);
+  return json(await resealStore(signInResealStore(storage, tenant),
+    { CRED_KEY: key, CRED_KEY_PREVIOUS: vaultKeys.CRED_KEY_PREVIOUS }));
+}
+
 // The step channel: what a worker asks an outpost's browser to do, and how it went (docs/browser-control.md).
 
 /// The steps a worker may queue in its own words, each of them reading: going to a page, reading its text, and signing in
@@ -711,9 +738,11 @@ type ReadStepKind = (typeof READ_STEP_KINDS)[number];
 /// `selector_not_found`: nothing on the page matched the read's selector. `sign_in_refused`: the site refused the
 /// saved password, so the worker reports the sign-in broken (`signInBroken`). `grant_refused`: the redeem was refused,
 /// so there was nothing to type. `submit_refused`: a write step's site refused what was submitted and kept the form, so
-/// nothing changed. `timed_out` and `browser_error`: anything else.
+/// nothing changed. `not_run`: the outpost did not do what the step asks (a kind it does not know, a step missing what
+/// its kind needs, or a stop before the step began or, for a write, before anything was typed), so nothing was
+/// submitted. `timed_out` and `browser_error`: anything else.
 export const STEP_FAILURES = ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused",
-  "grant_refused", "submit_refused", "timed_out", "browser_error"] as const;
+  "grant_refused", "submit_refused", "not_run", "timed_out", "browser_error"] as const;
 
 /// A step lives two minutes from when it is queued, or until its grant ends if that is sooner. An outpost asks for its
 /// steps every few seconds and a page loads in seconds, so a step normally ends well inside a minute; two leave room for
@@ -1396,6 +1425,31 @@ export async function issueSignInGrant(env: VaultEnv, attempt: AttemptRef, signI
   await appendAudit(env, tenant, { actor, action: "signin.requested", subject: { ...subject, grantId: grant.grantId },
     outcome: "ok" });
   return { ok: true, value: grant };
+}
+
+/// One of the shop's site sign-ins as a worker sees it (job-flow.ts, `signIns`): enough to choose one by its site and ask
+/// for a grant, and nothing a worker has no use for: never the account, nor who else may use it.
+export type WorkerSignIn = { signInId: string; site: string; origins: string[]; state: "working" | "broken" };
+
+/// The worker's list of sign-ins (job-flow.ts, `signIns`), once the port has read the switches and consent and the
+/// attempt's own heartbeat: the shop's live sign-ins this attempt's member is named on, oldest first. A broken one is
+/// listed as broken, since a grant for it is refused until the owner types a new password. Nothing is written to the
+/// audit log: a list changes nothing and reaches no site.
+export async function signInsFor(env: VaultEnv, attempt: AttemptRef):
+  Promise<{ ok: true; value: { signIns: WorkerSignIn[] } } | { ok: false; error: string }> {
+  let answer: Awaited<ReturnType<typeof vaultAnswer>>;
+  try {
+    answer = await vaultAnswer(await vaultCall(env, attempt.tenant, "GET", "/sign-ins"));
+  } catch {
+    answer = null;
+  }
+  if (!answer || answer.status !== 200 || !Array.isArray(answer.body.signIns)) {
+    return { ok: false, error: "vault_unavailable" };
+  }
+  const signIns = (answer.body.signIns as unknown[]).filter((view): view is SignInView =>
+    isRecord(view) && Array.isArray(view.members) && view.members.includes(attempt.member))
+    .map((view) => ({ signInId: view.id, site: view.site, origins: [...view.origins], state: view.state }));
+  return { ok: true, value: { signIns } };
 }
 
 /// The worker's browser step (job-flow.ts, `browserStep`), once the port has read the switches and consent and the

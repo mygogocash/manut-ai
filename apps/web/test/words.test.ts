@@ -803,6 +803,9 @@ describe("the audit log's words for the owner's people and for browser control",
     expect(auditReasonText("vault_not_configured")).toBe("The vault has no key set.");
     expect(auditReasonText("unseal_failed")).toBe("The vault could not open the saved password.");
     expect(auditReasonText("task_unavailable")).toBe("The task could not be read.");
+    // How an outpost may say a write step went, in words too.
+    expect(auditReasonText("submit_refused")).toBe("The site refused what was submitted and kept the form.");
+    expect(auditReasonText("not_run")).toBe("The outpost did not run the step, so nothing was submitted.");
     // The reasons that already had words keep them.
     expect(auditReasonText("attempt_ended")).toBe("Its attempt had already ended.");
     expect(auditReasonText("new_reason")).toBe("Reason: new_reason.");
@@ -813,6 +816,8 @@ describe("the audit log's words for the owner's people and for browser control",
       .toBe("ops@manut.test removed an outpost.");
     expect(said({ actor: op, action: "outpost.credential_rotated", subject: { outpostId: "o1" } }))
       .toBe("ops@manut.test gave an outpost a new credential.");
+    expect(said({ actor: op, action: "vault.resealed", subject: {} }))
+      .toBe("ops@manut.test sealed the shop's vault again under a new key.");
     expect(said({ actor: worker, action: "browser_step.queued", subject: { stepId: "st1", outpostId: "o1" } }))
       .toBe("Worker attempt 6f9d1f0e asked an outpost to run a browser step.");
     expect(said({ actor: outpost, action: "browser_step.fetched", subject: { stepId: "st1", outpostId: "o1" } }))

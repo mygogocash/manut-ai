@@ -82,34 +82,48 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   `941d9565`); smoke-tested: registering, the steps and the approvals answer 401 without a session.
 - Dev's API was redeployed on 24 Nov at 07:17 from `abd2333`, with an owner's shop session on the memory, consent,
   export and helpers (API `fcfcfdaf`); smoke-tested: those routes answer 401 without a session.
+- Dev was redeployed on 24 Nov at 07:32 from `e6d8f5a`, with the deletion follow-up in the API and the console
+  (pages `0f73ff1f`, API `9c50074a`); smoke-tested: the console and the admin routes are behind Access, the owner's
+  routes answer 401 without a session, the approval page loads, and the served bundle is the one just built.
+- Dev's API was redeployed on 24 Nov at 07:57 from `df6094b`, with the new-device route and the outpost's `not_run`
+  (API `8ec35ae7`); smoke-tested: the devices route answers 401 without a session.
+- Dev's API was redeployed on 24 Nov at 08:39 from `601192a`, with re-sealing the vault (API `d7d4e7f2`);
+  smoke-tested: the route is behind Access. To rotate the vault's key, follow `docs/pilot-api.md`, "Re-sealing the
+  vault after a key rotation": keep `CRED_KEY_PREVIOUS` until every shop answers `remaining` 0.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
 ## Next steps, in order
 
-1. Four helpers are running (24 Nov), each on its own branch from `pilot/week-1`; review each, merge it after the
+1. Four helpers are running (24 Nov). Items 20, 21 and 24 stopped at the account's 5-hour usage limit at 08:15 and
+   were sent on again at 09:35 in their own threads (`t3_thread_send`, as for item 9), once a new helper (item 25)
+   showed the limit no longer held. They run, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 18, the code editor's states for developers: a gap list, then the states that need no owner
-     (`feat/code-editor-states`, Opus);
-   - item 12, the desktop showing a browser write word for word, then its outpost submitting it
-     (`feat/outpost-submits`, Opus; a Rust build in the shared target folder);
-   - item 15, a helper's new device as an alert to the owner (`feat/new-device-alert`, Sonnet);
    - item 21, Customize › Connections for the owner: the shop's sign-ins and outposts (`feat/owner-connections`,
-     Opus).
+     Opus);
+   - item 20, the connected desktop's whole shop: a pilot shop's pages for its owner, Mission Control's team and
+     jobs from the API, routines' pause and Pause everyone (`feat/connected-whole-shop`, Opus);
+   - item 24, the console catching up with the owner's new routes (`feat/console-catch-up`, Sonnet);
+   - item 25, the shell naming the tool and the path on an agent's ask (`feat/ask-fields`, Opus; a Rust build).
    Merged: items 2 and 3 (routines running, shop templates), 5 (the desktop answering approvals), 6 (macOS
    notifications on `notify-rules`), 7 (several shops, the API side) and its console owner link and session end, the
    desktop's switcher with one Needs you across the shops (several shops, slice 2), 13 (an owner's shop session on
    the shop's memory, consent and export, and managing helpers; slice 4), 8a
-   (the outpost's step channel), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
+   (the outpost's step channel), 23 (re-sealing the vault after a key rotation, `POST /v1/admin/vault/reseal`, and a
+   worker's list of its sign-ins), 16 (a shop whose deletion stopped stays listed and can be finished), 8b (the outpost in the desktop shell; its Rust tests run in CI, and a shared target
    folder for local Rust builds is `~/Library/Caches/manut-ai-cargo-target`), browser control's slice 2 (a write asked for first, and the begin gate's race fixed),
-   9 (desktop leftovers), 11 (the Playwright follow-up, #17: every spec runs, in six
+   9 (desktop leftovers), 18 (the code editor's states for developers: Kit's dial, command asks, reads outside the
+   project blocked, keys in changes; `docs/code-editor.md`), 12 (a browser write shown word for word, then submitted by the outpost), 15 (a helper's new
+   device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
 2. The night build's queue is empty: add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - item 19, the outpost following the shop sessions, after 12; the cloud outpost after that.
-   - item 20, a pilot shop's full pages for its owner on the desktop, now that an owner's shop session reaches more.
+   - item 19 (the outpost following the shop sessions), after 21, which changes the same outpost code; the cloud
+     outpost after that (it may cost money).
+   - items 25 to 29, the code editor's states left for later that need no owner (`docs/code-editor.md`), as slots
+     free; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Pick new ids from
      2026112333 up for the next limiter.
@@ -173,6 +187,27 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   Approve and Look first buttons; the new window and badge permissions take effect at the next Tauri build. Quiet
   hours are on from the first run, 22:00 to 08:00 Bangkok time, with no time zone picker; say if they should start
   off. The Dock number now counts only what waits for an answer, not unread automation answers.
+- **From items 12 and 15:** the first real browser write on a real site (a Shopee chat reply, say) reaches a real
+  customer, so it needs the owner's go-ahead and a supervised trial. A long LINE reply no longer offers Approve in a
+  notification (only one line of at most 72 columns does). A browser write's sentence is the API's English in every
+  language, since translating it would make the app's words what gets approved. The new-device alert says "remove
+  access", but the app has no People screen yet, and "Notify me" off silences it: say if a security alert should ring
+  regardless.
+- **From item 18 (the code editor):** whether Kit's lanes are a chat (as the canvas's Code board draws) or a terminal
+  (the 16 November decision); the dial reaches only chat sessions today. Also: a real GitHub account (projects from
+  GitHub, checks on a pull request), a real sign-in to Claude Code, where developers' secrets live (the shop's vault
+  or this Mac's keychain), and a native speaker's check of the new Korean, Japanese and Chinese words.
+- **Connections for Ton's books (`docs/connectors.md`, 4a and 4b):** FlowAccount's Open API is by application
+  (form.flowaccount.com/request-openapi, as an app partner for the OpenID flow), a 30-day sandbox first, and each shop
+  needs its own Pro Business plan (฿457 a month, or ฿5,490 a year). Google Sheets needs a Google Cloud project of the
+  owner's with an OAuth client for the `drive.file` scope only, which needs no Google review.
+- **The cloud outpost** (`docs/browser-control.md`, "Next slices", 2): Cloudflare's hosted browser comes with Workers
+  Paid (10 browser hours and 10 concurrent browsers a month included, then $0.09 an hour); ten pilot shops would cost
+  about $8 a month above the plan. It needs the plan and the spending, and the owner's word that shops' sites may be
+  reached from Cloudflare's addresses.
+- **Sign-in, the biggest blocker:** `docs/sign-in-options.md` compares Sign in with Apple ($99 a year), a code sent by
+  email (Cloudflare Email Service, about 3,000 emails a month with Workers Paid, then $0.35 a thousand) and LINE Login
+  (free, parked), and recommends codes by email first. The owner chooses.
 - **Sign-in for owners:** the desktop's connected runtime works only with a pasted test token against a local API
   today. A real sign-in needs an Apple developer team (Sign in with Apple for `xyz.manut.desktop`, team-signed
   builds, `APPLE_CLIENT_ID` on the Worker), or LINE Login, which is parked with LINE. Also: how an owner's
@@ -181,7 +216,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 ## Known flaky tests (they fail only under heavy load)
 
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
-- `apps/desktop` `src/runs/boxView.test.ts`: can pass 30 seconds when the machine is saturated.
+- `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
+  (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
+- `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
+  `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
+  alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
 
 ## Practical notes for this Mac

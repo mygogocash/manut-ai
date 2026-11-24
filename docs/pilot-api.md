@@ -953,6 +953,25 @@ mends a broken sign-in: `state` is `working` again and `brokenAt` and `brokenBy`
 seal, as a revoked connection does, so a restored backup cannot bring the password back. A grant waiting for it is
 refused. 404 `sign_in_not_found`, also when it was already removed.
 
+### `POST /v1/admin/vault/reseal`
+
+Exactly `{ tenant }`. Seals the shop's connection secrets and its site sign-ins' passwords again under the vault's
+current key, and answers `{ connections, signIns }`, each `{ resealed, current, unreadable, remaining }`: how many it
+sealed again, how many already were under the current key, the ids of any that neither configured key opens (a secret
+nobody can recover, which its owner must give again), and how many live records still need the previous key. A record
+revoked, removed or given a new secret while it was being sealed is left as it now is. 503 `vault_not_configured`
+when the vault has no key, 503 `vault_unavailable` when it did not answer. Writes `vault.resealed`, by the operator,
+with no ids (it is the shop's whole vault; the counts are in the answer).
+
+**Re-sealing the vault after a key rotation.** A secret opens under `CRED_KEY`, or under `CRED_KEY_PREVIOUS` while
+that is set, and nothing else. To rotate:
+
+1. Set `CRED_KEY_PREVIOUS` to the current key, then `CRED_KEY` to a new one (`wrangler secret put`). Every secret
+   still opens.
+2. Send `POST /v1/admin/vault/reseal` for every shop, and send it again for any shop whose `remaining` is not 0.
+3. Only when every shop answers `remaining` 0 in both, delete `CRED_KEY_PREVIOUS`. A secret listed in `unreadable` was
+   sealed under a key neither setting holds: its owner gives it again.
+
 ### `POST /v1/admin/outposts`
 
 `{ tenant, name, kind }` answers `{ outpost: Outpost, credential: string }`. The credential (`mo1_` and 43 base64url
@@ -1082,12 +1101,18 @@ went, once, and answers `{ step: { stepId, state: "done" | "failed" } }`.
 - `outcome: "failed"` with `code`, one of `origin_not_allowed` (a page was, or went, off the step's origins, and the
   outpost stopped there), `page_unavailable`, `selector_not_found`, `sign_in_refused` (the site refused the saved
   password), `grant_refused` (the redeem was refused), `submit_refused` (a write step's site refused what was submitted
-  and kept the form), `timed_out`, `browser_error`; and no text.
+  and kept the form), `not_run` (the outpost did not do what the step asks: a kind it does not know, a step missing what
+  its kind needs, or a stop before the step began or, for a write, before anything was typed), `timed_out`,
+  `browser_error`; and no text.
+
+This Mac's outpost runs a write step as `docs/browser-control.md` says ("The outpost running write steps"): it types
+nothing until the form and every field are found, presses once, and reports `done` or `submit_refused` from what the
+page shows, or `not_run` for a step it did nothing for.
 
 A write step's report also settles its write, first, once the vault holds the report: `done` is `confirmed` (the step's
 id is its `providerOperationId`), a failure the outpost reports only before it submits (`page_unavailable`,
-`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`) is `failed`, and any other is `unknown`,
-since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
+`selector_not_found`, `sign_in_refused`, `grant_refused`, `submit_refused`, `not_run`) is `failed`, and any other is
+`unknown`, since the site may have taken it. The write stands as the outpost said even when its outcome can no longer land in the
 attempt (the step then reads refused, as below). A write step brings back no text.
 
 The outcome lands in the attempt's events as two agent events, a tool call in the agent event contract:
@@ -1122,7 +1147,7 @@ malformed report are not.
 
 ### The worker's side
 
-No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and the port has two steps for this.
+No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), and these are its browser methods.
 
 - `signIn(signInId, outpostId)` answers `{ grantId, signInId, site, outpostId, expiresAt }`. The control plane reads
   the switches (`officeCloud`) and the owner's consent, then the attempt's own heartbeat, which also gives the member
@@ -1131,6 +1156,10 @@ No route: a worker holds only the job flow's port (`apps/api/src/job-flow.ts`), 
   `consent_required`, and the attempt's, with `ended`), `sign_in_not_found`, `member_not_allowed`, `sign_in_broken`,
   `outpost_not_found`, `outpost_asleep`, `vault_unavailable`. The model asks for a sign-in by its site's name only; it
   never sees a username, a password or a grant.
+- `signIns()` answers `{ signIns: [{ signInId, site, origins, state }] }`: the shop's live sign-ins this attempt's
+  member is named on, oldest first, `state` `working` or `broken`, after the same switches, consent and heartbeat as
+  `signIn`. It is how a worker finds a sign-in by its site's name before asking for a grant. Never the account, the
+  password or who else may use it, and nothing is written to the audit log: a list changes nothing.
 - `signInBroken(signInId)` answers `{ signInId, state: "broken" }`: the site refused the saved password, and no grant
   is issued for the sign-in until a new password is typed. Only a member named on it can report it
   (`member_not_allowed`). A second report keeps the first's time and member.
@@ -1264,10 +1293,10 @@ that quotes, line breaks and spaces at either end show: `Make a refund on Shopee
 "500.00", set select[name="reason"] to "damaged", then submit form#refund.` A write with no values reads `On {url},
 submit {form}.`
 
-The desktop does not show a browser write's `text` yet: it reads a request's words from a LINE reply's fields or the
-task's action, so a browser write reads "browser.submit on {origin}". It must show `text` on its cards and
-notifications, and offer Approve in a notification only when it shows the text whole, before any outpost runs a write
-step (`docs/browser-control.md`, "Next slices").
+The desktop shows a browser write's `text` as it came, in every language, on the chat's card, on Home and on Needs you,
+whole: never cut, and never in a block that scrolls. A notification offers Approve only when its body is that text,
+unchanged and short enough to be seen whole, which a sentence holding links never is (`docs/browser-control.md`,
+"The desktop showing a browser write").
 
 ## One origin
 
@@ -1522,6 +1551,29 @@ no `tenant`. Each makes its change through the same operation of the shop's reco
 - **The log** names the owner's linked account by its id (`owner-session` for the shop's own session), never its
   subject, an email or a name. No session, or the operator key, answers 401 `unauthorized`; an unlinked owner's session
   401 `unlinked`; 503 `people_unavailable` when the session or the shop's record cannot be read.
+
+**`GET /v1/people/devices`** with no body: the sign-ins helpers made lately, for the owner's app to tell them once of a
+new device (`docs/people.md`, "A helper's new device"). It is one entry for each helper session opened, a join included,
+newest first. It is not part of `People`, so the console reads what it read before.
+
+```ts
+type Devices = { devices: { id: string; helperId: string; name: string; openedAt: string }[] };
+```
+
+- **What it says.** `id` is the session's own id, stable, which the app keeps to know it has already said so. It is no
+  credential: a session is its token, which only its device holds, and the shop keeps only the token's hash. `helperId`
+  is the helper's id, `name` the name the owner gave them, and `openedAt` when the session was opened, by the shop's
+  clock. Nothing else: never a token, a hash, an email, a LINE id or the account a helper signed in with.
+- **Still signed in or not.** A sign-in stays listed after its device signs out, so an owner whose app was closed still
+  hears of it. It is dropped when it is older than a session lasts (30 days) and beyond the newest 50. The sign-ins of a
+  helper the owner removed are not listed. A shop whose record was written before sign-ins were kept lists none, and
+  starts at the next one.
+- **Who.** The same as the rest of this section: an owner session and the shop's own session. A helper's session answers
+  403 `owner_only`, a person's own sign-in 404 `not_found`, no session or the operator key 401 `unauthorized`, an
+  unlinked owner's session 401 `unlinked` and a removed helper's 401 `removed`. It has one method (405
+  `method_not_allowed`), takes no `shop`, `tenant` or `role` in the query (400 `invalid_request`), and answers 503
+  `people_unavailable` when the session or the shop's record cannot be read, never a shorter list.
+- Reading it writes nothing, not even to the audit log.
 
 ### A helper's own routes
 

@@ -56,6 +56,12 @@
   max-height: 160px;
   overflow-y: auto;
 }
+/* A browser write's sentence names the site, the page, the form and every value it will type, and is read whole before it
+   is approved: its block grows with it, with no height it is cut at and nothing scrolled out of sight. */
+.card-cmd.whole {
+  max-height: none;
+  overflow-y: visible;
+}
 /* plan mode's plan: rendered as an answer is, in its own scroll; the card keeps its width */
 .card-plan {
   font-size: 12.5px;

@@ -35,6 +35,10 @@ export interface AskNote {
   member: string;
   /** The card offers Allow once. */
   canApprove: boolean;
+  /** The exact action, whole, as the card shows it. notify-rules offers Approve only when the body is this text, unchanged,
+   *  and short enough to be seen whole: a body cut to fit or changed on the way (a link shortened, marks dropped) is a
+   *  hidden detail. */
+  action?: string;
   /** How many requests wait for the owner now, this one included: all a notification says while details are hidden. */
   waiting: number;
 }
@@ -117,7 +121,15 @@ export function noteFor(
         bot,
         tag: `${bot}:approval`,
         // only the connected runtime's asks carry an approval-core kind; any other has none and is owner-only
-        ask: { id: ev.request_id, approval: ev.kind ?? "", member: who, canApprove: Array.isArray(ev.choices) && ev.choices.includes("once") && !ev.outdated, waiting: ctx.waiting?.() ?? 1 },
+        ask: {
+          id: ev.request_id,
+          approval: ev.kind ?? "",
+          member: who,
+          canApprove: Array.isArray(ev.choices) && ev.choices.includes("once") && !ev.outdated,
+          // what the body must be, word for word, for Approve: the command the card shows (a browser write's sentence)
+          ...(ev.command ? { action: ev.command } : {}),
+          waiting: ctx.waiting?.() ?? 1,
+        },
       };
     case "clarify.request":
       return {
@@ -414,7 +426,7 @@ export async function showNote(note: Note, onClick?: () => void, focusOpen = fal
     notified.add(note.ask.id);
   }
   const src: Outside = note.ask
-    ? { kind: "request", approval: note.ask.approval, member: note.ask.member, summary: note.body, canApprove: note.ask.canApprove }
+    ? { kind: "request", approval: note.ask.approval, member: note.ask.member, summary: note.body, canApprove: note.ask.canApprove, ...(note.ask.action === undefined ? {} : { action: note.ask.action }) }
     : { kind: "notice", title: note.title, body: note.body };
   return showOutside(src, { open: onClick, approve }, note.tag, focusOpen, note.ask?.waiting ?? 1);
 }
@@ -422,6 +434,14 @@ export async function showNote(note: Note, onClick?: () => void, focusOpen = fal
 /** Work that waited while the Mac slept, shown once after it woke (`wokeAt`, ms) and only if something waited. */
 export function showWoke(count: number, wokeAt: number, open?: () => void): Promise<boolean> {
   return showOutside({ kind: "slept", count, wokeAt }, { open }, "manut:slept");
+}
+
+/** A helper signed in on a new device at a shop the person owns: the owner's alert (docs/people.md, "A helper's new device").
+ *  It goes through `showOutside` like every notification, so notify-rules rules on it: quiet hours never silence it, and
+ *  Hide details hides the helper and the shop. Each sign-in has a notification of its own (the tag carries its id). `open`
+ *  is Look first; Later only dismisses. `at` is ms. True when it was shown. Never throws. */
+export function showNewDevice(sign: { id: string; helper: string; shop: string; at: number }, open?: () => void): Promise<boolean> {
+  return showOutside({ kind: "new_device", helper: { name: sign.helper, shop: sign.shop, at: sign.at } }, { open }, `manut:device:${sign.id}`);
 }
 
 /** True while the person can see the manut window. */

@@ -96,6 +96,9 @@ export const AUDIT_ACTIONS = [
   "signin.broken",
   "signin.requested",
   "signin.redeemed",
+  // The shop's vault sealed again under the current key after a rotation (vault-reseal.ts). It names no id: it is the
+  // shop's whole vault, and the counts are in the operator's answer.
+  "vault.resealed",
   "outpost.registered",
   "outpost.removed",
   "outpost.credential_rotated",

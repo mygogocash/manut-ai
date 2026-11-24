@@ -44,6 +44,8 @@ export interface HomeAskRow {
   title: string;
   /** the exact action an approval names (its command), as its card shows it; null for a question */
   action: string | null;
+  /** the action is shown whole, as its card shows it: a browser write's sentence, never cut or scrolled away */
+  whole?: boolean;
   /** who asks: the member's name, or a terminal session's folder and agent */
   who: string;
   /** the shop the ask comes from, when the runtime shows several */
@@ -233,7 +235,7 @@ export function HomeView(p: HomeViewProps) {
                     </span>
                     <span className="grow">
                       {r.action ? (
-                        <code className="act">{r.action}</code>
+                        <code className={r.whole ? "act whole" : "act"}>{r.action}</code>
                       ) : (
                         <span className="l2">
                           <AskLine text={r.title} />
@@ -248,7 +250,7 @@ export function HomeView(p: HomeViewProps) {
                       <span className="l1" id={`home-need-${i}`}>
                         <AskLine text={r.title} />
                       </span>
-                      {r.action && <code className="act">{r.action}</code>}
+                      {r.action && <code className={r.whole ? "act whole" : "act"}>{r.action}</code>}
                       <span className="l2">{[r.who, r.shop, r.age].filter(Boolean).join(" · ")}</span>
                     </span>
                     {/* Approve sends the card's Allow once through the card's own path (respond.ts), and only where
@@ -352,13 +354,14 @@ export function needsYouRows(
 ): HomeAskRow[] {
   return homeAsks(selectAsks(s), settledAsks(s.chats, done)).map((a) => {
     const key = askKey(a);
-    const { title, action } = askLines(a.item);
+    const { title, action, whole } = askLines(a.item);
     const state = rows[key];
     const resolved = a.item.kind === "approval" ? a.item.resolved : undefined;
     return {
       key,
       title,
       action,
+      ...(whole ? { whole: true } : {}),
       who: askFrom(s, a.bot),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       age: age(a.ts, nowMs),

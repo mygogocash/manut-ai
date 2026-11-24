@@ -124,6 +124,11 @@ export class SoundBoard {
   typed(): void {
     this.typedAt = this.deps.now();
   }
+  /** The app answered ask `id` of chat `chat` by itself, as it arrived (Kit's dial, src/code/kitAsks.ts): nobody needs to
+   *  look, so it never rings. */
+  answered(chat: string, id: string): void {
+    this.asked.add(`${chat}\n${id}`);
+  }
 
   /** Play `sound` unless a rule drops it; an ask (`chat` + request id) sounds at most once, ever. */
   offer(sound: Sound, ask?: { chat: string; id: string }): boolean {

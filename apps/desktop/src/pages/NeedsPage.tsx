@@ -37,6 +37,8 @@ export interface NeedRow {
   title?: string;
   /** the exact action an approval names, as its card shows it */
   action?: string | null;
+  /** the action is shown whole, as its card shows it: a browser write's sentence, never cut or scrolled away */
+  whole?: boolean;
   /** when it was asked ("09:14", "Yesterday 18:40"), beside how long ago */
   asked?: string;
 }
@@ -49,7 +51,7 @@ export function newestFirst(asks: readonly Ask[]): Ask[] {
 /** The rows for every open ask in the store, newest first, each opening its chat on the ask. */
 export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
   return newestFirst(selectAsks(s)).map((a) => {
-    const { title, action } = askLines(a.item);
+    const { title, action, whole } = askLines(a.item);
     const role = isSessionChat(a.bot) ? "" : (s.bots.find((b) => b.name === chatTarget(a.bot).bot)?.description ?? "");
     return {
       key: `${a.bot}:${a.item.id}`,
@@ -63,6 +65,7 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       title,
       action,
+      ...(whole ? { whole: true } : {}),
       asked: whenText(a.ts, nowMs),
     };
   });
@@ -83,7 +86,7 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
                       <span className="l1" id={`needs-ask-${i}`}>
                         <AskLine text={r.title ?? r.text} />
                       </span>
-                      {r.action && <code className="act">{r.action}</code>}
+                      {r.action && <code className={r.whole ? "act whole" : "act"}>{r.action}</code>}
                       <span className="l2">
                         {[r.who, r.shop, r.role].filter(Boolean).join(" · ")}
                         {r.asked && ` · ${t("needs.since", { when: r.asked })}`}

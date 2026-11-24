@@ -3,6 +3,7 @@
 // button is read, and the number on the Dock icon.
 import { notificationFor, KNOWN_KINDS, type NotifyEvent } from "@manut/notify-rules";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { dayTime } from "../app/time";
 import { DICT, LANGS, setLang, t } from "../i18n";
 import {
   DEFAULT_QUIET,
@@ -31,6 +32,7 @@ const ask = (kind: string, over: Partial<RequestInfo> = {}): Outside => ({
   approval: kind,
   member: "Nam",
   summary: "Send on LINE: “Thanks, Mali!”",
+  action: "Send on LINE: “Thanks, Mali!”",
   canApprove: true,
   ...over,
 });
@@ -62,10 +64,19 @@ describe("a request waiting for the owner", () => {
     expect(ids(presentOutside(ask("reply", { canApprove: false }), ctx()))).toEqual(["look_first"]);
   });
 
+  it("drops Approve when the body is not the exact action shown whole: cut to fit, changed, or with no action to compare", () => {
+    expect(ids(presentOutside(ask("reply", { summary: "Send on LINE: “Thanks, Ma…" }), ctx()))).toEqual(["look_first"]);
+    expect(ids(presentOutside(ask("reply", { action: undefined }), ctx()))).toEqual(["look_first"]);
+    const long = `Send on LINE: “${"Thanks again for your order. ".repeat(3)}”`;
+    expect(ids(presentOutside(ask("reply", { summary: long, action: long }), ctx()))).toEqual(["look_first"]);
+    // the body still says what it said
+    expect(presentOutside(ask("reply", { summary: long, action: long }), ctx())?.body).toBe(long);
+  });
+
   it("is what notify-rules says, in the app's words: the same in English", () => {
     for (const kind of [...KNOWN_KINDS, "wire_transfer"]) {
       for (const hideDetails of [false, true]) {
-        const event: NotifyEvent = { type: "request", kind, member: "Nam", summary: "Send on LINE: “Thanks, Mali!”" };
+        const event: NotifyEvent = { type: "request", kind, member: "Nam", summary: "Send on LINE: “Thanks, Mali!”", action: "Send on LINE: “Thanks, Mali!”" };
         const rule = notificationFor(event, { hideDetails, waitingCount: 3 }, at("12:00"));
         const shown = presentOutside(ask(kind), ctx({ hideDetails, waiting: 3 }))!;
         expect({ title: shown.title, body: shown.body, sound: shown.sound }, `${kind} ${hideDetails}`).toEqual({ title: rule.title, body: rule.body, sound: rule.sound });
@@ -128,7 +139,8 @@ describe("a plain notice", () => {
 });
 
 describe("the two alerts quiet hours never silence", () => {
-  // A live page that stopped working and a sign-in from a new device have no source in the app yet: only their mapping is here.
+  // A live page that stopped working has no source in the app yet: only its mapping is here. A sign-in to the person's own
+  // account has none either; a helper's new device has one, below.
   const down: Outside = { kind: "page_down", page: "baanmali.shop" };
   const device: Outside = { kind: "new_device", device: "Chrome on Windows" };
 
@@ -162,6 +174,79 @@ describe("the two alerts quiet hours never silence", () => {
         expect({ title: s.title, body: s.body, sound: s.sound }, `${src.kind} ${hideDetails}`).toEqual({ title: rule.title, body: rule.body, sound: rule.sound });
       }
     }
+  });
+});
+
+describe("a helper's new device, as the owner is told", () => {
+  // The canvas's board "States: people and roles": "Mint signed in on a new device. ... If this was not Mint, remove access."
+  type Helper = NonNullable<Extract<Outside, { kind: "new_device" }>["helper"]>;
+  const signedIn = (over: Partial<Helper> = {}): Outside => ({ kind: "new_device", helper: { name: "Mint", shop: "Baan Mali", at: at("21:05"), ...over } });
+  const day = (hhmm: string, now: string, nowDay = 24) => dayTime(at(hhmm), at(now, nowDay));
+
+  it("names the helper and the shop, says when, and rings", () => {
+    expect(presentOutside(signedIn(), ctx({ now: at("21:06") }))).toMatchObject({
+      title: "Mint signed in on a new device",
+      body: `Baan Mali, ${day("21:05", "21:06")}. If this was not Mint, remove access.`,
+      sound: true,
+    });
+  });
+
+  it("says the day first when the sign-in was not today, so one from yesterday is never taken for one from this morning", () => {
+    const body = presentOutside(signedIn(), ctx({ now: at("08:10", 25) }))!.body;
+    expect(body).toBe(`Baan Mali, ${day("21:05", "08:10", 25)}. If this was not Mint, remove access.`);
+    expect(body).toContain("Nov 24");
+  });
+
+  it("rings through quiet hours with Look first and Later, whatever the hour", () => {
+    for (const now of [at("03:00"), at("22:30"), at("12:00")]) {
+      const s = presentOutside(signedIn(), ctx({ now }))!;
+      expect(s.sound).toBe(true);
+      expect(ids(s)).toEqual(["look_first", "later"]);
+    }
+  });
+
+  it("names neither the helper nor the shop while details are hidden", () => {
+    const s = presentOutside(signedIn(), ctx({ hideDetails: true }))!;
+    expect(s).toMatchObject({ title: "Manut AI", body: "Something needs you.", sound: true });
+    expect(JSON.stringify(s)).not.toMatch(/Mint|Baan Mali/);
+  });
+
+  it("is what notify-rules rules on a new sign-in: shown, with a sound, Look first and Later, nothing named when hidden", () => {
+    for (const hideDetails of [false, true]) {
+      for (const now of [at("03:00"), at("12:00")]) {
+        const rule = notificationFor({ type: "new_device" }, { hideDetails }, now);
+        const s = presentOutside(signedIn(), ctx({ hideDetails, now }))!;
+        expect({ sound: s.sound, ids: ids(s) }, `${hideDetails} ${now}`).toEqual({ sound: rule.sound, ids: rule.buttons.map((b) => b.id) });
+        if (hideDetails) expect({ title: s.title, body: s.body }).toEqual({ title: rule.title, body: rule.body });
+      }
+    }
+  });
+
+  it("says Helper and a shop for a name that is blank, and the hour of the alert for a time it cannot read", () => {
+    const s = presentOutside(signedIn({ name: "  ", shop: "", at: Number.NaN }), ctx({ now: at("21:06") }))!;
+    expect(s.title).toBe("Helper signed in on a new device");
+    expect(s.body).toBe(`a shop, ${day("21:06", "21:06")}. If this was not Helper, remove access.`);
+    expect(presentOutside(signedIn({ name: "  Mint  ", shop: " Baan Mali " }), ctx())!.title).toBe("Mint signed in on a new device");
+  });
+
+  it("is worded in every language the app speaks, with the names and the time in place and no slot left open", () => {
+    for (const l of LANGS) {
+      setLang(l);
+      const s = presentOutside(signedIn(), ctx({ now: at("21:06") }))!;
+      expect(s.title, l).toBe(t("out.helperDeviceTitle", { helper: "Mint" }));
+      expect(s.title, l).toContain("Mint");
+      expect(s.body, l).toContain("Baan Mali");
+      expect(s.body, l).toContain("Mint");
+      expect(s.body, l).toContain(day("21:05", "21:06"));
+      expect(`${s.title} ${s.body}`, l).not.toMatch(/\{\w+\}/);
+      // the same buttons, in the app's words
+      expect(s.actions.map((a) => a.title), l).toEqual([DICT[l]["out.look"], DICT[l]["out.later"]]);
+    }
+  });
+
+  it("leaves a sign-in to the person's own account as it was", () => {
+    expect(presentOutside({ kind: "new_device", device: "Chrome on Windows" }, ctx())).toMatchObject({ title: "New sign-in", body: "Someone signed in from Chrome on Windows. Was it you?" });
+    expect(presentOutside({ kind: "new_device" }, ctx())!.body).toBe("Someone signed in from a new device. Was it you?");
   });
 });
 

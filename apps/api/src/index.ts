@@ -5,6 +5,7 @@ import { hasAppleTokenShape } from "./auth";
 import { peekJsonBody, readJsonBody } from "./body";
 import { beginDispatchAction, finishDispatchAction } from "./broker-actions";
 import { isOutpostRoute, outpostRoute, ownerOutpostRoute, ownerVaultRoute, vaultAdminRoute } from "./browser-control";
+import { vaultResealRoute } from "./vault-reseal";
 import { CompanyObject } from "./company-object";
 import { ConnectorError } from "./connectors/types";
 import { readConnectionSecret } from "./cred-broker";
@@ -223,10 +224,11 @@ const ADMIN_METHODS = new Set([
   // code travel in the body.
   "POST /v1/admin/shops/owner", "POST /v1/admin/shops/owner/unlink",
   // The vault's site sign-ins and the outposts that type them (browser-control.ts): list sign-ins without any secret,
-  // add one, replace a password, remove one; register an outpost, list them. The tenant and the ids travel in the
-  // query or the body.
+  // add one, replace a password, remove one, seal the shop's vault again after a key rotation (vault-reseal.ts);
+  // register an outpost, list them. The tenant and the ids travel in the query or the body.
   "GET /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins", "POST /v1/admin/vault/sign-ins/password",
-  "POST /v1/admin/vault/sign-ins/remove", "GET /v1/admin/outposts", "POST /v1/admin/outposts",
+  "POST /v1/admin/vault/sign-ins/remove", "POST /v1/admin/vault/reseal", "GET /v1/admin/outposts",
+  "POST /v1/admin/outposts",
   // Remove an outpost, refusing what waits for it, or replace its credential, the new one shown once. The tenant and the
   // outpost's id travel in the body.
   "POST /v1/admin/outposts/remove", "POST /v1/admin/outposts/credential",
@@ -673,6 +675,9 @@ export default {
     if (shops) return shops;
     // The vault's site sign-ins and the outposts (browser-control.ts). The admin gate above already required both
     // credentials and the exact method for the operator's routes; an outpost's own routes need its credential.
+    // Sealing one shop's vault again under the current key after a rotation (vault-reseal.ts), under the gate above.
+    const resealed = await vaultResealRoute(request, url, env, ctx);
+    if (resealed) return resealed;
     const vault = await vaultAdminRoute(request, url, env, ctx);
     if (vault) return vault;
     const outpost = await outpostRoute(request, url, env, () => featureFlags(env));

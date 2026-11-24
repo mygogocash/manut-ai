@@ -724,6 +724,10 @@ export type BridgeEvent =
       request_id: string;
       title: string;
       command: string;
+      /** `command` must be read whole before it is approved (a browser write's sentence, naming the site, the page, the form
+       *  and every value): every surface shows it with nothing cut or scrolled away, and a notification approves it only when
+       *  its body is that text, shown whole (notify-rules' `shownWhole`). */
+      whole?: boolean;
       choices: ApprovalChoice[];
       /** Asked inside a subagent: which one (its id and name or task). */
       subagent?: AskSubagent;
@@ -772,6 +776,10 @@ export type BridgeEvent =
   | (EventBase & { event: "bots.update" })
   /** The person's shops changed: one was added, left, or is now the one viewed. `shops.list` says how they stand. */
   | (EventBase & { event: "shops.update" })
+  /** A helper signed in on a new device at a shop the person owns (docs/people.md, "A helper's new device"): said once for
+   *  each sign-in the app has not said yet, and never for what it found the first time it looked at the shop. `id` is the
+   *  API's id for the sign-in, `helper` the name the owner gave them ("" when none), `at` seconds. */
+  | (EventBase & { event: "device.new"; id: string; helper: string; shop: { id: string; name: string }; at: number })
   /** After `bots.restart` said ok: the bot is attached again (`ok`), or did not come back in time. Also `ok` when a
    *  bot whose gateway went away without manut restarting it (an update, a relaunch) is attached again. */
   | (EventBase & { event: "bot.restarted"; ok: boolean })

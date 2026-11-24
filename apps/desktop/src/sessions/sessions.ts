@@ -45,7 +45,9 @@ import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat,
 import { localBot } from "../peers/peerKey";
 import { folderKey, getStore, notifySessionEvent, notifySessionNote, onBridgeEvent, selectAsks, setChatRoute, setSessionKeyLookup, type OutFile, type SentFile, type Store } from "../state/store";
 import { blobType, bytesOf, inlinePicture, parseSentFiles, pathsTyped, putSentFiles, SENT_FILES_KEY, shellQuote, wireText, type SavedFile, type SentFilesBook } from "./attach";
-import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, Msg } from "../lib/protocol";
+import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnswers, DiffFile, EventOf, Msg } from "../lib/protocol";
+import { settleApproval } from "../chat/cards/respond";
+import { kitAnswer, noteChange } from "../code/kitAsks";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
@@ -447,13 +449,25 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
 
   // ---- chat plumbing ------------------------------------------------------------------------
 
-  /** Apply one event from a session's chat to the app store, under the session's chat key. */
-  const dispatchChat = (id: string, ev: ChatEvent) => {
+  /** Apply one event from a session's chat to the app store, under the session's chat key. `quiet`: an ask the app
+   *  answers by itself as it arrives (Kit's dial), which no notification announces. */
+  const dispatchChat = (id: string, ev: ChatEvent, quiet = false) => {
     const key = keys.get(id);
     if (!key) return;
     const full = { ...ev, bot: key } as unknown as BridgeEvent;
     store().dispatch({ type: "event", ev: full, now: Date.now() });
-    notify?.(full);
+    if (!quiet) notify?.(full);
+  };
+
+  /** What Kit's dial does with an ask from a coding session as it arrives (src/code/kitAsks.ts): when the project's
+   *  level, a kept rule or the project's edge settles it, the answer to send through the ask's own card. */
+  const kitAsk = (id: string, ev: ChatEvent): (() => Promise<unknown>) | null => {
+    const key = keys.get(id);
+    const r = rec(id);
+    if (ev.event !== "approval.request" || !key?.startsWith("agent:") || !r?.cwd) return null;
+    const ask = ev as unknown as EventOf<"approval.request">;
+    const a = kitAnswer(ask, { chat: key, root: r.cwd, home: state.home, branch: state.live[id]?.branch });
+    return a ? () => settleApproval(store(), key, { id: `approval-${ask.request_id}`, request_id: ask.request_id }, a.choice) : null;
   };
 
   /** The chat's program is gone (it exited, or manut stopped it): a turn the chat still shows ends with it. The
@@ -589,7 +603,11 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // sentence, said in the person's language
         if (ev.event === "turn.end" && typeof ev.error === "string") ev = { ...ev, error: signedOutSaid(ev.error) };
         if (ev.event === "turn.end" && proc.noChat && ev.outcome === "error") ev = { ...ev, error: proc.noChat };
-        dispatchChat(id, ev);
+        // Kit's dial: the card is added either way, so the chat says what was done; its answer goes through the card
+        const kit = kitAsk(id, ev);
+        dispatchChat(id, ev, !!kit);
+        if (kit) void kit();
+        if (ev.event === "tool.diff" && Array.isArray(ev.files)) noteChange(keys.get(id) ?? "", ev.files as DiffFile[]);
         if (ev.event === "turn.end") afterTurn(id, ev.outcome === "interrupted");
         if (ev.event === "turn.end" && proc.signedOut) {
           endSignedOut(id, proc);

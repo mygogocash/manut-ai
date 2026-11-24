@@ -57,7 +57,7 @@ const ask = (kind: string, over: Partial<NonNullable<Note["ask"]>> = {}, id = "r
   body: "Send on LINE: “Thanks, Mali!”",
   bot: "buddy",
   tag: "buddy:approval",
-  ask: { id, approval: kind, member: "Nam", canApprove: true, waiting: 1, ...over },
+  ask: { id, approval: kind, member: "Nam", canApprove: true, action: "Send on LINE: “Thanks, Mali!”", waiting: 1, ...over },
 });
 const news: Note = { title: "Buddy", body: "Replied to Mali.", bot: "buddy", tag: "buddy:message" };
 const performed = (actionId: string, id: unknown) => h.listener!({ actionId, inputValue: null, notification: { id } });
@@ -321,8 +321,9 @@ describe("a job that waited while the Mac slept", () => {
   });
 });
 
-describe("the two alerts that have no source yet", () => {
-  it("ring through quiet hours, with Look first and Later, when something one day reports them", async () => {
+describe("the two alerts quiet hours never silence", () => {
+  // A helper's new device has its own source (notify.device.test.ts); a live page that stops has none yet.
+  it("ring through quiet hours, with Look first and Later", async () => {
     vi.setSystemTime(at("03:00"));
     const { showOutside } = await load();
     await showOutside({ kind: "page_down", page: "baanmali.shop" });

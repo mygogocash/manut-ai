@@ -31,6 +31,13 @@
 // request on, always goes with the session of the ask's own shop, which its id names, and never with the shop being
 // viewed. A shop the person's place in ended (removed, unlinked, gone from the list) is said so, its asks close in those
 // words, and its session and kept read are dropped at once.
+//
+// A helper's new device (docs/people.md). After each read, a shop the person owns is also asked which helpers signed in
+// there, with that shop's own session and never a shop they help at (devices.ts). That is done in the background, after the
+// read is taken, so a slow or failing devices route never holds back or fails the read of the shop. Each sign-in the app
+// has not said yet is emitted once as `device.new`; the first look at a shop emits none, and what was seen is kept per shop
+// on this computer and goes with the shop. The store turns the event into the notification (store.ts `notifySessionEvent`,
+// notify.ts `showNewDevice`).
 import { mayDecide } from "@manut/approval-core";
 import { t } from "../../i18n";
 import type { ApprovalChoice, BridgeEvent, OpMap, PassedOnNote, ShopLeft, ShopRow } from "../../lib/protocol";
@@ -43,6 +50,7 @@ import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopAppr
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { shopRoutines } from "./customize";
+import { DeviceWatch, readDevices } from "./devices";
 import type { ApiSession, SignInState } from "./session";
 import { readShop, type ReadFailure, type ShopPart, type ShopRead, type ShopSnapshot } from "./shop";
 import { departureOf, listShops, ShopSessions, type Departure, type Left } from "./shops";
@@ -92,6 +100,9 @@ export interface HostOptions {
    *  page still runs it, and from then on nothing is kept, so the file that switch removed does not come back with the
    *  next read. */
   keeping?: () => boolean;
+  /** What the app has already said of its shops' helpers' devices, kept on this computer; this computer's own storage when
+   *  absent. */
+  devices?: DeviceWatch;
 }
 
 const notFound = () => new OpError("not_found", t("rt.notFound"));
@@ -157,6 +168,7 @@ export class HttpHost {
   private readonly disk: ShopCache | undefined;
   private readonly keeping: () => boolean;
   private readonly shopSessions: ShopSessions;
+  private readonly devices: DeviceWatch;
   /** What the screens are answered from: the latest good read, or while the API cannot be reached the kept one. */
   private snapshot: ShopSnapshot | null = null;
   /** The shop the person chose to view, when they are in several; the first one listed until they choose. */
@@ -184,6 +196,7 @@ export class HttpHost {
     this.disk = opts.cache;
     this.keeping = opts.keeping ?? (() => true);
     this.shopSessions = opts.shops ?? new ShopSessions(opts.session, this.now);
+    this.devices = opts.devices ?? new DeviceWatch();
   }
 
   /** Whether the screens can be answered: the API answered, or its last answer is shown because it cannot be reached. */
@@ -425,6 +438,28 @@ export class HttpHost {
     } else this.emitChanges(was, r.snapshot);
     this.schedule(POLL_MS);
     this.keep(r.snapshot, ticket);
+    this.lookAtDevices(r.snapshot);
+  }
+
+  /** After a read is taken: forgets what the app saw of the shops the person no longer owns, then asks each shop they own
+   *  which helpers signed in there (each with its own session, a shop they help at never) and tells the sign-ins it has not
+   *  told yet. Each shop is read in the background and never waited on: the asks are what the owner must see, and a route
+   *  that is slow or down must not hold them back. */
+  private lookAtDevices(snapshot: ShopSnapshot): void {
+    const owned = (snapshot.shops ?? []).filter((p) => p.shop.role === "owner").map((p) => p.shop);
+    this.devices.keepOnly(owned.map((shop) => shop.id));
+    for (const shop of owned) void this.tellDevicesOf(shop).catch(() => undefined);
+  }
+
+  /** Reads `shop`'s devices and says each sign-in the app has not said yet (`device.new`), once, oldest first. A read that
+   *  did not work says and remembers nothing, and so does one that ended after the person signed out (which clears what the
+   *  host holds of the shops) or left the shop, or after the host stopped: the next read that works tells the sign-ins. */
+  private async tellDevicesOf(shop: ShopRow): Promise<void> {
+    const listed = await readDevices(this.shopSessions, shop);
+    if (!listed || !this.running || partOf(this.snapshot, shop.id)?.shop.role !== "owner") return;
+    for (const d of this.devices.fresh(shop.id, listed)) {
+      this.emit({ event: "device.new", bot: TEAM, id: d.id, helper: d.name, shop: { id: shop.id, name: shop.name }, at: d.openedAt / 1000 });
+    }
   }
 
   /** Keeps the read on disk for the next run, unless Settings has moved the choice off this shop. Never waited on. */
