@@ -161,14 +161,19 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 46, the owner's memory and routines writes on the connected desktop, through the API's existing owner routes
-     (`feat/connected-memory-routines`, Sonnet), started when item 43 finished.
    - item 47, each coding lane in a git worktree of its own (`feat/lane-worktrees`, Opus), started when item 44
      finished. Two heavy helpers at a time ran without a stop at the limit on 24 Nov afternoon.
+   - item 48, approvals found without reading every task: a per-shop lookup of which task holds each request
+     (`feat/approval-index`, Opus), started when item 46 finished. `GET /v1/approvals` and deciding walk the whole
+     task index one task at a time today, which a busy shop would take past Cloudflare's per-request call limit.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 44 (`GET /v1/tasks`, the session's own tasks newest first, 25 a page with a stable cursor, each task
+   Merged: 46 (the owner's memory and routines on the connected desktop: remember, confirm, correct and forget a
+   fact, make and remove a team routine, each change bound to the shop its list was read for; it also fixed the
+   Connected Playwright stubs item 44 had left serving only the export, which failed nine `google-sheets` specs and one
+   `make-shop` spec in CI on `d74eaf1`. The root gate runs no Playwright: when a merge changes what Connected reads, run
+   the Connected specs that stub the API before pushing), 44 (`GET /v1/tasks`, the session's own tasks newest first, 25 a page with a stable cursor, each task
    answering for itself in its own object; an owner's shop session also reads `/v1/schedules` and
    `/v1/inbound/attention`; the connected desktop reads the newest 50 tasks instead of the export, with cache version
    5, and a screens test pinned from the export-based code), 43 (the model gateway's sweep and alerts: the shop's TenantObject now has an alarm, a list of jobs, which
