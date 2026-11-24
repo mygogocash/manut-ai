@@ -131,7 +131,8 @@ with PKCE and a one-use state), the refresh token is sealed in the vault, and on
 through approval-core, owner-only, naming the sheet, the month, the rows and their totals, and sent once on approval. The
 sheet's record in the vault keeps what was appended to it (the month, when, how many rows and how it ended, never the
 rows), so a month already sent, or sent with no answer learnt, is asked for again only with that said first, and two
-requests for one month cannot both write it unannounced. Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are Wrangler secrets every Google route answers
+requests for one month cannot both write it unannounced. Deleting a shop's data revokes its Google token at Google before the
+vault forgets it, and says when Google could not be reached. Until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are Wrangler secrets every Google route answers
 `google_not_configured`; no environment sets them. The Picker (the owner choosing an existing sheet) comes later.
 
 What the owner makes to turn it on, in a Google Cloud project of their own [G3, G4, G5]:

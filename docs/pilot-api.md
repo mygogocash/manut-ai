@@ -274,6 +274,11 @@ type DeletedShop = {
   schedulesWiped: number;
   occurrencesWiped: number;
   sessionsWiped: number;
+  // Only for a shop that had a Google connection: how many were ended at Google before the vault forgot their tokens, and
+  // how many could not be. The shop's data is deleted either way; the second is for the owner to end in their Google
+  // account ("Google Sheets for Ton's books", below). The deletion's record keeps both with the other counts.
+  googleRevoked?: number;
+  googleNotRevoked?: number;
   deletedAt: string;
 };
 ```
@@ -333,6 +338,13 @@ type DeletedShop = {
     request. A shop whose own record is gone cannot be opened, so no page lists it; the note above the shop's page
     says its deletion did not finish and offers the same button. The practice fake lists and finishes a deletion
     that did not finish by the same rules, though a practice wipe never stops part way.
+  - **Google.** A shop's Google connection is revoked at Google before its vault forgets the token, as `POST
+    /v1/google/disconnect` does it, in every deletion: the operator's of a shop that never went live, the owner's yes on
+    their link, and a person's own tenant. Google not answering, or the secret not opening, or Google not being set up on
+    this Worker, never stops the deletion: the answer counts the connection as `googleNotRevoked`. The vault is listed
+    first, and a vault that cannot be listed is not wiped (`connections` in `failed`), so no token is forgotten that was
+    not looked at. A run that stops after the vault was wiped carries the same counts on its `wipe_incomplete`, since the
+    run that finishes it has no connection left to revoke. No token is in any answer, record or log.
   - Every step answers again after its own wipe: the task index reads as empty once the shop's own object is wiped,
     and each wipe finds nothing more to remove. So the same request runs to the end after a stop at any step,
     including one after the tombstone, when only taking the shop off the list is left.
@@ -2335,6 +2347,7 @@ An append's job ends `failed` with one of these, besides the job flow's own: `go
 `sheet_in_progress`, `sheet_not_made`, `sheet_tab_missing`. The owner's route answers 400 `invalid_month` before
 anything starts.
 
+**Deleting the shop** revokes the token at Google first, as disconnecting does ("Export and deletion", above).
+
 **Not built yet.** The desktop's and the web's screens (Customize › Connections gets a Google row); the Google Picker,
-for the owner to choose an existing sheet; a monthly schedule for the append; and revoking the token at Google when the
-shop's data is deleted (deletion forgets it).
+for the owner to choose an existing sheet; and a monthly schedule for the append.

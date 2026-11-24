@@ -219,6 +219,10 @@ export type DeletedShop = {
   schedulesWiped: number;
   occurrencesWiped: number;
   sessionsWiped: number;
+  /// Only for a shop that had a Google connection: how many were ended at Google before the vault forgot their tokens, and how
+  /// many could not be (Google did not answer), which the owner removes in their Google account's settings.
+  googleRevoked?: number;
+  googleNotRevoked?: number;
   deletedAt: string;
 };
 

@@ -100,6 +100,17 @@ describe("the words for deleting a shop", () => {
     expect(deletedText("Baan Mali", null)).toBe("Baan Mali is already deleted. Nothing of it was left to delete.");
   });
 
+  it("says what became of the shop's Google access, and only for a shop that had a Google connection", () => {
+    expect(deletedText("Baan Mali", { ...RESULT, googleRevoked: 1, googleNotRevoked: 0 }, SAME_DAY)).toBe(
+      "Deleted Baan Mali at 10:00. Removed 1 task with its replies, 1 LINE connection and the shop's messages and payments. Manut AI's access to the owner's Google account was ended at Google.",
+    );
+    // Google not answering never stops a deletion, so the words say what is left for the owner to do.
+    expect(deletedText("Baan Mali", { ...RESULT, googleRevoked: 0, googleNotRevoked: 1 }, SAME_DAY)).toBe(
+      "Deleted Baan Mali at 10:00. Removed 1 task with its replies, 1 LINE connection and the shop's messages and payments. Google could not be reached, so Manut AI's access to the owner's Google account may still stand: ask the owner to remove it in their Google account's settings.",
+    );
+    expect(deletedText("Baan Mali", RESULT, SAME_DAY)).not.toContain("Google");
+  });
+
   it("says plainly whether a deletion that did not finish left data behind", () => {
     const incomplete = new ApiError(500, "wipe_incomplete");
     expect(unfinishedText({ name: "Baan Mali", partial: true, tries: 1, error: incomplete })).toBe(

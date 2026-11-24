@@ -173,7 +173,14 @@ export function deletedText(name: string, result: DeletedShop | null, now: numbe
   if (result.sessionsWiped) parts.push(countOf(result.sessionsWiped, "sign-in session", "sign-in sessions"));
   parts.push("the shop's messages and payments");
   const when = Number.isNaN(Date.parse(result.deletedAt)) ? "" : ` ${whenText(result.deletedAt, now)}`;
-  return `Deleted ${name}${when}. Removed ${listOf(parts)}.`;
+  // A shop's Google connection is ended at Google before the vault forgets it. When Google could not be reached the data is
+  // gone all the same, and only the owner can end the access that is left.
+  const google = result.googleNotRevoked
+    ? " Google could not be reached, so Manut AI's access to the owner's Google account may still stand: ask the owner to remove it in their Google account's settings."
+    : result.googleRevoked
+      ? " Manut AI's access to the owner's Google account was ended at Google."
+      : "";
+  return `Deleted ${name}${when}. Removed ${listOf(parts)}.${google}`;
 }
 
 /// A deletion that stopped part way (`partial`, from the API's wipe_incomplete) or whose answer never
