@@ -495,6 +495,8 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   "signin.requested": () => "asked to sign in to a site",
   "signin.broken": () => "reported that a site refused a saved password",
   "signin.redeemed": () => "asked for a sign-in to type into a site",
+  // The owner's own Connections: the log keeps the sign-in's id, and who may use it is on the sign-in's record.
+  "signin.members_changed": () => "changed who may use a site sign-in",
   "outpost.removed": () => "removed an outpost",
   "outpost.credential_rotated": () => "gave an outpost a new credential",
   // The owner's own Connections: the log keeps the outpost's id, never the name the owner typed.

@@ -751,8 +751,8 @@ export default {
     // This Mac registering itself as an outpost through the desktop, with the owner's session (browser-control.ts).
     const ownerOutpost = await ownerOutpostRoute(request, url, env);
     if (ownerOutpost) return ownerOutpost;
-    // The owner's Connections: the shop's sign-ins and outposts, a new password, and renaming or removing an outpost, with
-    // the owner's session (browser-control.ts).
+    // The owner's Connections: the shop's sign-ins and outposts, a sign-in added, a new password, who may use a sign-in, and
+    // renaming or removing an outpost, with the owner's session (browser-control.ts).
     const ownerVault = await ownerVaultRoute(request, url, env);
     if (ownerVault) return ownerVault;
     // Google Sheets for Ton's books (google-connect.ts): the owner's own routes from their session, and Google's callback,

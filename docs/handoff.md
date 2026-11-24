@@ -139,14 +139,15 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 39, Bring it back after a rewind, and main moving on the lane's row (`feat/bring-it-back`, Sonnet);
-   - item 40, the owner adds a sign-in and changes who may use it, from the app (`feat/owner-sign-ins`, Opus);
-   - item 41, the security review's front-door findings (`fix/front-door-hardening`, Opus).
-   Next: item 42, the review's session and self-serve findings (Opus), then item 39 (Bring it back; its run stopped
-   at the limit before it pushed anything, so send it on in its own thread).
+   - item 41, the security review's front-door findings (`fix/front-door-hardening`, Opus);
+   - item 42, the review's session and self-serve findings (`fix/sessions-and-self-serve`, Opus).
+   Next: item 39 (Bring it back; its run stopped at the limit before it pushed anything, so send it on in its own
+   thread).
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 37 (Google Sheets on the desktop: Customize › Connections' row, the append shown whole before Approve, a
+   Merged: 40 (the owner adds a sign-in and changes who may use it, from the app: `POST /v1/vault/sign-ins` and
+   `/members`, through the vault's own operations), 37 (Google Sheets on the desktop: Customize › Connections' row, the append shown whole before Approve, a
    month already sent asked again only with words that say so, and a shop's deletion revoking its Google token first),
    38 (a shop make is journalled first and the same request finishes the same shop, nothing is listed until
    whole, and a self-serve slot is never lost; `docs/pilot-api.md`, "A make that stops part way"), 17 (the owner's web app at `/app/`: `__Host-` HttpOnly SameSite=Strict cookies read only by five routes

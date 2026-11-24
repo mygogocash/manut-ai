@@ -1287,4 +1287,14 @@ describe("the audit log's words for the owner's Connections", () => {
     expect(sentence).not.toContain("outpost.renamed");
     expect(sentence).not.toMatch(/\bdid\b/);
   });
+
+  it("says what the owner's added sign-in and their choice of who may use one did, by the owner", () => {
+    expect(said({ actor: owner, action: "signin.created", subject: { signInId: "s1" } }))
+      .toBe("Fon (linked account owner-1) added a site sign-in to the vault.");
+    expect(said({ actor: owner, action: "signin.members_changed", subject: { signInId: "s1" } }))
+      .toBe("Fon (linked account owner-1) changed who may use a site sign-in.");
+    expect(said({ actor: shopSession, action: "signin.members_changed", subject: { signInId: "s1" } }))
+      .toBe("Fon (the shop's own session) changed who may use a site sign-in.");
+    expect(said({ actor: owner, action: "signin.members_changed" })).not.toContain("signin.members_changed");
+  });
 });

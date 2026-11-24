@@ -6,19 +6,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { LANGS, setLang, t } from "../i18n";
-import type { ShopConnections, ShopOutpost, VaultSignIn } from "../runtime/connections";
+import { isOrigin, SIGN_IN_MEMBERS, type ShopConnections, type ShopOutpost, type VaultSignIn } from "../runtime/connections";
 import { CustomizeView, type MemoryPaneProps, type RoutinesPaneProps } from "./CustomizePage";
 import {
   addedLine,
+  addFields,
+  addStart,
   CONN_START,
   connectionsDo,
   connReduce,
   memberName,
+  membersReady,
   nameReady,
   outpostLine,
   passwordReady,
+  readAddress,
+  readAddresses,
   signInLine,
   thisMacRecord,
+  type AddDraft,
   type ConnAction,
   type ConnectionsCalls,
   type ConnUi,
@@ -88,6 +94,15 @@ function reduce(...actions: ConnAction[]): ConnUi {
   return actions.reduce(connReduce, CONN_START);
 }
 
+/** A runtime client a test is not about: each change fails, so a test that reaches one by mistake says so. */
+const noCalls: ConnectionsCalls = {
+  add: () => Promise.reject(new Error("not this test's change")),
+  password: () => Promise.reject(new Error("not this test's change")),
+  members: () => Promise.reject(new Error("not this test's change")),
+  rename: () => Promise.reject(new Error("not this test's change")),
+  remove: () => Promise.reject(new Error("not this test's change")),
+};
+
 beforeEach(() => setLang("en"));
 afterEach(() => setLang("en"));
 
@@ -116,13 +131,18 @@ describe("how a sign-in and an outpost are said", () => {
 });
 
 describe("the Vault box", () => {
-  it("draws the canvas's box: each sign-in, who may use it, whether it works, when it was added, and its Change", () => {
+  it("draws the canvas's box: each sign-in, who may use it, whether it works, when it was added, its Change, and Add a sign-in", () => {
     const html = vault(props());
     expect(words(html)).toBe(
       "Vault Passwords are hidden from AI Sign-ins your team may use. The vault types the password in. The AI never sees it. " +
-        "Shopee Seller Centre Used by Nam and Ton, last today 09:02 Added 3 November Working Change " +
-        "Carrier portal The site refused the saved password today at 09:02. Added 3 November Needs a new password Change",
+        "Shopee Seller Centre Used by Nam and Ton, last today 09:02 Added 3 November Working Change Who uses it " +
+        "Carrier portal The site refused the saved password today at 09:02. Added 3 November Needs a new password Change Who uses it " +
+        "Add a sign-in",
     );
+    expect(byTestId(VaultPane({ p: props() }), "signin-who").map((e) => [e.props.className, e.props["aria-label"]])).toEqual([
+      ["lk", "Who uses it: Shopee Seller Centre"],
+      ["lk", "Who uses it: Carrier portal"],
+    ]);
     // The states board's two rows: working, with a quiet Change; refused, with a warning tag and a button.
     const [shopee, refused] = byTestId(VaultPane({ p: props() }), "signin-change");
     expect([shopee?.props.className, refused?.props.className]).toEqual(["lk", "btn"]);
@@ -139,7 +159,11 @@ describe("the Vault box", () => {
     expect(words(vault(props({ state: { kind: "unavailable", code: "offline", message: "Offline: the Manut AI API cannot be reached." } })))).toContain(
       "Offline: the Manut AI API cannot be reached.",
     );
-    expect(words(vault(props({ state: { kind: "ready", value: { ...DATA, signIns: [] } } })))).toContain("No sign-ins yet. Your operator adds them for now.");
+    // An empty vault says so, with Add a sign-in under it: the owner adds one from here.
+    expect(words(vault(props({ state: { kind: "ready", value: { ...DATA, signIns: [] } } })))).toContain("No sign-ins yet. Add a sign-in");
+    // Add a sign-in is there only once the vault was read: not while reading, and not for a helper's refusal.
+    expect(vault(props({ state: LOADING }))).not.toContain('data-testid="signin-add"');
+    expect(vault(props({ state: { kind: "unavailable", code: "owner_only", message: "Only Noi sees it." } }))).not.toContain('data-testid="signin-add"');
     // Until the vault is read, nothing about the shop's outposts is drawn: the Vault box says why.
     expect(outposts(props({ state: LOADING }))).toBe("");
   });
@@ -226,6 +250,7 @@ describe("the typed password", () => {
   it("is sent once, for the shop its row was read for, and comes back in no word the page shows", async () => {
     const sent: unknown[][] = [];
     const calls: ConnectionsCalls = {
+      ...noCalls,
       password: async (...args) => {
         sent.push(args);
         return { signIn: { ...carrier, state: "working", brokenAt: null, brokenBy: null, passwordSetAt: NOW / 1000 } };
@@ -247,7 +272,9 @@ describe("the typed password", () => {
 
   it("says each refusal in the owner's words, and drops a row the shop no longer has", async () => {
     const refusing = (code: string, message = "runtime words"): ConnectionsCalls => ({
+      add: () => Promise.reject({ code, message }),
       password: () => Promise.reject({ code, message }),
+      members: () => Promise.reject({ code, message }),
       rename: () => Promise.reject({ code, message }),
       remove: () => Promise.reject({ code, message }),
     });
@@ -276,6 +303,7 @@ describe("the typed password", () => {
 describe("renaming and removing, step by step", () => {
   it("puts the runtime's answer in its place, and says what was done", async () => {
     const calls: ConnectionsCalls = {
+      ...noCalls,
       password: async () => ({ signIn: carrier }),
       rename: async (_shop, outpost, name) => ({ outpost: { ...mac, id: outpost, name } }),
       remove: async (_shop, outpost) => ({ outpost }),
@@ -424,6 +452,294 @@ describe("this Mac, folded into its own row", () => {
       expect(part(draw(running("outpost-mac"), props()), "outposts"), lang).not.toBe(english[0]);
       expect(part(draw(running("outpost-mac"), props()), "outposts"), lang).toContain("Front desk Mac");
       expect(part(draw(running("outpost-mac"), props({ state: { kind: "ready", value: { ...DATA, outposts: [mac] } } })), "shop-outposts"), lang).not.toBe(english[1]);
+    }
+  });
+});
+
+// ---- Add a sign-in, and who may use one -------------------------------------------------------------------------------------
+
+/** Add a sign-in, open with `draft` typed into it. */
+const adding = (draft: Partial<AddDraft>, over: Partial<ConnectionsProps> = {}) =>
+  props({ ui: { ...CONN_START, ask: { kind: "add", draft: { ...addStart(), ...draft } }, at: "vault" }, ...over });
+/** Everything a new sign-in needs, as an owner types it: a page's address pasted whole, a space a paste brought. */
+const READY: AddDraft = { site: "Carrier portal", addresses: ["https://track.carrier.example/parcels?id=1"], username: "baan.mali ", password: PASSWORD, members: ["nam"] };
+type Change = (e: { target: { value: string } }) => void;
+const submit = (form: ReactElement<Record<string, unknown>> | undefined) => (form?.props.onSubmit as (e: { preventDefault(): void }) => void)({ preventDefault() {} });
+const escape = (form: ReactElement<Record<string, unknown>> | undefined) =>
+  (form?.props.onKeyDown as (e: unknown) => void)({ key: "Escape", preventDefault() {}, nativeEvent: { isComposing: false } });
+
+describe("Add a sign-in", () => {
+  it("opens its form in the canvas's last row, with every field empty and nobody ticked, and nothing else can be asked", () => {
+    const dispatch = vi.fn();
+    (byTestId(VaultPane({ p: props({ dispatch }) }), "signin-add")[0]?.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenCalledWith({ type: "add" });
+    const open = reduce({ type: "add" });
+    expect(open).toEqual({ ...CONN_START, ask: { kind: "add", draft: { site: "", addresses: [""], username: "", password: "", members: [] } }, at: "vault" });
+    const said = words(vault(props({ ui: open })));
+    expect(said).toContain("A new sign-in for your team The site's name Its address Paste it from your browser, starting with https://.");
+    expect(said).toContain("The account's name on the site The email or name you sign in with there. Its password");
+    expect(said).toContain("Who may use it Nam Pim Ton Kit Only the members you tick may use it.");
+    const box = VaultPane({ p: props({ ui: open }) });
+    // The link gives way to the form, and each row's links wait while it is open.
+    expect(byTestId(box, "signin-add")).toEqual([]);
+    expect([...byTestId(box, "signin-change"), ...byTestId(box, "signin-who")].map((e) => e.props.disabled)).toEqual([true, true, true, true]);
+    expect(byTestId(box, "add-save")[0]?.props.disabled).toBe(true);
+    expect(byTestId(box, "add-password")[0]?.props).toMatchObject({ type: "password", value: "", autoComplete: "new-password", maxLength: 1024, spellCheck: false });
+    expect(byTestId(box, "add-address")[0]?.props).toMatchObject({ type: "text", inputMode: "url", autoCapitalize: "off", spellCheck: false });
+    expect(SIGN_IN_MEMBERS.map((m) => byTestId(box, `member-${m}`)[0]?.props.checked)).toEqual([false, false, false, false]);
+  });
+
+  it("reads each address as the vault keeps it: the site's part only, and https only", () => {
+    expect(readAddress("https://Seller.Shopee.co.th/portal/sale?type=toship")).toEqual({ kind: "origin", origin: "https://seller.shopee.co.th", changed: true });
+    expect(readAddress("  https://seller.shopee.co.th  ")).toEqual({ kind: "origin", origin: "https://seller.shopee.co.th", changed: false });
+    expect(readAddress("https://seller.shopee.co.th:443/")).toEqual({ kind: "origin", origin: "https://seller.shopee.co.th", changed: true });
+    expect(readAddress("https://seller.shopee.co.th:8443")).toEqual({ kind: "origin", origin: "https://seller.shopee.co.th:8443", changed: false });
+    expect(readAddress(" ")).toEqual({ kind: "empty" });
+    for (const text of ["http://seller.shopee.co.th", "ftp://files.example", "seller.shopee.co.th:443"]) {
+      expect(readAddress(text), text).toEqual({ kind: "problem", problem: "not_https" });
+    }
+    for (const text of ["seller.shopee.co.th", "shopee", "https://"]) expect(readAddress(text), text).toEqual({ kind: "problem", problem: "not_address" });
+    expect(readAddress("https://fon:secret@seller.shopee.co.th")).toEqual({ kind: "problem", problem: "account" });
+    expect(readAddress("https://fon@seller.shopee.co.th")).toEqual({ kind: "problem", problem: "account" });
+    const reads = readAddresses(["https://a.example/x", "https://A.example", "", "https://b.example"]);
+    expect(reads.map((r) => (r.kind === "problem" ? r.problem : r.kind))).toEqual(["origin", "repeated", "empty", "origin"]);
+    // Every origin read here is one the vault would keep as it is.
+    for (const r of reads) if (r.kind === "origin") expect(isOrigin(r.origin)).toBe(true);
+  });
+
+  it("says under each field what the vault would not keep, as it is typed, and says nothing of a field still empty", () => {
+    const p = adding({ site: "x".repeat(81), addresses: ["http://seller.shopee.co.th", "https://fon:pw@seller.shopee.co.th", "seller", "https://a.example", "https://a.example/"], username: "fon\u0007" });
+    const said = words(vault(p));
+    for (const line of [
+      "A site's name is 1 to 80 letters.",
+      "Only addresses that start with https:// work.",
+      "Leave the account's name and password out of the address: type them below.",
+      "Paste the whole address from your browser, starting with https://.",
+      "This address is already in the list.",
+      "The account's name is 1 to 256 characters.",
+    ]) {
+      expect(said).toContain(line);
+    }
+    // An address that holds an account is never said back.
+    expect(said).not.toContain("fon:pw");
+    // The site's part a page's own address is cut to is said, so the owner sees that it is what counts.
+    expect(words(vault(adding({ addresses: ["https://Track.Carrier.example/parcels?id=1"] })))).toContain("Kept as https://track.carrier.example");
+    expect(words(vault(adding({ addresses: ["https://track.carrier.example"] })))).not.toContain("Kept as");
+    const box = VaultPane({ p });
+    expect(byTestId(box, "add-address").map((e) => e.props["aria-invalid"])).toEqual([true, true, true, undefined, true]);
+    expect([byTestId(box, "add-site")[0]?.props["aria-invalid"], byTestId(box, "add-username")[0]?.props["aria-invalid"]]).toEqual([true, true]);
+    expect(byTestId(box, "add-save")[0]?.props.disabled).toBe(true);
+    expect(words(vault(adding({})))).not.toMatch(/Only addresses|Paste the whole|1 to 80|1 to 256|Kept as/);
+  });
+
+  it("is ready once the vault would take it: the name trimmed, each address's site, the account's name without a paste's spaces, someone ticked", () => {
+    expect(addFields({ ...READY, members: [] })).toBeNull();
+    expect(addFields({ ...READY, site: "  " })).toBeNull();
+    expect(addFields({ ...READY, addresses: [""] })).toBeNull();
+    expect(addFields({ ...READY, addresses: ["https://track.carrier.example", "http://track.carrier.example"] })).toBeNull();
+    expect(addFields({ ...READY, password: "" })).toBeNull();
+    expect(addFields({ ...READY, username: "   " })).toBeNull();
+    expect(addFields({ ...READY, site: " Carrier portal ", addresses: ["https://track.carrier.example/parcels", "", "https://login.carrier.example"] })).toEqual({
+      site: "Carrier portal",
+      origins: ["https://track.carrier.example", "https://login.carrier.example"],
+      username: "baan.mali",
+      password: PASSWORD,
+      members: ["nam"],
+    });
+    // A password is kept exactly as typed, spaces and all, up to what the vault takes.
+    expect(addFields({ ...READY, password: ` ${PASSWORD} ` })?.password).toBe(` ${PASSWORD} `);
+    expect(addFields({ ...READY, password: "x".repeat(1025) })).toBeNull();
+    expect(addFields({ ...READY, site: "ร้าน".repeat(20) })?.site).toBe("ร้าน".repeat(20));
+    expect(byTestId(VaultPane({ p: adding(READY) }), "add-save")[0]?.props.disabled).toBe(false);
+  });
+
+  it("adds and removes address fields, up to five and never none, and keeps the members ticked in the team's order", () => {
+    let s = reduce({ type: "add" }, { type: "address", index: 0, text: "https://a.example" });
+    for (let i = 0; i < 6; i++) s = connReduce(s, { type: "addressMore" });
+    expect(s.ask?.kind === "add" && s.ask.draft.addresses).toEqual(["https://a.example", "", "", "", ""]);
+    expect(byTestId(VaultPane({ p: props({ ui: s }) }), "add-address-more")).toEqual([]);
+    s = connReduce(connReduce(s, { type: "address", index: 2, text: "https://c.example" }), { type: "addressLess", index: 1 });
+    expect(s.ask?.kind === "add" && s.ask.draft.addresses).toEqual(["https://a.example", "https://c.example", "", ""]);
+    const one = reduce({ type: "add" }, { type: "addressLess", index: 0 }, { type: "address", index: 3, text: "https://nowhere.example" });
+    expect(one.ask?.kind === "add" && one.ask.draft.addresses).toEqual([""]);
+    expect(byTestId(VaultPane({ p: props({ ui: one }) }), "add-address-remove")).toEqual([]);
+    const ticked = reduce({ type: "add" }, { type: "member", member: "kit" }, { type: "member", member: "nam" }, { type: "member", member: "buddy" }, { type: "member", member: "ton" }, { type: "member", member: "kit" });
+    expect(ticked.ask?.kind === "add" && ticked.ask.draft.members).toEqual(["nam", "ton"]);
+  });
+
+  it("sends each field's, address's and box's change through the page's own actions, saves only when ready, and cancels on Escape", () => {
+    const dispatch = vi.fn();
+    const onSave = vi.fn();
+    const box = () => VaultPane({ p: adding({ ...READY, addresses: ["https://a.example", ""] }, { dispatch, onSave }) });
+    (byTestId(box(), "add-site")[0]?.props.onChange as Change)({ target: { value: "Carrier" } });
+    (byTestId(box(), "add-username")[0]?.props.onChange as Change)({ target: { value: "fon" } });
+    (byTestId(box(), "add-password")[0]?.props.onChange as Change)({ target: { value: "pw" } });
+    (byTestId(box(), "add-address")[1]?.props.onChange as Change)({ target: { value: "https://b.example" } });
+    (byTestId(box(), "add-address-remove")[0]?.props.onClick as () => void)();
+    (byTestId(box(), "add-address-more")[0]?.props.onClick as () => void)();
+    (byTestId(box(), "member-pim")[0]?.props.onChange as () => void)();
+    expect(dispatch.mock.calls.map(([a]) => a)).toEqual([
+      { type: "addField", field: "site", text: "Carrier" },
+      { type: "addField", field: "username", text: "fon" },
+      { type: "addField", field: "password", text: "pw" },
+      { type: "address", index: 1, text: "https://b.example" },
+      { type: "addressLess", index: 0 },
+      { type: "addressMore" },
+      { type: "member", member: "pim" },
+    ]);
+    submit(byTestId(box(), "add-form")[0]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    escape(byTestId(box(), "add-form")[0]);
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "cancel" });
+    // Enter in a form that is not ready saves nothing.
+    submit(byTestId(VaultPane({ p: adding({ site: "Carrier portal" }, { onSave }) }), "add-form")[0]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps no password once Add is pressed: not in the page's state, the lists or its words, and not put back after a refusal", async () => {
+    const typing = reduce(
+      { type: "add" },
+      { type: "addField", field: "site", text: "Carrier portal" },
+      { type: "address", index: 0, text: "https://track.carrier.example" },
+      { type: "addField", field: "username", text: "baan.mali" },
+      { type: "addField", field: "password", text: PASSWORD },
+      { type: "member", member: "nam" },
+    );
+    expect(JSON.stringify(typing)).toContain(PASSWORD);
+    // The field's value is drawn as the browser keeps a password field's: never as words on the page.
+    expect(words(vault(props({ ui: typing })))).not.toContain(PASSWORD);
+    const sending = connReduce(typing, { type: "begin" });
+    expect(sending).toEqual({
+      ask: { kind: "add", draft: { site: "Carrier portal", addresses: ["https://track.carrier.example"], username: "baan.mali", password: "", members: ["nam"] } },
+      busy: true,
+      at: "vault",
+      error: null,
+      notice: null,
+    });
+    // Nothing collects in the form while it is on its way.
+    for (const a of [{ type: "addField", field: "password", text: PASSWORD }, { type: "member", member: "kit" }, { type: "addressMore" }, { type: "cancel" }] as ConnAction[]) {
+      expect(connReduce(sending, a)).toBe(sending);
+    }
+    const refused = connReduce(sending, { type: "failed", message: t("conn.err.again"), close: false });
+    expect(JSON.stringify(refused)).not.toContain(PASSWORD);
+    expect(refused.ask?.kind === "add" && refused.ask.draft).toMatchObject({ site: "Carrier portal", password: "" });
+    expect(connReduce(sending, { type: "done", notice: "Added." }).ask).toBeNull();
+
+    // The change goes once, to the shop the rows were read for, and what comes back holds none of it.
+    const sent: unknown[][] = [];
+    const made = signIn({ id: "signin-new", site: "Carrier portal", members: ["nam"], lastUsedAt: null, lastUsedBy: null, createdAt: NOW / 1000, passwordSetAt: NOW / 1000 });
+    const calls: ConnectionsCalls = {
+      ...noCalls,
+      add: async (...args) => {
+        sent.push(args);
+        return { signIn: made };
+      },
+    };
+    const fields = addFields({ site: "Carrier portal", addresses: ["https://track.carrier.example"], username: "baan.mali", password: PASSWORD, members: ["nam"] })!;
+    const step = await connectionsDo(calls, DATA, { what: "add", fields });
+    expect(sent).toEqual([["pilot:baan-mali", { site: "Carrier portal", origins: ["https://track.carrier.example"], username: "baan.mali", password: PASSWORD, members: ["nam"] }]]);
+    expect(step.data.signIns.map((s) => s.id)).toEqual(["signin-shopee", "signin-carrier", "signin-new"]);
+    expect(step.action).toEqual({ type: "done", notice: "Added Carrier portal to the vault. Nam may use it from now on." });
+    expect(JSON.stringify(step)).not.toContain(PASSWORD);
+    // A runtime whose refusal repeated it would still not get it on the page.
+    const echoing: ConnectionsCalls = { ...noCalls, add: () => Promise.reject({ code: "refused", message: `could not add ${PASSWORD}` }) };
+    expect((await connectionsDo(echoing, DATA, { what: "add", fields })).action).toEqual({ type: "failed", message: "That did not work. Try again.", close: false });
+  });
+
+  it("says each of the vault's refusals in the owner's words, and closes the question for a full vault", async () => {
+    const fields = addFields(READY)!;
+    const said = async (code: string) =>
+      (await connectionsDo({ ...noCalls, add: () => Promise.reject({ code, message: "runtime words" }) }, DATA, { what: "add", fields })).action;
+    const failed = (message: string, close = false) => ({ type: "failed", message, close });
+    expect(await said("invalid_site")).toEqual(failed("A site's name is 1 to 80 letters."));
+    expect(await said("invalid_origins")).toEqual(failed("Add 1 to 5 of the site's own addresses, each starting with https://."));
+    expect(await said("invalid_username")).toEqual(failed("The account's name is 1 to 256 characters."));
+    expect(await said("invalid_password")).toEqual(failed("A password is 1 to 1024 characters."));
+    expect(await said("invalid_members")).toEqual(failed("Choose who may use it: one or more of Nam, Pim, Ton and Kit."));
+    expect(await said("vault_not_configured")).toEqual(failed("The vault is not ready yet, so nothing was saved. Ask your operator to set it up."));
+    expect(await said("not_saved")).toEqual(failed("runtime words"));
+    expect(await said("owner_only")).toEqual(failed("Only the shop's owner sees and changes its sign-ins and outposts."));
+    expect(await said("too_many_sign_ins")).toEqual(failed("Your shop already has 50 sign-ins, the most the vault keeps. Ask your operator to remove one.", true));
+  });
+});
+
+describe("Who uses it", () => {
+  it("opens in the sign-in's row with who may use it now ticked, and saves only a change with someone ticked", () => {
+    const dispatch = vi.fn();
+    (byTestId(VaultPane({ p: props({ dispatch }) }), "signin-who")[0]?.props.onClick as () => void)();
+    expect(dispatch).toHaveBeenCalledWith({ type: "who", signIn: "signin-shopee", members: ["nam", "ton"] });
+    const open = reduce({ type: "who", signIn: "signin-shopee", members: ["ton", "nam"] });
+    expect(open.ask).toEqual({ kind: "members", signIn: "signin-shopee", members: ["nam", "ton"] });
+    expect(words(vault(props({ ui: open })))).toContain("Who may use Shopee Seller Centre Nam Pim Ton Kit Only the members you tick may use it. One you take off stops at once. Save Cancel");
+    const box = (ui: ConnUi) => VaultPane({ p: props({ ui }) });
+    expect(SIGN_IN_MEMBERS.map((m) => byTestId(box(open), `member-${m}`)[0]?.props.checked)).toEqual([true, false, true, false]);
+    // Only this row's question is open: its own links give way to it, and the other row's and Add a sign-in wait.
+    expect(byTestId(box(open), "members-form")).toHaveLength(1);
+    expect([...byTestId(box(open), "signin-change"), ...byTestId(box(open), "signin-who"), ...byTestId(box(open), "signin-add")].map((e) => e.props.disabled)).toEqual([true, true, true]);
+    // Unchanged, or nobody ticked, it does not save.
+    expect(byTestId(box(open), "members-save")[0]?.props.disabled).toBe(true);
+    const nobody = reduce({ type: "who", signIn: "signin-shopee", members: ["nam", "ton"] }, { type: "member", member: "nam" }, { type: "member", member: "ton" });
+    expect(byTestId(box(nobody), "members-save")[0]?.props.disabled).toBe(true);
+    const more = connReduce(open, { type: "member", member: "kit" });
+    expect(more.ask).toEqual({ kind: "members", signIn: "signin-shopee", members: ["nam", "ton", "kit"] });
+    expect(byTestId(box(more), "members-save")[0]?.props.disabled).toBe(false);
+    expect(membersReady(["ton", "nam"], ["nam", "ton"])).toBe(false);
+    expect(membersReady(["nam"], ["nam", "ton"])).toBe(true);
+    expect(membersReady(["nam", "pim"], ["nam", "ton"])).toBe(true);
+    expect(membersReady([], ["nam"])).toBe(false);
+    expect(membersReady(["buddy"], ["nam"])).toBe(false);
+  });
+
+  it("ticks through the page's own actions, saves only when ready, and cancels on Escape", () => {
+    const dispatch = vi.fn();
+    const onSave = vi.fn();
+    const ui = reduce({ type: "who", signIn: "signin-carrier", members: ["nam"] }, { type: "member", member: "pim" });
+    const box = () => VaultPane({ p: props({ ui, dispatch, onSave }) });
+    (byTestId(box(), "member-ton")[0]?.props.onChange as () => void)();
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "member", member: "ton" });
+    submit(byTestId(box(), "members-form")[0]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    escape(byTestId(box(), "members-form")[0]);
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "cancel" });
+    submit(byTestId(VaultPane({ p: props({ ui: reduce({ type: "who", signIn: "signin-carrier", members: ["nam"] }), onSave }) }), "members-form")[0]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends who to the shop its row was read for, puts the answer in its place, and drops a row the shop no longer has", async () => {
+    const sent: unknown[][] = [];
+    const calls: ConnectionsCalls = {
+      ...noCalls,
+      members: async (...args) => {
+        sent.push(args);
+        return { signIn: signIn({ members: ["nam", "kit"] }) };
+      },
+    };
+    const step = await connectionsDo(calls, DATA, { what: "members", signIn: "signin-shopee", members: ["nam", "kit"] });
+    expect(sent).toEqual([["pilot:baan-mali", "signin-shopee", ["nam", "kit"]]]);
+    expect(step.data.signIns.map((s) => [s.id, s.members])).toEqual([["signin-shopee", ["nam", "kit"]], ["signin-carrier", ["nam"]]]);
+    expect(step.action).toEqual({ type: "done", notice: "Saved. Nam and Kit may use Shopee Seller Centre from now on." });
+    const refusing = (code: string): ConnectionsCalls => ({ ...noCalls, members: () => Promise.reject({ code, message: "runtime words" }) });
+    const gone = await connectionsDo(refusing("sign_in_not_found"), DATA, { what: "members", signIn: "signin-carrier", members: ["pim"] });
+    expect(gone.action).toEqual({ type: "failed", message: "That sign-in is no longer in the vault.", close: true });
+    expect(gone.data.signIns.map((s) => s.id)).toEqual(["signin-shopee"]);
+    const invalid = await connectionsDo(refusing("invalid_members"), DATA, { what: "members", signIn: "signin-carrier", members: ["pim"] });
+    expect(invalid).toEqual({ data: DATA, action: { type: "failed", message: "Choose who may use it: one or more of Nam, Pim, Ton and Kit.", close: false } });
+  });
+});
+
+describe("Add a sign-in and Who uses it in every language", () => {
+  it("have their words in ko, ja and zh, never the English, and name the members the same", () => {
+    const drawn = (ui: ConnUi) => words(vault(props({ ui })));
+    const asks = [reduce({ type: "add" }, { type: "address", index: 0, text: "http://track.carrier.example" }), reduce({ type: "who", signIn: "signin-shopee", members: ["nam"] })];
+    const english = asks.map(drawn);
+    for (const lang of LANGS.filter((l) => l !== "en")) {
+      setLang(lang);
+      asks.forEach((ui, i) => {
+        expect(drawn(ui), `${lang} ${i}`).not.toBe(english[i]);
+        expect(drawn(ui), `${lang} ${i}`).toMatch(/Nam.*Pim.*Ton.*Kit/);
+      });
+      expect(drawn(asks[0]!)).toContain(t("vault.add.notHttps"));
+      expect(drawn(asks[0]!)).not.toContain("Only addresses that start with https://");
     }
   });
 });

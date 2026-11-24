@@ -62,7 +62,7 @@ The protocol ops are answered from the latest read (`src/runtime/http/host.ts`, 
 | `approval.respond` | the person's answer, through the decide route (Answering approvals, below) |
 | `routine.pause`, `routine.resume`, `team.pause`, `team.resume`, and `automations.pause` and `.resume` of a team routine | for a shop the person owns, through apps/api's routines routes with that shop's session (A shop the person owns, below) |
 | `connections.list` | the shop's site sign-ins and outposts, `GET /v1/vault/sign-ins` and `GET /v1/vault/outposts`, for Customize › Connections (below) |
-| `connections.password`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins/password`, `/v1/vault/outposts/rename` or `/remove` (below) |
+| `connections.add`, `connections.password`, `connections.members`, `connections.rename`, `connections.remove` | the owner's change, to `POST /v1/vault/sign-ins`, `/v1/vault/sign-ins/password`, `/v1/vault/sign-ins/members`, `/v1/vault/outposts/rename` or `/remove` (below) |
 | `people.list` | who can use Manut AI for the shop the switcher shows, `GET /v1/people`, for Settings › People (below) |
 | `people.invite`, `people.cancelInvite`, `people.remove`, `people.setAway`, `people.clearAway` | the owner's change, to `POST /v1/people/invites`, `/invites/revoke`, `/remove`, `/away` or `/away/clear` (below) |
 | every other write (`chat.send`, `routine.create`, …) | refused with `not_yet` and a translated "Not yet: Connected mode answers approvals, pauses your team's routines and looks after Connections for now." Nothing is sent to the API. Buddy's chat needs a model, the owner's key. |
@@ -361,10 +361,15 @@ owner's vault and outposts"; the design is `docs/browser-control.md`, "The owner
   tenant with the sign-in while the person is in no shops. Each change names the shop its row was read for (`shop`,
   null for the signed-in tenant) and goes with that shop's session. A shop the person helps at is refused `owner_only`
   here with nothing sent, and nothing is sent while only a kept read is shown (`offline`).
-- **The password** crosses once: the same session reads the sign-ins first, so it is one that works and the shop still
-  has the sign-in (`sign_in_not_found` otherwise, with nothing sent), then one send with no second try after a 401
-  (`ApiSession.writeOnce`, or the shop's session as it is held), which answers `not_saved` and asks the owner to type it
-  again. A password the vault would not take (empty, over 1,024 characters) is refused here first.
+- **The password** crosses once, a new sign-in's (`connections.add`) as a new password: the same session reads the
+  sign-ins first, so it is one that works, the shop still has the sign-in a new password is for (`sign_in_not_found`
+  otherwise, with nothing sent), and the vault has room for a new one (`too_many_sign_ins` at 50, with nothing sent); then
+  one send with no second try after a 401 (`ApiSession.writeOnce`, or the shop's session as it is held), which answers
+  `not_saved` and asks the owner to type it again. What the vault would not take is refused here first: a password empty
+  or over 1,024 characters, and for a new sign-in its name, its addresses, its account or its members, by the vault's own
+  rules said once in `src/runtime/connections.ts` (`newSignInRefusal`), which Practice keeps too.
+- **Who may use a sign-in** (`connections.members`) carries no secret, so it goes as every other change does; members the
+  vault would not take (none, a repeat, anyone but Nam, Pim, Ton and Kit) are refused here first.
 - **What the tab is shown.** Each sign-in without its account or its sites' addresses, and each outpost, times in
   seconds; an entry this build cannot read is left out. The page keeps none of it in the store or the kept read: the tab
   asks through a client of the runtime of its own (`src/pages/ConnectionsPane.tsx`).
