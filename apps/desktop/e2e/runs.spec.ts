@@ -1503,18 +1503,21 @@ test("motion: the boxes appear one by one in frontier order, then nothing moves 
   expect(order.map((n) => n.frontier)).toEqual([...order.map((n) => n.frontier)].sort((a, b) => a - b));
   for (let i = 1; i < order.length; i++) expect(order[i].delay).toBeGreaterThan(order[i - 1].delay);
   expect(Math.max(...order.map((n) => n.delay))).toBeLessThan(1);
-  expect(new Set(first.map((n) => n.anim))).toEqual(new Set(["bv-in"]));
+  expect(new Set(first.map((n) => n.anim))).toEqual(new Set(["rise"]));
   await settled(page);
-  const moving = await f.locator(".bv *").evaluateAll((els) => els.filter((e) => getComputedStyle(e).animationName !== "none").map((e) => [e.getAttribute("class"), getComputedStyle(e).animationName]));
+  // what is moving now: an animation still playing (a finished entrance keeps its name, but has stopped)
+  const moving = await f.locator(".bv *").evaluateAll((els) =>
+    els.flatMap((e) => e.getAnimations().filter((a) => a.playState === "running").map((a) => [e.getAttribute("class"), (a as CSSAnimation).animationName])),
+  );
   expect(moving.length).toBeGreaterThan(0);
   // the dash into a running node, and the ring turning around a running node's status dot: nothing else
   for (const [cls, name] of moving) expect([cls, name]).toEqual(expect.arrayContaining([/\bbx-spin\b/.test(cls ?? "") ? "spin" : "bv-flow"]));
   for (const [cls] of moving) expect(cls).toMatch(/\b(flow|bx-spin)\b/);
   expect(moving.filter(([cls]) => /\bbx-spin\b/.test(cls ?? "")).length).toBe(await f.locator('.bx-ic[data-icon="dot"]').count());
-  // a box only answers the pointer (its outline, shadow and lift ease in 120ms): nothing shimmers, pulses or glows
+  // a box only answers the pointer (its outline and shadow fade by Hover, its lift answers by Press): nothing shimmers, pulses or glows
   expect(
     await f.getByTestId("run-node").evaluateAll(
-      (els) => els.filter((e) => getComputedStyle(e).transitionProperty !== "border-color, box-shadow, transform" || getComputedStyle(e).transitionDuration !== "0.12s, 0.12s, 0.12s" || getComputedStyle(e, "::before").animationName !== "none").length,
+      (els) => els.filter((e) => getComputedStyle(e).transitionProperty !== "border-color, box-shadow, transform" || getComputedStyle(e).transitionDuration !== "0.15s, 0.15s, 0.2s" || getComputedStyle(e, "::before").animationName !== "none").length,
     ),
   ).toBe(0);
 });
@@ -1525,7 +1528,19 @@ test("reduced motion: no entrance and no dash", async ({ browser }) => {
   await openRuns(page);
   await page.getByTestId("graph-expand").click();
   await expect(full(page).getByTestId("run-node")).toHaveCount(6);
-  expect(await full(page).locator(".bv *").evaluateAll((els) => els.filter((e) => getComputedStyle(e).animationName !== "none").length)).toBe(0);
+  // Reduced motion ends a move at once rather than removing it (docs/motion.md): nothing is still playing, every
+  // animation named is over within a millisecond and never repeats, and no dash is drawn
+  await page.waitForTimeout(300);
+  expect(await full(page).locator(".bv *").evaluateAll((els) => els.flatMap((e) => e.getAnimations()).filter((a) => a.playState === "running").length)).toBe(0);
+  expect(
+    await full(page).locator(".bv *").evaluateAll((els) =>
+      els.filter((e) => {
+        const cs = getComputedStyle(e);
+        return cs.animationName !== "none" && (parseFloat(cs.animationDuration) >= 0.001 || cs.animationIterationCount !== "1");
+      }).length,
+    ),
+  ).toBe(0);
+  expect(await full(page).locator(".bv-flow").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length)).toBe(0);
   // and a box does not ease either
   expect(await full(page).getByTestId("run-node").evaluateAll((els) => els.filter((e) => !/^0s(, 0s)*$/.test(getComputedStyle(e).transitionDuration)).length)).toBe(0);
   await ctx.close();
