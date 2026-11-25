@@ -24,7 +24,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer, files and modes | `sessions/SessionView.tsx` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the composer names the model, not the plan | `sessions/SessionView.tsx` |
-| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. Not drawn: the project's page inside the pane (Open hands the address to the browser). See [The pane beside a lane](#the-pane-beside-a-lane) and [The preview of a lane](#the-preview-of-a-lane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
+| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
 ## StatesCode: lanes, test output and artifacts
@@ -154,6 +154,10 @@ The states whose rules are pure functions, with their tests, then the screens th
   `code/previewRun.ts` chooses the command (`@manut/preview-command`), says what it runs with (`previewSecrets`) and what each
   thing the shell says makes of a run; `code/previewStore.ts` keeps each lane's; `code/previewHost.ts` is the shell, or a fake run
   in a plain browser; `code/LanePreview.tsx` draws it under the Preview chip. `e2e/preview-run.spec.ts` walks it.
+- The page in the pane (see [The page in the pane](#the-page-in-the-pane)): `code/previewFrame.ts` says which address the frame
+  may show and why it shows none, and holds its sandbox; `code/LanePreview.tsx` draws the frame; tauri.conf.json's `frame-src`
+  bounds every frame; `src-tauri/src/preview.rs` (`app_window_may_load`) is the app window's navigation hook (lib.rs
+  `app_window_guard`). `e2e/preview-frame.spec.ts` and `e2e/preview-frame-webkit.spec.ts` walk it.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
@@ -285,7 +289,8 @@ thing it starts is the lane's preview, when the person presses Start.
   has ids of its own (`lane-diff-*`) and does not scroll itself into view, so the timeline's `diff-view` ids are the timeline's
   alone. A file changed twice shows its later change, not both. "Kit has not changed any file yet." is said only while none is listed.
 - **Preview.** The lane's project run with its own dev server in the lane's own folder (`LanePreview.tsx`; see
-  [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, the names of the
+  [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, its page in a frame
+  that fills the view while it runs ([The page in the pane](#the-page-in-the-pane)), the names of the
   secrets it runs on samples, and under it the Sample rows of the secrets Kit's changed code reads (`needsOfChat`, drawn by
   `PreviewSampleView` as on the Code page, without the band that the chip names), each with Add, which says the vault comes
   later. A session that works in the developer's own folder gets no Start.
@@ -345,8 +350,9 @@ lane's own folder, says where it runs, and Open hands that address to the person
 - **Its lines.** stdout and stderr go to the page as they come, every 50 ms and at most 500 at once, a line cut at 4 KiB, a progress
   line read as what shows last; the shell keeps none. The page keeps the last 200, in memory only, with a terminal's escapes taken
   out.
-- **Open.** `preview_open` takes only `http` or `https`, then `localhost`, `127.0.0.1` or `[::1]`, a port or none, and a closing
-  `/` with nothing after it, and hands it to the system opener. Nothing of the project is drawn in the app, whose pages may frame nothing (`frame-src 'none'`).
+- **Open in browser.** `preview_open` takes only `http` or `https`, then `localhost`, `127.0.0.1` or `[::1]`, a port or none, and a
+  closing `/` with nothing after it (`loopback_url`), and hands it to the system opener. The same address is what the pane draws
+  while the preview runs ([The page in the pane](#the-page-in-the-pane)).
 - **Stop, and the other ends.** Stop hangs up the preview's process group, as a chat's close does, and kills what still runs 1.5
   seconds later. A preview also stops when its lane's session closes, when the page loads again (`preview_close_all`) and when the
   app quits; a start the shell answers after its lane closed is stopped at once. When its program ends by itself, what it started
@@ -355,13 +361,81 @@ lane's own folder, says where it runs, and Open hands that address to the person
   is the preview's own, so the pane says Stopped.
 - **Where.** macOS and Linux. On Windows the view says the preview runs on macOS and Linux for now.
 - **In a browser.** No shell, so a fake preview (`MockPreviewHost`) prints a dev server's lines and its address and lists itself
-  with what keeps running; `window.__manutMockPreview` says what a folder holds and how the run goes, and `window.__manutPreviewCalls`
-  records each call. `e2e/preview-run.spec.ts` walks it in light, dark and narrow and in ko, ja and zh.
+  with what keeps running; `window.__manutMockPreview` says what a folder holds, how the run goes and the address it prints (`url`,
+  Vite's `http://localhost:5173/` unless given), and `window.__manutPreviewCalls` records each call. A test can instead stand in for
+  the shell's four preview commands (`window.__manutPreviewShell`, a stubbed shell, read only outside the desktop app): the page
+  then runs the desktop's own host, `TauriPreviewHost`, against it. `e2e/preview-run.spec.ts` walks it in light, dark and narrow
+  and in ko, ja and zh.
 
 The tests: `preview.rs` (the environment, the sixteen commands, the folder, the address Open takes, and real runs with a stand-in
 manager: its words, its folder, its environment, Stop ending its whole group, an end by itself, `changed`, `running`),
 `running.rs` (a preview's row), and `previewRun.test.ts`, `previewStore.test.ts`, `previewHost.test.ts`, `LanePane.test.tsx` and
 `RunningPanel.test.tsx` on the page.
+
+### The page in the pane
+
+The board draws the preview's page in a box under the chips (`New Year gift set`, the QR code, `฿590`). While a lane's preview runs
+at an address, the desktop draws the page at that address in a frame that fills the rest of the view, under the preview's box,
+whose buttons are then Reload, Open in browser and Stop (`LanePreview.tsx`, `PageFrame`; `previewFrame.ts`). Under the frame one
+line says what does not open in it. The frame goes the moment the run is no longer Running: Stop pressed, stopped, ended, its
+session closed.
+
+- **Which address.** Only the one its own lane's preview printed and runs at, as `@manut/dev-url` read it, and only when it passes
+  the rule Open keeps in the shell (`loopbackUrl` on the page, `loopback_url` in preview.rs, one table for both:
+  `code/__fixtures__/loopback.json`). Then only on `localhost`, the one host the CSP names; never the app page's own origin (in a
+  debug build the dev server is the app's page to Tauri, so a frame there would be the app, with its origin); and never on Windows.
+  Otherwise the box says why in words and keeps Open in browser: `[::1]` ("The app shows a page inside it only at localhost"), the
+  app's own address, Windows, or an address that is not this computer's (which `@manut/dev-url` never answers; the page looks again).
+- **Reload** makes the frame again at the preview's address: the page is another origin's, so the app cannot ask it to reload
+  itself, and a page the frame moved to inside the dev server is left for the preview's first page.
+- **The sandbox:** `allow-scripts allow-same-origin allow-forms`, and `referrerpolicy="no-referrer"`. Scripts, since a dev server's
+  page is a script app. Its own origin, which its module scripts, its reload socket and its storage need (an opaque origin fails a
+  dev server's own CORS and WebSocket checks), and which is never the app's, so it reaches nothing of the app's. Forms, so a form
+  posts to its own server. Nothing else: no top navigation of any kind, so it cannot move the app's window; no pop-ups; no dialogs
+  over the app; no downloads, pointer lock, presentation, orientation lock or storage-access prompt. The page keeps its own white
+  canvas in both themes, as a browser tab shows a page that sets no background.
+- **The CSP.** `frame-src` is `http://localhost:* https://localhost:*` in both `csp` and `devCsp`; every other directive is as it was
+  (`previewFrame.test.ts` pins them). WebKit applies the embedding page's `frame-src` to every navigation of a frame, not only its
+  first address (`PolicyChecker::checkNavigationPolicy`), so a link in the page to another site, and the app's own
+  `tauri://localhost` pages, never load in it. A CSP source cannot name `[::1]`: WebKit refuses the frame even with
+  `http://[::1]:*` written (its host grammar takes letters, digits and `-` only), hence Open in browser there. An `https` dev
+  server shows only when its certificate is one the system trusts.
+- **The shell looks again.** The app's window has a navigation hook (lib.rs `app_window_guard`, the main window only; the
+  outpost's window keeps its own): it lets the window and its frames load only the app's own pages, `about:blank`, `about:srcdoc`
+  and pages on an address of this computer by `loopback_url`'s rule with any path (`app_window_may_load`), and cancels anything
+  else. wry asks it about every frame's navigation as well as the window's, with only the address, so it is a second check of what
+  the frame loads, whatever the CSP says, and it also keeps anything from taking the window to another site. It cannot tell the
+  frame from the window, so it lets both load loopback pages and the app's own pages: the sandbox keeps the frame from moving the
+  window, and the CSP keeps the app's pages out of the frame.
+- **No way into the app.** Tauri (2.12.5) puts its scripts, the invoke key among them, in the main frame only on macOS and Linux
+  (WKWebView's and WebKitGTK's main-frame user scripts), so the frame has no `__TAURI_INTERNALS__`. It can still reach wry's `ipc`
+  message handler and the `ipc://` scheme, and both reach Tauri, which drops a call without the key unanswered; a call with the key
+  from the frame's origin is refused by Tauri's check, since no capability names a remote page (mod.rs's test keeps it so). Tauri
+  lets one command skip that check for any page with the key (`plugin:__TAURI_CHANNEL__|fetch`, a channel's data), which is why
+  the frame stays off on Windows: WebView2 puts every script in every frame. The app listens to no `message` from a frame.
+- **macOS versions.** Drawn on every macOS the app supports, with no version gate. Checked on this Mac (macOS 27.2.1, Safari 27.2's
+  WebKit) with a scratch Tauri program on the app's Tauri, CSP and sandbox, page served from `tauri://localhost`: the frame draws;
+  it has no `__TAURI_INTERNALS__`; a guessed key and the real key (handed over by the scratch, which a frame can never get) both
+  run nothing; a pop-up gives `null`; the top frame throws `SecurityError`; a link to another site is refused by the CSP alone and,
+  with the CSP opened wide, by the shell's hook alone, and loads only when both are off; the frame cannot load `tauri://localhost`;
+  `[::1]` is refused even when named. Not run on macOS 11, which this Mac cannot be. For it, WebKit's source of late 2020 shows
+  that mixed content is checked only for an `https` page (`MixedContentChecker`: "We only care about HTTPS security origins"), so
+  a `tauri:` page may frame `http://localhost`, and that `frame-src` is checked for every navigation of a frame
+  (`PolicyChecker`); the sandbox, main-frame-only user scripts and the navigation delegate the shell's hook hears are all older
+  than macOS 11. Apple's transport security does not apply to `localhost`.
+- **In a browser.** The fake preview prints the address a spec gives it (`__manutMockPreview.url`), and a stubbed shell can stand in
+  for the shell (`__manutPreviewShell`); `e2e/preview-frame.spec.ts` answers that address itself (`page.route`, as
+  `outpost-scripts.ts` serves its pages) and serves the app's page with the app's own `frame-src`, then walks the frame drawn, its
+  sandbox, the top navigation, the pop-up and the other site refused, its own pages and form working, Reload, Open in browser, the
+  frame going on Stop and on the session closing, another computer's address and `[::1]` never framed, the stubbed shell, and light,
+  dark, narrow, ko, ja and zh. `e2e/preview-frame-webkit.spec.ts` runs all but the layout walks in WebKit on a Mac.
+
+The tests: `previewFrame.test.ts` (the shared table, which address is framed and why not, the sandbox's tokens, the CSP),
+`LanePane.test.tsx` (the frame in each state, Reload, the words why, the four languages), `previewHost.test.ts` (the mock's address,
+the stubbed shell, and that only a plain browser reads it), `preview.rs` (the shared table, and what the app's window may load),
+and lib.rs's tests: every command the page may call, and twelve plugin commands, sent through Tauri's own check from a preview's
+origin are refused and none runs, in Tauri's mock runtime with the app's own capabilities (`tauri`'s `test` feature, for tests
+only), and the window's hook refuses another site in the main window and leaves the outpost's to its own.
 
 ### Where a lane works
 
@@ -663,8 +737,10 @@ rewind.
   open session does not show its own commands. Also: Windows has no reader, so the page draws nothing there; a command
   that left its parent for good (a daemon) is no longer found; a long-lived `sh -c` that an agent keeps for its own use
   would be listed as a command; and so might a helper a shell's startup file leaves running (not seen yet).
-- The preview of a lane, past its first slice: the project's page drawn inside the pane (the app's pages may frame nothing, and
-  what may be framed wants its own decision); Windows (an environment list of its own and the package manager's `.cmd` shim); a
+- The preview of a lane, past its second slice: Windows (an environment list of its own and the package manager's `.cmd` shim,
+  and for the page in the pane, a frame that does not hold Tauri's scripts, which WebView2 puts in every frame); the page in the
+  pane at `[::1]` (no CSP source names it); the shell's hook telling the frame from the window, so the window could load only the
+  app's own pages and the frame only loopback ones (on macOS the outpost's delegate in front of wry's shows how); a
   preview from the Code page's lane row, where only the session view has one; the owner's own secrets once a vault exists
   (`previewSecrets` already takes them as `added`); an address read from the ports a preview listens on when it prints none; a
   preview kept through a reload or a restart of the app (every one stops); and a lane that runs in its own terminal, which has no
