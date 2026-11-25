@@ -1766,6 +1766,102 @@ order and the order of refusals are the ones above, and the desktop and the web 
   one call per task the shop ever had. A read now makes a few calls to the shop's own object and one per task with
   something to read.
 
+## The shop's live feed
+
+`GET /v1/feed` (`apps/api/src/feed.ts`, December item 61), opened with a one-use ticket from `POST /v1/feed/ticket`: a
+WebSocket that says, and only says, that something the shop's screens read has changed, so a connected desktop reads again
+within seconds instead of at its next one-minute read (`docs/runtime-adapter.md`, "The live feed"). Built switched off: until
+the operator turns `shopFeed` on with `PUT /v1/admin/flags`, the mint answers 403
+`{ error: "feature_disabled", feature: "shopFeed" }`, so no socket can open, and nothing else changes. What it costs on
+Cloudflare is in `docs/turning-on.md`.
+
+- **Who.** A shop's session mints the ticket, taken as the approvals list takes it (`callerOf`): an owner session (`mos1.`) or
+  a helper session (`mhs1.`), for the one shop it names. A person's own sign-in has a tenant but no shop, and answers 404
+  `not_found`, as the shop's routes answer it. The session goes only in the mint's `Authorization` header, which Cloudflare's
+  request logs mask by its name, and never in the socket's handshake or its address.
+- **The ticket.** `POST /v1/feed/ticket` with exactly `{}`, sent as `application/json`, answers 200
+  `{ feed: "on", protocol: "manut-feed.v1", ticket, expiresIn: 30 }` with `cache-control: no-store`. The desktop asks this
+  before each socket it opens, through the shell's request command like any write of the shop's, and opens the socket only on
+  this answer. A ticket is the shop in base64url (a tenant may hold characters, `:` among them, that a protocol entry may not),
+  a dot, and 32 random bytes in base64url. It opens one socket, once, within 30 seconds of the mint. The shop's TenantObject
+  keeps it in memory only, as the SHA-256 of its secret with the session's hash and role, so one an evicted object lost
+  answers 401 like any unknown ticket, and the desktop mints another. A session keeps at most 3 unused tickets, its next
+  taking the place of its oldest; a shop keeps at most 50, all its sessions together, and refuses the next 429
+  `feed_shop_full` until one is used or over; tickets past their time are dropped as the next is kept. A mint pings nothing.
+- **The socket.** An upgrade (`Upgrade: websocket`) with the ticket as one `Sec-WebSocket-Protocol` entry,
+  `manut-ticket.<ticket>`, beside `manut-feed.v1`, answers 101 with `Sec-WebSocket-Protocol: manut-feed.v1`, never naming the
+  ticket. A page's WebSocket can set no `Authorization` header, and Cloudflare's request logs record that protocol header as it
+  is, so it carries a ticket and never a session: a ticket that reaches a log was spent by the request that put it there. The
+  upgrade is taken on its ticket alone. An `Authorization` header on it is never read, and a plain `GET /v1/feed`, which the
+  mint replaced as the desktop's look, answers 401 with no ticket. The Worker reads the shop from the ticket and hands that
+  shop's TenantObject only the SHA-256 of its secret. The object takes the ticket out before anything else, so every request
+  that carries one spends it, even one refused afterwards for its method, its upgrade, its query or its protocols. It then
+  checks the session behind the ticket once more against the shop's people record, accepts the socket with the hibernation
+  API (`ctx.acceptWebSocket`), so an idle socket costs no object time, and keeps everything the socket needs in its
+  attachment.
+- **Messages.** The server sends only pings, `{ "v": 1, "seq": n }`, `seq` growing with each one. A ping carries no data: the
+  client reads as it reads each minute, with its own session, so the feed can never show anyone what their session could not
+  read, and it decides nothing; approvals still settle only through approval-core. The client sends only the keepalive
+  `ping`, which the runtime answers `pong` without waking the object; anything else closes the socket with 4400.
+- **What pings.** Each write the shop's TenantObject takes that a screen reads: a task new to the index, a request about to
+  open (its entry in the approval lookup), a new attention item, any change to the routines and the team, and any change to
+  the shop's people (a note passed on, a helper's new device, a removal, a device signing out). And a task object's own
+  change, which it tells the shop's object in one call (`POST /feed/touch`, `feed-touch.ts`): the task written, a command, a
+  run claimed, its asks, its draft and its end, a sweep of runs that ran out, an action proposed, decided, begun or settled,
+  and a request decided. Never a read: a session check, what a read tells the approval lookup and the lookup's backfill ping
+  nothing, so the reads a ping sets off never set off another. Nor a run's progress (its heartbeats, steps and events), nor
+  the model meter, the audit log, what the team knows, consent or the pilot's own records, none of which a desktop reads each
+  minute. A write that changed nothing (a task indexed again, a delivery seen before) pings nothing.
+- **At most one ping a second.** The first write schedules the ping a second later (`ShopFeed.coalesceMs`), and every write
+  until it goes rides with it, so a burst of writes is one ping and one read.
+- **A shop nobody follows** pays nothing for its own writes: with no socket open, the object schedules nothing. A task object
+  learns it from its call's answer (`{ listening: 0 }`) and tells the shop nothing more for a minute, so while the switch is
+  off a busy task makes at most one extra call a minute.
+- **Limits.** 3 sockets for one session: the next answers 429 `feed_session_full`; 50 for the shop, all its sessions together:
+  429 `feed_shop_full`; both with `retry-after: 60`. A socket that sent no keepalive for 10 minutes gives up its place when its
+  session or its shop is at its limit, and a socket past its hour never holds one.
+- **How a socket ends.** 4000 `renew` after an hour, by the object's alarm or in place of a ping: the client mints a ticket and
+  opens it again, which checks the session and the switch again, so a switch turned off reaches even a shop where nothing is
+  written. 4401 `session_ended` when its session no longer works (signed out, run out, a helper removed, an owner unlinked):
+  each ping checks every socket's session first, and every change to the shop's people pings, so this comes within the second.
+  4503 `feed_off` once the switch reads off: the object reads the switch at most once a minute while it pings, and a record it
+  cannot read is the environment's default, which is off. The mint's read counts as the first, as of when the ticket was kept,
+  and a newer read of the object's own wins, so a ticket minted before the switch went off opens nothing (403) once the object
+  has read it off. 4410 `shop_deleted` when the shop's data is deleted. 4400 `bad_request` for a message other than the
+  keepalive. 4408 `silent` for a silent socket that gave up its place. The runtime completes the close handshake itself on this
+  compatibility date.
+
+Refusals of the mint, in this order:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 415 | `{ error: "json_required" }` | A body that does not say it is `application/json`: the Worker's front door answers it before anything else, as for every POST |
+| 401 | `{ error: "unauthorized" }` | No session, an ended one, or the operator key |
+| 401 | `{ error: "removed", removedAt }` | A helper session of a helper the owner removed |
+| 401 | `{ error: "unlinked", unlinkedAt }` | An owner session whose account the operator unlinked |
+| 503 | `{ error: "people_unavailable" }` | The session could not be checked |
+| 404 | `{ error: "not_found" }` | A person's own sign-in, which is no shop's session |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `POST` |
+| 400 | `{ error: "invalid_request" }` | A query naming `shop`, `tenant` or `role` |
+| 413 | `{ error: "body_too_large" }` | A body over 16 KiB |
+| 400 | `{ error: "invalid_json" }` | No body, or one that is not JSON |
+| 400 | `{ error: "invalid_request" }` | A body other than exactly `{}` |
+| 403 | `{ error: "feature_disabled", feature: "shopFeed" }` | The switch is off |
+| 429 | `{ error: "feed_shop_full" }`, `retry-after: 30` | The shop already keeps 50 unused tickets |
+| 503 | `{ error: "feed_unavailable" }` | The shop's object could not keep the ticket |
+
+Refusals of the upgrade, in this order. Every one after the first two rows comes after the ticket was spent:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 401 | `{ error: "unauthorized" }` | No ticket, or one that names no shop: the Worker answers without waking any object |
+| 401 | `{ error: "unauthorized" }` | A ticket the shop's object does not keep (unknown, used, over, or lost with the object's memory), or whose session no longer works |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `GET` |
+| 400 | `{ error: "invalid_request" }` | No `Upgrade: websocket`, a query naming `shop`, `tenant` or `role`, or protocols without `manut-feed.v1` |
+| 403 | `{ error: "feature_disabled", feature: "shopFeed" }` | The shop's object has read the switch off since the ticket was minted |
+| 429 | `{ error: "feed_session_full" }`, `retry-after: 60` | The session already holds 3 sockets |
+| 429 | `{ error: "feed_shop_full" }`, `retry-after: 60` | The shop already holds 50 sockets |
+
 ## Signing in by email
 
 Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an

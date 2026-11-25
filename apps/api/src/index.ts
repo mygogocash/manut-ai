@@ -1,5 +1,6 @@
 import { auditAdminRoute } from "./audit-log";
 import { approvalsRoute } from "./approvals";
+import { feedRoute } from "./feed";
 import { AuthObject } from "./auth-object";
 import { hasAppleTokenShape } from "./auth";
 import { codeRequestAddress, emailExchange, emailSignIn } from "./email-code";
@@ -84,6 +85,9 @@ export interface Env {
   OFFICE_EXTERNAL_WRITES?: string;
   OFFICE_INBOUND?: string;
   OFFICE_SHARING?: string;
+  /// The shop's live feed (feed.ts; docs/turning-on.md). Like the others, the operator's dynamic record wins over it, and
+  /// no environment sets it: the feed stays off until the owner says.
+  SHOP_FEED?: string;
   /// Linear webhook signing secret (`wrangler secret put
   /// LINEAR_WEBHOOK_SECRET`). Never in config; without it every delivery is
   /// refused as unsigned.
@@ -380,9 +384,12 @@ export type FeatureFlags = {
   /// owner opens Release 4 under D-R4-live-gate, so nobody can be scoped,
   /// invited or shown shared work before then.
   officeSharing: boolean;
+  /// The shop's live feed (feed.ts, docs/pilot-api.md "The shop's live feed"): `GET /v1/feed` answers 403
+  /// `feature_disabled` until it is on, and a TenantObject closes its feed's sockets once it reads off.
+  shopFeed: boolean;
 };
 
-const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"] as const;
+const FLAG_KEYS = ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed"] as const;
 
 async function featureFlags(env: Env): Promise<FeatureFlags> {
   const defaults: FeatureFlags = {
@@ -391,6 +398,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
     officeExternalWrites: env.OFFICE_EXTERNAL_WRITES === "1",
     officeInbound: env.OFFICE_INBOUND === "1",
     officeSharing: env.OFFICE_SHARING === "1",
+    shopFeed: env.SHOP_FEED === "1",
   };
   try {
     const response = await authCall(env, "/flags");
@@ -408,6 +416,7 @@ async function featureFlags(env: Env): Promise<FeatureFlags> {
         typeof dynamic.officeInbound === "boolean" ? dynamic.officeInbound : defaults.officeInbound,
       officeSharing:
         typeof dynamic.officeSharing === "boolean" ? dynamic.officeSharing : defaults.officeSharing,
+      shopFeed: typeof dynamic.shopFeed === "boolean" ? dynamic.shopFeed : defaults.shopFeed,
     };
   } catch {
     return defaults;
@@ -1208,6 +1217,12 @@ export default {
     // a helper session a helper (people.ts); the role never comes from a body.
     const approvals = await approvalsRoute(request, url, env, () => featureFlags(env));
     if (approvals) return approvals;
+
+    // The shop's live feed (feed.ts): a one-use ticket a shop's session mints, taken as the approvals list takes it, and
+    // the WebSocket that ticket opens, handed to the shop's TenantObject and saying only that something changed. Off until
+    // `shopFeed` is turned on.
+    const feed = await feedRoute(request, url, env, () => featureFlags(env));
+    if (feed) return feed;
 
     // Exact-action approvals. Proposals and decisions pass through to the
     // task's ledger; dispatch runs the broker, which re-verifies everything

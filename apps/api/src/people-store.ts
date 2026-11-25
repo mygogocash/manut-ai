@@ -217,8 +217,23 @@ function checkOwnerSession(record: PeopleRecord, session: OwnerSession, nowMs: n
   return { ok: true, accountId: session.accountId, sessionId: session.sessionId };
 }
 
+/// Whether the shop session whose token hashes to `tokenHash` still works at `nowMs`, a helper's or an owner's, by the
+/// same checks the routes make (`checkHelperSession`, `checkOwnerSession`). The shop's live feed (feed.ts) asks before
+/// each ping, and every change to the record brings one, so a helper the owner removed, a device that signed out or an
+/// account the operator unlinked is closed within the second and hears nothing more from the shop.
+export function shopSessionWorks(kv: SyncKvStorage, tenant: string, tokenHash: string, nowMs: number): boolean {
+  const record = readRecord(kv, tenant);
+  const helper = heldSession(record.sessions, tokenHash);
+  if (helper) return checkHelperSession(record, helper.session, nowMs).ok;
+  const owner = heldSession(record.ownerSessions ?? {}, tokenHash);
+  return owner ? checkOwnerSession(record, owner.session, nowMs).ok : false;
+}
+
 /// `/people` and `/people/*` on a TenantObject. Reads need only the tenant; writes need the Worker's `x-people` header.
-export async function peopleTenantRoute(storage: DurableObjectStorage, request: Request, url: URL): Promise<Response> {
+/// `changed` hears each write that changed the record, once it is stored, and never a check that only read it, so the
+/// shop's live feed pings for what changed and a session check never wakes a desktop (tenant-object.ts).
+export async function peopleTenantRoute(storage: DurableObjectStorage, request: Request, url: URL,
+  changed?: () => void): Promise<Response> {
   const route = `${request.method} ${url.pathname}`;
   if (request.method === "GET") {
     const tenant = url.searchParams.get("tenant") ?? "";
@@ -245,6 +260,7 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
   const operation = OPERATIONS[route];
   if (!operation) return json({ error: "not_found" }, 404);
   const tenant = body.tenant;
+  let wrote = false;
   const answer = storage.transactionSync((): Answer => {
     const kv = storage.kv;
     const nowMs = Date.now();
@@ -257,9 +273,12 @@ export async function peopleTenantRoute(storage: DurableObjectStorage, request: 
         ...(signIns ? { signIns: recentSignIns(signIns, nowMs) } : {}) } satisfies PeopleRecord);
       const { record, missed } = done.audit ?? {};
       if (missed) auditPutSync(kv, tenant, record ?? null, missed);
+      wrote = true;
     }
     return done.answer;
   });
+  // After the transaction, so only a change that was stored is heard: a throw inside it rolls the write back.
+  if (wrote) changed?.();
   return json(answer.body, answer.status);
 }
 

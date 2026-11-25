@@ -222,7 +222,7 @@ export class AuthObject extends DurableObject {
           return Response.json({ error: "invalid_json" }, { status: 400 });
         }
         const next = (await this.ctx.storage.get<Record<string, boolean>>("flags")) ?? {};
-        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing"]) {
+        for (const key of ["officeCloud", "officeRoutines", "officeExternalWrites", "officeInbound", "officeSharing", "shopFeed"]) {
           if (body[key] === undefined) continue;
           if (typeof body[key] !== "boolean") {
             return Response.json({ error: "invalid_request" }, { status: 400 });

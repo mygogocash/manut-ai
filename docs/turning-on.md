@@ -35,6 +35,38 @@ waits on the review any more: each waits only for what its row below needs from 
 | Routines running, and the team's cloud work | `PUT /v1/admin/flags` with `officeRoutines` and `officeCloud` (the console's operator key) | The owner's go. Each shop also gives its own consent to cloud work, from the owner's app or link | `docs/handoff.md`; `docs/pilot-api.md` |
 | Any write that leaves the app (a reply sent, a form submitted, a sheet appended) | `PUT /v1/admin/flags` with `officeExternalWrites`, as well as each write's own approval | The owner's go-ahead, and for the first browser write on a real site (a Shopee chat reply, say) a supervised trial | `docs/browser-control.md` |
 | LINE messages coming in | `PUT /v1/admin/flags` with `officeInbound` | LINE is parked by the owner; it needs a LINE Official Account for a test shop first | `docs/connectors.md`, 1 |
+| The live feed: a connected desktop shows a change at a shop within seconds instead of at its next one-minute read | `PUT /v1/admin/flags` with `shopFeed` (the console's operator key); var `SHOP_FEED` is its default, and no environment sets it | The owner's go, and a desktop build from `feat/live-feed` or later, whose CSP lets the page reach Manut AI's own API hosts and which opens each socket with a one-use ticket, so no session reaches Cloudflare's request logs. Running apps take it up within an hour, or at their next start. What it costs is below | `docs/pilot-api.md`, "The shop's live feed"; `docs/runtime-adapter.md`, "The live feed" |
+
+### What the live feed costs on Cloudflare
+
+From Cloudflare's Durable Objects pricing (developers.cloudflare.com/durable-objects/platform/pricing/, read on 25 Nov 2026):
+
+- **Requests.** The Workers Paid plan includes 1 million a month, then $0.15 a million (the Free plan: 100,000 a day). HTTP
+  requests, WebSocket messages and alarms all count. A request is needed to create a WebSocket connection; outgoing WebSocket
+  messages are not billed, nor are incoming WebSocket protocol pings, and other incoming WebSocket messages count 20 to 1.
+- **Duration.** Paid includes 400,000 GB-s a month, then $12.50 a million GB-s (Free: 13,000 GB-s a day). An object is billed
+  while it runs, or while it sits idle in memory unable to hibernate; one that is idle and able to hibernate is not billed, even
+  before the runtime hibernates it. Messages answered by `setWebSocketAutoResponse` take no wall-clock time and are not charged.
+
+What that makes for the feed, counted from the code (the pilot's figure is an estimate):
+
+| What | Durable Object requests | Duration |
+| --- | --- | --- |
+| A socket opening, once an hour and after a drop: the desktop's ticket and its upgrade | 4: at the mint, the session checked, the switch read and the ticket kept; at the upgrade, the connection itself, where the shop's object checks the ticket and the session from what it holds. The mint adds the ticket's request, and the upgrade no longer checks the session or reads the switch in the Worker; and 2 Worker requests | Milliseconds |
+| The alarm that ends a socket's hour | 1 | Milliseconds |
+| A socket's keepalive, every 50 seconds | About 86 a day (1,728 messages, at 20 to 1) | None: the runtime answers it without the object |
+| A socket that sits open | None | None: the object hibernates |
+| A write the shop's object already takes, while it has sockets | None more | Up to a second more awake, until its ping goes: about 0.125 GB-s at 128 MB |
+| A task's own change, while someone follows the shop | 1: its call to the shop's object | Milliseconds, then as above |
+| A task's own change, while nobody follows the shop (every shop while the switch is off) | At most 1 a minute for a busy task | Milliseconds |
+| The switch, read while a shop pings | At most 1 a minute for each shop with sockets | Milliseconds |
+| A ping | None: an outgoing message | None more |
+
+So one socket costs about 6,200 requests a month (5 an hour to keep it open, and about 86 a day for its keepalive), and no
+duration while it is idle. The pilot's ten shops with two desktops each, twenty sockets, come to about 124,000 requests a month,
+inside the Paid plan's million. What a busy shop adds is reads: each ping makes every desktop that follows the shop read it
+again, at most once in 15 seconds each, so a desktop reads a busy shop up to four times a minute instead of once, each read the
+same requests the minute's read makes now. A quiet shop is read once a minute, as now.
 
 ## Not built, and waiting on the owner
 
