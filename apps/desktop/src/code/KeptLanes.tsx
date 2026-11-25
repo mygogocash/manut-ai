@@ -38,9 +38,11 @@ export interface KeptLanesProps {
   open: KeptOpen | null;
   /** A line under the band after a removal that left the branch: git's words. */
   notice: string | null;
-  /** Why a clean-up left a folder, by branch (a code from the shell), and why it could not tell at all. */
+  /** Why a clean-up left a folder, by branch (a code from the shell), and why it could not tell at all, with the setting of the
+   *  project's own git config that stopped it (`config`). */
   why?: Record<string, string>;
   cannot?: string | null;
+  setting?: string | null;
   onShow: (lane: KeptLane) => void;
   onRemove: (lane: KeptLane) => void;
   onBranch: (on: boolean) => void;
@@ -66,10 +68,17 @@ function aheadLine(ahead: number | null, base: string): string {
   return ahead === 1 ? t("lane.kept.aheadOne", { base }) : t("lane.kept.aheadMany", { n: ahead, base });
 }
 
-/** What a kept folder says of the clean-up: the reason it left it, or that its branch has commits on no remote. */
+/** The first few of a folder's ignored files, as the line names them. */
+const fewFiles = (files: readonly string[]) => (files.length > 5 ? [...files.slice(0, 5), "…"] : files).join(", ");
+
+/** What a kept folder says of the clean-up: the reason it left it, that its branch has commits on no remote, or that it holds
+ *  files git ignores that may be the developer's (a `.env.local`, a local database), which a clean-up never takes unasked. */
 function cleanLine(k: KeptLane, why: string | undefined): string | null {
+  const ignored = k.exists && k.ignored?.length ? t("lane.kept.ignored", { files: fewFiles(k.ignored) }) : null;
+  if (why === "ignored" && ignored) return ignored;
   if (why && why !== "open") return t(`lane.kept.why.${why}` as Key);
   if (k.exists && k.changed === 0 && k.unpushed) return k.unpushed === 1 ? t("lane.kept.unpushedOne") : t("lane.kept.unpushedMany", { n: k.unpushed });
+  if (k.changed === 0 && ignored) return ignored;
   if (why === "open") return t("lane.kept.why.open");
   return null;
 }
@@ -88,7 +97,7 @@ export function KeptLanesView(p: KeptLanesProps) {
       )}
       {p.cannot && (
         <p className="mut lline" role="status" data-testid="kept-cannot">
-          {t(`lane.kept.cannot.${p.cannot}` as Key)}
+          {t(`lane.kept.cannot.${p.cannot}` as Key, { setting: p.setting || "?" })}
         </p>
       )}
       {p.rows.map((k) => {
@@ -124,6 +133,7 @@ export function KeptLanesView(p: KeptLanesProps) {
                 {open.changed > 0 && (
                   <p data-testid="kept-lose">{open.changed === 1 ? t("lane.kept.loseOne") : t("lane.kept.loseMany", { n: open.changed })}</p>
                 )}
+                {!!k.ignored?.length && <p data-testid="kept-lose-ignored">{t("lane.kept.loseIgnored", { files: fewFiles(k.ignored) })}</p>}
                 <label className="kept-tick">
                   <input type="checkbox" checked={open.branch} onChange={(e) => p.onBranch(e.currentTarget.checked)} data-testid="kept-branch" />{" "}
                   {t("lane.kept.branchToo", { branch: k.branch })}
@@ -195,6 +205,7 @@ export function KeptLanes({ root }: { root: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [why, setWhy] = useState<Record<string, string>>({});
   const [cannot, setCannot] = useState<string | null>(null);
+  const [setting, setSetting] = useState<string | null>(null);
 
   // another project: nothing of the last one's stays on the page
   useEffect(() => {
@@ -203,6 +214,7 @@ export function KeptLanes({ root }: { root: string }) {
     setNotice(null);
     setWhy({});
     setCannot(null);
+    setSetting(null);
   }, [root]);
   // Settings › Worktrees: remove the folders of lanes whose pull request merged. Asked when the project opens and when the
   // window is looked at again, never on a timer, and at most once an hour for a project; the shell removes nothing with work
@@ -221,6 +233,7 @@ export function KeptLanes({ root }: { root: string }) {
         (got) => {
           if (!live) return;
           setCannot(got.cannot);
+          setSetting(got.setting ?? null);
           setWhy(Object.fromEntries(got.kept.map((k) => [k.branch, k.why])));
           if (got.removed.length > 0) {
             setNotice(got.removed.length === 1 ? t("lane.kept.cleanedOne") : t("lane.kept.cleanedMany", { n: got.removed.length }));
@@ -289,6 +302,7 @@ export function KeptLanes({ root }: { root: string }) {
       notice={notice}
       why={why}
       cannot={cannot}
+      setting={setting}
       onShow={(k) => void getHost().reveal(k.worktree).catch(() => undefined)}
       onRemove={(k) => setOpen({ worktree: k.worktree, changed: k.exists ? (k.changed ?? 0) : 0, ahead: k.ahead, branch: false, busy: false, why: null })}
       onBranch={(on) => open && setOpen({ ...open, branch: on, why: null })}

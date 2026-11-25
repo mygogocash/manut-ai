@@ -35,7 +35,7 @@ afterEach(() => setLang("en"));
 describe("the page's own check of extra arguments (the shell's, run sooner)", () => {
   it("takes only --name, --name=value, -x and -x=value, one per line, never split on spaces", () => {
     expect(argLines("--model=opus\n\n--name=two words\r\n")).toEqual(["--model=opus", "--name=two words"]);
-    for (const ok of ["--model=opus", "--model", "-m", "-m=opus", "--agent=reviewer"]) expect(checkArgs("claude", [ok]), ok).toBeNull();
+    for (const ok of ["--model=opus", "--model", "-n", "-n=work", "--effort=high"]) expect(checkArgs("claude", [ok]), ok).toBeNull();
     for (const bad of ["opus", "mcp", "--", "-", "-abc", "-mopus", "---x", "--=x", " --model=x"]) expect(checkArgs("claude", [bad])?.why, bad).toBe("arg_shape");
     expect(optionOf("--model=a=b")).toEqual(["model", true]);
     expect(optionOf("-c=k=v")).toEqual(["c", false]);
@@ -69,12 +69,34 @@ describe("the page's own check of extra arguments (the shell's, run sooner)", ()
     expect(checkArgs("codex", ["-c=model=\"o3\"", "-m=o3"])).toBeNull();
   });
 
+  it("refuses every spelling the CLI's parser takes, and takes only options known to be harmless", () => {
+    // yargs (Gemini CLI) reads camelCase and a dot's object form; Codex takes --yolo, which its help does not print
+    const other: [string, string[]][] = [
+      ["gemini", ["--approvalMode=yolo", "--skipTrust", "--includeDirectories=/", "--allowedTools=x", "--sandbox.enabled=false", "--s=false", "--noSandbox"]],
+      ["codex", ["--yolo", "--full-auto", "--not-so-yolo", "--enable=x", "-c=features.x=true"]],
+      ["claude", ["--permissionMode=bypassPermissions", "--addDir=/"]],
+    ];
+    for (const [id, args] of other) for (const a of args) expect(checkArgs(id, [a])?.why, `${id} ${a}`).toBe("arg_skips");
+    // the rule turned round: an option on no list is refused, naming the option only
+    expect(checkArgs("claude", ["--agent=reviewer"])).toEqual({ why: "arg_unlisted", what: "--agent" });
+    expect(checkArgs("codex", ["-c=model_providers.x.base_url=\"https://x\""])).toEqual({ why: "arg_unlisted", what: "-c" });
+    expect(checkArgs("gemini", ["--screenReader", "-m=x"])).toBeNull();
+    expect(checkArgs("claude", ["--model.x=1"])?.why).toBe("arg_unlisted");
+    setLang("en");
+    expect(refusalText({ why: "arg_unlisted", what: "--agent" }, "Claude Code")).toBe("--agent is not on the short list of options Manut AI knows are harmless for Claude Code, so it does not pass it.");
+  });
+
   it("refuses variables the app sets itself, the home variable and a name twice", () => {
     expect(checkVars("claude", [{ name: "ANTHROPIC_BASE_URL", value: "x" }])).toBeNull();
     expect(checkVars("claude", [{ name: "PATH" }])).toEqual({ why: "var_own", what: "PATH" });
     expect(checkVars("claude", [{ name: "manut_x" }])?.why).toBe("var_own");
     expect(checkVars("claude", [{ name: "CLAUDE_CONFIG_DIR" }])).toEqual({ why: "var_home", what: "CLAUDE_CONFIG_DIR" });
     expect(checkVars("grok", [{ name: "GROK_SANDBOX" }])?.why).toBe("var_own");
+    // a variable that skips the asks, lifts the sandbox or points at other settings, in any case and with or without _
+    for (const [id, name] of [["gemini", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"], ["gemini", "gemini_cli_system_settings_path"], ["gemini", "GEMINICLISYSTEMSETTINGSPATH"], ["claude", "CLAUDE_CODE_SANDBOXED"], ["opencode", "OPENCODE_CONFIG"], ["codex", "CODEX_EXEC_SERVER_URL"]]) {
+      expect(checkVars(id, [{ name }]), `${id} ${name}`).toEqual({ why: "var_own", what: name });
+    }
+    expect(checkVars("claude", [{ name: "CLAUDECONFIGDIR" }])?.why).toBe("var_home");
     expect(checkVars("claude", [{ name: "A" }, { name: "a" }])?.why).toBe("var_name");
     expect(checkVars("claude", [{ name: "1A" }])?.why).toBe("var_name");
     expect(checkVars("dsh", [{ name: "A" }], false)?.why).toBe("var_none");

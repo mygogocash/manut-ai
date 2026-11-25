@@ -15,6 +15,7 @@ const ASK: ReviewAsk = {
   source: "github",
   repo: "mygogocash/web-app",
   remote: "origin",
+  from: "",
   branch: "kit/promptpay-qr",
   base: "main",
   head: "a".repeat(40),
@@ -29,7 +30,7 @@ const ASK: ReviewAsk = {
   message: "",
   dropped: 0,
 };
-const MERGE: ReviewAsk = { ...ASK, kind: "merge", number: 12, url: "https://github.com/mygogocash/web-app/pull/12", method: "squash", subject: "Add the PromptPay QR (#12)", message: "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\n\n* Read the amount", uncommitted: 0 };
+const MERGE: ReviewAsk = { ...ASK, kind: "merge", from: "mygogocash/web-app", number: 12, url: "https://github.com/mygogocash/web-app/pull/12", method: "squash", subject: "Add the PromptPay QR (#12)", message: "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\n\n* Read the amount", uncommitted: 0 };
 const PULL = { source: "github" as const, repo: "mygogocash/web-app", number: 12, state: "open" as const, title: "Add the PromptPay QR" };
 
 function draw(step: ReviewStep, over: Partial<ReviewViewProps> = {}) {
@@ -77,8 +78,9 @@ describe("Put up for review", () => {
     const html = draw({ at: "ask", ask: MERGE, busy: false, why: null });
     const text = words(html);
     expect(text).toContain("Merge pull request #12 into main?");
-    expect(text).toContain("#12 Add the PromptPay QR");
-    expect(text).toContain("kit/promptpay-qr into main");
+    // where the pull request comes from, and its head commit beside the title
+    expect(text).toContain("#12 Add the PromptPay QR (commit aaaaaaa)");
+    expect(text).toContain("kit/promptpay-qr of mygogocash/web-app into main");
     expect(html).toContain('data-method="squash"');
     expect(text).toContain("Squash and merge");
     expect(html).toContain(`data-testid="review-subject">Add the PromptPay QR (#12)</pre>`);

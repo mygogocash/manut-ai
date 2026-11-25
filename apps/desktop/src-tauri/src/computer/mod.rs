@@ -7,8 +7,9 @@
 //!   by itself.
 //! - A chat's Claude Code is handed an MCP server, this same program started as `manut --computer-mcp` (`mcp.rs`),
 //!   and a skill that says how to use it (`SKILL.md`, from Orca's guide). The server relays each call to the shell
-//!   over a socket only this user can open (`hub.rs`), and the shell does the looking and acting (`mac.rs`), so the
-//!   permissions are the app's and every check is in one place (`room.rs`).
+//!   over a socket only this user can open, which serves only this app's own program started under that chat's Claude
+//!   Code, read from the kernel (`hub.rs`), and the shell does the looking and acting (`mac.rs`), so the permissions
+//!   are the app's and every check is in one place (`room.rs`).
 //! - Each call Claude Code asks permission for comes to the shell first (`tap.rs`): a look at an app the person allowed
 //!   in this chat, or the list of apps, is answered at once; anything else is the chat's card, and only the person's
 //!   Allow once lets that one call run, once.

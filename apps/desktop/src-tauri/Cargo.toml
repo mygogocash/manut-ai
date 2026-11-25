@@ -63,6 +63,10 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFSpeechRecognitionTaskHint", "SFTranscription"] }
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioBuffer", "AVAudioFormat", "AVAudioTime", "AVAudioTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+# Computer use (computer/mac.rs): a running program's bundle identifier as the system knows it
+# (NSRunningApplication's `bundleIdentifier`), for any kind of bundle, so macOS's own prompts that are not `.app`s are
+# recognised. The objc2 project's AppKit bindings, already in the tree through objc2-web-kit; only this class is named.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
 
 # In-app updates (docs/releasing.md): reads the endpoint and the pinned public key in tauri.conf.json and installs only
 # a build signed with the matching private key. Desktop only, as Tauri's own guide says; lib.rs registers it.

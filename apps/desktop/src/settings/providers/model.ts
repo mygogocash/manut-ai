@@ -105,6 +105,7 @@ export type Why =
   | "arg_shape"
   | "arg_skips"
   | "arg_own"
+  | "arg_unlisted"
   | "arg_many"
   | "arg_unchecked"
   | "arg_cmd"
@@ -128,6 +129,8 @@ interface Rules {
   own: string[];
   config: string[];
   config_keys: string[];
+  config_allow: string[];
+  allow: string[];
   vars: string[];
 }
 const TABLE = RULES as { rules: Rules[]; appVars: string[]; homeVars: Record<string, string>; versionAgents: string[] };
@@ -150,12 +153,19 @@ export function optionOf(a: string): [string, boolean] | null {
   return m ? [m[1], false] : null;
 }
 
-const norm = (n: string) => n.toLowerCase().replace(/_/g, "-");
+/** The shell's `norm`: a name whatever its spelling, case folded and with every `-` and `_` taken out, so
+ *  `approval-mode`, `approval_mode` and `approvalMode` (yargs reads all three) are one name. */
+const norm = (n: string) => n.replace(/[-_]/g, "").toLowerCase();
+/** The shell's `names`: to refuse, a long name against every entry, as its `--no-` form and by its part before a dot. */
 function names(list: string[], name: string, long: boolean): boolean {
   if (!long) return list.some((r) => r.length === 1 && r === name);
-  const n = norm(name);
-  const off = n.startsWith("no-") ? n.slice(3) : null;
-  return list.filter((r) => r.length > 1).map(norm).some((r) => r === n || r === off);
+  const forms = [norm(name), norm(name.split(".")[0])];
+  return list.map(norm).some((r) => forms.some((n) => n === r || (n.startsWith("no") && n.slice(2) === r)));
+}
+/** The shell's `listed`: on the short list known to be harmless, whole. */
+function listed(list: string[], name: string, long: boolean): boolean {
+  if (!long) return list.some((r) => r.length === 1 && r === name);
+  return !name.includes(".") && list.some((r) => norm(r) === norm(name));
 }
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -176,7 +186,11 @@ export function checkArgs(id: string, args: string[]): Refusal | null {
     if (names(r.config, name, long)) {
       const key = (a.includes("=") ? a.slice(a.indexOf("=") + 1) : "").split("=")[0].trim().toLowerCase();
       if (!key || r.config_keys.some((k) => key.startsWith(k))) return { why: "arg_skips", what: shown };
+      if (!r.config_allow.includes(key)) return { why: "arg_unlisted", what: shown };
+      continue;
     }
+    // the rule turned round: anything not known to be harmless is refused, since no help prints a CLI's hidden options
+    if (!listed(r.allow, name, long)) return { why: "arg_unlisted", what: shown };
   }
   return null;
 }
@@ -192,8 +206,9 @@ export function checkVars(id: string, vars: { name: string; value?: string | nul
     const upper = v.name.toUpperCase();
     if (!shape || seen.has(upper)) return { why: "var_name", what: shape ? v.name : "" };
     seen.add(upper);
-    if (homeVarOf(id)?.toUpperCase() === upper) return { why: "var_home", what: v.name };
-    const own = TABLE.appVars.some((a) => a.toUpperCase() === upper) || upper.startsWith("MANUT_") || !!rulesOf(id)?.vars.some((x) => x.toUpperCase() === upper);
+    const home = homeVarOf(id);
+    if (home && norm(home) === norm(v.name)) return { why: "var_home", what: v.name };
+    const own = TABLE.appVars.some((a) => norm(a) === norm(v.name)) || upper.startsWith("MANUT_") || !!rulesOf(id)?.vars.some((x) => norm(x) === norm(v.name));
     if (own) return { why: "var_own", what: v.name };
     if (typeof v.value === "string" && (v.value.length > 8192 || v.value.includes("\0"))) return { why: "var_value", what: v.name };
   }
@@ -219,6 +234,7 @@ const WHY_KEY: Record<Why, Key> = {
   arg_shape: "prov.why.argShape",
   arg_skips: "prov.why.argSkips",
   arg_own: "prov.why.argOwn",
+  arg_unlisted: "prov.why.argUnlisted",
   arg_many: "prov.why.argMany",
   arg_unchecked: "prov.why.argUnchecked",
   arg_cmd: "prov.why.argCmd",

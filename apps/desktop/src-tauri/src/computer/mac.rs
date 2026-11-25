@@ -28,7 +28,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
 
 use super::keys::Chord;
-use super::room::{App, Desk, Handle, Node, MAX_DEPTH, MAX_NODES, SECURE};
+use super::room::{clean, App, Desk, Handle, Node, Place, MAX_DEPTH, MAX_NODES, SECURE};
 
 type AXUIElementRef = *const c_void;
 /// `AXError`: 0 is success (`AXError.h`).
@@ -66,7 +66,12 @@ extern "C" {
     fn AXUIElementSetAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: CFTypeRef) -> AXError;
     fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> AXError;
+    fn AXValueGetValue(value: CFTypeRef, the_type: u32, value_ptr: *mut c_void) -> u8;
 }
+
+/// `kAXValueTypeCGPoint` and `kAXValueTypeCGSize` (`AXValue.h`).
+const AX_POINT: u32 = 1;
+const AX_SIZE: u32 = 2;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -154,6 +159,22 @@ impl Ax {
         Some(Ax(v))
     }
 
+    /// An `AXValue` attribute (`AXPosition`, `AXSize`) as the structure it wraps.
+    fn value<T: Copy>(&self, name: &str, kind: u32, empty: T) -> Option<T> {
+        let v = self.attr(name)?;
+        let mut out = empty;
+        let ok = unsafe { AXValueGetValue(v.as_CFTypeRef(), kind, &mut out as *mut T as *mut c_void) };
+        (ok != 0).then_some(out)
+    }
+
+    /// Its position and size on screen in whole points: `AXPosition` is global, from the top-left of the screen with the
+    /// menu bar, as the window list's bounds are.
+    fn frame(&self) -> Option<[i64; 4]> {
+        let p = self.value("AXPosition", AX_POINT, CGPoint { x: 0.0, y: 0.0 })?;
+        let s = self.value("AXSize", AX_SIZE, CGSize { width: 0.0, height: 0.0 })?;
+        Some([p.x.round() as i64, p.y.round() as i64, s.width.round() as i64, s.height.round() as i64])
+    }
+
     /// What the element holds, as text, when it is text, a number or a check box's state. Never called for a
     /// password field.
     fn value_text(&self) -> Option<String> {
@@ -198,20 +219,86 @@ fn ax(handle: &Handle) -> Option<&Ax> {
     handle.downcast_ref::<Ax>()
 }
 
-/// The bundle identifier of the app process `pid` runs, read from its `Info.plist`, or empty.
-fn bundle_of(pid: i32) -> String {
+/// The window number of a window element.
+fn window_number(win: &Ax) -> Option<u32> {
+    let get = get_window()?;
+    let mut id: u32 = 0;
+    (unsafe { get(win.ptr(), &mut id) } == 0 && id != 0).then_some(id)
+}
+
+/// The program file process `pid` runs, or empty when it cannot be read.
+fn path_of(pid: i32) -> String {
     let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
     if n <= 0 {
         return String::new();
     }
-    let path = String::from_utf8_lossy(&buf[..n as usize]).into_owned();
-    let Some(at) = path.rfind(".app/Contents/MacOS/") else { return String::new() };
-    let plist = format!("{}.app/Contents/Info.plist", &path[..at]);
+    String::from_utf8_lossy(&buf[..n as usize]).into_owned()
+}
+
+/// Whether process `pid` runs as this user, both its real and its effective user (`proc_pidinfo`'s `pbi_ruid` and
+/// `pbi_uid`); false when that cannot be read.
+fn runs_as_me(pid: i32) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut c_void, size) };
+    let me = unsafe { libc::getuid() };
+    n == size && info.pbi_uid == me && info.pbi_ruid == me
+}
+
+/// The bundle identifier of process `pid` as the system knows it (`NSRunningApplication`'s `bundleIdentifier`, which
+/// AppKit's header says is the `CFBundleIdentifier` of the app's `Info.plist`, for any kind of bundle), else read from the
+/// `Info.plist` of whatever bundle its program `path` is in, else empty. AppKit tracks only "user applications", so the
+/// second read is what finds macOS's own prompts that run from a `.bundle`.
+fn bundle_of(pid: i32, path: &str) -> String {
+    let known = objc2_app_kit::NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|a| a.bundleIdentifier()).map(|b| b.to_string());
+    known.filter(|b| !b.trim().is_empty()).unwrap_or_else(|| bundle_in(path))
+}
+
+/// The bundle identifier of the bundle whose program is at `path` (`<name>.<kind>/Contents/MacOS/<program>`, any kind:
+/// `.app`, `.bundle`, `.xpc`, `.appex`), from its `Info.plist`, or empty.
+fn bundle_in(path: &str) -> String {
+    let Some(at) = path.rfind("/Contents/MacOS/") else { return String::new() };
+    let root = &path[..at];
+    if !root.rsplit('/').next().is_some_and(|name| name.len() > 1 && name[1..].contains('.')) {
+        return String::new();
+    }
+    let plist = format!("{root}/Contents/Info.plist");
     plist::Value::from_file(plist)
         .ok()
         .and_then(|v| v.as_dictionary().and_then(|d| d.get("CFBundleIdentifier")).and_then(|b| b.as_string()).map(str::to_string))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// macOS's own prompts are not all apps: SecurityAgent (a password prompt) and the Touch ID and password prompt
+    /// (`coreautha`) are `.bundle`s, and their bundle identifiers are what the refused list names.
+    #[test]
+    fn a_prompt_in_any_kind_of_bundle_reads_its_bundle_identifier() {
+        let d = std::env::temp_dir().join(format!("mc-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (bundle, exe, id) in [("SecurityAgent.bundle", "SecurityAgent", "com.apple.SecurityAgent"), ("coreautha.bundle", "coreautha", "com.apple.LocalAuthentication.UIAgent"), ("TextEdit.app", "TextEdit", "com.apple.TextEdit"), ("Helper.xpc", "Helper", "com.example.helper")] {
+            let root = d.join(bundle).join("Contents");
+            std::fs::create_dir_all(root.join("MacOS")).unwrap();
+            std::fs::write(root.join("Info.plist"), format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>")).unwrap();
+            assert_eq!(bundle_in(&root.join("MacOS").join(exe).to_string_lossy()), id, "{bundle}");
+        }
+        // a program in no bundle has none
+        assert_eq!(bundle_in("/usr/bin/python3"), "");
+        let _ = std::fs::remove_dir_all(&d);
+        // and on this Mac, the two prompts' own bundles, as macOS ships them (read from their Info.plist, nothing run)
+        for (path, id) in [
+            ("/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent", "com.apple.SecurityAgent"),
+            ("/System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha", "com.apple.LocalAuthentication.UIAgent"),
+        ] {
+            if std::path::Path::new(path).exists() {
+                assert_eq!(bundle_in(path), id);
+            }
+        }
+    }
 }
 
 /// `_AXUIElementGetWindow`, which HIServices exports without declaring: the window number of a window element, found
@@ -344,7 +431,8 @@ impl Desk for Mac {
                 .and_then(|v| v.downcast::<CFString>())
                 .map(|s| s.to_string())
                 .unwrap_or_default();
-            out.push(App { pid: pid as i32, name, bundle: bundle_of(pid as i32) });
+            let path = path_of(pid as i32);
+            out.push(App { pid: pid as i32, name, bundle: bundle_of(pid as i32, &path), path, mine: runs_as_me(pid as i32) });
         }
         out
     }
@@ -375,11 +463,8 @@ impl Desk for Mac {
 
     fn picture(&self, pid: i32, window: usize) -> Result<Vec<u8>, String> {
         let win = Mac::window(pid, window)?;
-        let get = get_window().ok_or("this macOS does not say which window it is")?;
-        let mut id: u32 = 0;
-        if unsafe { get(win.ptr(), &mut id) } != 0 || id == 0 {
-            return Err("this window has no picture (it may be minimized)".into());
-        }
+        get_window().ok_or("this macOS does not say which window it is")?;
+        let id = window_number(&win).ok_or("this window has no picture (it may be minimized)")?;
         let image = unsafe { CGWindowListCreateImage(CGRectNull, LIST_ONE, id, IMAGE_OPTIONS) };
         if image.is_null() {
             return Err("macOS gave no picture of this window".into());
@@ -396,6 +481,38 @@ impl Desk for Mac {
     fn again(&self, handle: &Handle) -> Option<Node> {
         let el = ax(handle)?;
         Ax(el.0.clone()).node(0)
+    }
+
+    fn place(&self, handle: &Handle) -> Option<Place> {
+        let el = Ax(ax(handle)?.0.clone());
+        let role = el.string("AXRole")?;
+        let win = if role == "AXWindow" { Ax(el.0.clone()) } else { el.element("AXWindow")? };
+        // the control's index among its parent's children at each level, up to the window
+        let mut path = Vec::new();
+        let mut here = el;
+        for _ in 0..=MAX_DEPTH + 1 {
+            if here.0 == win.0 {
+                path.reverse();
+                return Some(Place { window: window_number(&win), path, frame: Ax(ax(handle)?.0.clone()).frame() });
+            }
+            let parent = here.element("AXParent")?;
+            path.push(parent.elements("AXChildren").iter().position(|c| c.0 == here.0)?);
+            here = parent;
+        }
+        None
+    }
+
+    fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
+        let id = place.window.ok_or("the window has no number")?;
+        let [x, y, w, h] = place.frame.ok_or("the control has no frame")?;
+        let rect = CGRect { origin: CGPoint { x: x as f64, y: y as f64 }, size: CGSize { width: w as f64, height: h as f64 } };
+        let image = unsafe { CGWindowListCreateImage(rect, LIST_ONE, id, IMAGE_OPTIONS) };
+        if image.is_null() {
+            return Err("macOS gave no picture of the control".into());
+        }
+        let out = png(image);
+        unsafe { CFRelease(image) };
+        out
     }
 
     fn focused_window(&self, pid: i32) -> Option<String> {
@@ -437,7 +554,8 @@ impl Desk for Mac {
             let item = here
                 .elements("AXChildren")
                 .into_iter()
-                .find(|c| c.string("AXTitle").is_some_and(|t| t.trim() == title.trim()))
+                // a menu's title as the card showed it: without invisible format characters
+                .find(|c| c.string("AXTitle").is_some_and(|t| clean(&t).trim() == title.trim()))
                 .ok_or_else(|| format!("There is no menu item “{title}” there, so nothing was chosen."))?;
             if i + 1 == path.len() {
                 if item.boolean("AXEnabled") == Some(false) {

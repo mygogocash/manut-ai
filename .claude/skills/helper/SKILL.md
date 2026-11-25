@@ -35,12 +35,15 @@ agent in a mode that skips its asks, never force a removal or a push.
   release build, never `tauri dev`, never open the app's window.
 - Playwright: update and run only the specs you change. If you change a menu, a Settings page, the chat box or a
   lane's life, find the specs that assert it (`grep -rl` in `apps/desktop/e2e`) and run those.
-- Before your last commit, the whole gate once, with the script every helper and the lead share:
-  `.claude/skills/lead-merge/scripts/gate.sh <your worktree>` (add `--no-rust` only when you changed no Rust). It
-  installs, runs every package's tests, the type checks and the Rust suite, and waits its turn: only one gate runs on
-  this Mac at a time, so it may sit for some minutes saying it is waiting. Do not run the whole test suite any other
-  way. A test that fails only under load and passes alone is in `docs/handoff.md`, "Known flaky tests"; anything else
-  is yours.
+- Before you push, unless your brief asks for the whole gate: every test file you touched, the type check
+  (`pnpm --config.verify-deps-before-run=false typecheck`, or the desktop's alone when you changed only the desktop),
+  the whole Rust suite if you changed Rust, and the Playwright specs you changed or that assert what you changed. Say
+  in your report exactly what you ran, with counts. The lead runs the whole gate once, after merging your branch
+  (`.claude/skills/lead-merge/scripts/gate.sh`): with several helpers at work, a whole gate from each kept the one
+  gate lock busy for most of an hour (26 Nov 2026). A test that fails only under load and passes alone is in
+  `docs/handoff.md`, "Known flaky tests"; anything else is yours.
+- Look at what you built. A page or a move that only tests have seen is not checked: take the screenshots your brief
+  names, open them, and say in your report what you saw and what you changed because of it.
 - This Mac has 8 GB and several helpers are running. Run only the files you touch while you work, and nothing heavy
   beside the gate.
 
@@ -74,7 +77,7 @@ list names only.
   `mktemp -d` and use `git commit -F <file>`.
 - End each message with `Co-Authored-By:` and the model you are, for example
   `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
-- When the gate is green, push your branch once: `git push -u origin <your branch>`.
+- When those checks are green, push your branch once: `git push -u origin <your branch>`.
 - Never push to `main` or `pilot/week-1`, never merge, deploy, tag, publish a release or change a GitHub setting.
 
 ## If it does not fit
@@ -85,5 +88,5 @@ safe partial result is better than an unsafe whole one.
 ## Your report (all the lead sees)
 
 Under 400 words: what a person now sees; what you reused and what you added (files); each decision and why; how the
-safety rule is enforced and the test for it; what you verified for real and what only by tests; the gate's result with
+safety rule is enforced and the test for it; what you verified for real and what only by tests; what you ran, with
 counts; the commits and whether the branch is pushed; what is left, and what needs the owner.

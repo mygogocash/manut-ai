@@ -188,9 +188,13 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
           with it (cards.css .whole), and nothing in it is masked, since what is approved must be what is typed. Every
           other command hides any key in it (maskSecrets). */}
       {said ? (
-        <pre className="card-cmd whole" data-testid="card-computer">
-          {said.lines}
-        </pre>
+        <>
+          <pre className="card-cmd whole" data-testid="card-computer">
+            {said.lines}
+          </pre>
+          {/* the control as it looked at the ask (the shell's picture of just that part of the window), beside its name */}
+          {comp?.picture && <img className="card-computer-picture" data-testid="card-computer-picture" src={`data:image/png;base64,${comp.picture}`} alt={t("computer.ask.picture", { app: comp.app })} />}
+        </>
       ) : (
         item.command && <pre className={item.whole ? "card-cmd whole" : "card-cmd"}>{item.whole ? item.command : maskSecrets(item.command)}</pre>
       )}

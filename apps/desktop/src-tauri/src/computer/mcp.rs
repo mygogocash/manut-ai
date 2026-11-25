@@ -3,8 +3,10 @@
 //!
 //! It holds nothing and decides nothing. It answers `initialize`, `ping` and `tools/list` itself, and relays each
 //! `tools/call` to the running app over the shell's socket with the chat's token (both given to it by the
-//! configuration the shell wrote for that chat, `hub.rs`), where every check is made (`room.rs`). So a server started
-//! any other way, or by a chat that has ended, can do nothing.
+//! configuration the shell put on that chat's Claude Code command line, `hub.rs`), where every check is made
+//! (`room.rs`). The shell serves it only because it is this app's program under the process started for that chat,
+//! read from the kernel, never because it holds the token. So a server started any other way, or by a chat that has
+//! ended, can do nothing.
 //!
 //! The messages are MCP's own, as its specification (revision 2025-06-18) writes them: one JSON-RPC message a line,
 //! `initialize` answered with the protocol version the client asked for when this server speaks it (else its newest),

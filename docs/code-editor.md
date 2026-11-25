@@ -279,28 +279,58 @@ start, so a file changed by hand never starts what the page would refuse.
   They go after every argument the app adds (the chat mode, `--permission-prompt-tool stdio`, a conversation id, the
   attachment folder, the status line relay), so a value-taking option of theirs at the end can only fail, never take one
   of the app's as its value; for an agent whose chat starts with a word (Codex's `app-server`, the `acp` of OpenCode,
-  Kimi Code, Cursor and Antigravity) they are that word's options. Refused by name, also without case, with `_`, as a
-  `--no-` form and with a value: the options that skip the asks or the sandbox, and the ones the app sets itself (the chat
-  mode, the conversation, the folder, where the asks go), as each CLI's own `--help` spells them (`ARG_RULES`, with the
-  page's copy `src/settings/providers/argRules.json` held equal by a Rust test):
+  Kimi Code, Cursor and Antigravity) they are that word's options. Refused by name, compared with every `-` and `_` taken
+  out and case folded on both sides (yargs, Gemini CLI's parser, also reads `--approval-mode` as `--approvalMode`), as a
+  `--no-` form, in yargs' dot form (`--sandbox.enabled=false`) and with a value: the options that skip the asks or the
+  sandbox, and the ones the app sets itself (the chat mode, the conversation, the folder, where the asks go), as each CLI's
+  own `--help` spells them and with the hidden spellings found since (`ARG_RULES`, with the page's copy
+  `src/settings/providers/argRules.json` held equal by a Rust test):
 
   | Agent | Refused as skipping the asks or the sandbox |
   | --- | --- |
   | Claude Code | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode`, `--allowedTools`, `--allowed-tools`, `--settings`, `--agents`, `--add-dir` |
-  | Codex | `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me`, `--add-dir`, `--search`, `-p`/`--profile`, and `-c`/`--config` whose key starts with `approval`, `sandbox` or `profile` |
-  | OpenCode | `--auto` |
+  | Codex | `--dangerously-bypass-approvals-and-sandbox` and its hidden `--yolo`, `--full-auto` (before 0.147), `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me` and its hidden `--not-so-yolo`, `--add-dir`, `--search`, `-p`/`--profile`, `--enable`, `--disable`, `--trust`, and `-c`/`--config` whose key starts with `approval`, `sandbox`, `profile`, `default_permissions`, `permissions`, `projects`, `mcp_servers`, `features` or `shell_environment_policy` |
+  | OpenCode | `--auto`, `--yolo`, `--dangerously-skip-permissions` |
   | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
-  | oh-my-pi | `--auto-approve`, `--approval-mode`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile` |
+  | oh-my-pi | `--auto-approve`, `--approval-mode`, `--yolo`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile`, `--allow-home`, `--hook`, `-e`/`--extension`, `--trusted-extension`, `--plugin-dir` |
   | Grok | `--always-approve`, `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
-  | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir` |
+  | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir`, `--plugin-dir` |
   | Antigravity | `--dangerously-skip-permissions`, `--mode`, `--settings`, `--add-dir`, `--sandbox` |
+
+  The rule turned round (security review, 25 Nov 2026). These lists were read from `--help`, which prints no hidden
+  option or alias, so none of them can be shown whole; before, `--approvalMode=yolo`, `--skipTrust` and
+  `--includeDirectories` passed for Gemini CLI, and `--yolo` for Codex. So besides the refusals, an option is taken only
+  from a short list known to be harmless for that agent (which model, how hard it thinks, what it logs, how it draws, and
+  options that only take something away); anything else is refused as not on the list (`arg_unlisted`), naming the option
+  only:
+
+  | Agent | Taken |
+  | --- | --- |
+  | Claude Code | `--model`, `--fallback-model`, `--effort`, `-n`/`--name`, `-d`/`--debug`, `--betas`, `--ax-screen-reader`, `--disallowedTools`/`--disallowed-tools`, `--disable-slash-commands` |
+  | Codex | `-m`/`--model`, `--oss`, `--local-provider`, `--strict-config`, `--no-alt-screen`, and `-c`/`--config` for `model`, `model_reasoning_effort`, `model_reasoning_summary` and `model_verbosity` only |
+  | OpenCode | `--log-level`, `--print-logs` |
+  | Gemini CLI | `-m`/`--model`, `-d`/`--debug`, `--screen-reader` |
+  | oh-my-pi | `--model`, `--smol`, `--slow`, `--plan`, `--models`, `--thinking`, `--hide-thinking`, `--no-title`, `--max-time`, `--warn-cost`, `--max-cost`, `--motion` |
+  | Grok | `-m`/`--model`, `--reasoning-effort`, `--debug`, `--disable-web-search`, `--disallowed-tools`, `--no-alt-screen`, `--max-turns` |
+  | Cursor | `--model` |
+  | Antigravity | `--model`, `--effort`, `--disable-slash-commands` |
 
   The agents whose options could not be read on this Mac (OmO, DeepSeek Harness, pi, Qwen Code, Kimi Code and Copilot CLI are
   not installed here, and Cline's `--help` did not return) take no extra arguments, and a person's own agent keeps its own on its entry. Buddy takes none
   at all, so its `--permission-mode default` stays the last word on its asks.
 - **Environment variables.** Names and values, for that agent's chats and terminals only, not Buddy's. They come before the
   home and the app's own variables, which therefore win; the names the app sets itself (`PATH`, `HOME`, `TERM`, `COLORTERM`,
-  `TERM_PROGRAM`, `MANUT_*`, OpenCode's `OPENCODE_CONFIG_CONTENT`), the home variable and Grok's `GROK_SANDBOX` are refused.
+  `TERM_PROGRAM`, `MANUT_*`, OpenCode's `OPENCODE_CONFIG_CONTENT`) and the home variable are refused, and so is every
+  variable a CLI's own documentation or program names as skipping its asks, lifting or changing its sandbox, or pointing it
+  at another settings or configuration file (`ArgRules::vars`, security review, 25 Nov 2026): Claude Code's
+  `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`, `CLAUDE_CODE_SANDBOXED`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`,
+  `CLAUDE_CODE_SHELL_PREFIX` and the others in `ARG_RULES`; Codex's `CODEX_EXEC_SERVER_URL`; Gemini CLI's
+  `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, `GEMINI_CLI_TRUST_WORKSPACE`, `GEMINI_SANDBOX`, `SANDBOX`, `SEATBELT_PROFILE` and the
+  rest; OpenCode's `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR` and `XDG_CONFIG_HOME`; oh-my-pi's `PI_CONFIG_DIR`,
+  `PI_CONFIG_FILES` and the shell prefixes; Grok's `GROK_SANDBOX`, `GROK_AUTO_PERMISSION_MODE`, `GROK_CONFIG_PATH` and the
+  rest; Cursor's `CURSOR_CONFIG_DIR` and `CURSOR_SANDBOX_POLICY_DIR`. Names are compared as options are, without case or
+  `_`. Antigravity's documentation names none. The person is setting their own tool, so these refusals are for a mistake
+  or a line pasted from somewhere, and the page says so in one line under the fields.
   OpenCode's ask rules are read with the person's variables, so one that changes its own rules is read too. A value is a
   secret: it stays in the shell's file and goes only into the agent's process; the page, an event, a refusal and a `{:?}`
   name the variable, never its value (`View` carries names, `Var`'s `Debug` hides it). A saved variable shows as its name with
@@ -679,8 +709,14 @@ another's files or the developer's folder.
   and the dial asks first, as for any install.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
-  changed or new (what git ignores goes with it), git is not partway through a rebase, merge, cherry-pick, revert or bisect
-  there, and every commit on its branch is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0).
+  changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch
+  is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0), and nothing git ignores in it may be the
+  developer's own (item 86). `git worktree remove` takes ignored files without a word, so the folder's ignored files are listed
+  first (`git ls-files --others --ignored --exclude-standard --directory`): only what a project rebuilds (inside a folder of
+  `turn_files::REBUILT`, the list Rewind already leaves out: `node_modules`, `target`, `dist`, `build`, `.next`, `.venv` and the
+  rest), the system's own files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) and the agent settings item 72 copied in (and the
+  `.gitignore` it writes in an agent folder it makes) may go with it. Anything else, a `.env.local` or a local database made
+  in the lane, keeps the folder, and the kept list names the first of those files; Remove's panel names them as going too.
   The branch stays, and no force flag is ever passed: the removal is `git worktree remove <folder>`, which git itself refuses
   for a locked worktree or one holding files it will not take. A folder kept for commits on no remote says so in the kept
   list. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
@@ -718,7 +754,8 @@ another's files or the developer's folder.
     --json headRefOid,mergedAt --limit 10` (GitLab: `glab mr list --repo <r> --source-branch <branch> --merged --output json
     --per-page 10`), and removes the folder only when a merged request exists, the branch's tip is in the default branch on the
     remote (fetched first, one branch) or, on GitHub, is exactly the commit that merged (what a squash merge leaves), and then
-    `lane_release`'s checks pass: nothing changed or new, git not busy there, and no session still works in it. The branch
+    `lane_release`'s checks pass: nothing changed or new, nothing ignored that may be the developer's, git not busy there, and
+    no session still works in it. The branch
     stays. Each folder it leaves is listed with why (not merged, not in the default branch yet, changes of its own, ...).
 - **While the session is listed** the folder stays, through the agent's end, a Restart and a restart of the app: a lane's
   branch and folder are saved with its session, so Resume and Restart start its agent in its own folder again, never in the
@@ -761,18 +798,44 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   as coming back to the window does.
 - **Automatically pull** (default off). When on, the Code page asks `source_pull` for the project it opens and when the window is
   looked at again, at most every fifteen minutes for a project, never on a timer. `git_pull.rs` brings the default branch up to
-  date only when the folder is not a lane's; git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
+  date only when the folder is not a lane's; the repository's own config names no program for git to run and no other address to
+  fetch from (see "Git the app runs by itself" below); git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
   no index lock; the checkout is on a branch that tracks a remote branch and both are, by name, the remote's default branch (where
   `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); `git status --porcelain=v1
   --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
   --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
   password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
-  --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase, a stash or a force; no
-  hook runs. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
+  --no-overwrite-ignore --no-autostash --no-verify-signatures --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
+  a stash or a force; no hook runs. An ignored file does not count as a change, but it is never written over: git's default
+  (`--overwrite-ignore`) would replace a person's ignored `.env` or `.mcp.json` with a tracked file an incoming commit adds at
+  the same path, so the pull passes `--no-overwrite-ignore` and git's refusal is said as the folder having changes (item 86).
+  A lane started from the remote cannot do this: its fetch moves only the remote-tracking branch, and its checkout is a new
+  folder. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
   how many commits came, or why nothing was done (changes, commits on no remote, busy, another branch, no upstream, could not
   fetch, both moved).
 - **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
   merging** (default off), for the asks below. The recognised credit lines are listed on the page as the code holds them.
+
+**Git the app runs by itself** (item 86). A repository's `.git/config` can come from someone else (a zip a freelancer sent), and
+git runs programs it names without asking: clean and smudge filters while it reads or checks out files, an ssh command, a
+credential helper, a remote of the `ext::` kind, and `url.<base>.insteadOf` sends a fetch elsewhere. The work the app starts by
+itself, never on a press (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list's counts, the lane's
+Diff and the main-moved note), first reads `git config --list --show-scope --includes -z` (or `--local` on a git before 2.26)
+and does nothing while the repository's own scopes (`local`, `worktree`, and the files they include) name any of
+`filter.<driver>.clean`, `.smudge` or `.process`, `core.sshCommand`, `core.gitProxy`, `core.askPass`,
+`core.alternateRefsCommand`, `credential.helper` or `credential.<url>.helper`, `remote.<name>.uploadpack`, `.receivepack` or
+`.vcs`, a `remote.<name>.url` or `.pushurl` of the `<transport>::<address>` form, or `url.<base>.insteadOf` or
+`.pushInsteadOf` (`lane::risky_setting`). The pull says it in its one line with the setting's name (an address in it shown as
+`*`), the clean-up says it where it says it could not tell, a folder of a deleted chat is kept with that reason, the kept list
+reads no counts, and the Diff and the main-moved note fall back to what they show when they cannot read. The person's own global
+and system settings are theirs and stay as they are. What the app's runs switch off instead, so it is not refused: hooks
+(`core.hooksPath` pointed at a folder never made), `core.fsmonitor=false`, `--no-ext-diff --no-textconv` on every diff
+(`diff.external`, `diff.<driver>.command` and `.textconv`), `--no-verify-signatures` on the pull's write (`merge.verifySignatures`
+would run `gpg.program`), `protocol.ext.allow=never` on every automatic run, and a pager or an editor, which git starts only for a
+terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressing something (a lane started, its fetch, a push
+and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
+hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
+deploy-key ssh setup the person relies on.
 
 **Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
 its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a
@@ -786,8 +849,18 @@ mr create --repo <r> --source-branch <branch> --target-branch <base> --title=<ti
 title and body in boxes, exactly as they will be sent, with how many uncommitted files stay behind. Push and open, or Not now.
 
 **Merge** (the same place, once the lane's pull request is open and not a draft). The method starts from the setting and can be
-changed; Ask has the shell read the pull request (`gh pr view --json ...`, `glab mr view --output json`) and ask only when it is
-open, not a draft, made from the lane's branch and can merge now: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
+changed; Ask has the shell read the pull request (`gh pr view --json ...` with `isCrossRepository`, `headRepository` and
+`headRepositoryOwner`, `glab mr view --output json`) and ask only when it is open, not a draft, made from the lane's branch in
+this very repository, its head commit is the lane's own tip, and it can merge now (item 86). A fork can open a pull request on a
+branch named like a lane's (`kit/<words>` is easy to guess and public once pushed), so the branch's name is never enough:
+GitHub's `isCrossRepository` must be false and its head repository (`nameWithOwner`, else the owner's login and the name) the
+repository the pull request's own address names; GitLab's `source_project_id` must equal its `target_project_id` (GitLab's API
+says they differ only for a fork; glab is not on the Mac this was built on, so its answer is read as the API's object, as
+before). A request from another repository is refused (`other_repo`). Its head commit must be the lane's branch tip on this Mac
+and the tip this Mac last pushed (`refs/remotes/<remote>/<branch>`): a lane with commits the request does not hold
+(`lane_ahead`), a request holding commits the lane does not (`pull_ahead`) and a tip this Mac has no record of pushing
+(`not_pushed`) each say why on the card and ask nothing. The ask shows where the request comes from (`<branch> of <owner/repo>
+into <base>`) and its head commit's short id beside its title. Then: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
 `CLEAN`, `HAS_HOOKS` or `UNSTABLE` (`BLOCKED` is refused, since gh would turn on auto-merge for it), GitLab's
 `detailed_merge_status` is `mergeable`. The ask names the pull request, the method and the message exactly as sent: GitHub's own
 defaults (`Merge pull request #<n> from <owner>/<branch>` with the title and description; `<title> (#<n>)` with each commit's
@@ -810,7 +883,9 @@ approval-core settled reaches `review_settle`, which sends the ask's id and the 
 out of waiting under its lock before anything runs, so a second answer is `already_decided`; an ask taken back (the panel closed,
 the draft or the method changed) is `withdrawn`; one older than fifteen minutes is `expired`; an id this run never made is
 `not_found`. A No runs nothing. A Yes runs the plan written at ask time, after reading again that the branch is still the commit
-shown (open) or that the pull request is still open, mergeable and at the head shown (merge); otherwise nothing runs (`changed`). The
+shown (open) or that the pull request is still this repository's own branch, open, mergeable, at the head shown and into the base
+shown, and the lane still at that commit (merge); otherwise nothing runs (`changed`). Neither `gh pr merge` nor `glab mr merge` can
+bind the base itself, so a retarget in the moment between that read and the merge is the one change the app cannot see. The
 function that runs a plan takes a proof only `settle` can make, and `lib.rs` names only the asks, `settle` and `withdraw`
 (`the_page_reaches_the_writes_only_through_a_settled_ask`). Tasks (`tasks.rs`) stays the read-only reader its tests say it is.
 
@@ -847,14 +922,25 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   where it keeps local settings with the worktree.
 - **An added account** (`accounts.rs`, `share` and `prepare`). Before a session of Claude Code or Codex starts as an added
   account, the account's home gets links to the person's own home (the home folder set on Settings › Providers, else the
-  CLI's default) for an allow-list of configuration: Codex's `config.toml`
-  (settings and MCP servers), `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`, `plugins`; Claude Code's `skills`,
+  CLI's default) for an allow-list of configuration: Codex's `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`,
+  `plugins`; Claude Code's `skills`,
   `commands`, `agents`, `output-styles`, `rules`, `workflows`, `plugins`, `CLAUDE.md`. An entry the account has of its own
   stays its own, a link elsewhere is left alone, and nothing is written in the person's home. Claude Code's `settings.json` is
   a copy without `env` and the keys its settings reference lists under Authentication and providers (`apiKeyHelper`,
   `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`, `forceLoginMethod`, `forceLoginOrgUUID`,
   `forceLoginGatewayUrl`, `enforceAnthropicSignIn`, `allowedProviders`, `otelHeadersHelper`), written again on each start
-  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Never shared: `auth.json`, `auth.lock`,
+  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Codex's `config.toml` (settings and MCP
+  servers) is the same kind of copy (`.manut-config-copy`), since the security review of 25 Nov 2026: it used to be linked
+  whole, and it can hold a provider's key or headers and an MCP server's tokens, so the added account could use the
+  person's own key. The copy leaves out, wherever they sit (a provider, an MCP server, a profile, OpenTelemetry's
+  exporters, the network proxy, an agent's role), every key Codex's configuration reference and its `rust-v0.169.0` schema
+  name as holding a credential (`experimental_bearer_token`, `http_headers`, `query_params`, `headers`, `env`,
+  `client_secret`, `oauth` and the rest of `CODEX_LOGIN_KEYS`), naming where one is read (`env_key`, `env_http_headers`,
+  `bearer_token_env_var`, `credential_file`, `config_file`...) or running a command that prints one (`auth`,
+  `gateway_oauth`, `aws`, `http_headers_helper`), and the tables `mcp_enterprise_managed_auth` and
+  `shell_environment_policy.set`; the model, providers' addresses, the MCP servers themselves and project trust stay. An
+  earlier version's link is replaced by the copy; the copy keeps no comments; a key pasted into an MCP server's `command`
+  or `args` is not recognised. Never shared: `auth.json`, `auth.lock`,
   `.credentials.json`, `.claude.json`. On macOS Claude Code keeps an account's sign-in in the keychain under its config folder,
   so the shared files carry none. Left as before: Claude Code's servers added with `claude mcp add` (user scope, and a folder's
   local scope) live in its `.claude.json` beside the account's own details, and Claude Code rewrites that file while it runs,
