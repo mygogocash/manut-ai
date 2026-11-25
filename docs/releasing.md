@@ -21,6 +21,22 @@ release is Mac only (`docs/decisions.md`, 25 Nov 2026).
 
 Never publish a draft titled UNSIGNED: macOS warns on it and it is not notarized.
 
+## The first download: 0.1.0, unsigned, a pre-release
+
+The owner chose on 25 Nov 2026 to offer the first build from GitHub before the Apple secrets exist. So 0.1.0 is built
+unsigned from the tag `desktop-v0.1.0` and published as a pre-release, and a signed 0.1.1 follows as a full release.
+
+- **Opening it.** macOS does not open an unsigned app that was downloaded until the person allows it: open the
+  `.dmg`, drag Manut AI to Applications, open it once (macOS says it could not verify the app), then System Settings,
+  Privacy & Security, scroll to Security, Open Anyway, and confirm. It opens normally from then on. The release's notes
+  on GitHub say this too.
+- **Which file.** `aarch64` is for Apple silicon (M1 and later), `x64` for Intel Macs.
+- **Updates.** GitHub's latest release is the newest one that is not a pre-release, so while 0.1.0 is the only release
+  the app's update check finds nothing and stays quiet. Publishing 0.1.1 as a full release is what offers it to every
+  installed 0.1.0.
+- **Publishing a pre-release:** `gh release edit desktop-v<version> --draft=false --prerelease`, after the checks
+  below. Only the owner, or Claude when the owner said so for that release, publishes.
+
 ## Where Windows is
 
 The same run builds the Windows installer and keeps it as the run's `windows-installer` artifact for 14 days. It is not
