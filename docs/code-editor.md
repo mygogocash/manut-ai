@@ -279,28 +279,58 @@ start, so a file changed by hand never starts what the page would refuse.
   They go after every argument the app adds (the chat mode, `--permission-prompt-tool stdio`, a conversation id, the
   attachment folder, the status line relay), so a value-taking option of theirs at the end can only fail, never take one
   of the app's as its value; for an agent whose chat starts with a word (Codex's `app-server`, the `acp` of OpenCode,
-  Kimi Code, Cursor and Antigravity) they are that word's options. Refused by name, also without case, with `_`, as a
-  `--no-` form and with a value: the options that skip the asks or the sandbox, and the ones the app sets itself (the chat
-  mode, the conversation, the folder, where the asks go), as each CLI's own `--help` spells them (`ARG_RULES`, with the
-  page's copy `src/settings/providers/argRules.json` held equal by a Rust test):
+  Kimi Code, Cursor and Antigravity) they are that word's options. Refused by name, compared with every `-` and `_` taken
+  out and case folded on both sides (yargs, Gemini CLI's parser, also reads `--approval-mode` as `--approvalMode`), as a
+  `--no-` form, in yargs' dot form (`--sandbox.enabled=false`) and with a value: the options that skip the asks or the
+  sandbox, and the ones the app sets itself (the chat mode, the conversation, the folder, where the asks go), as each CLI's
+  own `--help` spells them and with the hidden spellings found since (`ARG_RULES`, with the page's copy
+  `src/settings/providers/argRules.json` held equal by a Rust test):
 
   | Agent | Refused as skipping the asks or the sandbox |
   | --- | --- |
   | Claude Code | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode`, `--allowedTools`, `--allowed-tools`, `--settings`, `--agents`, `--add-dir` |
-  | Codex | `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me`, `--add-dir`, `--search`, `-p`/`--profile`, and `-c`/`--config` whose key starts with `approval`, `sandbox` or `profile` |
-  | OpenCode | `--auto` |
+  | Codex | `--dangerously-bypass-approvals-and-sandbox` and its hidden `--yolo`, `--full-auto` (before 0.147), `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me` and its hidden `--not-so-yolo`, `--add-dir`, `--search`, `-p`/`--profile`, `--enable`, `--disable`, `--trust`, and `-c`/`--config` whose key starts with `approval`, `sandbox`, `profile`, `default_permissions`, `permissions`, `projects`, `mcp_servers`, `features` or `shell_environment_policy` |
+  | OpenCode | `--auto`, `--yolo`, `--dangerously-skip-permissions` |
   | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
-  | oh-my-pi | `--auto-approve`, `--approval-mode`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile` |
+  | oh-my-pi | `--auto-approve`, `--approval-mode`, `--yolo`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile`, `--allow-home`, `--hook`, `-e`/`--extension`, `--trusted-extension`, `--plugin-dir` |
   | Grok | `--always-approve`, `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
-  | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir` |
+  | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir`, `--plugin-dir` |
   | Antigravity | `--dangerously-skip-permissions`, `--mode`, `--settings`, `--add-dir`, `--sandbox` |
+
+  The rule turned round (security review, 25 Nov 2026). These lists were read from `--help`, which prints no hidden
+  option or alias, so none of them can be shown whole; before, `--approvalMode=yolo`, `--skipTrust` and
+  `--includeDirectories` passed for Gemini CLI, and `--yolo` for Codex. So besides the refusals, an option is taken only
+  from a short list known to be harmless for that agent (which model, how hard it thinks, what it logs, how it draws, and
+  options that only take something away); anything else is refused as not on the list (`arg_unlisted`), naming the option
+  only:
+
+  | Agent | Taken |
+  | --- | --- |
+  | Claude Code | `--model`, `--fallback-model`, `--effort`, `-n`/`--name`, `-d`/`--debug`, `--betas`, `--ax-screen-reader`, `--disallowedTools`/`--disallowed-tools`, `--disable-slash-commands` |
+  | Codex | `-m`/`--model`, `--oss`, `--local-provider`, `--strict-config`, `--no-alt-screen`, and `-c`/`--config` for `model`, `model_reasoning_effort`, `model_reasoning_summary` and `model_verbosity` only |
+  | OpenCode | `--log-level`, `--print-logs` |
+  | Gemini CLI | `-m`/`--model`, `-d`/`--debug`, `--screen-reader` |
+  | oh-my-pi | `--model`, `--smol`, `--slow`, `--plan`, `--models`, `--thinking`, `--hide-thinking`, `--no-title`, `--max-time`, `--warn-cost`, `--max-cost`, `--motion` |
+  | Grok | `-m`/`--model`, `--reasoning-effort`, `--debug`, `--disable-web-search`, `--disallowed-tools`, `--no-alt-screen`, `--max-turns` |
+  | Cursor | `--model` |
+  | Antigravity | `--model`, `--effort`, `--disable-slash-commands` |
 
   The agents whose options could not be read on this Mac (OmO, DeepSeek Harness, pi, Qwen Code, Kimi Code and Copilot CLI are
   not installed here, and Cline's `--help` did not return) take no extra arguments, and a person's own agent keeps its own on its entry. Buddy takes none
   at all, so its `--permission-mode default` stays the last word on its asks.
 - **Environment variables.** Names and values, for that agent's chats and terminals only, not Buddy's. They come before the
   home and the app's own variables, which therefore win; the names the app sets itself (`PATH`, `HOME`, `TERM`, `COLORTERM`,
-  `TERM_PROGRAM`, `MANUT_*`, OpenCode's `OPENCODE_CONFIG_CONTENT`), the home variable and Grok's `GROK_SANDBOX` are refused.
+  `TERM_PROGRAM`, `MANUT_*`, OpenCode's `OPENCODE_CONFIG_CONTENT`) and the home variable are refused, and so is every
+  variable a CLI's own documentation or program names as skipping its asks, lifting or changing its sandbox, or pointing it
+  at another settings or configuration file (`ArgRules::vars`, security review, 25 Nov 2026): Claude Code's
+  `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`, `CLAUDE_CODE_SANDBOXED`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`,
+  `CLAUDE_CODE_SHELL_PREFIX` and the others in `ARG_RULES`; Codex's `CODEX_EXEC_SERVER_URL`; Gemini CLI's
+  `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, `GEMINI_CLI_TRUST_WORKSPACE`, `GEMINI_SANDBOX`, `SANDBOX`, `SEATBELT_PROFILE` and the
+  rest; OpenCode's `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR` and `XDG_CONFIG_HOME`; oh-my-pi's `PI_CONFIG_DIR`,
+  `PI_CONFIG_FILES` and the shell prefixes; Grok's `GROK_SANDBOX`, `GROK_AUTO_PERMISSION_MODE`, `GROK_CONFIG_PATH` and the
+  rest; Cursor's `CURSOR_CONFIG_DIR` and `CURSOR_SANDBOX_POLICY_DIR`. Names are compared as options are, without case or
+  `_`. Antigravity's documentation names none. The person is setting their own tool, so these refusals are for a mistake
+  or a line pasted from somewhere, and the page says so in one line under the fields.
   OpenCode's ask rules are read with the person's variables, so one that changes its own rules is read too. A value is a
   secret: it stays in the shell's file and goes only into the agent's process; the page, an event, a refusal and a `{:?}`
   name the variable, never its value (`View` carries names, `Var`'s `Debug` hides it). A saved variable shows as its name with
@@ -892,14 +922,25 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   where it keeps local settings with the worktree.
 - **An added account** (`accounts.rs`, `share` and `prepare`). Before a session of Claude Code or Codex starts as an added
   account, the account's home gets links to the person's own home (the home folder set on Settings › Providers, else the
-  CLI's default) for an allow-list of configuration: Codex's `config.toml`
-  (settings and MCP servers), `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`, `plugins`; Claude Code's `skills`,
+  CLI's default) for an allow-list of configuration: Codex's `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`,
+  `plugins`; Claude Code's `skills`,
   `commands`, `agents`, `output-styles`, `rules`, `workflows`, `plugins`, `CLAUDE.md`. An entry the account has of its own
   stays its own, a link elsewhere is left alone, and nothing is written in the person's home. Claude Code's `settings.json` is
   a copy without `env` and the keys its settings reference lists under Authentication and providers (`apiKeyHelper`,
   `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`, `forceLoginMethod`, `forceLoginOrgUUID`,
   `forceLoginGatewayUrl`, `enforceAnthropicSignIn`, `allowedProviders`, `otelHeadersHelper`), written again on each start
-  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Never shared: `auth.json`, `auth.lock`,
+  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Codex's `config.toml` (settings and MCP
+  servers) is the same kind of copy (`.manut-config-copy`), since the security review of 25 Nov 2026: it used to be linked
+  whole, and it can hold a provider's key or headers and an MCP server's tokens, so the added account could use the
+  person's own key. The copy leaves out, wherever they sit (a provider, an MCP server, a profile, OpenTelemetry's
+  exporters, the network proxy, an agent's role), every key Codex's configuration reference and its `rust-v0.169.0` schema
+  name as holding a credential (`experimental_bearer_token`, `http_headers`, `query_params`, `headers`, `env`,
+  `client_secret`, `oauth` and the rest of `CODEX_LOGIN_KEYS`), naming where one is read (`env_key`, `env_http_headers`,
+  `bearer_token_env_var`, `credential_file`, `config_file`...) or running a command that prints one (`auth`,
+  `gateway_oauth`, `aws`, `http_headers_helper`), and the tables `mcp_enterprise_managed_auth` and
+  `shell_environment_policy.set`; the model, providers' addresses, the MCP servers themselves and project trust stay. An
+  earlier version's link is replaced by the copy; the copy keeps no comments; a key pasted into an MCP server's `command`
+  or `args` is not recognised. Never shared: `auth.json`, `auth.lock`,
   `.credentials.json`, `.claude.json`. On macOS Claude Code keeps an account's sign-in in the keychain under its config folder,
   so the shared files carry none. Left as before: Claude Code's servers added with `claude mcp add` (user scope, and a folder's
   local scope) live in its `.claude.json` beside the account's own details, and Claude Code rewrites that file while it runs,

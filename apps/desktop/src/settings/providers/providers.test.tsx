@@ -127,10 +127,13 @@ describe("the settings of one agent", () => {
     expect(text).toContain("Signed in as me@example.com · Pro");
     expect(html).toContain('data-testid="provider-runs-chat"');
     expect(text).toContain("--model=opus");
+    // one line says the checks are about a mistake or a pasted line, not against the person
+    expect(text).toContain(t("prov.guard", { agent: "Claude Code" }));
     // DeepSeek Harness: a path only, and it says why nothing else
     const dsh = renderToString(<ProviderDetail v={views.find((v) => v.id === "dsh")!} signin={null} onSaved={() => {}} />);
     expect(dsh).not.toContain('data-testid="provider-args"');
     expect(dsh).not.toContain('data-testid="provider-vars"');
+    expect(dsh).not.toContain('data-testid="provider-guard"');
     expect(dsh).toContain('data-testid="provider-path"');
   });
 });

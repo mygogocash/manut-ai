@@ -18,10 +18,15 @@
 //!   can only fail, never take one of the app's arguments as its value. Each is one argument, never split by a shell, in
 //!   the shape `--name`, `--name=value`, `-x` or `-x=value`, so none is a word the agent reads as a command or a prompt.
 //!   One that names an option the app sets itself, or one that would let the agent act without asking or outside its
-//!   sandbox, is refused by name ([`ARG_RULES`], read from each CLI's own `--help`). An agent whose options were not read
-//!   here takes none. Buddy takes none at all.
+//!   sandbox, is refused by name ([`ARG_RULES`], read from each CLI's own `--help`), in every spelling its parser takes
+//!   ([`norm`]). And since no `--help` prints a CLI's hidden options, a refused list cannot be shown whole: every other
+//!   option must be on a short list of options known to be harmless for that CLI ([`ArgRules::allow`]), or it is
+//!   refused too. An agent whose options were not read here takes none. Buddy takes none at all.
 //! - **Environment variables** reach that agent's chats and terminals only (not Buddy's), before the home and the app's
-//!   own variables, which therefore win; a name the app sets itself is refused. Their values are secrets: kept in this file
+//!   own variables, which therefore win; a name the app sets itself is refused, and so is one the CLI's own
+//!   documentation or program names as skipping its asks, lifting its sandbox or pointing it at another settings file
+//!   ([`ArgRules::vars`]). The person is setting their own tool: these refusals catch a mistake or a pasted line, and the
+//!   page says so. Their values are secrets: kept in this file
 //!   and handed to the agent's process, never sent back to the page, put in an event or written to a log ([`View`] has
 //!   the names only, [`Var`]'s `Debug` hides the value, and a refusal names the variable, never its value).
 
@@ -112,6 +117,8 @@ pub enum Why {
     ArgSkips,
     /// an argument names an option the app sets itself (the chat mode, the conversation, the folder, the asks' path)
     ArgOwn,
+    /// an argument names an option not on the short list known to be harmless for this agent
+    ArgUnlisted,
     /// more than [`MAX_ARGS`] arguments
     ArgMany,
     /// this agent's options were not read here, so it takes no extra arguments
@@ -171,11 +178,18 @@ impl Refusal {
 // ---------------------------------------------------------------------------------------------
 
 /// What each agent's own `--help` says about the options a person might add, read on this Mac on 25 Nov 2026 (Claude Code
-/// 2.1.332, Codex 0.167, OpenCode, Gemini CLI, oh-my-pi 18.22.0, Grok Build, Cursor Agent 2026.11.22, Antigravity 1.5.17).
-/// Names are written without their dashes; one letter is a short option, compared as written, and a longer one is a long
-/// option, compared without case and with `_` read as `-` (Go's and yargs' spellings) and as its `--no-` form (yargs and
-/// commander turn a switch off with it). None of these eight parses an abbreviation as the whole option (commander,
-/// yargs, clap, Go's flag and Bun's parser do not), so a shorter name that is another option of its own stays allowed.
+/// 2.1.332, Codex 0.167 and 0.169, OpenCode 2.3.0, Gemini CLI 0.65.0, oh-my-pi 18.22.0, Grok Build 1.0.93, Cursor Agent
+/// 2026.11.22, Antigravity 1.5.17), with the hidden spellings found since (security review, 25 Nov 2026): Codex takes
+/// `--yolo` for its bypass and `--not-so-yolo` for `--approve-for-me` (Codex's `rust-v0.169.0` source, and `codex --yolo
+/// --version` on this Mac), and took `--full-auto` before 0.147.
+///
+/// Names are written without their dashes; one letter is a short option, compared as written. A long option is compared
+/// with every `-` and `_` taken out and case folded, on both sides ([`norm`]): yargs (Gemini CLI) also reads
+/// `--approval-mode` as `--approvalMode`, and Go's and yargs' spellings differ in `_`. A refused option is also refused as
+/// its `--no-` form (yargs and commander turn a switch off with it), and in yargs' dot form (`--sandbox.enabled=false`
+/// makes an object of it). None of these eight parses an abbreviation as the whole option (commander, yargs, clap, Go's
+/// flag and Bun's parser do not), so a shorter name that is another option of its own is not refused for it; it still
+/// has to be on [`ArgRules::allow`].
 #[derive(Serialize)]
 pub struct ArgRules {
     pub id: &'static str,
@@ -184,10 +198,16 @@ pub struct ArgRules {
     /// Options the app sets itself or that take the session somewhere else: the chat mode, the conversation, the folder,
     /// where the asks go.
     pub own: &'static [&'static str],
-    /// Options whose `key=value` is a configuration override (Codex's `-c`), and the key prefixes refused in them.
+    /// Options whose `key=value` is a configuration override (Codex's `-c`), the key prefixes refused as skipping the asks
+    /// or the sandbox, and the only keys taken (the rule turned round, as for options).
     pub config: &'static [&'static str],
     pub config_keys: &'static [&'static str],
-    /// Environment variables the help names as setting the sandbox or the asks.
+    pub config_allow: &'static [&'static str],
+    /// The options known to be harmless (which model, how hard it thinks, what it logs, how it draws, and options that
+    /// only take something away): the only ones taken besides the configuration keys above.
+    pub allow: &'static [&'static str],
+    /// Environment variables the CLI's own documentation or program names as skipping its asks, lifting or changing its
+    /// sandbox, or pointing it at another settings or configuration file.
     pub vars: &'static [&'static str],
 }
 
@@ -243,11 +263,52 @@ pub const ARG_RULES: [ArgRules; 8] = [
         ],
         config: &[],
         config_keys: &[],
-        vars: &[],
+        config_allow: &[],
+        allow: &["model", "fallback-model", "effort", "n", "name", "d", "debug", "betas", "ax-screen-reader", "disallowedTools", "disallowed-tools", "disable-slash-commands"],
+        // the environment variables page (code.claude.com/docs/en/env-vars) and Claude Code 2.1.332's own program
+        vars: &[
+            "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
+            "CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",
+            "CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT",
+            "CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT",
+            "CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",
+            "CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",
+            "CLAUDE_CODE_SANDBOXED",
+            "CLAUDE_CODE_IGNORE_PERSISTED_TRUST",
+            "CLAUDE_CODE_SESSION_KIND",
+            "CLAUDE_BG_SESSION_PERMISSION_RULES",
+            "CLAUDE_BG_WORKSPACE_TRUSTED",
+            "CLAUDE_CHROME_PERMISSION_MODE",
+            "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
+            "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
+            "CLAUDE_CODE_PLUGIN_DIRS",
+            "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+            "CLAUDE_CODE_PLUGIN_SEED_DIR",
+            "CLAUDE_CODE_SHELL_PREFIX",
+            "CLAUDE_ENV_FILE",
+        ],
     },
     ArgRules {
         id: "codex",
-        skips: &["dangerously-bypass-approvals-and-sandbox", "dangerously-bypass-hook-trust", "a", "ask-for-approval", "s", "sandbox", "approve-for-me", "add-dir", "search", "p", "profile"],
+        skips: &[
+            "dangerously-bypass-approvals-and-sandbox",
+            "yolo",
+            "full-auto",
+            "dangerously-bypass-hook-trust",
+            "a",
+            "ask-for-approval",
+            "s",
+            "sandbox",
+            "approve-for-me",
+            "not-so-yolo",
+            "add-dir",
+            "search",
+            "p",
+            "profile",
+            "enable",
+            "disable",
+            "trust",
+        ],
         own: &[
             "C",
             "cd",
@@ -272,16 +333,32 @@ pub const ARG_RULES: [ArgRules; 8] = [
             "version",
         ],
         config: &["c", "config"],
-        config_keys: &["approval", "sandbox", "profile"],
-        vars: &[],
+        config_keys: &["approval", "sandbox", "profile", "default_permissions", "permissions", "projects", "mcp_servers", "features", "shell_environment_policy"],
+        config_allow: &["model", "model_reasoning_effort", "model_reasoning_summary", "model_verbosity"],
+        allow: &["m", "model", "oss", "local-provider", "strict-config", "no-alt-screen"],
+        // Codex's `rust-v0.169.0` source: tools sent to another exec server
+        vars: &["CODEX_EXEC_SERVER_URL", "CODEX_EXEC_SERVER_NOISE_REGISTRY_URL"],
     },
     ArgRules {
         id: "opencode",
-        skips: &["auto"],
+        skips: &["auto", "yolo", "dangerously-skip-permissions"],
         own: &["standalone", "server", "c", "continue", "s", "session", "prompt", "login", "wizard", "completions", "h", "help", "v", "version"],
         config: &[],
         config_keys: &[],
-        vars: &[],
+        config_allow: &[],
+        allow: &["log-level", "print-logs"],
+        // OpenCode 2.3.0's own program: another configuration file or folder, project configuration skipped
+        vars: &[
+            "OPENCODE_CONFIG",
+            "OPENCODE_CONFIG_DIR",
+            "OPENCODE_DISABLE_PROJECT_CONFIG",
+            "OPENCODE_CONFIG_PROJECT_DISABLE",
+            "OPENCODE_DISABLE_CLAUDE_CODE",
+            "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
+            "OPENCODE_FLAGS",
+            "OPENCODE_TEST_HOME",
+            "XDG_CONFIG_HOME",
+        ],
     },
     ArgRules {
         id: "gemini",
@@ -312,15 +389,39 @@ pub const ARG_RULES: [ArgRules; 8] = [
         ],
         config: &[],
         config_keys: &[],
-        vars: &[],
+        config_allow: &[],
+        allow: &["m", "model", "d", "debug", "screen-reader"],
+        // Gemini CLI 0.65.0's own bundle and its documentation: trust, the sandbox, and other settings files
+        vars: &[
+            "GEMINI_CLI_TRUST_WORKSPACE",
+            "GEMINI_CLI_INTEGRATION_TEST",
+            "VITEST",
+            "SANDBOX",
+            "GEMINI_SANDBOX",
+            "SEATBELT_PROFILE",
+            "SANDBOX_FLAGS",
+            "SANDBOX_MOUNTS",
+            "SANDBOX_ENV",
+            "SANDBOX_PORTS",
+            "GEMINI_SANDBOX_IMAGE",
+            "GEMINI_SANDBOX_PROXY_COMMAND",
+            "BUILD_SANDBOX",
+            "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+            "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
+            "GEMINI_CLI_TRUSTED_FOLDERS_PATH",
+            "GEMINI_CLI_IDE_WORKSPACE_PATH",
+        ],
     },
     ArgRules {
         id: "omp",
-        skips: &["auto-approve", "approval-mode", "plan-yolo", "plan-yolo-into", "add-dir", "config", "profile"],
+        skips: &["auto-approve", "approval-mode", "yolo", "plan-yolo", "plan-yolo-into", "add-dir", "config", "profile", "allow-home", "hook", "e", "extension", "trusted-extension", "plugin-dir"],
         own: &["mode", "p", "print", "c", "continue", "r", "resume", "restore", "goal", "from-claude", "from-codex", "export", "alias", "cwd", "session-dir", "no-session", "no-ui", "h", "help", "version"],
         config: &[],
         config_keys: &[],
-        vars: &[],
+        config_allow: &[],
+        allow: &["model", "smol", "slow", "plan", "models", "thinking", "hide-thinking", "no-title", "max-time", "warn-cost", "max-cost", "motion"],
+        // oh-my-pi 18.22.0's own program: another configuration folder or files, a wrapper around every command
+        vars: &["PI_CONFIG_DIR", "PI_CONFIG_FILES", "PI_SHELL_PREFIX", "CLAUDE_CODE_SHELL_PREFIX"],
     },
     ArgRules {
         id: "grok",
@@ -351,11 +452,26 @@ pub const ARG_RULES: [ArgRules; 8] = [
         ],
         config: &[],
         config_keys: &[],
-        vars: &["GROK_SANDBOX"],
+        config_allow: &[],
+        allow: &["m", "model", "reasoning-effort", "debug", "disable-web-search", "disallowed-tools", "no-alt-screen", "max-turns"],
+        // Grok Build 1.0.93's own documentation, built into its program
+        vars: &[
+            "GROK_SANDBOX",
+            "GROK_SANDBOX_MODE",
+            "GROK_SANDBOX_AUTO_ALLOW_BASH",
+            "GROK_AUTO_PERMISSION_MODE",
+            "GROK_DEFAULT_SELECTED_PERMISSION",
+            "GROK_REMEMBER_TOOL_APPROVALS",
+            "GROK_WORKTREE_INHERITS_MAIN_APPROVALS",
+            "GROK_FOLDER_TRUST",
+            "GROK_CONFIG",
+            "GROK_CONFIG_PATH",
+            "GROK_MANAGED_CONFIG_URL",
+        ],
     },
     ArgRules {
         id: "cursor-agent",
-        skips: &["f", "force", "yolo", "auto-review", "sandbox", "approve-mcps", "trust", "add-dir"],
+        skips: &["f", "force", "yolo", "auto-review", "sandbox", "approve-mcps", "trust", "add-dir", "plugin-dir"],
         own: &[
             "p",
             "print",
@@ -379,7 +495,10 @@ pub const ARG_RULES: [ArgRules; 8] = [
         ],
         config: &[],
         config_keys: &[],
-        vars: &[],
+        config_allow: &[],
+        allow: &["model"],
+        // Cursor Agent 2026.11.22's own program: another configuration folder, sandbox policies, feature overrides
+        vars: &["CURSOR_CONFIG_DIR", "XDG_CONFIG_HOME", "CURSOR_SANDBOX_POLICY_DIR", "CURSOR_STATSIG_OVERRIDES"],
     },
     ArgRules {
         id: "agy",
@@ -415,6 +534,8 @@ pub const ARG_RULES: [ArgRules; 8] = [
         ],
         config: &[],
         config_keys: &[],
+        config_allow: &[],
+        allow: &["model", "effort", "disable-slash-commands"],
         vars: &[],
     },
 ];
@@ -541,19 +662,31 @@ pub fn option_of(a: &str) -> Option<(&str, bool)> {
     (after.is_empty() || after.starts_with('=')).then_some((&rest[..c.len_utf8()], false))
 }
 
+/// A name as the parsers here read it, whatever its spelling: case folded, with every `-` and `_` taken out, so
+/// `approval-mode`, `approval_mode`, `approvalMode` and `APPROVAL-MODE` are one name.
 fn norm(n: &str) -> String {
-    n.to_ascii_lowercase().replace('_', "-")
+    n.chars().filter(|c| !matches!(c, '-' | '_')).flat_map(char::to_lowercase).collect()
 }
 
-/// Whether option `name` (long or short) is one of `list`: a short one as written; a long one by [`norm`], or as its
-/// `--no-` form.
+/// Whether option `name` (long or short) is one of `list`, to refuse it: a short one as written; a long one by [`norm`]
+/// against every entry (yargs reads `--s` as `-s`), as its `--no-` form, and by its part before a dot (yargs' object
+/// form).
 fn names(list: &[&str], name: &str, long: bool) -> bool {
     if !long {
         return list.iter().any(|r| r.len() == 1 && *r == name);
     }
+    let whole = norm(name);
+    let head = norm(name.split('.').next().unwrap_or(""));
+    list.iter().map(|r| norm(r)).any(|r| [&whole, &head].iter().any(|n| **n == r || n.strip_prefix("no") == Some(r.as_str())))
+}
+
+/// Whether option `name` is on the harmless list `list`: a short one as written, a long one by [`norm`], whole.
+fn listed(list: &[&str], name: &str, long: bool) -> bool {
+    if !long {
+        return list.iter().any(|r| r.len() == 1 && *r == name);
+    }
     let n = norm(name);
-    let off = n.strip_prefix("no-");
-    list.iter().filter(|r| r.len() > 1).map(|r| norm(r)).any(|r| r == n || off == Some(r.as_str()))
+    !name.contains('.') && list.iter().any(|r| norm(r) == n)
 }
 
 /// Agent `id`'s extra arguments, checked: the shape of each, then the app's own options and the ones that skip the asks
@@ -580,11 +713,19 @@ pub fn check_args(id: &str, args: &[String]) -> Result<(), Refusal> {
             return Err(Refusal::on(Why::ArgOwn, &shown));
         }
         if names(r.config, name, long) {
-            // `-c key=value` written as one argument; the key decides
+            // `-c key=value` written as one argument; the key decides, and only a key on the short list is taken
             let key = a.split_once('=').map(|(_, v)| v).unwrap_or("").split('=').next().unwrap_or("").trim().to_ascii_lowercase();
             if key.is_empty() || r.config_keys.iter().any(|k| key.starts_with(k)) {
                 return Err(Refusal::on(Why::ArgSkips, &shown));
             }
+            if !r.config_allow.iter().any(|k| *k == key) {
+                return Err(Refusal::on(Why::ArgUnlisted, &shown));
+            }
+            continue;
+        }
+        // the rule turned round: no `--help` prints a CLI's hidden options, so anything not known to be harmless is refused
+        if !listed(r.allow, name, long) {
+            return Err(Refusal::on(Why::ArgUnlisted, &shown));
         }
     }
     Ok(())
@@ -613,11 +754,11 @@ pub fn check_vars(id: &str, vars: &[Var]) -> Result<(), Refusal> {
             return Err(Refusal::on(Why::VarName, if shape { n } else { "" }));
         }
         seen.push(upper.clone());
-        if home_var(id).is_some_and(|h| h.eq_ignore_ascii_case(n)) {
+        if home_var(id).is_some_and(|h| norm(h) == norm(n)) {
             return Err(Refusal::on(Why::VarHome, n));
         }
-        // names compared without case: Windows reads them so
-        let own = APP_VARS.iter().any(|a| a.eq_ignore_ascii_case(n)) || upper.starts_with("MANUT_") || rules(id).is_some_and(|r| r.vars.iter().any(|x| x.eq_ignore_ascii_case(n)));
+        // names compared as the options are ([`norm`]): without case, as Windows reads them, and without `_`
+        let own = APP_VARS.iter().any(|a| norm(a) == norm(n)) || upper.starts_with("MANUT_") || rules(id).is_some_and(|r| r.vars.iter().any(|x| norm(x) == norm(n)));
         if own {
             return Err(Refusal::on(Why::VarOwn, n));
         }
@@ -1034,8 +1175,13 @@ mod tests {
     fn the_rules_are_agents_the_app_knows_written_as_their_help_writes_them() {
         for r in &ARG_RULES {
             assert!(crate::sessions::agent(r.id).is_some(), "{}", r.id);
-            for n in r.skips.iter().chain(r.own).chain(r.config) {
+            for n in r.skips.iter().chain(r.own).chain(r.config).chain(r.allow) {
                 assert!(!n.starts_with('-') && !n.is_empty() && !n.contains('='), "{}: {n}", r.id);
+            }
+            // nothing on the harmless list is also refused, in any spelling
+            for n in r.allow {
+                let long = n.len() > 1;
+                assert!(!names(r.skips, n, long) && !names(r.own, n, long) && !names(r.config, n, long), "{}: {n}", r.id);
             }
         }
         // the agents whose help could not be read here take no extra arguments
@@ -1049,7 +1195,7 @@ mod tests {
     /// (after which the app's own arguments would be read as words), a cluster of short options or a control character.
     #[test]
     fn an_argument_is_one_option_and_nothing_else() {
-        for ok in ["--model=opus", "--model", "-m", "-m=opus", "--name=two words", "--effort=high", "--agent=reviewer"] {
+        for ok in ["--model=opus", "--model", "-n", "-n=work", "--name=two words", "--effort=high", "-d", "--debug=api"] {
             assert!(check_args("claude", &s(&[ok])).is_ok(), "{ok}");
         }
         for bad in ["opus", "mcp", "--", "-", "-abc", "-mopus", "---x", "--=x", "--model\n", "--a\u{0}b", "", " --model=x"] {
@@ -1130,6 +1276,92 @@ mod tests {
         let r = check_args("cursor-agent", &s(&["--api-key=sk-secret-123"])).unwrap_err();
         assert_eq!((r.why, r.what.as_str()), (Why::ArgOwn, "--api-key"));
         assert!(!r.text().contains("sk-secret"));
+    }
+
+    /// Every other spelling a CLI's parser takes for a refused option is refused too: yargs (Gemini CLI) also reads a
+    /// hyphenated option in camelCase and as an object with a dot, and Codex takes `--yolo` for its bypass, which its
+    /// `--help` does not print.
+    #[test]
+    fn other_spellings_of_a_refused_option_are_refused() {
+        let cases: &[(&str, &[&str])] = &[
+            ("gemini", &["--approvalMode=yolo", "--skipTrust", "--includeDirectories=/", "--allowedTools=run_shell_command", "--adminPolicy=/tmp/p", "--approval_mode=yolo", "--sandbox.enabled=false", "--policy.x=1", "--s=false", "--noSandbox"]),
+            ("codex", &["--yolo", "--full-auto", "--not-so-yolo", "--askForApproval=never", "--dangerously_bypass_approvals_and_sandbox"]),
+            ("claude", &["--allowedtools=Bash", "--permissionMode=bypassPermissions", "--dangerouslySkipPermissions", "--addDir=/"]),
+            ("cursor-agent", &["--autoReview", "--approveMcps"]),
+        ];
+        for (id, args) in cases {
+            for a in *args {
+                assert!(check_args(id, &s(&[a])).is_err(), "{id} {a}");
+            }
+        }
+    }
+
+    /// The rule turned round: no `--help` prints a CLI's hidden options, so an option is taken only when it is on that CLI's
+    /// short list of options known to be harmless, in any spelling its parser takes, and a Codex configuration override
+    /// only for a key on its own short list. Anything else is refused, naming the option only.
+    #[test]
+    fn only_options_known_to_be_harmless_are_taken() {
+        let ok: &[(&str, &[&str])] = &[
+            ("claude", &["--model=opus", "--fallback-model=sonnet", "--effort=high", "--name=work", "--betas=x", "--disallowedTools=Bash", "--disallowed-tools=Bash"]),
+            ("codex", &["-m=o3", "--model=o3", "-c=model=\"o3\"", "--config=model_reasoning_effort=\"high\"", "-c=model_verbosity=low", "--oss", "--strict-config"]),
+            ("gemini", &["-m=gemini-2.5-pro", "--model=x", "-d", "--debug", "--screen-reader", "--screenReader"]),
+            ("opencode", &["--log-level=debug", "--print-logs"]),
+            ("omp", &["--model=opus", "--thinking=high", "--no-title", "--max-cost=2"]),
+            ("grok", &["-m=grok-4", "--reasoning-effort=high", "--disable-web-search"]),
+            ("cursor-agent", &["--model=sonnet-4"]),
+            ("agy", &["--model=x", "--effort=high"]),
+        ];
+        for (id, args) in ok {
+            for a in *args {
+                assert!(check_args(id, &s(&[a])).is_ok(), "{id} {a}: {:?}", check_args(id, &s(&[a])));
+            }
+            assert!(check_args(id, &s(args)).is_ok(), "{id} all at once");
+        }
+        let unlisted: &[(&str, &[&str])] = &[
+            ("claude", &["--agent=reviewer", "--system-prompt=x", "--mcp-config={}", "--plugin-dir=/x", "--tools=Bash", "--model.x=1", "-m"]),
+            ("codex", &["-c=model_providers.x.base_url=\"https://x\"", "-c=hide_agent_reasoning=true", "--remote-auth-token-env=X", "-i=/x.png"]),
+            ("gemini", &["--proxy=http://x", "-e=foo", "--raw-output"]),
+            ("cursor-agent", &["-H=X-Key: 1", "--endpoint=https://x", "--plan"]),
+            ("agy", &["--agent=x", "--log-file=/tmp/x"]),
+        ];
+        for (id, args) in unlisted {
+            for a in *args {
+                let r = check_args(id, &s(&[a])).unwrap_err();
+                assert!(matches!(r.why, Why::ArgUnlisted | Why::ArgOwn), "{id} {a}: {r:?}");
+                assert!(r.what.starts_with('-') && !r.what.contains('='), "{id} {a}: {r:?}");
+            }
+        }
+        assert_eq!(check_args("claude", &s(&["--agent=reviewer"])).unwrap_err(), Refusal::on(Why::ArgUnlisted, "--agent"));
+        // a Codex override of a feature, a project's trust or an MCP server's approvals is about the asks
+        for a in ["-c=features.x=true", "-c=projects.\"/\".trust_level=\"trusted\"", "-c=mcp_servers.x.default_tools_approval_mode=\"approve\"", "-c=default_permissions=\":danger-full-access\"", "--enable=x", "--disable=x"] {
+            assert_eq!(check_args("codex", &s(&[a])).unwrap_err().why, Why::ArgSkips, "{a}");
+        }
+    }
+
+    /// A variable a CLI's own documentation or program names as skipping its asks, lifting or changing its sandbox, or
+    /// pointing it at another settings file is refused by name, compared as options are (without case or `_`).
+    #[test]
+    fn a_variable_that_skips_the_asks_or_points_elsewhere_is_refused() {
+        let refused: &[(&str, &[&str])] = &[
+            ("claude", &["CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS", "CLAUDE_CODE_SANDBOXED", "CLAUDE_CODE_MANAGED_SETTINGS_PATH", "CLAUDE_CODE_SHELL_PREFIX", "claude_code_plugin_dirs"]),
+            ("codex", &["CODEX_EXEC_SERVER_URL", "codexhome"]),
+            ("gemini", &["GEMINI_CLI_SYSTEM_SETTINGS_PATH", "gemini_cli_system_settings_path", "GEMINICLISYSTEMSETTINGSPATH", "GEMINI_SANDBOX", "SANDBOX", "SEATBELT_PROFILE", "GEMINI_CLI_TRUST_WORKSPACE"]),
+            ("opencode", &["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME", "OpenCode_Config_Content"]),
+            ("omp", &["PI_CONFIG_DIR", "PI_SHELL_PREFIX"]),
+            ("grok", &["GROK_SANDBOX", "GROK_SANDBOX_MODE", "GROK_AUTO_PERMISSION_MODE", "GROK_CONFIG_PATH", "GROK_FOLDER_TRUST"]),
+            ("cursor-agent", &["CURSOR_CONFIG_DIR", "CURSOR_SANDBOX_POLICY_DIR"]),
+        ];
+        for (id, names) in refused {
+            for n in *names {
+                let r = check_vars(id, &[var(n, "x")]).unwrap_err();
+                assert!(matches!(r.why, Why::VarOwn | Why::VarHome), "{id} {n}: {r:?}");
+                assert_eq!(r.what, *n);
+            }
+        }
+        // the ones that only say where the model is, or the person's own, stay theirs
+        for (id, n) in [("claude", "ANTHROPIC_BASE_URL"), ("gemini", "GEMINI_API_KEY"), ("codex", "OPENAI_API_KEY"), ("opencode", "MY_TOKEN")] {
+            assert!(check_vars(id, &[var(n, "x")]).is_ok(), "{id} {n}");
+        }
     }
 
     /// The options the app sets itself cannot be given again: the chat mode, where the asks go, the conversation, the folder.
@@ -1394,8 +1626,10 @@ mod tests {
         let cur = Stored { name: "Work".into(), args: s(&["--model=opus"]), ..Stored::default() };
         let next = apply("claude", &cur, Patch { off: Some(true), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap();
         assert_eq!((next.off, next.name.as_str(), next.args.clone()), (true, "Work", s(&["--model=opus"])));
-        let e = apply("claude", &cur, Patch { args: Some(s(&["--model=x", "", "--yolo-nope", "--permission-mode=auto"])), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err();
+        let e = apply("claude", &cur, Patch { args: Some(s(&["--model=x", "", "--permission-mode=auto", "--yolo-nope"])), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err();
         assert_eq!((e.why, e.what.as_str()), (Why::ArgSkips, "--permission-mode"));
+        let e = apply("claude", &cur, Patch { args: Some(s(&["--model=x", "--yolo-nope"])), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err();
+        assert_eq!((e.why, e.what.as_str()), (Why::ArgUnlisted, "--yolo-nope"));
         assert_eq!(apply("claude", &cur, Patch { name: Some("a;b".into()), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err().why, Why::Name);
         // a person's own agent: the switch only
         assert!(apply("my-agent", &Stored::default(), Patch { off: Some(true), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).is_ok());
