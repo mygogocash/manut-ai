@@ -1209,7 +1209,10 @@ export class MockHost implements SessionHost, BuddyHost {
   async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean, mode?: string) {
     const id = ++this.next;
     this.log({ op: "chat.start", id, agent, cwd, ...(resume ? { resume } : {}), ...(account ? { account } : {}), ...(session ? { session } : {}), ...(mode ? { mode } : {}) });
+    // as the shell's `start_mode`: a mode the agent does not offer starts nothing, and none is its careful one (item 89)
+    if (mode !== undefined && !(MOCK_MODES[agent] ?? []).includes(mode)) throw new Error(MOCK_MODES[agent] ? `not a mode Manut AI offers: ${mode}` : `${agent} has no permission mode here (${mode})`);
     const c = new MockChat(agent, onEvent, resume, cwd, {
+      mode: mode ?? MOCK_CAREFUL[agent],
       noChat: !!this.g.__manutMockNoChat?.includes(agent),
       // the generic ACP agents are signed out on the mock host unless a test signs them in, as on a fresh Mac; a
       // person's own agent answers unless a test signs it out
@@ -1657,6 +1660,14 @@ const MOCK_CONTROLS: Partial<Record<AgentId, { mode?: string; efforts: string[];
   },
 };
 const MOCK_MODES: Partial<Record<AgentId, string[]>> = { claude: ["default", "plan", "acceptEdits"], codex: ["read-only", "ask", "auto"] };
+/** A Codex mode as the approval policy and sandbox its thread reports (`codex_mode` in src-tauri/src/agent_chat.rs). */
+const CODEX_MOCK_POLICY: Record<string, { approval: string; sandbox: string }> = {
+  "read-only": { approval: "on-request", sandbox: "readOnly" },
+  ask: { approval: "untrusted", sandbox: "workspaceWrite" },
+  auto: { approval: "on-request", sandbox: "workspaceWrite" },
+};
+/** The mode a chat starts in when the page names none, as the shell's `careful_mode`. */
+const MOCK_CAREFUL: Partial<Record<AgentId, string>> = { claude: "default", codex: "ask" };
 
 /** One mock chat agent. `/approve` asks to run `rm -rf ./build`; `/slow` streams long enough to stop with
  *  Esc; `/exit` ends the program; `/title <name>` names the conversation as the agent; anything else gets a
@@ -1761,7 +1772,7 @@ class MockChat {
     private emit: (ev: ChatEvent) => void,
     resume?: string,
     private cwd = "",
-    private how: { noChat?: boolean; gone?: boolean; unguarded?: boolean; signedOut?: boolean; suggest?: string } = {},
+    private how: { noChat?: boolean; gone?: boolean; unguarded?: boolean; signedOut?: boolean; suggest?: string; mode?: string } = {},
   ) {
     this.model = MOCK_MODELS[agent]?.[0]?.label ?? agentDef(agent).label;
     this.session = resume ?? `${agent}-mock-${Math.random().toString(16).slice(2, 10)}-0000-0000-000000000000`;
@@ -1810,10 +1821,13 @@ class MockChat {
     this.at(20, () => {
       if (this.how.gone) this.emit({ event: "session.note", kind: "new_conversation", text: "The earlier Codex conversation was not found; a new one started." });
       const c = MOCK_CONTROLS[this.agent];
-      this.emit({ event: "session.info", agent_session: this.session, ...(this.model ? { model: this.model } : {}), ...(c ? { effort: c.effort } : {}), ...(c?.mode !== undefined ? { mode: c.mode } : {}) });
-      // the thread's own approval policy and sandbox, as the Codex adapter reports them
+      // the mode it started in, named at the start (item 89), as Claude Code's initialize and Codex's thread report it
+      const mode = this.how.unguarded ? undefined : (this.how.mode ?? c?.mode);
+      this.emit({ event: "session.info", agent_session: this.session, ...(this.model ? { model: this.model } : {}), ...(c ? { effort: c.effort } : {}), ...(mode !== undefined ? { mode } : {}) });
+      // the thread's own approval policy and sandbox, as the Codex adapter reports them: the started mode's, unless a test
+      // stands in for a Codex whose own config won over them
       if (this.agent === "codex")
-        this.emit({ event: "session.info", ...(this.how.unguarded ? { approval: "never", sandbox: "dangerFullAccess" } : { approval: "untrusted", sandbox: "workspaceWrite" }) });
+        this.emit({ event: "session.info", ...(this.how.unguarded ? { approval: "never", sandbox: "dangerFullAccess", mode: "" } : CODEX_MOCK_POLICY[mode ?? "ask"]) });
       this.emit({ event: "session.models", options: (MOCK_MODELS[this.agent] ?? []).map((m) => ({ ...m, detail: "" })) });
       if (c) {
         this.emit({ event: "session.efforts", levels: c.efforts });
