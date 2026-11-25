@@ -92,8 +92,9 @@ function base64url(text: string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/// The text a base64url segment spells, or null unless the segment is that text's one canonical spelling.
-function fromBase64url(segment: string): string | null {
+/// The text a base64url segment spells, or null unless the segment is that text's one canonical spelling. The live feed's
+/// tickets name their shop the same way (feed.ts).
+export function fromBase64url(segment: string): string | null {
   try {
     const binary = atob(segment.replace(/-/g, "+").replace(/_/g, "/"));
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })

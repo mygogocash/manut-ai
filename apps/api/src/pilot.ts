@@ -1144,7 +1144,12 @@ async function listShops(env: PilotEnv): Promise<Response> {
 /// cannot be read, so neither the list nor a deletion ever takes an unreadable record for a missing one.
 async function shopRecord(env: PilotEnv, tenant: string): Promise<PilotShopRecord | null> {
   const response = await tenantCall(env, tenant, `/pilot/shop?tenant=${encodeURIComponent(tenant)}`);
-  if (response.status === 404) return null;
+  // An answer left unread keeps its request open on the shop's object, which then cannot hibernate or be evicted until
+  // the runtime gives up on it: every new shop's first read is this 404.
+  if (response.status === 404) {
+    await response.body?.cancel();
+    return null;
+  }
   if (!response.ok) throw new Error(`shop_read_${response.status}`);
   return ((await response.json()) as { shop: PilotShopRecord }).shop;
 }

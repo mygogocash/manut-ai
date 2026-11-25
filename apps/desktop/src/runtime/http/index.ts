@@ -17,6 +17,7 @@ import { OpError } from "../mock/host";
 import { readRuntimeSetting } from "../setting";
 import { ShopCache } from "./cache";
 import type { OwnerLink } from "./connections";
+import type { FeedSocket, OpenSocket } from "./feed";
 import { HttpHost, type HostEvent, type LinkState } from "./host";
 import { followSignIn, shellOutpost } from "./outpost";
 import { ApiSession } from "./session";
@@ -170,11 +171,22 @@ export function sessionFor(origin: string): ApiSession {
   return session;
 }
 
+/** The page's own WebSocket, which the shops' live feed opens (feed.ts), or none in a page that has no WebSocket. The
+ *  app's CSP lets it reach Manut AI's own API hosts and nowhere else (src-tauri/tauri.conf.json). Its handlers take what the
+ *  feed reads of their events, a message's data and a close's code, so it serves as the feed's socket as it is. */
+function pageSocket(): { open: OpenSocket } | undefined {
+  if (typeof WebSocket === "undefined") return undefined;
+  return { open: (url, protocols) => new WebSocket(url, protocols) as unknown as FeedSocket };
+}
+
 /** The page's one host for the API at `origin`. It keeps each good read in the saved file, but only while the choice
- *  saved on this computer is still this origin. */
+ *  saved on this computer is still this origin, and follows each shop's live feed while the API says it is on. */
 export function sharedHttpHost(origin: string): HttpHost {
   let host = hosts.get(origin);
-  if (!host) hosts.set(origin, (host = new HttpHost({ session: sessionFor(origin), cache: shopCache(), keeping: () => stillConnectedTo(origin) })));
+  if (!host) {
+    hosts.set(origin, (host = new HttpHost({ session: sessionFor(origin), cache: shopCache(), keeping: () => stillConnectedTo(origin),
+      feed: pageSocket() })));
+  }
   return host;
 }
 

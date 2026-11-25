@@ -90,9 +90,9 @@ one tag ("Checked: 14 tests passed"). Lacks: the trace with tokens and baht per 
 
 ## Needs the owner
 
-- Whether Kit's lanes run as chats in the app, as the canvas's Code board draws them, or only in terminals, as decided
-  on 16 November. The dial's asks, the lanes and Rewind to before a turn reach only the first: the + menu starts
-  terminals only, so the Lanes band is empty until a chat session exists.
+- Settled on 25 November: the owner chose both. The + menu will start each coding agent as Kit's chat lane, as the
+  canvas's Code board draws it, or in its own terminal, as since 16 November (item 66). Until item 66 merges, the + menu
+  starts terminals only, so the Lanes band is empty until a chat session exists.
 
 - Adding a project from GitHub, and a check that fails after a pull request: a real GitHub account.
 - Your plan at its limit, and using the AI budget for a job: money, and a real plan.

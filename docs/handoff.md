@@ -178,7 +178,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 61, a shop's live feed, built and switched off: a hibernating WebSocket per shop session that only says
-     something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged.
+     something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged. Built and
+     reviewed on 25 Nov; one finding holds the merge: a page's socket sent the shop session as a
+     `Sec-WebSocket-Protocol` entry, which Cloudflare's request logs keep unmasked (they mask a header by its name
+     only). Item 61b, running (`feat/live-feed-ticket`, Opus), swaps it for a one-use ticket of 30 seconds minted
+     with the session in `Authorization`; both merge together.
+   - item 62, the Runs layout tests made fast: profile `boxView.test.ts`'s six slow generator tests and speed the slow
+     side with every answer proved the same (`feat/fast-box-tests`, Sonnet), started 25 Nov when item 60 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -311,10 +317,27 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 2. The night build's queue is empty: `env-example` (`9fa8151`), `dev-url` (PR #19) and `preview-command` (PR #20) were
    merged on 25 Nov, all three for the code editor's preview itself (item 53), which is the first to import them. Add pure
    packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
-3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
-   - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
-   - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).
-   - the code editor's remaining states are running; item 30 (Kit's dial in a terminal) waits for the owner's chat-or-terminal call.
+3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
+   at once swapped hard and reached the usage limit on 24 and 25 Nov):
+   - running: item 61b (the live feed's one-use ticket, which item 61 merges with) and item 62 (the Runs layout
+     tests made fast);
+   - next, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
+     the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
+     now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets, Mac only in the draft
+     release, and the updater on with the key made on 25 Nov, whose owner's copy is in `~/manut-ai-updater-key`), item
+     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 65 (a Thai dictionary for the
+     desktop) is parked: on 25 Nov the owner said Thai is not needed yet. Item 64 (Apple sessions refused on the lifted routes, which turning
+     Sign in with Apple on needs first) is parked until sign-in is wanted;
+   - candidates that need no owner:
+     - a helper's own session on the desktop (`docs/runtime-adapter.md`, "Next slices" 4);
+     - a schedule's time zone shown when it is not this computer's (the same list);
+     - the lane pane's Diff read from the lane folder's own git, so a restart does not start it empty, and a subagent's
+       own edits in it (`docs/code-editor.md`, "Left for later");
+     - keychain support on Windows and Linux, for the session and the sealed cache: CI has no Windows runner, so it
+       would be built untested there;
+   - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`);
+   - item 30 (Kit's dial in a terminal): the owner chose both on 25 Nov, so Kit's chat lanes come from the + menu
+     (item 66) and the dial in a terminal stays a later idea.
    - Checked 24 Nov: the rate limiters' namespace ids in `apps/api/wrangler.jsonc` (2026112301 to 2026112332) clash
      with no other Worker in the Cloudflare account, whose other limiters use only 1001 and 1002. Items 31 to 42 took
      2026112333 to 2026112352 (four each: dev, staging, production and the top level); pick the next limiter's ids
@@ -346,9 +369,12 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - **From `docs/connectors.md`:** each approved reply is a LINE push, which counts against the shop's monthly
   quota (300 on the free plan). Shopee chat is closed to third parties. Lazada and Meta need applications started now.
 - **A look at the approval page on a real phone.**
-- **Model gateway (money):** an Anthropic API key from a paid account, as a Worker secret, only when models
-  should run; the exchange rate (default ฿35.00 a dollar) and each shop's monthly cap (default ฿200); a check of
-  the prices in `docs/model-gateway.md` against Anthropic's pricing page.
+- **Model gateway (money): not wanted yet.** On 25 Nov the owner said people bring their own model: on the desktop
+  each person signs in to their own coding agent with its CLI's login, or sets their own API key in that CLI, and
+  the app reads which (`src-tauri/src/accounts.rs`). The cloud team members (Nam, Pim and Ton) keep drafting with the
+  stand-in model until the owner wants them real. Then: an Anthropic API key from a paid account, as a Worker secret;
+  the exchange rate (default ฿35.00 a dollar) and each shop's monthly cap (default ฿200); a check of the prices in
+  `docs/model-gateway.md` against Anthropic's pricing page.
 - **The gate's rules:** shops that ask for deletion leave the cohort (keeping them needs a snapshot at deletion);
   subscription payments are deleted with the shop (whether Manut AI must keep its own billing records is a legal
   question); a payment before day 15 counts as paid.
@@ -364,7 +390,7 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   practice mode early and whether 3 days is right.
 - **Routines' switches:** `officeRoutines` and `officeCloud` are off in every environment, so each routine run is
   written down as `skipped` (`routines_off`) until someone turns them on with `PUT /v1/admin/flags`. Real drafts
-  also need the model key; stock routines need a stock feed; "Send the books" only drafts until FlowAccount is
+  also need the model key, which the owner does not want yet; stock routines need a stock feed; "Send the books" only drafts until FlowAccount is
   connected. The console's new words (New shop, First week) need Thai copy.
 - **Night replies:** the canvas's routine "Every night after 21:00: Answer order-status questions" reads as Nam
   replying alone; the rules (and CLAUDE.md) make every reply to a customer ask first, so the desktop shows
@@ -416,7 +442,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
-  second for "Everyone is paused since 10:00 today."), and both passed when run alone.
+  second for "Everyone is paused since 10:00 today."), and both passed when run alone. The web tests' waits are three
+  seconds since `6771bc3` (`apps/web/test/setup.ts`), and item 62 is speeding up `boxView.test.ts`.
 - `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
   (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
 - `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
