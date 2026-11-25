@@ -3555,6 +3555,7 @@ export const zh: Record<Key, string> = {
   "wf.file.day": "每月的日期：1 到 28，或 \"last\"。",
   "wf.file.zone": "这台电脑不认识这个时区。请使用 Asia/Bangkok 这样的名称。",
   "wf.file.duplicate": "已有同名的工作流：{detail}。",
+  "wf.file.unseen": "它含有屏幕上看不到的字符，例如零宽字符或改变文字方向的符号，所以不会读取。",
   "wf.lane.note": "这条泳道运行工作流“{name}”。它可能无人看着，所以无论项目的拨盘怎么设，Kit 在每次更改前都会询问。",
   "wf.lane.careful": "这条泳道运行工作流“{name}”，所以无论项目的拨盘怎么设，Kit 在每次更改前都会询问。",
   "wf.palette": "运行工作流：{name}",

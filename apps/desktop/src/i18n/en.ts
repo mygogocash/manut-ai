@@ -3589,6 +3589,7 @@ export const en = {
   "wf.file.day": "Its day of the month: 1 to 28, or \"last\".",
   "wf.file.zone": "Its time zone is not one this computer knows. Use a name such as Asia/Bangkok.",
   "wf.file.duplicate": "Another workflow has the same name: {detail}.",
+  "wf.file.unseen": "It has characters that do not show on screen, such as zero-width or text-direction marks, so it is not read.",
   "wf.lane.note": "This lane runs the workflow \"{name}\". Nobody may be watching it, so Kit asks before every change, whatever the project's dial says.",
   "wf.lane.careful": "This lane runs the workflow \"{name}\", so Kit asks before every change in it, whatever the project's dial says.",
   "wf.palette": "Run workflow: {name}",

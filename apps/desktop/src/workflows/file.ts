@@ -71,13 +71,24 @@ export type WorkflowWhy =
   | "weekdays"
   | "day"
   | "zone"
-  | "duplicate";
+  | "duplicate"
+  /** item 91: a character the card cannot show as it is read */
+  | "unseen";
 
 /** One file of the folder as the page lists it: a workflow, or why it is not one (`detail`: the field, the step's number or the
  *  other file, as the reason's words need it). */
 export type WorkflowFile = { file: string; workflow: Workflow } | { file: string; why: WorkflowWhy; detail?: string };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** A character the card cannot show as an agent reads it (item 91): a control other than a line break or a tab, a format
+ *  character (zero-width marks and joiners, bidirectional overrides and isolates, the invisible tag letters, a soft hyphen), a
+ *  private-use or unassigned code point, or a lone surrogate. A step holding one could say more to the agent than the person
+ *  read, so the whole file is refused rather than cleaned: what runs is exactly what was shown. */
+const UNSEEN = /(?![\n\t])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}]/u;
+/** Whether any text in `v`, at any depth, holds an UNSEEN character. */
+const hasUnseen = (v: unknown): boolean =>
+  typeof v === "string" ? UNSEEN.test(v) : Array.isArray(v) ? v.some(hasUnseen) : isObject(v) ? Object.values(v).some(hasUnseen) : false;
 
 /** An absolute folder path, written plainly: no control characters and no `..` part, so the project named is the one that is read. */
 export function plainFolder(p: unknown): p is string {
@@ -115,6 +126,7 @@ export function readWorkflow(file: string, text: string): WorkflowFile {
   if (!isObject(v)) return { file, why: "shape" };
   const extra = Object.keys(v).find((k) => !(FIELDS as readonly string[]).includes(k));
   if (extra !== undefined) return { file, why: "field", detail: extra.slice(0, 40) };
+  if (hasUnseen(v)) return { file, why: "unseen" };
   if (v.version !== undefined && v.version !== WORKFLOW_VERSION) return { file, why: "version" };
   const name = typeof v.name === "string" ? v.name.trim() : "";
   // the name's rule is a routine's (1 to 80 characters): asked of the package with a schedule it always takes

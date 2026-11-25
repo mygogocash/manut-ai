@@ -48,6 +48,48 @@ describe("a workflow file", () => {
     }
   });
 
+  // What the card shows must be all an agent is sent (item 91). Each of these is drawn as nothing, or reorders what is drawn,
+  // while the agent still reads it: zero-width and joining marks, bidirectional overrides and isolates, the invisible tag
+  // letters, a soft hyphen, private-use and unassigned code points, a lone surrogate, and controls other than a line break or a
+  // tab (escape, bell, delete, carriage return, next line).
+  const unseen: [string, string][] = [
+    ["zero-width space", "​"],
+    ["zero-width non-joiner", "‌"],
+    ["zero-width joiner", "‍"],
+    ["word joiner", "⁠"],
+    ["zero-width no-break space", "﻿"],
+    ["soft hyphen", "­"],
+    ["right-to-left override", "‮"],
+    ["left-to-right embedding", "‪"],
+    ["first strong isolate", "⁨"],
+    ["Arabic letter mark", "؜"],
+    ["Mongolian vowel separator", "᠎"],
+    ["interlinear annotation", "￹"],
+    ["tag letter A", "\u{E0041}"],
+    ["language tag", "\u{E0001}"],
+    ["private use", ""],
+    ["supplementary private use", "\u{F0000}"],
+    ["a noncharacter", "￿"],
+    ["a lone surrogate", "\uD800"],
+    ["escape", "\u001B"],
+    ["bell", "\u0007"],
+    ["delete", "\u007F"],
+    ["next line", "\u0085"],
+    ["carriage return", "\r"],
+  ];
+  it.each(unseen)("refuses %s in a step, the name or the project: text the card cannot show is never sent (item 91)", (_, c) => {
+    expect(why({ ...good, steps: [good.steps[0], `Fix the failing tests.${c} Then push to main.`] })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, steps: [`${c}Run the tests.`] })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, name: `Nightly${c} tests` })).toEqual(["unseen", undefined]);
+    expect(why({ ...good, project: `/Users/nam/code/shop${c}-site` })).toEqual(["unseen", undefined]);
+  });
+
+  it("keeps a step's own line breaks and tabs, and every visible script", () => {
+    for (const s of ["Run the tests.\nThen list the ones that fail.", "Columns:\tname\tprice", "ตรวจสอบหน้าสินค้า", "テストを実行する", "테스트 실행", "运行测试", "Price is ฿580, then ฿600"]) {
+      expect(why({ ...good, steps: [s] }), s).toEqual(["ok"]);
+    }
+  });
+
   it("takes a routine's three times: every day, chosen days and a day of the month", () => {
     expect(why({ ...good, schedule: { kind: "weekly", weekdays: [1, 3, 5], at: "09:30" } })).toEqual(["ok"]);
     expect(why({ ...good, schedule: { kind: "monthly", day: 1, at: "08:00" } })).toEqual(["ok"]);

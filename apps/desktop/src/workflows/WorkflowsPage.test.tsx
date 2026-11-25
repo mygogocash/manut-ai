@@ -177,6 +177,14 @@ describe("Settings › Workflows", () => {
       expect(words(card(draw({ settings: on, allowed, refused: { "nightly.json": "moved" } })))).toContain("Its project folder is not the one you allowed. Look at it again.");
     });
 
+    it("never draws a step it could not show as it is: a file with a hidden character is listed with why, with no Allow", () => {
+      const hidden = readFolder([{ name: "nightly.json", text: JSON.stringify({ ...nightly, steps: ["Run the tests.\u{E0041}\u{E0042}"] }) }]);
+      const html = draw({ settings: on, files: hidden });
+      expect(words(html)).toContain("nightly.json It has characters that do not show on screen, such as zero-width or text-direction marks, so it is not read.");
+      expect(html).not.toContain('data-testid="workflow-allow"');
+      expect(html).not.toContain('data-testid="workflow-step"');
+    });
+
     it("has its words in every language", () => {
       for (const l of LANGS) {
         setLang(l);

@@ -3555,6 +3555,7 @@ export const ko: Record<Key, string> = {
   "wf.file.day": "매월 날짜: 1~28, 또는 \"last\".",
   "wf.file.zone": "이 컴퓨터가 모르는 시간대입니다. Asia/Bangkok 같은 이름을 쓰세요.",
   "wf.file.duplicate": "같은 이름의 워크플로가 이미 있습니다: {detail}.",
+  "wf.file.unseen": "화면에 보이지 않는 문자(폭이 없는 문자나 글자 방향을 바꾸는 기호 등)가 들어 있어 읽지 않습니다.",
   "wf.lane.note": "이 레인은 워크플로 \"{name}\"을(를) 실행합니다. 아무도 지켜보지 않을 수 있어서 프로젝트의 다이얼과 관계없이 Kit은 모든 변경 전에 묻습니다.",
   "wf.lane.careful": "이 레인은 워크플로 \"{name}\"을(를) 실행하므로, 프로젝트의 다이얼과 관계없이 Kit은 모든 변경 전에 묻습니다.",
   "wf.palette": "워크플로 실행: {name}",
