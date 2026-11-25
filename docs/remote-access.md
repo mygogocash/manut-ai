@@ -4,7 +4,7 @@ The design for the features the owner pointed at on 25 Nov 2026 in another app's
 settings: network access, a tunnel, new devices approved first, permissions, agent activity on a phone, guest links,
 linked environments, a preview tunnel, webhooks held while offline. It was written by a read-only design pass over
 this repository and GoSpark's remote access, which the relay in `apps/api` was lifted from. Nothing here is built yet
-except that relay. The plan's rows are 78a to 78f.
+except that relay and the read of Tailscale's state (78f's first part, below). The plan's rows are 78a to 78f.
 
 ## The first version
 
@@ -118,7 +118,7 @@ tailnet first and starts the relay if the tailnet has not answered in 1.5 second
 handshake proved with K wins, and a phone has one session across both roads. With the relay switched off, a phone on
 the tailnet still pairs and works, so this road needs no server of ours.
 
-**What Settings says**, from a read-only `tailscale.rs` that only ever runs `tailscale status --json`:
+**What Settings says**, from a read-only `tailscale.rs` that only ever runs `tailscale status --json --peers=false`:
 
 - "Tailscale isn't installed."
 - "Open Tailscale and sign in."
@@ -128,6 +128,27 @@ the tailnet still pairs and works, so this road needs no server of ours.
 
 Manut never runs `serve` before HTTPS is on for the tailnet, because `serve` would send the person to a page that
 turns it on.
+
+**Built: the read (78f's first part, 26 Nov 2026).** `apps/desktop/src-tauri/src/tailscale.rs`, the command
+`tailscale_state`, and `apps/desktop/src/remote/tailscale.ts`, which reads it and holds the four lines above in all four
+dictionaries (`tailscale.*`). Nothing shows them yet: the Sharing and access page is 78b's.
+
+- It runs exactly `tailscale status --json --peers=false` (the flag is in the CLI's own help on 1.104.7, so the answer
+  holds no other device), with no shell, at most 5 seconds and 1 MiB read. The CLI is looked for in PATH's absolute
+  folders, then `/usr/local/bin/tailscale`, `/opt/homebrew/bin/tailscale` and
+  `/Applications/Tailscale.app/Contents/MacOS/Tailscale`. On this Mac the first of those is Tailscale's own two-line
+  script that runs the app's binary with the same arguments.
+- Ready needs all of: `BackendState` exactly `Running`; `CurrentTailnet.MagicDNSEnabled` true (read by name on
+  1.104.7's answer: a name that does not resolve on a phone is no use, whatever its certificate); `MagicDNSSuffix` under
+  `ts.net`; `Self.DNSName`, its trailing dot dropped and lowercased, plain DNS labels (letters, digits, hyphens, none
+  starting or ending with a hyphen, at most 253 bytes) under that suffix; and that name among `CertDomains`.
+- A CLI that is missing is "isn't installed". One that fails, exits non-zero, does not answer in time, answers more than
+  the cap or answers what is not read, and any state but `Running`, is "Open Tailscale and sign in". A running answer
+  that fails any other check is the HTTPS line. Nothing is ever ready by default.
+- Only the state and, when ready, the name leave the shell: the parser reads only the five fields above, so addresses,
+  the user, keys and peers never become values. The page checks the name again by the same rule.
+- Tested with a stand-in CLI whose call log holds only `status --json --peers=false`; on this Mac, with Tailscale
+  stopped, the real read says `signed_out`.
 
 **No shortcut for "the tailnet is already private".** Pairing, K and the decision challenge are the same on this road.
 A tailnet holds teammates' devices, shared devices and compromised ones; its access rules change; TLS ends in
