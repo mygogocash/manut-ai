@@ -361,6 +361,7 @@ export const ko: Record<Key, string> = {
   "set.allBots": "모든 봇",
   "set.app": "앱",
   "set.shop": "가게",
+  "set.hood": "고급 설정",
   "set.people": "사람",
   "set.general": "일반",
   "set.terminal": "터미널",

@@ -361,6 +361,7 @@ export const zh: Record<Key, string> = {
   "set.allBots": "全部机器人",
   "set.app": "应用",
   "set.shop": "店铺",
+  "set.hood": "高级设置",
   "set.people": "人员",
   "set.general": "通用",
   "set.terminal": "终端",

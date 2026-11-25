@@ -361,6 +361,7 @@ export const ja: Record<Key, string> = {
   "set.allBots": "すべてのボット",
   "set.app": "アプリ",
   "set.shop": "お店",
+  "set.hood": "詳細設定",
   "set.people": "メンバー",
   "set.general": "一般",
   "set.terminal": "ターミナル",
