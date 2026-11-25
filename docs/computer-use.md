@@ -64,11 +64,38 @@ rule of what may be looked at and done (`room.rs`), the card (`tap.rs`), the Set
 
 ## How it reaches the agent
 
-A Claude Code chat that starts while Accessibility is on is given `--mcp-config ~/.manut/computer/chats/<token>.json`
-(0600, in a 0700 folder) and `--plugin-dir ~/.manut/computer/plugin` (the skill, for that session only; nothing is
-written in the person's Claude Code folders). The configuration starts this same program as `manut --computer-mcp`,
-which relays each call over the socket `~/.manut/computer/app-<pid>.sock` with the chat's token. The shell does the
-looking and acting, so a server started any other way, or for a chat that ended, can do nothing.
+A Claude Code chat that starts while Accessibility is on is given `--mcp-config '<JSON>'` (the server's configuration as
+a string: Claude Code's `--mcp-config` takes "JSON files or strings", and 2.1.332 parses each value as JSON before it
+tries it as a file) and `--plugin-dir ~/.manut/computer/plugin` (the skill, for that session only; nothing is written in
+the person's Claude Code folders). The configuration starts this same program as `manut --computer-mcp`, which relays
+each call over the socket `~/.manut/computer/app-<pid>.sock` (in a 0700 folder) with the chat's token. The shell does
+the looking and acting, so a server started any other way, or for a chat that ended, can do nothing.
+
+### Who may call (security review, 25 Nov 2026)
+
+Until then a chat's token was written to `~/.manut/computer/chats/<token>.json`, and the socket served any connection
+that held a live token. Every program running as the person could read that file (a repository's dev script, another
+chat's agent through its shell tool, a terminal session) and connect with it: it could read the windows of every app the
+person had let that chat look at, without a card and through Manut AI's Accessibility and Screen capture grants, so
+macOS never asked, and it could spend a yes the person gave for that chat's own call. Now (`hub.rs`, tests
+`only_the_server_claude_code_started_for_the_chat_is_served`, `a_program_the_chat_did_not_start_is_refused_even_with_its_token`):
+
+- No file holds a token. The token is still in Claude Code's arguments and its server's environment, which any program
+  of the same user can read from the process list; so it only names the chat, and it opens nothing by itself.
+- The shell names the process it started for the chat once it runs (`agent_chat.rs` `bind_computer`), and a call is
+  served only when the kernel says the program at the other end of the connection (`LOCAL_PEERPID` and
+  `LOCAL_PEERTOKEN` from `sys/un.h`) has that process among its parents (`proc_pidinfo`, at most 16 steps up) and runs
+  Manut AI's own program (`proc_pidpath_audittoken` from `libproc.h`, read before and after the walk). Before the
+  process is named, nothing is served.
+- Parents, not "the parent": a `claude` on the person's `PATH` can be a wrapper that stays Claude Code's parent instead
+  of replacing itself (one on this Mac does), and then the process the shell started is the server's grandparent.
+- What is still let in, and why that is the same chat: a program that chat's own Claude Code started (its shell
+  commands, its hooks) can run Manut AI's program with the token. It reaches only that chat's room: the apps the person
+  let that chat look at and the yeses they gave on that chat's cards, each for exactly one call. Another chat, a
+  terminal or anything started outside the chat is refused whatever it holds.
+- Checked on this Mac with the real kernel (`the_kernel_names_the_caller_and_a_token_read_before_an_exec_names_nothing`):
+  the peer's process and parent read right, and the kernel gives a peer's audit token as the process is when asked, so
+  a token read before an exec names nothing after it. Starting Claude Code for real is a step for the owner (below).
 
 ## The bounds, and their tests
 
@@ -120,7 +147,10 @@ On the Mac app built from this branch:
    Do the same for Screen capture ("Screen & System Audio Recording"); macOS may ask to quit and reopen Manut AI.
 3. The line reads "Computer use is ready". The note about the Developer ID shows on 0.1.1.
 4. Start a new Buddy chat and say "Open TextEdit's front window and tell me what it says" with a TextEdit document
-   open. A card asks to look at TextEdit; Allow once. The answer quotes the document.
+   open. A card asks to look at TextEdit; Allow once. The answer quotes the document. (This is the first run of the
+   socket's caller check with a real Claude Code: if every call says it did not come from the chat's server, the
+   chat's server is not under the process Manut AI started, and that is a bug to report.) Then, from Terminal, run
+   `ls ~/.manut/computer`: there is no `chats` folder.
 5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello". Press No:
    nothing is typed, and the agent does not ask again by itself. Ask again and Allow once: Hello appears once.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
