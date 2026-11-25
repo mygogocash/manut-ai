@@ -150,10 +150,12 @@ describe("History", () => {
 });
 
 describe("Artifacts", () => {
-  it("is empty until the runtime has artifacts, and says what will show here", () => {
+  // The page's states, its ask and its list are drawn from data in ArtifactsPage.test.tsx.
+  it("says publishing public links is off until it is turned on in Settings, and offers nothing else", () => {
     const html = draw(<ArtifactsPage />);
     expect(html).toContain('data-testid="page-artifacts"');
-    expect(words(html)).toContain("What the team makes, such as pages, posts, sheets and reports, shows here.");
+    expect(words(html)).toContain("Publishing public links is off on this Mac. Turn it on in Settings › Artifacts.");
+    expect(html).not.toContain('data-testid="art-links"');
   });
 });
 

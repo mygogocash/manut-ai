@@ -3047,3 +3047,79 @@ status, Connect, Disconnect and Send a month's books) and, in Needs you, Ton's a
 
 **Not built yet.** The web's screens; the Google Picker, for the owner to choose an existing sheet; and a monthly schedule for
 the append.
+
+## Artifact links
+
+An HTML or Markdown page the shop's owner publishes as a link anyone with it can open (item 83; `apps/api/src/artifacts.ts`,
+`artifact-store.ts`). Built switched off: until the operator turns `artifactLinks` on with `PUT /v1/admin/flags` (its
+default is the var `ARTIFACT_LINKS`, which no environment sets) and the var `ARTIFACT_ORIGIN` names the links' own web
+address, publishing is refused and no page is served anywhere. What it needs from the owner and what it costs are in
+`docs/turning-on.md`.
+
+**The artifact origin.** `ARTIFACT_ORIGIN` is `https://<host>` and nothing after it. It is ignored, as if unset, when it is
+not https, carries a path, a query or credentials, or is the app's own host (`PUBLIC_API_ORIGIN`, `WEB_ORIGIN`), a host inside
+it or a host it is inside. It should be a registrable domain of its own (as GitHub serves user content from
+`githubusercontent.com`), since a sibling under the app's domain shares its site for cookies; the code cannot tell a sibling
+from a stranger without the public suffix list, so that is the owner's choice of domain.
+
+**The owner's routes.** Each takes the shop's session as the owner's other routes do (`callerOf`): an owner session or the
+shop's own session. A helper session answers 403 `owner_only`; a person's own sign-in, which is no shop, 404 `not_found`. The
+order is who is asking (401 or 503), the role, the method (405), the query (400 if it names `shop`, `tenant` or `role`) and the
+body, then for a publish the switch and the origin, and only then the shop's record. Every POST body is
+`application/json` (415 otherwise, at the front door). The desktop sends a publish or a removal only after its own ask settled
+it through approval-core (`docs/runtime-adapter.md`, "Artifacts: pages shared by a link"); this API is not a way round that
+ask.
+
+- `GET /v1/artifacts` answers `{ publishing, artifacts }` with `cache-control: no-store`. `publishing` is `"on"`,
+  `"feature_disabled"` or `"artifact_origin_not_configured"`, so the desktop can say why it cannot publish before it sends
+  anything. `artifacts` is newest first: `{ id, title, kind, bytes, createdAt, url }`, `createdAt` in Unix milliseconds,
+  `url` null while no origin is set. Listing stays open while publishing is off.
+- `POST /v1/artifacts` with exactly `{ title, kind, text }`: `title` 1 to 120 characters once trimmed with no control or
+  line-separator character (400 `invalid_title`), `kind` `"html"` or `"markdown"` (400 `invalid_kind`), `text` not empty
+  (400 `invalid_text`) and at most 128 KiB in UTF-8 bytes (413 `{ error: "too_large", max: 131072 }`), so that with JSON's
+  escaping of quotes and line breaks the body fits the desktop's 256 KiB request (the desktop checks the whole body too). Then 403
+  `{ error: "feature_disabled", feature: "artifactLinks" }` while the switch is off, 503 `artifact_origin_not_configured`
+  while no usable origin is set, and 409 `{ error: "too_many", max: 50 }` once the shop holds 50 links. Answers
+  `{ artifact }` as listed, with `cache-control: no-store`. Nothing is stored for any refusal.
+- `POST /v1/artifacts/remove` with exactly `{ id }` removes the link at once: its record, its text and its way in, in one
+  write, so the link answers 404 from then on. 404 `not_found` for an id the shop does not hold. Open while the switch is off,
+  so an owner can always take a link down. (The plan said `DELETE /v1/artifacts?id=`; the owner's other changes are all POSTs
+  with a JSON body, and the desktop's shop link sends only GET and POST, so removal is one too.)
+
+Each publish and removal writes an audit entry, `artifact.published` or `artifact.removed`, naming the link by its id
+(`artifactId`, an `art-…` id), never its title, its text or the link. The id is not the link's secret.
+
+**A link** is `<ARTIFACT_ORIGIN>/a/<shop>.<secret>`: `<shop>` is the shop's TenantObject id (its 32 bytes in base64url, 43
+characters), so the Worker reaches the shop's object with no lookup anywhere global and no tenant in a public address (an
+object's id is a one-way hash of its name that only Cloudflare can make), and `<secret>` is 24 random bytes (192 bits) in
+base64url, 32 characters, of which the object keeps the SHA-256 for the lookup. Two links of one shop share `<shop>`, so they
+show they are the same shop's, and nothing more.
+
+**The public read**, `GET /a/{link}`, is answered only on the artifact origin's host. A path under `/a/` on any other host,
+the app's own included, answers 404 and reaches nothing; and the artifact host answers nothing but links (the API and the
+app's pages are 404 there). On that host every request, any method and path, first counts against `ARTIFACT_READ_LIMITER`
+(120 a minute per IPv4 address or IPv6 /64, keyed as every other ingress limit), 429 `rate_limited` with `retry-after: 60` past
+it and 503 `rate_limit_unavailable` without the binding. Every answer there carries exactly these headers, the page's own
+included:
+
+```
+content-security-policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'
+x-content-type-options: nosniff
+referrer-policy: no-referrer
+x-robots-tag: noindex, nofollow
+```
+
+with `cache-control: private, max-age=60` on a page (no shared cache keeps one, so a removed link is gone for everyone else
+at once) and `no-store` on anything else. HTML is served as `text/html; charset=utf-8`; Markdown as
+`text/plain; charset=utf-8`, as written, since no renderer runs on the server and none is added for it. No cookie is read or
+set. A method other than GET answers 405 with `allow: GET`. An unknown link, a removed one, a deleted shop's, and every link
+while the switch is off answer the same 404 (`Not found`, `text/plain`), so nothing tells them apart. The Worker keeps its
+read of the switch for 30 seconds, so a busy page never wakes the AuthObject on every visit; turning the switch off stops
+every link within that. A visit writes nothing: opens are not counted.
+
+**Export and deletion.** The tenant export carries `artifacts`, each `{ id, title, kind, bytes, createdAt, text }`, without
+its link: an export is a file the owner keeps and may pass on, and a live link in it would open the page for whoever reads it.
+The tenant wipe removes every record, text and way in, so no link of a deleted shop opens again.
+
+**Not built yet.** Rendering Markdown on the server; a way for someone who is not the owner to report a link (the owner must
+decide how a link is taken down on a complaint); and a way to see how often a link was opened.
