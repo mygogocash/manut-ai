@@ -6,7 +6,7 @@
 // the shell keeps the list). Every value is checked by the shell before it is saved and again when a session starts
 // (src-tauri/src/providers.rs); the page's own check (model.ts) only says it sooner. A variable's value is typed once
 // and never shown again: the shell sends names only.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import "./providers.css";
 import "../accounts/accounts.css";
 import { AgentMark } from "../../sessions/AgentMark";
@@ -111,47 +111,50 @@ export function ProvidersPage({ focus }: { focus?: "accounts" }) {
           const s = statusLine(v, signinOf(v.id), planName);
           const open = chosen === v.id;
           return (
-            <div key={v.id} className={`prov-row${open ? " open" : ""}${v.off ? " off" : ""}`} data-testid={`provider-row-${v.id}`} data-off={v.off}>
-              <button
-                type="button"
-                className="prov-pick"
-                aria-expanded={open}
-                onClick={() => setChosen(open ? null : v.id)}
-                data-testid={`provider-open-${v.id}`}
-              >
-                <AgentMark agent={v.id} size={16} />
-                <span className="prov-who">
-                  <span className="prov-n">
-                    <b>{shownName(v)}</b>
-                    {v.name && <span className="prov-own">{v.label}</span>}
-                    {versions[v.id] && (
-                      <span className="prov-ver" data-testid={`provider-version-${v.id}`}>
-                        {versions[v.id]}
-                      </span>
-                    )}
+            <Fragment key={v.id}>
+              <div className={`prov-row${open ? " open" : ""}${v.off ? " off" : ""}`} data-testid={`provider-row-${v.id}`} data-off={v.off}>
+                <button
+                  type="button"
+                  className="prov-pick"
+                  aria-expanded={open}
+                  onClick={() => setChosen(open ? null : v.id)}
+                  data-testid={`provider-open-${v.id}`}
+                >
+                  <AgentMark agent={v.id} size={16} />
+                  <span className="prov-who">
+                    <span className="prov-n">
+                      <b>{shownName(v)}</b>
+                      {v.name && <span className="prov-own">{v.label}</span>}
+                      {versions[v.id] && (
+                        <span className="prov-ver" data-testid={`provider-version-${v.id}`}>
+                          {versions[v.id]}
+                        </span>
+                      )}
+                    </span>
+                    <span className={`prov-s ${s.tone}`} data-testid={`provider-status-${v.id}`}>
+                      {s.text}
+                    </span>
                   </span>
-                  <span className={`prov-s ${s.tone}`} data-testid={`provider-status-${v.id}`}>
-                    {s.text}
-                  </span>
-                </span>
-              </button>
-              <Toggle on={!v.off} label={t("prov.switchOf", { agent: shownName(v) })} onChange={(on) => void toggle(v, on)} testId={`provider-switch-${v.id}`} />
-            </div>
+                </button>
+                <Toggle on={!v.off} label={t("prov.switchOf", { agent: shownName(v) })} onChange={(on) => void toggle(v, on)} testId={`provider-switch-${v.id}`} />
+              </div>
+              {/* the chosen agent's settings open under its own row, where the person pressed */}
+              {open && view && (
+                <ProviderDetail
+                  key={view.id}
+                  v={view}
+                  version={versions[view.id]}
+                  signin={signinOf(view.id)}
+                  onSaved={(next) => {
+                    put(next);
+                    void getSessions().loadAgents();
+                  }}
+                />
+              )}
+            </Fragment>
           );
         })}
       </div>
-      {view && (
-        <ProviderDetail
-          key={view.id}
-          v={view}
-          version={versions[view.id]}
-          signin={signinOf(view.id)}
-          onSaved={(next) => {
-            put(next);
-            void getSessions().loadAgents();
-          }}
-        />
-      )}
 
       <YourAgents
         onChanged={() => {
@@ -204,7 +207,7 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
 
   if (v.kind === "custom") {
     return (
-      <div className="st-grp prov-detail" data-testid="provider-detail">
+      <div className="prov-detail" data-testid="provider-detail">
         <div className="st-row">
           <span className="st-k">
             <span>{t("prov.custom")}</span>
@@ -217,7 +220,7 @@ export function ProviderDetail({ v, version, signin, onSaved }: { v: ProviderVie
   const status = statusLine(v, signin, planName);
   return (
     <form
-      className="st-grp prov-detail"
+      className="prov-detail"
       data-testid="provider-detail"
       onKeyDown={holdImeEnter}
       onSubmit={(e) => {

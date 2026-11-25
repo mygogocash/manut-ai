@@ -433,7 +433,8 @@ test("Accounts: every leading mark sits in one 16px slot, one column", async ({ 
     };
   });
   await open(page);
-  await openSettings(page, "accounts");
+  // Accounts are a part of Settings › Providers since item 74
+  await openSettings(page, "providers");
   await expect(page.getByTestId("accounts-codex")).toBeVisible();
   const marks = await page.evaluate(() =>
     [...document.querySelectorAll(".acc-gh-i .agent-ic, .acc-ring .agent-ic")].map((e) => {

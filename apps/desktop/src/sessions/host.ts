@@ -852,7 +852,8 @@ export class MockHost implements SessionHost, BuddyHost {
   }
   async providers(): Promise<ProviderView[]> {
     this.log({ op: "providers" });
-    return (await this.agents()).map((a) => this.providerView(a));
+    // oh-my-hermes is offered nowhere (offeredAgents), so the page does not list it (providers.rs `list_here`)
+    return (await this.agents()).filter((a) => a.id !== "omh").map((a) => this.providerView(a));
   }
   async providerSave(id: string, patch: ProviderPatch): Promise<ProviderView> {
     this.log({ op: "providerSave", id, fields: Object.keys(patch) });

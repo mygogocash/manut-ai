@@ -962,11 +962,13 @@ pub fn view_of(a: &Agent, s: &Stored, found: Option<PathBuf>, path_ok: bool) -> 
     }
 }
 
-/// Every agent the app knows on this computer, in the page's order: the built-ins, the ACP agents, then the person's own.
+/// Every agent the app offers on this computer, in the page's order: the built-ins, the ACP agents, then the person's own.
+/// oh-my-hermes is left out: its chat needed the Hermes bridge, so the app offers it nowhere (`offeredAgents`).
 pub fn list_here() -> Vec<View> {
     let all = load_here();
     let mut out: Vec<View> = crate::sessions::agents_on_this_machine_with(&all)
         .into_iter()
+        .filter(|info| info.id != "omh")
         .filter_map(|info| {
             let a = crate::sessions::agent(info.id)?;
             let s = all.get(a.id);

@@ -75,8 +75,13 @@
 .prov-row.off .prov-n b {
   color: var(--muted);
 }
+/* the chosen agent's settings, inside the list under its row: rows of their own, set in from the list's edge */
 .prov-detail {
-  margin-top: 12px;
+  background: var(--raise);
+  padding-left: 26px;
+}
+.prov-detail > * + * {
+  border-top: 1px solid var(--line);
 }
 .prov-status .st-k,
 .prov-runs .st-k {
