@@ -89,12 +89,12 @@
 .wf-look-h[aria-expanded="true"] .wf-chev {
   transform: rotate(180deg);
 }
+/* it holds a decision (Allow), so it appears and stays still, as an ask does (docs/motion.md); only the chevron turns */
 .wf-look-p {
   padding: 4px 4px 8px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  animation: var(--anim-rise);
 }
 .wf-look-p[hidden] {
   display: none;
