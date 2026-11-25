@@ -22,6 +22,7 @@ mod git_moved;
 mod lane;
 mod lane_clean;
 mod lane_config;
+mod lane_diff;
 mod past_chats;
 mod platform;
 mod outpost;
@@ -897,6 +898,14 @@ async fn session_main_moved(cwd: String, base: Option<String>, show: Option<Vec<
         .map_err(|e| e.to_string())?
 }
 
+/// What really changed in the lane's own folder since it started, from git, for the Diff beside the lane (lane_diff.rs). Only a
+/// folder the app made is read; the answer is a short code otherwise.
+#[tauri::command]
+async fn lane_diff(worktree: String) -> Result<lane_diff::LaneDiff, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane_diff::read(&home, &worktree)).await.map_err(|e| e.to_string())?
+}
+
 /// Remove session `session`'s saved files (it was closed).
 #[tauri::command]
 async fn session_files_remove(session: String) -> Result<(), String> {
@@ -1464,6 +1473,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_release,
         lane_clean_merged,
         session_main_moved,
+        lane_diff,
         chat_close_all,
         buddy_start,
         buddy_input,
