@@ -13,6 +13,7 @@
 import { decodeDecision, isUnknown, type ApprovalKind, type WireDecision } from "@manut/approval-core";
 import { dayTime, longDay } from "../../app/time";
 import { t, type Key } from "../../i18n";
+import { onlyOwnerWords } from "../../lib/shops";
 import type { Answer } from "./session";
 
 /** Who the API names when the shop's own session decided (apps/api approvals.ts) and when the owner's link did (pilot.ts). */
@@ -134,7 +135,9 @@ export function outcomeOf(answer: Answer, ctx: AnswerContext): Outcome {
   const code = answer.code || "refused";
   switch (code) {
     case "not_permitted":
-      return { ok: false, code, words: t(NOT_PERMITTED[ctx.kind] ?? "rt.no.other") };
+      // A helper is told who may decide it, by name, in the words their card says it in ("Only Noi can approve money"): the
+      // card offered an answer this build thought their role may give, and approval-core, which decides, says it may not.
+      return { ok: false, code, words: ctx.owner ? onlyOwnerWords(ctx.kind, ctx.owner) : t(NOT_PERMITTED[ctx.kind] ?? "rt.no.other") };
     case "already_decided":
       return over(code, decidedWords(decodeDecision(result.decision), ctx.names, ctx.now, ctx.owner), "resolved");
     case "changed":

@@ -229,6 +229,16 @@
   flex: 1;
   min-width: 0;
 }
+/* A shop the person only helps at, said after its name as the switcher's list says it: a quiet word, never cut, which the
+   name gives way to. */
+.sb .acct-role {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-pill);
+  color: var(--aui-muted);
+  font-size: 11px;
+}
 .sb .acct-switch {
   flex: none;
   margin-left: 0;
