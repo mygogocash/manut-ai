@@ -3067,7 +3067,8 @@ shop's own session. A helper session answers 403 `owner_only`; a person's own si
 order is who is asking (401 or 503), the role, the method (405), the query (400 if it names `shop`, `tenant` or `role`) and the
 body, then for a publish the switch and the origin, and only then the shop's record. Every POST body is
 `application/json` (415 otherwise, at the front door). The desktop sends a publish or a removal only after its own ask settled
-it through approval-core (`docs/code-editor.md`, "Artifact links"); this API is not a way round that ask.
+it through approval-core (`docs/runtime-adapter.md`, "Artifacts: pages shared by a link"); this API is not a way round that
+ask.
 
 - `GET /v1/artifacts` answers `{ publishing, artifacts }` with `cache-control: no-store`. `publishing` is `"on"`,
   `"feature_disabled"` or `"artifact_origin_not_configured"`, so the desktop can say why it cannot publish before it sends

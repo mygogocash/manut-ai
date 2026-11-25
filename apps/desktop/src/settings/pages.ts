@@ -16,6 +16,9 @@ export const APP_PAGES: { id: string; label: Key }[] = [
   // git, gh and glab with their versions and accounts, the default branch pulled when clean, how pull requests merge (item 75,
   // SourceControlPage.tsx)
   { id: "source", label: "set.source" },
+  // publishing HTML and Markdown files as public links: the one switch, off by default, and how it works (item 83,
+  // ArtifactLinksPage.tsx)
+  { id: "artifacts", label: "set.artifacts" },
   // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
   { id: "mcp", label: "set.mcp" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)

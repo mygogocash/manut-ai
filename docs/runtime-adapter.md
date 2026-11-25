@@ -829,6 +829,40 @@ own routes"; the rules are `docs/people.md`). It is a page of Settings, under Sh
   shop's: the canvas's Fon, Mint and Beam, an invite for one account at a time, removal ending sessions, invites and cover, and
   cover until a day that has not passed. Its invite links end in `.invalid`, which can never be a real address.
 
+## Artifacts: pages shared by a link
+
+An HTML or Markdown page the shop's owner publishes as a link anyone with it can open (item 83; the routes are
+`docs/pilot-api.md`, "Artifact links"). The Artifacts page in the side menu (`src/pages/ArtifactsPage.tsx`, `artifacts.ts`) and
+Settings › Artifacts (`src/settings/ArtifactLinksPage.tsx`), with three ops (`src/runtime/artifacts.ts`) and the asks before each
+change (`src/runtime/artifactAsks.ts`).
+
+- **The switch.** Settings › Artifacts › Allow publishing public artifact links is off by default, saved on this computer
+  (`src/lib/artifactLinks.ts`). While it is off the page offers nothing and every op is refused `switched_off` before anything
+  is sent, a read included. Links made before stay open until removed, which needs the switch on again. The API has its own
+  switch and its own web address for links (`docs/turning-on.md`); the page says which one is missing.
+- **Before anything is sent.** In Practice, and on the WebSocket bridge, the page says links need Manut AI connected to the shop,
+  and Practice refuses every op (`practice`). Connected with nobody signed in, it says to sign in: a link belongs to the shop's
+  account. A shop the person helps at is refused `owner_only`, and a person in no shop `no_shop`, with nothing sent.
+- **The ask.** Share a file as a link reads an HTML or Markdown file on this Mac (nothing is sent) and opens an approval-core
+  request of kind `public_post`, offering yes this once or no, whose detail is the whole plan: the shop, the title (the file's
+  name), the kind, the size and the text. The page shows the title, the kind, the size and that anyone with the link can open it
+  without signing in until it is removed. Remove opens a request of kind `command` naming the link, and says the link stops at
+  once and cannot be undone. Each settles once (`answerArtifactAsk`), waits at most 15 minutes, and is taken back if the page
+  closes first.
+- **No way round it.** `artifacts.publish` and `artifacts.remove` take only an ask's id. The runtime takes that ask's own plan
+  from approval-core (`takeSettled`) only when it was settled with a yes, only for its own kind of change, and only once; an
+  ask that waits, was answered no, was withdrawn or expired, or was used already publishes nothing (`not_settled`). So what is
+  published is exactly what the person saw, and there is no other op that publishes or removes a link. An agent that asks to
+  share a file must be shown this same ask; no agent path exists yet.
+- **What a change sends.** `{ title, kind, text }` to `POST /v1/artifacts`, or `{ id }` to `POST /v1/artifacts/remove`, with
+  the shop's own owner session. A page the API would refuse (no title, not HTML or Markdown, empty, over 128 KiB, or a body over
+  the shell's 256 KiB) is refused here first. A change that got no answer is never sent again: its ask is used, and the page
+  reads the list again.
+- **What the page is shown.** The links newest first, each with its kind, size, day and address, and Open (the default
+  browser), Copy link and Remove; a link the API sent without an https address, or with a field this build cannot read, makes
+  the list unreadable rather than shown in part. Nothing is kept: the links live in the page's state only, never the store, the
+  kept read of the shop, an event or a log.
+
 ## Signing in
 
 ### What the lifted sign-in supports today
