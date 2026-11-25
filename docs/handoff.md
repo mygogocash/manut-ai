@@ -174,6 +174,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 57, the console's Routines page for operators: a shop's routines and its team, with pause, resume and
      remove asked first (`feat/console-routines`, Sonnet), started 25 Nov when item 55 reported.
+   - item 58, the preview drawn in the pane: a sandboxed frame of the lane's running preview, the CSP widened for
+     loopback frames only (`feat/preview-frame`, Opus), started 25 Nov when item 53 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
