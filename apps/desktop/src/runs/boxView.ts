@@ -1079,10 +1079,8 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
   const lineOf = (n: (typeof nets)[number], c: number) => (endOf.has(n.key) && rowOf.get(endOf.get(n.key)!)! - 1 === c ? `>${endOf.get(n.key)}` : n.key);
   const beside = vrows.map((_, r) => free([r])); // per row, the free spaces beside its boxes
   // per row, where its boxes begin and end: a lane outside them runs round the end of the row
-  const rowEnds = vrows.map((r) => {
-    const xs = r.ids.map((id) => xOf.get(id)!);
-    return [Math.min(...xs), Math.max(...xs) + boxW];
-  });
+  const rowStart = vrows.map((r) => Math.min(...r.ids.map((id) => xOf.get(id)!)));
+  const rowStop = vrows.map((r) => Math.max(...r.ids.map((id) => xOf.get(id)!)) + boxW);
   const pitch = Math.min(G.lane, clear); // the least two passing lines stand apart in this layout
   const aparts = clear > pitch ? [clear, pitch] : [pitch]; // how far a place is kept from the other lines: first the clearance, then only a lane
   /** One pass: every line into a child gets its point on the child's top, then every line that passes rows its
@@ -1411,7 +1409,7 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       lanes.set(n.key, chosen);
       for (const [r, x] of chosen) {
         for (const q of [r - 1, r, r + 1]) line(q, x, mine);
-        if (x < rowEnds[r][0] || x > rowEnds[r][1]) outer++;
+        if (x < rowStart[r] || x > rowStop[r]) outer++;
       }
     }
     return { port, lanes, crowded, shared, tight, outer };
