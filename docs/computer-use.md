@@ -120,6 +120,19 @@ Reads (`room.rs` tests unless named):
   and besides the list, any window of a program that does not run as this person, and of one with no bundle identifier
   that is under `/System/` or whose program cannot be read, is refused
   (`macos_prompts_are_refused_whatever_kind_of_bundle_they_are`).
+- macOS's helpers, by where they run (second security review, 26 Nov 2026). SecurityAgentHelper (the XPC service in
+  `SecurityAgent.bundle` that draws its password sheet, `com.apple.SecurityAgentHelper.arm64`) and
+  LocalAuthenticationRemoteService (the Touch ID and password sheet, an XPC service of `LocalAuthenticationUI.framework`)
+  run as the person, have bundle identifiers and live under `/System/`, so the rule above let them in. Now any program
+  of macOS (under `/System/`, `/usr/` but not `/usr/local/`, `/bin/`, `/sbin/` or `/Library/Apple/`) is let in only
+  when it is an app a person opens: an `.app` right in `/System/Applications/`, its `Utilities/`, Safari's app cryptex,
+  `/System/Library/CoreServices/Applications/`, or the Finder. Every other kind (XPC services, `.bundle`s, `.appex`es,
+  apps nested in frameworks or in other apps, macOS's own agents and alerts such as Notification Center and Control
+  Center, programs in `/usr/libexec/`) is refused whatever it is called, and so is a program whose path cannot be read,
+  even with a bundle identifier. The two helpers are named in `REFUSED` too
+  (`macos_helpers_that_are_not_apps_a_person_opens_are_refused_by_where_they_run`). On this Mac, UserNotificationCenter
+  and AuthorizationPromptService declare no agent key in their `Info.plist`, so a rule on agents alone would have missed
+  them: that is why the rule names where apps are, not what a helper is.
 - At most 400 elements and 30 levels a look; a picture only with Screen capture
   (`a_picture_comes_only_with_screen_capture`).
 

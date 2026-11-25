@@ -3388,7 +3388,7 @@ export const zh: Record<Key, string> = {
   "computer.bounds": "你的智能体可以做什么",
   "computer.looks": "查看：只看你允许的应用，按聊天分别允许。第一次查看某个应用时会用卡片问你，这次同意在该聊天结束前有效。其他应用的界面标题不显示。",
   "computer.acts": "操作：每次点击、输入、按键或选择菜单前，都会先用卡片问你要做什么、在哪里做、输入的确切文字，并且只执行一次。一次同意不会执行多个操作，屏幕锁定时什么都不做。",
-  "computer.never": "从不：Manut AI 自己的界面、系统设置、钥匙串访问和密码 App、Mac 的密码与权限提示，以及密码栏里的内容。",
+  "computer.never": "从不：Manut AI 自己的界面、系统设置、钥匙串访问和密码 App、不是你自己打开的 App 的 macOS 部分（密码、触控 ID 和权限提示、提醒与辅助程序），以及密码栏里的内容。",
   "computer.unsigned": "这份 Manut AI 没有用 Developer ID 签名，所以每次更新后 macOS 都会忘记这两项权限。更新后，请在每个项目中先关掉 Manut AI 再重新打开。",
   "computer.notMac": "目前只能在 Mac 上操作电脑。",
   "computer.ask.look": "要让你的智能体在这个聊天中查看 {app} 吗？",

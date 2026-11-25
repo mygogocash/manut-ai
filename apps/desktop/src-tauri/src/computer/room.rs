@@ -190,8 +190,9 @@ pub const OWN_BUNDLE: &str = "xyz.manut.desktop";
 /// The apps computer use never looks at or works, each with the words a refusal uses. Bundle identifiers read from
 /// this Mac's own `Info.plist` files (macOS 27.2): System Settings, the two places passwords are kept, the login and
 /// lock screen and the screen saver, and every prompt where macOS asks for a password, Touch ID, a permission or an
-/// "open anyway".
-pub const REFUSED: [(&str, &str); 12] = [
+/// "open anyway", with the two helpers that draw the password and Touch ID sheets (XPC services, which the rule in
+/// [`refused`] for macOS's own programs covers too).
+pub const REFUSED: [(&str, &str); 15] = [
     ("com.apple.systempreferences", "System Settings"),
     ("com.apple.keychainaccess", "Keychain Access, where macOS keeps passwords"),
     ("com.apple.Passwords", "Passwords, where macOS keeps passwords"),
@@ -200,16 +201,53 @@ pub const REFUSED: [(&str, &str); 12] = [
     ("com.apple.ScreenSaver.Engine", "the screen saver"),
     ("com.apple.SecurityAgent", "a password prompt"),
     ("com.apple.LocalAuthentication.UIAgent", "a Touch ID or password prompt"),
+    ("com.apple.LocalAuthenticationRemoteService", "a Touch ID or password prompt"),
+    ("com.apple.SecurityAgentHelper.arm64", "a password prompt"),
+    ("com.apple.SecurityAgentHelper.x86_64", "a password prompt"),
     ("com.apple.tcc.AuthorizationPromptService", "a permission prompt"),
     ("com.apple.accessibility.universalAccessAuthWarn", "the Accessibility permission prompt"),
     ("com.apple.UserNotificationCenter", "a system alert"),
     ("com.apple.coreservices.uiagent", "a prompt about opening an app or file"),
 ];
 
+/// Where macOS keeps its own programs: its sealed system volume and the folders under it that the person cannot change.
+/// `/usr/local/` is the person's.
+fn of_macos(path: &str) -> bool {
+    ["/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/"].iter().any(|p| path.starts_with(p)) && !path.starts_with("/usr/local/")
+}
+
+/// The folders where macOS keeps the apps a person opens themselves (Safari's is on the app cryptex, as this Mac runs it,
+/// and the same seen through the Preboot volume).
+const MACOS_APPS: [&str; 5] = [
+    "/System/Applications/",
+    "/System/Applications/Utilities/",
+    "/System/Cryptexes/App/System/Applications/",
+    "/System/Volumes/Preboot/Cryptexes/App/System/Applications/",
+    "/System/Library/CoreServices/Applications/",
+];
+
+/// The Finder, the one app a person opens that macOS keeps among its own services.
+const FINDER: &str = "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder";
+
+/// `path` is the program of an app a person opens from one of macOS's Applications folders, or the Finder: an `.app`
+/// right in one of those folders, its program right in its `Contents/MacOS`, nothing nested and nothing doubled.
+fn macos_app(path: &str) -> bool {
+    path == FINDER
+        || MACOS_APPS.iter().any(|dir| {
+            path.strip_prefix(dir).is_some_and(|rest| {
+                let parts: Vec<&str> = rest.split('/').collect();
+                matches!(parts.as_slice(), [app, "Contents", "MacOS", program] if app.len() > 4 && app.ends_with(".app") && !program.is_empty())
+            })
+        })
+}
+
 /// Why computer use stays away from `app`, or None when it may look at it. Besides Manut AI and the list above: any
 /// window of a program that does not run as this person (the login window, and macOS's prompts that run as the system),
-/// and any of a program with no bundle identifier that is part of macOS (under `/System/`) or whose program cannot be
-/// read, so a prompt this list does not name yet is still left alone.
+/// any of a program that cannot be read, and any of a program of macOS that is not an app a person opens from one of its
+/// Applications folders (its prompts, alerts, agents and helpers, whatever kind of bundle they are and whatever they
+/// are called), so a prompt this list does not name yet is still left alone. SecurityAgentHelper and
+/// LocalAuthenticationRemoteService, which draw the password and Touch ID sheets, run as the person from XPC services
+/// with bundle identifiers, which is why the rule is where a program runs and not what it lacks.
 pub fn refused(app: &App, own_pid: i32) -> Option<String> {
     if app.pid == own_pid || app.bundle.eq_ignore_ascii_case(OWN_BUNDLE) {
         return Some("Manut AI's own windows, where you are asked before anything acts".into());
@@ -220,8 +258,8 @@ pub fn refused(app: &App, own_pid: i32) -> Option<String> {
     if !app.mine {
         return Some("a window of a program that does not run as you, such as the login window or a macOS prompt".into());
     }
-    if app.bundle.trim().is_empty() && (app.path.is_empty() || app.path.starts_with("/System/")) {
-        return Some("a window of macOS itself, such as one of its prompts".into());
+    if app.path.is_empty() || (of_macos(&app.path) && !macos_app(&app.path)) {
+        return Some("a window of macOS itself that is not an app you open, such as one of its prompts, alerts or helpers".into());
     }
     None
 }
@@ -1297,6 +1335,55 @@ mod tests {
         // a field whose content cannot be read is not asked about: the card could not say what typing replaces
         s.change(TEXTEDIT, 0, 5, |x| x.value = None);
         assert!(refused(&r, SET, &typing).contains("cannot read what"));
+    }
+
+    /// macOS's prompts and its helpers are refused by where they run, not only by name: SecurityAgentHelper and
+    /// LocalAuthenticationRemoteService run as the person, have bundle identifiers and live under `/System/`, as an
+    /// XPC service. A program of macOS is let in only when it is an app a person opens from one of macOS's
+    /// Applications folders, or the Finder.
+    #[test]
+    fn macos_helpers_that_are_not_apps_a_person_opens_are_refused_by_where_they_run() {
+        let app = |bundle: &str, path: &str| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine: true };
+        let agent = "/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/XPCServices";
+        for (bundle, path) in [
+            ("com.apple.SecurityAgentHelper.arm64", format!("{agent}/SecurityAgentHelper-arm64.xpc/Contents/MacOS/SecurityAgentHelper-arm64")),
+            ("com.apple.SecurityAgentHelper.x86_64", format!("{agent}/SecurityAgentHelper-x86_64.xpc/Contents/MacOS/SecurityAgentHelper-x86_64")),
+            ("com.apple.LocalAuthenticationRemoteService", "/System/Library/PrivateFrameworks/LocalAuthenticationUI.framework/Versions/A/XPCServices/LocalAuthenticationRemoteService.xpc/Contents/MacOS/LocalAuthenticationRemoteService".into()),
+            // helpers no list names yet, of every kind a program of macOS comes in
+            ("com.apple.example.service", "/System/Library/PrivateFrameworks/Example.framework/XPCServices/Example.xpc/Contents/MacOS/Example".into()),
+            ("com.apple.example.extension", "/System/Library/ExtensionKit/Extensions/Example.appex/Contents/MacOS/Example".into()),
+            ("com.apple.example.plugin", "/System/Library/CoreServices/Example.bundle/Contents/MacOS/Example".into()),
+            ("com.apple.example.nested", "/System/Library/PrivateFrameworks/Example.framework/Versions/A/Resources/Example.app/Contents/MacOS/Example".into()),
+            ("com.apple.example.widget", "/System/Applications/Notes.app/Contents/PlugIns/Widget.appex/Contents/MacOS/Widget".into()),
+            // macOS's own agents and alerts, which are apps but not ones a person opens
+            ("com.apple.notificationcenterui", "/System/Library/CoreServices/NotificationCenter.app/Contents/MacOS/NotificationCenter".into()),
+            ("com.apple.controlcenter", "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter".into()),
+            ("com.apple.example.alert", "/System/Library/CoreServices/Example Alert.app/Contents/MacOS/Example Alert".into()),
+            ("com.apple.example.safari-agent", "/System/Cryptexes/App/usr/libexec/SafariNotificationAgent".into()),
+            ("com.apple.example.protect", "/Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect".into()),
+            ("com.apple.example.daemon", "/usr/libexec/exampled".into()),
+            ("", "/usr/sbin/exampled".into()),
+            ("", "/sbin/example".into()),
+            // a path that does not read as macOS keeps it is not one, even with an identifier
+            ("com.apple.example.doubled", "/System/Applications//Notes.app/Contents/MacOS/Notes".into()),
+            ("com.apple.example.unread", String::new()),
+        ] {
+            assert!(super::refused(&app(bundle, &path), 1).is_some(), "{path}");
+        }
+        // the apps a person opens from macOS, and every program that is not macOS's, stay possible
+        for path in [
+            "/System/Applications/Notes.app/Contents/MacOS/Notes",
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+            "/System/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari",
+            "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+            "/System/Library/CoreServices/Applications/Archive Utility.app/Contents/MacOS/Archive Utility",
+            "/Applications/Shopee.app/Contents/MacOS/Shopee",
+            "/usr/local/bin/tool",
+            "/opt/homebrew/bin/python3",
+            "/Users/k/bin/tool",
+        ] {
+            assert!(super::refused(&app("com.example.app", path), 1).is_none(), "{path}");
+        }
     }
 
     #[test]

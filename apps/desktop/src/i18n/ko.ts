@@ -3388,7 +3388,7 @@ export const ko: Record<Key, string> = {
   "computer.bounds": "에이전트가 할 수 있는 일",
   "computer.looks": "보기: 허용한 앱만, 채팅마다. 앱을 처음 볼 때 카드로 묻고, 그 허락은 채팅이 끝날 때까지 유지됩니다. 다른 앱의 창 제목은 보여 주지 않습니다.",
   "computer.acts": "조작하기: 클릭, 입력, 키 누르기, 메뉴 선택마다 무엇을 어디서 하는지와 정확한 글자를 카드로 먼저 묻고, 한 번만 실행합니다. 한 번의 허락으로 여러 가지를 하지 않으며, 화면이 잠겨 있으면 아무것도 하지 않습니다.",
-  "computer.never": "하지 않는 일: Manut AI 자신의 창, 시스템 설정, 키체인 접근과 암호, Mac의 암호 및 권한 확인 창, 암호 입력란의 내용.",
+  "computer.never": "하지 않는 일: Manut AI 자신의 창, 시스템 설정, 키체인 접근과 암호, 직접 여는 앱이 아닌 macOS의 부분(암호, Touch ID, 권한 확인 창과 알림, 도우미 프로그램), 암호 입력란의 내용.",
   "computer.unsigned": "이 Manut AI는 Developer ID로 서명되지 않아서, 업데이트할 때마다 macOS가 두 권한을 잊습니다. 업데이트한 뒤 각 항목에서 Manut AI를 껐다가 다시 켜 주세요.",
   "computer.notMac": "컴퓨터 사용은 지금은 Mac에서만 쓸 수 있습니다.",
   "computer.ask.look": "이 채팅에서 에이전트가 {app}을(를) 보게 할까요?",
