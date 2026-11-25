@@ -40,8 +40,9 @@ export interface HostIdentity {
   sign(message: string): Promise<string>;
 }
 
-/** Whether the relay is switched on, asked without a socket: `off` for its 503 `relay_disabled`. The page asks through the
- *  shell, because its content policy lets it open sockets to the API origin but send it no plain request. */
+/** Whether the relay is switched on, asked without a socket: a refused upgrade reaches a page only as a close with no
+ *  reason, so the API's public health answer says it (`relay: "off"`). The page asks through the shell, because its
+ *  content policy lets it open sockets to the API origin but send it no plain request. */
 export type RelayProbe = () => Promise<"off" | "on" | "unknown">;
 
 export interface Timers {
@@ -103,9 +104,10 @@ export function relaySocketUrl(origin: string, hostId: string): string | null {
   return null;
 }
 
-/** The same route as plain https, for the probe that asks whether the relay is on. */
-export function relayProbeUrl(socketUrl: string): string {
-  return socketUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
+/** What the API's public health answer says of its relay (`relay: "on" | "off"`), for the probe. */
+export function relayFromHealth(body: unknown): "on" | "off" | "unknown" {
+  const relay = body !== null && typeof body === "object" ? (body as { relay?: unknown }).relay : undefined;
+  return relay === "on" || relay === "off" ? relay : "unknown";
 }
 
 function readJson(text: string): Record<string, unknown> | null {

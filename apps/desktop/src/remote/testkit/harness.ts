@@ -30,8 +30,8 @@ export function macHarness(options: { origin?: string | null } = {}) {
     keyring,
     origin: options.origin === undefined ? ORIGIN : options.origin,
     connect: relay.connectMac,
-    probe: async (url) => {
-      probes.push(url);
+    probe: async () => {
+      probes.push("health");
       return relay.enabled ? "on" : "off";
     },
     chats,

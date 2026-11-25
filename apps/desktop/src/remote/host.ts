@@ -20,7 +20,7 @@ import {
   acceptSession,
 } from "@manut/remote-channel";
 import { type Keyring, type PairedPhone, RemoteVault } from "./keys";
-import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relayProbeUrl, relaySocketUrl } from "./link";
+import { type LinkState, type RelayProbe, type SocketFactory, type Timers, RelayLink, relaySocketUrl } from "./link";
 import { PairingDoor, type PairingView } from "./pairing";
 import { type ChatSources, type MacActions, Server } from "./serve";
 
@@ -29,8 +29,8 @@ export interface RemoteMacDeps {
   /** The API origin the app is connected to, or null in Practice. */
   readonly origin: string | null;
   readonly connect: SocketFactory;
-  /** Asks the relay's route whether the relay is on, given its plain https address. */
-  probe(url: string): ReturnType<RelayProbe>;
+  /** Asks the API whether its relay is switched on (its public health answer, fromShell.ts). */
+  readonly probe: RelayProbe;
   readonly chats: ChatSources;
   readonly actions: MacActions;
   now(): number;
@@ -169,7 +169,7 @@ export class RemoteMac {
       url,
       identity,
       connect: this.#deps.connect,
-      probe: () => this.#deps.probe(relayProbeUrl(url)),
+      probe: this.#deps.probe,
       timers: this.#timers,
       events: {
         onOpen: (stream, device) => this.#onOpen(stream, device),

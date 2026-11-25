@@ -32,6 +32,7 @@ mod power;
 mod review;
 mod preview;
 mod providers;
+mod remote_keys;
 #[cfg(all(test, unix))]
 mod pty_bench;
 mod running;
@@ -593,6 +594,48 @@ async fn shop_cache_seal_key(make: bool) -> Result<Option<String>, String> {
 #[tauri::command]
 async fn shop_cache_seal_key_clear() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(shop_cache_key::clear).await.map_err(|_| "keychain".to_string())?
+}
+
+/// What the keychain keeps for reaching this Mac from a phone (remote_keys.rs): the relay key and the paired phones, as
+/// the JSON document the page reads once and imports at once as keys script cannot read back; null when none is kept.
+/// `unavailable` on a computer with no keychain support, where the page keeps nothing. Reading makes nothing.
+#[tauri::command]
+async fn remote_keys_read() -> Result<Option<String>, String> {
+    let text = tauri::async_runtime::spawn_blocking(remote_keys::read).await.map_err(|_| "keychain".to_string())??;
+    Ok(text.map(|t| t.as_str().to_owned()))
+}
+
+/// Keeps the Mac's relay key, made by the page once the person turned the switch on. Refused (`exists`) when one is kept.
+#[tauri::command]
+async fn remote_keys_set_host(host: remote_keys::HostKey) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_host(doc, host)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Keeps a newly paired phone. Refused for a malformed record (`invalid`), an id or a passkey already kept (`exists`,
+/// `credential_taken`), and past seven phones (`full`).
+#[tauri::command]
+async fn remote_keys_add_device(device: remote_keys::Device) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_device(doc, device)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Notes when a phone was last seen and its passkey's counter, which may not go down (`counter`).
+#[tauri::command]
+async fn remote_keys_touch_device(id: String, last_seen: u64, sign_count: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| remote_keys::with_touch(doc, &id, last_seen, sign_count)))
+        .await
+        .map_err(|_| "keychain".to_string())?
+}
+
+/// Forgets a phone at Unpair, its K and passkey with it.
+#[tauri::command]
+async fn remote_keys_remove_device(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || remote_keys::change(|doc| Ok(remote_keys::without_device(doc, &id))))
+        .await
+        .map_err(|_| "keychain".to_string())?
 }
 
 /// Keystrokes (and pastes) from the terminal view into session `id`.
@@ -1606,6 +1649,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         shop_cache_clear,
         shop_cache_seal_key,
         shop_cache_seal_key_clear,
+        remote_keys_read,
+        remote_keys_set_host,
+        remote_keys_add_device,
+        remote_keys_touch_device,
+        remote_keys_remove_device,
         term_link::term_link_take,
         disk::disk_watch,
         turn_files::turn_files_take,
