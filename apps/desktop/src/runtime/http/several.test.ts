@@ -19,6 +19,7 @@ import {
   iso,
   memoryCacheStore,
   memoryVault,
+  openedFile,
   ORIGIN,
   replyDetail,
   serveShops,
@@ -27,6 +28,7 @@ import {
   shopToken,
   storedSession,
   T0,
+  useMicrotaskCrypto,
   type FakeApi,
   type ServedShops,
 } from "./testkit";
@@ -89,6 +91,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
@@ -269,7 +273,7 @@ describe("a shop the person's place in ended", () => {
       left: [{ id: SHOP_B.id, name: "Ran Pa Noi", owner: "Noi", why: "removed", at: Date.parse(REMOVED_AT) / 1000 }],
     });
     // the kept read no longer holds it
-    const file = JSON.parse([...disk.files.values()][0]);
+    const file = JSON.parse(await openedFile([...disk.files.values()][0]));
     expect(file.snapshot.shops.map((p: { id: string }) => p.id)).toEqual([SHOP_A.id]);
   });
 
@@ -310,8 +314,9 @@ describe("signing out", () => {
 describe("offline", () => {
   it("keeps each shop's asks under its own id, shows every shop's while the API cannot be reached, and answers none", async () => {
     const { api, store, disk, host } = await opened();
-    const [[key, text]] = [...disk.files];
+    const [[key, sealed]] = [...disk.files];
     expect(key).toBe(cacheKey(ORIGIN, "apple:owner-1"));
+    const text = await openedFile(sealed);
     const file = JSON.parse(text);
     expect(file.v).toBe(CACHE_VERSION);
     expect(file.snapshot.shops.map((p: { id: string; approvals: { record: { request: { id: string } } }[] }) => [p.id, p.approvals.map((a) => a.record.request.id)])).toEqual([

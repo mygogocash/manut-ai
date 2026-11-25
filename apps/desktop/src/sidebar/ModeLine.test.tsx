@@ -49,6 +49,8 @@ describe("the mode line", () => {
     expect(words(renderToString(<ModeLine onOpen={noop} />))).toBe("Not answering. Showing what was here at 14:05");
     Object.assign(host, { link: "offline", cache: { kind: "too_old", at: read.getTime() - 9 * 24 * 3600_000 } });
     expect(words(renderToString(<ModeLine onOpen={noop} />))).toBe("Offline. The saved copy is more than 7 days old, so it is not shown");
+    Object.assign(host, { link: "offline", cache: { kind: "unkept" } });
+    expect(words(renderToString(<ModeLine onOpen={noop} />))).toBe("Offline. This computer cannot keep a saved copy yet, so none is shown");
     Object.assign(host, { link: "offline", cache: { kind: "none" } });
     expect(words(renderToString(<ModeLine onOpen={noop} />))).toBe("Offline · mode-offline.manut.xyz");
     Object.assign(host, { link: "open", cache: { kind: "none" } });

@@ -34,6 +34,8 @@ import {
   shopToken,
   storedSession,
   T0,
+  keptPlain,
+  useMicrotaskCrypto,
   type FakeAnswer,
   type FakeApi,
   type Recorded,
@@ -191,10 +193,13 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("reading the shop's vault and outposts", () => {
@@ -290,7 +295,9 @@ describe("the owner's new password", () => {
     expect(vaultCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${SIGN_INS_PATH}`, `POST ${PASSWORD_PATH}`]);
     // Every other request, the saved read of the shop, the events and what the host holds carry none of it.
     for (const call of api.calls.filter((c) => c !== sent[0])) expect(JSON.stringify(call)).not.toContain(PASSWORD);
-    expect(JSON.stringify([...disk.files.values()])).not.toContain(PASSWORD);
+    // what the saved read of the shop holds, opened: sealed, its text would hide a password it held
+    expect(disk.files.size).toBe(1);
+    expect(JSON.stringify(await keptPlain(disk))).not.toContain(PASSWORD);
     expect(JSON.stringify(events)).not.toContain(PASSWORD);
     expect(JSON.stringify(host)).not.toContain(PASSWORD);
   });
@@ -384,7 +391,9 @@ describe("adding a sign-in", () => {
     const vaultCalls = api.calls.filter((c) => c.path.startsWith("/v1/vault/"));
     expect(vaultCalls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${SIGN_INS_PATH}`, `POST ${SIGN_INS_PATH}`]);
     for (const call of api.calls.filter((c) => c !== sent[0])) expect(JSON.stringify(call)).not.toContain(PASSWORD);
-    expect(JSON.stringify([...disk.files.values()])).not.toContain(PASSWORD);
+    // what the saved read of the shop holds, opened: sealed, its text would hide a password it held
+    expect(disk.files.size).toBe(1);
+    expect(JSON.stringify(await keptPlain(disk))).not.toContain(PASSWORD);
     expect(JSON.stringify(events)).not.toContain(PASSWORD);
     expect(JSON.stringify(host)).not.toContain(PASSWORD);
     expect(JSON.stringify(signIn)).not.toContain(PASSWORD);
@@ -484,7 +493,9 @@ describe("changing a sign-in's account or addresses", () => {
     // Before it went, the same session read the sign-ins: one that works, for a sign-in the shop has, at the addresses checked.
     expect(api.calls.filter((c) => c.path.startsWith("/v1/vault/")).map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${SIGN_INS_PATH}`, `POST ${CHANGE_PATH}`]);
     for (const call of api.calls.filter((c) => c !== sent[0])) expect(JSON.stringify(call)).not.toContain(PASSWORD);
-    expect(JSON.stringify([...disk.files.values()])).not.toContain(PASSWORD);
+    // what the saved read of the shop holds, opened: sealed, its text would hide a password it held
+    expect(disk.files.size).toBe(1);
+    expect(JSON.stringify(await keptPlain(disk))).not.toContain(PASSWORD);
     expect(JSON.stringify(events)).not.toContain(PASSWORD);
     expect(JSON.stringify(host)).not.toContain(PASSWORD);
     expect(JSON.stringify(signIn)).not.toContain(PASSWORD);

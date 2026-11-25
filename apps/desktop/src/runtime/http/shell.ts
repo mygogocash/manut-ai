@@ -12,11 +12,12 @@
 //
 // The last good read of the shop is kept in one file under the app's own folder (`~/.manut/shop-cache/`), written and
 // read by three more Rust commands that name a file only by a key of 64 hex digits (cache.ts makes it), never by a
-// path. It holds no token and nothing from the keychain (cache.ts says what it does hold).
+// path. It holds no token and nothing from the keychain (cache.ts says what it does hold), and it is sealed with a key a
+// third keychain item holds, which two more commands give and delete (src-tauri/src/shop_cache_key.rs, seal.ts).
 //
-// Each takes a plain shape (`fetch`'s, a three-call vault, a three-call store), so the runtime's tests hand in fakes and
+// Each takes a plain shape (`fetch`'s, a three-call vault, a five-call store), so the runtime's tests hand in fakes and
 // never need the shell.
-import type { CacheStore } from "./cache";
+import { NoKeychain, type CacheStore } from "./cache";
 
 export interface FetchInit {
   method: "GET" | "POST" | "DELETE";
@@ -102,8 +103,9 @@ export function shellVault(): SessionVault {
   };
 }
 
-/** The saved read of the shop through the shell's `shop_cache_write`, `shop_cache_read` and `shop_cache_clear`. Outside
- *  the desktop app there is no disk to keep it on, so every call fails, which the cache reads as nothing kept. */
+/** The saved read of the shop through the shell's `shop_cache_write`, `shop_cache_read` and `shop_cache_clear`, and the
+ *  key it is sealed with through `shop_cache_seal_key` and `shop_cache_seal_key_clear`. Outside the desktop app there is
+ *  no disk to keep it on, so every call fails, which the cache reads as nothing kept. */
 export function shellCacheStore(): CacheStore {
   const call = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
     if (!inShell()) throw new Error("no desktop shell");
@@ -113,5 +115,15 @@ export function shellCacheStore(): CacheStore {
     write: (key, text) => call<void>("shop_cache_write", { key, text }),
     read: (key) => call<string | null>("shop_cache_read", { key }),
     clear: () => call<void>("shop_cache_clear"),
+    sealKey: async (make) => {
+      try {
+        return await call<string | null>("shop_cache_seal_key", { make });
+      } catch (e) {
+        // Only the shell's own "unavailable" means this computer has no keychain, where no copy is ever kept; a refusal
+        // (a locked keychain, a denied prompt) is a plain failure, and nothing is kept or deleted that time.
+        throw e === "unavailable" ? new NoKeychain() : new Error("keychain");
+      }
+    },
+    dropSealKey: () => call<void>("shop_cache_seal_key_clear"),
   };
 }

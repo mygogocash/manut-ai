@@ -1,12 +1,13 @@
 // The offline cache's own rules, without a runtime: what is kept of a read of the shop, what is read back after a
 // restart, when a kept read is too old to show, and how the saved file is looked after (one at a time, in order, never
-// raising, forgotten for good when the session ends). The runtime's use of it is in offline.test.ts.
+// raising, sealed with a key only the keychain holds, forgotten for good with that key when the session ends). The
+// runtime's use of it is in offline.test.ts; the seal itself is in seal.test.ts. These run Node's own Web Crypto.
 import { isUnknown } from "@manut/approval-core";
 import { describe, expect, it } from "vitest";
 import { decodeApprovals, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, CACHE_VERSION, ShopCache, cacheKey, decodeCached, encodeSnapshot } from "./cache";
 import type { ShopSnapshot, ShopWork } from "./shop";
-import { approvalJson, memoryCacheStore, replyDetail, type ApprovalOver } from "./testkit";
+import { approvalJson, memoryCacheStore, newSealKey, openedFile, replyDetail, sealedFile, type ApprovalOver } from "./testkit";
 
 const NOW = Date.UTC(2026, 10, 23, 7, 0, 0);
 const DAY = 24 * 3600_000;
@@ -102,8 +103,8 @@ describe("what is kept", () => {
     const text = encodeSnapshot(snapshot());
     const file = JSON.parse(text);
     expect(Object.keys(file).sort()).toEqual(["snapshot", "v"]);
-    expect(file.v).toBe(5);
-    expect(CACHE_VERSION).toBe(5);
+    expect(file.v).toBe(6);
+    expect(CACHE_VERSION).toBe(6);
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
     expect(Object.keys(file.snapshot.tasks[0]).sort()).toEqual(["actions", "attempts", "createdAt", "draft", "id", "objective", "state", "title", "updatedAt"]);
     expect(Object.keys(file.snapshot.tasks[0].actions[0]).sort()).toEqual([
@@ -252,6 +253,9 @@ describe("the saved file", () => {
     expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
     store.files.set(cacheKey(ORIGIN, TENANT), "\u0000\u0001 not json");
     expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    // a file that opens but is not whole is ignored as well
+    store.files.set(cacheKey(ORIGIN, TENANT), await sealedFile('{"v":6,"snapshot":{"tasks":[{"id":3}]}}', ORIGIN, TENANT));
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
   });
 
   it("says a read is too old when it is, from the clock it was given", async () => {
@@ -329,6 +333,207 @@ describe("the saved file", () => {
   });
 });
 
+describe("the seal on the saved file", () => {
+  const KEY = cacheKey(ORIGIN, TENANT);
+  /** A read with a draft's words, a customer's LINE id and a Thai reply in it, none of which may be on disk to read. */
+  const wordy = (): ShopSnapshot => {
+    const s = snapshot();
+    const task = s.tasks[0];
+    return {
+      ...s,
+      tasks: [{ ...task, draft: { member: "pim", job: "reply", text: "New candles are in!", at: NOW }, actions: [{ ...task.actions[0], recipients: ["U4af4980629c9a9d1e3f0b5d2c7e1a6b8"], payload: { text: "ส่งพรุ่งนี้เช้าค่ะ" } }] }],
+    };
+  };
+  const WORDS = ["New candles are in!", "U4af4980629c9a9d1e3f0b5d2c7e1a6b8", "ส่งพรุ่งนี้เช้าค่ะ", "Reply to Khun Mali", "Tell me what came in overnight", "Morning brief", "Mint", "Looks right to me."];
+  /** Version 5's file: the same read, in plain text. */
+  const five = () => {
+    const file = JSON.parse(encodeSnapshot(wordy()));
+    file.v = 5;
+    return JSON.stringify(file);
+  };
+
+  it("writes the read sealed: the file says its version, opens with the keychain's key, and holds none of the shop's words", async () => {
+    const store = memoryCacheStore();
+    const c = new ShopCache(store, () => NOW);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    const text = store.files.get(KEY)!;
+    expect(JSON.parse(text).v).toBe(6);
+    expect(Object.keys(JSON.parse(text))).toEqual(["v", "iv", "sealed"]);
+    const plain = await openedFile(text, ORIGIN, TENANT, store.key!);
+    for (const word of WORDS) {
+      expect(plain, word).toContain(word);
+      expect(text, word).not.toContain(word);
+      // nor in the bytes its base64 stands for
+      const bytes = Buffer.concat([Buffer.from(JSON.parse(text).iv, "base64url"), Buffer.from(JSON.parse(text).sealed, "base64url")]);
+      expect(bytes.indexOf(Buffer.from(word)), word).toBe(-1);
+    }
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "usable", snapshot: kept(wordy()) });
+  });
+
+  it("seals every write with a fresh nonce, so the same read is never the same file twice", async () => {
+    const store = memoryCacheStore();
+    const c = new ShopCache(store, () => NOW);
+    const texts: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+      texts.push(store.files.get(KEY)!);
+    }
+    expect(new Set(texts.map((t) => JSON.parse(t).iv)).size).toBe(3);
+    expect(new Set(texts).size).toBe(3);
+    for (const text of texts) expect(await openedFile(text, ORIGIN, TENANT, store.key!)).toBe(encodeSnapshot(wordy()));
+  });
+
+  it("makes the key the first time a read is kept, never on a look, and asks the keychain once a run", async () => {
+    const store = memoryCacheStore({}, null);
+    const c = new ShopCache(store, () => NOW);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    expect(store.key).toBeNull();
+    expect(store.keyCalls).toEqual(["look"]);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect(store.key).toMatch(/^[0-9a-f]{64}$/);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect((await c.load(ORIGIN, TENANT)).kind).toBe("usable");
+    expect(store.keyCalls).toEqual(["look", "make"]);
+  });
+
+  it("deletes a version-5 file without reading it, the first time the upgraded app looks", async () => {
+    // Before the upgrade there was no key: the first look finds none, so nothing on disk could be opened.
+    const store = memoryCacheStore({ [KEY]: five() }, null);
+    const c = new ShopCache(store, () => NOW);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    expect(store.calls).toEqual(["clear"]);
+    expect(store.files.size).toBe(0);
+    // and the next read kept is sealed in its place
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect(JSON.parse(store.files.get(KEY)!).v).toBe(6);
+  });
+
+  it("deletes a version-5 file found beside a key too, never showing it", async () => {
+    // A build of version 5 run again after this one, say: the key is there, the file is plain.
+    const store = memoryCacheStore({ [KEY]: five() });
+    const c = new ShopCache(store, () => NOW);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    expect(store.calls).toEqual(["read", "clear"]);
+    expect(store.files.size).toBe(0);
+  });
+
+  it("deletes a file that does not open: a changed byte, cut short, another key, another shop, another version", async () => {
+    const sealed = await sealedFile(encodeSnapshot(wordy()), ORIGIN, TENANT);
+    const parts = JSON.parse(sealed) as { v: number; iv: string; sealed: string };
+    const bytes = Buffer.from(parts.sealed, "base64url");
+    const flipped = Buffer.from(bytes);
+    flipped[7] ^= 1;
+    const bad: [string, string][] = [
+      ["a changed byte", JSON.stringify({ ...parts, sealed: flipped.toString("base64url") })],
+      ["cut short", JSON.stringify({ ...parts, sealed: bytes.subarray(0, bytes.length - 5).toString("base64url") })],
+      ["half a file", sealed.slice(0, sealed.length / 2)],
+      ["another key", await sealedFile(encodeSnapshot(wordy()), ORIGIN, TENANT, newSealKey())],
+      ["another tenant's file under this one's name", await sealedFile(encodeSnapshot(wordy()), ORIGIN, "apple:owner-2")],
+      ["another origin's", await sealedFile(encodeSnapshot(wordy()), "https://staging.manut.xyz", TENANT)],
+      ["another version's", JSON.stringify({ ...parts, v: 7 })],
+    ];
+    for (const [what, text] of bad) {
+      const store = memoryCacheStore({ [KEY]: text });
+      expect(await new ShopCache(store, () => NOW).load(ORIGIN, TENANT), what).toEqual({ kind: "none" });
+      expect(store.calls, what).toEqual(["read", "clear"]);
+      expect(store.files.size, what).toBe(0);
+    }
+    // the file itself, untouched, opens: each refusal above is the change's
+    const store = memoryCacheStore({ [KEY]: sealed });
+    expect((await new ShopCache(store, () => NOW).load(ORIGIN, TENANT)).kind).toBe("usable");
+    expect(store.calls).toEqual(["read"]);
+  });
+
+  it("leaves a file that opens but is too old to show, as it did: the line says how old it is", async () => {
+    const store = memoryCacheStore();
+    await new ShopCache(store, () => NOW).keep(ORIGIN, TENANT, wordy(), 0);
+    expect(await new ShopCache(store, () => NOW + 8 * DAY).load(ORIGIN, TENANT)).toEqual({ kind: "too_old", at: NOW });
+    expect(store.files.size).toBe(1);
+  });
+
+  it("forgets the key with the file, so a copy of the file made before can never be opened, and seals the next read with a new one", async () => {
+    const store = memoryCacheStore({}, null);
+    const c = new ShopCache(store, () => NOW);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    const copy = store.files.get(KEY)!; // a backup, a sync folder
+    const first = store.key!;
+    await c.clear();
+    expect(store.files.size).toBe(0);
+    expect(store.key).toBeNull();
+    expect(store.keyCalls).toEqual(["make", "drop"]);
+    // the copy, put back, opens with nothing the keychain holds: it is deleted unread
+    store.files.set(KEY, copy);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    expect(store.files.size).toBe(0);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect(store.key).not.toBe(first);
+    await expect(openedFile(copy, ORIGIN, TENANT, store.key!)).rejects.toThrow();
+    expect(await openedFile(store.files.get(KEY)!, ORIGIN, TENANT, store.key!)).toBe(encodeSnapshot(wordy()));
+  });
+
+  it("drops the key even when the disk refuses to remove the file, so what is left can never be opened", async () => {
+    const store = memoryCacheStore();
+    const c = new ShopCache(store, () => NOW);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    store.refuse = true;
+    await expect(c.clear()).resolves.toBeUndefined();
+    expect(store.files.size).toBe(1);
+    expect(store.key).toBeNull();
+    store.refuse = false;
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    expect(store.files.size).toBe(0);
+  });
+
+  it("keeps nothing on a computer with no keychain, says so, and deletes a file found there rather than leave it", async () => {
+    const store = memoryCacheStore({ [KEY]: five() });
+    store.noKeychain = true;
+    const c = new ShopCache(store, () => NOW);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "unkept" });
+    expect(store.files.size).toBe(0);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect(store.files.size).toBe(0);
+    expect(store.calls).toEqual(["clear", "clear"]);
+    // said so even when the disk refuses the removal too
+    store.refuse = true;
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "unkept" });
+  });
+
+  it("keeps and deletes nothing when the keychain refuses (locked, or the person said no): the file may be good", async () => {
+    const sealed = await sealedFile(encodeSnapshot(wordy()), ORIGIN, TENANT);
+    const store = memoryCacheStore({ [KEY]: sealed });
+    store.lockedKeychain = true;
+    const c = new ShopCache(store, () => NOW);
+    expect(await c.load(ORIGIN, TENANT)).toEqual({ kind: "none" });
+    await c.keep(ORIGIN, TENANT, snapshot(), c.ticket());
+    expect(store.calls).toEqual([]);
+    expect(store.files.get(KEY)).toBe(sealed);
+    // the next run, with the keychain open again, shows it
+    store.lockedKeychain = false;
+    expect((await c.load(ORIGIN, TENANT)).kind).toBe("usable");
+  });
+
+  it("keeps nothing, plain or sealed, when the shell gives no key even when asked to make one", async () => {
+    const store = memoryCacheStore({}, null);
+    store.sealKey = async () => null;
+    const c = new ShopCache(store, () => NOW);
+    await c.keep(ORIGIN, TENANT, wordy(), c.ticket());
+    expect(store.calls).toEqual([]);
+    expect(store.files.size).toBe(0);
+  });
+
+  it("takes no answer that is not a key for one, and then keeps and deletes nothing", async () => {
+    const sealed = await sealedFile(encodeSnapshot(wordy()), ORIGIN, TENANT);
+    for (const odd of ["not a key", "A".repeat(64), "a".repeat(63), ""]) {
+      const store = memoryCacheStore({ [KEY]: sealed }, odd);
+      const c = new ShopCache(store, () => NOW);
+      expect(await c.load(ORIGIN, TENANT), odd).toEqual({ kind: "none" });
+      await c.keep(ORIGIN, TENANT, snapshot(), c.ticket());
+      expect(store.calls, odd).toEqual([]);
+      expect(store.files.get(KEY), odd).toBe(sealed);
+    }
+  });
+});
+
 describe("a shop the person owns", () => {
   const work = (): ShopWork => ({
     tasks: [
@@ -389,7 +594,11 @@ describe("a shop the person owns", () => {
   });
 
   it("reads a file any earlier version kept as nothing kept: shown no more, never half read", () => {
-    // Version 4 is this one but for the count of each task's log entries, which the task list does not carry.
+    // Version 5 kept what this one keeps, in plain text.
+    const five = JSON.parse(encodeSnapshot(snapshot()));
+    five.v = 5;
+    expect(decodeCached(JSON.stringify(five), NOW)).toEqual({ kind: "none" });
+    // Version 4 is 5 but for the count of each task's log entries, which the task list does not carry.
     const four = JSON.parse(encodeSnapshot(snapshot()));
     four.v = 4;
     for (const task of four.snapshot.tasks) task.events = 2;

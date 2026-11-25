@@ -2734,6 +2734,8 @@ export const ja: Record<Key, string> = {
   "mode.cachedUnavailable": "応答なし。{time} 時点の内容を表示しています",
   "mode.oldOffline": "オフライン。保存したコピーは7日より古いため表示しません",
   "mode.oldUnavailable": "応答なし。保存したコピーは7日より古いため表示しません",
+  "mode.unkeptOffline": "オフライン。このコンピューターはまだコピーを保存できないため、表示できる内容がありません",
+  "mode.unkeptUnavailable": "応答なし。このコンピューターはまだコピーを保存できないため、表示できる内容がありません",
   "mode.open": "ランタイムの設定",
   // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
   "rt.notYetShow": "まだできません。接続モードでは今のところこれを表示できません。今後のバージョンで対応します。",

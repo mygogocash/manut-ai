@@ -73,6 +73,21 @@ describe("the mode line while the API cannot be reached", () => {
     expect(line("unavailable", { kind: "too_old", at: old })).toBe("Not answering. The saved copy is more than 7 days old, so it is not shown");
   });
 
+  it("says there is no saved copy on a computer with no keychain to lock one, rather than show one kept plain", () => {
+    expect(line("offline", { kind: "unkept" })).toBe("Offline. This computer cannot keep a saved copy yet, so none is shown");
+    expect(line("unavailable", { kind: "unkept" })).toBe("Not answering. This computer cannot keep a saved copy yet, so none is shown");
+    // only while the API cannot be reached, as every other line about the copy
+    for (const link of ["open", "connecting", "signed_out"] as const) {
+      expect(text(modeLine(CONNECTED, "http", link, { kind: "unkept" }, later)), link).toBe(text(modeLine(CONNECTED, "http", link)));
+    }
+    setLang("ja");
+    expect(line("offline", { kind: "unkept" })).toBe("オフライン。このコンピューターはまだコピーを保存できないため、表示できる内容がありません");
+    setLang("ko");
+    expect(line("unavailable", { kind: "unkept" })).toBe("응답 없음. 이 컴퓨터는 아직 사본을 저장할 수 없어서 보여 줄 내용이 없어요");
+    setLang("zh");
+    expect(line("offline", { kind: "unkept" })).toBe("离线。这台电脑还不能保存副本，因此没有可显示的内容");
+  });
+
   it("says what it said before when nothing was kept, or the cache is not in play", () => {
     expect(line("offline", { kind: "none" })).toBe("Offline · dev.manut.xyz");
     expect(line("unavailable", null)).toBe("Not answering · dev.manut.xyz");

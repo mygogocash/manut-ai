@@ -27,8 +27,8 @@ export function readTime(at: number, now: number = Date.now()): string {
 
 /** The mode line's words: Practice, or the host and how the link to it stands. While the API cannot be reached (offline,
  *  or not answering) and the runtime shows its last good read, the line says so and when it was read; with a read too
- *  old to show (7 days), it says that instead. Null for a WebSocket runtime, which only the e2e suite configures and
- *  which is neither. */
+ *  old to show (7 days), it says that instead, and on a computer with no keychain, where no copy is kept, it says that.
+ *  Null for a WebSocket runtime, which only the e2e suite configures and which is neither. */
 export function modeLine(
   setting: RuntimeSetting,
   kind: RuntimeKind,
@@ -43,6 +43,7 @@ export function modeLine(
     const offline = link === "offline";
     if (cache.kind === "showing") return { key: offline ? "mode.cachedOffline" : "mode.cachedUnavailable", vars: { host, time: readTime(cache.at, now) } };
     if (cache.kind === "too_old") return { key: offline ? "mode.oldOffline" : "mode.oldUnavailable", vars: { host } };
+    if (cache.kind === "unkept") return { key: offline ? "mode.unkeptOffline" : "mode.unkeptUnavailable", vars: { host } };
   }
   return { key: LINK_KEY[link ?? "connecting"], vars: { host } };
 }

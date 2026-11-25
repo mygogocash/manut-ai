@@ -1,8 +1,10 @@
 // The connected runtime when the API cannot be reached: the last good read of the shop is kept on this computer after
-// every good read and shown, with the time it was read, instead of an empty screen. An ask from it cannot be answered
-// and nothing is queued. A kept read is not shown after 7 days, and a damaged file is ignored. Signing out, switching
-// to Practice and switching origin or shop remove it, and Practice never reads it. The file's own rules (what is kept,
-// its name, the order of its calls) are in cache.test.ts; the shell's commands are in shell.test.ts.
+// every good read, sealed, and shown, with the time it was read, instead of an empty screen. An ask from it cannot be
+// answered and nothing is queued. A kept read is not shown after 7 days, and a damaged file is ignored. Signing out,
+// switching to Practice and switching origin or shop remove it and its key, and Practice never reads it. The file's own
+// rules (what is kept, its name, its seal, the order of its calls) are in cache.test.ts and seal.test.ts; the shell's
+// commands are in shell.test.ts. These tests move a fake clock, so they seal with the test kit's stand-in for Web Crypto
+// (`useMicrotaskCrypto`), which seal.test.ts holds to the real one byte for byte.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError, BridgeEvent } from "../../lib/protocol";
@@ -20,13 +22,17 @@ import {
   fakeApi,
   memoryCacheStore,
   memoryVault,
+  openedFile,
   ORIGIN,
   savedRead,
+  sealedFile,
   serveShop,
   storedSession,
   T0,
   taskJson,
+  TEST_SEAL_KEY,
   tokens,
+  useMicrotaskCrypto,
   WRITE_OPS,
   type FakeApi,
 } from "./testkit";
@@ -43,6 +49,8 @@ interface Options {
   signedIn?: boolean;
   /** what an earlier run left on disk, by file name */
   files?: Record<string, string>;
+  /** the key the keychain holds (null: none), the tests' own when absent */
+  key?: string | null;
   keeping?: () => boolean;
   /** the session's way to the API, given the fake API (to hold an answer back) */
   fetch?: (api: FakeApi) => FetchLike;
@@ -50,7 +58,7 @@ interface Options {
 
 function setup(opts: Options = {}) {
   const api = fakeApi();
-  const store = memoryCacheStore(opts.files);
+  const store = memoryCacheStore(opts.files, opts.key === undefined ? TEST_SEAL_KEY : opts.key);
   const cache = new ShopCache(store);
   const vault = memoryVault(opts.signedIn === false ? null : storedSession(NOW));
   const session = new ApiSession({ origin: ORIGIN, fetch: opts.fetch ? opts.fetch(api) : api.fetch, vault, deviceId: () => "device-2", onEnd: () => cache.clear() });
@@ -74,6 +82,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   setLang("en");
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
@@ -88,7 +97,7 @@ describe("keeping the last good read", () => {
     await rt.connect();
     await settle();
     expect([...store.files.keys()]).toEqual([KEY]);
-    expect(decodeCached(store.files.get(KEY)!, NOW)).toMatchObject({
+    expect(decodeCached(await openedFile(store.files.get(KEY)!), NOW)).toMatchObject({
       kind: "usable",
       snapshot: { readAt: NOW, tasks: [{ id: "task-1", title: "Reply to Khun Mali" }], schedules: [{ id: "sched-1" }], attention: [{ id: "att-1" }] },
     });
@@ -96,7 +105,7 @@ describe("keeping the last good read", () => {
     await vi.advanceTimersByTimeAsync(POLL_MS);
     expect(store.calls).toEqual(["write", "write"]);
     expect([...store.files.keys()]).toEqual([KEY]);
-    expect(decodeCached(store.files.get(KEY)!, NOW + POLL_MS)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + POLL_MS, tasks: [{ id: "task-2" }] } });
+    expect(decodeCached(await openedFile(store.files.get(KEY)!), NOW + POLL_MS)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + POLL_MS, tasks: [{ id: "task-2" }] } });
   });
 
   it("never writes a token, a refresh token or anything else the keychain holds, nor who the shop is", async () => {
@@ -104,15 +113,35 @@ describe("keeping the last good read", () => {
     serveShop(api, { tasks: [taskJson({ accessToken: "CANARY-ACCESS", actions: [actionJson({ refreshToken: "CANARY-REFRESH", csrf: "CANARY-CSRF" })] })] });
     await rt.connect();
     await settle();
-    const text = store.files.get(KEY)!;
+    const sealed = store.files.get(KEY)!;
+    // what was sealed holds none of it either: the seal hides the read, it is not what keeps the session out of it
+    const text = await openedFile(sealed);
     expect(text.length).toBeGreaterThan(200);
-    for (const secret of ["CANARY", "access-1", "refresh-1", "device-1", "device-2", "Bearer", "signedInAt", "accessExpiresAt"]) expect(text, secret).not.toContain(secret);
+    for (const secret of ["CANARY", "access-1", "refresh-1", "device-1", "device-2", "Bearer", "signedInAt", "accessExpiresAt", TEST_SEAL_KEY]) {
+      expect(text, secret).not.toContain(secret);
+      expect(sealed, secret).not.toContain(secret);
+    }
     // the file is known by its hashed name alone: neither the origin nor the tenant is in its name or in what it holds
     for (const own of ["apple:owner-1", "dev.manut.xyz"]) {
       expect(text, own).not.toContain(own);
+      expect(sealed, own).not.toContain(own);
       expect(KEY, own).not.toContain(own);
     }
     expect(vault.value).toBe(storedSession(NOW));
+  });
+
+  it("keeps the read sealed: none of the shop's words, its customers' LINE ids or what waits for the owner can be read on disk", async () => {
+    const { api, rt, store } = setup();
+    serveShop(api);
+    await rt.connect();
+    await settle();
+    const sealed = store.files.get(KEY)!;
+    expect(sealed).toMatch(/^\{"v":6,"iv":"[A-Za-z0-9_-]{16}","sealed":"[A-Za-z0-9_-]+"\}$/);
+    const plain = await openedFile(sealed);
+    for (const word of ["Reply to Khun Mali", "Your order ships tomorrow morning.", "U-customer", "Tell me what came in overnight", "Morning brief", "issue-9"]) {
+      expect(plain, word).toContain(word);
+      expect(sealed, word).not.toContain(word);
+    }
   });
 
   it("keeps nothing once the saved choice is no longer this shop, so a switch's deletion is not undone by the next read", async () => {
@@ -178,19 +207,20 @@ describe("when the API cannot be reached", () => {
   });
 
   it("reads the disk once for a whole outage, not on every try, whatever it finds there", async () => {
-    const found: [string, Record<string, string>][] = [
-      ["a read it can show", await savedRead(EARLIER)],
-      ["a read too old to show", await savedRead(NOW - 8 * DAY)],
-      ["a damaged file", { [KEY]: "\u0000 not json" }],
-      ["nothing", {}],
+    // a file that does not open is deleted at that one look
+    const found: [string, Record<string, string>, string[]][] = [
+      ["a read it can show", await savedRead(EARLIER), ["read"]],
+      ["a read too old to show", await savedRead(NOW - 8 * DAY), ["read"]],
+      ["a damaged file", { [KEY]: "\u0000 not json" }, ["read", "clear"]],
+      ["nothing", {}, ["read"]],
     ];
-    for (const [what, files] of found) {
+    for (const [what, files, calls] of found) {
       const { api, rt, store } = setup({ files });
       allOffline(api);
       start(rt);
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       expect(api.to("GET", "/v1/schedules").length, what).toBeGreaterThan(3);
-      expect(store.calls, what).toEqual(["read"]);
+      expect(store.calls, what).toEqual(calls);
       rt.close();
     }
   });
@@ -237,7 +267,7 @@ describe("when the API cannot be reached", () => {
     expect(statuses).toEqual(["connecting", "open", "closed", "open"]);
     expect(events).toEqual([{ event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" }]);
     expect(await ask(rt)("thread.list", { bot: "buddy" })).toEqual({ threads: [expect.objectContaining({ thread: "task-7" })] });
-    expect(decodeCached(store.files.get(KEY)!, NOW + 2_000)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + 2_000, tasks: [{ id: "task-7" }] } });
+    expect(decodeCached(await openedFile(store.files.get(KEY)!), NOW + 2_000)).toMatchObject({ kind: "usable", snapshot: { readAt: NOW + 2_000, tasks: [{ id: "task-7" }] } });
   });
 
   it("is signed out, with nothing shown, for a session the API ended, even with a read kept", async () => {
@@ -434,7 +464,9 @@ describe("through the desktop shell", () => {
     await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(1), PATIENT);
     const writes = shell.commands("shop_cache_write");
     expect(writes[0].args.key).toBe(cacheKey(origin, "apple:owner-1"));
-    expect(decodeCached(writes[0].args.text, NOW)).toMatchObject({ kind: "usable", snapshot: { tasks: [{ id: "task-1" }] } });
+    // sealed with the key the shell gave, made for the first read kept
+    expect(shell.commands("shop_cache_seal_key").map((c) => c.args)).toEqual([{ make: true }]);
+    expect(decodeCached(await openedFile(writes[0].args.text, origin), NOW)).toMatchObject({ kind: "usable", snapshot: { tasks: [{ id: "task-1" }] } });
     expect(JSON.stringify(shell.calls.filter((c) => c.cmd.startsWith("shop_cache")))).not.toMatch(/access-1|refresh-1|device-1/);
     // Settings moved the saved choice to Practice: this page runs on, reading as before, but keeps nothing more
     saved.set(RUNTIME_KEY, JSON.stringify({ mode: "practice" }));
@@ -450,7 +482,125 @@ describe("through the desktop shell", () => {
     await vi.waitFor(() => expect(shell.commands("shop_cache_write")).toHaveLength(2), PATIENT);
     await sessionFor(origin).signOut();
     expect(shell.commands("shop_cache_clear")).toHaveLength(1);
+    expect(shell.commands("shop_cache_seal_key_clear")).toHaveLength(1);
     expect(store.files.size).toBe(0);
+    expect(store.key).toBeNull();
+    // the key was asked of the shell once for the whole run, not at each read kept
+    expect(shell.commands("shop_cache_seal_key")).toHaveLength(1);
+    rt.close();
+  });
+});
+
+describe("the seal", () => {
+  /** Version 5's file of the read an earlier run kept: the same read, in plain text. */
+  async function versionFive(): Promise<string> {
+    const plain = JSON.parse(await openedFile(Object.values(await savedRead(EARLIER))[0]));
+    return JSON.stringify({ ...plain, v: 5 });
+  }
+
+  it("deletes the file version 5 kept in plain text, unread, the first time the upgraded app looks, and shows nothing", async () => {
+    const five = await versionFive();
+    expect(five).toContain("Your order ships tomorrow morning.");
+    const { api, rt, host, store } = setup({ files: { [KEY]: five }, key: null });
+    allOffline(api);
+    start(rt);
+    await settle();
+    expect(host.link).toBe("offline");
+    expect(host.cache).toEqual({ kind: "none" });
+    expect(rt.status).toBe("closed");
+    expect(store.calls).toEqual(["clear"]);
+    expect(store.files.size).toBe(0);
+    // and when the API answers, the read is kept sealed in its place, under a key made for it
+    serveShop(api);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(rt.status).toBe("open");
+    expect(store.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.files.get(KEY)).not.toContain("Your order ships tomorrow morning.");
+    expect(await openedFile(store.files.get(KEY)!, ORIGIN, "apple:owner-1", store.key!)).toContain("Your order ships tomorrow morning.");
+    rt.close();
+  });
+
+  it("writes over version 5's file with a sealed one when the upgraded app starts with the API answering", async () => {
+    const { api, rt, store } = setup({ files: { [KEY]: await versionFive() }, key: null });
+    serveShop(api);
+    await rt.connect();
+    await settle();
+    expect(store.calls).toEqual(["write"]);
+    expect(JSON.parse(store.files.get(KEY)!).v).toBe(6);
+    expect(store.files.get(KEY)).not.toContain("Your order ships tomorrow morning.");
+  });
+
+  it("shows nothing, and deletes the file, when the file does not open: another shop's sealed read under this one's name", async () => {
+    const other = await openedFile(Object.values(await savedRead(EARLIER))[0]);
+    const { api, rt, host, store } = setup({ files: { [KEY]: await sealedFile(other, ORIGIN, "apple:someone-else") } });
+    allOffline(api);
+    start(rt);
+    await settle();
+    expect(host.cache).toEqual({ kind: "none" });
+    expect(rt.status).toBe("closed");
+    expect(store.calls).toEqual(["read", "clear"]);
+    expect(store.files.size).toBe(0);
+    rt.close();
+  });
+
+  it("deletes the key with the file at sign-out, and seals the next sign-in's reads with a new one", async () => {
+    const { api, rt, store, session } = setup({ key: null });
+    serveShop(api).on("DELETE", "/v1/auth/session", { status: 200, json: {} }).on("POST", "/v1/auth/exchange", { status: 200, json: tokens(2) });
+    await rt.connect();
+    await settle();
+    const first = store.key!;
+    const copy = store.files.get(KEY)!; // a copy a backup took
+    expect(await openedFile(copy, ORIGIN, "apple:owner-1", first)).toContain("Reply to Khun Mali");
+    await session.signOut();
+    expect(store.files.size).toBe(0);
+    expect(store.key).toBeNull();
+    await session.signIn("eyJ.eyJ.sig", "nonce");
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    await settle();
+    expect(store.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.key).not.toBe(first);
+    expect(await openedFile(store.files.get(KEY)!, ORIGIN, "apple:owner-1", store.key!)).toContain("Reply to Khun Mali");
+    // the copy can never be opened again: its key is gone, and the new one is another
+    await expect(openedFile(copy, ORIGIN, "apple:owner-1", store.key!)).rejects.toThrow();
+    rt.close();
+  });
+
+  it("on a computer with no keychain keeps no copy, deletes one it finds, and says there is none to show", async () => {
+    const { api, rt, host, store } = setup({ files: { [KEY]: await versionFive() } });
+    store.noKeychain = true;
+    allOffline(api);
+    start(rt);
+    await settle();
+    expect(host.link).toBe("offline");
+    expect(host.cache).toEqual({ kind: "unkept" });
+    expect(rt.status).toBe("closed");
+    expect(store.files.size).toBe(0);
+    expect(await refusal(ask(rt)("thread.list", { bot: "buddy" }))).toEqual({ code: "offline", message: t("rt.offline") });
+    // when the API answers, the shop opens as ever, and nothing is written for it
+    serveShop(api);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(rt.status).toBe("open");
+    expect(host.cache).toEqual({ kind: "none" });
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(store.calls.filter((c) => c === "write")).toEqual([]);
+    expect(store.files.size).toBe(0);
+    rt.close();
+  });
+
+  it("keeps nothing new, and leaves the file, while the keychain refuses the key: locked, or the person said no", async () => {
+    const files = await savedRead(EARLIER);
+    const { api, rt, host, store } = setup({ files });
+    store.lockedKeychain = true;
+    allOffline(api);
+    start(rt);
+    await settle();
+    expect(host.cache).toEqual({ kind: "none" });
+    expect(store.files.get(KEY)).toBe(files[KEY]);
+    serveShop(api);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(rt.status).toBe("open");
+    expect(store.calls).toEqual([]);
+    expect(store.files.get(KEY)).toBe(files[KEY]);
     rt.close();
   });
 });

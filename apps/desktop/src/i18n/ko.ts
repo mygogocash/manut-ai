@@ -2734,6 +2734,8 @@ export const ko: Record<Key, string> = {
   "mode.cachedUnavailable": "응답 없음. {time}에 있던 내용을 보여 주고 있어요",
   "mode.oldOffline": "오프라인. 저장된 사본이 7일보다 오래되어 보여 주지 않아요",
   "mode.oldUnavailable": "응답 없음. 저장된 사본이 7일보다 오래되어 보여 주지 않아요",
+  "mode.unkeptOffline": "오프라인. 이 컴퓨터는 아직 사본을 저장할 수 없어서 보여 줄 내용이 없어요",
+  "mode.unkeptUnavailable": "응답 없음. 이 컴퓨터는 아직 사본을 저장할 수 없어서 보여 줄 내용이 없어요",
   "mode.open": "런타임 설정",
   // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
   "rt.notYetShow": "아직 안 돼요. 연결 모드에서는 지금은 이것을 볼 수 없어요. 다음 버전에 나와요.",

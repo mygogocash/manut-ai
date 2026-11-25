@@ -24,6 +24,8 @@ import {
   shopToken,
   storedSession,
   T0,
+  keptPlain,
+  useMicrotaskCrypto,
   type FakeAnswer,
   type FakeApi,
   type Recorded,
@@ -102,10 +104,13 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("reading where Google Sheets stands", () => {
@@ -182,8 +187,11 @@ describe("connecting", () => {
     expect(api.to("POST", CONNECT_PATH).map((c) => [c.bearer, c.body])).toEqual([[OWNER_A, {}]]);
     // The address carries a one-use state and a PKCE challenge: the saved read of the shop, the events, the host and every other
     // request are free of both.
+    // what the saved read of the shop holds, opened: sealed, its text would hide a secret it held
+    expect(disk.files.size).toBe(1);
+    const kept = JSON.stringify(await keptPlain(disk));
     for (const secret of ["SECRET-STATE-7f3a", "SECRET-CHALLENGE-91c2"]) {
-      expect(JSON.stringify([...disk.files.values()])).not.toContain(secret);
+      expect(kept).not.toContain(secret);
       expect(JSON.stringify(events)).not.toContain(secret);
       expect(JSON.stringify(host)).not.toContain(secret);
       for (const call of api.calls) expect(JSON.stringify(call)).not.toContain(secret);

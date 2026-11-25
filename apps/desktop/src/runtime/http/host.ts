@@ -92,16 +92,19 @@ export type LinkState = "connecting" | "open" | ReadFailure;
 export type HostEvent = BridgeEvent | ThreadEvent;
 
 /** What stands in for the shop while the API cannot be reached: the last good read, shown, with the time it was read
- *  (ms); a read that is too old to show (more than 7 days), with the time it was read; or nothing at all (none was kept,
- *  or what was kept is damaged). Always `none` while the link is open or signed out. */
-export type CacheView = { kind: "none" } | { kind: "showing"; at: number } | { kind: "too_old"; at: number };
+ *  (ms); a read that is too old to show (more than 7 days), with the time it was read; nothing at all (none was kept,
+ *  or what was kept is damaged); or nothing because this computer has no keychain to keep a copy's key in, so it keeps
+ *  none (`unkept`). Always `none` while the link is open or signed out. */
+export type CacheView = { kind: "none" } | { kind: "showing"; at: number } | { kind: "too_old"; at: number } | { kind: "unkept" };
 const NO_CACHE: CacheView = { kind: "none" };
+const UNKEPT: CacheView = { kind: "unkept" };
 /** What a failed read leaves the screens: the read to answer from (null when none may be shown) and how to say so. */
 interface StandIn {
   snapshot: ShopSnapshot | null;
   view: CacheView;
 }
-const sameView = (a: CacheView, b: CacheView) => a.kind === b.kind && (a.kind === "none" || (b.kind !== "none" && a.at === b.at));
+const atOf = (v: CacheView) => ("at" in v ? v.at : null);
+const sameView = (a: CacheView, b: CacheView) => a.kind === b.kind && atOf(a) === atOf(b);
 
 /** Ops the app sends beside the protocol's op map, as `MockHost` answers them. */
 interface ExtraOps {
@@ -495,7 +498,7 @@ export class HttpHost {
 
   /** What stands in for the shop when a read failed because the API is offline or not answering: the last good read of
    *  this run, else the one an earlier run kept (looked for once per outage), and either only while it is no more than
-   *  7 days old. */
+   *  7 days old. On a computer with no keychain no run keeps one, which is said. */
   private async standIn(): Promise<StandIn> {
     let found = this.snapshot;
     if (!found && this.disk) {
@@ -504,6 +507,7 @@ export class HttpHost {
         if (this.onDisk?.tenant !== tenant) this.onDisk = { tenant, read: await this.disk.load(this.session.origin, tenant) };
         const read = this.onDisk.read;
         if (read.kind === "too_old") return { snapshot: null, view: { kind: "too_old", at: read.at } };
+        if (read.kind === "unkept") return { snapshot: null, view: UNKEPT };
         if (read.kind === "usable") found = read.snapshot;
       }
     }

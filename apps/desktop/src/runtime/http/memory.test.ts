@@ -14,7 +14,7 @@ import { HttpHost } from "./host";
 import { HttpRuntime } from "./index";
 import { decodeFact, decodeFacts, decodeSource } from "./memory";
 import { ApiSession } from "./session";
-import { fakeApi, learned, memoryCacheStore, memoryVault, ORIGIN, serveShop, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, type FakeApi, type ServedShops } from "./testkit";
+import { fakeApi, keptPlain, learned, memoryCacheStore, memoryVault, ORIGIN, serveShop, serveShops, SHOP_A, SHOP_B, shopToken, storedSession, T0, useMicrotaskCrypto, type FakeApi, type ServedShops } from "./testkit";
 
 const NOW = T0 + 600_000;
 const OWNER_A = shopToken(SHOP_A.id, "owner");
@@ -54,6 +54,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -112,7 +114,9 @@ describe("reading what the team knows", () => {
     await req("memory.list", {});
     await req("memory.remember", { shop: SHOP_A.id, text: "Our supplier Somchai sells wax at ฿40 a kilo" });
     await vi.advanceTimersByTimeAsync(130_000);
-    const everything = JSON.stringify([...disk.files.values(), events]);
+    // what the saved read of the shop holds, opened: sealed, its text would hide what it held
+    expect(disk.files.size).toBe(1);
+    const everything = JSON.stringify([...(await keptPlain(disk)), events]);
     for (const word of ["jasmine", "Jasmine", "Somchai", "price list", "chat-17", "Closed on Mondays"]) expect(everything, word).not.toContain(word);
   });
 });

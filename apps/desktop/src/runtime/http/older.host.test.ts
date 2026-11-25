@@ -18,6 +18,7 @@ import {
   listedJson,
   memoryCacheStore,
   memoryVault,
+  openedFile,
   ORIGIN,
   serveShop,
   serveShops,
@@ -27,6 +28,7 @@ import {
   storedSession,
   T0,
   taskJson,
+  useMicrotaskCrypto,
   workerTaskJson,
   type FakeAnswer,
   type FakeApi,
@@ -125,6 +127,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(NOW);
   setLang("en");
+  // the kept read is sealed, and Node's Web Crypto finishes on its thread pool, which the fake clock never waits for
+  useMicrotaskCrypto();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -558,7 +562,7 @@ describe("offline", () => {
 });
 
 describe("the offline cache", () => {
-  it("is left as it is: the newest 50 only, version 5, and no older page or cursor is ever written to disk", async () => {
+  it("is left as it is: the newest 50 only, version 6 (5's read, sealed), and no older page or cursor is ever written to disk", async () => {
     const { req, disk, host } = await opened(80);
     await req("jobs.older", {});
     await req("jobs.older", {});
@@ -566,10 +570,10 @@ describe("the offline cache", () => {
     await settle();
     expect(nums((await req("jobs.list", {})).jobs)).toEqual(range(1, 80));
     expect(host.cache.kind).toBe("none");
-    const text = [...disk.files.values()][0];
+    const text = await openedFile([...disk.files.values()][0]);
     const file = JSON.parse(text);
     expect(file.v).toBe(CACHE_VERSION);
-    expect(CACHE_VERSION).toBe(5);
+    expect(CACHE_VERSION).toBe(6);
     const work = file.snapshot.shops[0].work;
     expect(Object.keys(work).sort()).toEqual(["attention", "routines", "schedules", "tasks", "team"]);
     expect(work.tasks.map((x: { id: string }) => x.id)).toEqual(range(31, 80).map((i) => `t${i}`));
@@ -582,8 +586,8 @@ describe("the offline cache", () => {
     await own.req("jobs.older", {});
     await minute();
     await settle();
-    const file = JSON.parse([...own.disk.files.values()][0]);
-    expect(file.v).toBe(5);
+    const file = JSON.parse(await openedFile([...own.disk.files.values()][0]));
+    expect(file.v).toBe(6);
     expect(file.snapshot.tasks.map((x: { id: string }) => x.id)).toEqual(range(31, 80).map((i) => `t${i}`));
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
   });

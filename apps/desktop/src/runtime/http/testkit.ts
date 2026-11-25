@@ -1,12 +1,14 @@
 // Fakes for the connected runtime's tests: an API that answers by method and path and records every request, a
-// keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
-// shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
-// without a shell or a network.
+// keychain that keeps one value in memory, and the disk that keeps the last good read with the key it is sealed with.
+// They stand where the desktop shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app
+// (shell.ts), so the tests run without a shell or a network.
+import { createCipheriv, createDecipheriv, webcrypto } from "node:crypto";
 import { decodeDecision, decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
 import { createRoutine, describeTrigger, nextRun, type ActionKind, type Trigger } from "@manut/routine-rules";
 import { confirm as confirmFact, correct as correctFact, emptyState, forget as forgetFact, propose, remember as rememberFact, type FactSource, type MemoryState, type Result } from "@manut/shop-memory";
 import { vi } from "vitest";
-import { cacheKey, encodeSnapshot, type CacheStore } from "./cache";
+import { cacheKey, encodeSnapshot, NoKeychain, openFile, sealFile, type CacheStore } from "./cache";
+import { importSealKey } from "./seal";
 import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
 import { LinkDown, VaultUnavailable } from "./shell";
@@ -149,14 +151,133 @@ export function memoryVault(value: string | null = null): SessionVault & { value
   return vault;
 }
 
-/** The shell's saved-read commands in memory, with a log of the calls. Like the shell's, it keeps the one read of the one
- *  signed-in shop: a write replaces whatever was kept. `refuse` makes every call fail, as a full or unreadable disk
- *  would. */
-export function memoryCacheStore(files: Record<string, string> = {}): CacheStore & { files: Map<string, string>; calls: string[]; refuse: boolean } {
+/** 32 bytes as the shell gives a key: 64 lowercase hex digits. */
+export const hexOf = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+/** A key the shell would give, made at run time: random, never written in a test. */
+export const newSealKey = () => hexOf(crypto.getRandomValues(new Uint8Array(32)));
+
+/** The key the tests' keychain holds unless a test gives another: made once per test file, when it runs. */
+export const TEST_SEAL_KEY = newSealKey();
+
+/** `plain` (encodeSnapshot's) sealed as the page writes it to disk for `origin` and `tenant`, with `key`. */
+export async function sealedFile(plain: string, origin = ORIGIN, tenant = "apple:owner-1", key = TEST_SEAL_KEY): Promise<string> {
+  return sealFile(plain, (await importSealKey(key))!, origin, tenant);
+}
+
+/** What a file the page wrote holds, opened with `key` for `origin` and `tenant`. Throws when it does not open. */
+export async function openedFile(text: string, origin = ORIGIN, tenant = "apple:owner-1", key = TEST_SEAL_KEY): Promise<string> {
+  const plain = await openFile(text, (await importSealKey(key))!, origin, tenant);
+  if (plain === null) throw new Error("the file does not open with that key for that shop");
+  return plain;
+}
+
+/** What every file `store` keeps holds, opened with the key its keychain holds now, for `origin` and `tenant`: what a
+ *  test looks through for words that must never be kept. */
+export async function keptPlain(store: { files: Map<string, string>; key: string | null }, origin = ORIGIN, tenant = "apple:owner-1"): Promise<string[]> {
+  if (!store.files.size) return [];
+  if (!store.key) throw new Error("files kept with no key to open them");
+  return Promise.all([...store.files.values()].map((text) => openedFile(text, origin, tenant, store.key!)));
+}
+
+/** Web Crypto as the page uses it to seal the kept read, AES-GCM, done by Node's own cipher and answered at once, for
+ *  the tests that move a fake clock by hand. Node's Web Crypto finishes AES-GCM on its thread pool, which a fake clock
+ *  never waits for, so a read kept or looked at during a tick would land after the test looked. Every other call is
+ *  Node's Web Crypto. seal.test.ts checks that it seals and opens byte for byte as Web Crypto does; seal.test.ts and
+ *  cache.test.ts themselves use the real one. */
+export function microtaskCrypto(): Crypto {
+  const real = webcrypto as unknown as Crypto;
+  const keys = new WeakMap<object, Buffer>();
+  const bytes = (b: BufferSource) => (ArrayBuffer.isView(b) ? Buffer.from(b.buffer, b.byteOffset, b.byteLength) : Buffer.from(b as ArrayBuffer));
+  const owned = (b: Buffer) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+  const keyOf = (key: CryptoKey) => {
+    const raw = keys.get(key);
+    if (!raw) throw new DOMException("not a key of this stand-in", "InvalidAccessError");
+    return raw;
+  };
+  const aesGcm = (alg: unknown) => {
+    const a = alg as AesGcmParams;
+    if (a.name !== "AES-GCM" || (a.tagLength ?? 128) !== 128) throw new DOMException("only AES-GCM with a 128-bit tag", "NotSupportedError");
+    return a;
+  };
+  const subtle = {
+    async importKey(format: string, data: BufferSource, alg: AlgorithmIdentifier, extractable: boolean, usages: KeyUsage[]) {
+      if (format !== "raw" || (alg as Algorithm).name !== "AES-GCM") throw new DOMException("only a raw AES-GCM key", "NotSupportedError");
+      const raw = Buffer.from(bytes(data));
+      if (raw.length !== 32) throw new DOMException("not a 256-bit key", "DataError");
+      const key = { type: "secret", extractable, algorithm: { name: "AES-GCM", length: 256 }, usages: [...usages] };
+      keys.set(key, raw);
+      return key as unknown as CryptoKey;
+    },
+    async encrypt(alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) {
+      const a = aesGcm(alg);
+      const cipher = createCipheriv("aes-256-gcm", keyOf(key), bytes(a.iv), { authTagLength: 16 });
+      if (a.additionalData) cipher.setAAD(bytes(a.additionalData));
+      return owned(Buffer.concat([cipher.update(bytes(data)), cipher.final(), cipher.getAuthTag()]));
+    },
+    async decrypt(alg: AlgorithmIdentifier, key: CryptoKey, data: BufferSource) {
+      const a = aesGcm(alg);
+      const sealed = bytes(data);
+      if (sealed.length < 16) throw new DOMException("The operation failed for an operation-specific reason", "OperationError");
+      const decipher = createDecipheriv("aes-256-gcm", keyOf(key), bytes(a.iv), { authTagLength: 16 });
+      if (a.additionalData) decipher.setAAD(bytes(a.additionalData));
+      decipher.setAuthTag(sealed.subarray(sealed.length - 16));
+      try {
+        return owned(Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - 16)), decipher.final()]));
+      } catch {
+        // what Web Crypto raises when GCM's check fails
+        throw new DOMException("The operation failed for an operation-specific reason", "OperationError");
+      }
+    },
+  };
+  return {
+    getRandomValues: real.getRandomValues.bind(real),
+    randomUUID: real.randomUUID.bind(real),
+    subtle: subtle as unknown as SubtleCrypto,
+  } as Crypto;
+}
+
+/** One stand-in for a whole test file, so a key one test imported (a `ShopCache` the page keeps for its life holds its
+ *  key) still works in the next. */
+const MICROTASK_CRYPTO = microtaskCrypto();
+
+/** Puts `microtaskCrypto` where the page's code finds Web Crypto, for a test file whose tests move a fake clock by hand;
+ *  `vi.unstubAllGlobals` takes it away. */
+export function useMicrotaskCrypto(): void {
+  vi.stubGlobal("crypto", MICROTASK_CRYPTO);
+}
+
+/** The shell's saved-read commands in memory, with a log of the calls, and the keychain's key the read is sealed with
+ *  (`key`, the tests' own unless given; null when the keychain holds none). Like the shell's, it keeps the one read of
+ *  the one signed-in shop: a write replaces whatever was kept. `refuse` makes every call to the disk fail, as a full or
+ *  unreadable disk would; `lockedKeychain` makes the key's calls fail, as a locked keychain or a denied prompt would;
+ *  `noKeychain` makes them answer as on a computer with no keychain. The key's calls are logged apart (`keyCalls`), so
+ *  the order of the disk's own reads as before. */
+export function memoryCacheStore(
+  files: Record<string, string> = {},
+  key: string | null = TEST_SEAL_KEY,
+): CacheStore & { files: Map<string, string>; calls: string[]; refuse: boolean; key: string | null; keyCalls: string[]; lockedKeychain: boolean; noKeychain: boolean } {
   const store = {
     files: new Map(Object.entries(files)),
     calls: [] as string[],
     refuse: false,
+    key,
+    keyCalls: [] as string[],
+    lockedKeychain: false,
+    noKeychain: false,
+    async sealKey(make: boolean) {
+      store.keyCalls.push(make ? "make" : "look");
+      if (store.noKeychain) throw new NoKeychain();
+      if (store.lockedKeychain) throw new Error("keychain");
+      if (store.key === null && make) store.key = newSealKey();
+      return store.key;
+    },
+    async dropSealKey() {
+      store.keyCalls.push("drop");
+      if (store.noKeychain) throw new NoKeychain();
+      if (store.lockedKeychain) throw new Error("keychain");
+      store.key = null;
+    },
     async write(key: string, text: string) {
       store.calls.push("write");
       if (store.refuse) throw new Error("disk");
@@ -462,6 +583,11 @@ export function desktopShell(api: FakeApi, store: ReturnType<typeof memoryCacheS
         return store.read(args.key);
       case "shop_cache_clear":
         return store.clear();
+      // the shell answers its own words, `unavailable` where there is no keychain and `keychain` when it refused
+      case "shop_cache_seal_key":
+        return store.sealKey(args.make).catch((e) => Promise.reject(e instanceof NoKeychain ? "unavailable" : "keychain"));
+      case "shop_cache_seal_key_clear":
+        return store.dropSealKey().then(() => null, (e) => Promise.reject(e instanceof NoKeychain ? "unavailable" : "keychain"));
     }
     throw new Error(`no such command: ${cmd}`);
   };
@@ -475,14 +601,14 @@ export function clock(start = Date.UTC(2026, 10, 23, 3, 0, 0)) {
   return c;
 }
 
-/** What an earlier run left on disk for the shop, as the shell holds it (the file's name, and its text): the read of
- *  `serveShop(api, over)` as of `at`. */
+/** What an earlier run left on disk for the shop, as the shell holds it (the file's name, and its text, sealed with the
+ *  tests' key): the read of `serveShop(api, over)` as of `at`. */
 export async function savedRead(at: number, over: Parameters<typeof serveShop>[1] = {}): Promise<Record<string, string>> {
   const api = serveShop(fakeApi(), over);
   const session = new ApiSession({ origin: ORIGIN, fetch: api.fetch, vault: memoryVault(storedSession(Date.now())) });
   const read = await readShop(session, () => at);
   if (!read.ok) throw new Error("the fixture's read failed");
-  return { [cacheKey(ORIGIN, "apple:owner-1")]: encodeSnapshot(read.snapshot) };
+  return { [cacheKey(ORIGIN, "apple:owner-1")]: await sealedFile(encodeSnapshot(read.snapshot)) };
 }
 
 // ---- several shops (docs/several-shops.md; docs/pilot-api.md, "Several shops") -------------------------------------

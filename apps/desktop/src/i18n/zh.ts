@@ -2734,6 +2734,8 @@ export const zh: Record<Key, string> = {
   "mode.cachedUnavailable": "无响应。显示的是 {time} 时的内容",
   "mode.oldOffline": "离线。已保存的副本超过 7 天，因此不再显示",
   "mode.oldUnavailable": "无响应。已保存的副本超过 7 天，因此不再显示",
+  "mode.unkeptOffline": "离线。这台电脑还不能保存副本，因此没有可显示的内容",
+  "mode.unkeptUnavailable": "无响应。这台电脑还不能保存副本，因此没有可显示的内容",
   "mode.open": "运行时设置",
   // Mission Control: the job view, the activity log and Pause everyone (src/pages/Job*, Activity*, Pause*)
   "rt.notYetShow": "暂时还不行：连接模式目前无法显示这些内容。之后的版本会提供。",

@@ -1,7 +1,8 @@
 // The desktop shell's side of the connected runtime: one Rust command that makes an API request (the webview's own
-// fetch is held to CORS, and the API answers none), three that keep the session in the keychain, and three that keep
-// the last good read of the shop in a file of the app's own.
+// fetch is held to CORS, and the API answers none), three that keep the session in the keychain, three that keep the
+// last good read of the shop in a file of the app's own, and two that give and delete the key that file is sealed with.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NoKeychain } from "./cache";
 import { LinkDown, shellCacheStore, shellFetch, shellVault, VaultUnavailable } from "./shell";
 
 type Call = [string, Record<string, unknown> | undefined];
@@ -130,5 +131,43 @@ describe("shellCacheStore", () => {
     vi.unstubAllGlobals();
     await expect(shellCacheStore().read("ab".repeat(32))).rejects.toThrow();
     await expect(shellCacheStore().clear()).rejects.toThrow();
+    await expect(shellCacheStore().sealKey(true)).rejects.toThrow();
+    await expect(shellCacheStore().dropSealKey()).rejects.toThrow();
+  });
+
+  it("asks the shell for the seal's key, made only when asked, and deletes it", async () => {
+    let held: string | null = null;
+    const made = "0f".repeat(32);
+    const calls = shell((cmd, args) => {
+      if (cmd === "shop_cache_seal_key") return held ?? (args?.make ? (held = made) : null);
+      if (cmd === "shop_cache_seal_key_clear") held = null;
+      return null;
+    });
+    const store = shellCacheStore();
+    expect(await store.sealKey(false)).toBeNull();
+    expect(await store.sealKey(true)).toBe(made);
+    expect(await store.sealKey(false)).toBe(made);
+    await store.dropSealKey();
+    expect(await store.sealKey(false)).toBeNull();
+    expect(calls).toEqual([
+      ["shop_cache_seal_key", { make: false }],
+      ["shop_cache_seal_key", { make: true }],
+      ["shop_cache_seal_key", { make: false }],
+      ["shop_cache_seal_key_clear", {}],
+      ["shop_cache_seal_key", { make: false }],
+    ]);
+  });
+
+  it("says when this computer has no keychain for the key, apart from a keychain that refused", async () => {
+    shell(() => {
+      throw "unavailable";
+    });
+    await expect(shellCacheStore().sealKey(true)).rejects.toBeInstanceOf(NoKeychain);
+    shell(() => {
+      throw "keychain";
+    });
+    const refused = await shellCacheStore().sealKey(false).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused).not.toBeInstanceOf(NoKeychain);
   });
 });
