@@ -13,6 +13,8 @@
 //! - git is not partway through a rebase, merge, cherry-pick, revert or bisect, and holds no index lock (`busy`);
 //! - the checkout is on a branch (`detached`), that branch tracks a remote branch (`no_upstream`), and both are the remote's
 //!   default branch by name, read as the merged clean-up reads it (`not_default`);
+//! - the checkout has no submodules (`submodules`, item 90: a gitlink in the index or a modules folder): what one holds is never
+//!   read by itself, since git reads a submodule's own config inside it, so the pull cannot tell whether it would move past work;
 //! - nothing in the work tree is changed, staged or new, ignored files aside (`changes`; `unread` when git could not say). An
 //!   ignored file is not counted, but it is never written over either: see [`FAST_FORWARD`];
 //! - no commit of the branch is missing from every remote branch (`ahead`).
@@ -114,6 +116,12 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
         Some((default, _)) if default == merge && default == branch => {}
         _ => return "not_default",
     }
+    // what a submodule holds is not read by itself (item 90), and the fast-forward would move what the checkout records for one
+    match git.submodules(&top) {
+        Some(false) => {}
+        Some(true) => return "submodules",
+        None => return "unread",
+    }
     match git.changed(&top) {
         None => return "unread",
         Some(n) if n > 0 => return "changes",
@@ -141,6 +149,9 @@ fn pull_into(home: &Path, cwd: &Path, out: &mut Pulled) -> &'static str {
     // read again just before the one write: the fetch took time, and the person may have started something since
     if git.busy(&top) {
         return "busy";
+    }
+    if git.submodules(&top) != Some(false) {
+        return "submodules";
     }
     if git.changed(&top) != Some(0) {
         return "changes";
@@ -413,6 +424,26 @@ mod tests {
         let marker = crate::lane::tests::filter_in_submodule(&home, &d);
         let got = pull(&home, &d);
         assert!(!marker.exists(), "a program ran: {} ({got:?})", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_checkout_with_submodules_is_not_pulled_by_itself() {
+        let Some((home, d)) = repo("pull-submodules") else { return };
+        let bare = with_origin(&home, &d);
+        crate::lane::tests::with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        advance(&home, &bare, 1);
+        // work inside the submodule the app does not read: the pull stops before anything is fetched or moved
+        fs::write(d.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        let before = state_quiet(&d);
+        let got = pull(&home, &d);
+        assert_eq!((got.done, got.why.as_str()), (false, "submodules"), "{got:?}");
+        assert_eq!(state_quiet(&d), before);
+        // not checked out at all: the same
+        sh(&d, &["submodule", "deinit", "-q", "-f", "sub"]);
+        let _ = fs::remove_dir_all(d.join(".git/modules"));
+        assert_eq!(pull(&home, &d).why, "submodules");
         let _ = fs::remove_dir_all(home);
     }
 

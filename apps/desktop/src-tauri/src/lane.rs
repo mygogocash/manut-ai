@@ -150,6 +150,9 @@ pub struct Kept {
     /// The files and folders git ignores in it that are not plainly rebuilt and the app did not put there (see
     /// [`Git::ignored_own`]), at most [`IGNORED_SHOWN`]: what a clean-up keeps a clean folder for.
     pub ignored: Vec<String>,
+    /// Whether it has submodules ([`Git::submodules`]): what changed inside them is not in `changed`, a clean-up leaves it, and
+    /// Remove never forces it. False when it could not be read.
+    pub submodules: bool,
 }
 
 /// What the person said yes to when a lane's folder goes. `changed`: how many changed or new files they saw counted and said
@@ -642,6 +645,20 @@ impl Git {
         self.line(at, &["rev-list", "--count", &r, "--not", "--remotes"]).and_then(|l| l.parse().ok())
     }
 
+    /// Whether the work tree `wt` has submodules (item 90): a gitlink in its index, checked out or not (an empty submodule
+    /// folder can hold files git lists nowhere, and `git worktree remove` takes them), or a modules folder of its own (a submodule
+    /// checked out there once, whose commits may be nowhere else). None when git could not say. Nothing inside a submodule is
+    /// read by itself (see [`Git::changed`]), so what one holds is not known: whatever could take it or move past it (a clean-up,
+    /// a force, the automatic pull) does not happen without the person.
+    pub(crate) fn submodules(&self, wt: &Path) -> Option<bool> {
+        let modules = self.line(wt, &["rev-parse", "--git-path", "modules"]).filter(|l| !l.is_empty())?;
+        if fs::symlink_metadata(from_cwd(wt, &modules)).is_ok() {
+            return Some(true);
+        }
+        let listing = self.run(wt, &["ls-files", "-s", "-z"]).ok()?;
+        gitlinks(&listing).map(|l| !l.is_empty())
+    }
+
     /// Whether the worktree at `wt` is partway through a rebase, merge, cherry-pick, revert or bisect, or holds an index lock.
     pub(crate) fn busy(&self, wt: &Path) -> bool {
         match self.line(wt, &["rev-parse", "--absolute-git-dir"]) {
@@ -1104,6 +1121,8 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
                 ahead: if read { git.ahead(&wt, &r) } else { None },
                 unpushed: if read { git.unpushed(&wt, &r.branch) } else { None },
                 ignored: if read { git.ignored_own(&wt, &r.prefix).map(|mut v| { v.truncate(IGNORED_SHOWN); v }).unwrap_or_default() } else { Vec::new() },
+                // read even where the config names a program: only the index and the modules folder are looked at
+                submodules: exists && i < STATUS_MAX && git.submodules(&wt) == Some(true),
                 exists,
                 worktree: r.worktree,
                 branch: r.branch,
@@ -1148,9 +1167,11 @@ pub fn remove(home: &Path, worktree: &str, ask: &RemoveAsk) -> Result<Removed, S
         return Ok(Removed { changed: Some(changed), ahead, ..Removed::default() });
     }
 
-    // git's own note of the worktree goes with it; for a folder already gone, only the note
+    // git's own note of the worktree goes with it; for a folder already gone, only the note. A folder with submodules is never
+    // forced (item 90): their work is not in `changed`, and a force takes it, the commits in its own modules folder too, so
+    // git's own refusal of such a folder stands and says why
     let mut args = vec!["worktree", "remove"];
-    if changed > 0 {
+    if changed > 0 && exists && git.submodules(&wt) == Some(false) {
         args.push("--force");
     }
     args.push(worktree);
@@ -1199,7 +1220,8 @@ pub(crate) fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf,
 /// What a clean-up did with one lane's folder: `removed`, or why it was kept. `kept` is a short code the page words:
 /// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `ignored` (files git ignores
 /// that are not rebuilt and the app did not put there, named in `ignored`), `config` (the repository's own config names a
-/// program git would run, [`Git::config_risk`]), `busy` (git is partway through
+/// program git would run, [`Git::config_risk`]), `submodules` (it has submodules, whose work is not read: [`Git::submodules`]),
+/// `busy` (git is partway through
 /// something there), `unread` (git could not say what is there), `changed` (it changed while this ran), `held` (a session still
 /// works in it). `changed` and `unpushed` give the numbers.
 #[derive(Debug, Serialize, PartialEq, Default)]
@@ -1235,6 +1257,12 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
         // `status` and `git worktree remove` would run)
         if git.config_risk(&wt).is_some() {
             return keep("config", None, None);
+        }
+        // what a submodule holds is not read by itself, so a folder with any is not the clean-up's to remove (item 90)
+        match git.submodules(&wt) {
+            Some(false) => {}
+            Some(true) => return keep("submodules", None, None),
+            None => return keep("unread", None, None),
         }
         let changed = git.changed(&wt);
         match changed {
@@ -1845,6 +1873,68 @@ pub(crate) mod tests {
         fs::write(d.join(".git/more.cfg"), "[credential]\n\thelper = store\n").unwrap();
         sh(&d, &["config", "include.path", "more.cfg"]);
         assert_eq!(git.config_risk(&d).as_deref(), Some("credential.helper"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_never_removes_a_folder_with_submodules_whose_work_it_does_not_count() {
+        let Some((home, d)) = repo("sub-release") else { return };
+        with_origin(&home, &d);
+        with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        // a submodule never checked out, its empty folder holding a file of someone's: git lists nothing for it
+        let a = pushed_lane(&home, &d, "a");
+        let wt = Path::new(&a.worktree);
+        fs::write(wt.join("sub/notes.txt"), "mine\n").unwrap();
+        assert_eq!(Git::automatic(&home).unwrap().changed(wt), Some(0));
+        let r = release(&home, &a.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("submodules")), "{r:?}");
+        assert_eq!(fs::read_to_string(wt.join("sub/notes.txt")).unwrap(), "mine\n");
+        // a submodule checked out, with work in it that is not counted
+        let b = pushed_lane(&home, &d, "b");
+        let wt = Path::new(&b.worktree);
+        sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        fs::write(wt.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        commit_in(&wt.join("sub"), "only-here.txt", "a commit on no remote\n");
+        let r = release(&home, &b.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("submodules")), "{r:?}");
+        // the merged clean-up's path, which asks for no remote, keeps them the same way
+        assert_eq!(release(&home, &b.worktree, false).unwrap().kept.as_deref(), Some("submodules"));
+        assert_eq!(fs::read_to_string(wt.join("sub/s.txt")).unwrap(), "uncommitted in the submodule\n");
+        assert!(wt.join("sub/only-here.txt").exists());
+        // the kept list says so for both, and for a lane with none it does not
+        let got = list(&home, &d).unwrap();
+        assert!(got.iter().all(|k| k.submodules), "{got:?}");
+        let _ = fs::remove_dir_all(home);
+
+        let Some((home, d)) = repo("sub-release-none") else { return };
+        let plain = make(&home, &d, &names(&["kit/p"])).unwrap();
+        assert!(!list(&home, &d).unwrap()[0].submodules);
+        assert_eq!(Git::automatic(&home).unwrap().submodules(Path::new(&plain.worktree)), Some(false));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn remove_never_forces_a_folder_with_submodules_so_git_s_own_refusal_keeps_their_work() {
+        let Some((home, d)) = repo("sub-remove") else { return };
+        with_submodule(&home, &d);
+        let a = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let wt = Path::new(&a.worktree);
+        sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        // clean: git's own rule refuses a worktree with a submodule checked out, without a force flag
+        let err = remove(&home, &a.worktree, &RemoveAsk::default()).unwrap_err();
+        assert!(err.contains("submodules"), "{err}");
+        assert!(wt.join("sub/s.txt").exists());
+        // one changed file of the lane's own, counted, and uncounted work in the submodule: whatever the yes was to, the folder
+        // stays, since a force would take the submodule's work with it
+        fs::write(wt.join("a.txt"), "changed\n").unwrap();
+        fs::write(wt.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        for changed in [1, 2] {
+            let got = remove(&home, &a.worktree, &RemoveAsk { changed, ..RemoveAsk::default() });
+            assert!(!got.as_ref().is_ok_and(|r| r.removed), "{changed}: {got:?}");
+            assert_eq!(fs::read_to_string(wt.join("sub/s.txt")).unwrap(), "uncommitted in the submodule\n", "{changed}");
+        }
+        assert_eq!(fs::read_to_string(wt.join("a.txt")).unwrap(), "changed\n");
         let _ = fs::remove_dir_all(home);
     }
 

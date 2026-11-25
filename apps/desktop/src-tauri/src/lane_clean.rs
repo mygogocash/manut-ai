@@ -34,7 +34,8 @@ use crate::tasks::{self, Source, Tasks};
 const MAX_LANES: usize = 20;
 const BUDGET: Duration = Duration::from_secs(90);
 
-/// One folder a clean-up left, with why: a code from `lane::release` (`changes`, `ignored`, `busy`, `unread`, `changed`), or `open` (no
+/// One folder a clean-up left, with why: a code from `lane::release` (`changes`, `ignored`, `config`, `submodules`, `busy`,
+/// `unread`, `changed`), or `open` (no
 /// merged pull request for the branch), `not_in_default` (merged, but its commits are not in the default branch), `no_default`
 /// (the default branch could not be found), `later` (not asked about yet in this run).
 #[derive(Debug, Serialize, PartialEq)]
@@ -393,6 +394,22 @@ mod tests {
         assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
         assert_eq!(out.removed, Vec::<String>::new(), "{out:?}");
         assert!(Path::new(&made.worktree).join("sub/s.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_merged_lane_with_submodules_is_kept_with_its_own_reason() {
+        let Some((home, d)) = repo("clean-submodules") else { return };
+        with_origin(&home, &d);
+        crate::lane::tests::with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let (made, tip) = lane(&home, &d, "subs", true);
+        let wt = Path::new(&made.worktree);
+        sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        fs::write(wt.join("sub/s.txt"), "uncommitted in the submodule\n").unwrap();
+        let out = run(&home, &d, Source::Github, &|_| Some(said(&tip)));
+        assert_eq!(out.kept, vec![CleanKept { branch: "kit/subs".into(), why: "submodules".into() }], "{out:?}");
+        assert_eq!(fs::read_to_string(wt.join("sub/s.txt")).unwrap(), "uncommitted in the submodule\n");
         let _ = fs::remove_dir_all(home);
     }
 
