@@ -273,8 +273,8 @@ test("chat: a typing bubble with the ringed face waits for the first delta, whic
   await expect(typing.locator(".msg-face")).toHaveCount(1);
   await expect(typing.getByTestId("typing-bubble").locator(".ui-typing i")).toHaveCount(3);
   const dot = typing.locator(".ui-typing i").first();
-  await expect(dot).toHaveCSS("animation-name", "ui-typing-hop");
-  await expect(dot).toHaveCSS("animation-duration", "1s");
+  await expect(dot).toHaveCSS("animation-name", "pulse");
+  await expect(dot).toHaveCSS("animation-duration", "1.6s");
   // same bubble fill as a bot answer
   const [bg, botBg] = await Promise.all([
     typing.getByTestId("typing-bubble").evaluate((e) => getComputedStyle(e).backgroundColor),
@@ -365,8 +365,20 @@ test("reduced motion: the arc and the dots stand still", async ({ page }) => {
   await emit(ev("kami", "turn.start"));
   const typing = page.getByTestId("typing");
   await expect(typing.getByTestId("typing-ring")).toBeVisible();
-  await expect(typing.getByTestId("typing-ring")).toHaveCSS("animation-name", "none");
-  for (const dot of await typing.locator(".ui-typing i").all()) await expect(dot).toHaveCSS("animation-name", "none");
+  // Reduced motion ends a move at once rather than removing it (docs/motion.md): still means none, or over within a
+  // millisecond and never repeating.
+  const still = async (l: import("@playwright/test").Locator) => {
+    const m = await l.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      return { name: cs.animationName, seconds: parseFloat(cs.animationDuration), times: cs.animationIterationCount };
+    });
+    if (m.name !== "none") {
+      expect(m.seconds).toBeLessThan(0.001);
+      expect(m.times).toBe("1");
+    }
+  };
+  await still(typing.getByTestId("typing-ring"));
+  for (const dot of await typing.locator(".ui-typing i").all()) await still(dot);
   await emit(ev("kami", "turn.end", { outcome: "done" }));
 });
 
