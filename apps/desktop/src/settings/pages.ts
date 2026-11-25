@@ -19,6 +19,9 @@ export const APP_PAGES: { id: string; label: Key }[] = [
   // publishing HTML and Markdown files as public links: the one switch, off by default, and how it works (item 83,
   // ArtifactLinksPage.tsx)
   { id: "artifacts", label: "set.artifacts" },
+  // reaching this Mac from a paired phone: the switch behind a consent sheet, off by default, pairing with the typed code,
+  // the paired phones and Unpair (item 78b, RemotePage.tsx)
+  { id: "remote", label: "set.remote" },
   // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
   { id: "mcp", label: "set.mcp" },
   // workflows run from files in ~/.manut/workflows: the switch, skipped runs kept, each workflow with Run now and its history
