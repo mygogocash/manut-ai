@@ -20,6 +20,7 @@ mod past_chats;
 mod platform;
 mod outpost;
 mod power;
+mod preview;
 #[cfg(all(test, unix))]
 mod pty_bench;
 mod running;
@@ -52,6 +53,8 @@ struct Shell {
     logins: Arc<accounts::Logins>,
     sessions: Arc<Sessions>,
     chats: Arc<ChatSessions>,
+    /// The lanes' previews (preview.rs): each a project's dev server, started by the page in a lane's own folder.
+    previews: Arc<preview::Previews>,
 }
 
 /// Open a link the person clicked: a thread in its own app (Slack / Discord / Telegram), a plan node's GitHub
@@ -398,21 +401,26 @@ struct ShellStarted {
 }
 
 /// What keeps running (running.rs, the page's src/running/): every command that this app's terminals and chats started
-/// and that still runs, with its arguments, when it started and the ports it listens on. Only processes under a session
-/// this app started are looked at, and the page sends nothing. `unsupported` where the shell has no reader (Windows).
+/// and that still runs, and every lane's preview, with its arguments, when it started and the ports it listens on. Only
+/// processes under a session or a preview this app started are looked at, and the page sends nothing. `unsupported` where
+/// the shell has no reader (Windows).
 #[tauri::command]
 async fn running_list(shell: State<'_, Shell>) -> Result<Vec<running::Row>, String> {
-    let roots = running::roots_of(&shell.sessions, &shell.chats);
+    let roots = running::roots_of(&shell.sessions, &shell.chats, &shell.previews);
     tauri::async_runtime::spawn_blocking(move || running::list(&roots)).await.map_err(|e| e.to_string())?
 }
 
 /// Stop one command of those and everything it started: `stopping` once each is told to end (what still runs a few
 /// seconds later is killed), `gone` when it is not there to stop. The page names the command by its session, its process
 /// id and when it started, never by words; the shell finds it under that session again, so nothing else can be reached.
+/// A preview is stopped as its own Stop stops it (its process group), so its pane says that it was stopped.
 #[tauri::command]
 async fn running_stop(shell: State<'_, Shell>, kind: String, session: u32, pid: u32, started: Option<u64>) -> Result<&'static str, String> {
     let kind = running::Kind::parse(&kind).ok_or("not a kind of session")?;
-    let roots = running::roots_of(&shell.sessions, &shell.chats);
+    if kind == running::Kind::Preview {
+        return Ok(if shell.previews.is(session, pid) { shell.previews.stop(session) } else { "gone" });
+    }
+    let roots = running::roots_of(&shell.sessions, &shell.chats, &shell.previews);
     tauri::async_runtime::spawn_blocking(move || running::stop(&roots, &running::Target { kind, session, pid, started })).await.map_err(|e| e.to_string())?
 }
 
@@ -829,6 +837,63 @@ async fn term_share_take(links: Vec<String>) -> Result<Vec<term_share::Request>,
     tauri::async_runtime::spawn_blocking(move || term_share::take(&home, &links).0).await.map_err(|e| e.to_string())
 }
 
+/// A lane's preview (preview.rs; the page's src/code/previewStore.ts): what the lane's own folder `cwd` holds for the page to
+/// choose the start command from, its `package.json`, the names at its root and its `.env.example`. Only reads, and only in a
+/// lane's own folder (`not_a_lane` for any other, the developer's own folder among them).
+#[tauri::command]
+async fn preview_read(cwd: String) -> Result<preview::Project, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || preview::read(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())?
+}
+
+/// Start a lane's preview in its own folder `cwd`: `argv` is the command the page chose (`pnpm run dev`, one of the sixteen
+/// preview.rs runs), `package` the `package.json` text it chose from (`changed` when the folder's is not that any more), and
+/// `env` the secrets it runs with, each a sample unless the owner added it (`previewEnv`), over an environment that starts
+/// empty. Its lines, and once its end, go to `on_event` (`{event:"lines", lines}`, `{event:"exit", code, stopped}`). The id it
+/// answers names it to `preview_stop`. Refusals: `not_a_lane`, `bad_command`, `bad_env`, `changed`, `running`,
+/// `missing:<manager>`, `unsupported`, or why the system would not start it.
+#[tauri::command]
+async fn preview_start(shell: State<'_, Shell>, cwd: String, argv: Vec<String>, package: String, env: Vec<(String, String)>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+    let home = user_home()?;
+    let previews = shell.previews.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        previews.start(&home, std::path::Path::new(&cwd), &argv, &package, &env, move |out| {
+            let _ = on_event.send(match out {
+                preview::PreviewOut::Lines(lines) => serde_json::json!({"event": "lines", "lines": lines}),
+                preview::PreviewOut::Exit { code, stopped } => serde_json::json!({"event": "exit", "code": code, "stopped": stopped}),
+            });
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stop preview `id` and everything it started (its process group, as a chat's close stops a chat): `stopping`, or `gone`
+/// when it had ended already.
+#[tauri::command]
+async fn preview_stop(shell: State<'_, Shell>, id: u32) -> Result<&'static str, String> {
+    let previews = shell.previews.clone();
+    tauri::async_runtime::spawn_blocking(move || previews.stop(id)).await.map_err(|e| e.to_string())
+}
+
+/// Stop every preview. The page calls this when it loads, with `session_close_all`: a preview whose page is gone would run on
+/// unseen.
+#[tauri::command]
+async fn preview_close_all(shell: State<'_, Shell>) -> Result<(), String> {
+    let previews = shell.previews.clone();
+    tauri::async_runtime::spawn_blocking(move || previews.close_all()).await.map_err(|e| e.to_string())
+}
+
+/// A preview's Open: its address in the person's browser, through the system opener. Only an address of this computer, as
+/// a dev server prints it (`http://localhost:5173/`), is sent; any other is refused (preview.rs `loopback_url`).
+#[tauri::command]
+async fn preview_open(url: String) -> Result<(), String> {
+    if !preview::loopback_url(&url) {
+        return Err("not an address of this computer".into());
+    }
+    system_open_url(&url)
+}
+
 /// Stop the chat's program and forget the session.
 #[tauri::command]
 async fn chat_close(shell: State<'_, Shell>, id: u32) -> Result<(), String> {
@@ -1056,6 +1121,7 @@ pub fn run() {
                 logins: accounts::Logins::new(),
                 sessions: Sessions::new(),
                 chats: ChatSessions::new(),
+                previews: preview::Previews::new(),
             });
             Ok(())
         })
@@ -1077,6 +1143,7 @@ pub fn run() {
             if let Some(shell) = handle.try_state::<Shell>() {
                 shell.sessions.close_all();
                 shell.chats.close_all();
+                shell.previews.close_all();
                 shell.logins.cancel_all();
             }
             // the sessions are gone: so are the status files bots read
@@ -1144,6 +1211,11 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         codex_conversation,
         running_list,
         running_stop,
+        preview_read,
+        preview_start,
+        preview_stop,
+        preview_close_all,
+        preview_open,
         host_name,
         asks_badge,
         tasks_status,

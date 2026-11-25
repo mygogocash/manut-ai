@@ -1,7 +1,8 @@
 // Where what keeps running is read and stopped. In the desktop app: the shell's `running_list` and `running_stop`
-// (src-tauri/src/running.rs), which look only at the processes under this app's own terminals and chats. In a plain
-// browser (dev, e2e against the mock bridge) there is no shell, so a mock keeps the list the page's own test seeds
-// through `window.__manutMockRunning` and records every call in `window.__manutRunningCalls`.
+// (src-tauri/src/running.rs), which look only at the processes under this app's own terminals, chats and previews. In a
+// plain browser (dev, e2e against the mock bridge) there is no shell, so a mock keeps the list the page's own test seeds
+// through `window.__manutMockRunning` (and the mock preview adds its fake run to, code/previewHost.ts) and records every
+// call in `window.__manutRunningCalls`.
 import type { RunningRow } from "./model";
 
 /** `stopping`: the command and what it started were told to end. `gone`: it had ended already. */
@@ -29,7 +30,7 @@ export function readRow(v: unknown): RunningRow[] {
   if (typeof v !== "object" || v === null) return [];
   const o = v as Record<string, unknown>;
   const { kind, session, folder, pid, started, argv, ports } = o;
-  if ((kind !== "pty" && kind !== "chat") || !num(session) || typeof folder !== "string" || !num(pid)) return [];
+  if ((kind !== "pty" && kind !== "chat" && kind !== "preview") || !num(session) || typeof folder !== "string" || !num(pid)) return [];
   if (!(started === null || started === undefined || num(started))) return [];
   if (!Array.isArray(argv) || !argv.every((a) => typeof a === "string")) return [];
   if (!Array.isArray(ports) || !ports.every((p) => num(p) && p > 0 && p < 65_536)) return [];
@@ -82,6 +83,9 @@ export interface MockRunningControl {
   stopMode: "end" | "ignore" | "refuse";
   /** This computer cannot say what runs (the list answers null). */
   unsupported: boolean;
+  /** The mock preview's own Stop (code/previewHost.ts): a preview's row is stopped as the shell stops one, through the
+   *  preview, so its pane says that it was stopped. None until a fake preview has run. */
+  stopPreview: ((session: number) => void) | null;
 }
 
 type MockGlobals = { __manutMockRunning?: MockRunningControl; __manutRunningCalls?: MockRunningCall[] };
@@ -109,6 +113,7 @@ export class MockRunningHost implements RunningHost {
       },
       stopMode: "end",
       unsupported: false,
+      stopPreview: null,
     };
     g.__manutMockRunning = this.control;
   }
@@ -124,6 +129,11 @@ export class MockRunningHost implements RunningHost {
     if (this.control.stopMode === "refuse") throw new Error("the shell would not stop it");
     const at = this.control.rows.findIndex((r) => r.kind === t.kind && r.session === t.session && r.pid === t.pid && r.started === t.started);
     if (at < 0) return "gone";
+    if (t.kind === "preview" && this.control.stopPreview) {
+      // the fake preview ends, says so to its pane and takes its own row off the list, as the shell's preview does
+      this.control.stopPreview(t.session);
+      return "stopping";
+    }
     if (this.control.stopMode === "end") this.control.rows = this.control.rows.filter((_, i) => i !== at);
     return "stopping";
   }

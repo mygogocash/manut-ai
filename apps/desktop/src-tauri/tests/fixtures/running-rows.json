@@ -16,5 +16,14 @@
     "started": null,
     "argv": ["/bin/zsh", "-c", "vitest --watch"],
     "ports": []
+  },
+  {
+    "kind": "preview",
+    "session": 1,
+    "folder": "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr",
+    "pid": 4500,
+    "started": 1795491090000,
+    "argv": ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "run", "dev"],
+    "ports": [5173]
   }
 ]

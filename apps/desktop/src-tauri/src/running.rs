@@ -1,8 +1,9 @@
-//! What keeps running: the commands this app's own terminals and chats started and that still run, each with how long it
-//! has run and the ports it listens on, and Stop (docs/code-editor.md, "Watching it run"; the page is src/running/).
+//! What keeps running: the commands this app's own terminals and chats started and that still run, and the previews of its
+//! lanes, each with how long it has run and the ports it listens on, and Stop (docs/code-editor.md, "Watching it run"; the
+//! page is src/running/).
 //!
-//! Which processes are the app's own is settled in one place: [`Sessions::roots`] and [`ChatSessions::roots`], the
-//! program of each session this app started. Everything here walks down from those programs, through the processes they
+//! Which processes are the app's own is settled in one place: [`Sessions::roots`], [`ChatSessions::roots`] and
+//! [`Previews::roots`], the program of each session and each preview this app started. Everything here walks down from those programs, through the processes they
 //! started, and reads nothing else. A Stop names a command by its session, its process id and when it started, and the
 //! shell finds that process under that session again before it signals anything, so a number the page made up, a
 //! process that took a finished one's number, or the session's own shell is never touched. A process's environment is
@@ -25,6 +26,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::agent_chat::ChatSessions;
+use crate::preview::Previews;
 use crate::sessions::Sessions;
 
 /// How deep a tree is walked, how many processes of one session are looked at, how many commands one session lists and
@@ -39,13 +41,14 @@ const MAX_ARG_CHARS: usize = 4_096;
 #[cfg(unix)]
 const GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// What kind of session a command belongs to: a terminal (the shell's pty) or a chat (an agent on pipes). The same two
-/// words the page uses.
+/// What kind of session a command belongs to: a terminal (the shell's pty), a chat (an agent on pipes), or a lane's preview
+/// (preview.rs: the project's dev server, which is itself the command). The same words the page uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Pty,
     Chat,
+    Preview,
 }
 
 impl Kind {
@@ -53,6 +56,7 @@ impl Kind {
         match word {
             "pty" => Some(Kind::Pty),
             "chat" => Some(Kind::Chat),
+            "preview" => Some(Kind::Preview),
             _ => None,
         }
     }
@@ -67,12 +71,13 @@ pub struct Root {
     pub folder: PathBuf,
 }
 
-/// Every session of this app that has a program running now.
+/// Every session of this app that has a program running now, and every preview.
 #[cfg_attr(not(unix), allow(dead_code))]
-pub fn roots_of(sessions: &Sessions, chats: &ChatSessions) -> Vec<Root> {
+pub fn roots_of(sessions: &Sessions, chats: &ChatSessions, previews: &Previews) -> Vec<Root> {
     let ptys = sessions.roots().into_iter().map(|(session, pid, folder)| Root { kind: Kind::Pty, session, pid, folder });
     let chat = chats.roots().into_iter().map(|(session, pid, folder)| Root { kind: Kind::Chat, session, pid, folder });
-    ptys.chain(chat).collect()
+    let shown = previews.roots().into_iter().map(|(session, pid, folder)| Root { kind: Kind::Preview, session, pid, folder });
+    ptys.chain(chat).chain(shown).collect()
 }
 
 /// What the system says of one process. `argv` is as the system holds it (the program first); it is empty when the
@@ -255,10 +260,25 @@ fn capped(argv: Vec<String>) -> Vec<String> {
     argv.into_iter().take(MAX_ARGS).map(|a| if a.chars().count() > MAX_ARG_CHARS { a.chars().take(MAX_ARG_CHARS).collect() } else { a }).collect()
 }
 
-/// Every command still running under `roots`.
+/// Every command still running under `roots`. A preview's program is itself the command (`pnpm run dev`), listed with the
+/// ports of everything it started, read as they are now.
 pub fn commands(os: &dyn Procs, roots: &[Root]) -> Vec<Row> {
     let mut rows = Vec::new();
     for root in roots {
+        if root.kind == Kind::Preview {
+            if let Some(info) = os.info(root.pid) {
+                rows.push(Row {
+                    kind: root.kind,
+                    session: root.session,
+                    folder: root.folder.to_string_lossy().into_owned(),
+                    pid: root.pid,
+                    started: info.started,
+                    argv: capped(info.argv),
+                    ports: tree_ports(os, root.pid),
+                });
+            }
+            continue;
+        }
         for (pid, info) in command_roots(os, root.pid) {
             rows.push(Row {
                 kind: root.kind,
@@ -665,6 +685,29 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_is_its_own_command_with_the_ports_of_all_it_started_and_lists_nothing_under_it() {
+        // `pnpm run dev` in a lane's folder: pnpm starts `sh -c vite`, which starts the node that listens
+        let mut f = Fake::default();
+        f.info.insert(30, Info { exe: "/opt/homebrew/bin/node".into(), argv: vec!["node".into(), "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs".into(), "run".into(), "dev".into()], started: Some(4_000) });
+        f.add(30, 31, "/bin/sh", &["sh", "-c", "vite"], 4_010);
+        f.add(31, 32, "/opt/homebrew/bin/node", &["node", "/lanes/web-app/promptpay-qr/node_modules/vite/bin/vite.js"], 4_020);
+        f.listen(32, &[5173, 24678]);
+        let lane = Root { kind: Kind::Preview, session: 1, pid: 30, folder: PathBuf::from("/home/you/.manut/lanes/web-app/promptpay-qr") };
+        let rows = commands(&f, std::slice::from_ref(&lane));
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!((r.kind, r.session, r.pid, r.started), (Kind::Preview, 1, 30, Some(4_000)));
+        assert_eq!(r.argv, ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "run", "dev"]);
+        assert_eq!(r.ports, [5173, 24678]);
+        assert_eq!(r.folder, "/home/you/.manut/lanes/web-app/promptpay-qr");
+        // a preview that ended is no row
+        assert!(commands(&f, &[Root { pid: 99, ..lane.clone() }]).is_empty());
+        // the same number as a chat's is another kind: a chat's Stop never reaches a preview, nor the other way round
+        assert_eq!(Kind::parse("preview"), Some(Kind::Preview));
+        assert!(to_stop(&f, std::slice::from_ref(&lane), &Target { kind: Kind::Chat, session: 1, pid: 30, started: Some(4_000) }).is_none());
+    }
+
+    #[test]
     fn a_shell_inside_a_shell_is_not_a_command_but_what_it_ran_is() {
         let mut f = shell_terminal();
         f.add(10, 14, "/bin/bash", &["bash"], 3_000);
@@ -806,10 +849,20 @@ mod tests {
                 ports: vec![3000, 24678],
             },
             Row { kind: Kind::Chat, session: 2, folder: folder(), pid: 4400, started: None, argv: ["/bin/zsh", "-c", "vitest --watch"].map(String::from).to_vec(), ports: vec![] },
+            Row {
+                kind: Kind::Preview,
+                session: 1,
+                folder: "/home/you/.manut/lanes/baanmali-preorder/promptpay-qr".to_string(),
+                pid: 4500,
+                started: Some(1_795_491_090_000),
+                argv: ["node", "/opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs", "run", "dev"].map(String::from).to_vec(),
+                ports: vec![5173],
+            },
         ];
         assert_eq!(serde_json::to_value(&rows).unwrap(), want);
         assert_eq!(Kind::parse("pty"), Some(Kind::Pty));
         assert_eq!(Kind::parse("chat"), Some(Kind::Chat));
+        assert_eq!(Kind::parse("preview"), Some(Kind::Preview));
         assert_eq!(Kind::parse("tab"), None);
     }
 
@@ -918,13 +971,14 @@ mod tests {
             let chats = ChatSessions::default();
             let pty = sessions.spawn(vec!["/bin/sh".into(), "-c".into(), "sleep 66".into()], &tmp, None, &[], 80, 24, |_| {}).unwrap();
             let chat = chats.spawn(vec!["/bin/sh".into(), "-c".into(), "trap '' HUP; sleep 67".into()], &tmp, None, &[], Box::new(crate::agent_chat::Claude::default()), |_| {}).unwrap();
+            let previews = Previews::default();
             // each table counts from one, so the same number can be a terminal and a chat: the kind tells them apart
-            let roots = roots_of(&sessions, &chats);
+            let roots = roots_of(&sessions, &chats, &previews);
             assert_eq!(roots.iter().map(|r| (r.kind, r.session)).collect::<Vec<_>>(), [(Kind::Pty, pty), (Kind::Chat, chat)]);
             assert!(roots.iter().all(|r| r.pid > 1 && r.folder == tmp), "{roots:?}");
             sessions.close_all();
             chats.close_all();
-            assert!(roots_of(&sessions, &chats).is_empty());
+            assert!(roots_of(&sessions, &chats, &previews).is_empty());
         }
 
         #[test]
