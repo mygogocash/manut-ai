@@ -3757,7 +3757,11 @@ impl ChatSessions {
             (_, Some(_)) if acp.is_some() => return Err("not a conversation id".into()),
             _ => None,
         };
-        let mut adapter = adapter_for(agent_id, &cwd.to_string_lossy(), thread).ok_or("no chat adapter")?;
+        // an ACP agent is handed the project's MCP servers the person approved (acp_mcp.rs); its own it reads itself
+        let mut adapter = match acp {
+            Some(row) => Box::new(Acp::new(row, &cwd.to_string_lossy(), thread).with_mcp(crate::acp_mcp::for_session(cwd))) as Box<dyn Adapter>,
+            None => adapter_for(agent_id, &cwd.to_string_lossy(), thread).ok_or("no chat adapter")?,
+        };
         let (mut argv, path_env) = launch_for(agent_id)?;
         let program = argv.clone();
         if let Some(path) = unrecognized_program(agent_id) {
@@ -3819,7 +3823,7 @@ impl ChatSessions {
             Some(_) => return Err("not a conversation id".into()),
             None => None,
         };
-        let adapter: Box<dyn Adapter> = Box::new(Acp::new(crate::custom_agents::adapter_row(c), &cwd.to_string_lossy(), thread));
+        let adapter: Box<dyn Adapter> = Box::new(Acp::new(crate::custom_agents::adapter_row(c), &cwd.to_string_lossy(), thread).with_mcp(crate::acp_mcp::for_session(cwd)));
         let (argv, path_env) = crate::custom_agents::launch_here(c, dirs)?;
         self.spawn(argv, cwd, Some(path_env), account_env, adapter, sink)
     }

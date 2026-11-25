@@ -4,7 +4,8 @@
 //!
 //! - start: `initialize` with the client's file-system and terminal capabilities OFF, so the agent uses its
 //!   own tools and manut reads and writes nothing new; then `session/resume` when the agent offers it and manut
-//!   holds a conversation id, else `session/load`, else `session/new`.
+//!   holds a conversation id, else `session/load`, else `session/new`, each with the project's MCP servers the person
+//!   approved (`acp_mcp.rs`) in the shapes the agent takes, or none.
 //! - Send -> `session/prompt`; Stop -> `session/cancel`; model -> `session/set_config_option`.
 //! - `session/update` notifications -> the bot chat's events (delta, message, thinking, tool.start / tool.end
 //!   with a duration measured here, turn.end from `stopReason`, session.info, session.models,
@@ -415,6 +416,11 @@ pub struct Acp {
     msg_seq: u64,
     /// the agent refused to open a conversation because it is not signed in: nothing more can be sent
     signed_out: bool,
+    /// the project's MCP servers the person approved (`acp_mcp.rs`), handed on when the conversation opens and nowhere else
+    mcp: crate::acp_mcp::Approved,
+    /// whether the agent takes HTTP and SSE servers (`agentCapabilities.mcpCapabilities`); stdio it always takes
+    mcp_http: bool,
+    mcp_sse: bool,
 }
 
 impl Acp {
@@ -439,7 +445,22 @@ impl Acp {
             can_load: false,
             msg_seq: 0,
             signed_out: false,
+            mcp: crate::acp_mcp::Approved::default(),
+            mcp_http: false,
+            mcp_sse: false,
         }
+    }
+
+    /// The project's approved MCP servers to hand the agent when its conversation opens ([`crate::acp_mcp::approved`]).
+    pub fn with_mcp(mut self, mcp: crate::acp_mcp::Approved) -> Acp {
+        self.mcp = mcp;
+        self
+    }
+
+    /// The `mcpServers` list of a `session/new`, `session/load` or `session/resume`: the approved servers in the shapes the
+    /// agent said it takes.
+    fn mcp_servers(&self) -> Value {
+        self.mcp.for_agent(self.mcp_http, self.mcp_sse)
     }
 
     fn call(&mut self, st: &mut Step, what: Call, method: &str, params: Value) -> u64 {
@@ -739,7 +760,8 @@ impl Acp {
                     if self.session.is_none() && self.resume.take().is_some() {
                         emit(st, ev("session.error", json!({"message": format!("{} could not continue the conversation ({msg}); this is a new one.", self.agent.label)})));
                         let cwd = self.cwd.clone();
-                        self.call(st, Call::Open, "session/new", json!({"cwd": cwd, "mcpServers": []}));
+                        let mcp = self.mcp_servers();
+                        self.call(st, Call::Open, "session/new", json!({"cwd": cwd, "mcpServers": mcp}));
                     } else {
                         emit(st, ev("session.error", json!({"message": msg})));
                         if self.turn {
@@ -761,17 +783,20 @@ impl Acp {
                 let caps = r.get("agentCapabilities").cloned().unwrap_or(Value::Null);
                 self.can_load = caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false);
                 self.can_resume = caps.get("sessionCapabilities").and_then(|c| c.get("resume")).is_some_and(|x| !x.is_null());
+                let takes = |k: &str| caps.get("mcpCapabilities").and_then(|m| m.get(k)).and_then(Value::as_bool) == Some(true);
+                (self.mcp_http, self.mcp_sse) = (takes("http"), takes("sse"));
                 let cwd = self.cwd.clone();
+                let mcp = self.mcp_servers();
                 match self.resume.clone() {
                     Some(sid) if self.can_resume => {
-                        self.call(st, Call::Open, "session/resume", json!({"sessionId": sid, "cwd": cwd, "mcpServers": []}));
+                        self.call(st, Call::Open, "session/resume", json!({"sessionId": sid, "cwd": cwd, "mcpServers": mcp}));
                     }
                     Some(sid) if self.can_load => {
-                        self.call(st, Call::Open, "session/load", json!({"sessionId": sid, "cwd": cwd, "mcpServers": []}));
+                        self.call(st, Call::Open, "session/load", json!({"sessionId": sid, "cwd": cwd, "mcpServers": mcp}));
                     }
                     _ => {
                         self.resume = None;
-                        self.call(st, Call::Open, "session/new", json!({"cwd": cwd, "mcpServers": []}));
+                        self.call(st, Call::Open, "session/new", json!({"cwd": cwd, "mcpServers": mcp}));
                     }
                 }
             }
@@ -1362,6 +1387,37 @@ fn decide_on(rules: &[(String, String, String)], tool: &str, input: &str, fold: 
         let st = a.on_line(&err);
         assert!(s(of(&st.events, "session.error")[0], "message").contains("could not continue"));
         assert_eq!(written(&st)[0]["method"], "session/new");
+    }
+
+    #[test]
+    fn the_approved_mcp_servers_go_to_the_agent_alone_in_the_shapes_it_takes() {
+        const SECRET: &str = "ghp_SECRET_only_for_the_agent";
+        let mcp = json!({"mcpServers": {
+            "github": {"command": "gh-mcp", "env": {"TOKEN": SECRET}},
+            "docs": {"type": "http", "url": "https://docs.example/mcp", "headers": {"Authorization": format!("Bearer {SECRET}")}}
+        }});
+        let init = |caps: Value| json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentCapabilities": caps}}).to_string();
+        // an agent that takes HTTP servers gets both; one that does not, the stdio one only
+        for (caps, names) in [(json!({"mcpCapabilities": {"http": true, "sse": false}}), vec!["docs", "github"]), (json!({}), vec!["github"])] {
+            let mut a = Acp::new(opencode(), "/w/proj", None).with_mcp(crate::acp_mcp::all_of(&mcp, &|_| None));
+            a.start();
+            let st = a.on_line(&init(caps));
+            let w = written(&st);
+            assert_eq!(w[0]["method"], "session/new");
+            let got: Vec<&str> = w[0]["params"]["mcpServers"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+            assert_eq!(got, names);
+            assert_eq!(w[0]["params"]["mcpServers"].as_array().unwrap().last().unwrap(), &json!({"name": "github", "command": "gh-mcp", "args": [], "env": [{"name": "TOKEN", "value": SECRET}]}));
+            // never in an event the page sees
+            let opened = a.on_line(&json!({"jsonrpc": "2.0", "id": w[0]["id"], "result": {"sessionId": "ses_abc"}}).to_string());
+            for e in st.events.iter().chain(opened.events.iter()) {
+                assert!(!e.to_string().contains(SECRET) && !e.to_string().contains("gh-mcp"), "{e}");
+            }
+        }
+        // a resumed conversation is handed the same servers
+        let mut a = Acp::new(opencode(), "/w", Some("ses_abc")).with_mcp(crate::acp_mcp::all_of(&mcp, &|_| None));
+        a.start();
+        let w = written(&a.on_line(&init(json!({"loadSession": true}))));
+        assert_eq!((w[0]["method"].as_str(), w[0]["params"]["mcpServers"].as_array().map(Vec::len)), (Some("session/load"), Some(1)));
     }
 
     #[test]

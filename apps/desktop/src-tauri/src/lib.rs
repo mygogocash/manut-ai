@@ -2,6 +2,7 @@ mod accounts;
 mod acp_agents;
 mod api_link;
 mod acp_chat;
+mod acp_mcp;
 mod agent_chat;
 mod app_menu;
 mod appimage;
