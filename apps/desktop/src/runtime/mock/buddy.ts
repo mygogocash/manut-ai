@@ -11,10 +11,17 @@
 // One agent process per conversation (Buddy's main chat, or one of its threads), kept for that conversation's next
 // message, and at most `LIVE` at once: a new one closes the idle one used longest ago. A conversation whose process was
 // closed starts a new one, which is handed what was said before so it can go on.
-import type { AskTool, ClarifyAnswers, ClarifyQuestion } from "../../lib/protocol";
+//
+// The chat box's choices (item 80): each conversation keeps its own model, effort and approval level (`box`, `set`).
+// The models and efforts are the ones the agent itself listed (any of Buddy's processes: the same agent, account and
+// settings list the same), never a list of ours; the approval levels are `BUDDY_MODES`. A choice reaches a running
+// process at once, and a process that starts later is set to it before the conversation's next message goes. The shell
+// checks every one of them again (`buddy_chat::check`).
+import type { AgentBox, AskTool, ClarifyAnswers, ClarifyQuestion } from "../../lib/protocol";
 import { listText, t } from "../../i18n";
 import { agentDef, INSTALL, type AgentId, type AgentInfo, type BuiltinId } from "../../sessions/agents";
-import type { BuddyHost, ChatEvent } from "../../sessions/host";
+import type { BuddyChatInput, BuddyHost, ChatEvent } from "../../sessions/host";
+import { parseCommands, type AgentCommand } from "../../chat/parts/commands";
 
 /** What answers Buddy now, as the model line names it: the agent's name, or that there is none. */
 export interface BuddyWho {
@@ -37,13 +44,28 @@ export interface BuddyTurn {
   prompt: string;
 }
 
-/** An ask the agent raised, as its card shows it. `id` is the agent's own request id. */
+/** An ask the agent raised, as its card shows it. `id` is the agent's own request id. `plan`: the plan a "Plan first"
+ *  turn asks to start on (Claude Code's ExitPlanMode), shown whole on the card. */
 export interface BuddyAsk {
   id: string;
   title: string;
   command: string;
   whole?: boolean;
   tool?: AskTool;
+  plan?: string;
+}
+
+/** Buddy's approval levels, Claude Code's own permission modes and the only ones the shell takes for Buddy
+ *  (`BUDDY_MODES` in src-tauri/src/buddy_chat.rs): `default`, where everything that acts asks first and every
+ *  conversation starts, and `plan`, where the agent says what it would do and changes nothing until the person says yes
+ *  to the plan. Never `acceptEdits` or a mode that skips the asks. */
+export const BUDDY_MODES: readonly string[] = ["default", "plan"];
+
+/** A choice in a conversation's box: a model the agent listed, one of its effort levels, an approval level. */
+export interface BuddyChoice {
+  model?: string;
+  effort?: string;
+  approval?: string;
 }
 
 /** A question the agent asked (Claude Code's AskUserQuestion). `id` is the agent's own request id. */
@@ -83,7 +105,21 @@ export interface BuddyMind {
   answer(key: string, id: string, answer: string | ClarifyAnswers): void;
   close(key: string): void;
   closeAll(): void;
+  /** Conversation `key`'s box: what the agent offers and what this conversation chose. */
+  box(key: string): AgentBox;
+  /** A choice in conversation `key`'s box. Throws for anything the agent did not offer. */
+  set(key: string, choice: BuddyChoice): AgentBox;
+  /** `fn` runs whenever a box may have changed (a choice, or what the agent listed or runs). */
+  onBox(fn: () => void): () => void;
+  /** The commands and skills the agent listed (its `session.commands`), for the `/` menu. */
+  commands(): AgentCommand[];
+  /** Keeps a copy of a file the person attached and gives its path (the shell's `buddy_file_save`). */
+  saveFile(name: string, data: Uint8Array): Promise<string>;
 }
+
+/** The line a message carries for each file attached to it in Buddy's chat: the copy's path, which the agent reads with
+ *  its own tools and asks before it does (the copy is outside the folder it runs in). English, as the agent reads it. */
+export const fileLine = (path: string) => `Attached file (a copy Manut AI saved; open it with your tools): ${path}`;
 
 /** The agents that may answer as Buddy, best first (`BUDDY_AGENTS` in src-tauri/src/buddy_chat.rs). */
 export const BUDDY_AGENTS: readonly BuiltinId[] = ["claude"];
@@ -153,6 +189,42 @@ interface Chat {
   out: BuddyOut | null;
   used: number;
   dead: boolean;
+  /** what the agent says this process runs: the model as it names it, and the effort */
+  model: string;
+  effort: string;
+  /** the model values this process listed (the only ones the shell lets a pick name) */
+  offered: string[];
+  /** settles once this process has listed its models */
+  listed: Promise<void>;
+  onListed: () => void;
+  /** the approval level the agent reported last; the one last asked of it, and whether it has said it took it */
+  mode: string;
+  asked: string;
+  confirmed: boolean;
+}
+
+/** How long a new process may take to list its models before a message waiting on a model choice goes anyway. */
+const LIST_MS = 10_000;
+
+/** `p`, or nothing after `ms`, whichever comes first. */
+function within(p: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((done) => {
+    timer = setTimeout(done, ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/** The models of a `session.models` event, as the agent listed them; odd entries dropped. */
+function modelsOf(raw: unknown): AgentBox["models"] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((o) => {
+    const m = o as Record<string, unknown>;
+    const id = typeof m?.id === "string" ? m.id : "";
+    if (!id) return [];
+    const label = typeof m.label === "string" && m.label ? m.label : id;
+    return [{ id, label, ...(typeof m.detail === "string" && m.detail ? { detail: m.detail } : {}) }];
+  });
 }
 
 /** Buddy answering through the person's own coding agent, on `host` (the shell in the app, a stand-in elsewhere). */
@@ -164,6 +236,11 @@ export class AgentBuddy implements BuddyMind {
   /** A reload keeps the shell, and any chat the page before this one started: those stop before the first starts. */
   private cleared: Promise<void> | null = null;
   private tick = 0;
+  /** Each conversation's own choices in its box, kept for it whatever process answers it. */
+  private readonly picks = new Map<string, BuddyChoice>();
+  /** What the agent listed last, in any of Buddy's processes: its models, effort levels, commands and skills. */
+  private listed: { models: AgentBox["models"]; efforts: string[]; commands: AgentCommand[] } = { models: [], efforts: [], commands: [] };
+  private readonly boxListeners = new Set<() => void>();
 
   constructor(private readonly host: () => BuddyHost) {
     void this.look();
@@ -194,8 +271,110 @@ export class AgentBuddy implements BuddyMind {
       if (next.model === this.current.model && next.provider === this.current.provider) return;
       this.current = next;
       for (const fn of [...this.listeners]) fn();
+      this.changed();
     });
     return p;
+  }
+
+  // ---- the chat box -----------------------------------------------------------------------------------------------
+
+  box(key: string): AgentBox {
+    const pick = this.picks.get(key) ?? {};
+    const chat = this.chats.get(key);
+    const live = chat && !chat.dead ? chat : null;
+    return {
+      agent: this.current.provider,
+      label: this.current.model,
+      models: this.listed.models.map((m) => ({ ...m })),
+      model: pick.model ?? "",
+      running: live?.model ?? "",
+      efforts: [...this.listed.efforts],
+      effort: pick.effort ?? live?.effort ?? "",
+      approvals: [...BUDDY_MODES],
+      // what the agent says it runs, once it has said so; until then what this conversation chose
+      approval: live?.confirmed ? live.mode : (pick.approval ?? "default"),
+    };
+  }
+
+  set(key: string, choice: BuddyChoice): AgentBox {
+    const next: BuddyChoice = { ...this.picks.get(key) };
+    if (choice.approval !== undefined) {
+      if (!BUDDY_MODES.includes(choice.approval)) throw new Error(`not an approval level Buddy offers: ${choice.approval}`);
+      next.approval = choice.approval;
+    }
+    if (choice.effort !== undefined) {
+      if (!this.listed.efforts.includes(choice.effort)) throw new Error(`not an effort level the agent offers: ${choice.effort}`);
+      next.effort = choice.effort;
+    }
+    if (choice.model !== undefined) {
+      if (!this.listed.models.some((m) => m.id === choice.model)) throw new Error(`not a model the agent offers: ${choice.model}`);
+      next.model = choice.model;
+    }
+    this.picks.set(key, next);
+    const chat = this.chats.get(key);
+    if (chat && !chat.dead) void this.apply(key, chat, choice);
+    this.changed();
+    return this.box(key);
+  }
+
+  onBox(fn: () => void): () => void {
+    this.boxListeners.add(fn);
+    return () => this.boxListeners.delete(fn);
+  }
+
+  commands(): AgentCommand[] {
+    return this.listed.commands.map((c) => ({ ...c }));
+  }
+
+  saveFile(name: string, data: Uint8Array): Promise<string> {
+    return Promise.resolve().then(() => this.host().buddySaveFile(name, data));
+  }
+
+  private changed(): void {
+    for (const fn of [...this.boxListeners]) fn();
+  }
+
+  /** Sends `choice` to conversation `key`'s process. A model goes once the process has listed its models, since the
+   *  shell takes only one it listed. A choice the agent or the shell refuses is let go, so the box never shows one the
+   *  agent does not run. */
+  private async apply(key: string, chat: Chat, choice: BuddyChoice): Promise<void> {
+    const send = async (field: keyof BuddyChoice, input: BuddyChatInput) => {
+      try {
+        await this.host().buddyInput(await chat.id, input);
+      } catch {
+        const pick = this.picks.get(key);
+        if (pick && pick[field] === choice[field]) {
+          const { [field]: _gone, ...rest } = pick;
+          this.picks.set(key, rest);
+        }
+        if (field === "approval") chat.asked = chat.mode;
+        this.changed();
+      }
+    };
+    if (choice.approval !== undefined) {
+      chat.asked = choice.approval;
+      chat.confirmed = false;
+      await send("approval", { kind: "mode", mode: choice.approval });
+    }
+    if (choice.effort !== undefined) await send("effort", { kind: "effort", effort: choice.effort });
+    if (choice.model !== undefined) {
+      await within(chat.listed, LIST_MS);
+      if (chat.offered.includes(choice.model)) await send("model", { kind: "model", model: choice.model });
+    }
+  }
+
+  /** The agent says it runs approval level `mode`. Once it has taken the one asked of it, a change it makes by itself (a
+   *  plan the person said yes to takes it back to `default`) becomes the conversation's choice too. */
+  private reportedMode(chat: Chat, mode: string): void {
+    chat.mode = mode;
+    if (mode === chat.asked) {
+      chat.confirmed = true;
+      return;
+    }
+    if (!chat.confirmed) return;
+    chat.asked = mode;
+    const key = [...this.chats.entries()].find(([, c]) => c === chat)?.[0];
+    if (key !== undefined && BUDDY_MODES.includes(mode)) this.picks.set(key, { ...this.picks.get(key), approval: mode });
   }
 
   send(turn: BuddyTurn, out: BuddyOut): void {
@@ -228,6 +407,13 @@ export class AgentBuddy implements BuddyMind {
     const id = await live.id;
     // stopped, or closed, while the agent started
     if (live.out !== out) return;
+    // a new process is set to this conversation's choices before its first message (it starts in `default` already)
+    const pick = this.picks.get(turn.key);
+    if (fresh && pick) {
+      const { approval, ...rest } = pick;
+      await this.apply(turn.key, live, approval && approval !== "default" ? pick : rest);
+      if (live.out !== out) return;
+    }
     // a slash command (one of the person's own skills) goes as typed, since the agent reads it only at the start of a message
     const first = fresh && !turn.text.startsWith("/");
     await this.host().buddyInput(id, { kind: "send", text: first ? withBefore(turn.before, turn.text) : turn.text });
@@ -237,7 +423,9 @@ export class AgentBuddy implements BuddyMind {
     this.spare();
     const host = this.host();
     this.cleared ??= host.buddyCloseAll().catch(noop);
-    const chat: Chat = { agent, id: Promise.resolve(0), out: null, used: ++this.tick, dead: false };
+    let onListed: () => void = noop;
+    const listed = new Promise<void>((done) => (onListed = done));
+    const chat: Chat = { agent, id: Promise.resolve(0), out: null, used: ++this.tick, dead: false, model: "", effort: "", offered: [], listed, onListed, mode: "default", asked: "default", confirmed: false };
     chat.id = this.cleared.then(() => host.buddyStart(agent, prompt, (ev) => this.onEvent(chat, ev)));
     chat.id.catch(() => {
       chat.dead = true;
@@ -272,8 +460,37 @@ export class AgentBuddy implements BuddyMind {
           command: typeof ev.command === "string" ? ev.command : "",
           ...(ev.whole === true ? { whole: true } : {}),
           ...(ev.tool && typeof ev.tool === "object" ? { tool: ev.tool as AskTool } : {}),
+          ...(typeof ev.plan === "string" && ev.plan ? { plan: ev.plan } : {}),
         });
         return;
+      // what the box shows: what this process runs, and what the agent lists
+      case "session.info":
+        if (typeof ev.model === "string" && ev.model) chat.model = ev.model;
+        if (typeof ev.effort === "string" && ev.effort) chat.effort = ev.effort;
+        if (typeof ev.mode === "string" && ev.mode) this.reportedMode(chat, ev.mode);
+        this.changed();
+        return;
+      case "session.models": {
+        const models = modelsOf(ev.options);
+        chat.offered = models.map((m) => m.id);
+        if (models.length) this.listed = { ...this.listed, models };
+        chat.onListed();
+        this.changed();
+        return;
+      }
+      case "session.efforts": {
+        const levels = Array.isArray(ev.levels) ? ev.levels.filter((x): x is string => typeof x === "string" && !!x) : [];
+        if (levels.length) this.listed = { ...this.listed, efforts: levels };
+        this.changed();
+        return;
+      }
+      case "session.commands": {
+        // a list may come in parts: each entry kept once, the newest words winning
+        const next = parseCommands(ev.commands);
+        const seen = new Set(next.map((c) => c.prefix + c.name));
+        this.listed = { ...this.listed, commands: [...this.listed.commands.filter((c) => !seen.has(c.prefix + c.name)), ...next] };
+        return;
+      }
       case "clarify.request":
         out?.question({
           id: String(ev.request_id),
@@ -296,7 +513,9 @@ export class AgentBuddy implements BuddyMind {
         return;
       case "exit":
         chat.dead = true;
+        chat.onListed();
         for (const [k, c] of this.chats) if (c === chat) this.chats.delete(k);
+        this.changed();
         if (!out) return;
         chat.out = null;
         out.say(whySaid(chat.agent, typeof ev.error === "string" ? ev.error : ""));
@@ -336,7 +555,9 @@ export class AgentBuddy implements BuddyMind {
     this.chats.delete(key);
     chat.dead = true;
     chat.out = null;
+    chat.onListed();
     void chat.id.then((id) => this.host().buddyClose(id)).catch(noop);
+    this.changed();
   }
 
   closeAll(): void {
@@ -354,4 +575,7 @@ export const NO_AGENTS: BuddyHost = {
   buddyInput: async () => {},
   buddyClose: async () => {},
   buddyCloseAll: async () => {},
+  buddySaveFile: async () => {
+    throw new Error("no coding agent here");
+  },
 };

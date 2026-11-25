@@ -35,6 +35,7 @@ import type {
   FolderResumeResult,
   ModelCurrent,
   ModelOptions,
+  AgentBox,
   PeekMsg,
   ReplyRef,
   Routine,
@@ -488,6 +489,10 @@ export interface AppState {
   /** Every bot's automations (`automations.list`, read from each profile's cron/jobs.json); null until read. */
   automations: Automation[] | null;
   models: Record<string, ModelOptions>;
+  /** Per chat (a bot's main chat by its name, a thread by its `fold:` key): the chat box's own choices when the chat
+   *  answers through the person's coding agent (`agent.box`, Buddy in Practice), null when it does not; absent until
+   *  read. */
+  agentBox: Record<string, AgentBox | null>;
   /** Per bot: the composer's "Reply there" chip, if any. */
   replyTo: Record<string, ReplyChip | null>;
   /** Per bot: its threads (bridge `thread.list`), newest first; absent until read. */
@@ -695,6 +700,7 @@ export function initialState(): AppState {
     routines: {},
     automations: null,
     models: {},
+    agentBox: {},
     replyTo: {},
     threads: {},
     shops: { list: [], current: null, left: [], dismissed: [], loaded: false },
@@ -1064,6 +1070,7 @@ export type Action =
   /** The first-run setup moved, opened again from Settings, or ended (null). */
   | { type: "ui.firstRun"; flow: FlowState | null }
   | { type: "models"; bot: string; options: ModelOptions }
+  | { type: "agentBox"; key: string; box: AgentBox | null }
   | { type: "model.set"; bot: string; current: ModelCurrent }
   | { type: "ui.panel"; open?: boolean }
   | { type: "ui.panelTab"; tab: PanelTabId }
@@ -1355,6 +1362,7 @@ function reduceEvent(state: AppState, ev: BridgeEvent, now: number): AppState {
       };
     case "elsewhere.update":
     case "bots.update":
+    case "agent.box":
     case "bot.restarted":
     case "accounts.update":
       return state; // the store refetches; nothing to change here
@@ -1675,6 +1683,8 @@ export function reduce(state: AppState, a: Action): AppState {
       return { ...state, ui: { ...state.ui, firstRun: a.flow } };
     case "models":
       return { ...state, models: { ...state.models, [a.bot]: a.options } };
+    case "agentBox":
+      return { ...state, agentBox: { ...state.agentBox, [a.key]: a.box } };
     case "model.set": {
       const next = touchChat(state, a.bot, (c) => ({
         ...c,
@@ -2162,6 +2172,10 @@ export interface Actions {
   /** Settings › General: open the setup again on Your shop, holding what was saved. */
   openFirstRun(): void;
   loadModels(bot?: string): Promise<void>;
+  /** Read the chat box's own choices of `bot`'s main chat, or of its thread `thread` (`agent.box`). */
+  loadAgentBox(bot: string, thread?: string): Promise<void>;
+  /** A choice in that box; resolves to the runtime's reason when it refused, else null (the box then shows it). */
+  setAgentBox(change: { model?: string; effort?: string; approval?: string }, bot: string, thread?: string): Promise<string | null>;
   peek(sessionId: string, limit?: number, bot?: string): Promise<void>;
   /** Change the main chat's model (the selected bot's, or `bot`'s). */
   setModel(change: { model?: string; provider?: string; reasoning?: string }, bot?: string): Promise<void>;
@@ -2569,6 +2583,26 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     }
   };
 
+  const loadAgentBox = async (bot: string, thread?: string) => {
+    const key = thread ? folderKey(bot, thread) : bot;
+    try {
+      const { box } = await bridge.request("agent.box", thread ? { bot, session: thread } : { bot });
+      dispatch({ type: "agentBox", key, box });
+    } catch {
+      // a runtime without the op (the WebSocket bridge, an older one) has no box of its own: the chat shows none
+      dispatch({ type: "agentBox", key, box: null });
+    }
+  };
+  const setAgentBox = async (change: { model?: string; effort?: string; approval?: string }, bot: string, thread?: string): Promise<string | null> => {
+    try {
+      const { box } = await bridge.request("agent.set", { ...(thread ? { bot, session: thread } : { bot }), ...change });
+      dispatch({ type: "agentBox", key: thread ? folderKey(bot, thread) : bot, box });
+      return null;
+    } catch (e) {
+      return errText(e);
+    }
+  };
+
   const online = (b: Bot) => b.status !== "offline";
 
   const setRoster = (roster: string[]) => {
@@ -2763,6 +2797,12 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
         if (ev.event === "routine.ran" || ev.event === "routines.update" || ev.event === "routine.added" || ev.event === "brief.ready")
           void loadAutomations();
         if (ev.event === "bots.update") void reloadBots();
+        // a bot's chat boxes changed: each one this page has read is read again
+        if (ev.event === "agent.box")
+          for (const key of Object.keys(state.agentBox)) {
+            if (key === ev.bot) void loadAgentBox(ev.bot);
+            else if (key.startsWith(folderKey(ev.bot, ""))) void loadAgentBox(ev.bot, key.slice(folderKey(ev.bot, "").length));
+          }
         if (ev.event === "shops.update") void loadShops();
         const tev = threadEvent(ev);
         if (tev) {
@@ -3049,6 +3089,8 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     loadRoutines,
     loadAutomations,
     loadModels,
+    loadAgentBox,
+    setAgentBox,
     openAutomations: (job) => {
       dispatch({ type: "ui.automations", job });
       void loadAutomations();

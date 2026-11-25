@@ -64,12 +64,18 @@ export interface PastMsg {
   ts: number;
 }
 
-/** What Buddy's chat may be sent (`buddy_chat::allowed` in src-tauri): a message, text only, Stop, or an answer. */
+/** What Buddy's chat may be sent (`buddy_chat::check` in src-tauri): a message, text only (an attached file goes by
+ *  its saved copy's path in the text), Stop, an answer, and the chat box's choices: a model Claude Code listed in that
+ *  chat, one of its own effort levels, and an approval level of `BUDDY_MODES` (src/runtime/mock/buddy.ts). The shell
+ *  checks each against its own fixed list and refuses anything else. */
 export type BuddyChatInput =
   | { kind: "send"; text: string }
   | { kind: "interrupt" }
   | { kind: "approve"; request_id: string; choice: ApprovalChoice }
-  | { kind: "clarify"; request_id: string; answer: string | ClarifyAnswers };
+  | { kind: "clarify"; request_id: string; answer: string | ClarifyAnswers }
+  | { kind: "model"; model: string }
+  | { kind: "effort"; effort: string }
+  | { kind: "mode"; mode: string };
 
 /** Buddy's chat through the person's own coding agent (src-tauri/src/buddy_chat.rs): Claude Code with their own account
  *  and configuration, in `~/.manut/buddy/chat`, kept apart from the coding sessions so their reset never stops it. Only
@@ -81,6 +87,9 @@ export interface BuddyHost {
   buddyClose(id: number): Promise<void>;
   /** Stop every one of Buddy's chats, those a page before this one started included. */
   buddyCloseAll(): Promise<void>;
+  /** Save a file the person attached in Buddy's chat under `~/.manut/buddy/files` (`buddy_chat::save_file`) and give its
+   *  path, which the message names. Outside Buddy's own folder, so its agent asks before it reads the copy. */
+  buddySaveFile(name: string, data: Uint8Array): Promise<string>;
 }
 
 export interface SessionHost extends HistoryHost {
@@ -268,6 +277,11 @@ export class TauriHost implements SessionHost, BuddyHost {
   async buddyCloseAll() {
     const { invoke } = await this.core();
     await invoke("buddy_close_all");
+  }
+  async buddySaveFile(name: string, data: Uint8Array) {
+    const { invoke } = await this.core();
+    // as a session's file: the bytes raw, the name in a header
+    return invoke<string>("buddy_file_save", data, { headers: { "x-name": encodeURIComponent(name) } });
   }
   async saveFile(session: string, name: string, data: Uint8Array) {
     const { invoke } = await this.core();
@@ -485,7 +499,8 @@ export interface MockCall {
     | "buddy.start"
     | "buddy.input"
     | "buddy.close"
-    | "buddy.closeAll";
+    | "buddy.closeAll"
+    | "buddy.file";
   id?: number;
   /** power.busy: the edge, and whether the shell lets go at once (the setting went off) */
   busy?: boolean;
@@ -962,6 +977,9 @@ export class MockHost implements SessionHost, BuddyHost {
     this.log({ op: "buddy.input", id, input });
     const c = this.buddies.get(id);
     if (!c) throw new Error("no such session");
+    // as the shell's `buddy_chat::check`: Buddy's own approval levels only, and a model the agent listed
+    if (input.kind === "mode" && !["default", "plan"].includes(input.mode)) throw new Error("Buddy's chat takes a message, Stop, an answer, or a model, effort or approval level it offers");
+    if (input.kind === "model" && !(MOCK_MODELS.claude ?? []).some((m) => m.id === input.model)) throw new Error(`${input.model} is not a model Claude Code offered in this chat`);
     c.input(input);
   }
   async buddyClose(id: number) {
@@ -973,6 +991,16 @@ export class MockHost implements SessionHost, BuddyHost {
     this.log({ op: "buddy.closeAll" });
     for (const c of this.buddies.values()) c.stop();
     this.buddies.clear();
+  }
+  async buddySaveFile(name: string, data: Uint8Array) {
+    if (this.g.__manutFileSaveError) throw new Error(this.g.__manutFileSaveError);
+    const dir = "/home/you/.manut/buddy/files/";
+    let n = 1;
+    while (this.files.has(`${dir}${n}-${name}`)) n += 1;
+    const path = `${dir}${n}-${name}`;
+    this.files.set(path, data);
+    this.log({ op: "buddy.file", name, size: data.length, path });
+    return path;
   }
 
   // ---- files: kept in memory under the same paths the shell would use ------------------------
