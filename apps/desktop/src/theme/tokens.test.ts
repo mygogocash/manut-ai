@@ -76,7 +76,7 @@ describe("tokens.css against packages/ui-kit/tokens.json", () => {
     expect(stack[stack.length - 1]).toBe("sans-serif");
     for (const cjk of ["PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo"]) expect(stack, cjk).toContain(cjk);
     // each family the tokens name first is a font file in the bundle, not a hope that the computer has it
-    for (const family of ["Geist", "Geist Mono", "IBM Plex Sans Thai"]) expect(FONTS, family).toContain(`font-family: "${family}";`);
+    for (const family of ["Geist", "Geist Mono", "IBM Plex Sans Thai", "Source Serif 4"]) expect(FONTS, family).toContain(`font-family: "${family}";`);
     expect(FONTS).not.toMatch(/https?:/);
   });
 });

@@ -1,4 +1,17 @@
-/* Chat: header, timeline (filled bubbles), composer. */
+/* Chat: header, timeline, composer. The timeline reads as the Chat board (item 85f): an answer stands on the page in
+   the serif at the Type board's Reading size, and only the person's own message is in a bubble (the kit's `.you`). */
+:root {
+  /* one line of an answer as it stands (the default "open" look), and of the person's bubble with its 10px above and
+     below: what the typing row, the live line and the marks beside a message line up with */
+  --ans-pad-y: 0px;
+  --ans-line: calc(var(--fs-read) * var(--lh-read) + 2 * var(--ans-pad-y));
+  --you-line: calc(var(--fs-msg) * var(--lh-msg) + 20px);
+}
+/* Settings > Appearance can still put the answer in a bubble (Soft, Solid) */
+[data-bubbles="soft"],
+[data-bubbles="solid"] {
+  --ans-pad-y: 9px;
+}
 .chat-empty {
   flex: 1;
   display: grid;
@@ -212,15 +225,15 @@
    takes the dots' place and nothing moves; until the answer starts it carries the ringed face in that column */
 .thread > .row-activity.live-line {
   position: relative;
-  padding-block: calc((var(--fs-msg) * var(--lh-msg) + 18px - 30px) / 2);
+  padding-block: max(0px, calc((var(--ans-line) - 30px) / 2));
 }
 .thread > .row-activity.live-line > .ui-ring-w {
   position: absolute;
   left: 0;
-  top: calc((var(--fs-msg) * var(--lh-msg) + 18px - 28px) / 2);
+  top: max(0px, calc((var(--ans-line) - 28px) / 2));
 }
 
-/* bubbles: filled both sides, no border, 10px radius */
+/* the person's message in its bubble on the right; an answer on the page on the left, beside its face */
 .msg {
   display: flex;
   flex-direction: column;
@@ -268,9 +281,6 @@
 }
 .msg .b {
   border-radius: var(--r-bubble);
-  padding: 9px 13px;
-  line-height: var(--lh-msg);
-  font-size: var(--fs-msg);
   /* Korean/CJK wraps at spaces, long tokens still break */
   word-break: keep-all;
   overflow-wrap: anywhere;
@@ -279,18 +289,27 @@
 .msg .b code {
   background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
+/* the kit's `.you`: 15px / 1.5 at the default size, 10px 14px inside, 82% of the column up to 560px; in a narrow
+   column (a side panel open) it may use all but 40px of it */
 .msg.u .b {
+  padding: 10px 14px;
+  font-size: var(--fs-msg);
+  line-height: var(--lh-msg);
   background: var(--bub-me);
   color: var(--ink);
-  /* 70% of the column, up to 640px; in a narrow column (a side panel open) it may use all but 40px of it */
-  max-width: min(100% - 40px, max(70%, 380px), 640px);
+  max-width: min(100% - 40px, max(82%, 380px), 560px);
   white-space: pre-wrap;
 }
+/* the Type board's Reading: the serif at 17px / 1.65 at the default size, never wider than 696px */
 .msg.a .b {
+  padding: var(--ans-pad-y) 13px;
+  font-family: var(--font-read);
+  font-size: var(--fs-read);
+  line-height: var(--lh-read);
   background: var(--bub-bot);
   color: var(--body);
   /* 80% of the column; in a narrow column the whole of it, so a sentence is not five lines beside empty room */
-  max-width: min(100%, max(80%, 440px));
+  max-width: min(100%, max(80%, 440px), 696px);
 }
 
 /* bubble styles (Settings > Appearance) */
@@ -302,11 +321,12 @@
   background: rgba(255, 255, 255, 0.18);
   color: inherit;
 }
+/* the default: the answer on the page, as the Chat board draws it */
 [data-bubbles="open"] .msg.a .b {
   background: none;
   padding-left: 0;
   padding-right: 0;
-  max-width: 100%;
+  max-width: min(100%, 696px);
   border-radius: 0;
 }
 .msg-err {
@@ -328,7 +348,7 @@
    ellipsis inside the bubble's width instead of wrapping */
 .msg-steer-reply {
   margin-top: 1px;
-  max-width: min(100% - 40px, max(70%, 380px), 640px);
+  max-width: min(100% - 40px, max(82%, 380px), 560px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -378,7 +398,7 @@
   flex: none;
   display: inline-flex;
   gap: 4px;
-  margin-top: calc((var(--fs-msg) * var(--lh-msg) + 18px - 24px) / 2);
+  margin-top: calc((var(--you-line) - 24px) / 2);
 }
 .sq-mark {
   width: 24px;
@@ -636,17 +656,104 @@
   border-width: 0 0 1.5px 1.5px;
   transform: translateY(-1px) rotate(-45deg);
 }
+/* Markdown in an answer (item 85f), the serif's rhythm: paragraphs 12px apart as the kit's `.prose p`, headings one
+   step up the scale at weight 600, lists with room for their markers. Code stays monospace at the board's sizes (the
+   kit's `.codeb` for a block: 12px / 1.6 on a quiet ground with a hairline edge), and a table is set in the interface
+   face as the kit's data table (13px, figures in columns, a muted header, hairlines between rows), so a long answer
+   reads in the serif and its figures and code still scan. */
+.msg.a .md > * + * {
+  margin-top: var(--read-gap, 12px);
+}
+.msg.a .md li > p + p,
+.msg.a .md li > ul,
+.msg.a .md li > ol {
+  margin-top: 4px;
+}
+.msg.a .md ul,
+.msg.a .md ol {
+  padding-left: 24px;
+  gap: 4px;
+}
+.msg.a .md :is(h1, h2, h3, h4) {
+  font-weight: 600;
+  line-height: 1.35;
+}
+.msg.a .md :is(h1, h2) {
+  font-size: var(--fs-read-h);
+}
+.msg.a .md :is(h3, h4) {
+  font-size: var(--fs-read);
+}
+.msg.a .md > :is(h1, h2, h3, h4):not(:first-child) {
+  margin-top: 24px;
+}
+.msg.a .md > :is(h1, h2, h3, h4) + * {
+  margin-top: 8px;
+}
+.msg.a .md code {
+  font-size: var(--fs-read-code);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+}
+.msg.a .md pre {
+  padding: 12px 32px 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.msg.a .md pre code {
+  font-size: inherit;
+  padding: 0;
+}
+.msg.a .md blockquote {
+  padding: 0 0 0 14px;
+  border-left-width: 2px;
+}
+.msg.a .md table {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.msg.a .md th,
+.msg.a .md td {
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 8px 12px;
+}
+.msg.a .md thead th {
+  border-top: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.msg.a .md td code {
+  font-size: 12px;
+}
+/* a task's box at the size of the serif's line */
+.msg.a .md .task-list-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
 /* waiting for the first token: the face with the live ring, then a bubble of three typing dots */
 .msg.a.typing {
   flex-direction: row;
   align-items: center;
   gap: 10px;
 }
-/* one line tall, like the bubble that replaces it */
+/* one line tall, like the answer that replaces it */
 .msg.a.typing .b {
   display: flex;
   align-items: center;
-  height: calc(var(--fs-msg) * var(--lh-msg) + 18px);
+  height: max(28px, var(--ans-line));
   padding: 0 14px;
 }
 /* the live activity line right under the dots: a small gap, so the two read as one live block */
@@ -794,7 +901,8 @@
   outline: 0;
   color: var(--ink);
   font-size: var(--fs-msg);
-  line-height: 20px;
+  /* the box's line (tokens.css), which its mirror (parts/skills.css) shares */
+  line-height: var(--lh-box);
   padding: 5px 0;
   max-height: 200px;
 }

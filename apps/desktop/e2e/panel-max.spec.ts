@@ -207,7 +207,8 @@ const freeRowPoint = (page: Page) =>
 const isMaxed = async (page: Page) => /\bpanel-max\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "");
 
 /** Each slide round starts the same way, whatever the last one's press hit (a control is the person's: the model
- *  picker may be open, the places chip may have closed the panel): picker closed, panel open on Plans, maximised. */
+ *  picker may be open, the places chip or the panel button may have closed the panel): picker closed, panel open on
+ *  Plans, maximised. */
 async function maxForRound(page: Page) {
   if (await page.getByTestId("model-pop").isVisible()) await page.keyboard.press("Escape");
   await expect(page.getByTestId("model-pop")).toBeHidden();
@@ -230,6 +231,7 @@ const recordPresses = (page: Page) =>
     const where = (t: Element) => ({
       model: !!t.closest('[data-testid="model-pill"]'),
       places: !!t.closest('[data-testid="places"]'),
+      button: !!t.closest('[data-testid="panel-button"]'),
     });
     window.addEventListener(
       "pointerdown",
@@ -258,7 +260,7 @@ const recordPresses = (page: Page) =>
       true,
     );
   });
-type Spot = { model: boolean; places: boolean };
+type Spot = { model: boolean; places: boolean; button: boolean };
 type Press = Spot & { id: string | null; row: boolean; control: boolean; sliding: boolean; aim: number | null; at: number; up?: Spot };
 const presses = (page: Page) => page.evaluate(() => (window as unknown as { __presses: Press[] }).__presses.splice(0));
 /** Watches (x, y), free tab-row space now, every frame until the next press: a press that lands on what slid in
@@ -298,8 +300,8 @@ const slideStarted = (page: Page) =>
     { polling: "raf", timeout: 2000 },
   );
 
-// A control in the chat header the person actually hits during the restore slide is theirs (the model pill opens
-// its picker, the places chip closes the panel), at every delay; only the header's bare background can be claimed by
+// A control in the chat header the person actually hits during the restore slide is theirs (the panel button and the
+// places chip close the panel; the model pill that was here moved into the chat box in item 85f), at every delay; only the header's bare background can be claimed by
 // a double-click aimed at the tab row. The delay counts from the Esc keydown; the point is hit-tested right before a
 // real mouse click, and only a round whose real pointerdown AND pointerup both landed inside the control counts: a
 // press on a control still sliding can be released over whatever slid in under the pointer, and the browser clicks
@@ -307,7 +309,7 @@ const slideStarted = (page: Page) =>
 // delay (a loaded runner starts the slide late), the round clicks at the first moment after the delay the control
 // shows: the earliest press the slide could steal. A press that landed or was released elsewhere is sampled again:
 // 20 actual hits, 0 lost.
-for (const control of ["model-pill", "places"] as const)
+for (const control of ["panel-button", "places"] as const)
   for (const delay of [120, 180, 220, 280, 350, 450])
     test(`a real click on the header's ${control} ${delay}ms after Esc is never stolen by the slide, 20 actual hits`, async ({ page }) => {
       // 20 actual hits; a round only misses when the press lands elsewhere, so 60 rounds is plenty
@@ -315,7 +317,7 @@ for (const control of ["model-pill", "places"] as const)
       await page.setViewportSize({ width: 1440, height: 900 });
       await openPanel(page, "runs");
       await recordPresses(page);
-      const own = (h: Spot) => (control === "model-pill" ? h.model : h.places);
+      const own = (h: Spot) => (control === "panel-button" ? h.button : h.places);
       const hits: { round: number; after: number; worked: boolean }[] = [];
       const left: { round: number; why: string }[] = [];
       for (let round = 0; hits.length < 20 && round < 60; round++) {
@@ -355,10 +357,7 @@ for (const control of ["model-pill", "places"] as const)
         }
         const after = Math.round(hit.at - (await page.evaluate(() => (window as unknown as { __esc: number }).__esc)));
         await page.waitForTimeout(450);
-        const worked =
-          control === "model-pill"
-            ? await page.getByTestId("model-pop").isVisible()
-            : !/\bpanel-open\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "");
+        const worked = !/\bpanel-open\b/.test((await page.getByTestId("window").getAttribute("class")) ?? "");
         hits.push({ round, after, worked });
       }
       const summary = JSON.stringify({ control, delay, hits, left });
@@ -386,8 +385,8 @@ async function escUntil(page: Page, x: number, y: number, want: "bare" | "contro
 // away before the second) aimed below the header's controls, so the second press lands on the chat header's bare
 // background, never a control: still maximises, 10 of 10. Only a round whose first press landed while the slide ran,
 // within the row's aim window of the spot last showing the row (watchSpot), counts: a loaded runner can deliver it
-// later, and a press on the bare header the row left long before is not aimed at the row (sampled again). The chosen trade-off, next test: a press that lands on a header control (the model
-// pill) after the row left is the control's, and that double-click does not toggle.
+// later, and a press on the bare header the row left long before is not aimed at the row (sampled again). The chosen trade-off, next test: a press that lands on a header control (the panel
+// button) after the row left is the control's, and that double-click does not toggle.
 test("restore-slide double-click whose second press lands on bare header background maximises 10 of 10", async ({ page }) => {
   test.setTimeout(300_000); // up to 40 slide rounds on a slow runner
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -415,13 +414,13 @@ test("restore-slide double-click whose second press lands on bare header backgro
   expect(maxed).toBe(10);
 });
 
-test("trade-off: where the model pill slid over the row's old free space, the pill wins and the double-click does not toggle", async ({ page }) => {
+test("trade-off: where the panel button slid over the row's old free space, the button wins and the double-click does not toggle", async ({ page }) => {
   test.setTimeout(90_000); // 10 slide rounds on a slow runner
   await page.setViewportSize({ width: 1440, height: 900 });
   await openPanel(page, "runs");
   await recordPresses(page);
-  // the pill's place once restored: free tab-row space while maximised
-  const p = await page.getByTestId("model-pill").evaluate((e) => {
+  // the button's place once restored: free tab-row space while maximised
+  const p = await page.getByTestId("panel-button").evaluate((e) => {
     const b = e.getBoundingClientRect();
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
   });
@@ -433,17 +432,17 @@ test("trade-off: where the model pill slid over the row's old free space, the pi
     await page.mouse.dblclick(p.x, p.y, { delay: 45 });
     const [first] = await presses(page);
     await page.waitForTimeout(400);
-    expect(first.model, `round ${i}: ${JSON.stringify(first)}`).toBe(true);
-    expect(await isMaxed(page), `round ${i}: the pill won, no toggle`).toBe(false);
+    expect(first.button, `round ${i}: ${JSON.stringify(first)}`).toBe(true);
+    expect(await isMaxed(page), `round ${i}: the button won, no toggle`).toBe(false);
     await settled(page);
   }
 });
 
-// Where the second press lands on a header control the slide brought under the pointer (the model pill), the control
+// Where the second press lands on a header control the slide brought under the pointer (the panel button), the control
 // wins and the pair does not toggle (the chosen trade-off, above); every other round whose first press landed while
 // the slide ran, within the row's aim window (watchSpot), maximises, 10 of 10. A loaded runner can deliver the first
 // press after the slide ended, or long after the row left the spot, on a tab or the bare header: that is a settled
-// press, the tab's or nobody's, not a double click aimed at the row during the slide, and is sampled again. Some rounds land on the pill at this point, so the 10 qualifying rounds take up
+// press, the tab's or nobody's, not a double click aimed at the row during the slide, and is sampled again. Some rounds land on the button at this point, so the 10 qualifying rounds take up
 // to 60.
 test("a person's double-click on the tab row during the restore slide still maximises, 10 of 10 (real mouse)", async ({ page }) => {
   test.setTimeout(300_000); // up to 60 slide rounds on a slow runner

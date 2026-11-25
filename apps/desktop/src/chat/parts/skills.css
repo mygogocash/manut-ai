@@ -20,7 +20,7 @@
   /* the textarea's own type and wrapping (.composer textarea), so every line breaks at the same place */
   font: inherit;
   font-size: var(--fs-msg);
-  line-height: 20px;
+  line-height: var(--lh-box);
   padding: 5px 0;
   white-space: pre-wrap;
   overflow-wrap: break-word;

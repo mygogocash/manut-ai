@@ -157,12 +157,13 @@ test.beforeEach(async () => {
 
 // ---- the tab and the list ----
 
-test("Plans is the sixth tab; the header holds the model control and the panel button; the panel is 460px, up to 560px beyond a 480px chat", async ({ page }) => {
+test("Plans is the sixth tab; the header holds the panel button; the panel is 460px, up to 560px beyond a 480px chat", async ({ page }) => {
   await openRuns(page);
   const tabs = page.getByRole("tablist", { name: "Panel" }).getByRole("tab");
   expect(await tabs.evaluateAll((els) => els.map((e) => e.getAttribute("title")))).toEqual(["Details", "Terminal", "Schedule", "Worktrees", "Diff", "Plans"]);
   await expect(page.getByTestId("panel-tab-runs")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   // what the window has beyond the 248px sidebar and a 480px chat, between 460 and 560
   const width = async () => Math.round((await page.getByTestId("details").boundingBox())?.width ?? 0);
   await expect.poll(width).toBe(552);
@@ -1347,7 +1348,8 @@ test("⌘⇧G and 'Full view' maximise the panel in place; Esc and the button re
   await expect.poll(async () => Math.round((await page.getByTestId("details").boundingBox())!.x)).toBe(Math.round(side));
   await expect(page.getByTestId("details")).toBeVisible();
   await expect(page.locator("[role=dialog]")).toHaveCount(0);
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   await expect(full(page).getByTestId("run-node")).toHaveCount(6);
   // the same plain header, and the drawing at the text's own size from the top
   await expect(full(page).getByTestId("run-plan-title")).toHaveText("Codex coexistence (live)");
