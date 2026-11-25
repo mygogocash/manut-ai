@@ -177,8 +177,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 60, the offline cache sealed at rest: AES-GCM under a key held only in the keychain, version 6, no plain
-     cache where there is no keychain (`feat/cache-sealed`, Opus), started 25 Nov when item 58 merged.
    - item 61, a shop's live feed, built and switched off: a hibernating WebSocket per shop session that only says
      something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -194,7 +192,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 59 (making a routine from the console: a form whose every field `@manut/routine-rules` checks, every fault
+   Merged: 60 (the offline cache sealed at rest: AES-256-GCM in the webview's Web Crypto, a fresh nonce each write
+   and the version, origin and tenant bound in, under a key made from SecRandomCopyBytes and held only in the macOS
+   keychain; version 6, a version-5 file deleted unread; the key deleted whenever the kept read is forgotten; no copy
+   kept where there is no keychain; both usage-limit stops resumed by themselves at 13:50; desktop only, Rust changed),
+   59 (making a routine from the console: a form whose every field `@manut/routine-rules` checks, every fault
    beside its field, asked first with the routine in the API's words and its next run, then exactly the route's body;
    asks first locked on for a reply, a send, a payment or a deletion; practice world v14; pages Worker redeployed),
    58 (the preview drawn in the pane: a sandboxed frame, `allow-scripts allow-same-origin allow-forms`, of the
@@ -412,6 +414,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 ## Known flaky tests (they fail only under heavy load)
 
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
+- `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
+  failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
+  second for "Everyone is paused since 10:00 today."), and both passed when run alone.
 - `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
   (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
 - `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
