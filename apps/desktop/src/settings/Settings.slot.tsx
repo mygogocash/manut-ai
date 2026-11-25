@@ -1,10 +1,13 @@
-// Settings view (main column while `ui.view === "settings"`). Left list: Bots (one page per bot: Profile, Model, Work)
-// and App (General, Voice, Terminal, Providers, Computer, Worktrees, Source control, MCP and Skills, Workflows, Developer). Providers (item 74) is
-// the coding agents with their settings, the person's own agents and the accounts, in every mode; the page ids of the
-// two pages it replaced, `agents` and `accounts`, open it (`accounts` at its accounts). Pages are `bot:<name>`
-// and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
+// Settings view (main column while `ui.view === "settings"`), as the design canvas's Settings board draws it (item
+// 85h): a quiet list of its pages beside one reading column. The list leads with the everyday pages (General, Voice),
+// then the team (Bots: one page per bot, Profile, Model, Work) and the shop's People; the developer pages (Terminal,
+// Providers, Computer, Worktrees, Source control, Artifacts, MCP and Skills, Workflows, Developer) live under one entry,
+// "Under the hood", which opens their list. Providers (item 74) is the coding agents with their settings, the person's
+// own agents and the accounts, in every mode; the page ids of the two pages it replaced, `agents` and `accounts`, open
+// it (`accounts` at its accounts). Pages are `bot:<name>` and the App page names; the page lives in the store
+// (`ui.settingsPage`) so the model popover can deep-link to a bot, and a link to a page under the hood opens the hood.
 // Oh My Hermes also had Providers (`hermes auth`) and Remote machines (Hermes over SSH) here; both needed its bridge.
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import "./settings.css";
 import type { SlotProps } from "../features";
 import type { Bot, ModelOptions } from "../lib/protocol";
@@ -13,7 +16,7 @@ import { addToList } from "../addbot/bots";
 import { appSounds, setSoundsEnabled, soundsEnabled } from "../lib/sounds";
 import { LANG_NAMES, LANGS, t, type Key, type Lang } from "../i18n";
 import { Avatar, GridIcon, ModelIcon, SourceIcon } from "../ui";
-import { Seg } from "../chat/model/Seg";
+import { Modes } from "../ui/Modes";
 import { reasoningLabel } from "../chat/model/levels";
 import { Appearance } from "./Appearance";
 import { TerminalPage } from "./terminal/TerminalPage";
@@ -35,9 +38,52 @@ import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 import { WorkflowsPage } from "../workflows/WorkflowsPage";
-import { APP_PAGES } from "./pages";
+import { APP_PAGES, EVERYDAY_PAGES, HOOD_PAGES, inHood } from "./pages";
 
 export const slot = "settings";
+
+/** Whether "Under the hood" was left open: a convenience for whoever uses the developer pages, kept on this computer
+ *  only. Everyone else finds it closed, which is how it starts. Storage that cannot be read reads as closed. */
+export const HOOD_KEY = "manut.settings.hood";
+export function hoodRemembered(): boolean {
+  try {
+    return localStorage.getItem(HOOD_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function rememberHood(open: boolean): void {
+  try {
+    if (open) localStorage.setItem(HOOD_KEY, "1");
+    else localStorage.removeItem(HOOD_KEY);
+  } catch {
+    // not kept: the hood is only as open as it is now
+  }
+}
+
+/** "Under the hood" is open when the person left it open, and whenever the page shown is one of its own (a deep link
+ *  from the palette or a page's button), so the page's entry is always in sight beside it. Closing it while one of its
+ *  pages is shown is allowed: the page stays, and the entry is marked as holding it. */
+function useHood(current: string): [boolean, () => void] {
+  const [open, setOpen] = useState(() => hoodRemembered() || inHood(current));
+  const [seen, setSeen] = useState(current);
+  if (seen !== current) {
+    setSeen(current);
+    if (inHood(current) && !open) setOpen(true);
+  }
+  const toggle = () => {
+    rememberHood(!open);
+    setOpen(!open);
+  };
+  return [open, toggle];
+}
+
+/** The disclosure's chevron, in the canvas's icon style (16px, a 1.4 line). */
+const HoodChevron = () => (
+  <svg className="st-ic st-hood-ic" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M4.5 6.5L8 10l3.5-3.5" />
+  </svg>
+);
 
 
 const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offline", starting: "bot.starting" };
@@ -53,16 +99,23 @@ export default function Settings({ page }: SlotProps["settings"]) {
   const bot = botName ? s.bots.find((b) => b.name === botName) : undefined;
   const asked = pageOf(page);
   const current = bot ? `bot:${bot.name}` : asked === "bots" || (asked === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === asked) ? asked : "general";
+  const [hood, toggleHood] = useHood(current);
 
   return (
     <div className="st" data-testid="settings-view">
       <nav className="st-nav" aria-label={t("set.sections")}>
+        {EVERYDAY_PAGES.map((p) => (
+          <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
+            {t(p.label)}
+          </NavItem>
+        ))}
         <div className="st-sh">{t("set.bots")}</div>
         <NavItem id="bots" current={current} onPick={s.openSettings}>
           <span className="st-nav-i" aria-hidden="true">
             <GridIcon />
           </span>
-          {t("set.allBots")}<span className="st-count">{s.bots.length}</span>
+          <span className="st-nav-n">{t("set.allBots")}</span>
+          <span className="st-count">{s.bots.length}</span>
         </NavItem>
         {s.bots.map((b) => (
           <NavItem key={b.name} id={`bot:${b.name}`} current={current} onPick={s.openSettings}>
@@ -73,20 +126,36 @@ export default function Settings({ page }: SlotProps["settings"]) {
         {/* who can use Manut AI for the shop the switcher shows: the shop's owner's, so it sits with the shop and not with the app */}
         {peopleOffered() && (
           <>
-            <div className="st-sh st-sh2">{t("set.shop")}</div>
+            <div className="st-sh">{t("set.shop")}</div>
             <NavItem id="people" current={current} onPick={s.openSettings}>
               {t("set.people")}
             </NavItem>
           </>
         )}
-        <div className="st-sh st-sh2">{t("set.app")}</div>
-        {APP_PAGES.map((p) => (
-          <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
-            {t(p.label)}
-          </NavItem>
-        ))}
+        <button
+          type="button"
+          className={`st-hood${!hood && inHood(current) ? " holds" : ""}`}
+          aria-expanded={hood}
+          aria-controls="st-hood-list"
+          onClick={toggleHood}
+          data-testid="settings-hood"
+        >
+          <span className="st-nav-n">{t("set.hood")}</span>
+          <HoodChevron />
+        </button>
+        {hood && (
+          <div className="st-hood-list" id="st-hood-list" role="group" aria-label={t("set.hood")} data-testid="settings-hood-list">
+            {HOOD_PAGES.map((p) => (
+              <NavItem key={p.id} id={p.id} current={current} onPick={s.openSettings}>
+                {t(p.label)}
+              </NavItem>
+            ))}
+          </div>
+        )}
       </nav>
       <div className="st-body" data-testid={`settings-page-${current.replace(":", "-")}`}>
+        {/* keyed by the page, so each page's content comes in once, quietly, as it opens (settings.css) */}
+        <Fragment key={current}>
         {bot ? (
           <BotPage bot={bot} />
         ) : current === "bots" ? (
@@ -116,6 +185,7 @@ export default function Settings({ page }: SlotProps["settings"]) {
         ) : (
           <GeneralPage />
         )}
+        </Fragment>
       </div>
     </div>
   );
@@ -407,8 +477,7 @@ const SHORTCUTS: [string, Key][] = [
 function NotifySeg() {
   const [on, setOn] = useState(notifyEnabled());
   return (
-    <Seg
-      small
+    <Modes
       label={t("set.notify")}
       value={on ? "on" : "off"}
       options={[
@@ -427,8 +496,7 @@ function NotifySeg() {
 function NotifyErrorsSeg() {
   const [on, setOn] = useState(notifyErrorsEnabled());
   return (
-    <Seg
-      small
+    <Modes
       label={t("set.notifyErrors")}
       value={on ? "on" : "off"}
       options={[
@@ -515,8 +583,7 @@ function SoundsSeg() {
       <button type="button" className="st-btn" disabled={!on} onClick={() => appSounds().preview()} data-testid="sounds-play">
         {t("sounds.play")}
       </button>
-      <Seg
-        small
+      <Modes
         label={t("sounds.title")}
         value={on ? "on" : "off"}
         options={[
@@ -537,8 +604,7 @@ function SoundsSeg() {
 function DiskWarnSeg() {
   const [v, setV] = useState(diskWarn());
   return (
-    <Seg
-      small
+    <Modes
       label={t("disk.setting")}
       value={String(v)}
       options={DISK_WARN_CHOICES.map((n) => ({ value: String(n), label: n ? t("disk.gb", { n }) : t("set.off") }))}
@@ -559,8 +625,7 @@ function TasksBarToggle() {
 function CloseSeg() {
   const [hide, setHide] = useState(closeHides());
   return (
-    <Seg
-      small
+    <Modes
       label={t("win.close")}
       value={hide ? "tray" : "quit"}
       options={[
@@ -609,7 +674,7 @@ function GeneralPage() {
       <Appearance />
       <div className="st-grp st-grp-lang">
         <Row title={t("lang.title")} hint={t("lang.hint")}>
-          <Seg
+          <Modes
             label={t("lang.title")}
             value={s.ui.lang}
             onChange={(v) => s.setLanguage(v as Lang)}

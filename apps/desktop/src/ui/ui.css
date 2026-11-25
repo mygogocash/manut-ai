@@ -36,6 +36,47 @@ button.ui-pill:hover {
   color: var(--muted);
   font-weight: 500;
 }
+/* The one segmented switch (Modes.tsx, and Home's ask box): the canvas's .modes and .mode from packages/ui-kit/app.css,
+   a 28px pill per choice in a pill that holds them. The chosen one is lifted on the surface with a hairline, never a
+   colour. Settings marks it aria-checked (radios), Home aria-pressed (pressed buttons); the look is one. */
+.ui-modes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  background: var(--soft);
+}
+.ui-mode {
+  position: relative;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--rad-pill);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  white-space: nowrap;
+}
+.ui-mode:hover:not(:disabled) {
+  color: var(--ink);
+}
+.ui-mode[aria-pressed="true"],
+.ui-mode[aria-checked="true"] {
+  background: var(--aui-surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.ui-mode:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* the canvas's larger press area: each choice reaches 8px past its top and bottom, to 44px */
+.ui-mode::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
+}
 .ui-spin {
   display: inline-block;
   flex: none;

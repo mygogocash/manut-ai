@@ -188,9 +188,9 @@ export function HomeView(p: HomeViewProps) {
             data-testid="home-ask"
           />
           <div className="askrow">
-            <div className="modes" role="group" aria-label={t("home.where")}>
+            <div className="ui-modes" role="group" aria-label={t("home.where")}>
               {p.modes.map((m) => (
-                <button key={m} type="button" className="mode" aria-pressed={m === p.mode} onClick={() => p.onMode(m)} data-testid={`home-mode-${m}`}>
+                <button key={m} type="button" className="ui-mode" aria-pressed={m === p.mode} onClick={() => p.onMode(m)} data-testid={`home-mode-${m}`}>
                   {t(MODE_WORDS[m].label)}
                 </button>
               ))}

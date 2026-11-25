@@ -363,6 +363,7 @@ export const en = {
   "set.allBots": "All bots",
   "set.app": "App",
   "set.shop": "Shop",
+  "set.hood": "Under the hood",
   "set.people": "People",
   "set.general": "General",
   "set.terminal": "Terminal",
