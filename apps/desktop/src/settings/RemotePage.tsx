@@ -192,7 +192,7 @@ export function RemoteView(props: RemoteViewProps) {
       <div className="st-note">{t("rm.intro")}</div>
       <div className="st-grp">
         <Row title={t("rm.switch")} hint={t(snapshot.on ? LINK_WORDS[snapshot.link] : "rm.state.off")}>
-          <Toggle on={snapshot.on || consenting} label={t("rm.switch")} onChange={props.onSwitch} testId="remote-switch" />
+          <Toggle on={snapshot.on} label={t("rm.switch")} onChange={props.onSwitch} testId="remote-switch" />
         </Row>
       </div>
       {connected.length > 0 && (

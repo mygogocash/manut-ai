@@ -70,9 +70,10 @@
   color: var(--aui-muted);
 }
 
-/* The quiet line while a phone is connected. */
+/* The quiet line while a phone is connected: Settings' own note, at the scale's smallest size. */
 .rm .rm-live {
   margin-top: 8px;
+  font-size: 12px;
 }
 
 /* A decision: the consent sheet and the pairing panel, as the kit's .dialog draws one, in the page's flow. */
