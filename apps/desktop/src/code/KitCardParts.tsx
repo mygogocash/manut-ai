@@ -18,7 +18,7 @@ function sessionContext(chat: string): AskContext | null {
   const id = chat.slice("agent:".length);
   const r = ss.list.find((x) => x.id === id);
   // a lane's asks are read inside its own folder; the project, whose settings the dial keeps, is the session's folder
-  return r?.cwd ? { chat, root: workDir(r), project: r.cwd, home: ss.home, branch: ss.live[id]?.branch } : null;
+  return r?.cwd ? { chat, root: workDir(r), project: r.cwd, home: ss.home, branch: ss.live[id]?.branch, ...(r.workflow ? { careful: true } : {}) } : null;
 }
 
 /** Kit's reading of an open ask of chat `chat`, read again when a project's settings or a session's keys change; null

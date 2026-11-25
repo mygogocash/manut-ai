@@ -33,6 +33,7 @@ import { useLookAttributes, useThemeAttribute } from "./theme";
 import { useShortcuts } from "./shortcuts";
 import { useAsksBadge } from "./badge";
 import { startPower } from "../lib/power";
+import { startWorkflows } from "../workflows/runner";
 import { setTerminalCwd, useTermPanel } from "../terminal/state";
 
 // The terminal view (and xterm with it) loads when a session is first opened.
@@ -63,6 +64,8 @@ export function App() {
     void s.init();
     // close = hide to the tray, keep awake while agents work (Settings › General)
     void startPower();
+    // Settings › Workflows' clock: it runs while the app is open, and starts nothing while Workflows is off
+    startWorkflows();
     // init is idempotent in the store; run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

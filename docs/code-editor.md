@@ -165,6 +165,9 @@ The states whose rules are pure functions, with their tests, then the screens th
   `src-tauri/src/review.rs` writes down and runs the asks that push and open a pull request or merge one, `code/reviewAsk.ts` settles
   them through approval-core and `code/Review.tsx` draws them; `src-tauri/src/credits.rs` takes agent credit lines out of a merge's
   message, from the list in `src/lib/agentCredits.json`; `src/lib/sourceControl.ts` keeps the page's choices.
+- Workflows (item 77b, see [Workflows](#workflows)): `src-tauri/src/workflows.rs` reads `~/.manut/workflows/`; `src/workflows/` checks each
+  file, runs it as a lane step by step (`sessions.ts` `startWorkflowLane`), keeps its history and its clock, and draws Settings ›
+  Workflows; the palette's "Run workflow" presses its Run now.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
@@ -1073,8 +1076,99 @@ rewind.
   rewind. The chat stays where the rewind left it."), and the lane reads by its tests again with its own line (see How a lane is
   read), until the next turn starts.
 
+## Workflows
+
+Item 77b, from the owner's T3 Code Labs screenshot: "run multi-step workflows from files in the workflows folder ... Skipped
+runs kept". A workflow is a list of messages to a coding agent, kept as a file and run in order, as a lane of its own, when
+the person presses Run now or at its time. Settings › Workflows holds all of it; nothing else in the app changes until the person
+turns it on.
+
+**The file.** One JSON file for each workflow in `~/.manut/workflows/` (the file's name, letters, digits, `.`, `_` and `-` ending in
+`.json`, is the workflow's id):
+
+```json
+{
+  "name": "Nightly tests",
+  "project": "/Users/nam/code/shop-site",
+  "agent": "claude",
+  "steps": ["Run the tests and list the ones that fail.", "Fix the failing tests, then run them again."],
+  "schedule": { "kind": "daily", "at": "02:00" },
+  "timeZone": "Asia/Bangkok"
+}
+```
+
+`name` (1 to 80 characters), `project` (a full folder path, no `..`), `agent` (an agent's id as Settings › Providers lists it) and
+`steps` (1 to 20, each 1 to 4,000 characters) are needed. `schedule` is a routine's trigger from `@manut/routine-rules`: `daily`,
+`weekly` with `weekdays` (0 is Sunday) or `monthly` with `day` (1 to 28, or `"last"`), each with `at` (24-hour `HH:MM`); without
+one the workflow runs only on Run now. `timeZone` is an IANA name; without one the time is this computer's. `version` may be left
+out or be 1. Any other field is refused by name. JSON and not T3 Code's TypeScript workflows: a file of data runs no code of its
+own, and the app's other files are JSON (decisions, 25 Nov 2026).
+
+**Reading it.** The shell (`src-tauri/src/workflows.rs`, `workflows_read`) lists the folder's `.json` files in name order, at most
+100, each with its text or why it did not read it: a name that is not plain, a link (never read through one, nor a folder that is
+one), over 64 KB, not UTF-8. Dot-files, subfolders and other files are left alone. `workflows/file.ts` checks every field; the page
+lists a file that is not a workflow with its first reason in words, and a second workflow of the same name as a duplicate of the
+first. The app never writes, renames or removes a file there; Show folder (`workflows_folder`) only makes the folder.
+
+**A run.** Run now (or the clock) reads the folder again, and the run starts a lane the way a person's own lane starts
+(`startWorkflowLane` in `sessions/sessions.ts`): a New session chat on the workflow's agent in its project, started by `start` with
+step 1 as its first message, so it has a branch and a folder of its own and is listed in the Lanes band. It is made beside the
+person's drafts and never in place of one, is not opened in front of them, changes neither how they last opened the agent nor
+their last folder, and is named after the workflow. When a step's turn ends `done`, the next step goes through `send`, as the
+person's next message would, until the last.
+
+- **An ask waits.** The run never answers one. An ask in any step is on its card and in Needs you as always, and the run waits
+  there, since the turn has not ended; the page says "Waiting for you at step 2 of 3".
+- **It ends** when a turn fails (Failed, with the agent's words, any key hidden by the app's masker and cut at 300 characters), the
+  person stops a turn (Stopped), the agent ends, the lane is closed, or the person pressed Stop after this step (it stops when that
+  step's turn ends). A turn the agent began on its own while the step waited behind it is not the step's.
+- **One run of a workflow at a time.** Run now is refused while one goes; a time that comes then is kept as skipped, "Its last run
+  was still going". Two workflows may run at once, as two lanes do.
+- **The agent** must be one a person could start a lane with now: installed, on in Settings › Providers, and a chat here.
+  Otherwise the run is Failed with that reason and nothing starts.
+- **The most careful setting.** Nobody may be watching, so the lane reads its asks at Kit's lowest level, Asks every time, with no
+  kept rule, whatever the project's dial says (`careful` on `code/kitAsks.ts`' context), and starts in the agent's Ask mode
+  (Claude Code `default`, Codex `ask`). Reading files and running the tests still go alone, and a step outside the project is still
+  stopped. The mark (`SessionRec.workflow`) is saved with the session, so a lane that comes back after a restart stays careful. The
+  lane's box shows that level and says why instead of the dial; the chat says it as the lane starts; the page says it under the
+  switch.
+
+**When it runs by itself.** Only while the app is open, the Mac is awake and Workflows is on: no service is installed and nothing
+wakes the Mac (Settings › General's "Keep the computer awake while agents work" applies to a workflow's lane as to any lane). The
+app looks at the clock every 30 seconds (`workflows/schedule.ts`, reading only the folder and the time, never the network). A time
+read at most 2 minutes late runs. One further back is not made up: it is kept as skipped, "The app was not open" when it fell
+before this run of the app began, "The Mac was asleep, or the app could not check the clock" after. A time before the app first saw
+the file is not counted, and turning Workflows on starts the clock from then, so nothing missed while it was off is listed. The time
+is in the workflow's zone, else this computer's, named with `lib/zone.ts`' words when it is not this computer's ("Every day at 02:00
+(Bangkok time) · Next: Today 02:00").
+
+**Off by default.** While off, nothing in the folder runs, Run now is not offered and nothing is scheduled. A run going when it is
+turned off finishes its current turn and stops ("Workflows was turned off"); unlike T3 Code's, it is not held to go on later.
+
+**The history.** Each run keeps when it started (and when it was due), who started it, which step it reached and how it ended, on
+this computer (`localStorage` `manut.workflows.runs`). Each workflow keeps its newest 20 runs that did something and its newest
+skipped runs up to Settings' "Skipped runs kept" (0 to 500, default 50; 0 keeps none), bounded again as soon as it changes. A run
+the app closed in the middle of says "The app closed while it ran" when the app opens again. The page shows each workflow's newest
+10.
+
+**The command palette** lists "Run workflow: <name>" for each workflow whose Run now can be pressed now. It opens Settings › Workflows
+and presses that Run now, so it adds no power of its own (`palette/registry.ts`, held to the button by `registry.test.ts`), and
+"Settings › Workflows" is in its Go to list as every Settings page is.
+
+**Files.** `src-tauri/src/workflows.rs` (the folder, with its tests); `src/workflows/file.ts` (the file and its checks),
+`schedule.ts` (the clock), `history.ts` (the runs and their bounds), `settings.ts` (the switch and Skipped runs kept), `runner.ts`
+(runs, the clock's ticks, the store the page reads), `host.ts` (the shell, and a mock for a browser seeded through
+`window.__manutMockWorkflows`), `words.ts`, `WorkflowsPage.tsx` and `workflows.css`; `sessions/sessions.ts` (`startWorkflowLane`,
+`onChatEvent`). `runner.test.ts` drives runs through a real sessions store and app store with the lanes' stand-in shell, and
+`e2e/workflows.spec.ts` walks the page, a run of two steps with the stand-in agent, the Lanes band and the palette.
+
 ## Left for later (no owner needed)
 
+- From item 77b (Workflows): a New workflow form that writes a file (today a person writes the file, or asks an agent to); a run
+  that goes on after the app restarts (today it ends as "The app closed while it ran"); a run on another project's lane settings
+  (the dial is always Asks every time); a workflow's own steps that branch, wait or ask the person (T3 Code's `ask` and `step`):
+  today a step is a message and the agent's own asks are the only questions. Not tried with a real agent: no message was sent to
+  one for this item.
 - From item 72 (MCP servers and skills): Claude Code's own MCP servers (user and local scope, in its `.claude.json`) in an
   added Claude Code account, which would need a safe way to write a file Claude Code rewrites while it runs; added accounts of
   Grok, pi and oh-my-pi, and every added account on Windows; the lists of the agents other than Claude Code and Codex on

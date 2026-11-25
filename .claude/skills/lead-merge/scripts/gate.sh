@@ -43,8 +43,18 @@ pnpm --config.verify-deps-before-run=false typecheck > "$logs/types.log" 2>&1; c
 if [ $code -eq 0 ]; then echo "typecheck: ok"; else fail=1; echo "typecheck: FAILED"; grep -E "error TS" "$logs/types.log" | cut -c1-220 | head -10; fi
 
 if [ $rust -eq 1 ]; then
-  while pgrep -x cargo > /dev/null; do sleep 5; done   # one cargo at a time on this Mac
-  ( cd apps/desktop/src-tauri && CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR="$HOME/Library/Caches/manut-ai-cargo-target" cargo test --locked ) > "$logs/rust.log" 2>&1; code=$?
+  # The suite runs once more when it failed: a helper's own cargo beside it once made the scratch-keychain tests fail on a
+  # suite that took ten minutes instead of three (26 Nov), and a failure a quiet second run repeats is a real one. The
+  # first run's failures are named either way, so a test that needs a second run too often is seen.
+  for attempt in 1 2; do
+    while pgrep -x cargo > /dev/null; do sleep 5; done   # one cargo at a time on this Mac
+    ( cd apps/desktop/src-tauri && CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR="$HOME/Library/Caches/manut-ai-cargo-target" cargo test --locked ) > "$logs/rust.log" 2>&1; code=$?
+    [ $code -eq 0 ] && break
+    if [ $attempt -eq 1 ]; then
+      cp "$logs/rust.log" "$logs/rust-first.log"
+      echo "rust: first run failed, running once more. It failed: $(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$logs/rust-first.log" | grep -E "^test .* \.\.\. FAILED" | sed -E 's/^test (.*) \.\.\. FAILED/\1/' | tr '\n' ' ' | cut -c1-600)"
+    fi
+  done
   results=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$logs/rust.log" | grep -E "^test result" | awk '{p+=$4; f+=$6} END {print p " passed, " f " failed"}')
   if [ $code -eq 0 ]; then echo "rust: ok  $results"; else
     fail=1; echo "rust: FAILED  $results"
