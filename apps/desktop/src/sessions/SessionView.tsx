@@ -7,7 +7,7 @@
 // in a draft too; a file dropped or pasted on a terminal is saved and its path typed at the prompt. A TERMINALS session
 // can split with up to three others on any side (SplitView: ⌘D / ⌘⇧D in its terminal, or a TERMINALS row dragged onto it).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getStore, selectAsks, useStore, type OutFile } from "../state/store";
+import { getStore, selectAsks, useStore, type Chat, type OutFile } from "../state/store";
 import { useResolvedTheme } from "../app/theme";
 import { Timeline } from "../chat/parts/Timeline";
 import { Composer } from "../chat/parts/Composer";
@@ -44,6 +44,8 @@ import { SplitView, useSplit, useSplitKeys } from "./SplitView";
 import { groupOf } from "./splitState";
 import { isCopyLinkKey, LINK_COPIED_EVENT } from "./termLink";
 import { TermShareCards } from "./TermShareCard";
+import { LanePane } from "../code/LanePane";
+import { isLaneChat } from "../code/laneStore";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
 
@@ -199,6 +201,21 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         }
         foot={<Context rec={rec} />}
       />
+    </div>
+  );
+}
+
+/** A lane: a coding session's chat with the pane beside it that says what to look at (code/LanePane.tsx), as the design canvas's Code
+ *  board draws it. The pane goes under the chat when the column is too narrow for both (code/lanepane.css). Only the chat is
+ *  `session-chat`; the pane is its own. */
+function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; chat: Chat | undefined }) {
+  return (
+    <div className="ss-lane" data-testid="session-lane">
+      <div className="ss-lane-body">
+        <ChatPane rec={rec} chatKey={chatKey} />
+        {/* a new key for each lane, so each opens on Diff and keeps its own question about a secret */}
+        <LanePane key={chatKey} chatKey={chatKey} chat={chat} />
+      </div>
     </div>
   );
 }
@@ -1005,7 +1022,8 @@ export function SessionView() {
         // a TERMINALS session in a split: every pane shows, each as its session is (running, paused, ended)
         <SplitView main={rec} pane={(r) => <SplitPane rec={r} />} />
       ) : showChat ? (
-        <ChatPane rec={rec} chatKey={chatKey!} />
+        // a coding session that runs as a chat is a lane (code/Lanes.tsx lists them): its chat has the pane beside it
+        isLaneChat(chatKey) ? <LaneSplit rec={rec} chatKey={chatKey} chat={c} /> : <ChatPane rec={rec} chatKey={chatKey!} />
       ) : rec.paused || ((rec.status === "exited" || rec.status === "failed") && !getSessions().hasTerm(rec.id)) ? (
         <TerminalIdle rec={rec} />
       ) : rec.view === "chat" && mode !== "terminal" ? (

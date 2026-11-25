@@ -1,0 +1,190 @@
+/* The pane beside a lane (LanePane.tsx, the design canvas's Code board, "What to look at") and the split that holds it beside a coding
+   session's chat (SessionView.tsx, `LaneSplit`). The canvas's rules from packages/ui-kit/app.css (.side2, .fchip, .box, .mono, .mut,
+   .lk, .tag, .rowl, .grow) are copied and scoped under the pane's root class, as mission.css scopes the job page's and kit.css Kit's.
+   The canvas's short token names map onto the desktop's (src/theme/tokens.css): --bg is --aui-surface, --band is --aui-subtle, --mut
+   is --aui-muted, --oki and --erri are --aui-success and --aui-danger. Lines that are the desktop's own rather than the canvas's say
+   so. */
+
+/* The desktop's own: the chat and the pane stand side by side while the column holds both, as the canvas's .split lays them out (the
+   chat is its .pane, 3 1 440px, and the pane its .side2, 3 1 380px). The columns are what the session view has, not the window: the
+   side menu and the Plans panel take theirs first, so the pane goes by its own container. When it is too narrow for both the pane goes
+   under the chat, as the canvas's .side2 does under 920px, with a height and a scroll of its own, so the chat keeps the rest. */
+.ss-lane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container: lane / inline-size;
+}
+.ss-lane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ss-lane-body > .ss-chat {
+  flex: 3 1 440px;
+  min-width: 0;
+}
+
+.lpane {
+  flex: 3 1 380px;
+  min-width: 0;
+  min-height: 0;
+  /* The desktop's own: a very wide window gives the chat the rest, not a pane wider than a diff reads. */
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.lpane .fgroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lpane .fchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--rad-pill);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--aui-muted);
+}
+.lpane .fchip:hover {
+  background: var(--hov);
+}
+.lpane .fchip[aria-pressed="true"] {
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-weight: 500;
+}
+.lpane .fchip::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
+}
+.lpane .fchip:focus-visible {
+  outline: 2px solid var(--aui-border-strong);
+  outline-offset: 1px;
+}
+/* The desktop's own: what the picked chip shows is a column of boxes and rows, 12px apart as the canvas's side pane spaces them. */
+.lpane .lp-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.lpane .mut {
+  margin: 0;
+  color: var(--aui-muted);
+}
+.lpane .mono {
+  font-family: var(--aui-font-mono);
+  font-size: 12.5px;
+}
+.lpane .box {
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+}
+/* The Tests box and the preview's note: the canvas's .box.mono with a few lines in it, a line to each fact. */
+.lpane .lp-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  line-height: 1.7;
+}
+.lpane .lp-box p {
+  margin: 0;
+}
+/* The desktop's own: a command wraps rather than scrolls sideways, as the running list's does. */
+.lpane .lp-cmd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lpane .lp-state {
+  color: var(--ink);
+  font-weight: 500;
+}
+.lpane .lp-result.ok {
+  color: var(--aui-success);
+}
+.lpane .lp-result.err {
+  color: var(--aui-danger);
+}
+.lpane .lp-box .lnames {
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: disc;
+  color: var(--aui-muted);
+  overflow-wrap: anywhere;
+}
+.lpane .lp-none,
+.lpane .lp-stale {
+  margin: 0;
+}
+
+/* The Sample rows (PreviewSample.tsx) as Kit's panel draws them: the canvas's .rowl, .tag and .lk, scoped here. */
+.lpane .rowl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+}
+.lpane .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.lpane .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.lpane .lk {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
+  text-decoration: underline;
+}
+.lpane .lk:hover {
+  color: var(--ink);
+}
+
+/* Last, so it wins over the pane's own rules above it: the same selectors with the same weight go by their order. */
+@container lane (max-width: 819px) {
+  .ss-lane-body {
+    flex-direction: column;
+  }
+  .ss-lane-body > .ss-chat {
+    flex: 1 1 0;
+  }
+  .lpane {
+    flex: 0 1 auto;
+    max-width: none;
+    max-height: 45vh;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

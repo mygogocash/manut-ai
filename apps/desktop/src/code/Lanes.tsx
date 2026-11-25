@@ -19,7 +19,7 @@ import { getSessions, useSessions, type AgentLive } from "../sessions/sessions";
 import { pickTitle } from "../sessions/titles";
 import { askText, getStore, selectAsks, useStore } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
-import { laneOf, useLanesVersion } from "./laneStore";
+import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
 
 /** The branch a lane's row shows, and why: Kit's own for the lane (with the folder of its own it works in), the folder's
@@ -124,7 +124,7 @@ export function useLaneRows(root: string): LaneRow[] {
     if (rec.status === "draft" || pathKey(rec.cwd) !== here) return [];
     // a session in its own terminal has no chat to read a lane from, and a Hermes folder chat is not a coding agent's
     const key = sessions.chatKey(rec.id);
-    if (!key?.startsWith("agent:")) return [];
+    if (!isLaneChat(key)) return [];
     const turn = app.chats[key]?.turn;
     return [
       laneRowOf({

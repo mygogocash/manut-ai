@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DICT, LANGS, setLang, t } from "../i18n";
-import { emptyLane, failedNames, laneLine, laneStatus, laneTag, noteLane, testState, type LaneRecord, type LaneStatus } from "./lane";
+import { COMMAND_MAX, emptyLane, failedNames, laneLine, laneStatus, laneTag, laneTests, noteLane, resultLine, testState, type LaneRecord, type LaneStatus } from "./lane";
 
 const out = (name: string) => readFileSync(join(__dirname, "__fixtures__", "test-output", `${name}.txt`), "utf8");
 
@@ -308,6 +308,163 @@ describe("the line under a lane's row", () => {
 
   it("is in every language, with the same slots", () => {
     const keys = ["lane.title", "lane.who", "lane.open", "lane.madeFrom", "lane.madeFromIn", "lane.moved", "lane.testing", "lane.tag.checked", "lane.tag.testsFailed", "lane.tag.reverted", "lane.tag.failed", "lane.tag.unconfirmed", "lane.tag.notRun", "lane.line.working", "lane.line.workingHere", "lane.line.asks", "lane.line.checked1", "lane.line.checkedN", "lane.line.checkedSome", "lane.line.failedOf", "lane.line.failed1", "lane.line.failedN", "lane.line.failedSome", "lane.line.reverted", "lane.line.revertedFiles", "lane.line.broughtBack", "lane.line.unconfirmed", "lane.line.stale", "lane.answer", "lane.back", "lane.moreNames"] as const;
+    for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
+  });
+});
+
+describe("the command a lane keeps beside its last finished run", () => {
+  const KEY = "sk-FAKE0000000000000000TEST";
+
+  it("is the command the step began with, or the whole one when the step's end carries it", () => {
+    expect(feed(ran("pnpm test", true, out("vitest-pass"))).run?.command).toBe("pnpm test");
+    const cut = "cd /Users/fon/work/baanmali-preorder/apps/storefront/packages/checkout/src/components/payments/promptpay/qr && xxxxxxxxxxxxxxxxxxxxxxxxxxx…";
+    const whole = "cd /Users/fon/work/baanmali-preorder/apps/storefront && pnpm exec vitest run src/checkout.test.ts";
+    const lane = feed([start("t1", cut), { ...end("t1", true, out("vitest-pass")), command: whole }]);
+    expect(lane.run?.command).toBe(whole);
+  });
+
+  it("is the last run's: a later run replaces it, and a rewound turn takes it away", () => {
+    const first = feed(ran("pnpm test", false, out("vitest-fail")));
+    const second = feed([start("t2", "pnpm exec vitest run src/a.test.ts"), end("t2", true, out("vitest-pass"))], first);
+    expect(second.run?.command).toBe("pnpm exec vitest run src/a.test.ts");
+    expect(feed([{ event: "rewound" }], second).run).toBeUndefined();
+  });
+
+  it("is kept for a run that could not be read, and for a refused one it is not", () => {
+    expect(feed(ran("pnpm test", true, "all done")).run?.command).toBe("pnpm test");
+    const refused = feed([start("t1", "pnpm test"), { event: "tool.end", tool_id: "t1", name: "", ok: false, ms: 0, declined: true }]);
+    expect(refused.run).toBeUndefined();
+  });
+
+  it("hides a key in it, whether the step's start or its end carried the command", () => {
+    const start1 = feed(ran(`API_KEY=${KEY} pnpm test`, true, out("vitest-pass")));
+    expect(start1.run?.command).toContain("pnpm test");
+    expect(start1.run?.command).toContain("••••");
+    expect(JSON.stringify(start1)).not.toContain(KEY);
+    const atEnd = feed([start("t1", "pnpm test"), { ...end("t1", true, out("vitest-pass")), command: `pnpm test --token ${KEY}` }]);
+    expect(atEnd.run?.command).toContain("pnpm test");
+    expect(JSON.stringify(atEnd)).not.toContain(KEY);
+  });
+
+  it("hides a key before the command is cut, so a cut cannot leave the front of one that the masker does not know", () => {
+    // the key starts at character 151, and the cut at 159 falls inside it, leaving `sk-FAKE0`: the masker needs 8 characters after
+    // `sk-` to know a key, so a command cut first and masked after would show it
+    const long = `${"a".repeat(150)} ${KEY} and a tail of more words`;
+    const lane = feed(ran(`${long} && pnpm test`, true, out("vitest-pass")));
+    expect(lane.run?.command).not.toContain("sk-FAKE");
+    expect(lane.run?.command).toContain("••••");
+    // the same cut, for a command with no key in it
+    const words = `pnpm exec vitest run ${"src/checkout/very/long/path/to/a/test.test.ts ".repeat(8)}`;
+    const cut = feed(ran(words, true, out("vitest-pass"))).run?.command ?? "";
+    expect(cut.length).toBe(COMMAND_MAX);
+    expect(cut.endsWith("…")).toBe(true);
+    expect(words.startsWith(cut.slice(0, -1))).toBe(true);
+  });
+
+  it("is one line, whatever line breaks and spaces the command had", () => {
+    expect(feed(ran("cd app\n  && pnpm   test", true, out("vitest-pass"))).run?.command).toBe("cd app && pnpm test");
+  });
+
+  it("keeps none of the run's output, as before", () => {
+    const noisy = `${out("vitest-pass")}\nprinted by a test: ${KEY} and a password hunter2-MARKER\n`;
+    const lane = feed(ran("pnpm test", true, noisy));
+    expect(JSON.stringify(lane)).not.toContain("MARKER");
+    expect(JSON.stringify(lane)).not.toContain(KEY);
+    expect(Object.keys(lane.run ?? {}).sort()).toEqual(["at", "command", "read"]);
+  });
+});
+
+describe("what a finished run said, in the lane's words", () => {
+  it("counts the tests that passed, and the ones that failed of all of them, and says when the result could not be read", () => {
+    expect(resultLine({ kind: "passed", passed: 14 })).toEqual({ key: "lane.line.checkedN", vars: { n: 14 } });
+    expect(resultLine({ kind: "passed", passed: 1 })).toEqual({ key: "lane.line.checked1" });
+    expect(resultLine({ kind: "passed", passed: null })).toEqual({ key: "lane.line.checkedSome" });
+    expect(resultLine({ kind: "failed", failed: 1, total: 14, names: [] })).toEqual({ key: "lane.line.failedOf", vars: { failed: 1, total: 14 } });
+    expect(resultLine({ kind: "failed", failed: 3, total: null, names: [] })).toEqual({ key: "lane.line.failedN", vars: { n: 3 } });
+    expect(resultLine({ kind: "failed", failed: 1, total: null, names: [] })).toEqual({ key: "lane.line.failed1" });
+    expect(resultLine({ kind: "failed", failed: null, total: null, names: [] })).toEqual({ key: "lane.line.failedSome" });
+    expect(resultLine({ kind: "unknown", why: "exit" })).toEqual({ key: "lane.line.unconfirmed" });
+  });
+});
+
+describe("the facts of the Tests view beside a lane", () => {
+  const KEY = "sk-FAKE0000000000000000TEST";
+  const later = (lane: LaneRecord, ...events: Ev[]) => events.reduce((l, ev, i) => noteLane(l, ev, 5_000 + i), lane);
+
+  it("has nothing for a lane that ran no test", () => {
+    expect(laneTests(emptyLane())).toEqual({ running: [], last: null, stale: false });
+  });
+
+  it("says how many tests passed, when the run finished and the command that ran it", () => {
+    const t1 = laneTests(feed(ran("pnpm test", true, out("vitest-pass"))));
+    expect(t1).toEqual({
+      running: [],
+      last: { say: { key: "lane.line.checkedN", vars: { n: 2 } }, tone: "ok", names: [], more: 0, at: 1_001, command: "pnpm test" },
+      stale: false,
+    });
+  });
+
+  it("says how many failed of how many, and names the tests the run named, with how many more there were", () => {
+    const t1 = laneTests(feed(ran("pnpm test", false, out("vitest-fail"))));
+    expect(t1.last).toMatchObject({ say: { key: "lane.line.failedOf", vars: { failed: 1, total: 5 } }, tone: "err", names: ["promptpay > locks the amount into the QR"], more: 0 });
+    const many = Array.from({ length: 12 }, (_, i) => ` FAIL  a.test.ts > case ${i}`).join("\n");
+    const t2 = laneTests(feed(ran("vitest run", false, `${many}\n      Tests  12 failed (14)\n`)));
+    expect(t2.last?.names).toHaveLength(10);
+    expect(t2.last?.more).toBe(2);
+    // a failure that named no test names none, and counts no more
+    expect(laneTests(feed(ran("go test ./...", false, out("go-build-failed")))).last).toMatchObject({ names: [], more: 0 });
+  });
+
+  it("hides a key that a failing test's name holds", () => {
+    const named = ` FAIL  a.test.ts > sends ${KEY} to the api\n      Tests  1 failed (1)\n`;
+    const t1 = laneTests(feed(ran("vitest run", false, named)));
+    expect(t1.last?.names[0]).toContain("••••");
+    expect(JSON.stringify(t1)).not.toContain(KEY);
+  });
+
+  it("says in a word why a run could not be read, and marks no pass", () => {
+    const why = (output: string | undefined, ok = true, command = "pnpm test") => laneTests(feed(ran(command, ok, output))).last;
+    expect(why(undefined)).toMatchObject({ say: { key: "lane.line.unconfirmed" }, tone: "", why: "lane.pane.why.no_output" });
+    expect(why("all done")).toMatchObject({ why: "lane.pane.why.no_summary" });
+    expect(why("ℹ tests 0\nℹ suites 0\nℹ pass 0\nℹ fail 0\n")).toMatchObject({ why: "lane.pane.why.no_tests" });
+    expect(why(` Test Files  1 passed (1)\n      Tests  3 passed (3)\n     Errors  1 error\n`)).toMatchObject({ why: "lane.pane.why.errors" });
+    expect(why(out("vitest-pass"), false)).toMatchObject({ why: "lane.pane.why.exit" });
+    // a run that passed or failed gives no reason
+    expect(why(out("vitest-pass"))).not.toHaveProperty("why");
+    expect(why(out("vitest-fail"), false)).not.toHaveProperty("why");
+  });
+
+  it("says a file changed since, and keeps the result of the run it changed after", () => {
+    const passed = feed(ran("pnpm test", true, out("vitest-pass")));
+    const changed = later(passed, { event: "tool.diff", tool_id: "e1", files: [] });
+    expect(laneTests(changed)).toMatchObject({ stale: true, last: { say: { key: "lane.line.checkedN" }, tone: "ok", command: "pnpm test" } });
+    // a run after the change is of the code as it is
+    expect(laneTests(later(changed, start("t2", "pnpm test"), end("t2", true, out("vitest-pass")))).stale).toBe(false);
+    // no run, no result to be old
+    expect(laneTests(later(emptyLane(), { event: "tool.diff", tool_id: "e1", files: [] }))).toEqual({ running: [], last: null, stale: false });
+  });
+
+  it("lists the runs in flight with their commands hidden of keys, beside the last result", () => {
+    const passed = feed(ran("pnpm test", true, out("vitest-pass")));
+    const running = later(passed, start("t2", `API_KEY=${KEY} vitest run`), start("t3", "go test ./..."));
+    const t1 = laneTests(running);
+    expect(t1.running).toHaveLength(2);
+    expect(t1.running[1]).toBe("go test ./...");
+    expect(t1.running[0]).toContain("vitest run");
+    expect(JSON.stringify(t1)).not.toContain(KEY);
+    expect(t1.last?.command).toBe("pnpm test");
+    // the run's end moves it from one to the other
+    expect(laneTests(later(running, end("t2", true, out("vitest-pass")))).running).toEqual(["go test ./..."]);
+  });
+
+  it("forgets the result of a rewound turn, and a run in flight that the turn's end cut off", () => {
+    const passed = feed(ran("pnpm test", true, out("vitest-pass")));
+    expect(laneTests(later(passed, { event: "rewound", id: "m-1" })).last).toBeNull();
+    expect(laneTests(later(passed, start("t2", "pnpm test"), { event: "turn.end", outcome: "interrupted" })).running).toEqual([]);
+  });
+
+  it("is in every language, with the same slots", () => {
+    const keys = ["lane.pane.title", "lane.pane.diff", "lane.pane.preview", "lane.pane.tests", "lane.pane.diff.none", "lane.pane.preview.none", "lane.pane.tests.none", "lane.pane.tests.running", "lane.pane.tests.at", "lane.pane.tests.stale", "lane.pane.why.no_output", "lane.pane.why.no_summary", "lane.pane.why.no_tests", "lane.pane.why.errors", "lane.pane.why.exit"] as const;
     for (const l of LANGS) for (const k of keys) expect(DICT[l][k].trim(), `${l} ${k}`).not.toBe("");
   });
 });

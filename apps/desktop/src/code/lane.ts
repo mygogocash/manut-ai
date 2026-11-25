@@ -2,9 +2,10 @@
 // shown, the state the owner reads from that at a glance, and the line under the lane's row.
 //
 // Three things are kept per lane and nothing else: the test runs in flight, the last run that ended with what its output
-// said (testRun.ts), and whether a file changed after it. The rest of a state is what the app already knows, and the
-// functions here take it as facts, as thread/status.ts does for a thread: a turn running, the asks that wait, how the
-// session ended. A test's output is read when its step ends and is never kept, since it can hold anything a test prints.
+// said (testRun.ts) and the command that ran it, and whether a file changed after it. The rest of a state is what the app
+// already knows, and the functions here take it as facts, as thread/status.ts does for a thread: a turn running, the asks
+// that wait, how the session ended. A test's output is read when its step ends and is never kept, since it can hold anything
+// a test prints. The command is kept for the Tests view beside the lane (LanePane.tsx), with any key in it hidden first.
 import type { Key } from "../i18n";
 import { maskSecrets } from "../lib/secrets";
 import type { Say } from "./command";
@@ -14,8 +15,9 @@ import { readTestOutput, runnerOf, runsTests, testsRunOutside, type TestRead } f
 export interface LaneRecord {
   /** The test runs in flight, by step id, each with the command that runs it. */
   steps: Record<string, string>;
-  /** The last test run that ended, and when (ms). */
-  run?: { read: TestRead; at: number };
+  /** The last test run that ended: what its output said, when it ended (ms), and the command that ran it as one line with any
+   *  key in it hidden and the rest cut (`keptCommand`). None of its output is kept. */
+  run?: { read: TestRead; at: number; command: string };
   /** A file changed after that run, so what it said is of older code. */
   changed: boolean;
   /** The person took a turn back at this time (ms), and none has started since. */
@@ -38,6 +40,16 @@ const changed = (lane: LaneRecord): LaneRecord => (lane.changed ? lane : { ...la
 
 /** A reading as the lane keeps it: its names without any key a test's own name may hold. */
 const kept = (read: TestRead): TestRead => (read.kind === "failed" ? { ...read, names: read.names.map(maskSecrets) } : read);
+
+/** The longest command a lane keeps, as the running list cuts one (running/model.ts) and the shell cuts a step's start. */
+export const COMMAND_MAX = 160;
+
+/** A command as the lane keeps it and the Tests view shows it: one line, with any key in it hidden by the app's one masker, and
+ *  only then cut, so a cut can never leave the front of a key too short for the masker to know. */
+const keptCommand = (command: string): string => {
+  const line = maskSecrets(command.replace(/\s+/g, " ").trim());
+  return line.length > COMMAND_MAX ? `${line.slice(0, COMMAND_MAX - 1)}…` : line;
+};
 
 /** Where a lane works (its own folder, else the session's), and the home folder for a `~` in a command. */
 export interface LaneWhere {
@@ -78,7 +90,7 @@ export function noteLane(lane: LaneRecord, ev: LaneEvent, now: number, where?: L
       // the person said no, so the command never ran: it is no test run, and an earlier result stands
       if (ev.declined === true) return { ...lane, steps };
       const read = readTestOutput(typeof ev.output === "string" ? ev.output : undefined, { ok: typeof ev.ok === "boolean" ? ev.ok : undefined, runner: runnerOf(command) });
-      return { ...lane, steps, run: { read: kept(read), at: now }, changed: false };
+      return { ...lane, steps, run: { read: kept(read), at: now, command: keptCommand(command) }, changed: false };
     }
     case "turn.start":
       return lane.revertedAt === undefined && lane.backAt === undefined ? lane : { ...lane, revertedAt: undefined, revertedFiles: undefined, backAt: undefined };
@@ -185,6 +197,22 @@ export interface LaneLineInput {
   error?: string;
 }
 
+/** What a run that finished said, in the lane's own words: how many tests passed, how many of how many failed, or that its result
+ *  could not be read. The row's line and the Tests view beside the lane say it the same way. */
+export function resultLine(read: TestRead): Say {
+  switch (read.kind) {
+    case "passed":
+      if (read.passed === null) return { key: "lane.line.checkedSome" };
+      return read.passed === 1 ? { key: "lane.line.checked1" } : { key: "lane.line.checkedN", vars: { n: read.passed } };
+    case "failed":
+      if (read.failed === null) return { key: "lane.line.failedSome" };
+      if (read.total !== null && read.total >= read.failed) return { key: "lane.line.failedOf", vars: { failed: read.failed, total: read.total } };
+      return read.failed === 1 ? { key: "lane.line.failed1" } : { key: "lane.line.failedN", vars: { n: read.failed } };
+    case "unknown":
+      return { key: "lane.line.unconfirmed" };
+  }
+}
+
 /** The line under a lane's row, as a dictionary key and its slots, or null when there is nothing to add. */
 export function laneLine(i: LaneLineInput): Say | null {
   const read = i.lane.run?.read;
@@ -196,13 +224,9 @@ export function laneLine(i: LaneLineInput): Say | null {
     case "reverted":
       return { key: i.lane.revertedFiles ? "lane.line.revertedFiles" : "lane.line.reverted", vars: { time: i.time ?? "" } };
     case "checked":
-      if (read?.kind !== "passed" || read.passed === null) return { key: "lane.line.checkedSome" };
-      return read.passed === 1 ? { key: "lane.line.checked1" } : { key: "lane.line.checkedN", vars: { n: read.passed } };
-    case "tests_failed": {
-      if (read?.kind !== "failed" || read.failed === null) return { key: "lane.line.failedSome" };
-      if (read.total !== null && read.total >= read.failed) return { key: "lane.line.failedOf", vars: { failed: read.failed, total: read.total } };
-      return read.failed === 1 ? { key: "lane.line.failed1" } : { key: "lane.line.failedN", vars: { n: read.failed } };
-    }
+      return read?.kind === "passed" ? resultLine(read) : { key: "lane.line.checkedSome" };
+    case "tests_failed":
+      return read?.kind === "failed" ? resultLine(read) : { key: "lane.line.failedSome" };
     case "unconfirmed":
       return { key: "lane.line.unconfirmed" };
     case "not_run":
@@ -212,6 +236,58 @@ export function laneLine(i: LaneLineInput): Say | null {
     case "failed":
       return null;
   }
+}
+
+/** Why a run that could not be read could not, in the Tests view's words. */
+const WHY: Record<Extract<TestRead, { kind: "unknown" }>["why"], Key> = {
+  no_output: "lane.pane.why.no_output",
+  no_summary: "lane.pane.why.no_summary",
+  no_tests: "lane.pane.why.no_tests",
+  errors: "lane.pane.why.errors",
+  exit: "lane.pane.why.exit",
+};
+
+/** What the Tests view beside a lane shows (LanePane.tsx), read from the record alone: the runs in flight, and the last one that
+ *  finished with what it said, when it finished and the command that ran it. The record keeps no output, so there is none here. */
+export interface LaneTests {
+  /** The commands of the test runs in flight, any key in them hidden. */
+  running: string[];
+  /** The last run that finished: none when no test ran, or a rewound turn took it away. */
+  last: {
+    say: Say;
+    tone: "ok" | "err" | "";
+    /** The words for why a run could not be read, when it could not. */
+    why?: Key;
+    /** The failing tests' names, already masked, and how many more the run had than it named. */
+    names: string[];
+    more: number;
+    /** When it finished (ms). */
+    at: number;
+    command: string;
+  } | null;
+  /** A file changed after that run, so what it said is of older code. */
+  stale: boolean;
+}
+
+export function laneTests(lane: LaneRecord): LaneTests {
+  const running = Object.values(lane.steps).map(keptCommand);
+  const run = lane.run;
+  if (!run) return { running, last: null, stale: false };
+  const { read } = run;
+  const names = read.kind === "failed" ? read.names : [];
+  return {
+    running,
+    last: {
+      say: resultLine(read),
+      tone: read.kind === "passed" ? "ok" : read.kind === "failed" ? "err" : "",
+      ...(read.kind === "unknown" ? { why: WHY[read.why] } : {}),
+      names,
+      more: read.kind === "failed" && names.length > 0 ? Math.max(0, (read.failed ?? names.length) - names.length) : 0,
+      at: run.at,
+      command: run.command,
+    },
+    stale: lane.changed,
+  };
 }
 
 /** The failing tests the row names (a few, since the terminal has them all) and how many more there were. Only the

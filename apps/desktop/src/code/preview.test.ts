@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DiffFile } from "../lib/protocol";
 import { DICT, setLang, t } from "../i18n";
-import { SAMPLES, kindOf, needsOfProject, noteReads, onSample, previewEnv, readsAfter, needsOf, resetPreview, sessionsWithNeeds, type Need } from "./preview";
+import { SAMPLES, kindOf, needsOfChat, needsOfProject, noteReads, onSample, previewEnv, readsAfter, needsOf, resetPreview, sessionsWithNeeds, type Need } from "./preview";
 
 const file = (path: string, lines: string[], kind: DiffFile["kind"] = "update"): DiffFile => ({
   path,
@@ -142,6 +142,19 @@ describe("what each session's changes need", () => {
   it("is nothing for a change that reads no secret", () => {
     noteReads("agent:s1", [file("README.md", ["+Hello"])]);
     expect(sessionsWithNeeds()).toEqual([]);
+  });
+
+  it("is what one session's changes read, once each in name order, and nothing of another session's", () => {
+    noteReads("agent:s1", [file("src/checkout.tsx", ["+  qr(process.env.PROMPTPAY_SHOP_ID);", "+  s(process.env.STRIPE_SECRET_KEY);"])]);
+    noteReads("agent:s2", [file("src/a.ts", ["+  k(process.env.OTHER_API_KEY);"])]);
+    expect(needsOfChat("agent:s1")).toEqual([SHOP, STRIPE]);
+    expect(needsOfChat("agent:s2")).toEqual([{ name: "OTHER_API_KEY", kind: "key" }]);
+    // a session that read nothing, and a chat that is no session's, need nothing
+    expect(needsOfChat("agent:s3")).toEqual([]);
+    expect(needsOfChat("")).toEqual([]);
+    // it follows the changes, as the list of every session does
+    noteReads("agent:s1", [file("src/checkout.tsx", ["-  qr(process.env.PROMPTPAY_SHOP_ID);"])]);
+    expect(needsOfChat("agent:s1")).toEqual([STRIPE]);
   });
 });
 
