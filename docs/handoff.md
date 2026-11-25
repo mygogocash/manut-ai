@@ -316,9 +316,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
    - running: item 61 (a shop's live feed, built and switched off) and item 62 (the Runs layout tests made fast);
-   - next, for the desktop's first release (the owner has an Apple Developer account, 25 Nov): item 63 (release builds
-     in CI, signed and notarized once the owner adds the secrets), item 64 (Apple sessions refused on the lifted
-     routes, which turning Sign in with Apple on needs first) and item 65 (a Thai dictionary for the desktop);
+   - next, for the desktop's first release (the owner has an Apple Developer account; on 25 Nov the owner said sign-in
+     is not needed for now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets) and
+     item 65 (a Thai dictionary for the desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
+     Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
      - a helper's own session on the desktop (`docs/runtime-adapter.md`, "Next slices" 4);
      - a schedule's time zone shown when it is not this computer's (the same list);
