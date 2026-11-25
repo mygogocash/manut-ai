@@ -136,9 +136,10 @@ export const LIVE = 2;
 /** The most of an earlier conversation handed to a new process, newest kept. */
 const BEFORE_CHARS = 6_000;
 
-/** The agent that answers as Buddy on a computer with `agents`, or null. */
+/** The agent that answers as Buddy on a computer with `agents`, or null. One turned off on Settings › Providers never
+ *  does (the shell would refuse its start). */
 export function answering(agents: readonly AgentInfo[]): AgentId | null {
-  return BUDDY_AGENTS.find((id) => agents.some((a) => a.id === id && !!a.path)) ?? null;
+  return BUDDY_AGENTS.find((id) => agents.some((a) => a.id === id && !!a.path && !a.off)) ?? null;
 }
 
 function whoOf(agent: AgentId | null): BuddyWho {
@@ -148,6 +149,9 @@ function whoOf(agent: AgentId | null): BuddyWho {
 /** What Buddy says with no agent that can answer: which agent works and where its install line is, how to sign in, and
  *  which agents it found that cannot answer yet. */
 export function noneSaid(agents: readonly AgentInfo[]): string {
+  // installed but turned off: say where to turn it on, not how to install it
+  const off = BUDDY_AGENTS.find((id) => agents.some((a) => a.id === id && !!a.path && a.off));
+  if (off) return t("buddy.off", { agent: agentDef(off).label });
   const there = NOT_YET.filter((id) => agents.some((a) => a.id === id && !!a.path)).map((id) => agentDef(id).label);
   const none = t("buddy.none", { cmd: SIGN_IN.claude });
   return there.length ? `${none}\n\n${t("buddy.notYet", { agents: listText(there) })}` : none;

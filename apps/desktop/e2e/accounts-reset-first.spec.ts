@@ -59,7 +59,8 @@ async function openAccounts(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript(installHost);
   await page.goto("/");
   await chatOpen(page);
-  await openSettings(page, "accounts");
+  // Accounts are a part of Settings › Providers since item 74
+  await openSettings(page, "providers");
   await expect(page.getByTestId("accounts-page")).toBeVisible();
   await expect(page.getByTestId("accounts-codex").getByTestId("account-row")).toHaveCount(2);
 }

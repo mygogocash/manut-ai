@@ -17,6 +17,7 @@ import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
+import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -197,6 +198,14 @@ export interface SessionHost extends HistoryHost {
   /** Keep the computer awake while agents work (src/lib/power.ts): a busy or idle edge. `now`: the setting went off,
    *  so the shell lets go at once instead of a minute later. */
   power?(busy: boolean, now: boolean): Promise<void>;
+  /** Settings › Providers (item 74): every agent the app knows with what the person set for it, as the shell read its
+   *  own file now. Variables come as names only. */
+  providers?(): Promise<ProviderView[]>;
+  /** One change to agent `id`'s settings, checked and saved by the shell; the answer is its new view. A refusal rejects
+   *  with `why:<code>` or `why:<code>:<option or variable name>`, never a value. */
+  providerSave?(id: string, patch: ProviderPatch): Promise<ProviderView>;
+  /** The version agent `id`'s program prints (the token only), or null. */
+  providerVersion?(id: string): Promise<string | null>;
   /** Settings › Agents: the person's own agents, read and checked by the shell from manut's own file, and the broken
    *  entries. */
   customList(): Promise<CustomList>;
@@ -418,6 +427,18 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     await invoke("power_busy", { busy, now });
   }
+  async providers() {
+    const { invoke } = await this.core();
+    return invoke<ProviderView[]>("providers_list");
+  }
+  async providerSave(id: string, patch: ProviderPatch) {
+    const { invoke } = await this.core();
+    return invoke<ProviderView>("provider_save", { id, patch });
+  }
+  async providerVersion(id: string) {
+    const { invoke } = await this.core();
+    return invoke<string | null>("provider_version", { id });
+  }
   async customList() {
     const { invoke } = await this.core();
     return invoke<CustomList>("custom_agents_list");
@@ -533,8 +554,12 @@ export interface MockCall {
     | "buddy.input"
     | "buddy.close"
     | "buddy.closeAll"
-    | "buddy.file";
-  id?: number;
+    | "buddy.file"
+    | "providers"
+    | "providerSave";
+  /** providerSave: the fields the patch named (never a variable's value) */
+  fields?: string[];
+  id?: number | string;
   /** power.busy: the edge, and whether the shell lets go at once (the setting went off) */
   busy?: boolean;
   now?: boolean;
@@ -686,6 +711,9 @@ export type MockGlobals = MockTurnGlobals & {
   __manutBadge?: number;
   /** e2e: the mock's copy of manut's custom-agents file (`agents` of `~/.manut/custom-agents.json`, as written) */
   __manutCustomFile?: unknown[];
+  /** Settings › Providers: the mock's copy of the shell's providers file, by agent id (values kept, as the shell keeps
+   *  them; the page is only ever sent the names) */
+  __manutProviders?: Record<string, MockProvider>;
   /** e2e: programs the mock finds on the search path, bare name -> where (absolute paths: any of the values) */
   __manutMockPrograms?: Record<string, string>;
   /** e2e: custom agents the mock treats as signed out (the others answer) */
@@ -708,8 +736,18 @@ export type MockGlobals = MockTurnGlobals & {
   __manutConvChecks?: { agent: string; id: string; account?: string }[];
 };
 
+/** What the mock keeps for one agent on Settings › Providers, as the shell's file does. */
+export interface MockProvider {
+  off?: boolean;
+  name?: string;
+  path?: string;
+  home?: string;
+  args?: string[];
+  env?: { name: string; value: string }[];
+}
+
 /** The programs the mock host finds unless a test says otherwise. */
-const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "stub-acp": "/usr/local/bin/stub-acp" };
+const MOCK_PROGRAMS: Record<string, string> = { "cursor-agent": "/opt/homebrew/bin/cursor-agent", "acme-agent": "/opt/homebrew/bin/acme-agent", "stub-acp": "/usr/local/bin/stub-acp" };
 
 /** The mock's past conversations: two Claude Code and one Codex conversation in the e2e folders. */
 const MOCK_PAST: PastChat[] = [
@@ -772,7 +810,99 @@ export class MockHost implements SessionHost, BuddyHost {
         : { id: a.id, label: a.label, mode: a.mode, path: installed.includes(a.id) ? `/usr/local/bin/${a.program}` : null },
     );
     const acp: AgentInfo[] = MOCK_ACP.map((r) => ({ id: r.id, label: r.label, mode: "chat", path: installed.includes(r.id) ? `/usr/local/bin/${r.program}` : null, acp: r }));
-    return [...builtins, ...acp, ...this.customInfos()];
+    // what Settings › Providers says of each, as the shell's look-up adds it
+    const set = this.g.__manutProviders ?? {};
+    return [...builtins, ...acp, ...this.customInfos()].map((a) => {
+      const p = set[a.id];
+      if (!p) return a;
+      return { ...a, ...(p.off ? { off: true } : {}), ...(p.name ? { name: p.name } : {}), ...(p.path && a.path !== null ? { path: p.path } : {}) };
+    });
+  }
+
+  // ---- Settings › Providers: the shell's checks over the mock's copy of its file (providers.rs) ---------------
+  private providerView(a: AgentInfo): ProviderView {
+    const p = this.g.__manutProviders?.[a.id] ?? {};
+    const custom = !!a.acp && "custom" in a.acp && !!a.acp.custom;
+    const builtin = !custom;
+    const args = p.args ?? [];
+    const fixed = a.acp?.args ?? (a.id === "claude" ? ["-p", "--input-format", "stream-json"] : a.id === "codex" ? ["app-server"] : []);
+    const found = a.path;
+    return {
+      id: a.id,
+      label: a.label,
+      kind: custom ? "custom" : ["claude", "codex", "omo"].includes(a.id) ? "main" : a.acp ? "acp" : "builtin",
+      mode: a.mode ?? "chat",
+      off: !!p.off,
+      name: p.name ?? "",
+      found,
+      path: p.path ?? "",
+      path_ok: !p.path || Object.values(this.programs()).includes(p.path) || p.path === found,
+      home_var: builtin ? (homeVarOf(a.id) ?? null) : null,
+      home: p.home ?? "",
+      args,
+      env: (p.env ?? []).map((v) => v.name),
+      takes_path: builtin,
+      takes_args: builtin && !!rulesOf(a.id),
+      takes_vars: builtin && a.id !== "dsh",
+      version: versionAgent(a.id),
+      signin: a.id === "claude" || a.id === "codex",
+      chat: found && (a.mode ?? "chat") === "chat" && a.id !== "dsh" ? [found, ...(custom ? (a.acp?.args ?? []) : fixed), ...(custom ? [] : args)].join(" ") : null,
+      terminal: found && !custom && a.id !== "dsh" ? [found, ...args].join(" ") : null,
+    };
+  }
+  async providers(): Promise<ProviderView[]> {
+    this.log({ op: "providers" });
+    // oh-my-hermes is offered nowhere (offeredAgents), so the page does not list it (providers.rs `list_here`)
+    return (await this.agents()).filter((a) => a.id !== "omh").map((a) => this.providerView(a));
+  }
+  async providerSave(id: string, patch: ProviderPatch): Promise<ProviderView> {
+    this.log({ op: "providerSave", id, fields: Object.keys(patch) });
+    const all = await this.agents();
+    const a = all.find((x) => x.id === id);
+    if (!a) throw new Error("why:unknown");
+    const view = this.providerView(a);
+    const cur = this.g.__manutProviders?.[id] ?? {};
+    const next: MockProvider = { ...cur };
+    if (patch.off !== undefined) next.off = patch.off;
+    if (patch.name !== undefined) {
+      if (patch.name && !/^[\p{L}\p{N} ._+-]{1,40}$/u.test(patch.name)) throw new Error("why:name");
+      next.name = patch.name;
+    }
+    if (patch.path !== undefined) {
+      if (patch.path && !view.takes_path) throw new Error("why:path_none");
+      if (patch.path && !patch.path.startsWith("/")) throw new Error("why:path_shape");
+      if (patch.path && !Object.values(this.programs()).includes(patch.path)) throw new Error("why:path_run");
+      next.path = patch.path;
+    }
+    if (patch.home !== undefined) {
+      if (patch.home && !view.home_var) throw new Error("why:home_none");
+      if (patch.home && !patch.home.startsWith("/")) throw new Error("why:home_shape");
+      next.home = patch.home;
+    }
+    if (patch.args !== undefined) {
+      if (patch.args.length && !view.takes_args) throw new Error("why:arg_unchecked");
+      const r = checkArgs(id, patch.args);
+      if (r) throw new Error(`why:${r.why}${r.what ? `:${r.what}` : ""}`);
+      next.args = patch.args;
+    }
+    if (patch.env !== undefined) {
+      const env: { name: string; value: string }[] = [];
+      for (const v of patch.env) {
+        const kept = v.value ?? cur.env?.find((x) => x.name === v.name)?.value;
+        if (kept === undefined) throw new Error(`why:var_keep:${v.name}`);
+        env.push({ name: v.name, value: kept });
+      }
+      const r = checkVars(id, env, view.takes_vars);
+      if (r) throw new Error(`why:${r.why}${r.what ? `:${r.what}` : ""}`);
+      next.env = env;
+    }
+    this.g.__manutProviders = { ...(this.g.__manutProviders ?? {}), [id]: next };
+    return this.providerView((await this.agents()).find((x) => x.id === id)!);
+  }
+  async providerVersion(id: string): Promise<string | null> {
+    const a = (await this.agents()).find((x) => x.id === id);
+    if (!a?.path || !versionAgent(id)) return null;
+    return ({ claude: "2.1.332", codex: "0.167.0" } as Record<string, string>)[id] ?? "1.0.0";
   }
 
   // ---- the person's own agents: the shell's checks over the mock's file (custom_agents.rs) --------------------

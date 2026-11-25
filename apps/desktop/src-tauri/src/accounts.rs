@@ -62,14 +62,28 @@ pub fn account_dir(home: &Path, cli: &str, id: &str) -> Result<PathBuf, String> 
     Ok(home.join(".manut").join("accounts").join(cli).join(id))
 }
 
-/// The env a new session of `cli` starts with to use account `id`. `default` is the CLI's own home: no env.
+/// The env a new session of `cli` starts with to use account `id`. `default` is "This computer": the CLI's own home (no
+/// env), or the home folder set for it on Settings › Providers ([`own_home_env`]).
 pub fn account_env(home: &Path, cli: &str, id: &str) -> Result<Vec<(String, String)>, String> {
     let var = home_var(cli).ok_or("unknown cli")?;
     if id == "default" {
-        return Ok(Vec::new());
+        return Ok(own_home_env(home, cli));
     }
     let dir = account_dir(home, cli, id)?;
     Ok(vec![(var.to_string(), dir.to_string_lossy().into_owned())])
+}
+
+/// The home folder set for `cli` on Settings › Providers (item 74), as its home variable: what "This computer" means for
+/// that CLI in this app. Nothing when none is set (the CLI's own default), or when what the file holds is not an absolute
+/// path. An added account's folder replaces it for the sessions that run as that account, and shares this one's settings
+/// ([`prepare`]), so the two never fight over the variable.
+pub fn own_home_env(home: &Path, cli: &str) -> Vec<(String, String)> {
+    let Some(var) = home_var(cli) else { return Vec::new() };
+    let h = crate::providers::load(home).get(cli).home;
+    if h.is_empty() || !Path::new(&h).is_absolute() {
+        return Vec::new();
+    }
+    vec![(var.to_string(), h)]
 }
 
 /// The Accounts CLI a SESSIONS agent signs in as: claude, codex and grok map 1:1. omh has no login of its own,
@@ -115,7 +129,7 @@ pub fn session_env_for(home: &Path, agent: &str, account: Option<&str>) -> Vec<(
         return Vec::new();
     };
     match account {
-        Some("default") => Vec::new(),
+        Some("default") => account_env(home, cli, "default").unwrap_or_default(),
         Some(id) if account_dir(home, cli, id).map(|d| d.is_dir() && !d.is_symlink()).unwrap_or(false) => account_env(home, cli, id).unwrap_or_default(),
         _ => session_env(home, agent),
     }
@@ -296,7 +310,8 @@ pub fn prepare(home: &Path, agent: &str, account_env: &[(String, String)]) {
     if account_dir(home, cli, id).ok().as_deref() != Some(Path::new(dir)) {
         return;
     }
-    if let Some(own) = crate::past_chats::cli_home(home, agent, &[], &host_env) {
+    // the person's own home of that CLI: the one set on Settings › Providers, else the CLI's default
+    if let Some(own) = crate::past_chats::cli_home(home, agent, &own_home_env(home, cli), &host_env) {
         let _ = share(home, cli, id, &own);
     }
 }
@@ -557,7 +572,11 @@ pub fn command_for(home: &Path, cli: &str, id: &str, step: Step) -> Result<Prepa
         account_env(home, cli, id)?.into_iter().map(|(k, v)| (k, v.into())).collect();
     let os = Os::current();
     let dirs = search_dirs(&host_env, os);
-    let program = resolve(cli, &dirs, is_program_file, os).ok_or_else(|| format!("{cli} is not on this computer"))?;
+    // the program set on Settings › Providers (checked again now), else the first on the search path as always
+    let program = match crate::providers::set_program(cli, &crate::providers::load(home).get(cli), os, is_program_file)? {
+        Some(p) => p,
+        None => resolve(cli, &dirs, is_program_file, os).ok_or_else(|| format!("{cli} is not on this computer"))?,
+    };
     let mut child_dirs: Vec<PathBuf> = program.parent().map(|p| vec![p.to_path_buf()]).unwrap_or_default();
     child_dirs.extend(dirs.into_iter().filter(|d| d.is_dir()));
     env.push(("PATH".into(), std::env::join_paths(child_dirs).map_err(|e| e.to_string())?));
@@ -586,8 +605,24 @@ fn command(program: &Path, args: &[&str], env: &[(String, OsString)]) -> Command
 
 /// Run a fixed command to the end (or `STATUS_TIMEOUT`): `(exit code, stdout, stderr)`.
 fn run_to_end(program: &Path, args: &[&str], env: &[(String, OsString)]) -> Result<(Option<i32>, String, String), String> {
-    let mut child =
-        command(program, args, env).spawn().map_err(|e| format!("could not start {}: {e}", program.display()))?;
+    run_cmd(command(program, args, env), program)
+}
+
+/// The version an agent's program prints for Settings › Providers: `argv` is the program a session would start and
+/// `--version` (`providers::version_here`), with the session's child `PATH` and nothing else; the output is read to the
+/// end (or `STATUS_TIMEOUT`) and only the caller's [`parse_version`] of it is kept.
+pub fn run_version(argv: &[OsString], path_env: &OsString) -> Result<Option<String>, String> {
+    let (program, rest) = argv.split_first().ok_or("nothing to run")?;
+    let mut cmd = Command::new(program);
+    cmd.args(rest).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).env("PATH", path_env);
+    crate::platform::no_console_window(&mut cmd);
+    crate::appimage::host_env(&mut cmd);
+    let (_, out, err) = run_cmd(cmd, Path::new(program))?;
+    Ok(Some(if out.trim().is_empty() { err } else { out }))
+}
+
+fn run_cmd(mut cmd: Command, program: &Path) -> Result<(Option<i32>, String, String), String> {
+    let mut child = cmd.spawn().map_err(|e| format!("could not start {}: {e}", program.display()))?;
     let read = |s: Option<Box<dyn Read + Send>>| {
         thread::spawn(move || {
             let mut buf = Vec::new();
@@ -637,6 +672,282 @@ pub fn status(home: &Path, cli: &str, id: &str) -> Result<Option<LoginStatus>, S
         }
         _ => Ok(None),
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The accounts list, kept by the shell (item 74)
+// ---------------------------------------------------------------------------------------------
+//
+// Settings › Accounts listed and changed accounts through the Hermes bridge (`accounts.list`, `add`, `set_active`,
+// `remove`, `label`, `discard`), which Practice and Connected do not have, so the page hid itself there. All the bridge did
+// was read and write folders and two small files under `~/.manut/accounts`, which the shell can do in every mode; the
+// sign-in and the status were already the shell's. These are those six, for the two CLIs whose sign-in the app runs and
+// reads (Claude Code and Codex). The bridge's usage records and its CLIProxyAPI rows are not read here: a row's usage is
+// `null` from the shell.
+
+/// The CLIs the shell lists accounts for: the ones whose own sign-in it runs ([`fixed_args`] `Login`) and whose status it
+/// reads.
+pub const LISTED_CLIS: [&str; 2] = ["claude", "codex"];
+
+/// One account row, in the bridge's shape (`Account` in src/lib/protocol.ts). Never a token: an email at most.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Row {
+    pub id: String,
+    pub label: String,
+    pub email: String,
+    /// `ready` (a sign-in is there) or `login` (none yet). The page's status read wins over it.
+    pub state: &'static str,
+    pub dir: Option<String>,
+    pub usage: Option<()>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Group {
+    pub cli: &'static str,
+    pub installed: bool,
+    pub active: String,
+    pub accounts: Vec<Row>,
+}
+
+/// The largest `.claude.json` the email is read from (it holds the account's projects too).
+const CLAUDE_JSON_MAX: u64 = 16 << 20;
+/// A label's length cap, in characters (the bridge's).
+pub const LABEL_MAX: usize = 40;
+
+fn is_real_dir(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+/// The sign-in a CLI home holds, as far as a file shows it without reading a token: Codex's `auth.json` is there (a stat
+/// only, the file is never opened); Claude Code's `.claude.json` names its `oauthAccount` (only its email is kept). On
+/// macOS Claude Code keeps the key itself in the keychain, so this is the account's own identity file, not the key.
+pub fn signed_in_here(cli: &str, cli_home: &Path, claude_json: &Path) -> (bool, String) {
+    match cli {
+        "codex" => (std::fs::symlink_metadata(cli_home.join("auth.json")).map(|m| m.is_file()).unwrap_or(false), String::new()),
+        "claude" => {
+            let v = std::fs::symlink_metadata(claude_json)
+                .ok()
+                .filter(|m| m.is_file() && m.len() <= CLAUDE_JSON_MAX)
+                .and_then(|_| std::fs::read_to_string(claude_json).ok())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+            let Some(acct) = v.as_ref().and_then(|v| v.get("oauthAccount")).filter(|a| a.is_object()) else { return (false, String::new()) };
+            let email = short(acct.get("emailAddress").and_then(|e| e.as_str()).map(str::to_string), 120).filter(|e| e.contains('@')).unwrap_or_default();
+            (true, email)
+        }
+        _ => (false, String::new()),
+    }
+}
+
+fn accounts_root(home: &Path) -> PathBuf {
+    home.join(".manut").join("accounts")
+}
+
+/// Refuses when `~/.manut`, `~/.manut/accounts` or the CLI's folder in it is a link: every write stays in the app's own
+/// folders.
+fn no_links(home: &Path, cli: &str) -> Result<(), String> {
+    let root = accounts_root(home);
+    for p in [home.join(".manut"), root.clone(), root.join(cli)] {
+        if std::fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Err("the accounts folder is a link".into());
+        }
+    }
+    Ok(())
+}
+
+fn read_json(p: &Path) -> serde_json::Map<String, serde_json::Value> {
+    std::fs::symlink_metadata(p)
+        .ok()
+        .filter(|m| m.is_file() && m.len() <= 64 * 1024)
+        .and_then(|_| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Write a small JSON file of the app's own through a temporary file and a rename (never through a link).
+fn write_json(p: &Path, v: &serde_json::Value) -> Result<(), String> {
+    if p.is_symlink() {
+        return Err("a link is in the way".into());
+    }
+    let dir = p.parent().ok_or("no folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!(".{}.tmp", p.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
+    std::fs::write(&tmp, serde_json::to_string_pretty(v).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+/// A label as kept: trimmed, without control characters, at most [`LABEL_MAX`] characters.
+pub fn clean_label(label: &str) -> String {
+    label.trim().chars().filter(|c| !c.is_control()).take(LABEL_MAX).collect::<String>().trim().to_string()
+}
+
+/// An id made from a label: lower-case letters, digits, `.`, `_`, `-`; `account-<n>` when nothing is left or it would be
+/// `default`.
+pub fn id_from_label(label: &str, taken: &[String]) -> String {
+    let mut id = String::new();
+    for c in label.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-') {
+            id.push(c);
+        } else if !id.ends_with('-') {
+            id.push('-');
+        }
+    }
+    let id: String = id.trim_matches(|c| matches!(c, '-' | '.' | '_')).chars().take(LABEL_MAX).collect();
+    if valid_account_id(&id) {
+        return id;
+    }
+    (2..1000).map(|n| format!("account-{n}")).find(|i| !taken.contains(i)).unwrap_or_else(|| "account-x".into())
+}
+
+/// The ids of `cli`'s added accounts: real folders (never links) with a valid name, sorted.
+fn added_ids(home: &Path, cli: &str) -> Vec<String> {
+    let mut ids: Vec<String> = std::fs::read_dir(accounts_root(home).join(cli))
+        .map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().map(str::to_string)).filter(|n| valid_account_id(n)).collect())
+        .unwrap_or_default();
+    ids.retain(|id| is_real_dir(&accounts_root(home).join(cli).join(id)));
+    ids.sort();
+    ids
+}
+
+/// Every account of the [`LISTED_CLIS`] on this computer: the CLI's own login first ("This computer", in the home set on
+/// Settings › Providers when one is), then the added ones. A CLI is listed when it is installed or has added accounts.
+/// `installed` says whether each CLI's program is there.
+pub fn list(home: &Path, installed: &dyn Fn(&str) -> bool, env: &dyn Fn(&str) -> Option<String>) -> Vec<Group> {
+    let labels = read_json(&accounts_root(home).join("labels.json"));
+    LISTED_CLIS
+        .iter()
+        .filter_map(|&cli| {
+            let ids = added_ids(home, cli);
+            let here = installed(cli);
+            if !here && ids.is_empty() {
+                return None;
+            }
+            let own = own_home_env(home, cli);
+            let own_home = crate::past_chats::cli_home(home, cli, &own, env);
+            // Claude Code keeps `.claude.json` inside its config folder when one is named, else beside the home folder
+            let named = !own.is_empty() || env("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
+            let own_json = match (&own_home, named) {
+                (Some(h), true) => h.join(".claude.json"),
+                _ => home.join(".claude.json"),
+            };
+            let (signed, email) = own_home.as_deref().map(|h| signed_in_here(cli, h, &own_json)).unwrap_or((false, String::new()));
+            let mut rows = vec![Row {
+                id: "default".into(),
+                label: labels.get(cli).and_then(|v| v.as_str()).map(clean_label).unwrap_or_default(),
+                email,
+                state: if signed { "ready" } else { "login" },
+                dir: None,
+                usage: None,
+            }];
+            for id in ids {
+                let dir = accounts_root(home).join(cli).join(&id);
+                let (signed, email) = signed_in_here(cli, &dir, &dir.join(".claude.json"));
+                let label = read_json(&dir.join("account.json")).get("label").and_then(|v| v.as_str()).map(clean_label).unwrap_or_default();
+                rows.push(Row { id, label, email, state: if signed { "ready" } else { "login" }, dir: Some(dir.to_string_lossy().into_owned()), usage: None });
+            }
+            Some(Group { cli, installed: here, active: active_account(home, cli), accounts: rows })
+        })
+        .collect()
+}
+
+fn listed(cli: &str) -> Result<(), String> {
+    if LISTED_CLIS.contains(&cli) {
+        Ok(())
+    } else {
+        Err("unknown cli".into())
+    }
+}
+
+/// A new empty home folder for `cli` (made for this account only), named from `label`, with the label kept beside it.
+/// The page then runs the CLI's own sign-in with it. Refused when the name is taken.
+pub fn add(home: &Path, cli: &str, label: &str) -> Result<(String, PathBuf), String> {
+    listed(cli)?;
+    no_links(home, cli)?;
+    let label = clean_label(label);
+    let taken = added_ids(home, cli);
+    let id = id_from_label(&label, &taken);
+    let dir = account_dir(home, cli, &id)?;
+    std::fs::create_dir_all(accounts_root(home).join(cli)).map_err(|e| e.to_string())?;
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(&dir).map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { format!("an account named {id} already exists") } else { e.to_string() })?;
+    write_json(&dir.join("account.json"), &serde_json::json!({ "label": label }))?;
+    Ok((id, dir))
+}
+
+/// The account new sessions of `cli` start with (`default` or an added account's id). Running sessions are untouched.
+pub fn set_active(home: &Path, cli: &str, id: &str) -> Result<(), String> {
+    listed(cli)?;
+    no_links(home, cli)?;
+    if id != "default" && !account_dir(home, cli, id).map(|d| is_real_dir(&d)).unwrap_or(false) {
+        return Err("no such account".into());
+    }
+    let path = accounts_root(home).join("active.json");
+    let mut all = read_json(&path);
+    all.insert(cli.to_string(), serde_json::Value::String(id.to_string()));
+    write_json(&path, &serde_json::Value::Object(all))
+}
+
+/// The person's own name for a row ("" clears it); `default` = the CLI's own login.
+pub fn set_label(home: &Path, cli: &str, id: &str, label: &str) -> Result<(), String> {
+    listed(cli)?;
+    no_links(home, cli)?;
+    let label = clean_label(label);
+    if id == "default" {
+        let path = accounts_root(home).join("labels.json");
+        let mut all = read_json(&path);
+        all.insert(cli.to_string(), serde_json::Value::String(label));
+        return write_json(&path, &serde_json::Value::Object(all));
+    }
+    let dir = account_dir(home, cli, id)?;
+    if !is_real_dir(&dir) {
+        return Err("no such account".into());
+    }
+    write_json(&dir.join("account.json"), &serde_json::json!({ "label": label }))
+}
+
+/// Deletes `~/.manut/accounts/<cli>/<id>/` and nothing else (never `default`, never through a link). When it was the
+/// account new sessions use, they go back to "This computer".
+pub fn remove(home: &Path, cli: &str, id: &str) -> Result<(), String> {
+    listed(cli)?;
+    no_links(home, cli)?;
+    let dir = account_dir(home, cli, id)?;
+    if !is_real_dir(&dir) {
+        return Err("no such account".into());
+    }
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    if active_account(home, cli) == "default" {
+        let path = accounts_root(home).join("active.json");
+        let mut all = read_json(&path);
+        if all.get(cli).and_then(|v| v.as_str()) == Some(id) {
+            all.insert(cli.to_string(), serde_json::Value::String("default".into()));
+            let _ = write_json(&path, &serde_json::Value::Object(all));
+        }
+    }
+    Ok(())
+}
+
+/// A cancelled sign-in: removes the new folder, refused when the CLI did sign in there after all.
+pub fn discard(home: &Path, cli: &str, id: &str) -> Result<(), String> {
+    listed(cli)?;
+    let dir = account_dir(home, cli, id)?;
+    if signed_in_here(cli, &dir, &dir.join(".claude.json")).0 {
+        return Err("this account is signed in; remove it from its menu".into());
+    }
+    remove(home, cli, id)
+}
+
+/// [`list`] on this computer.
+pub fn list_here(home: &Path) -> Vec<Group> {
+    let on: Vec<(&str, bool)> = clis_on_this_computer();
+    let installed = |cli: &str| {
+        on.iter().any(|(c, here)| *c == cli && *here) || crate::providers::set_program(cli, &crate::providers::load(home).get(cli), Os::current(), is_program_file).ok().flatten().is_some()
+    };
+    list(home, &installed, &host_env)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1208,6 +1519,128 @@ mod tests {
         std::fs::create_dir_all(account_dir(&home, "claude", "probe").unwrap()).unwrap();
         let s = status(&home, "claude", "probe").unwrap().unwrap();
         assert!(!s.logged_in && s.email.is_none());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    // ---- the accounts list the shell keeps (item 74) ------------------------------------------------------------
+
+    fn list_home(name: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("manut-acct-list-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    /// Practice and Connected have no bridge: the shell lists, adds, picks, names and removes accounts itself, writing only
+    /// under `~/.manut/accounts`, and never reads a token (a Codex `auth.json` is a stat, a Claude Code `.claude.json` gives
+    /// its email only).
+    #[test]
+    fn the_shell_keeps_the_accounts_list_in_every_mode() {
+        let home = list_home("ops");
+        let none = |_: &str| None;
+        // nothing installed and no account: no group; installed: "This computer" alone
+        assert!(list(&home, &|_| false, &none).is_empty());
+        let g = list(&home, &|c| c == "codex", &none);
+        assert_eq!(g.len(), 1);
+        assert_eq!((g[0].cli, g[0].active.as_str(), g[0].accounts.len(), g[0].accounts[0].id.as_str(), g[0].accounts[0].state), ("codex", "default", 1, "default", "login"));
+        // Codex's own sign-in is a file there; Claude Code's identity names an email (a token beside it is never kept)
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex").join("auth.json"), format!(r#"{{"tokens":{{"access_token":"{SECRET}"}}}}"#)).unwrap();
+        std::fs::write(home.join(".claude.json"), format!(r#"{{"oauthAccount":{{"emailAddress":"me@example.com","accessToken":"{SECRET}"}}}}"#)).unwrap();
+        let g = list(&home, &|_| true, &none);
+        assert_eq!(g.iter().map(|g| g.cli).collect::<Vec<_>>(), ["claude", "codex"]);
+        assert_eq!((g[0].accounts[0].state, g[0].accounts[0].email.as_str()), ("ready", "me@example.com"));
+        assert_eq!(g[1].accounts[0].state, "ready");
+        assert!(!serde_json::to_string(&g).unwrap().contains(SECRET));
+
+        // add: a folder of its own (0700) named from the label, the label kept beside it, taken names refused
+        let (id, dir) = add(&home, "claude", "  Work  ").unwrap();
+        assert_eq!((id.as_str(), dir.clone()), ("work", home.join(".manut").join("accounts").join("claude").join("work")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        assert!(add(&home, "claude", "work").unwrap_err().contains("already exists"));
+        assert_eq!(add(&home, "claude", "!!").unwrap().0, "account-2");
+        assert_eq!(add(&home, "claude", "Default").unwrap().0, "account-3");
+        for bad in ["gemini", "pi", "../x", ""] {
+            assert!(add(&home, bad, "x").is_err(), "{bad}");
+        }
+        let g = list(&home, &|_| true, &none);
+        let rows: Vec<(&str, &str, &str)> = g[0].accounts.iter().map(|r| (r.id.as_str(), r.label.as_str(), r.state)).collect();
+        assert_eq!(rows, [("default", "", "ready"), ("account-2", "!!", "login"), ("account-3", "Default", "login"), ("work", "Work", "login")]);
+
+        // pick, name, discard and remove
+        set_active(&home, "claude", "work").unwrap();
+        assert_eq!(active_account(&home, "claude"), "work");
+        assert!(set_active(&home, "claude", "gone").is_err() && set_active(&home, "claude", "../../x").is_err());
+        set_label(&home, "claude", "default", "Personal").unwrap();
+        set_label(&home, "claude", "work", "Team").unwrap();
+        let g = list(&home, &|_| true, &none);
+        assert_eq!((g[0].accounts[0].label.as_str(), g[0].active.as_str()), ("Personal", "work"));
+        assert_eq!(g[0].accounts.iter().find(|r| r.id == "work").unwrap().label, "Team");
+        // a sign-in that happened after all is not discarded
+        std::fs::write(home.join(".manut/accounts/claude/account-2/.claude.json"), r#"{"oauthAccount":{"emailAddress":"b@example.com"}}"#).unwrap();
+        assert!(discard(&home, "claude", "account-2").unwrap_err().contains("signed in"));
+        discard(&home, "claude", "account-3").unwrap();
+        remove(&home, "claude", "work").unwrap();
+        assert!(!dir.exists());
+        assert_eq!(active_account(&home, "claude"), "default");
+        assert!(remove(&home, "claude", "default").is_err());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Nothing is written through a link: an accounts folder that is a link refuses every change, and a link inside the
+    /// CLI's folder is never listed or removed.
+    #[cfg(unix)]
+    #[test]
+    fn the_accounts_list_never_follows_a_link() {
+        let home = list_home("links");
+        let elsewhere = home.join("elsewhere");
+        std::fs::create_dir_all(elsewhere.join("keep")).unwrap();
+        std::fs::create_dir_all(home.join(".manut/accounts/claude")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("keep"), home.join(".manut/accounts/claude/linked")).unwrap();
+        let g = list(&home, &|_| true, &|_: &str| None);
+        assert!(!g[0].accounts.iter().any(|r| r.id == "linked"));
+        assert!(remove(&home, "claude", "linked").is_err());
+        assert!(elsewhere.join("keep").exists());
+        std::fs::remove_dir_all(home.join(".manut/accounts/claude")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, home.join(".manut/accounts/claude")).unwrap();
+        assert!(add(&home, "claude", "x").unwrap_err().contains("link"));
+        assert!(!elsewhere.join("x").exists());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// The home folder set on Settings › Providers is what "This computer" means: its variable for a session with no added
+    /// account, the folder an added account's settings are shared from, and where its sign-in is read; an added account's
+    /// own folder still replaces it.
+    #[test]
+    fn the_providers_home_is_this_computers_and_an_added_account_wins() {
+        let home = list_home("own");
+        let mine = home.join("claude-elsewhere");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(home.join(".manut")).unwrap();
+        std::fs::write(crate::providers::store_path(&home), serde_json::json!({"version": 1, "agents": {"claude": {"home": mine}}}).to_string()).unwrap();
+        let own = vec![("CLAUDE_CONFIG_DIR".to_string(), mine.to_string_lossy().into_owned())];
+        assert_eq!(own_home_env(&home, "claude"), own);
+        assert_eq!(account_env(&home, "claude", "default").unwrap(), own);
+        assert_eq!(session_env(&home, "claude"), own);
+        assert_eq!(session_env_for(&home, "claude", Some("default")), own);
+        assert!(own_home_env(&home, "codex").is_empty());
+        // its sign-in is read where Claude Code keeps it for that folder
+        std::fs::write(mine.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"elsewhere@example.com"}}"#).unwrap();
+        let g = list(&home, &|c| c == "claude", &|_: &str| None);
+        assert_eq!(g[0].accounts[0].email, "elsewhere@example.com");
+        // an added account: its own folder, with its settings linked from the folder set here
+        let (id, dir) = add(&home, "claude", "work").unwrap();
+        set_active(&home, "claude", &id).unwrap();
+        let env = session_env(&home, "claude");
+        assert_eq!(env, vec![("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().into_owned())]);
+        std::fs::create_dir_all(mine.join("skills")).unwrap();
+        prepare(&home, "claude", &env);
+        #[cfg(unix)]
+        assert_eq!(std::fs::read_link(dir.join("skills")).unwrap(), mine.canonicalize().unwrap().join("skills"));
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

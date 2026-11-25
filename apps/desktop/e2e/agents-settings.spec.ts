@@ -1,8 +1,11 @@
-// Settings › Agents (mock host): the built-ins listed read-only by tier in four languages; Add agent -> Save opens a
-// confirm card with the exact command and nothing is written until Add; Cancel writes nothing; the new agent appears
-// in the SESSIONS + menu after the generic ACP agents and opens a session chat (the mock speaks what the generic ACP
-// adapter emits), whose view says once that approvals follow the agent's own settings; Remove asks once, then ends
-// its open session. Shots with MANUT_SHOTS=<dir> (MANUT_SHOT_TAG=after by default).
+// Settings › Providers (item 74, mock host; Settings › Agents until then): every agent the app knows with a switch, its
+// status and version, in four languages; an agent turned off leaves both parts of the + menu at once and comes back when
+// turned on; the chosen agent's settings, where an argument that skips the asks is refused by name and a variable's value
+// is never shown again once saved; Your agents (the person's own ACP agents): Add agent -> Save opens a confirm card with
+// the exact command and nothing is written until Add; Cancel writes nothing; the new agent appears in the SESSIONS + menu
+// after the generic ACP agents and opens a session chat (the mock speaks what the generic ACP adapter emits), whose view
+// says once that approvals follow the agent's own settings; Remove asks once, then ends its open session. Shots with
+// MANUT_SHOTS=<dir> (MANUT_SHOT_TAG=after by default).
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -52,9 +55,10 @@ async function open(page: Page, opts: { theme?: string; lang?: string; file?: un
 
 async function agentsPage(page: Page) {
   await page.getByTestId("nav-settings").click();
-  await page.getByTestId("settings-nav-agents").click();
+  await page.getByTestId("settings-nav-providers").click();
+  await expect(page.getByTestId("providers-page")).toBeVisible();
+  await expect(page.getByTestId("provider-row-cline")).toBeVisible();
   await expect(page.getByTestId("agents-page")).toBeVisible();
-  await expect(page.getByTestId("agents-row-cline")).toBeVisible();
 }
 
 async function fill(page: Page, label: string, program: string, args = "acp") {
@@ -71,39 +75,104 @@ async function plus(page: Page) {
   await page.waitForFunction(() => document.querySelector(".ss-pop")?.getAnimations().every((a) => a.playState !== "running"));
 }
 
-test("the page lists every offered agent read-only with its tier and whether it is installed", async ({ page }) => {
+test("the page lists every agent with a switch and its status, between Terminal and Computer", async ({ page }) => {
   await open(page);
   await agentsPage(page);
-  const rows = page.locator("[data-testid=agents-builtins] [data-testid^=agents-row-]");
-  // every agent but oh-my-hermes, which the fork does not offer (README.md, what was removed)
-  await expect(rows).toHaveCount(13);
-  expect(await rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")!.slice("agents-row-".length)))).toEqual([
-    "claude", "codex", "omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline",
+  const rows = page.locator("[data-testid=providers-list] [data-testid^=provider-row-]");
+  // every agent the app knows: the built-ins, then the ACP agents, Cursor and Antigravity among them (item 74)
+  expect(await rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")!.slice("provider-row-".length)))).toEqual([
+    "claude", "codex", "omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy",
   ]);
-  await expect(page.getByTestId("agents-tier-claude")).toHaveText("Main");
-  await expect(page.getByTestId("agents-tier-dsh")).toHaveText("Built-in");
-  await expect(page.getByTestId("agents-tier-gemini")).toHaveText("ACP");
-  await expect(page.getByTestId("agents-row-gemini")).toContainText("Installed");
-  await expect(page.getByTestId("agents-row-qwen")).toContainText("Not installed");
-  // nothing on the built-in rows can be changed
-  await expect(page.locator("[data-testid=agents-builtins] button, [data-testid=agents-builtins] input")).toHaveCount(0);
+  // oh-my-hermes is offered nowhere, so it is not listed either
+  await expect(page.getByTestId("provider-status-gemini")).toHaveText("Installed");
+  await expect(page.getByTestId("provider-status-qwen")).toHaveText("Not installed");
+  await expect(page.getByTestId("provider-version-claude")).toHaveText("2.1.332");
+  await expect(page.getByTestId("provider-switch-claude")).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("agents-mine")).toContainText("No agents of your own yet");
-  // the page sits between Terminal and Computer (the fork removed Providers, which was Hermes' sign-in)
+  // the page sits where Agents was, between Terminal and Computer, and Accounts is a part of it, not a page of its own
   const names = await page.locator(".st-nav button").allTextContents();
-  expect(names.indexOf("Agents")).toBe(names.indexOf("Terminal") + 1);
-  expect(names.indexOf("Computer")).toBe(names.indexOf("Agents") + 1);
+  expect(names.indexOf("Providers")).toBe(names.indexOf("Terminal") + 1);
+  expect(names.indexOf("Computer")).toBe(names.indexOf("Providers") + 1);
+  expect(names).not.toContain("Accounts");
+  expect(names).not.toContain("Agents");
+  await expect(page.getByTestId("accounts-page")).toBeAttached();
+});
+
+test("an agent turned off leaves both parts of the + menu at once, and comes back when turned on", async ({ page }) => {
+  await open(page);
+  await agentsPage(page);
+  await page.getByTestId("provider-switch-claude").click();
+  await expect(page.getByTestId("provider-switch-claude")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("provider-status-claude")).toHaveText("Turned off");
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await openCode(page);
+  await page.getByTestId("session-new").click();
+  await expect(page.getByTestId("session-agent-codex")).toBeVisible();
+  // neither Chat with Kit nor In a terminal (nor More agents) offers it
+  await expect(page.getByTestId("session-chat-claude")).toHaveCount(0);
+  await expect(page.getByTestId("session-agent-claude")).toHaveCount(0);
+  await expect(page.getByTestId("session-chat-codex")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await agentsPage(page);
+  await page.getByTestId("provider-switch-claude").click();
+  await expect(page.getByTestId("provider-switch-claude")).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await plus(page);
+  await expect(page.getByTestId("session-chat-claude")).toBeVisible();
+});
+
+test("an agent's settings: a refused argument is refused by name, and a variable's value is never shown again", async ({ page }) => {
+  const secret = "sk-live-7f3a9c2e1b";
+  await open(page);
+  await agentsPage(page);
+  await page.getByTestId("provider-open-claude").click();
+  const detail = page.getByTestId("provider-detail");
+  await expect(detail).toBeVisible();
+  await expect(page.getByTestId("provider-detail-status")).toBeVisible();
+  // an argument that would skip the asks: refused with its name, nothing saved
+  await page.getByTestId("provider-args").fill("--model=opus\n--dangerously-skip-permissions");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-error")).toHaveText("--dangerously-skip-permissions would let Claude Code act without asking first, or outside its sandbox, so Manut AI does not pass it.");
+  // one the app sets itself
+  await page.getByTestId("provider-args").fill("--permission-prompt-tool=x");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-error")).toContainText("--permission-prompt-tool is set by Manut AI itself");
+  // a path that is not a program
+  await page.getByTestId("provider-args").fill("--model=opus");
+  await page.getByTestId("provider-path").fill("/nowhere/claude");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-error")).toHaveText("That path is not a program this account may run.");
+  await page.getByTestId("provider-path").fill("");
+  // a variable: saved once, then only its name
+  await page.getByTestId("provider-var-add").click();
+  await page.getByTestId("provider-var-name").fill("MY_KEY");
+  await page.getByTestId("provider-var-value").fill(secret);
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-note")).toHaveText("Saved");
+  await expect(page.getByTestId("provider-runs-chat")).toContainText("--model=opus");
+  await expect(page.getByTestId("provider-var-name")).toHaveValue("MY_KEY");
+  await expect(page.getByTestId("provider-var-value")).toHaveValue("");
+  await expect(page.getByTestId("provider-var-value")).toHaveAttribute("placeholder", "Saved, hidden. Type to replace it.");
+  expect(await page.content()).not.toContain(secret);
+  const log = await page.evaluate(() => JSON.stringify((window as unknown as { __manutSessionCalls?: unknown[] }).__manutSessionCalls ?? []));
+  expect(log).not.toContain(secret);
+  // a display name is the agent's name in the list
+  await page.getByTestId("provider-name").fill("Claude at work");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-row-claude").locator(".prov-n b")).toHaveText("Claude at work");
+  expect(await page.content()).not.toContain(secret);
 });
 
 test("Save opens the confirm card with the exact command; Cancel writes nothing", async ({ page }) => {
   await open(page);
   await agentsPage(page);
-  await fill(page, "Cursor Agent", "cursor-agent");
+  await fill(page, "Acme Agent", "acme-agent");
   await expect(page.getByTestId("agent-form-nokeys")).toHaveText("No keys, tokens or environment variables here: the agent signs in on its own.");
   await expect(page.getByTestId("agent-form-args")).toHaveValue("acp");
   await page.getByTestId("agent-form-save").click();
   const card = page.getByTestId("agent-confirm");
   await expect(card).toBeVisible();
-  await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/cursor-agent acp");
+  await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/acme-agent acp");
   await expect(card).toContainText("In the folder you pick for each session.");
   // Cancel comes first, Add second
   expect(await card.locator("button").allTextContents()).toEqual(["Cancel", "Add"]);
@@ -120,7 +189,7 @@ test("Save opens the confirm card with the exact command; Cancel writes nothing"
   await expect(page.getByTestId("agent-confirm-missing")).toHaveText("not-here: not found on the search path");
   await page.getByTestId("agent-confirm-cancel").click();
   // OpenCode and Kilo Code are refused with one line, no card
-  for (const [program, line] of [["opencode", "Use the built-in OpenCode."], ["kilo", "Kilo Code is not offered."], ["cursor-agent; rm -rf ~", "Give a program name on your search path or a full path, with no shell characters."]]) {
+  for (const [program, line] of [["opencode", "Use the built-in OpenCode."], ["kilo", "Kilo Code is not offered."], ["acme-agent; rm -rf ~", "Give a program name on your search path or a full path, with no shell characters."]]) {
     await page.getByTestId("agent-form-program").fill(program);
     await page.getByTestId("agent-form-save").click();
     await expect(page.getByTestId("agents-error")).toHaveText(line);
@@ -159,7 +228,7 @@ test.skip("Add writes it; it appears in the + menu after the generic ACP agents 
 
   // remove: one confirm, then gone; its open session ends cleanly
   await page.getByTestId("nav-settings").click();
-  await page.getByTestId("settings-nav-agents").click();
+  await page.getByTestId("settings-nav-providers").click();
   await page.getByTestId("agents-remove-stub-acp").click();
   await expect(page.getByTestId("agents-remove-confirm")).toContainText("Remove Stub ACP? Its open sessions end.");
   await page.getByTestId("agents-remove-yes").click();
@@ -175,59 +244,62 @@ test.skip("Add writes it; it appears in the + menu after the generic ACP agents 
 
 // chat-mode CLI sessions replaced by bot threads (2026-11-16: terminals kept)
 test.skip("a broken entry of the file is listed as broken, never offered, and can be removed", async ({ page }) => {
-  await open(page, { file: [{ id: "evil", label: "Evil", program: "sh", args: ["-c", "rm -rf ~"], install: "" }, { id: "cursor", label: "Cursor", program: "cursor-agent", args: ["acp"], install: "" }] });
+  await open(page, { file: [{ id: "evil", label: "Evil", program: "sh", args: ["-c", "rm -rf ~"], install: "" }, { id: "acme", label: "Acme", program: "acme-agent", args: ["acp"], install: "" }] });
   await agentsPage(page);
   await expect(page.getByTestId("agents-broken-evil")).toContainText("evil cannot run");
-  await expect(page.getByTestId("agents-mine-cursor")).toBeVisible();
+  await expect(page.getByTestId("agents-mine-acme")).toBeVisible();
   await page.getByRole("button", { name: "Close settings" }).click();
   await plus(page);
   await expect(page.getByTestId("session-agent-evil")).toHaveCount(0);
-  await expect(page.getByTestId("session-agent-cursor")).toBeVisible();
+  await expect(page.getByTestId("session-agent-acme")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByTestId("nav-settings").click();
-  await page.getByTestId("settings-nav-agents").click();
+  await page.getByTestId("settings-nav-providers").click();
   await page.getByTestId("agents-remove-evil").click();
   await page.getByTestId("agents-remove-yes").click();
   await expect(page.getByTestId("agents-broken-evil")).toHaveCount(0);
-  expect(await file(page)).toEqual([{ id: "cursor", label: "Cursor", program: "cursor-agent", args: ["acp"], install: "" }]);
+  expect(await file(page)).toEqual([{ id: "acme", label: "Acme", program: "acme-agent", args: ["acp"], install: "" }]);
 });
 
-for (const [lang, title, main, add, card] of [
-  ["en", "Agents", "Main", "Add agent", "Add Cursor?"],
-  ["ko", "에이전트", "메인", "에이전트 추가", "Cursor을(를) 추가할까요?"],
-  ["ja", "エージェント", "メイン", "エージェントを追加", "Cursor を追加しますか？"],
-  ["zh", "智能体", "主要", "添加智能体", "添加 Cursor？"],
+for (const [lang, title, off, add, card] of [
+  ["en", "Providers", "Turned off", "Add agent", "Add Acme?"],
+  ["ko", "프로바이더", "꺼짐", "에이전트 추가", "Acme을(를) 추가할까요?"],
+  ["ja", "プロバイダー", "オフ", "エージェントを追加", "Acme を追加しますか？"],
+  ["zh", "提供方", "已关闭", "添加智能体", "添加 Acme？"],
 ] as const) {
   test(`the page and its card read in ${lang}`, async ({ page }) => {
     await open(page, { lang });
     await page.getByTestId("nav-settings").click();
-    await expect(page.getByTestId("settings-nav-agents")).toHaveText(title);
-    await page.getByTestId("settings-nav-agents").click();
-    await expect(page.getByTestId("agents-tier-claude")).toHaveText(main);
+    await expect(page.getByTestId("settings-nav-providers")).toHaveText(title);
+    await page.getByTestId("settings-nav-providers").click();
+    await page.getByTestId("provider-switch-gemini").click();
+    await expect(page.getByTestId("provider-status-gemini")).toHaveText(off);
     await expect(page.getByTestId("agents-add")).toHaveText(add);
-    await fill(page, "Cursor", "cursor-agent");
+    await fill(page, "Acme", "acme-agent");
     await page.getByTestId("agent-form-save").click();
     await expect(page.getByTestId("agent-confirm")).toContainText(card);
-    await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/cursor-agent acp");
+    await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/acme-agent acp");
   });
 }
 
 // ---- shots --------------------------------------------------------------------------------------
 
-const FILE = [{ id: "cursor-agent", label: "Cursor Agent", program: "cursor-agent", args: ["acp"], install: "" }];
+const FILE = [{ id: "acme-agent", label: "Acme Agent", program: "acme-agent", args: ["acp"], install: "" }];
 
 for (const theme of ["dark", "light"]) {
-  test(`shots: Settings › Agents, the confirm card and the + menu (${theme})`, async ({ page }) => {
+  test(`shots: Settings › Providers, the confirm card and the + menu (${theme})`, async ({ page }) => {
     test.skip(!SHOTS, "set MANUT_SHOTS to take the shots");
     await mock("bots.rename", { bot: "default", name: "Milo" });
     await page.setViewportSize({ width: 1280, height: 820 });
     await open(page, { theme, file: FILE });
     mkdirSync(SHOTS, { recursive: true });
     await agentsPage(page);
-    await expect(page.getByTestId("agents-mine-cursor-agent")).toBeVisible();
-    // the end of the page: the last built-in rows, Your agents and Add agent
-    await page.getByTestId("agents-add").scrollIntoViewIfNeeded();
+    await expect(page.getByTestId("agents-mine-acme-agent")).toBeVisible();
+    // the top of the page: the list with an agent open, then the end: Your agents and Add agent
+    await page.getByTestId("provider-open-claude").click();
     await page.mouse.move(1200, 780);
+    await page.screenshot({ path: join(SHOTS, `providers-${TAG}-${theme}.png`), animations: "disabled" });
+    await page.getByTestId("agents-add").scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(SHOTS, `agents-settings-${TAG}-${theme}.png`), animations: "disabled" });
     await fill(page, "Stub ACP", "stub-acp");
     await page.getByTestId("agent-form-save").click();

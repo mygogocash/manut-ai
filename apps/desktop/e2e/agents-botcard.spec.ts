@@ -118,7 +118,7 @@ test("Cancel writes nothing; two blocks make two chips; a refused draft's chip i
   await reply(
     [
       "Two options:",
-      fence({ name: "Cursor Agent", program: "cursor-agent", args: ["acp"] }),
+      fence({ name: "Acme Agent", program: "acme-agent", args: ["acp"] }),
       fence({ name: "Stub ACP", program: "stub-acp", args: ["acp"] }),
       "and these I should not have proposed:",
       fence({ name: "Shell", program: "/bin/bash", args: ["-c", "id"] }),
@@ -141,7 +141,7 @@ test("Cancel writes nothing; two blocks make two chips; a refused draft's chip i
     await expect(chips.nth(i)).toHaveAttribute("title", why);
   }
   await chips.nth(0).click();
-  await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/cursor-agent acp");
+  await expect(page.getByTestId("agent-confirm-command")).toHaveText("/opt/homebrew/bin/acme-agent acp");
   await page.getByTestId("agent-confirm-cancel").click();
   await expect(page.getByTestId("agent-confirm")).toHaveCount(0);
   // Escape and a click outside close it too; none of them wrote
@@ -172,7 +172,8 @@ test("Ask the bot fills the current bot's composer and sends nothing", async ({ 
   await open(page);
   const before = (await mock("mock.submits")).submits.length;
   await page.getByTestId("nav-settings").click();
-  await page.getByTestId("settings-nav-agents").click();
+  // Your agents are a part of Settings › Providers since item 74
+  await page.getByTestId("settings-nav-providers").click();
   await expect(page.getByTestId("agents-ask-bot")).toHaveText("Ask the bot");
   await page.getByTestId("agents-ask-bot").click();
   // back in the chat, the request is in the composer, focused, not sent
@@ -192,7 +193,7 @@ for (const theme of ["dark", "light"]) {
     await page.setViewportSize({ width: 1280, height: 820 });
     await open(page, theme);
     mkdirSync(SHOTS, { recursive: true });
-    await reply(`Cursor's agent speaks ACP. This is what I would add:\n\n${fence({ name: "Cursor Agent", program: "cursor-agent", args: ["acp"], install: "npm install -g @cursor/agent" })}\n\nPress Add agent to check the exact command first.`);
+    await reply(`Acme's agent speaks ACP. This is what I would add:\n\n${fence({ name: "Acme Agent", program: "acme-agent", args: ["acp"], install: "npm install -g @acme/agent" })}\n\nPress Add agent to check the exact command first.`);
     const chip = page.getByTestId("bubble-bot").last().getByTestId("agent-chip");
     await expect(chip).toBeVisible();
     await chip.scrollIntoViewIfNeeded();

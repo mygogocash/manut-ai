@@ -32,11 +32,12 @@ async function openZh(page: Page) {
 }
 
 /** Words a person reads that are still English: text nodes and UI attributes, minus names that stay in Latin
- *  (bots, brands, models, commands, paths, people's data) and the language picker's own "English". */
+ *  (bots, brands, models, commands, paths, people's data, and git's own "Worktrees", which Settings › Worktrees keeps in
+ *  every language) and the language picker's own "English". */
 async function englishLeft(page: Page, root: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const KEEP =
-      /^(manut|Manut AI|Worktrees|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Graphite|Ocean|Forest|Sunset|Rose)$/;
+      /^(manut|Manut AI|OMH|Hermes|Kami|Friren|Frieren|Hermes Bot|OMH TUI|English|한국어|日本語|中文|Claude( Code)?|Codex|OmO|DSH|pi|omp|oh-my-pi|oh-my-hermes|Grok|Gemini( CLI)?|OpenAI|Worktrees|ChatGPT|CLIProxyAPI|Slack|Discord|Telegram|Cron|GitHub|GitLab|Linear|API|ID|PR|CI|Esc|Ctrl\+?.*|⌘.*|Max \d+x|Pro|Plus|Graphite|Ocean|Forest|Sunset|Rose)$/;
     // commands (`hermes auth add …`, `npm i -g …`), paths, ids and model or provider names stay as written
     const isData = (s: string) =>
       /[@/\\:]|^\d|^[a-z0-9._-]+$|^v?\d+(\.\d+)+/.test(s) ||
@@ -54,7 +55,8 @@ async function englishLeft(page: Page, root: string): Promise<string[]> {
         out.add(s);
       }
     };
-    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title");
+    // .prov-n: an agent's own product name on Settings › Providers (Copilot CLI, Cursor), as .ss-l is in the + menu
+    const skip = (el: Element | null) => !!el?.closest("code, pre, kbd, .mono, .msg, .md, .ap-preview, [data-testid=bot-sub], [data-testid=bots-grid] .bc-desc, .be-desc, .acc-n, .acc-sub, .pv-ms, .pv-v, .mp-list, .ss-n, .ss-l, .ss-where, [data-testid=session-sub], [data-testid=session-name], .bot-n, .head-title, .prov-n");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;
@@ -119,8 +121,8 @@ for (const width of [1280, 900]) {
     await openZh(page);
     await page.getByTestId("nav-settings").click();
     await expect(page.locator(".head-title")).toHaveText("设置");
-    // every page but Providers, which the fork removed with Hermes' sign-in
-    const pages = ["accounts", "bots", "bot-kami", "general", "computer"];
+    // Providers (item 74: the coding agents, your own agents and the accounts), the bots, General and Computer
+    const pages = ["providers", "bots", "bot-kami", "general", "computer"];
     for (const id of pages) {
       await page.getByTestId(`settings-nav-${id}`).click();
       await expect(page.getByTestId(`settings-page-${id}`)).toBeVisible();

@@ -89,12 +89,20 @@ export function parseAcpRow(v: unknown): AcpRow | null {
 /** The shape of a generic or custom agent's id (`^[a-z0-9][a-z0-9-]{0,31}$`, as the shell checks it). */
 const ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+/** The display names set on Settings › Providers (item 74), by agent id, as the last look-up sent them. */
+const shownNames = new Map<string, string>();
+
 /** Learn the generic ACP agents from the shell's look-up: each `acp` row is remembered by its id. A person's own
- *  agent the look-up no longer sends (removed on Settings › Agents) is forgotten. */
-export function registerAcp(agents: readonly { acp?: unknown }[] | null | undefined): void {
+ *  agent the look-up no longer sends (removed on Settings › Agents) is forgotten. The display names the person set on
+ *  Settings › Providers are learnt with them, so every place that names an agent ([`agentDef`]) uses them. */
+export function registerAcp(agents: readonly { id?: unknown; acp?: unknown; name?: unknown }[] | null | undefined): void {
   const rows = (agents ?? []).map((a) => parseAcpRow(a.acp)).filter((r): r is AcpRow => !!r);
   for (const [id, r] of acpRows) if (r.custom && !rows.some((x) => x.id === id)) acpRows.delete(id);
   for (const row of rows) acpRows.set(row.id, row);
+  if (agents) {
+    shownNames.clear();
+    for (const a of agents) if (typeof a.id === "string" && typeof a.name === "string" && a.name.trim() && a.name.length <= 40) shownNames.set(a.id, a.name.trim());
+  }
 }
 
 /** Whether `id` is an agent the person added on Settings › Agents. */
@@ -171,11 +179,12 @@ export const isShell = (agent: AgentId | null | undefined): boolean => agent ===
 /** A built-in's definition, a generic ACP agent's from its row, else (an agent manut no longer offers, or one the
  *  shell has not described yet) its id as a name with no way to run. */
 export const agentDef = (id: AgentId): AgentDef => {
+  const own = shownNames.get(id);
   const b = AGENTS.find((a) => a.id === id);
-  if (b) return b;
+  if (b) return own ? { ...b, label: own } : b;
   if (id === SHELL) return { id, program: "shell", label: "Shell", mode: "terminal" };
   const row = acpRow(id);
-  if (row) return { id, program: row.program, label: row.label, mode: "chat" };
+  if (row) return { id, program: row.program, label: own ?? row.label, mode: "chat" };
   return { id, program: id, label: GONE[id] ?? id, mode: "chat" };
 };
 
@@ -201,6 +210,10 @@ export interface AgentInfo {
   via?: "hermes";
   /** A generic ACP agent: its row from the shell's list (the only copy the UI has). */
   acp?: AcpRow;
+  /** Turned off on Settings › Providers (item 74): offered nowhere, and the shell starts no session of it. */
+  off?: boolean;
+  /** The display name the person set on Settings › Providers. */
+  name?: string;
 }
 
 /** The oh-my-hermes row's name when only Hermes is there (the shell's `HERMES_LABEL`). */
@@ -212,10 +225,12 @@ export function hermesOnly(agents: AgentInfo[] | null | undefined): boolean {
   return !!agents?.some((a) => a.id === "omh" && a.via === "hermes" && !!a.path);
 }
 
-/** The agents Manut AI offers for a new session: every one the shell found except oh-my-hermes. That row's chat is a
+/** The agents Manut AI offers for a new session: every one the shell found except oh-my-hermes and the ones the person
+ *  turned off on Settings › Providers (item 74), which the shell would refuse to start anyway. oh-my-hermes' chat is a
  *  Hermes chat in a folder (`folder.open`), which needed the Hermes bridge this app no longer starts, so it is not
- *  offered; the entry stays in `AGENTS` because the shell's allow-list and a saved session may still name it. */
-export const offeredAgents = (agents: AgentInfo[]): AgentInfo[] => agents.filter((a) => a.id !== "omh");
+ *  offered; the entry stays in `AGENTS` because the shell's allow-list and a saved session may still name it. Both parts
+ *  of the + menu, its tooltip and the drafts read this. */
+export const offeredAgents = (agents: AgentInfo[]): AgentInfo[] => agents.filter((a) => a.id !== "omh" && !a.off);
 
 /** How an agent is named on this computer: "Hermes" for the oh-my-hermes row of a person without `omh`. */
 export function agentLabel(id: AgentId, agents: AgentInfo[] | null | undefined): string {
@@ -719,9 +734,11 @@ export function menuParts(agents: AgentInfo[], list: Recent[]): { shown: AgentIn
 
 /** The agent a New session chat starts on: the last one used if it is installed, else the first installed (menu
  *  order), else the last one used or Claude Code. Before the look-up (`agents` null) the last one used stands. */
-export function draftAgent(list: Recent[], agents: AgentInfo[] | null): AgentId {
+export function draftAgent(list: Recent[], all: AgentInfo[] | null): AgentId {
   const last = lastAgent(list);
-  if (!agents) return last ?? AGENTS[0].id;
+  if (!all) return last ?? AGENTS[0].id;
+  // an agent turned off on Settings › Providers is never a draft's agent
+  const agents = all.filter((a) => !a.off);
   const installed = (id: AgentId) => agents.some((a) => a.id === id && !!a.path);
   if (last && installed(last)) return last;
   const first = menuOrder(agents, []).find((a) => !!a.path);

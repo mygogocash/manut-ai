@@ -9,7 +9,7 @@ import type { AccountGroup } from "../../lib/protocol";
 import { getStore } from "../../state/store";
 import { AgentIcon, Popover } from "../../ui";
 import { Ring } from "../../sidebar/Usage";
-import { accountHost, type LoginStatus, type SignInEvent } from "./native";
+import { accountHost, accountOps, type LoginStatus, type SignInEvent } from "./native";
 import {
   CLI_NAME,
   SIGN_IN,
@@ -35,7 +35,8 @@ import { GithubAccounts } from "./GithubAccounts";
 const errText = (e: unknown) => (typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e));
 const NOTE_MS = 8000;
 
-export function AccountsPage() {
+/** `embedded`: a part of Settings › Providers (item 74) rather than a page of its own. */
+export function AccountsPage({ embedded = false }: { embedded?: boolean }) {
   const { groups, error, note, onComputer, status, versions } = useAccounts();
   const [, tick] = useState(0);
   useEffect(() => {
@@ -49,8 +50,8 @@ export function AccountsPage() {
   const fresh = note && Date.now() - note.at < NOTE_MS;
   const split = groups ? splitGroups(groups, onComputer) : null;
   return (
-    <div className="st-page acc" data-testid="accounts-page">
-      <div className="st-gh st-gh0">{t("nav.accounts")}</div>
+    <div className={embedded ? "acc" : "st-page acc"} data-testid="accounts-page">
+      <div className={embedded ? "st-gh" : "st-gh st-gh0"}>{t("nav.accounts")}</div>
       <p className="acc-lead" data-testid="accounts-lead">
         {/* "Bots" opens Settings › Bots */}
         {tx("acc.headerLine", {
@@ -130,7 +131,7 @@ function RowMenu({ items, label }: { items: { label: string; on: () => void; dis
 type SignIn = { id: string; login: number | null; lines: string[]; ending: boolean };
 
 function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Record<string, LoginStatus>; version?: string; note: string | null }) {
-  const s = getStore().actions;
+  const s = accountOps();
   const host = accountHost();
   const [auto, setAuto] = useState(() => autoSwitchOn(g.cli));
   const [resetFirst, setResetFirst] = useState(() => resetFirstOn(g.cli));
@@ -168,7 +169,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
       return;
     }
     try {
-      await s.discardAccount(g.cli, id);
+      await s.discard(g.cli, id);
     } catch {
       /* already gone, or the CLI did write a login after all: the next read shows it */
     }
@@ -181,7 +182,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
     setMsg(null);
     let id: string;
     try {
-      id = (await s.addAccount(g.cli, label)).id;
+      id = (await s.add(g.cli, label)).id;
     } catch (e) {
       setMsg(errText(e));
       return;
@@ -199,7 +200,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
       setSignIn((cur) => (cur && cur.id === id ? { ...cur, login } : cur));
     } catch (e) {
       setMsg(errText(e));
-      await s.discardAccount(g.cli, id).catch(() => {});
+      await s.discard(g.cli, id).catch(() => {});
       setSignIn(null);
       await reloadAccounts();
     }
@@ -243,7 +244,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
                   initial={r.label}
                   onDone={(text) => {
                     setRenaming(null);
-                    if (text !== null) void run(() => s.labelAccount(g.cli, r.id, text));
+                    if (text !== null) void run(() => s.label(g.cli, r.id, text));
                   }}
                 />
               ) : (
@@ -265,7 +266,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
                 <RowMenu
                   label={t("acc.actionsFor", { name: rowTitle(r, i) })}
                   items={[
-                    { label: t("acc.useForNew"), on: () => void run(() => s.setActiveAccount(g.cli, r.id)), disabled: inUse || !r.signedIn },
+                    { label: t("acc.useForNew"), on: () => void run(() => s.setActive(g.cli, r.id)), disabled: inUse || !r.signedIn },
                     { label: r.label ? t("acc.rename") : t("acc.addName"), on: () => setRenaming(r.id) },
                     ...(r.id === "default" ? [] : [{ label: t("acc.remove"), on: () => setConfirm(r), danger: true }]),
                   ]}
@@ -353,7 +354,7 @@ function CliGroup({ g, status, version, note }: { g: AccountGroup; status: Recor
       {confirm && (
         <div className="acc-confirm" role="alertdialog" aria-label={t("acc.removeAccount")} data-testid="remove-confirm">
           <span>{tx("acc.removeConfirm", { name: <b>{rowTitle(confirm, g.accounts.findIndex((a) => a.id === confirm.id))}</b> })}</span>
-          <button type="button" className="st-btn danger" onClick={() => void run(() => s.removeAccount(g.cli, confirm.id)).then(() => setConfirm(null))}>
+          <button type="button" className="st-btn danger" onClick={() => void run(() => s.remove(g.cli, confirm.id)).then(() => setConfirm(null))}>
             {t("acc.removeBtn")}
           </button>
           <button type="button" className="st-btn" onClick={() => setConfirm(null)}>

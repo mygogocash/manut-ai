@@ -21,6 +21,7 @@ import { leftWords } from "../lib/shops";
 import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type ShopsState } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
+import { isDesktop } from "../settings/accounts/native";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
 import { rowStatus } from "../threads/ThreadTree";
@@ -226,7 +227,8 @@ export function Sidebar() {
           <DiskChip />
           {/* The coding CLIs' subscription usage, which only a runtime that reads their logins has. */}
           {can("accounts") && <Usage />}
-          {can("accounts") && <AccountsWatcher />}
+          {/* the desktop app's shell keeps the accounts in every mode (item 74); a runtime may keep them too */}
+          {(can("accounts") || isDesktop()) && <AccountsWatcher />}
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}
           <UpdateButton />
           {/* Practice mode, or the API host it is connected to: never a guess about which data this is. */}

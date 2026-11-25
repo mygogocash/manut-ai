@@ -55,12 +55,24 @@ const fn generic(
 /// Gemini CLI 0.68.0, Qwen Code 0.27.2, Kimi Code 2.6.0, Copilot CLI 1.0.110 and Cline 3.0.74, checked up to their
 /// signed-out `session/new` (`tests/fixtures/acp/<agent>-signed-out.jsonl`). Gemini's `--experimental-acp` is
 /// deprecated. Sign-in lines from each agent's own help; install lines from each one's README.
-pub const ACP_LIST: [AcpEntry; 5] = [
+///
+/// Cursor's and Antigravity's CLIs (item 74) were read from their own `--help` and documentation on this Mac (Cursor
+/// Agent 2026.11.22, Antigravity 1.5.17), not run as a chat: `cursor-agent help acp` says "Start the Cursor Agent as an
+/// ACP (Agent Client Protocol) server", and cursor.com/docs/cli/acp that it sends `session/request_permission` when a
+/// tool needs approval and resumes with `session/load` (its bundle asks before a write, a delete, a read, a command and
+/// an MCP tool, and skips asking only under `--force`, which [`crate::providers`] refuses); `agy help acp` says "Start the
+/// Agent Client Protocol (ACP) stdio server" with `--dangerously-skip-permissions` to "Auto-approve all tool permission
+/// requests", so by default it asks the client (its binary names `session/request_permission`, `session/load` and
+/// `loadSession`). Sign-in lines from each one's help (`login`; Antigravity's `acp --login`), install lines from
+/// cursor.com/docs/cli/installation and antigravity.google/docs/getting-started.
+pub const ACP_LIST: [AcpEntry; 7] = [
     generic("gemini", "Gemini CLI", &["--acp"], "gemini", "npm install -g @google/gemini-cli", "geminicli-color.svg", true),
     generic("qwen", "Qwen Code", &["--acp"], "qwen", "npm install -g @qwen-code/qwen-code@latest", "qwen-color.svg", true),
     generic("kimi", "Kimi Code", &["acp"], "kimi login", "npm install -g @moonshot-ai/kimi-code", "kimi-code.png", true),
     generic("copilot", "Copilot CLI", &["--acp"], "copilot login", "npm install -g @github/copilot", "githubcopilot.svg", true),
     generic("cline", "Cline", &["--acp"], "cline auth", "npm install -g cline", "cline.svg", true),
+    generic("cursor-agent", "Cursor", &["acp"], "cursor-agent login", "curl https://cursor.com/install -fsS | bash", "cursor.svg", true),
+    generic("agy", "Antigravity", &["acp"], "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", "antigravity.svg", true),
 ];
 
 /// The row of generic ACP agent `id`, or `None` for anything else (a built-in, a removed agent, any other text).
@@ -123,10 +135,12 @@ mod tests {
             // A plain file name of a kind the desktop's asset loader reads (src/harness/assets.ts: *.svg, *.png).
             assert!((e.mark.ends_with(".svg") || e.mark.ends_with(".png")) && !e.mark.contains('/'), "{id}: {}", e.mark);
             assert!(!assets.join(e.mark).exists(), "{id}: {} ships, but the vendors' logos are left out", e.mark);
-            assert!(e.install.starts_with("npm install -g "), "{id}");
+            // an npm package, or (Cursor, Antigravity) the vendor's own installer line from its documentation
+            let vendor = ["curl https://cursor.com/install -fsS | bash", "curl -fsSL https://antigravity.google/cli/install.sh | bash"];
+            assert!(e.install.starts_with("npm install -g ") || vendor.contains(&e.install), "{id}");
             assert!(crate::sessions::AGENTS.iter().all(|a| a.id != id), "{id} is also a built-in");
         }
-        assert_eq!(seen, ["gemini", "qwen", "kimi", "copilot", "cline"]);
+        assert_eq!(seen, ["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
         assert!(entry("kilo").is_none() && entry("opencode").is_none() && entry("claude").is_none() && entry("").is_none());
     }
 
@@ -139,7 +153,7 @@ mod tests {
         assert_eq!(copy, serde_json::to_value(&ACP_LIST).unwrap());
     }
 
-    /// 0.2.8's sign-in and install lines, unchanged.
+    /// 0.2.8's sign-in and install lines, unchanged, and Cursor's and Antigravity's (item 74).
     #[test]
     fn the_lines_are_0_2_8s() {
         let rows: Vec<(&str, &str, &str, &[&str])> = ACP_LIST.iter().map(|e| (e.agent.id, e.acp.login, e.install, e.args)).collect();
@@ -151,6 +165,8 @@ mod tests {
                 ("kimi", "kimi login", "npm install -g @moonshot-ai/kimi-code", &["acp"][..]),
                 ("copilot", "copilot login", "npm install -g @github/copilot", &["--acp"][..]),
                 ("cline", "cline auth", "npm install -g cline", &["--acp"][..]),
+                ("cursor-agent", "cursor-agent login", "curl https://cursor.com/install -fsS | bash", &["acp"][..]),
+                ("agy", "agy acp --login", "curl -fsSL https://antigravity.google/cli/install.sh | bash", &["acp"][..]),
             ]
         );
     }

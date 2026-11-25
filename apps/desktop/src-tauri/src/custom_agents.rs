@@ -492,6 +492,9 @@ pub struct CustomInfo {
     pub mode: Mode,
     pub path: Option<String>,
     pub acp: CustomRow,
+    /// Turned off on Settings › Providers (the look-up fills it in): offered nowhere, started never.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub off: bool,
 }
 
 pub fn info(c: &CustomAgent, path: Option<PathBuf>) -> CustomInfo {
@@ -501,6 +504,7 @@ pub fn info(c: &CustomAgent, path: Option<PathBuf>) -> CustomInfo {
         mode: Mode::Chat,
         path: path.map(|p| p.to_string_lossy().into_owned()),
         acp: CustomRow { id: c.id.clone(), label: c.label.clone(), program: c.program.clone(), args: c.args.clone(), login: c.program.clone(), install: c.install.clone(), mark: "", continues: true, custom: true },
+        off: false,
     }
 }
 
@@ -709,30 +713,33 @@ mod tests {
     #[test]
     fn add_then_remove() {
         let home = tmp("add");
-        let c = draft(&home, " Cursor Agent ", "cursor-agent", "acp  --model=x", "", Os::Unix, ANY).unwrap();
-        assert_eq!(c, CustomAgent { id: "cursor-agent".into(), label: "Cursor Agent".into(), program: "cursor-agent".into(), args: vec!["acp".into(), "--model=x".into()], install: "".into() });
+        let c = draft(&home, " Acme Agent ", "acme-agent", "acp  --model=x", "", Os::Unix, ANY).unwrap();
+        assert_eq!(c, CustomAgent { id: "acme-agent".into(), label: "Acme Agent".into(), program: "acme-agent".into(), args: vec!["acp".into(), "--model=x".into()], install: "".into() });
         assert!(!store_path(&home).exists(), "the preview wrote the file");
         assert!(!home.join(".manut").exists());
         // a name in another script makes its id from the program; a taken id gets a number
-        assert_eq!(draft(&home, "커서", "cursor-agent", "acp", "", Os::Unix, ANY).unwrap().id, "cursor-agent");
+        assert_eq!(draft(&home, "에이스", "acme-agent", "acp", "", Os::Unix, ANY).unwrap().id, "acme-agent");
         assert_eq!(draft(&home, "Claude", "x", "acp", "", Os::Unix, ANY).unwrap().id, "claude-2");
         confirm_add(&home, &c, Os::Unix, ANY).unwrap();
         assert_eq!(confirm_add(&home, &c, Os::Unix, ANY), Err(Why::Dup));
+        assert_eq!(draft(&home, "Acme Agent", "acme-agent", "acp", "", Os::Unix, ANY).unwrap().id, "acme-agent-2");
+        // Cursor's and Antigravity's ids are built-ins' now (item 74): a person's own entry gets another
         assert_eq!(draft(&home, "Cursor Agent", "cursor-agent", "acp", "", Os::Unix, ANY).unwrap().id, "cursor-agent-2");
+        assert_eq!(draft(&home, "agy", "agy", "acp", "", Os::Unix, ANY).unwrap().id, "agy-2");
         let l = load(&home, Os::Unix, ANY);
         assert_eq!(l.agents, vec![c.clone()]);
         let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(store_path(&home)).unwrap()).unwrap();
-        assert_eq!(on_disk, json!({"version": 1, "agents": [{"id": "cursor-agent", "label": "Cursor Agent", "program": "cursor-agent", "args": ["acp", "--model=x"], "install": ""}]}));
+        assert_eq!(on_disk, json!({"version": 1, "agents": [{"id": "acme-agent", "label": "Acme Agent", "program": "acme-agent", "args": ["acp", "--model=x"], "install": ""}]}));
         // an entry the card never checked is refused at Add too
         assert_eq!(confirm_add(&home, &agent("evil", "sh", &["-c"]), Os::Unix, ANY), Ok(()), "a plain name and argument are fine");
         assert_eq!(confirm_add(&home, &agent("evil2", "sh", &["-c", "rm -rf ~"]), Os::Unix, ANY), Err(Why::Args));
         assert_eq!(confirm_add(&home, &agent("claude", "x", &[]), Os::Unix, ANY), Err(Why::Builtin));
         confirm_remove(&home, "evil").unwrap();
-        confirm_remove(&home, "cursor-agent").unwrap();
+        confirm_remove(&home, "acme-agent").unwrap();
         assert!(load(&home, Os::Unix, ANY).agents.is_empty());
         assert!(!home.join(".manut").join("custom-agents.json.tmp").exists());
         // a removed id is gone for good; removing again changes nothing
-        confirm_remove(&home, "cursor-agent").unwrap();
+        confirm_remove(&home, "acme-agent").unwrap();
         // the cap
         for i in 0..MAX_AGENTS {
             confirm_add(&home, &agent(&format!("a{i}"), "x", &[]), Os::Unix, ANY).unwrap();
@@ -787,8 +794,8 @@ mod tests {
     fn a_bots_draft_is_stricter_than_the_form() {
         let home = tmp("bot");
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        let c = bot_draft(&home, "Cursor Agent", "cursor-agent", &s(&["acp"]), "", Os::Unix, ANY).unwrap();
-        assert_eq!(c, CustomAgent { id: "cursor-agent".into(), label: "Cursor Agent".into(), program: "cursor-agent".into(), args: s(&["acp"]), install: String::new() });
+        let c = bot_draft(&home, "Acme Agent", "acme-agent", &s(&["acp"]), "", Os::Unix, ANY).unwrap();
+        assert_eq!(c, CustomAgent { id: "acme-agent".into(), label: "Acme Agent".into(), program: "acme-agent".into(), args: s(&["acp"]), install: String::new() });
         for p in ["sh", "BASH", "/bin/zsh", "/usr/bin/env", "python3", "Node.exe", "pwsh", "osascript", "sudo", "open", "xargs", "/opt/homebrew/bin/deno"] {
             assert_eq!(bot_draft(&home, "X", p, &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Interp), "{p}");
             // the form keeps the person's own choice
@@ -796,12 +803,12 @@ mod tests {
         }
         assert_eq!(bot_draft(&home, "X", "opencode", &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Opencode));
         assert_eq!(bot_draft(&home, "X", "/usr/local/bin/kilo", &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Kilo));
-        for p in ["claude", "codex", "gemini", "/opt/homebrew/bin/cline"] {
+        for p in ["claude", "codex", "gemini", "/opt/homebrew/bin/cline", "cursor-agent", "/Users/k/.local/bin/agy"] {
             assert_eq!(bot_draft(&home, "X", p, &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Builtin), "{p}");
         }
-        assert_eq!(bot_draft(&home, "X", "cursor-agent", &s(&["acp", "a b"]), "", Os::Unix, ANY), Err(Why::Args));
-        assert_eq!(bot_draft(&home, "X", "cursor-agent", &s(&["$(id)"]), "", Os::Unix, ANY), Err(Why::Args));
-        assert_eq!(bot_draft(&home, "X; rm", "cursor-agent", &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Label));
+        assert_eq!(bot_draft(&home, "X", "acme-agent", &s(&["acp", "a b"]), "", Os::Unix, ANY), Err(Why::Args));
+        assert_eq!(bot_draft(&home, "X", "acme-agent", &s(&["$(id)"]), "", Os::Unix, ANY), Err(Why::Args));
+        assert_eq!(bot_draft(&home, "X; rm", "acme-agent", &s(&["acp"]), "", Os::Unix, ANY), Err(Why::Label));
         // nothing was written
         assert!(!store_path(&home).exists());
         assert_eq!(Why::Interp.code(), "interp");

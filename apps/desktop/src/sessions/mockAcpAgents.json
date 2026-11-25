@@ -58,5 +58,29 @@
     "install": "npm install -g cline",
     "mark": "cline.svg",
     "continues": true
+  },
+  {
+    "id": "cursor-agent",
+    "label": "Cursor",
+    "program": "cursor-agent",
+    "args": [
+      "acp"
+    ],
+    "login": "cursor-agent login",
+    "install": "curl https://cursor.com/install -fsS | bash",
+    "mark": "cursor.svg",
+    "continues": true
+  },
+  {
+    "id": "agy",
+    "label": "Antigravity",
+    "program": "agy",
+    "args": [
+      "acp"
+    ],
+    "login": "agy acp --login",
+    "install": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    "mark": "antigravity.svg",
+    "continues": true
   }
 ]
