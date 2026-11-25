@@ -553,6 +553,7 @@ describe("the Make a routine form, sending exactly the route's body", () => {
       timeZone: "Asia/Bangkok", asksFirst: false, member: "pim" });
   });
 
+  // A long walk through the page: it passes five seconds on a loaded Mac (26 Nov 2026), so it has its own limit.
   it("sends a trigger from its own kind's fields alone, though the form holds the other kinds' as well", async () => {
     const { calls } = renderPage();
     await ready();
@@ -588,7 +589,7 @@ describe("the Make a routine form, sending exactly the route's body", () => {
       expect(sent(calls, calls.createRoutine.mock.calls.length - 1).trigger, kind).toEqual(trigger);
       await waitFor(() => expect(text("Name").value).toBe(""));
     }
-  });
+  }, 30_000);
 
   it("sends a day of the month as a number, and the last day as the word the API takes", async () => {
     const { calls } = renderPage();
