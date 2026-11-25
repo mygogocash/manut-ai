@@ -177,6 +177,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 59, making a routine from the console: a form over `POST /v1/admin/routines`, previewed in the API's words
      and asked first (`feat/console-make-routine`, Sonnet), started 25 Nov when item 57 merged.
+   - item 60, the offline cache sealed at rest: AES-GCM under a key held only in the keychain, version 6, no plain
+     cache where there is no keychain (`feat/cache-sealed`, Opus), started 25 Nov when item 58 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
