@@ -167,6 +167,26 @@ fn runnable(_: &fs::Metadata) -> bool {
     false
 }
 
+/// The path `name` (one of [`PROJECT_FILES`] or [`OWN_FOLDERS`]) at each level, relative to the lane's top.
+fn at_levels<'a>(prefix: &'a str, names: &'a [&'a str]) -> impl Iterator<Item = String> + 'a {
+    levels(prefix).into_iter().flat_map(move |l| names.iter().map(move |n| if l.is_empty() { (*n).to_string() } else { format!("{l}/{n}") }))
+}
+
+/// Whether `rel` (a file, relative to a lane's top) is one [`bring`] may have put there: an agent settings file of
+/// [`PROJECT_FILES`] at a level down to `prefix`, or in one of its folders, or the `.gitignore` it writes in an agent folder it
+/// makes. A clean-up may take these with the folder (`lane::Git::ignored_own`): the developer's own copy stays in their folder.
+pub(crate) fn brought_here(rel: &str, prefix: &str) -> bool {
+    plain(rel)
+        && (at_levels(prefix, &PROJECT_FILES).any(|p| rel == p || rel.starts_with(&format!("{p}/")))
+            || at_levels(prefix, &OWN_FOLDERS).any(|f| rel == format!("{f}/.gitignore")))
+}
+
+/// Whether the folder `rel` (relative to a lane's top, no `/` at the end) is, holds or is inside a place [`bring`] copies into,
+/// so a list of what git ignores that names it as one folder has to be read inside it.
+pub(crate) fn may_hold_brought(rel: &str, prefix: &str) -> bool {
+    plain(rel) && at_levels(prefix, &PROJECT_FILES).chain(at_levels(prefix, &OWN_FOLDERS)).any(|p| p == rel || p.starts_with(&format!("{rel}/")) || rel.starts_with(&format!("{p}/")))
+}
+
 /// The paths `git status` lists as new in `wt` (untracked and not ignored), every one listed by itself.
 fn new_in(git: &Git, wt: &Path) -> Option<HashSet<String>> {
     let ran = git.run(wt, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]).ok()?;
@@ -312,6 +332,22 @@ mod tests {
         // every name is one a CLI's own documentation gives, and none is a credentials file
         for n in PROJECT_FILES {
             assert!(!n.contains("credentials") && !n.contains("auth") && !n.contains(".env"), "{n}");
+        }
+    }
+
+    #[test]
+    fn what_a_clean_up_may_take_is_only_what_bring_puts_in_a_lane() {
+        for ok in [".mcp.json", ".claude/settings.local.json", ".claude/skills/qr/SKILL.md", ".claude/.gitignore", "apps/web/.agents/skills/a/SKILL.md", "apps/web/.codex/.gitignore", "CLAUDE.local.md"] {
+            assert!(brought_here(ok, "apps/web"), "{ok}");
+        }
+        for no in [".env", ".env.local", "dev.db", ".claude/notes.md", ".claude/settings.local.json.bak", "apps/.claude/x/.gitignore", "src/.mcp.json", "../.mcp.json", ".claude/skills/n/node_modules/x"] {
+            assert!(!brought_here(no, "apps/web"), "{no}");
+        }
+        for dir in [".claude", ".claude/skills", "apps", "apps/web", "apps/web/.agents", ".claude/skills/qr"] {
+            assert!(may_hold_brought(dir, "apps/web"), "{dir}");
+        }
+        for dir in ["data", "src", "apps/api", ".git", "node_modules"] {
+            assert!(!may_hold_brought(dir, "apps/web"), "{dir}");
         }
     }
 

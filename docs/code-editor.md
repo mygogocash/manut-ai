@@ -679,8 +679,14 @@ another's files or the developer's folder.
   and the dial asks first, as for any install.
 - **When a folder goes.** When its session is closed (the chat is deleted), once its agent stopped, and Settings › Worktrees'
   "Remove the folder when its chat is deleted" is on (it is, by default), `lane_release` removes it only if nothing in it is
-  changed or new (what git ignores goes with it), git is not partway through a rebase, merge, cherry-pick, revert or bisect
-  there, and every commit on its branch is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0).
+  changed or new, git is not partway through a rebase, merge, cherry-pick, revert or bisect there, every commit on its branch
+  is on a remote (`git rev-list --count refs/heads/<branch> --not --remotes` is 0), and nothing git ignores in it may be the
+  developer's own (item 86). `git worktree remove` takes ignored files without a word, so the folder's ignored files are listed
+  first (`git ls-files --others --ignored --exclude-standard --directory`): only what a project rebuilds (inside a folder of
+  `turn_files::REBUILT`, the list Rewind already leaves out: `node_modules`, `target`, `dist`, `build`, `.next`, `.venv` and the
+  rest), the system's own files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) and the agent settings item 72 copied in (and the
+  `.gitignore` it writes in an agent folder it makes) may go with it. Anything else, a `.env.local` or a local database made
+  in the lane, keeps the folder, and the kept list names the first of those files; Remove's panel names them as going too.
   The branch stays, and no force flag is ever passed: the removal is `git worktree remove <folder>`, which git itself refuses
   for a locked worktree or one holding files it will not take. A folder kept for commits on no remote says so in the kept
   list. With the switch off, every folder of a deleted chat is kept and listed. A folder with changes is kept and listed under the lanes
@@ -718,7 +724,8 @@ another's files or the developer's folder.
     --json headRefOid,mergedAt --limit 10` (GitLab: `glab mr list --repo <r> --source-branch <branch> --merged --output json
     --per-page 10`), and removes the folder only when a merged request exists, the branch's tip is in the default branch on the
     remote (fetched first, one branch) or, on GitHub, is exactly the commit that merged (what a squash merge leaves), and then
-    `lane_release`'s checks pass: nothing changed or new, git not busy there, and no session still works in it. The branch
+    `lane_release`'s checks pass: nothing changed or new, nothing ignored that may be the developer's, git not busy there, and
+    no session still works in it. The branch
     stays. Each folder it leaves is listed with why (not merged, not in the default branch yet, changes of its own, ...).
 - **While the session is listed** the folder stays, through the agent's end, a Restart and a restart of the app: a lane's
   branch and folder are saved with its session, so Resume and Restart start its agent in its own folder again, never in the
@@ -761,18 +768,44 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   as coming back to the window does.
 - **Automatically pull** (default off). When on, the Code page asks `source_pull` for the project it opens and when the window is
   looked at again, at most every fifteen minutes for a project, never on a timer. `git_pull.rs` brings the default branch up to
-  date only when the folder is not a lane's; git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
+  date only when the folder is not a lane's; the repository's own config names no program for git to run and no other address to
+  fetch from (see "Git the app runs by itself" below); git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
   no index lock; the checkout is on a branch that tracks a remote branch and both are, by name, the remote's default branch (where
   `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); `git status --porcelain=v1
   --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
   --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
   password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
-  --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase, a stash or a force; no
-  hook runs. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
+  --no-overwrite-ignore --no-autostash --no-verify-signatures --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
+  a stash or a force; no hook runs. An ignored file does not count as a change, but it is never written over: git's default
+  (`--overwrite-ignore`) would replace a person's ignored `.env` or `.mcp.json` with a tracked file an incoming commit adds at
+  the same path, so the pull passes `--no-overwrite-ignore` and git's refusal is said as the folder having changes (item 86).
+  A lane started from the remote cannot do this: its fetch moves only the remote-tracking branch, and its checkout is a new
+  folder. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
   how many commits came, or why nothing was done (changes, commits on no remote, busy, another branch, no upstream, could not
   fetch, both moved).
 - **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
   merging** (default off), for the asks below. The recognised credit lines are listed on the page as the code holds them.
+
+**Git the app runs by itself** (item 86). A repository's `.git/config` can come from someone else (a zip a freelancer sent), and
+git runs programs it names without asking: clean and smudge filters while it reads or checks out files, an ssh command, a
+credential helper, a remote of the `ext::` kind, and `url.<base>.insteadOf` sends a fetch elsewhere. The work the app starts by
+itself, never on a press (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list's counts, the lane's
+Diff and the main-moved note), first reads `git config --list --show-scope --includes -z` (or `--local` on a git before 2.26)
+and does nothing while the repository's own scopes (`local`, `worktree`, and the files they include) name any of
+`filter.<driver>.clean`, `.smudge` or `.process`, `core.sshCommand`, `core.gitProxy`, `core.askPass`,
+`core.alternateRefsCommand`, `credential.helper` or `credential.<url>.helper`, `remote.<name>.uploadpack`, `.receivepack` or
+`.vcs`, a `remote.<name>.url` or `.pushurl` of the `<transport>::<address>` form, or `url.<base>.insteadOf` or
+`.pushInsteadOf` (`lane::risky_setting`). The pull says it in its one line with the setting's name (an address in it shown as
+`*`), the clean-up says it where it says it could not tell, a folder of a deleted chat is kept with that reason, the kept list
+reads no counts, and the Diff and the main-moved note fall back to what they show when they cannot read. The person's own global
+and system settings are theirs and stay as they are. What the app's runs switch off instead, so it is not refused: hooks
+(`core.hooksPath` pointed at a folder never made), `core.fsmonitor=false`, `--no-ext-diff --no-textconv` on every diff
+(`diff.external`, `diff.<driver>.command` and `.textconv`), `--no-verify-signatures` on the pull's write (`merge.verifySignatures`
+would run `gpg.program`), `protocol.ext.allow=never` on every automatic run, and a pager or an editor, which git starts only for a
+terminal (`GIT_PAGER=cat` too on the Diff). Work the person asked for by pressing something (a lane started, its fetch, a push
+and a pull request after a Yes, Remove) runs git with their settings and the repository's, as the same git in a terminal would,
+hooks and the file monitor aside: they chose to act on that project, and a refusal there would break a repository-local LFS or
+deploy-key ssh setup the person relies on.
 
 **Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
 its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a
@@ -786,8 +819,18 @@ mr create --repo <r> --source-branch <branch> --target-branch <base> --title=<ti
 title and body in boxes, exactly as they will be sent, with how many uncommitted files stay behind. Push and open, or Not now.
 
 **Merge** (the same place, once the lane's pull request is open and not a draft). The method starts from the setting and can be
-changed; Ask has the shell read the pull request (`gh pr view --json ...`, `glab mr view --output json`) and ask only when it is
-open, not a draft, made from the lane's branch and can merge now: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
+changed; Ask has the shell read the pull request (`gh pr view --json ...` with `isCrossRepository`, `headRepository` and
+`headRepositoryOwner`, `glab mr view --output json`) and ask only when it is open, not a draft, made from the lane's branch in
+this very repository, its head commit is the lane's own tip, and it can merge now (item 86). A fork can open a pull request on a
+branch named like a lane's (`kit/<words>` is easy to guess and public once pushed), so the branch's name is never enough:
+GitHub's `isCrossRepository` must be false and its head repository (`nameWithOwner`, else the owner's login and the name) the
+repository the pull request's own address names; GitLab's `source_project_id` must equal its `target_project_id` (GitLab's API
+says they differ only for a fork; glab is not on the Mac this was built on, so its answer is read as the API's object, as
+before). A request from another repository is refused (`other_repo`). Its head commit must be the lane's branch tip on this Mac
+and the tip this Mac last pushed (`refs/remotes/<remote>/<branch>`): a lane with commits the request does not hold
+(`lane_ahead`), a request holding commits the lane does not (`pull_ahead`) and a tip this Mac has no record of pushing
+(`not_pushed`) each say why on the card and ask nothing. The ask shows where the request comes from (`<branch> of <owner/repo>
+into <base>`) and its head commit's short id beside its title. Then: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
 `CLEAN`, `HAS_HOOKS` or `UNSTABLE` (`BLOCKED` is refused, since gh would turn on auto-merge for it), GitLab's
 `detailed_merge_status` is `mergeable`. The ask names the pull request, the method and the message exactly as sent: GitHub's own
 defaults (`Merge pull request #<n> from <owner>/<branch>` with the title and description; `<title> (#<n>)` with each commit's
@@ -810,7 +853,9 @@ approval-core settled reaches `review_settle`, which sends the ask's id and the 
 out of waiting under its lock before anything runs, so a second answer is `already_decided`; an ask taken back (the panel closed,
 the draft or the method changed) is `withdrawn`; one older than fifteen minutes is `expired`; an id this run never made is
 `not_found`. A No runs nothing. A Yes runs the plan written at ask time, after reading again that the branch is still the commit
-shown (open) or that the pull request is still open, mergeable and at the head shown (merge); otherwise nothing runs (`changed`). The
+shown (open) or that the pull request is still this repository's own branch, open, mergeable, at the head shown and into the base
+shown, and the lane still at that commit (merge); otherwise nothing runs (`changed`). Neither `gh pr merge` nor `glab mr merge` can
+bind the base itself, so a retarget in the moment between that read and the merge is the one change the app cannot see. The
 function that runs a plan takes a proof only `settle` can make, and `lib.rs` names only the asks, `settle` and `withdraw`
 (`the_page_reaches_the_writes_only_through_a_settled_ask`). Tasks (`tasks.rs`) stays the read-only reader its tests say it is.
 

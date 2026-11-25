@@ -13,9 +13,9 @@
 //! `mask_secrets` before it leaves this module, as every CLI answer does in `tasks.rs`.
 //!
 //! A repository's own config can name programs git runs while it reads: a file monitor, an external diff, a text
-//! conversion, a clean filter. The first three are switched off on the command line. A clean filter the repository names
-//! can still run when git compares a changed file in the work tree, as it would for the developer's own `git status`;
-//! the folder is one the developer chose and runs their own coding agent in.
+//! conversion, a clean filter. The first three are switched off on the command line. The note is read by itself whenever the
+//! page shows a session, so a repository whose own config names a clean filter, or any other program git would run
+//! (`lane::risky_setting`, item 86), is not read at all: there is no note, as for a folder that is not a repository.
 
 use std::path::{Path, PathBuf};
 
@@ -218,6 +218,17 @@ pub fn main_moved(cwd: &Path, base: Option<&str>, show: &[String]) -> Result<Opt
     let probe = Git { exe: exe.clone(), dir: cwd.to_path_buf() };
     let Some(top) = probe.line(&["rev-parse", "--show-toplevel"])? else { return Ok(None) };
     let git = Git { exe, dir: PathBuf::from(top) };
+    // the note is read by itself: nothing more is read where the repository's own config names a program git would run
+    let config = git.run(&["config", "--list", "--show-scope", "--includes", "-z"])?;
+    let risky = if config.code == Some(0) {
+        crate::lane::risky_setting(&config.out, true)
+    } else {
+        let local = git.run(&["config", "--list", "--local", "--includes", "-z"])?;
+        (local.code == Some(0)).then(|| crate::lane::risky_setting(&local.out, false)).flatten()
+    };
+    if risky.is_some() {
+        return Ok(None);
+    }
 
     // a detached HEAD is on no branch, so no lane
     let Some(head) = git.line(&["symbolic-ref", "--quiet", "HEAD"])? else { return Ok(None) };
@@ -591,6 +602,29 @@ mod tests {
 
     fn git_status(d: &Path) -> String {
         git(d, &["status", "--porcelain=v1", "-z"])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn says_nothing_by_itself_where_the_repository_s_own_config_names_a_clean_filter() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = moved("filter");
+        let spy = tmp("filter-spy");
+        let marker = spy.join("ran");
+        let script = spy.join("spy.sh");
+        std::fs::write(&script, format!("#!/bin/sh\necho ran >> '{}'\ncat\n", marker.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&d, &["config", "filter.spy.clean", script.to_str().unwrap()]);
+        std::fs::create_dir_all(d.join(".git/info")).unwrap();
+        std::fs::write(d.join(".git/info/attributes"), "*.txt filter=spy\n").unwrap();
+        // a stat change with the same size, so git has to read a.txt through the filter to compare it
+        let a = std::fs::read(d.join("a.txt")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(d.join("a.txt"), a).unwrap();
+        assert_eq!(main_moved(&d, None, &strs(&["a.txt"])).unwrap(), None);
+        assert!(!marker.exists(), "a program ran");
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&spy);
     }
 
     #[test]

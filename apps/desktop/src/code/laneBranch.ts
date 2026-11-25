@@ -74,6 +74,9 @@ export interface KeptLane {
   ahead: number | null;
   /** How many commits on its branch are on no remote (null: not read): why a clean-up leaves a clean folder. */
   unpushed: number | null;
+  /** Files and folders git ignores in it that may be the developer's (not rebuilt, not the agent settings the app copied in),
+   *  at most 20, a folder ending in `/`: why a clean-up leaves a clean folder. Absent when there are none. */
+  ignored?: string[];
 }
 
 /** What the person said yes to when a lane's folder goes (`lane_remove`): the changed files they saw counted and the commits
@@ -149,6 +152,8 @@ export function planLaneBranch(input: { title: string; current: string; prefix?:
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const count = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
+/** A list of paths from the shell: strings only, none empty, at most 20. */
+const paths = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p): p is string => typeof p === "string" && p !== "").slice(0, 20) : []);
 
 /** The shell's answer to `lane_worktree` as a `LaneMade`, or null when it is not one: a lane runs in its folder only when the
  *  shell named a branch Kit makes and an absolute folder for it. */
@@ -167,6 +172,8 @@ export function readKept(raw: unknown): KeptLane[] {
     if (!x || typeof x !== "object") return [];
     const r = x as Record<string, unknown>;
     const k: KeptLane = { worktree: str(r.worktree), dir: str(r.dir), branch: str(r.branch), base: str(r.base), made: count(r.made) ?? 0, exists: r.exists === true, changed: count(r.changed), ahead: count(r.ahead), unpushed: count(r.unpushed) };
+    const ignored = paths(r.ignored);
+    if (ignored.length > 0) k.ignored = ignored;
     return k.worktree && isLaneBranch(k.branch) ? [k] : [];
   });
 }
@@ -177,27 +184,34 @@ export function readRemoved(raw: unknown): LaneRemoved {
   return { removed: r.removed === true, deleted: r.deleted === true, changed: count(r.changed), ahead: count(r.ahead), error: typeof r.error === "string" && r.error ? r.error : null };
 }
 
-/** What a clean-up of a deleted chat's folder did (`lane_release`): removed, or why it was kept (`changes`, `unpushed`, `busy`,
- *  `unread`, `changed`) with the numbers. */
+/** What a clean-up of a deleted chat's folder did (`lane_release`): removed, or why it was kept (`changes`, `unpushed`, `ignored`,
+ *  `busy`, `unread`, `changed`) with the numbers. */
 export interface LaneReleased {
   removed: boolean;
   kept: string | null;
   changed: number | null;
   unpushed: number | null;
+  /** `ignored`'s own: the files git ignores it was kept for. Absent when there are none. */
+  ignored?: string[];
 }
 
 /** The shell's answer to `lane_release`. Nothing is taken as removed unless the shell said so. */
 export function readReleased(raw: unknown): LaneReleased {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  return { removed: r.removed === true, kept: typeof r.kept === "string" && r.kept ? r.kept : null, changed: count(r.changed), unpushed: count(r.unpushed) };
+  const out: LaneReleased = { removed: r.removed === true, kept: typeof r.kept === "string" && r.kept ? r.kept : null, changed: count(r.changed), unpushed: count(r.unpushed) };
+  const ignored = paths(r.ignored);
+  if (ignored.length > 0) out.ignored = ignored;
+  return out;
 }
 
 /** What a clean-up of merged lanes did (`lane_clean_merged`): the branches whose folders went, each folder left with why, and
- *  why it could not tell at all (`no_remote`, `not_installed`, `not_signed_in`). */
+ *  why it could not tell at all (`no_remote`, `not_installed`, `not_signed_in`, `config`: the project's own git config names a
+ *  program git would run, the setting in `setting`). */
 export interface LaneCleaned {
   removed: string[];
   kept: { branch: string; why: string }[];
   cannot: string | null;
+  setting?: string;
 }
 
 /** The shell's answer to `lane_clean_merged`, with anything that is not a name and a reason left out. */
@@ -210,5 +224,7 @@ export function readCleaned(raw: unknown): LaneCleaned {
         return isLaneBranch(str(o.branch)) && str(o.why) ? [{ branch: str(o.branch), why: str(o.why) }] : [];
       })
     : [];
-  return { removed, kept, cannot: typeof r.cannot === "string" && r.cannot ? r.cannot : null };
+  const out: LaneCleaned = { removed, kept, cannot: typeof r.cannot === "string" && r.cannot ? r.cannot : null };
+  if (typeof r.setting === "string" && r.setting) out.setting = r.setting;
+  return out;
 }
