@@ -18,7 +18,7 @@ import { composing } from "../lib/ime";
 import { modesOf, queueOff, usageText } from "./controls";
 import { ModelMenu } from "../chat/box/ModelMenu";
 import { ApprovalMenu, DialRows } from "../chat/box/ApprovalMenu";
-import { KIT_LEVELS } from "@manut/member-grants";
+import { DEFAULT_KIT_LEVEL, KIT_LEVELS } from "@manut/member-grants";
 import { setLevel, updateKitProjects, useKitProject } from "../code/project";
 import { projectName } from "../code/kitAsks";
 import type { SessionQueue } from "../chat/parts/Timeline";
@@ -458,6 +458,9 @@ function SessionApproval({ rec }: { rec: SessionRec }) {
   // the agent's own setting, when it asks for nothing or reaches the whole disk: said where the mode is
   const own = ownSetting({ ...ss.live[rec.id], mode: cur });
   const project = useKitProject(rec.cwd);
+  // a workflow's lane asks before every change, whatever the project's dial says (sessions.ts `kitAsk`): its box says that level
+  // and why, and offers no dial, since the project's would not reach it
+  const careful = !!rec.workflow;
   return (
     <ApprovalMenu
       modes={modes}
@@ -465,10 +468,16 @@ function SessionApproval({ rec }: { rec: SessionRec }) {
       own={own ? { words: own, from: t("ctl.own.from", { agent: agentDef(rec.agent).label }) } : null}
       live={live || !modes.length}
       onPick={(m) => void getSessions().setMode(rec.id, m)}
-      label={t(`kit.level.${project.level}`)}
+      label={t(`kit.level.${careful ? DEFAULT_KIT_LEVEL : project.level}`)}
       foot={rec.agent === "codex" ? t("ctl.modeFoot") : undefined}
       testId={modes.length ? "session-mode" : "session-approval"}
       extra={
+        careful ? (
+          <div className="bx-dial" role="group" aria-label={t("kit.dial")} data-testid="kit-box-careful">
+            <div className="ss-h ss-h-plain bx-dial-h">{`${t("kit.dial")} · ${t(`kit.level.${DEFAULT_KIT_LEVEL}`)}`}</div>
+            <p className="bx-dial-line">{t("wf.lane.careful", { name: rec.workflow ?? "" })}</p>
+          </div>
+        ) : (
         <DialRows
           title={`${t("kit.dial")} · ${projectName(rec.cwd)}`}
           levels={KIT_LEVELS}
@@ -479,6 +488,7 @@ function SessionApproval({ rec }: { rec: SessionRec }) {
           onLevel={(l) => updateKitProjects((x) => setLevel(x, rec.cwd, l))}
           testId="kit-box-level"
         />
+        )
       }
     />
   );

@@ -169,7 +169,7 @@
 }
 .termpanel .term-wrap.dim > .term-box {
   opacity: var(--pane-dim);
-  transition: opacity 0.12s ease;
+  transition: opacity var(--tr-hover);
 }
 .termpanel-tab-n {
   margin-left: 4px;

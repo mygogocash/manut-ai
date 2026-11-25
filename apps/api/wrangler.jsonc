@@ -57,6 +57,11 @@
   // reads nothing, until the var SELF_SERVE_SHOPS is "on". No environment sets
   // it: opening sign-ups is the owner's call. Its limiter,
   // SELF_SERVE_SHOP_LIMITER, is bound everywhere and counts only while it is on.
+  // Artifact links (docs/pilot-api.md, "Artifact links") are built and off:
+  // POST /v1/artifacts answers feature_disabled until the operator turns
+  // artifactLinks on, and no page is served anywhere until the var
+  // ARTIFACT_ORIGIN names a host of the links' own, never this one. No
+  // environment sets ARTIFACT_LINKS or ARTIFACT_ORIGIN (docs/turning-on.md).
   "main": "src/index.ts",
   "compatibility_date": "2026-09-16",
   // One origin for the pilot (docs/pilot-api.md): this Worker is the front
@@ -221,6 +226,16 @@
             "limit": 20,
             "period": 60
           }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112354",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     },
@@ -351,6 +366,16 @@
           "namespace_id": "2026112351",
           "simple": {
             "limit": 20,
+            "period": 60
+          }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112355",
+          "simple": {
+            "limit": 120,
             "period": 60
           }
         }
@@ -485,6 +510,16 @@
             "limit": 20,
             "period": 60
           }
+        },
+        // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+        // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+        {
+          "name": "ARTIFACT_READ_LIMITER",
+          "namespace_id": "2026112356",
+          "simple": {
+            "limit": 120,
+            "period": 60
+          }
         }
       ]
     }
@@ -513,7 +548,10 @@
   // data, per source address (2026112345 here, 46, 47 and 48 in dev, staging
   // and prod), and opening a shop session, per signed-in person (2026112349
   // here, 50, 51 and 52; session-limits.ts). Neither is checked against the
-  // account's limiters yet.
+  // account's limiters yet. Artifact links' public read comes next
+  // (2026112353 here, 54, 55 and 56 in dev, staging and prod; artifacts.ts),
+  // per source address on the artifact origin's host; not checked against the
+  // account's limiters either.
   "ratelimits": [
     {
       "name": "AUTH_EXCHANGE_LIMITER",
@@ -626,6 +664,16 @@
       "namespace_id": "2026112349",
       "simple": {
         "limit": 20,
+        "period": 60
+      }
+    },
+    // Artifact links' public read (artifacts.ts), every request on the artifact origin's host, per source address. The
+    // host exists only once ARTIFACT_ORIGIN is set, which no environment does yet.
+    {
+      "name": "ARTIFACT_READ_LIMITER",
+      "namespace_id": "2026112353",
+      "simple": {
+        "limit": 120,
         "period": 60
       }
     }

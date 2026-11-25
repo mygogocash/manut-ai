@@ -49,6 +49,7 @@ mod this_host;
 mod tray;
 mod turn_files;
 mod voice;
+mod workflows;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -852,6 +853,21 @@ async fn agent_config_list(cwd: Option<String>) -> Result<Vec<agent_config::Agen
     .map_err(|e| e.to_string())
 }
 
+/// Settings › Workflows (item 77b): the workflow files in `~/.manut/workflows/`, read now (workflows.rs). Only reads: a file
+/// the shell cannot read is listed with why, never changed.
+#[tauri::command]
+async fn workflows_read() -> Result<workflows::Folder, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::read(&home)).await.map_err(|e| e.to_string())
+}
+
+/// Settings › Workflows' Show folder: the folder made when it is not there yet (never through a link), and its path.
+#[tauri::command]
+async fn workflows_folder() -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || workflows::make(&home).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
+}
+
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
 /// path, or a short code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`).
 #[tauri::command]
@@ -1536,6 +1552,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_projects,
         lane_remove,
         lane_root_check,
+        workflows_read,
+        workflows_folder,
         agent_config_list,
         lane_release,
         lane_clean_merged,

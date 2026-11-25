@@ -4,6 +4,7 @@
 // chat messages, because cron.manage has neither (BOUNDARY rule 24).
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Automation, Bot } from "../lib/protocol";
+import { helpedShop, ownersWords } from "../lib/shops";
 import { useStore } from "../state/store";
 import { t } from "../i18n";
 import { RunOnce } from "./RunOnce";
@@ -104,6 +105,29 @@ export function AutomationsPage() {
   };
 
   const summary = [failed ? t("auto.nFailed", { n: failed }) : "", paused ? t("auto.nPaused", { n: paused }) : ""].filter(Boolean).join(" · ");
+
+  // A shop the person only helps at: its routines are its owner's to see and change (a helper's session is refused them), so
+  // the page says so in place of a list that would read as a shop with none, and offers nothing to add.
+  const helped = helpedShop(s.shops);
+  if (helped) {
+    const words = ownersWords("automations", helped);
+    return (
+      <div className="pg" data-testid="automations">
+        <PageHead title={t("auto.title")} sub={t("auto.sub")} />
+        <div className="pg-body">
+          <div className="pg-scroll">
+            <div className="pg-empty" role="status" data-testid="owners-automations">
+              <b>{words.title}</b>
+              <span>{words.text}</span>
+              <button type="button" className="pg-btn" onClick={() => s.openPage("needs")} data-testid="owners-needs">
+                {t("owners.toNeeds")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pg" data-testid="automations">

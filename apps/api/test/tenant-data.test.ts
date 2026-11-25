@@ -34,6 +34,8 @@ function defaults(): Record<string, () => Response> {
     "TENANT GET /people/export": () =>
       Response.json({ state: { shop: TENANT, ownerId: "owner", helpers: [{ id: "helper-1" }], invites: [], away: null,
         passedOn: [], removed: [] }, names: { "helper-1": "Mint" } }),
+    "TENANT GET /artifacts/export": () =>
+      Response.json({ artifacts: [{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }] }),
     "TENANT POST /pilot/prune": () => Response.json({ messagesPruned: 0 }),
     "TENANT POST /tenant-wipe": () => Response.json({ deletedAt: "2026-09-24T00:00:00.000Z", tasksWiped: 2 }),
     "TASK GET /export": () => Response.json({ task: { id: "unnamed" }, events: [], actions: [], attempts: [] }),
@@ -194,6 +196,7 @@ describe("tenant export fan-out", () => {
       memory?: { facts?: unknown[]; forgottenCount?: number };
       people?: { state?: { helpers?: unknown[] }; names?: unknown };
       routines?: { routines?: unknown[]; runs?: unknown[] };
+      artifacts?: unknown[];
     };
     expect(body.tenant).toBe(TENANT);
     expect((body.tasks ?? []).map((entry) => entry.task?.id)).toEqual(TASK_IDS);
@@ -217,6 +220,8 @@ describe("tenant export fan-out", () => {
     // The team's routines and how each run went.
     expect(body.routines?.routines).toEqual([{ id: "rt-1", name: "Morning brief" }]);
     expect(body.routines?.runs).toEqual([{ routineId: "rt-1", status: "done" }]);
+    // The shop's artifact links: each page with its text, never the link itself.
+    expect(body.artifacts).toEqual([{ id: "art-1", title: "Menu", kind: "html", bytes: 12, createdAt: 1, text: "<h1>Menu</h1>" }]);
   });
 
   for (const [route, part] of [
@@ -233,6 +238,7 @@ describe("tenant export fan-out", () => {
     ["TENANT GET /audit/export", "audit"],
     ["TENANT GET /memory/export", "memory"],
     ["TENANT GET /people/export", "people"],
+    ["TENANT GET /artifacts/export", "artifacts"],
     ["TENANT GET /index", "index"],
   ] as const) {
     it(`answers export_incomplete when the ${part} read fails`, async () => {

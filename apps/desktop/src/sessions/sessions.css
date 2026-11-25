@@ -61,7 +61,7 @@
   top: 5px;
   height: 1px;
   background: var(--line-soft);
-  transition: background 0.12s, height 0.12s, top 0.12s;
+  transition: background-color var(--tr-hover), height var(--tr-hover), top var(--tr-hover);
 }
 .side-split:hover::before,
 .side-split:focus-visible::before,
@@ -446,7 +446,6 @@ body.side-resizing * {
   font-size: 12.5px;
   color: var(--muted);
   text-align: left;
-  transition: background 0.12s;
 }
 /* the + in the nav icons' 18px column, so "New session" starts where "Settings" does */
 .ss-start > svg {
@@ -608,7 +607,7 @@ body.side-resizing * {
   height: 7px;
   border-radius: 50%;
   background: var(--spin);
-  animation: pulse 1.4s infinite;
+  animation: var(--anim-pulse);
 }
 .ss-head-st.failed {
   color: var(--danger);
@@ -687,7 +686,7 @@ body.side-resizing * {
 }
 .ss-split-side > .term-wrap,
 .ss-split-side > .ss-idle {
-  transition: opacity 0.12s ease;
+  transition: opacity var(--tr-hover);
 }
 .ss-split-side.dim > .term-wrap,
 .ss-split-side.dim > .ss-idle,
@@ -718,7 +717,7 @@ body.side-resizing * {
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--term-bg, var(--bg)) 86%, transparent);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--tr-hover);
 }
 .ss-split-side:hover > .ss-split-tools,
 .ss-split-tools:focus-within {
@@ -740,7 +739,7 @@ body.side-resizing * {
   cursor: grab;
   touch-action: none;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--tr-hover);
 }
 .ss-split-grip > span {
   width: 28px;
@@ -793,7 +792,8 @@ body.side-resizing * {
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  transition: left 0.08s ease, top 0.08s ease, width 0.08s ease, height 0.08s ease;
+  /* it glides to the zone under the pointer in Hover's time, on the plain ease so its edges never overshoot */
+  transition: left var(--tr-hover), top var(--tr-hover), width var(--tr-hover), height var(--tr-hover);
 }
 /* where a TERMINALS row dragged in the sidebar would go: a line between rows */
 .row-drop {
@@ -885,7 +885,7 @@ body.split-dragging .xterm {
   background: var(--bg);
   color: var(--muted);
   font-size: 11px;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background-color var(--tr-hover), border-color var(--tr-hover);
 }
 .ss-map-box:hover .ss-map-in {
   border-color: var(--line-strong);
@@ -1655,7 +1655,7 @@ body.split-dragging .xterm {
   border-radius: 8px;
   border: 1px solid transparent;
   flex: none;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background-color var(--tr-hover), border-color var(--tr-hover);
 }
 .ss-row.tr .ss-open {
   display: grid;
@@ -1790,7 +1790,7 @@ body.split-dragging .xterm {
   color: var(--term-run);
 }
 .tst.busy svg {
-  animation: tst-turn 0.9s linear infinite;
+  animation: var(--anim-spin);
 }
 .tst.ok {
   color: var(--ok);
@@ -1800,11 +1800,6 @@ body.split-dragging .xterm {
 }
 .tst.bell {
   color: #e8a33c;
-}
-@keyframes tst-turn {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .trm {
   position: relative;
@@ -1861,11 +1856,6 @@ body.split-dragging .xterm {
 .ss-folders {
   padding-left: 8px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .tst.busy svg {
-    animation: none;
-  }
-}
 .tg-open:has(> .tg-sum) > .tg-b {
   grid-column: 3;
 }
@@ -1885,7 +1875,8 @@ body.split-dragging .xterm {
   color: var(--bg);
   font-size: 12px;
   pointer-events: none;
-  animation: pop 0.14s ease both;
+  --rise-by: calc(var(--arrive-by) * -1);
+  animation: var(--anim-arrive);
 }
 
 /* an manut://terminal link to a session this computer does not have: a note at the window's foot for a moment */
@@ -1927,7 +1918,9 @@ body.split-dragging .xterm {
 .ss-idle > .tshare-cards .tshare-card {
   max-width: none;
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
-  animation: pop 0.14s ease both;
+  /* an ask: it fades in where it is and stays still (the board: approvals do not bounce) */
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
 }
 [data-theme="light"] .term-wrap .tshare-card,
 [data-theme="light"] .ss-idle > .tshare-cards .tshare-card {
@@ -2002,7 +1995,7 @@ body.split-dragging .xterm {
   color: var(--muted);
 }
 .ss-item.ss-shell-more svg {
-  transition: transform 0.12s ease;
+  transition: transform var(--tr-switch);
 }
 .ss-item.ss-shell-more.on svg {
   transform: rotate(90deg);
@@ -2013,11 +2006,6 @@ body.split-dragging .xterm {
 }
 .ss-shells {
   padding-left: 8px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .ss-item.ss-shell-more svg {
-    transition: none;
-  }
 }
 
 /* The desktop's own (item 76): a pinned terminal's small mark and a terminal set aside as done for now, small and quiet. */

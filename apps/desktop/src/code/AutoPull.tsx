@@ -18,7 +18,7 @@ const QUIET: readonly PullCode[] = ["not_a_repository", "lane"];
 /** What the line says for `p`, or null for nothing. */
 export function pullLine(p: Pulled): string | null {
   if (QUIET.includes(p.why)) return null;
-  const vars = { branch: p.branch || "?", remote: p.remote || "?", n: p.count, from: p.from, to: p.to };
+  const vars = { branch: p.branch || "?", remote: p.remote || "?", n: p.count, from: p.from, to: p.to, setting: p.setting || "?" };
   if (p.why === "pulled") return t(p.count === 1 ? "pull.why.pulledOne" : "pull.why.pulled", vars);
   return t(`pull.why.${p.why}` as Key, vars);
 }

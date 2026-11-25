@@ -10,6 +10,8 @@ import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import "./mission.css";
 import { hhmm, monthDay } from "../app/time";
 import { t, type Key } from "../i18n";
+import type { ShopRow } from "../lib/protocol";
+import { helpedShop } from "../lib/shops";
 import { OWNER, ACTIVITY_KINDS, type ActivityEvent, type ActivityKind, type OlderState } from "../runtime/mission";
 import { selectSidebarBots, getStore, useStore } from "../state/store";
 import { MenuIcon, SearchGlyph } from "../sidebar/menuIcons";
@@ -41,6 +43,7 @@ import { dayBand } from "./history";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { useShowOlder, type OlderView } from "./older";
+import { OwnersOnly } from "./OwnersOnly";
 import { saveCsv, type SaveResult } from "./saveFile";
 import { ShowOlder } from "./ShowOlder";
 
@@ -76,6 +79,11 @@ export interface ActivityViewProps {
   onOpenJob: (id: string) => void;
   /** the runtime has older events than the log holds, or Show older has shown all of them (older.ts): the line and the button under the list */
   older?: OlderView;
+  /** The shop shown, when the person only helps there: its activity log is its owner's, so the page says whose it is and
+   *  draws no event, filter or export. */
+  helped?: Pick<ShopRow, "name" | "owner"> | null;
+  /** opens Needs you, from the words a helper's shop shows */
+  onNeeds?: () => void;
 }
 
 const KIND_KEY: Record<ActivityKind, Key> = {
@@ -390,6 +398,14 @@ export function ActivityView(p: ActivityViewProps) {
       </button>
     </div>
   );
+  if (p.helped)
+    return (
+      <MenuPageFrame page="activity" title={t("act.title")} hideTitle middle={tabs}>
+        <div className="actv">
+          <OwnersOnly shop={p.helped} screen="activity" icon={<MenuIcon row="history" />} onNeeds={p.onNeeds} />
+        </div>
+      </MenuPageFrame>
+    );
   const full = !!log && log.events.length > 0;
   const acts = full && (
     <>
@@ -589,7 +605,10 @@ export function ActivityPage() {
   const [picked, setPicked] = useState<string | null>(null);
   // Which customers' messages are showing is this page's and no one else's: it is not kept, so leaving the page hides them.
   const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
+  // A shop the person only helps at: its log is its owner's, so it is never read here.
+  const helped = helpedShop(s.shops);
   useEffect(() => {
+    if (helped) return;
     let live = true;
     void load(() => getStore().actions.missionActivity()).then((r) => {
       if (!live) return;
@@ -602,7 +621,9 @@ export function ActivityPage() {
     return () => {
       live = false;
     };
-  }, [reads]);
+    // `helped` is read by its id: a new object for the same shop reads nothing again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reads, helped?.id]);
 
   const listed = selectSidebarBots(s);
   const nameOf = (who: string) => (who === OWNER ? t("act.you") : (s.bots.find((b) => b.name === who)?.display_name ?? who));
@@ -641,6 +662,8 @@ export function ActivityPage() {
       onBack={() => s.closeSettings()}
       onOpenJob={(id) => s.openJob(id)}
       older={state.kind === "ready" && state.value.older ? { state: state.value.older, ui: more.ui, onShow: more.show } : undefined}
+      helped={helped}
+      onNeeds={() => s.openPage("needs")}
     />
   );
 }

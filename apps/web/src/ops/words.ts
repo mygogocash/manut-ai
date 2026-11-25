@@ -556,6 +556,10 @@ const AUDIT_ACTIONS: Readonly<Record<string, (entry: AuditEntry, context: AuditC
   // The system noting the month's charged model spend reaching 80% of the cap, then all of it (docs/model-gateway.md).
   "model.cap_near": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached 80% of its monthly cap${amountOf(entry)}`,
   "model.cap_reached": (entry) => `noted that the shop's model spend${monthOfEntry(entry)} reached its monthly cap${amountOf(entry)}`,
+  // Artifact links (docs/pilot-api.md, "Artifact links"): a page published as a link anyone with it can open, and one taken
+  // down. The log names the link by its id only, never its title, its text or the link itself.
+  "artifact.published": () => "published a page as a public link",
+  "artifact.removed": () => "removed a public link",
 };
 
 /// " in November 2026" for an entry about a month of the model meter, or nothing for one that names none.
@@ -825,6 +829,8 @@ const SUBJECT_LABELS: readonly (readonly [string, string])[] = [
   ["grantId", "grant"],
   // A Bangkok month of the model meter, `YYYY-MM`, as a crossing of the cap names it.
   ["month", "model month"],
+  // An artifact link, by its id (`art-…`), which is not the link itself.
+  ["artifactId", "artifact"],
 ];
 
 export function auditSubjectText(subject: Record<string, string>): string {

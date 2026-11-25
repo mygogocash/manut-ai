@@ -41,6 +41,8 @@ function ctx(over: Partial<PaletteCtx> = {}, places: Places = {}): PaletteCtx {
     newThread: spy("newThread"),
     setLanguage: spy("setLanguage"),
     openNewSessionMenu: spy("openNewSessionMenu"),
+    workflows: [],
+    runWorkflow: spy("runWorkflow"),
     ...over,
   };
 }
@@ -107,7 +109,7 @@ describe("every action it lists is reachable elsewhere in the app", () => {
     const settings = calls.filter((c) => c.startsWith("openSettings"));
     expect(settings).toEqual([
       "openSettings(general)", "openSettings(bots)", "openSettings(bot:buddy)", "openSettings(bot:nam)", "openSettings(people)", "openSettings(voice)",
-      "openSettings(terminal)", "openSettings(providers)", "openSettings(computer)", "openSettings(worktrees)", "openSettings(source)", "openSettings(mcp)", "openSettings(developer)",
+      "openSettings(terminal)", "openSettings(providers)", "openSettings(computer)", "openSettings(worktrees)", "openSettings(source)", "openSettings(artifacts)", "openSettings(mcp)", "openSettings(workflows)", "openSettings(developer)",
     ]);
   });
 
@@ -148,6 +150,14 @@ describe("an action that needs a place that is not open is not listed", () => {
     places.runtime = { mode: "connected", set: spy("setRuntime") };
     expect(doRows(ctx({}, places)).map((r) => r.id)).toContain("do:runtime:practice");
     expect(doRows(ctx()).filter((r) => r.id.startsWith("do:language:")).map((r) => r.id)).toEqual(LANGS.filter((l) => l !== "en").map((l) => `do:language:${l}`));
+  });
+
+  it("offers Run workflow for each workflow Settings › Workflows offers Run now for, and presses that Run now", () => {
+    expect(doRows(ctx()).some((r) => r.id.startsWith("do:workflow:"))).toBe(false);
+    const rows = doRows(ctx({ workflows: [{ file: "nightly.json", name: "Nightly tests" }, { file: "weekly.json", name: "Weekly tidy" }] })).filter((r) => r.id.startsWith("do:workflow:"));
+    expect(rows.map((r) => r.label)).toEqual(["Run workflow: Nightly tests", "Run workflow: Weekly tidy"]);
+    rows[1].run();
+    expect(calls).toEqual(["runWorkflow(weekly.json)"]);
   });
 
   it("offers no new chat when Buddy cannot be reached", () => {

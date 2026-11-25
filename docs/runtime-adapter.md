@@ -21,7 +21,9 @@ History and the activity log, and Show older reads the next page from the cursor
 when nobody here answered it (below) is built and tested on `feat/how-decided`, 25 Nov 2026 (December item 55), the same way: an ask
 that left the open approvals on its own closes saying whether it was approved or declined and by whom, taken back, ended or timed out.
 The live feed (below) is built and tested on `feat/live-feed`, 25 Nov 2026 (December item 61), and switched off: while the API says
-it is on, a change at a shop the person is in shows within seconds instead of at the next minute's read.
+it is on, a change at a shop the person is in shows within seconds instead of at the next minute's read. A shop the person helps at
+(below) is built and tested on `feat/helper-session`, 25 Nov 2026 (December item 69), the same way: it is marked as theirs to help at, its
+asks are answered with their helper session, and each page that is the owner's says so instead of an empty list.
 
 ## Choosing it
 
@@ -381,8 +383,9 @@ the file since 2 keeps them, and the current one is 6 (The offline cache, below)
   session can carry. So an owner needs real sign-in (Sign in with Apple in the app, or LINE Login, which is parked) and
   the API's link from their identity to their shop. With a session for the shop, the desktop decides as the owner, once
   the shop has consented and the API's `officeCloud` and `officeExternalWrites` switches are on.
-- **Helpers on the desktop.** Built since (Several shops, below): a person who helps at a shop holds a helper session for
-  it (`mhs1.`, from `POST /v1/shops/session`), decides its messages and replies, and passes the rest on to the owner.
+- **Helpers on the desktop.** Built since (Several shops, and A shop the person helps at, below): a person who helps at a
+  shop holds a helper session for it (`mhs1.`, from `POST /v1/shops/session`), decides its messages and replies, passes the
+  rest on to the owner, and is shown the owner's pages as the owner's.
 - **How it was tested.** The desktop's tests use a fake API whose answers are built with approval-core's own encoders,
   as the API builds them (`approvalJson` in `testkit.ts`); the routes themselves are tested in real workerd in
   `apps/api` (`approvals-route.test.ts`, `session-decisions.test.ts`). By hand, the local API and test identity of
@@ -407,7 +410,7 @@ desktop's slice of `docs/several-shops.md`. The API side is `apps/api/src/shops.
 - **What a shop reads.** `GET /v1/approvals?state=open`, with its own session. A shop the person owns is read whole as
   well (A shop the person owns, below): its task list, schedules, attention items and routines, with the same session,
   and its helpers' devices (A helper's new device, below). A shop they help at is read for its asks and nothing else: what a helper sees is the
-  owner's call, so it shows Buddy, its asks, no tasks (History is empty), no schedules and no notes. Every listed shop is
+  owner's call, so it shows Buddy and its asks, and each page that is the owner's says whose it is (A shop the person helps at, below). Every listed shop is
   read each time, at once; one shop that fails (offline, 5xx) fails the whole read, and the kept read stands in for all of
   them.
 - **One Needs you.** Every shop's open requests are asks in Buddy's chat, sorted by when each was asked (the protocol
@@ -540,6 +543,83 @@ asks, Mission Control showed Buddy alone, and every write but an answer was "not
   `cache.test.ts` (version 6, and every earlier version read as nothing kept), and `serveShops` and `serveShop` in
   `testkit.ts`, which answer the task list as apps/api does (`listedJson`, `taskPage`), an owner's schedules, attention
   items, routines and team writes, and a helper's 403. The API's side is `apps/api/test/task-list.test.ts`. Show older's own tests are in Older tasks, below.
+
+## A shop the person helps at
+
+Built on `feat/helper-session` (December item 69, 25 Nov 2026): `src/lib/shops.ts` (`helpedShop`, `ownersWords`), `src/pages/OwnersOnly.tsx`,
+the Team, History, activity log, Automations and Home pages, the account row (`src/sidebar/Sidebar.tsx`), and `answer.ts`. A person who
+helps at a shop reads and answers what that shop asks of them with their helper session (`mhs1.`), as an owner does with an owner
+session. Before it the runtime already opened, read and answered a helper's shop (Several shops, above), but every page that is the owner's
+drew an empty list for it ("No team yet", "Nothing here yet", "Nobody is working") or offered a Pause everyone that could only be refused.
+
+- **In the switcher.** A shop the person helps at is listed after the ones they own, marked "Helper" (as before), and the account row now
+  marks it too while it is the shop shown ("Helper" after its name), so a person who only helps at one shop, who has no switcher, knows.
+  Home says "Helping Noi at Ran Pa Noi" where it says "For Baan Mali" of a shop the person owns. The shop is opened with `POST
+  /v1/shops/session` and exactly `{ shop }`, with the sign-in, and the API's record of the person says the role: nothing here chooses it.
+  The session is kept, opened again near its 30 days and after any 401 but `removed`, and ended at sign-out, exactly as an owner's is
+  (`shops.ts`, `session.ts`).
+- **What a helper's session is sent, and nothing else:** `GET /v1/approvals?state=open` with each read (every minute, and sooner when the
+  feed pings); `GET /v1/approvals?state=recent` once when one of its asks left with no answer from here (When nobody here answered it,
+  above); `POST /v1/feed/ticket` with exactly `{}` for the live feed; `POST /v1/approvals/{id}/decision` with exactly `{ optionId,
+  seenRevision }`; `POST /v1/approvals/{id}/pass-on` with exactly `{ note }`; and `POST /v1/shops/session/end` with `{}` at sign-out. These
+  are the routes `docs/pilot-api.md` ("A helper's own routes", "The shop's live feed") says a helper session is accepted by. It is never
+  sent to the task list, the schedules, the attention items, the routines and the team, what the team knows, the people and their devices,
+  the vault and outposts, Google Sheets, the consent or the export: each of those answers it 403 `owner_only` (`helper.test.ts` pins the
+  whole list).
+- **What each page that is the owner's shows** while the switcher shows the helper's shop. The page knows from the role the runtime's shop
+  list gives (`helpedShop`, from the store's `shops`), so it reads nothing to find out and draws nothing a helper's session is refused:
+
+  | Page | Shows | Reads |
+  | --- | --- | --- |
+  | Team | Buddy, who holds the asks, then "Only Noi sees this. You help at Ran Pa Noi. Its team, what each member is doing and Pause everyone are Noi's. What waits for you there is in Needs you." with Open Needs you. No Pause everyone, no side panel, and the palette offers no pause | none (`team.state` is not asked) |
+  | History | the same words for its past work, with Open Needs you; no search and no Activity log button | none of the shop's |
+  | Activity log | the same words for its log, under the tabs back to History; no filters, events or export | none (`activity.list` is not asked) |
+  | Automations | the same words for its routines, in the page's own empty box; no ask box, suggestions or New buttons | none (the runtime's list for the shop is empty, with nothing sent) |
+  | Home | "Only Noi sees who is working at Ran Pa Noi." in place of Working now, and no Automations button with a count | none of the shop's |
+  | Customize › Memory and routines | as built before: "Only the shop's owner sees and changes what the team knows." and "Only Noi can see and change the team at Ran Pa Noi.", with no form | none (refused here `owner_only`) |
+  | Customize › Connections | as built before: the vault's "Only the shop's owner sees and changes its sign-ins and outposts." and this Mac's "Only the shop's owner can use this Mac as its outpost."; Google Sheets is not drawn | none (refused here `owner_only`) |
+  | Settings › People | as built before: "Only Noi can see and change who can use Manut AI for Ran Pa Noi. Ask Noi if someone should be added or removed." | none |
+
+  The runtime's own refusals stay underneath, in case a page or the palette asks anyway: `team.state`, `team.pause`, `team.resume`, every
+  `routine.*`, `jobs.older` (`rt.ownerOnly`, in the owner's and the shop's names), `memory.*`, `connections.*`, `google.*` and `people.*`
+  answer `owner_only` with nothing sent, and `jobs.list`, `activity.list`, `automations.list` and `thread.list` list nothing for the shop.
+- **What a helper sees of an ask**, as `docs/people.md` says a helper may: every request that waits there, in Needs you with every other
+  shop's and naming its shop; the exact action as its request carries it (a reply's own words; a browser write's sentence; for a worker's
+  request, the operation and where it goes, since a helper's session reads no tasks; for Ton's books, that they wait for the owner, with the
+  month and the sheet's title and none of the books, which the API already cuts for a helper); "Only Noi can approve money" (or public
+  posts, a payment, the shop's own records) where approval-core's `mayDecide` says the helper may not decide it, with Ask Noi to pass it on
+  with a note once; "Passed on to Noi" and their note once they did; and how an ask that left was settled, with the owner named ("Declined
+  by Noi at 19:42"), never "you".
+- **Answering.** Allow once and Deny go through the one path every button takes to the shop's decide route with the helper session, exactly
+  `{ optionId, seenRevision }`, and approval-core decides with the role the session holds. Refused here, with nothing sent: a kind only the
+  owner decides ("Only Noi can approve money"), a card whose revision the read has moved past ("It changed since you saw it. Answer the new
+  version"), and while only a kept read is shown ("Connect to answer this"). Refused by the API, in words: `not_permitted` now names the
+  owner to a helper ("Only Noi can decide this", `answer.ts`), where it said "Only the owner can decide this"; `changed`, `expired` and
+  `superseded` as for an owner; `already_decided` says who: "Already decided by Noi" for the owner's app, session or LINE link, a helper by
+  the name a note they passed on carries ("Already decided by Ploy"), else "Already decided by a helper".
+- **Removed.** A 401 `removed` from any of the helper session's requests (a read, an answer, a note passed on, the feed's ticket) drops the
+  session and the shop's kept read at once, closes its asks in "You no longer have access to Ran Pa Noi. Noi removed you on Sunday,
+  November 22. Ask Noi if this is a mistake", and says the same above the account row until dismissed. A `removed` is never answered by
+  opening the shop again; the API's list of the person's shops no longer has it at the next read.
+- **Offline.** The kept read holds the least a helper's shop needs to show Needs you while the API cannot be reached: its id, name, owner
+  and the person's role, and its open requests as approval-core's wire JSON (the detail cut to the card's words, with any note passed on).
+  Nothing of its work: a record of a helper's shop that claims any makes the whole file ignored. It is sealed with the same key and in the
+  same file as every other shop's (The offline cache, below), and its asks cannot be answered until the API answers again.
+- **The live feed.** The helper's shop has a socket of its own, opened with a ticket its helper session minted, as an owned shop's is; the
+  API accepts a helper session there (`docs/pilot-api.md`, "The shop's live feed"). A ping brings the minute's read forward, which reads only
+  what waits there.
+- **Practice.** Its Ran Pa Noi is a shop the person helps at, so its pages now show the same words as a connected helper's shop; its own
+  shop is as it was, and nothing of Practice's runtime changed.
+- **What it does not do.** The API was not widened: a helper's session reads only what `docs/people.md` says a helper may. The asks of the
+  API it leaves are in Next slices, 3.
+- **Tests.** `helper.test.ts` (the runtime end to end over the fake API: the switcher's mark, exactly what a helper's session is sent, every
+  owner-only op refused or empty with nothing sent, approved, declined, refused for its kind here and by approval-core, an older revision
+  here and from the API, already decided by Noi, by Ploy and by a helper, removal, and what the kept file holds), `src/lib/shops.test.ts`
+  (`helpedShop`, `ownersWords` in four languages), `src/pages/OwnersOnly.test.tsx` (each page on the app's own store at Practice's Ran Pa
+  Noi and at the person's own shop, and the views in four languages), `e2e/helper-shop.spec.ts` (Connected over a stubbed shell: the
+  switcher and the row's mark, Home, Team and History in the owner's words, a reply approved with the helper's own session and money left
+  for Noi with nothing sent, and nothing else sent with that session) and `e2e/shops.spec.ts` (the row's mark, and a person who only helps
+  at one shop).
 
 ## Older tasks
 
@@ -829,6 +909,40 @@ own routes"; the rules are `docs/people.md`). It is a page of Settings, under Sh
   shop's: the canvas's Fon, Mint and Beam, an invite for one account at a time, removal ending sessions, invites and cover, and
   cover until a day that has not passed. Its invite links end in `.invalid`, which can never be a real address.
 
+## Artifacts: pages shared by a link
+
+An HTML or Markdown page the shop's owner publishes as a link anyone with it can open (item 83; the routes are
+`docs/pilot-api.md`, "Artifact links"). The Artifacts page in the side menu (`src/pages/ArtifactsPage.tsx`, `artifacts.ts`) and
+Settings › Artifacts (`src/settings/ArtifactLinksPage.tsx`), with three ops (`src/runtime/artifacts.ts`) and the asks before each
+change (`src/runtime/artifactAsks.ts`).
+
+- **The switch.** Settings › Artifacts › Allow publishing public artifact links is off by default, saved on this computer
+  (`src/lib/artifactLinks.ts`). While it is off the page offers nothing and every op is refused `switched_off` before anything
+  is sent, a read included. Links made before stay open until removed, which needs the switch on again. The API has its own
+  switch and its own web address for links (`docs/turning-on.md`); the page says which one is missing.
+- **Before anything is sent.** In Practice, and on the WebSocket bridge, the page says links need Manut AI connected to the shop,
+  and Practice refuses every op (`practice`). Connected with nobody signed in, it says to sign in: a link belongs to the shop's
+  account. A shop the person helps at is refused `owner_only`, and a person in no shop `no_shop`, with nothing sent.
+- **The ask.** Share a file as a link reads an HTML or Markdown file on this Mac (nothing is sent) and opens an approval-core
+  request of kind `public_post`, offering yes this once or no, whose detail is the whole plan: the shop, the title (the file's
+  name), the kind, the size and the text. The page shows the title, the kind, the size and that anyone with the link can open it
+  without signing in until it is removed. Remove opens a request of kind `command` naming the link, and says the link stops at
+  once and cannot be undone. Each settles once (`answerArtifactAsk`), waits at most 15 minutes, and is taken back if the page
+  closes first.
+- **No way round it.** `artifacts.publish` and `artifacts.remove` take only an ask's id. The runtime takes that ask's own plan
+  from approval-core (`takeSettled`) only when it was settled with a yes, only for its own kind of change, and only once; an
+  ask that waits, was answered no, was withdrawn or expired, or was used already publishes nothing (`not_settled`). So what is
+  published is exactly what the person saw, and there is no other op that publishes or removes a link. An agent that asks to
+  share a file must be shown this same ask; no agent path exists yet.
+- **What a change sends.** `{ title, kind, text }` to `POST /v1/artifacts`, or `{ id }` to `POST /v1/artifacts/remove`, with
+  the shop's own owner session. A page the API would refuse (no title, not HTML or Markdown, empty, over 128 KiB, or a body over
+  the shell's 256 KiB) is refused here first. A change that got no answer is never sent again: its ask is used, and the page
+  reads the list again.
+- **What the page is shown.** The links newest first, each with its kind, size, day and address, and Open (the default
+  browser), Copy link and Remove; a link the API sent without an https address, or with a field this build cannot read, makes
+  the list unreadable rather than shown in part. Nothing is kept: the links live in the page's state only, never the store, the
+  kept read of the shop, an event or a log.
+
 ## Signing in
 
 ### What the lifted sign-in supports today
@@ -1047,13 +1161,16 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    same pings.
 3. **Asks of the API**, none built here: a way for Pause everyone to stop a job already running, and for a request to wait
    while the team is paused, if the owner wants the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
-   provider; a tenant-wide event feed (built since: the live feed); and a helper's name with a decision (so "Already decided by Mint" does not depend on
-   a note she passed on). A way to say how a request that left on its own was decided is built (When nobody here answered it, above:
+   provider; a tenant-wide event feed (built since: the live feed); a helper's name with a decision (so "Already decided by Mint" does not depend on
+   a note she passed on); and, for a helper's shop (A shop the person helps at, above), a worker's request carrying its action's own words in its
+   detail, as a reply's does, since a helper's session reads no tasks and its card can say only the operation and where it goes ("shopee.refund to
+   RP-118") of what it passes on to the owner. Neither widens what a helper's session may read. A way to say how a request that left on its own was decided is built (When nobody here answered it, above:
    `GET /v1/approvals?state=recent` read when an ask leaves, at one more request). So is the index of a shop's open requests
    this list asked for: the API's approval lookup (December item 48, `docs/pilot-api.md`, "How the shop's approvals are
    found"), so `GET /v1/approvals?state=open` reads only the tasks that may hold an open request, and `state=recent` costs a
    few more reads, not a walk of every task.
-4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; a helper's own session on the desktop. (A note a helper passed on with its
+4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux. (A helper's own session on the desktop is
+   built: A shop the person helps at, above.) (A note a helper passed on with its
    request is drawn on the owner's card, "Passed on by Mint" and the note, and on the helper's as "Passed on to Noi":
    `shopAskLines` in `src/lib/shops.ts`, drawn by `chat/cards/Cards.slot.tsx`.) (Older tasks than the newest 50, which a screen asks for with Show older, are
    built: Older tasks, above. What it leaves for later is at the end of that section.)
@@ -1091,6 +1208,13 @@ in `session.ts`, `answering.test.ts`, the `note` of `prompt.expired` and the car
 from the actions in `view.ts`, remove `src/runtime/http/approvals.ts`, the fourth read in `shop.ts`, the requests in the
 cache (version 1 again), the `outdated` field (protocol, store, card) and `rt.updateToAnswer`, and the
 `@manut/approval-core` dependency.
+
+To take only a helper's pages out (A shop the person helps at, December item 69): drop `helpedShop`, `ownersWords` and `OwnersScreen` from
+`src/lib/shops.ts`, `src/pages/OwnersOnly.tsx` with its test, the `helped` and `onNeeds` props and their uses in `TeamPage.tsx`,
+`HistoryPage.tsx`, `ActivityPage.tsx`, `Automations.tsx` and `HomePage.tsx`, the `helping` mark in `Sidebar.tsx` with `.acct-role` in
+`menu.css`, the named `not_permitted` words in `answer.ts`, the `owners.*` and `home.forHelped` keys, `helper.test.ts` and
+`e2e/helper-shop.spec.ts`, and the row's mark in `e2e/shops.spec.ts`. The runtime's own refusals stay, so a helper's shop then shows its empty
+lists again; nothing about the API, the cache or the session changes.
 
 To take only several shops out: drop `readAll` and `depart` in `host.ts` (each read is `readShop` again), with
 `src/runtime/http/shops.ts`, the `shops` of the keychain value (session.ts; version 1 again), the `shops` and `viewing`

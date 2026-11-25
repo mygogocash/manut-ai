@@ -527,16 +527,16 @@ test("the graph's expand button maximises the panel on Plans, and restores it", 
   await expect(page.getByTestId("window")).not.toHaveClass(/\bpanel-max\b/);
 });
 
-test("eases in about 180ms; reduced motion: no transition", async ({ browser }) => {
+test("slides in the Press's 0.2 s on the plain ease (docs/motion.md); reduced motion: no transition", async ({ browser }) => {
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
     const ctx = await browser.newContext({ reducedMotion, viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
     await openPanel(page, "details");
     await page.getByTestId("panel-max").click();
     const t = await page.getByTestId("window").evaluate((e) => [getComputedStyle(e).transitionDuration, getComputedStyle(e).transitionProperty]);
-    // reduced motion: base.css forces every transition to 0.001ms, i.e. none a person can see
+    // reduced motion: motion.css turns every transition off, i.e. none a person can see
     if (reducedMotion === "reduce") expect(parseFloat(t[0]) * (t[0].endsWith("ms") ? 1 : 1000)).toBeLessThan(1);
-    else expect(t).toEqual(["0.18s", "grid-template-columns"]);
+    else expect(t).toEqual(["0.2s", "grid-template-columns"]);
     await expectMaxed(page);
     await ctx.close();
   }

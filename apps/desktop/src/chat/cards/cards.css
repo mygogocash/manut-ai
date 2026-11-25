@@ -250,7 +250,7 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   opacity: 0;
-  transition: opacity 0.12s;
+  transition: opacity var(--tr-hover);
 }
 .card:focus-within .card-keys {
   opacity: 1;

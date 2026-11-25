@@ -6,7 +6,8 @@
   grid-template-columns: var(--side-w) minmax(0, 1fr) 0px;
   grid-template-rows: minmax(0, 1fr);
   background: var(--bg);
-  transition: grid-template-columns 0.25s ease;
+  /* the side panel slides open and shut (a slide: the Switch's time on the plain ease, so the columns never overshoot) */
+  transition: grid-template-columns var(--tr-slide);
   overflow: hidden;
   /* clip, not just hide: the closed panel's 1px border (and, under 1100px, the panel parked off to the right) made
      .window 1px wider than the screen, and a scroll into view could shift the whole app 1px left */
@@ -54,7 +55,7 @@
   left: 0;
   width: 1px;
   background: transparent;
-  transition: background 0.12s;
+  transition: background-color var(--tr-hover);
 }
 .panel-resizer:hover::after,
 .panel-resizer:focus-visible::after,
@@ -74,25 +75,19 @@
 /* Maximised in place (⌘⇧G, the tab row's button): PanelResizer sets --panel-w to everything right of the sidebar,
    so the chat column folds to 0 inside the same grid. The chat stays mounted, hidden and inert, and is hidden only
    once the panel has covered it. No handle while maximised. */
+/* maximising answers the person's press at once: the slide in the Press's time, on the plain ease */
 .window.panel-maxing {
-  transition: grid-template-columns 0.18s ease-out;
+  transition: grid-template-columns var(--move-press) var(--ease-plain);
 }
 .window.panel-max .main {
   visibility: hidden;
-  transition: visibility 0s linear 0.18s;
+  transition: visibility 0s var(--move-press);
 }
 .window.panel-max .panel-resizer {
   display: none;
 }
 .window.panel-max .details {
   border-left-color: transparent;
-}
-@media (prefers-reduced-motion: reduce) {
-  .window.panel-maxing,
-  .window.panel-maxing .details,
-  .window.panel-max .main {
-    transition: none;
-  }
 }
 /* A narrow window keeps the chat its width: the panel slides over it instead of pushing it to ~350px. */
 @media (max-width: 1099px) {
@@ -107,7 +102,7 @@
     width: var(--panel-w);
     z-index: 20;
     box-shadow: var(--pop-shadow);
-    transition: transform 0.25s ease;
+    transition: transform var(--tr-slide);
   }
   .window:not(.panel-open) .details {
     transform: translateX(100%);

@@ -8,6 +8,11 @@
 //    when the page shows a lane with a branch of its own and the cache is stale; a failed read is not tried again within the
 //    same time). Nothing is written to GitHub or GitLab; the call is the one Tasks makes.
 // The cache lives in memory: a pull request's state is not something to show from last week.
+//
+// A request is known by the repository its branch is in and the branch's name, never the name alone (item 86): anyone can open a
+// pull request from a fork on a branch named like a lane's (`kit/<words>`, public once pushed), and that request must never stand
+// for the lane's, on its row or behind its Merge. Only a request the host says is from this very repository (`same`) is kept under
+// this repository; any other is kept under its own, which no lane looks up.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { taskHost, type TaskHost } from "./host";
 import type { CliSource, TaskItem, TaskRemote } from "./types";
@@ -26,6 +31,7 @@ export const PULLS_MAX_AGE = 5 * 60_000;
 
 interface Known {
   at: number;
+  /** By `<repository the branch is in>\n<branch>`. */
   byBranch: Map<string, LanePull>;
 }
 const known = new Map<string, Known>();
@@ -39,6 +45,8 @@ const bump = () => {
 };
 
 const keyOf = (source: CliSource, repo: string) => `${source}:${repo}`;
+/** Where a request's branch is, with its name: this repository's own only when the host said so. */
+const branchKey = (repo: string, i: Pick<TaskItem, "same" | "from">, branch: string) => `${i.same === true ? repo : `other:${i.from ?? ""}`}\n${branch}`;
 
 /** `items` (a list of pull requests the app just read for `repo`) into the cache. `whole`: the list is every open request of the
  *  repository's first page, so what it leaves out is no longer open; otherwise it is only added to what is known. */
@@ -47,9 +55,10 @@ export function notePulls(source: CliSource, repo: string, items: readonly TaskI
   const byBranch = whole || !prev ? new Map<string, LanePull>() : new Map(prev.byBranch);
   for (const i of items) {
     if (!i.head || (i.state !== "open" && i.state !== "draft")) continue;
-    // two open requests from one branch: the newer (higher number) is the one the person means
-    const was = byBranch.get(i.head);
-    if (!was || was.number < i.number) byBranch.set(i.head, { source, repo, number: i.number, state: i.state, title: i.title });
+    // two open requests from one branch of one repository: the newer (higher number) is the one the person means
+    const key = branchKey(repo, i, i.head);
+    const was = byBranch.get(key);
+    if (!was || was.number < i.number) byBranch.set(key, { source, repo, number: i.number, state: i.state, title: i.title });
   }
   known.set(keyOf(source, repo), { at: now, byBranch });
   bump();
@@ -64,9 +73,9 @@ export function dropPull(source: CliSource, repo: string, number: number): void 
   bump();
 }
 
-/** The open pull request made from `branch` in `repo`, or null. */
+/** The open pull request made from `branch` of `repo` itself (never a fork's branch of the same name), or null. */
 export function pullFor(source: CliSource, repo: string, branch: string): LanePull | null {
-  return known.get(keyOf(source, repo))?.byBranch.get(branch) ?? null;
+  return known.get(keyOf(source, repo))?.byBranch.get(branchKey(repo, { same: true }, branch)) ?? null;
 }
 
 /** Whether the Code page should read `repo`'s pull requests now: none are known (or they are old) and it has not asked within the

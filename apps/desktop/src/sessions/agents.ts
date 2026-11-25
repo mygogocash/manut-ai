@@ -383,6 +383,9 @@ export interface SessionRec {
    *  note read it. None: it made none (no repository, or the shell could not), and the session works in its folder. Saved
    *  with the session, so a lane that comes back after a restart works where it did. */
   lane?: LaneBranch;
+  /** A lane a workflow started (src/workflows/): the workflow's name. Nobody may be watching it, so Kit's dial reads its asks at
+   *  the most careful level, Asks every time, with no kept rule, whatever the project's dial says. Saved with the session. */
+  workflow?: string;
 }
 
 /** How long a TERMINALS card's second line may be (the card truncates it further with an ellipsis). */

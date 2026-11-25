@@ -13,6 +13,9 @@ import { historyDays } from "../pages/HistoryPage";
 import { useJobList } from "../pages/RecentWork";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { closePalette, usePaletteOpen } from "./state";
+import { useLeaving } from "../ui/leave";
+import { getWorkflows, useWorkflows } from "../workflows/runner";
+import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
 import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
@@ -31,13 +34,20 @@ export interface PaletteViewProps {
   onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void;
   onBackdrop: () => void;
   inputRef?: RefObject<HTMLInputElement | null>;
+  /** Closed and fading out (ui/leave.ts): drawn inert, so nothing in it takes a key or a press. */
+  leaving?: boolean;
 }
 
 export function PaletteView(p: PaletteViewProps) {
   let at = -1;
   const total = flat(p.groups).length;
   return (
-    <div className="pal-back" onMouseDown={(e) => e.target === e.currentTarget && p.onBackdrop()} data-testid="palette-backdrop">
+    <div
+      className="pal-back"
+      onMouseDown={(e) => e.target === e.currentTarget && p.onBackdrop()}
+      data-testid="palette-backdrop"
+      {...(p.leaving ? { "data-leaving": "", inert: true, "aria-hidden": true } : {})}
+    >
       <div className="pal" role="dialog" aria-modal="true" aria-label={t("pal.title")} onKeyDown={p.onKeyDown} data-testid="palette">
         <input
           ref={p.inputRef}
@@ -96,10 +106,12 @@ export function PaletteView(p: PaletteViewProps) {
   );
 }
 
-function OpenPalette() {
+function OpenPalette({ leaving }: { leaving: boolean }) {
   const s = useStore();
   const places = usePlaces();
   const { jobs } = useJobList();
+  const wf = useWorkflows();
+  const wfOn = useWorkflowSettings().on;
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -126,6 +138,13 @@ function OpenPalette() {
         if (getStore().getState().ui.view !== "code") s.openPage("code");
         openNewSessionMenu();
       },
+      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, or a run going
+      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
+      // the Run now on its page: the page opens, so the run is seen starting where its button is
+      runWorkflow: (file) => {
+        s.openSettings("workflows");
+        void getWorkflows().runNow(file);
+      },
     };
     // what History's own search finds for the same words: the same rows, so nothing is lost
     const chats: Row[] = query.trim()
@@ -133,7 +152,7 @@ function OpenPalette() {
       : [];
     return buildGroups(ctx, query, chats);
     // the store's state is the whole of what these rows read
-  }, [s, places, jobs, query]);
+  }, [s, places, jobs, query, wf, wfOn]);
   const rows = flat(groups);
   const at = Math.min(cursor, Math.max(0, rows.length - 1));
 
@@ -161,6 +180,7 @@ function OpenPalette() {
       onHover={setCursor}
       onBackdrop={() => closePalette()}
       inputRef={input}
+      leaving={leaving}
       onKeyDown={(e) => {
         if (e.key === "Tab") {
           // the palette is a modal: the focus stays in its field
@@ -181,7 +201,9 @@ function OpenPalette() {
   );
 }
 
-/** Mounted once by the app: draws nothing until ⌘K or the menu's Search opens it. */
+/** Mounted once by the app: draws nothing until ⌘K or the menu's Search opens it. Once closed it fades out where it
+ *  stands, faster than it came (ui/leave.ts); opened again meanwhile, it starts afresh. */
 export function Palette() {
-  return usePaletteOpen() ? <OpenPalette /> : null;
+  const { drawn, leaving, opened } = useLeaving(usePaletteOpen());
+  return drawn ? <OpenPalette key={opened} leaving={leaving} /> : null;
 }

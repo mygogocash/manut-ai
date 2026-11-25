@@ -87,6 +87,8 @@ const API_AUDIT_ACTIONS = [
   "google.appended",
   "model.cap_near",
   "model.cap_reached",
+  "artifact.published",
+  "artifact.removed",
 ];
 
 const NOW = "2026-11-24T03:00:00.000Z";

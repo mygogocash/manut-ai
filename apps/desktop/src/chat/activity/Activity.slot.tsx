@@ -69,7 +69,8 @@ function LabelView({ label }: { label: Label }) {
   );
 }
 
-/** Old text moves up and fades, new text comes from below (220 ms; none under reduced motion). */
+/** Old text moves up and fades, new text rises from below (one step of the board's Roll, activity.css; still under
+ *  reduced motion). */
 function Ticker({ label }: { label: Label }) {
   const text = labelText(label);
   const [cur, setCur] = useState({ label, text, k: 0 });
