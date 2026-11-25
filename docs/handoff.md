@@ -172,8 +172,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 57, the console's Routines page for operators: a shop's routines and its team, with pause, resume and
-     remove asked first (`feat/console-routines`, Sonnet), started 25 Nov when item 55 reported.
    - item 58, the preview drawn in the pane: a sandboxed frame of the lane's running preview, the CSP widened for
      loopback frames only (`feat/preview-frame`, Opus), started 25 Nov when item 53 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -189,7 +187,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 53 (the preview itself, first slice: Start in a lane's Preview view runs the command `preview-command`
+   Merged: 57 (the console's Routines page: a shop's routines, whose job, when, the next run or why none, the last run,
+   and its team, with pause, resume, remove and Pause everyone each asked first in its row; no making of routines yet;
+   practice world v13; only the pages Worker is redeployed),
+   53 (the preview itself, first slice: Start in a lane's Preview view runs the command `preview-command`
    chooses, as arguments, in the lane's own folder only, refused with `changed` if `package.json` moved since; the
    environment starts empty, takes what a dev server needs and sets each secret to its sample; `dev-url` finds the
    address, Open hands only a loopback address to the system browser, Stop ends the process group, and the app
