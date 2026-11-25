@@ -214,8 +214,6 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    - item 75, source control: git and the CLIs' status, the default branch pulled when clean, a pull request made and
      merged from a lane, each asked first (`feat/source-control`, Opus, worktree `cc-item75-source`), started 25 Nov at
      23:10.
-   - item 71, the lane pane's Diff read from the lane's own folder, so it is not empty after a restart
-     (`feat/lane-diff`, Sonnet, worktree `cc-item71-lane-diff`), started 25 Nov at 22:40.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -245,7 +243,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 74 (Settings, Providers in every mode: each agent with a switch the shell enforces, a name, its program's
+   Merged: 71 (the lane pane's Diff read from the lane's own folder through git, read only and capped, so it is there
+   after a restart and shows a subagent's and a hand's edits; planned by the lead and built by Sonnet in a quarter of
+   an hour, the first item under the owner's split of thinking and carrying out), 74 (Settings, Providers in every
+   mode: each agent with a switch the shell enforces, a name, its program's
    path, its home, extra arguments that go last and are refused by name when they would skip an ask, and variables
    whose values are never shown again; Cursor and Antigravity added as ACP agents, never yet sent a message), 82
    (computer use for Claude Code chats: Settings, Computer reads the two macOS permissions without prompting;
