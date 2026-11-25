@@ -72,6 +72,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | Working on your plan: "Costs nothing from the AI budget." | Part: sessions run on the developer's own sign-in; nothing says so | |
 | Your plan is at its limit: Wait, or use the AI budget for this job | Lacks (Owner: money, and a real plan to see the limit) | |
 | Your plan needs a sign-in | Part: a session that is not signed in says so and points to Settings › Accounts (Owner: a real sign-in to try it) | `sessions/sessions.ts` (`signedOutSaid`) |
+| Your own MCP servers and skills, wherever the agent runs | Has (item 72): see [MCP servers and skills](#mcp-servers-and-skills); an added Claude Code account does not get the servers added with `claude mcp add` | `src-tauri/src/lane_config.rs`, `accounts.rs` (`share`), `acp_mcp.rs`, `settings/mcp/McpSkillsPage.tsx` |
 
 ### Watching it run
 
@@ -504,8 +505,10 @@ another's files or the developer's folder.
   runs `git worktree prune`, and `--force` only ever reaches a folder it made, after the person's yes. Nothing is written
   through a link: a link where a lanes' folder or a record would go is refused or passed over.
 - **What comes along.** The committed tree only. The developer's uncommitted changes stay in their folder, and nothing git
-  ignores (`node_modules`, build output) is copied or linked: a link would let the lane's install write into the developer's
-  folder, and a copy could be of other versions than the lane's lock file says. No hook runs while a folder is made or
+  ignores (`node_modules`, build output, `.env`) is copied or linked: a link would let the lane's install write into the
+  developer's folder, and a copy could be of other versions than the lane's lock file says. One named exception (item 72,
+  `src-tauri/src/lane_config.rs`): the project's own agent settings that git does not hold, so the agent in the lane has the
+  same MCP servers, skills, commands and local settings as in the project. See [MCP servers and skills](#mcp-servers-and-skills). No hook runs while a folder is made or
   removed (git's `core.hooksPath` points at a folder that is never made), so nothing a project sets up on checkout (an
   install, a generated file) happens by itself. The chat says it as the lane starts: where Kit works, how many of the
   developer's changed files did not come along, and that nothing is installed there yet. The app installs nothing; Kit may,
@@ -579,6 +582,72 @@ another's files or the developer's folder.
   so after the update such a session comes back with no lane of its own and keeps working where it was, in the developer's
   folder; the app moves nothing. That folder may still be on the old lane's `kit/` branch; switching it back is the
   developer's to do.
+
+### MCP servers and skills
+
+What a person already has works wherever an agent runs here (item 72). Chats, terminals and Buddy start the agent with the
+app's whole environment and the person's real home, so Claude Code and Codex load their own MCP servers, skills, plugins and
+settings as in a terminal. Four places needed more, and each changes only what an agent can see: every tool a server gives
+still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
+
+- **A lane** (`lane_config.rs`). When a lane's folder is made, the files below that git does not track in the developer's
+  folder (untracked or ignored), at the repository's top and in each folder down to the session's, are copied into the lane
+  at the same paths: Claude Code's `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md`, `.claude/settings.json`,
+  `.claude/settings.local.json`, `.claude/skills`, `commands`, `agents`, `output-styles`, `rules`, `workflows`; Codex's
+  `AGENTS.md`, `AGENTS.override.md`, `.codex/config.toml`, `.agents/skills`. Names from each CLI's own documentation; nothing
+  else git ignores comes along. Copied, never linked: the lane's agent writes its own local settings (an "always allow"), and
+  a link would carry that into the developer's folder. A copy stays only when git ignores it in the lane: by the lane's own
+  rules (the committed `.gitignore` files, the repository's `info/exclude`, the person's global excludes, where Claude Code
+  puts `**/.claude/settings.local.json`), or because it is in an agent folder (`.claude`, `.codex`, `.agents`) the lane did not
+  have, which the app makes with a `.gitignore` of `*` that ignores itself too. A copy git would still list as new is taken
+  back at once. So a copy (an `.mcp.json` can hold a token) is never committed by `git add -A`, never kept in a turn's snapshot
+  (which leaves out what git ignores), never keeps a clean-up from removing the folder, and goes with the folder. Links, files
+  over 1 MiB and more than 200 files stay behind too. The lane's first line says how many came along and how many stayed and
+  why; a file that came along is not counted among the changed files that did not. Copies are made for this account only
+  (0600), and a change to a copy stays in the lane. Claude Code itself also reads some of the developer's own from a worktree
+  (local settings at the main checkout's root, untracked skills, agents and commands when the worktree has none, the folder's
+  local-scope MCP servers; checked on this Mac with Claude Code 2.1.332, `claude mcp list` in a `git worktree add` folder and
+  a throwaway `CLAUDE_CONFIG_DIR`); the copies are for what it does not (an untracked `.mcp.json`), for Codex, and for Windows,
+  where it keeps local settings with the worktree.
+- **An added account** (`accounts.rs`, `share` and `prepare`). Before a session of Claude Code or Codex starts as an added
+  account, the account's home gets links to the person's own home for an allow-list of configuration: Codex's `config.toml`
+  (settings and MCP servers), `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`, `plugins`; Claude Code's `skills`,
+  `commands`, `agents`, `output-styles`, `rules`, `workflows`, `plugins`, `CLAUDE.md`. An entry the account has of its own
+  stays its own, a link elsewhere is left alone, and nothing is written in the person's home. Claude Code's `settings.json` is
+  a copy without `env` and the keys its settings reference lists under Authentication and providers (`apiKeyHelper`,
+  `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`, `forceLoginMethod`, `forceLoginOrgUUID`,
+  `forceLoginGatewayUrl`, `enforceAnthropicSignIn`, `allowedProviders`, `otelHeadersHelper`), written again on each start
+  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Never shared: `auth.json`, `auth.lock`,
+  `.credentials.json`, `.claude.json`. On macOS Claude Code keeps an account's sign-in in the keychain under its config folder,
+  so the shared files carry none. Left as before: Claude Code's servers added with `claude mcp add` (user scope, and a folder's
+  local scope) live in its `.claude.json` beside the account's own details, and Claude Code rewrites that file while it runs,
+  so no part of it is split off; Grok, pi and oh-my-pi accounts; and every added account on Windows, where a link needs
+  rights a person rarely has.
+- **An ACP agent** (`acp_mcp.rs`). Each ACP agent reads its own MCP configuration itself. It is now also handed, at
+  `session/new`, `session/load` and `session/resume`, the project's `.mcp.json` servers that Claude Code would connect in
+  that folder: the folder trusted in Claude Code's own `.claude.json` (`projects["<root>"].hasTrustDialogAccepted`, the
+  root being the developer's folder for a lane), the server approved by `enabledMcpjsonServers` or
+  `enableAllProjectMcpServers` in the person's user settings, the root's `.claude/settings.local.json` while git does not
+  track it, or the folder's entry, and not in `disabledMcpjsonServers`. A repository's committed settings never approve its
+  own servers, as in Claude Code. This one source because `.mcp.json` lives in the folder the agent already works in, so its
+  literal values are ones the agent can read anyway, and its `${VAR}` and `${VAR:-default}` are filled in from the environment
+  the agent already runs with (a server with a variable that is not set is left out). The servers the person added to Claude
+  Code or Codex themselves are not handed on: their secrets were given to those agents. Shapes from the protocol's Session
+  Setup page: stdio `{name, command, args, env: [{name, value}]}` always, HTTP and SSE (`{type, name, url, headers}`) only to
+  an agent whose `mcpCapabilities` takes them. The values go only into that line to the agent, never an event or a log.
+- **Settings › MCP and Skills** (`src/settings/mcp/McpSkillsPage.tsx`, `src-tauri/src/agent_config.rs`). For Claude Code
+  and Codex: each MCP server and skill by name, where it comes from (yours in every project, yours in this project, the
+  project's file, a plugin), and whether it is on, turned off or waits for a yes; with a project folder chosen, that project's
+  too. Read from the agents' own files, never by running them (`claude mcp list` starts every server to check it and prints
+  each command): Claude Code's `.claude.json`, the project's `.mcp.json`, the plugins its user settings turn on (their
+  `.mcp.json`, `plugin.json` and `skills/`, found through its `installed_plugins.json`), its `skills/` and the project's;
+  Codex's `config.toml` (`enabled = false` is off) and the project's `.codex/config.toml` (waits until Codex trusts the
+  project), its `skills/` (Codex lists it as a skill root in `codex debug prompt-input`), `~/.agents/skills` and the project's.
+  Names only reach the page: never a command, argument, environment value, header or address. Whether a server connected is
+  what Claude Code's last chat said in its first line (`mcp_servers`, kept as a name and one of a few status words, in memory
+  until the app closes); Codex's is not known. Plugin skills are one row per plugin. The page changes nothing and names the
+  commands that do (`claude mcp add`, `codex mcp remove`, the skills folders), says where else the settings reach, and in a
+  browser says there is nothing to read.
 
 ### How the main branch moving is read
 
@@ -772,6 +841,13 @@ rewind.
 
 ## Left for later (no owner needed)
 
+- From item 72 (MCP servers and skills): Claude Code's own MCP servers (user and local scope, in its `.claude.json`) in an
+  added Claude Code account, which would need a safe way to write a file Claude Code rewrites while it runs; added accounts of
+  Grok, pi and oh-my-pi, and every added account on Windows; the lists of the agents other than Claude Code and Codex on
+  Settings › MCP and Skills (each reads its own files in its own format, to be checked against its documentation); Codex's
+  plugins' servers and skills on that page, and whether Codex connected a server; project files of the other agents
+  (Gemini's `.gemini/`, OpenCode's) in a lane; a skill that is a link, or a nested repository, in the developer's folder,
+  which a lane leaves behind.
 - The dial for a session in its own terminal: the shell starting the agent with the permission mode and allowed
   commands the dial gives (Claude Code's `--permission-mode` and `--allowedTools`). That is Rust, and it widens the
   shell's fixed list of arguments, so it wants its own review.
