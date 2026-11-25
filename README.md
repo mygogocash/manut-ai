@@ -19,6 +19,7 @@ spec is the Manut AI design canvas.
 | `packages/format` | How the app writes money and times (satang to text, typed text to satang, VAT split, relative times) | Written for Manut AI |
 | `packages/notify-rules` | What the app may show outside its window: notifications, buttons, quiet hours, hidden details, the Dock badge | Written for Manut AI |
 | `packages/promptpay` | PromptPay QR payloads for manual payments | dtinth/promptpay-qr's format and test vectors |
+| `packages/remote-channel` | A paired phone's channel to the Mac through the relay: pairing, an encrypted session, the one-use challenge a passkey signs for one Allow | GoSpark's pairing proof and decision challenges with their tests; WebAuthn Level 3's test vectors |
 | `packages/ui-kit` | Design tokens and component classes | The design canvas (`app.css`, `tokens.json`) |
 | `docs/pilot-api.md` | The contract between `apps/api` and `apps/web` | |
 
@@ -72,6 +73,11 @@ merging, keeping human co-authors), and `removeAgentCredits` with its tests and 
 (`computer-blocked-key-combos.ts`, which Orca ported from vercel-labs/agent-desktop, Apache-2.0), its lock check
 (`SessionLockProbe.swift`), the window number through `_AXUIElementGetWindow` (`AccessibilityWindowIdentity.swift`),
 the window picture and which windows count (`main.swift`), and the two System Settings addresses.
+
+GoSpark again (at `a7537c80`) for the remote channel (item 78a, `packages/remote-channel`): `RemoteAuthentication.proof` and
+`RemotePairingInvitation` (`Shared/Remote/RemoteHandshake.swift`), `RemoteDecisionChallenges` and the refusals in
+`Tests/Shared/RemoteAuthenticationTests.swift`, ported to TypeScript and Web Crypto; and the W3C Web Authentication Level 3
+specification's section 16 test vectors (read 25 Nov 2026), copied into its tests.
 
 Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which

@@ -73,6 +73,22 @@ which the repository does not have.
   or the passcode was used, and the signature. Only then does it call `settleApproval`, so approval-core settles it
   once, with the phone's device id as who decided.
 
+**What building 78a added to the design** (`packages/remote-channel/README.md` has every byte):
+
+- The pairing exchange keeps the relay out only while the relay lacks the code's secret. Someone who photographed the
+  code within its two minutes and controls the relay can pair with each side separately; the matching check code is
+  what catches that, and only because the phone commits to its throwaway key before it sees the Mac's (ZRTP's hash
+  commitment). Without that order the check code could be steered and would prove nothing. Pairing is therefore four
+  messages, and the codes match by chance one time in ten thousand, once per code.
+- The code travels in the link's fragment (`#pair=`), which no browser sends to a server.
+- K is drawn by the Mac after Allow, so the code's secret, photographed or not, never opens a session.
+- The Mac cannot tell that the grant reached the phone, so 78b counts a phone as paired only once its passkey
+  registration has come back over the pairing channel. The passkey's key is read from the authenticator's own data
+  (WebAuthn Level 3, section 7.1), and every answer is also refused from another site's frame or with a counter that
+  did not move on.
+- Records are authenticated one by one, but the end of a stream is not: a relay that cuts a stream short is noticed
+  by the journal's cursors (phase 2), not by the channel.
+
 **Lifted from GoSpark:** `docs/relay-protocol-v1.md` and `docs/security/remote-relay-threat-model.md` (this
 repository's relay code cites both, and neither is in `docs/` here yet); `GoGoCode/Remote/RemoteEventJournal.swift`
 (the last 500 events or 1 MB a chat, so a phone catches up or gets the whole chat again); `docs/remote.md`'s rules (the
