@@ -179,6 +179,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 61, a shop's live feed, built and switched off: a hibernating WebSocket per shop session that only says
      something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged.
+   - item 62, the Runs layout tests made fast: profile `boxView.test.ts`'s six slow generator tests and speed the slow
+     side with every answer proved the same (`feat/fast-box-tests`, Sonnet), started 25 Nov when item 60 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -416,7 +418,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop` `src/sessions/term/engine-osc52.test.ts`: builds clipboard-sized strings, can pass 5 seconds.
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
-  second for "Everyone is paused since 10:00 today."), and both passed when run alone.
+  second for "Everyone is paused since 10:00 today."), and both passed when run alone. The web tests' waits are three
+  seconds since `6771bc3` (`apps/web/test/setup.ts`), and item 62 is speeding up `boxView.test.ts`.
 - `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
   (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
 - `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
