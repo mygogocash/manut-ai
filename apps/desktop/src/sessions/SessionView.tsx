@@ -12,11 +12,15 @@ import { useResolvedTheme } from "../app/theme";
 import { Timeline } from "../chat/parts/Timeline";
 import { Composer } from "../chat/parts/Composer";
 import { CheckIcon } from "../chat/model/CheckIcon";
-import { Seg } from "../chat/model/Seg";
 import "../chat/model/model.css";
-import { ArrowUp, ChatIcon, ChevronDown, ModelIcon, Popover, SearchIcon, TerminalIcon } from "../ui";
+import { ArrowUp, ChatIcon, ChevronDown, Popover, TerminalIcon } from "../ui";
 import { composing } from "../lib/ime";
-import { levelLabel, levelOptions, modeHint, modeLabel, modesOf, queueOff, usageText } from "./controls";
+import { modesOf, queueOff, usageText } from "./controls";
+import { ModelMenu } from "../chat/box/ModelMenu";
+import { ApprovalMenu, DialRows } from "../chat/box/ApprovalMenu";
+import { KIT_LEVELS } from "@manut/member-grants";
+import { setLevel, updateKitProjects, useKitProject } from "../code/project";
+import { projectName } from "../code/kitAsks";
 import type { SessionQueue } from "../chat/parts/Timeline";
 import { ownSetting } from "./ownSetting";
 import type { Bot } from "../lib/protocol";
@@ -171,6 +175,7 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         : undefined,
     [takesFiles, rec.agent, rec.id, label],
   );
+  const commands = ss.live[rec.id]?.commands?.length ? ss.live[rec.id]!.commands : undefined;
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -192,11 +197,17 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         onSend={(t) => void getSessions().send(rec.id, t)}
         onSendFiles={takesFiles ? (t, files) => getSessions().sendFiles(rec.id, t, files) : undefined}
         onStop={() => void getSessions().interrupt(rec.id)}
-        commands={ss.live[rec.id]?.commands?.length ? ss.live[rec.id]!.commands : undefined}
+        commands={commands}
+        // Add context: a folder is named by its path (the dial reads one outside the project as blocked, with Allow this
+        // folder on the Code page), the `/` menu is the agent's own; a coding chat mentions no teammate
+        onFolder={takesFiles ? () => getSessions().pickFolder(rec.lane?.dir || rec.cwd) : undefined}
+        actions={!!commands}
         tools={
           <>
-            {modesOf(rec.agent).length > 0 && <SessionMode rec={rec} />}
             <AgentFixed agent={rec.agent} />
+            {/* the chat box's model with its effort, and how much the agent may do before asking (item 80) */}
+            <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />
+            {(modesOf(rec.agent).length > 0 || takesFiles) && <SessionApproval rec={rec} />}
           </>
         }
         foot={<Context rec={rec} />}
@@ -417,62 +428,41 @@ function LiveFoot({ rec }: { rec: SessionRec }) {
   );
 }
 
-/** The session's permission mode, a quiet label in the composer row; its menu lists the modes manut offers for the
- *  agent (never one that skips approvals or lifts the sandbox). */
-function SessionMode({ rec }: { rec: SessionRec }) {
+/** The session's approval level in the chat box (item 80): the agent's own preset, a quiet label in the composer row
+ *  whose menu lists the modes manut offers for the agent (never one that skips approvals or lifts the sandbox), and
+ *  under them Kit's dial for the session's project, the same setting as the Code page's (code/KitPanel.tsx). An agent
+ *  with no presets shows the dial's level. */
+function SessionApproval({ rec }: { rec: SessionRec }) {
   const ss = useSessions();
-  const [open, setOpen] = useState(false);
   const live = rec.status === "running";
   const cur = ss.live[rec.id]?.mode ?? rec.mode;
+  const modes = modesOf(rec.agent);
   // the agent's own setting, when it asks for nothing or reaches the whole disk: said where the mode is
   const own = ownSetting({ ...ss.live[rec.id], mode: cur });
-  const from = t("ctl.own.from", { agent: agentDef(rec.agent).label });
-  const pick = (m: string) => {
-    setOpen(false);
-    if (m !== cur) void getSessions().setMode(rec.id, m);
-  };
+  const project = useKitProject(rec.cwd);
   return (
-    <span className="ss-pick-w">
-      <button
-        type="button"
-        className={`ss-pick ss-mode${cur && cur !== "default" && cur !== "ask" ? " set" : ""}${own ? " own" : ""}`}
-        title={own ? `${own} · ${from}` : t("ctl.mode")}
-        aria-label={`${t("ctl.mode")}: ${own ? `${own} · ${from}` : modeLabel(cur)}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        disabled={!live}
-        onClick={() => setOpen((v) => !v)}
-        data-testid="session-mode"
-        data-mode={cur ?? ""}
-        {...(own ? { "data-own": "unguarded" } : {})}
-      >
-        <span className="ss-pick-n">{own ?? modeLabel(cur)}</span>
-        <ChevronDown />
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} side="top" align="right" width={264} label={t("ctl.mode")} className="ss-dpop">
-        <div data-testid="session-mode-menu">
-          <div className="ss-h ss-h-plain">{t("ctl.mode")}</div>
-          {own && (
-            <div className="ss-mode-own" data-testid="session-mode-own">
-              {own} · {from}
-            </div>
-          )}
-          {modesOf(rec.agent).map((m) => {
-            const on = m === cur;
-            return (
-              <button key={m} type="button" className={`ss-item ss-mode-row${on ? " on" : ""}`} aria-pressed={on} onClick={() => pick(m)} data-testid="session-mode-opt" data-mode={m}>
-                <span className="ss-mode-t">
-                  <span className="ss-n">{modeLabel(m)}</span>
-                  <span className="ss-mode-d">{modeHint(m)}</span>
-                </span>
-                <span className="ss-ck">{on && <CheckIcon />}</span>
-              </button>
-            );
-          })}
-          {rec.agent === "codex" && <div className="mp-f">{t("ctl.modeFoot")}</div>}
-        </div>
-      </Popover>
-    </span>
+    <ApprovalMenu
+      modes={modes}
+      current={cur}
+      own={own ? { words: own, from: t("ctl.own.from", { agent: agentDef(rec.agent).label }) } : null}
+      live={live || !modes.length}
+      onPick={(m) => void getSessions().setMode(rec.id, m)}
+      label={t(`kit.level.${project.level}`)}
+      foot={rec.agent === "codex" ? t("ctl.modeFoot") : undefined}
+      testId={modes.length ? "session-mode" : "session-approval"}
+      extra={
+        <DialRows
+          title={`${t("kit.dial")} · ${projectName(rec.cwd)}`}
+          levels={KIT_LEVELS}
+          level={project.level}
+          label={(l) => t(`kit.level.${l}`)}
+          line={t(`kit.line.${project.level}`)}
+          note={t("kit.live")}
+          onLevel={(l) => updateKitProjects((x) => setLevel(x, rec.cwd, l))}
+          testId="kit-box-level"
+        />
+      }
+    />
   );
 }
 
@@ -524,6 +514,7 @@ function DraftPane({ rec }: { rec: SessionRec }) {
         offlineText={!ready ? (!rec.cwd ? t("sessions.findingHome") : missingNote(rec.agent)) : t("sessions.pressStart", { agent: label })}
         onSend={(text) => start(text)}
         onSendFiles={mode === "chat" ? startWithFiles : undefined}
+        onFolder={mode === "chat" && rec.cwd ? () => getSessions().pickFolder(rec.cwd) : undefined}
         onStop={() => undefined}
         heldNote={terminal && !!rec.cwd ? t("ss.open.withheld") : undefined}
         tools={
@@ -668,174 +659,41 @@ function SplitPane({ rec }: { rec: SessionRec }) {
   );
 }
 
-/** Model options grouped by provider in the order they came (a model's `provider`, else the agent's own options
- *  under one group), filtered by a search over label, id and provider. */
-export function groupModels(options: ModelOption[], query: string): { provider: string; rows: ModelOption[] }[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const out: { provider: string; rows: ModelOption[] }[] = [];
-  for (const o of options) {
-    const hay = `${o.label} ${o.id} ${o.provider ?? ""} ${o.detail ?? ""}`.toLowerCase();
-    if (!words.every((w) => hay.includes(w))) continue;
-    const g = o.provider ?? "";
-    const last = out.find((x) => x.provider === g);
-    if (last) last.rows.push(o);
-    else out.push({ provider: g, rows: [o] });
-  }
-  return out;
-}
+export { groupModels } from "../chat/box/ModelMenu";
 
-/** The session's model button: the same pill as a bot's (model, then reasoning), listing what the agent itself
- *  offers with the bot picker's search and provider groups, and the agent's own reasoning levels when it has them. */
+/** The session's model in the chat box (item 80): the shared model menu (chat/box/ModelMenu.tsx) with what the agent
+ *  itself offers and its own reasoning levels. A pick made while a turn runs waits for the next turn, which says so. */
 function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelOption[] | undefined; note: string | undefined }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
   const agentLive = useSessions().live[rec.id];
   const efforts = agentLive?.efforts ?? [];
   const effort = agentLive?.effort ?? rec.effort ?? "";
   const live = rec.status === "running";
   const label = agentDef(rec.agent).label;
   const vendor = rec.agent === "codex" ? "openai" : rec.agent;
-  const groups = useMemo(() => groupModels(options ?? [], query), [options, query]);
-  const flat = groups.flatMap((g) => g.rows);
-  const many = (options?.length ?? 0) > 6;
-  useEffect(() => {
-    if (open) {
-      setQuery("");
-      setActive(0);
-    }
-  }, [open]);
-  useEffect(() => setActive(0), [query]);
-  useEffect(() => {
-    listRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [active, open]);
-  const choose = async (o: ModelOption) => {
-    const on = rec.modelNext ? o.label === rec.modelNext || o.id === rec.modelNext : o.label === rec.model || o.id === rec.model;
-    if (on || busy || !live) return;
-    setBusy(true);
-    await getSessions().setModel(rec.id, o);
-    setBusy(false);
-  };
-  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      if (flat.length) setActive((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + flat.length) % flat.length);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (composing(e)) return;
-      if (flat[active]) void choose(flat[active]);
-    }
-  };
+  const isOn = (o: ModelOption) => (rec.modelNext ? o.label === rec.modelNext || o.id === rec.modelNext : o.label === rec.model || o.id === rec.model);
   return (
-    <div className="mp-wrap">
-      <button
-        type="button"
-        className={`mp${open ? " on" : ""}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={tr("ss.model")}
-        data-testid="model-pill"
-      >
-        <span className="mp-mk" title={live ? tr("ss.running") : tr("ss.notRunning")}>
-          <ModelIcon model={rec.model || label} provider={vendor} size={14} />
-          <span className={`mp-d${live ? " live" : ""}`} aria-hidden="true" />
-        </span>
-        <span className="mp-l" title={rec.model || undefined} data-testid="model-label">
-          {rec.model || tr("ss.model")}
-        </span>
-        {effort && efforts.length > 0 && (
-          <>
-            <span className="sep" />
-            <span className="eff" data-testid="reasoning-label">
-              {levelLabel(effort, efforts)}
-            </span>
-          </>
-        )}
-        {/* a pick made while a turn ran: the agent takes it from the next turn, whose start confirms it */}
-        {rec.modelNext && (
+    <ModelMenu
+      label={rec.model || ""}
+      mark={{ model: rec.model || label, provider: vendor }}
+      live={live}
+      options={options}
+      isOn={isOn}
+      onPick={(o) => getSessions().setModel(rec.id, o)}
+      canPick={live}
+      efforts={efforts}
+      effort={effort}
+      onEffort={(v) => void getSessions().setEffort(rec.id, v)}
+      empty={live ? tr("ss.loadingModels") : tr("ss.agentNotRunning", { agent: label })}
+      badge={
+        // a pick made while a turn ran: the agent takes it from the next turn, whose start confirms it
+        rec.modelNext ? (
           <span className="mp-next" title={tr("ss.modelNextTip", { model: rec.model ?? "" })} data-testid="model-next">
             {tr("ss.modelNext", { model: rec.modelNext })}
           </span>
-        )}
-        <ChevronDown />
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} label={tr("ss.model")} width={300} className="mp-pop">
-        <div data-testid="model-pop" aria-busy={busy}>
-          {many ? (
-            <label className="mp-search">
-              <SearchIcon />
-              <input
-                type="search"
-                placeholder={tr("mp.search")}
-                aria-label={tr("mp.search")}
-                autoFocus
-                autoComplete="off"
-                spellCheck={false}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={onSearchKey}
-                data-testid="model-search"
-              />
-            </label>
-          ) : (
-            <div className="mp-h">{tr("ss.model")}</div>
-          )}
-          <div className="mp-list" ref={listRef}>
-            {!options || options.length === 0 ? (
-              <div className="mp-empty">{live ? tr("ss.loadingModels") : tr("ss.agentNotRunning", { agent: label })}</div>
-            ) : !flat.length ? (
-              <div className="mp-empty" data-testid="model-empty">
-                {tr("mp.none")}
-              </div>
-            ) : (
-              groups.map((g) => (
-                <div key={g.provider || "-"} role="group" aria-label={g.provider || label} data-testid="model-group">
-                  {groups.length > 1 && g.provider && <div className="mp-g">{g.provider}</div>}
-                  {g.rows.map((o) => {
-                    const on = rec.modelNext ? o.label === rec.modelNext || o.id === rec.modelNext : o.label === rec.model || o.id === rec.model;
-                    const i = flat.indexOf(o);
-                    return (
-                      <button
-                        key={`${o.provider ?? ""}/${o.id}`}
-                        type="button"
-                        className={`mp-opt${on ? " on" : ""}${many && i === active ? " kb" : ""}`}
-                        aria-pressed={on}
-                        data-active={many && i === active}
-                        disabled={busy || !live}
-                        title={o.detail || undefined}
-                        onClick={() => void choose(o)}
-                        onMouseMove={() => many && i !== active && setActive(i)}
-                        data-testid="model-opt"
-                      >
-                        <ModelIcon model={`${o.id} ${o.label}`} provider={o.provider ?? vendor} size={13} />
-                        <span className="mp-n">{o.label}</span>
-                        <span className="mp-ck">
-                          <CheckIcon />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ))
-            )}
-          </div>
-          {efforts.length > 0 && (
-            <>
-              <div className="mp-h mp-h2">{tr("mp.reasoning")}</div>
-              <Seg
-                label={tr("mp.reasoning")}
-                value={effort}
-                options={levelOptions(efforts)}
-                onChange={(v) => void getSessions().setEffort(rec.id, v)}
-                disabled={!live}
-                small={efforts.length > 5}
-                testId="reasoning-seg"
-              />
-            </>
-          )}
+        ) : undefined
+      }
+      notes={
+        <>
           {rec.modelNext && !note && (
             <div className="mp-note" role="status" data-testid="model-next-note">
               {tr("ss.modelNextTip", { model: rec.model ?? "" })}
@@ -846,10 +704,10 @@ function SessionModel({ rec, options, note }: { rec: SessionRec; options: ModelO
               {note}
             </div>
           )}
-          <div className="mp-f">{tr("ss.applies")}</div>
-        </div>
-      </Popover>
-    </div>
+        </>
+      }
+      foot={tr("ss.applies")}
+    />
   );
 }
 
@@ -1014,7 +872,6 @@ export function SessionView() {
                 {rec.view === "terminal" ? <ChatIcon /> : <TerminalIcon />}
               </button>
             )}
-            {showChat && <SessionModel rec={rec} options={ss.models[rec.id]} note={ss.notes[rec.id]} />}
             {showChat && <PanelToggle working={workingSubagents(c)} />}
           </div>
         )}

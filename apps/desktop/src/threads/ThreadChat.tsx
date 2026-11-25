@@ -10,6 +10,7 @@ import { t } from "../i18n";
 import { threadKey } from "./types";
 import { rowStatus } from "./ThreadTree";
 import { StatusGlyph } from "./StatusGlyph";
+import { AgentBoxTools, pickFolder, teammates, useAgentBox } from "../chat/box/AgentBox";
 
 export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
   const s = useStore();
@@ -18,6 +19,8 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
   const row = (s.threads[bot.name] ?? []).find((r) => r.thread === thread);
   const title = row?.title || t("thread.untitled");
   const away = s.conn !== "open";
+  // a thread that answers through the person's own coding agent has the chat box's own choices, as its main chat does
+  const box = useAgentBox(bot.name, thread);
   // the thread's chat stands in for a bot in the timeline and composer (its key, the bot's own picture and model)
   const as: Bot = { ...bot, name: key, model: chat?.model || bot.model, running: !!chat?.turn };
   return (
@@ -60,6 +63,11 @@ export function ThreadChat({ bot, thread }: { bot: Bot; thread: string }) {
           onStop={() => void s.threadInterrupt(bot.name, thread)}
           // `./thread` here opens a sibling thread under the same bot, as it does in the bot's main chat
           onNewThread={bot.host || bot.status === "offline" ? undefined : (first) => void s.newThreadWith(bot.name, first)}
+          onSendFiles={box ? (text, files) => s.threadSendWithFiles(bot.name, thread, text, files) : undefined}
+          tools={box ? <AgentBoxTools bot={bot.name} thread={thread} box={box} /> : undefined}
+          onFolder={box ? pickFolder : undefined}
+          mentions={box ? teammates(s.bots, bot.name) : undefined}
+          actions={!!box}
         />
       </div>
     </>

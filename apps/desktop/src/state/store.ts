@@ -2079,6 +2079,8 @@ export interface Actions {
   setReplyTo(chip: ReplyChip | null, bot?: string): void;
   /** Attach each file in order (`chat.attach`), then send. Rejects, sending nothing, if any attach fails. */
   sendWithFiles(text: string, files: OutFile[]): Promise<void>;
+  /** A message with files in `bot`'s thread `thread`, as `sendWithFiles` sends one in a main chat. */
+  threadSendWithFiles(bot: string, thread: string, text: string, files: OutFile[]): Promise<void>;
   interrupt(): Promise<void>;
   /** Steer queue, on a held row of `bot`'s main chat (the selected bot's by default). Send now: stop the running
    *  turn (one `chat.interrupt`) and send this one first when it ends. */
@@ -2585,6 +2587,11 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
 
   const loadAgentBox = async (bot: string, thread?: string) => {
     const key = thread ? folderKey(bot, thread) : bot;
+    // the WebSocket bridge is Hermes', whose bots answer through no agent of the person's: it is not asked
+    if ((bridge as Partial<RuntimeAdapter>).kind === "websocket") {
+      if (state.agentBox[key] !== null) dispatch({ type: "agentBox", key, box: null });
+      return;
+    }
     try {
       const { box } = await bridge.request("agent.box", thread ? { bot, session: thread } : { bot });
       dispatch({ type: "agentBox", key, box });
@@ -3404,6 +3411,33 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(text), last: now() / 1000 } });
       try {
         await bridge.request("chat.send", { bot, session: thread, text: text.trim() });
+        dispatch({ type: "send.ok", bot: key, id, now: now() });
+      } catch (e) {
+        dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
+      }
+    },
+    async threadSendWithFiles(bot, thread, text, files) {
+      if (!files.length) return actions.threadSend(bot, thread, text);
+      const key = threadRoute(bot, thread);
+      const id = `local-${++localSeq}`;
+      const t = text.trim();
+      const shown: SentFile[] = files.map(({ name, size, kind, url }) => ({ name, size, kind, url }));
+      // held with its files while the thread's turn runs: they are attached when it goes out (sendHeld)
+      if (holdIfBusy(key, id, { text: t, wire: t, files }, { type: "local.user", bot: key, id, text: t, now: now(), files: shown })) return;
+      const results: AttachResult[] = [];
+      for (const f of files) {
+        try {
+          results.push(await bridge.request("chat.attach", { bot, kind: f.attach, name: f.name, data_base64: await f.read() }));
+        } catch (e) {
+          throw new Error(tr("att.failed", { name: f.name, error: errText(e) }));
+        }
+      }
+      const sent = promptText(text, results);
+      dispatch({ type: "local.user", bot: key, id, text: t, now: now(), files: shown, sent });
+      const row = (state.threads[bot] ?? []).find((r) => r.thread === thread);
+      if (row && !row.title) dispatch({ type: "thread.upsert", bot, row: { ...row, title: firstWords(t || files[0].name), last: now() / 1000 } });
+      try {
+        await bridge.request("chat.send", { bot, session: thread, text: sent });
         dispatch({ type: "send.ok", bot: key, id, now: now() });
       } catch (e) {
         dispatch({ type: "send.failed", bot: key, id, error: errText(e) });
