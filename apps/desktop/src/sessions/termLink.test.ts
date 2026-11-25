@@ -92,6 +92,10 @@ describe("a TERMINALS session's link id", () => {
     expect(ss.byLink("aaaaaaaaaa")).toBeNull();
     expect(termMenuItems(ra)).toEqual(["rename", "reveal", "terminal", "link", "here", "close"]);
     expect(termMenuItems({ cwd: "/w" })).toEqual(["rename", "reveal", "terminal", "here", "close"]);
+    // with its marks (item 76) the row's menu gains Pin and Done for now, and offers the opposite once they are made
+    expect(termMenuItems({ cwd: "/w" }, null)).toEqual(["rename", "pin", "settle", "reveal", "terminal", "here", "close"]);
+    expect(termMenuItems({ cwd: "/w" }, { pinned: 1 })).toEqual(["rename", "unpin", "settle", "reveal", "terminal", "here", "close"]);
+    expect(termMenuItems({ cwd: "/w" }, { settled: true })).toEqual(["rename", "pin", "wake", "reveal", "terminal", "here", "close"]);
   });
 
   it("is kept through the saved list; one saved before links existed (or a bad or clashing one) gets a fresh one", () => {

@@ -32,7 +32,8 @@ function drawn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
   if (Array.isArray(node)) return node.flatMap(drawn);
   if (!isValidElement(node)) return [];
   const el = node as ReactElement<Record<string, unknown>>;
-  if (typeof el.type === "function") return drawn((el.type as (props: unknown) => ReactNode)(el.props));
+  // a lane's menu keeps state of its own (item 76: Pin, Snooze, Done for now, Archive), so it is drawn by its own test and not called here
+  if (typeof el.type === "function") return el.type.name === "LaneMore" ? [] : drawn((el.type as (props: unknown) => ReactNode)(el.props));
   return [...(typeof el.type === "string" ? [el] : []), ...drawn(el.props.children as ReactNode)];
 }
 const byId = (p: KitPanelProps, id: string) => drawn(KitPanelView(p)).filter((e) => e.props["data-testid"] === id);

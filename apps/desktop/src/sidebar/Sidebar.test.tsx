@@ -65,6 +65,20 @@ describe("the side menu", () => {
     expect(words(menu({ recent: [] }))).not.toContain("Recent");
   });
 
+  it("marks a pinned chat and a settled chat, and gives each Recent row its menu button (item 76)", () => {
+    const recent = [
+      { key: "a", title: "Pinned one", open: noop, place: "pinned" as const, rowKey: "thread:buddy:a" },
+      { key: "b", title: "Plain one", open: noop, rowKey: "thread:buddy:b" },
+      { key: "c", title: "Settled one", open: noop, place: "settled" as const, rowKey: "thread:buddy:c" },
+    ];
+    const html = menu({ recent });
+    expect(count(html, 'data-testid="menu-recent-pin"')).toBe(1);
+    expect(count(html, 'data-testid="row-more"')).toBe(3);
+    expect(html).toMatch(/data-place="settled"/);
+    // the menu itself stays shut until it is asked for
+    expect(html).not.toContain('role="menu"');
+  });
+
   it("ends on the account row, which opens Settings and is current while Settings is open", () => {
     const html = menu();
     expect(words(html)).toMatch(/You , Settings/);

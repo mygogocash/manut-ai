@@ -2,7 +2,8 @@
 // session of the project that runs as a chat in the app. A row has the lane's title, who works on it, the branch Kit made for
 // it, and its state as a tag, with a line under it for what the state means: what Kit asks, how many tests passed or which
 // failed, that the turn was reverted. The state comes from lane.ts, which reads it from what the session's events showed.
-// `LanesView` takes everything it shows as props and uses no hooks, so a test can draw it; `useLaneRows` reads the stores.
+// `LanesView` takes the rows and the time as props and reads only the row marks (sidebar/rows.ts, item 76: pinned on top, settled below,
+// snoozed and archived put away behind one line), so a test can draw it; `useLaneRows` reads the stores.
 //
 // The canvas's New lane is the band's quiet link (item 68). It is not a second way to start a lane: it opens the + menu on its
 // Chat with Kit choice, with the folder chip on this project, so which agent and which folder are chosen where they always
@@ -12,7 +13,7 @@
 // to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md), which New lane opens. A lane that
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { elapsed, hhmm } from "../app/time";
 import { t } from "../i18n";
 import { maskSecrets } from "../lib/secrets";
@@ -24,6 +25,8 @@ import { askText, getStore, selectAsks, useStore } from "../state/store";
 import { failedNames, laneLine, laneStatus, laneTag, testState, type LaneRecord, type LaneStatus } from "./lane";
 import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
+import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
+import { arrange, sessionRowKey, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
 /** The branch a lane's row shows, and why: Kit's own for the lane (with the folder of its own it works in), the folder's
  *  branch now that it is not the lane's, or the folder's own for a lane that made none. */
@@ -159,6 +162,11 @@ export interface LanesProps {
   onBack?: (id: string) => void;
   /** What a row shows under its line: Bring it back's panel (the Code page fills it, since the panel reads the stores). */
   below?: (row: LaneRow) => ReactNode;
+  /** What the person did to each row (sidebar/rows.ts), by the session's row key; none: every lane is where it was. */
+  marks?: RowMarks;
+  /** The line that opens the snoozed and archived lanes is open, and the link that opens or closes it. */
+  away?: boolean;
+  onAway?: () => void;
 }
 
 function branchTitle(b: LaneBranchTag): string {
@@ -172,12 +180,17 @@ function branchTitle(b: LaneBranchTag): string {
   }
 }
 
-function LaneItem({ row, now, onOpen, backOpen, onBack, below }: { row: LaneRow; now: number; onOpen: (id: string) => void } & Pick<LanesProps, "onBack" | "below"> & { backOpen: boolean }) {
+function LaneItem({ row, now, onOpen, backOpen, onBack, below, place, mark }: { row: LaneRow; now: number; onOpen: (id: string) => void; place: RowPlace; mark: RowMark | undefined } & Pick<LanesProps, "onBack" | "below"> & { backOpen: boolean }) {
   const tag = laneTag(row.status);
   const line = row.status === "failed" ? row.error : row.line ? t(row.line.key, row.line.vars) : "";
   return (
-    <div className="lane" data-testid={`lane-${row.id}`} data-status={row.status}>
+    <div className={`lane${place === "settled" ? " settled" : ""}`} data-testid={`lane-${row.id}`} data-status={row.status} data-place={place}>
       <button type="button" className="rowl" onClick={() => onOpen(row.id)} title={t("lane.open")}>
+        {place === "pinned" && (
+          <span className="lane-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="lane-pin">
+            ◆
+          </span>
+        )}
         <span className="grow l1">{row.title}</span>
         <span className="mut who">{t("lane.who", { agent: row.agent })}</span>
         {row.branch && (
@@ -226,12 +239,64 @@ function LaneItem({ row, now, onOpen, backOpen, onBack, below }: { row: LaneRow;
         </ul>
       )}
       {below?.(row)}
+      <LaneMore row={row} mark={mark} />
     </div>
   );
 }
 
-export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, below }: LanesProps) {
+/** A lane's menu (Pin, Snooze, Done for now, Archive): the one part of a row that keeps state, so the rest of the view stays a
+ *  function of its props. It draws the quiet "more" button, and a right-click anywhere on the row opens the menu too. */
+export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefined }) {
+  const menu = useRowMenu({ rowKey: sessionRowKey(row.id), kind: "lane", mark, name: row.title });
+  const here = useRef<HTMLSpanElement>(null);
+  const open = menu.open;
+  useEffect(() => {
+    const lane = here.current?.parentElement;
+    if (!lane) return;
+    const on = (e: MouseEvent) => {
+      e.preventDefault();
+      open(e.clientX, e.clientY);
+    };
+    lane.addEventListener("contextmenu", on);
+    return () => lane.removeEventListener("contextmenu", on);
+  }, [open]);
+  return (
+    <span ref={here} className="lane-more-wrap">
+      <MoreButton name={row.title} onOpen={menu.open} className="lane-more" />
+      {menu.menu}
+    </span>
+  );
+}
+
+/** Words for where a put-away lane is: Snoozed until a time, or Archived. */
+function awayWord(mark: RowMark | undefined, now: number): string {
+  if (mark?.archived !== undefined) return t("row.archived");
+  return mark?.snoozed !== undefined ? t("row.snoozed", { when: elapsedUntil(mark.snoozed, now) }) : "";
+}
+
+/** A time ahead as the day's time, with the day when it is not today ("09:00", "Thu 09:00"). */
+function elapsedUntil(at: number, now: number): string {
+  const d = new Date(at);
+  const same = d.toDateString() === new Date(now).toDateString();
+  return same ? hhmm(d) : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hhmm(d)}`;
+}
+
+export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;
+  // pinned on top, in the order pinned, then the rest, then the settled ones, small and quiet. Snoozed and archived lanes are put
+  // away: a line under the list counts them and opens them. A lane that asks something is never put away (rows.ts `placeOf`).
+  const places = arrange(
+    rows.map((r) => ({ key: sessionRowKey(r.id), needs: r.status === "needs_you", r })),
+    marks,
+    now,
+  );
+  const shown: { r: LaneRow; place: RowPlace }[] = [
+    ...places.pinned.map((x) => ({ r: x.r, place: "pinned" as const })),
+    ...places.normal.map((x) => ({ r: x.r, place: "normal" as const })),
+    ...places.settled.map((x) => ({ r: x.r, place: "settled" as const })),
+  ];
+  const hidden = [...places.snoozed, ...places.archived];
+  const item = (r: LaneRow, place: RowPlace) => <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} place={place} mark={marks[sessionRowKey(r.id)]} />;
   return (
     <>
       <div className="band" data-testid="lanes-band">
@@ -244,9 +309,21 @@ export function LanesView({ rows, now, onOpen, onNew, backOpen = null, onBack, b
       </div>
       {rows.length > 0 && (
         <div className="lanes" data-testid="lanes">
-          {rows.map((r) => (
-            <LaneItem key={r.id} row={r} now={now} onOpen={onOpen} backOpen={backOpen === r.id} onBack={onBack} below={below} />
-          ))}
+          {shown.map(({ r, place }) => item(r, place))}
+          {hidden.length > 0 && (
+            <>
+              <button type="button" className="lk lane-away" aria-expanded={away} onClick={onAway} data-testid="lane-away">
+                {t("lane.away", { n: hidden.length })}
+              </button>
+              {away &&
+                hidden.map((x) => (
+                  <div key={x.r.id} className="lane-away-row" data-testid={`lane-away-${x.r.id}`}>
+                    <span className="mut lane-away-word">{awayWord(marks[x.key], now)}</span>
+                    {item(x.r, marks[x.key]?.archived !== undefined ? "archived" : "snoozed")}
+                  </div>
+                ))}
+            </>
+          )}
         </div>
       )}
     </>

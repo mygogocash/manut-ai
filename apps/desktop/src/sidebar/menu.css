@@ -301,3 +301,41 @@
   width: 24px;
   height: 24px;
 }
+
+/* The desktop's own (item 76): a Recent row's quiet "more" button, a pinned row's mark and a settled row's small, quiet type. The
+   button shows on hover, on focus and while its menu is open, so no row carries a button it does not need. */
+.sb .rec-li {
+  position: relative;
+}
+.sb .rec-more {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.sb .rec-li:hover .rec-more,
+.sb .rec-more:focus-visible,
+.sb .rec-li.menu-open .rec-more {
+  opacity: 1;
+}
+.sb .rec-more:hover {
+  background: var(--hov);
+  color: var(--ink);
+}
+.sb .rec-pin {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--aui-muted);
+  vertical-align: -1px;
+}
+.sb .rec-li.settled .rec {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font-size: 12px;
+  opacity: 0.7;
+}

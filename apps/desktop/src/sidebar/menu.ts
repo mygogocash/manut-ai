@@ -8,6 +8,7 @@
 import type { Bot } from "../lib/protocol";
 import type { MenuPage, Ui } from "../state/store";
 import type { ThreadRow } from "../threads/types";
+import { arrange, threadRowKey, type RowMarks } from "./rows";
 
 /** A row of the menu. New is the row whose page is Home, so Home itself is not a row's name. */
 export type MenuRow = "new" | Exclude<MenuPage, "home">;
@@ -92,4 +93,28 @@ export function recentThreads(threads: Readonly<Record<string, readonly ThreadRo
   return threadsNewestFirst(threads, members)
     .slice(0, n)
     .map(({ bot, row, ts }) => ({ bot, thread: row.thread, title: row.title, ts }));
+}
+
+/** What Recent lists, in its three parts (item 76): the pinned chats on top, in the order they were pinned, then the `n` newest
+ *  that are not snoozed, settled or archived, then the settled ones, which sit below, small and quiet. A snoozed chat is left out
+ *  until its time, and every archived one for good (History's Archive lists it). A chat that needs the person is in the middle part
+ *  whatever else it is marked (`needs`, rows.ts `placeOf`). */
+export interface RecentParts {
+  pinned: RecentThread[];
+  recent: RecentThread[];
+  settled: RecentThread[];
+}
+
+export function recentParts(
+  threads: Readonly<Record<string, readonly ThreadRow[]>>,
+  members: readonly string[],
+  marks: RowMarks,
+  needs: (bot: string, row: ThreadRow) => boolean,
+  now: number,
+  n = 3,
+): RecentParts {
+  const all = threadsNewestFirst(threads, members).map((e) => ({ key: threadRowKey(e.bot, e.row.thread), needs: needs(e.bot, e.row), e }));
+  const places = arrange(all, marks, now);
+  const of = (x: (typeof all)[number]): RecentThread => ({ bot: x.e.bot, thread: x.e.row.thread, title: x.e.row.title, ts: x.e.ts });
+  return { pinned: places.pinned.map(of), recent: places.normal.slice(0, n).map(of), settled: places.settled.slice(0, n).map(of) };
 }
