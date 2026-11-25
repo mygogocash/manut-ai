@@ -211,6 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   - item 77a, a command palette on the box Command-K opens (`feat/command-palette`, Sonnet, worktree
+     `cc-item77a-palette`), started 25 Nov at 23:05, planned by the lead.
    - item 75, source control: git and the CLIs' status, the default branch pulled when clean, a pull request made and
      merged from a lane, each asked first (`feat/source-control`, Opus, worktree `cc-item75-source`), started 25 Nov at
      23:10.
