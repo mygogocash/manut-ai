@@ -190,9 +190,9 @@ test("Automations and Plugins are pages now, not Soon", async ({ page }) => {
 test("the bot's face sits beside its bubbles, once per run of bot messages", async ({ page }) => {
   await page.goto("/");
   const bot = page.getByTestId("bubble-bot").first();
-  await expect(bot.locator("img.msg-face")).toBeVisible();
+  await expect(bot.locator(".ui-av.msg-face")).toBeVisible();
   // a reply right after another bot bubble keeps the indent but hides the face
-  const faces = page.locator('[data-testid="bubble-bot"] img.msg-face:not(.blank)');
+  const faces = page.locator('[data-testid="bubble-bot"] .ui-av.msg-face:not(.blank)');
   expect(await faces.count()).toBeGreaterThan(0);
   // the thread is wider than before (920px cap) so a 1440px window is not a narrow centred column
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -208,7 +208,7 @@ test("the activity line and the approval card start at the bot bubbles' text col
   await expect(page.getByTestId("card-approval")).toBeVisible();
   const left = (sel: string) => page.locator(sel).last().evaluate((e) => Math.round(e.getBoundingClientRect().left));
   const text = await left('[data-testid="bubble-bot"] .b');
-  const face = await left('[data-testid="bubble-bot"] img.msg-face');
+  const face = await left('[data-testid="bubble-bot"] .ui-av.msg-face');
   expect(text - face).toBe(38); // face 28px + gap 10px
   expect(await left('[data-testid="card-approval"]')).toBe(text);
   expect(await left('[data-testid="activity"]')).toBe(text);

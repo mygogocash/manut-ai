@@ -55,11 +55,12 @@ async function watchFaces(page: Page) {
       const base = rows[lastUser]?.getBoundingClientRect().bottom ?? 0;
       const faces: Face[] = [];
       for (const r of rows.slice(lastUser + 1))
-        for (const f of r.querySelectorAll<HTMLElement>("img.msg-face, [data-testid=session-face]")) {
+        for (const f of r.querySelectorAll<HTMLElement>(".ui-av.msg-face, [data-testid=session-face]")) {
           if (f.closest(".blank")) continue;
           const b = f.getBoundingClientRect();
-          const img = f instanceof HTMLImageElement ? f : null;
-          const ok = b.width > 0 && b.height > 0 && getComputedStyle(f).visibility !== "hidden" && (!img || (img.complete && img.naturalWidth > 0));
+          // a member's face is drawn once its SVG is there (src/ui/Avatar.tsx); a session's mark is drawn as it is
+          const drawn = !f.classList.contains("ui-av") || !!f.querySelector("svg");
+          const ok = b.width > 0 && b.height > 0 && getComputedStyle(f).visibility !== "hidden" && drawn;
           faces.push({ left: b.left, top: b.top - base, ok, ring: !!f.closest(".ui-ring-w")?.querySelector(":scope > .ui-ring") });
         }
       const phase = tl.querySelector("[data-kind=streaming]")
@@ -118,7 +119,7 @@ test("a bot's face stays put from send to answer: typing, a recalled-memories st
   await expect(page.getByTestId("bubble-user").first()).toBeVisible();
   const tl = page.getByTestId("timeline");
   // the column every finished answer's face sits in
-  const column = (await tl.getByTestId("bubble-bot").first().locator("img.msg-face").boundingBox())!.x;
+  const column = (await tl.getByTestId("bubble-bot").first().locator(".ui-av.msg-face").boundingBox())!.x;
   await watchFaces(page);
 
   await page.getByTestId("composer").fill("why do the 502s come back?");
@@ -158,9 +159,9 @@ test("a bot's face stays put from send to answer: typing, a recalled-memories st
   await expect(act.getByTestId("activity-text")).toHaveText(/^Worked for \d+s · 1 step$/);
   const answer = tl.getByTestId("bubble-bot").last();
   await expect(answer).toContainText("idle timeout");
-  await expect(answer.locator("img.msg-face:not(.blank)")).toBeVisible();
+  await expect(answer.locator(".ui-av.msg-face:not(.blank)")).toBeVisible();
   await expect(tl.locator("[data-testid=face-ring], [data-testid=typing-ring]")).toHaveCount(0);
-  await expect(act.locator("img.msg-face")).toHaveCount(0);
+  await expect(act.locator(".ui-av.msg-face")).toHaveCount(0);
   const log = await faceLog(page);
   const end = log[log.length - 1];
   expect(end.phase).toBe("other");
