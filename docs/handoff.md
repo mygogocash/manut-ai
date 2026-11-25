@@ -213,9 +213,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 67, Buddy answering for real through the person's own coding agent (`feat/buddy-real-answers`, Opus, worktree
      `cc-item67-buddy-real`), started 25 Nov at 17:25.
-   - item 70, a schedule's time zone shown when it is not this computer's (`feat/schedule-time-zone`, Sonnet, worktree
-     `cc-item70-schedule-zone`), started 25 Nov at 17:25.
-   Next, as each finishes: items 68, 69 and 71.
+   - item 68, a New lane link in the Lanes band and a signed-out agent marked in the + menu (`feat/new-lane-link`,
+     Sonnet, worktree `cc-item68-new-lane`), started 25 Nov at 17:45.
+   Next, as each finishes: items 69 and 71, then the developer features the owner asked for (below).
    The owner also asked for the worktrees and branches to be cleaned up (25 Nov): 85 merged, clean worktrees and their
    local branches were removed, and 84 merged remote branches (`feat/`, `fix/`, `test/`, `ci/`). Kept: the night build's
    `cloud/*` branches, which it reads to know which tasks are done; `feat/owner-line-cards`, which is not merged; and
@@ -234,7 +234,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 66 (Kit as a chat from the + menu, beside the terminal: under the folder chip the menu has Chat with Kit,
+   Merged: 70 (a schedule's time zone named beside a routine's time and next run whenever it is not this computer's,
+   judged by the clock through a year and not by the zone's name; `apps/desktop/src/lib/zone.ts`), 66 (Kit as a chat from the + menu, beside the terminal: under the folder chip the menu has Chat with Kit,
    each installed agent that runs as the app's chat, then In a terminal as before; a pick opens the agent's New session
    chat, whose first message starts a lane the Lanes band lists; the first focus stays on a terminal row, so Command-N
    then Enter still starts a terminal; checked by unit tests and in a browser against the stand-in agent, and a real
