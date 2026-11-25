@@ -263,6 +263,44 @@ pub fn request(url: &str, method: &str, bearer: Option<&str>, body: Option<&str>
     run_curl(&curl_program(), &config)
 }
 
+/// The largest answer `fetch_link` reads: a bundle of skills is at most 128 KiB as stored (apps/api/src/artifact-store.ts), and
+/// served as JSON with its title, so four times that leaves room for escaping and refuses anything that is not one.
+const MAX_LINK_ANSWER: usize = 512 * 1024;
+
+/// A skill link's JSON address (skill_links.rs): `https://host[:port]/a/<shop>.<secret>.json`, or plain http to this computer,
+/// with nothing else in the path, no query and no fragment. The host is checked against the artifact origin before this.
+pub fn checked_link_url(url: &str) -> Result<(), &'static str> {
+    if url.len() > MAX_URL {
+        return Err("address too long");
+    }
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).ok_or("not http or https")?;
+    let slash = rest.find('/').ok_or("no path")?;
+    let (authority, path) = rest.split_at(slash);
+    // The same host rules as an API address: reuse them on a stand-in path.
+    let scheme = if url.starts_with("https://") { "https" } else { "http" };
+    checked_url(&format!("{scheme}://{authority}/v1/x"))?;
+    let key = path.strip_prefix("/a/").and_then(|k| k.strip_suffix(".json")).ok_or("not a link")?;
+    let (shop, secret) = key.split_once('.').ok_or("not a link")?;
+    let b64 = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !b64(shop, 43) || !b64(secret, 32) {
+        return Err("not a link");
+    }
+    Ok(())
+}
+
+/// One GET of a skill link's JSON from the artifact host: no token, no cookie, no body, redirects never followed, at most
+/// `MAX_LINK_ANSWER` read. Refused before anything runs unless `checked_link_url` takes the address.
+pub fn fetch_link(url: &str) -> Result<ApiAnswer, LinkError> {
+    checked_link_url(url).map_err(LinkError::Failed)?;
+    let config = curl_config(url, "GET", None, None);
+    let mut out = Vec::new();
+    match curl_into(&curl_program(), &config, &mut out, MAX_LINK_ANSWER)? {
+        Some(0) => parse_answer(out),
+        Some(code) if offline_exit(code) => Err(LinkError::Offline),
+        _ => Err(LinkError::Failed("curl")),
+    }
+}
+
 /// The largest answer `request_sealed` reads. A redeem's answer is a few hundred bytes: a username and a password of
 /// at most 1,024 characters, and five origins. An outpost's steps are read this way too (outpost/api.rs), and one ask
 /// hands out at most five, each write at most 12 KB as JSON, some 62 KB in all: twice that leaves room.
