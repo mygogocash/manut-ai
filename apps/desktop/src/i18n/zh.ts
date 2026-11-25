@@ -3379,6 +3379,8 @@ export const zh: Record<Key, string> = {
   "computer.ask.app": "应用：{app}",
   "computer.ask.window": "界面：{window}",
   "computer.ask.control": "控件：{control}",
+  "computer.ask.named": "控件的名字是 {app} 自己起的（网页可以随意给自己的控件起名），请确认它就是你要的那个。",
+  "computer.ask.picture": "{app} 中这个控件现在的样子",
   "computer.ask.keys": "按键：{keys}",
   "computer.ask.menuPath": "菜单：{menu}",
   "computer.ask.text": "文字：{text}",

@@ -3379,6 +3379,8 @@ export const ja: Record<Key, string> = {
   "computer.ask.app": "アプリ: {app}",
   "computer.ask.window": "画面: {window}",
   "computer.ask.control": "操作部品: {control}",
+  "computer.ask.named": "操作部品の名前は {app} が付けたものです（ウェブページは自分の部品に好きな名前を付けられます）。目的の部品か確かめてください。",
+  "computer.ask.picture": "{app} の操作部品の今の見た目",
   "computer.ask.keys": "キー: {keys}",
   "computer.ask.menuPath": "メニュー: {menu}",
   "computer.ask.text": "文字: {text}",

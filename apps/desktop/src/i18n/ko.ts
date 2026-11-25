@@ -3379,6 +3379,8 @@ export const ko: Record<Key, string> = {
   "computer.ask.app": "앱: {app}",
   "computer.ask.window": "창: {window}",
   "computer.ask.control": "조작 요소: {control}",
+  "computer.ask.named": "조작 요소의 이름은 {app}이(가) 붙인 것입니다(웹 페이지는 자기 요소에 원하는 이름을 붙일 수 있습니다). 원하는 요소가 맞는지 확인하세요.",
+  "computer.ask.picture": "{app}에서 조작 요소가 지금 보이는 모습",
   "computer.ask.keys": "키: {keys}",
   "computer.ask.menuPath": "메뉴: {menu}",
   "computer.ask.text": "글자: {text}",

@@ -22,7 +22,9 @@ and `apps/desktop/src/chat/cards/computerCard.ts`.
   app, the agent lists the apps, and its first look at an app is a card ("Let your agent look at TextEdit in this
   chat?"). After Allow once it reads that app's windows freely in this chat. Each click, typing, key press or menu choice
   is a card in the person's language that names the app, the window, the control and the exact text, keys or menu
-  item, with No and Allow once only.
+  item, with No and Allow once only. A click or typing card also says that the control's name is the one the app gives
+  it (a web page names its own controls) and, with Screen capture on, shows a small picture of the control as it is at
+  the ask.
 
 ## What the platform gives
 
@@ -124,6 +126,24 @@ Writes:
 - The action touches the very control the card named, checked again: changed, gone, the app quit, or another window in
   front, and nothing is done (`an_action_touches_only_the_control_the_card_named`,
   `a_key_is_pressed_in_the_window_the_card_named_and_never_a_blocked_shortcut`).
+- A card's words are the app's own, made safe to read (security review, 25 Nov 2026). Before, a control's name on the
+  card was its accessibility label, which a web page in an allowed browser sets itself, and the check just before acting
+  compared only the role and that label, which the page can keep while it changes what the control does; and Unicode's
+  invisible format characters were kept, so a right-to-left override could make a card read otherwise than what was
+  typed or pressed. Now:
+  - Every name, title and value shown or compared is stripped of Unicode's format characters (general category Cf, the
+    bidi isolates among them; Unicode 18.0's list in `room.rs` `FORMAT`), and text to type or a menu path that holds
+    any is refused, so the person reads exactly what is typed (`invisible_format_characters_are_never_shown_and_never_typed`;
+    the page strips them again, `computer.test.ts`). An emoji joined with a zero-width joiner, and Persian text with a
+    zero-width non-joiner, are refused too; Thai types as written.
+  - The card says, in the person's language, that the control's name is the one the app gives it.
+  - The control is read again at the moment of the ask, and the yes is bound to its window's number, its place in that
+    window's tree and its position and size on screen (`Place`): a control that moved, changed place or window since
+    the ask is refused and the agent asks again (`a_yes_is_bound_to_where_the_control_was_at_the_ask`). A page that keeps
+    all of these and changes only what a click does is not seen; that is why the card says whose name it is.
+  - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
+    control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
+    has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
 - Nothing while the screen is locked, and a yes waiting then is spent (`nothing_runs_while_the_screen_is_locked`).
 - Never the Apple menu (`a_menu_item_is_chosen_by_its_path_and_never_from_the_apple_menu`), never a blocked shortcut
   (`keys.rs`).
@@ -151,8 +171,11 @@ On the Mac app built from this branch:
    socket's caller check with a real Claude Code: if every call says it did not come from the chat's server, the
    chat's server is not under the process Manut AI started, and that is a bug to report.) Then, from Terminal, run
    `ls ~/.manut/computer`: there is no `chats` folder.
-5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello". Press No:
-   nothing is typed, and the agent does not ask again by itself. Ask again and Allow once: Hello appears once.
+5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello", and says the
+   control's name is the one TextEdit gives it. Press No: nothing is typed, and the agent does not ask again by itself.
+   Ask again and Allow once: Hello appears once. Ask it to click a button in a small dialog: with Screen capture on, the
+   card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
+   refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.
 7. Ask it to look at System Settings, Keychain Access, or Manut AI itself: refused, no card.
 8. With a login form open in Safari, ask it to read the password field: the tree says the field's content is never read.

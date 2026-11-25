@@ -739,6 +739,8 @@ export type ComputerAsk = {
   text?: string;
   keys?: string;
   menu?: string[];
+  /** A small picture of the control at the moment of the ask, a PNG in base64, when Screen capture is on. */
+  picture?: string;
 };
 
 export type BridgeEvent =

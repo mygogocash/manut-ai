@@ -3410,6 +3410,8 @@ export const en = {
   "computer.ask.app": "App: {app}",
   "computer.ask.window": "Window: {window}",
   "computer.ask.control": "Control: {control}",
+  "computer.ask.named": "The control's name is the one {app} gives it (a web page names its own controls), so check it is the one you mean.",
+  "computer.ask.picture": "How the control looks in {app} now",
   "computer.ask.keys": "Keys: {keys}",
   "computer.ask.menuPath": "Menu: {menu}",
   "computer.ask.text": "Text: {text}",

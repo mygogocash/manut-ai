@@ -28,7 +28,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
 
 use super::keys::Chord;
-use super::room::{App, Desk, Handle, Node, MAX_DEPTH, MAX_NODES, SECURE};
+use super::room::{clean, App, Desk, Handle, Node, Place, MAX_DEPTH, MAX_NODES, SECURE};
 
 type AXUIElementRef = *const c_void;
 /// `AXError`: 0 is success (`AXError.h`).
@@ -66,7 +66,12 @@ extern "C" {
     fn AXUIElementSetAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: CFTypeRef) -> AXError;
     fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> AXError;
+    fn AXValueGetValue(value: CFTypeRef, the_type: u32, value_ptr: *mut c_void) -> u8;
 }
+
+/// `kAXValueTypeCGPoint` and `kAXValueTypeCGSize` (`AXValue.h`).
+const AX_POINT: u32 = 1;
+const AX_SIZE: u32 = 2;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -154,6 +159,22 @@ impl Ax {
         Some(Ax(v))
     }
 
+    /// An `AXValue` attribute (`AXPosition`, `AXSize`) as the structure it wraps.
+    fn value<T: Copy>(&self, name: &str, kind: u32, empty: T) -> Option<T> {
+        let v = self.attr(name)?;
+        let mut out = empty;
+        let ok = unsafe { AXValueGetValue(v.as_CFTypeRef(), kind, &mut out as *mut T as *mut c_void) };
+        (ok != 0).then_some(out)
+    }
+
+    /// Its position and size on screen in whole points: `AXPosition` is global, from the top-left of the screen with the
+    /// menu bar, as the window list's bounds are.
+    fn frame(&self) -> Option<[i64; 4]> {
+        let p = self.value("AXPosition", AX_POINT, CGPoint { x: 0.0, y: 0.0 })?;
+        let s = self.value("AXSize", AX_SIZE, CGSize { width: 0.0, height: 0.0 })?;
+        Some([p.x.round() as i64, p.y.round() as i64, s.width.round() as i64, s.height.round() as i64])
+    }
+
     /// What the element holds, as text, when it is text, a number or a check box's state. Never called for a
     /// password field.
     fn value_text(&self) -> Option<String> {
@@ -196,6 +217,13 @@ fn ax_error(err: AXError, what: &str) -> String {
 /// The element a handle holds, when it is one of this desk's.
 fn ax(handle: &Handle) -> Option<&Ax> {
     handle.downcast_ref::<Ax>()
+}
+
+/// The window number of a window element.
+fn window_number(win: &Ax) -> Option<u32> {
+    let get = get_window()?;
+    let mut id: u32 = 0;
+    (unsafe { get(win.ptr(), &mut id) } == 0 && id != 0).then_some(id)
 }
 
 /// The bundle identifier of the app process `pid` runs, read from its `Info.plist`, or empty.
@@ -375,11 +403,8 @@ impl Desk for Mac {
 
     fn picture(&self, pid: i32, window: usize) -> Result<Vec<u8>, String> {
         let win = Mac::window(pid, window)?;
-        let get = get_window().ok_or("this macOS does not say which window it is")?;
-        let mut id: u32 = 0;
-        if unsafe { get(win.ptr(), &mut id) } != 0 || id == 0 {
-            return Err("this window has no picture (it may be minimized)".into());
-        }
+        get_window().ok_or("this macOS does not say which window it is")?;
+        let id = window_number(&win).ok_or("this window has no picture (it may be minimized)")?;
         let image = unsafe { CGWindowListCreateImage(CGRectNull, LIST_ONE, id, IMAGE_OPTIONS) };
         if image.is_null() {
             return Err("macOS gave no picture of this window".into());
@@ -396,6 +421,38 @@ impl Desk for Mac {
     fn again(&self, handle: &Handle) -> Option<Node> {
         let el = ax(handle)?;
         Ax(el.0.clone()).node(0)
+    }
+
+    fn place(&self, handle: &Handle) -> Option<Place> {
+        let el = Ax(ax(handle)?.0.clone());
+        let role = el.string("AXRole")?;
+        let win = if role == "AXWindow" { Ax(el.0.clone()) } else { el.element("AXWindow")? };
+        // the control's index among its parent's children at each level, up to the window
+        let mut path = Vec::new();
+        let mut here = el;
+        for _ in 0..=MAX_DEPTH + 1 {
+            if here.0 == win.0 {
+                path.reverse();
+                return Some(Place { window: window_number(&win), path, frame: Ax(ax(handle)?.0.clone()).frame() });
+            }
+            let parent = here.element("AXParent")?;
+            path.push(parent.elements("AXChildren").iter().position(|c| c.0 == here.0)?);
+            here = parent;
+        }
+        None
+    }
+
+    fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
+        let id = place.window.ok_or("the window has no number")?;
+        let [x, y, w, h] = place.frame.ok_or("the control has no frame")?;
+        let rect = CGRect { origin: CGPoint { x: x as f64, y: y as f64 }, size: CGSize { width: w as f64, height: h as f64 } };
+        let image = unsafe { CGWindowListCreateImage(rect, LIST_ONE, id, IMAGE_OPTIONS) };
+        if image.is_null() {
+            return Err("macOS gave no picture of the control".into());
+        }
+        let out = png(image);
+        unsafe { CFRelease(image) };
+        out
     }
 
     fn focused_window(&self, pid: i32) -> Option<String> {
@@ -437,7 +494,8 @@ impl Desk for Mac {
             let item = here
                 .elements("AXChildren")
                 .into_iter()
-                .find(|c| c.string("AXTitle").is_some_and(|t| t.trim() == title.trim()))
+                // a menu's title as the card showed it: without invisible format characters
+                .find(|c| c.string("AXTitle").is_some_and(|t| clean(&t).trim() == title.trim()))
                 .ok_or_else(|| format!("There is no menu item “{title}” there, so nothing was chosen."))?;
             if i + 1 == path.len() {
                 if item.boolean("AXEnabled") == Some(false) {
