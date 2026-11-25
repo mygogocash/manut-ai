@@ -244,8 +244,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
      `cc-item92-computer-use-cards`);
    - item 78b, the Mac's side of reaching it from a phone and Settings, Sharing and access, built switched off
      (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`);
-   - item 85f, the chat's type (`feat/chat-type`, Opus, `cc-item85f-chat-type`), and 85i, the last sweep of the audit
-     (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`).
+   - item 85i, the last sweep of the audit (`feat/quiet-sweep`, Opus, `cc-item85i-quiet-sweep`). Item 85f, the chat's
+     type, merged at 03:45 with the serif bundled.
    Next: 78c and 78f part 2 (they need the owner's relay, a tailnet and phones to try), a third read of the security
    fixes once they merge, and a redeploy of dev for the API routes of items 83 and 84 (both behind flags that are
    off). The briefs the helpers were given are not kept in the repository; each item's row in `docs/plan.md` says what
