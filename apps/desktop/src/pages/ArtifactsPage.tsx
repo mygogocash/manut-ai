@@ -14,7 +14,7 @@ import { runtimeKind, startedRuntime } from "../runtime";
 import { answerArtifactAsk, askToRemove, askToShare, withdrawArtifactAsk } from "../runtime/artifactAsks";
 import type { ArtifactLink, RemovePlan, SharePlan } from "../runtime/artifacts";
 import { useSignIn } from "../runtime/link";
-import { getStore } from "../state/store";
+import { getStore, useStore } from "../state/store";
 import { MenuIcon } from "../sidebar/menuIcons";
 import { blockedReason, kindText, madeText, planFromFile, sizeText, type ArtifactsState } from "./artifacts";
 import { Empty, MenuPageFrame } from "./MenuPage";
@@ -183,6 +183,8 @@ export function gate(publish: boolean, practice: boolean, signIn: { kind: string
 
 export function ArtifactsPage() {
   const settings = useArtifactSettings();
+  // The shop the switcher shows: its links are the ones listed, read again when it changes.
+  const viewing = useStore().shops.current;
   const setting = startedRuntime();
   const kind = runtimeKind(setting);
   const origin = kind === "http" && setting.mode === "connected" ? setting.origin : null;
@@ -217,13 +219,22 @@ export function ArtifactsPage() {
 
   const blocked = before?.kind ?? null;
   useEffect(() => {
+    // Another shop, or the switch or sign-in gone: an ask about what was shown before is taken back, so it can settle nothing.
+    const open = askRef.current;
+    if (open) {
+      void withdrawArtifactAsk(open.id);
+      setAsk(null);
+      setBusy(false);
+    }
+    setError(null);
+    setNotice(null);
     if (blocked !== null) {
       setLinks([]);
       return;
     }
     setState({ kind: "reading" });
     void load();
-  }, [blocked, load]);
+  }, [blocked, viewing, load]);
 
   // An ask left open when the page goes away is taken back, so no later answer settles it.
   useEffect(() => () => {
