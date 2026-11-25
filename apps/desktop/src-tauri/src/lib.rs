@@ -1079,10 +1079,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        // In-app updates are off: Oh My Hermes' update endpoint and signing key are not ours, and the updater plugin
-        // will not start without a key. Register `tauri_plugin_updater` here again once Manut AI has its own key and
-        // endpoint in tauri.conf.json (and flip `UPDATER_ENABLED` in src/sidebar/updater.ts). The process plugin
-        // stays for the restart that follows an update.
+        // In-app updates: the page checks the one endpoint in tauri.conf.json, which moves only when the owner publishes
+        // a release, and installs only a build signed with the key whose public half is pinned there (docs/releasing.md).
+        // The process plugin does the restart that follows an update.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // The app's window keeps to the app's own pages and this computer's addresses, frames included (preview.rs)
         .plugin(app_window_guard())

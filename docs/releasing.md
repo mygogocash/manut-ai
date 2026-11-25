@@ -1,0 +1,111 @@
+# Releasing the desktop app
+
+How the Mac app is built, signed, put into a draft release and updated in place. The workflow is
+`.github/workflows/release-desktop.yml`; its rules are pinned by `.github/scripts/release-desktop.test.mjs`. The first
+release is Mac only (`docs/decisions.md`, 25 Nov 2026).
+
+## Cutting a release
+
+1. Set the version in `apps/desktop/src-tauri/tauri.conf.json` (and `Cargo.toml` and `package.json`, which should match) and merge it.
+2. Start the build, either way. Both cost macOS minutes, so do it once the version is final.
+   - Push a tag that is exactly `desktop-v` and the version, for example `desktop-v0.1.0`. The run refuses a tag that
+     does not equal `tauri.conf.json`'s version.
+   - Or, on GitHub, Actions, "Release desktop", Run workflow, on the branch to build.
+3. The run builds Apple silicon and then Intel, one after the other, and makes one draft release `desktop-v<version>`
+   holding a `.dmg` for each, the updater bundles, their `.sig` files and `latest.json`. Open the run's summary: it says
+   "signed and notarized" or "UNSIGNED build" for each chip. The second build adds its files to the draft the first
+   one made, and its chip to that draft's `latest.json`; that is why they do not run side by side.
+4. Download a `.dmg` from the draft and check it (below).
+5. Publish the draft (Edit, Publish release). Nothing else publishes. From that moment `latest.json` is what installed
+   apps are told, so Publish is the switch that sends an update to everyone.
+
+Never publish a draft titled UNSIGNED: macOS warns on it and it is not notarized.
+
+## Where Windows is
+
+The same run builds the Windows installer and keeps it as the run's `windows-installer` artifact for 14 days. It is not
+attached to the release, as the owner chose (25 Nov), and it is unsigned (a trusted one needs a paid certificate).
+
+## The secrets
+
+All are GitHub Actions secrets of `mygogocash/manut-ai` (Settings, Secrets and variables, Actions). Never put a value in
+source, a chat or a log. The workflow prints names only.
+
+| Secret | What it is | Where it comes from | Status |
+| --- | --- | --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Manut AI's updater signing key (minisign key id `C74B6B3F298928A7`) | Made 25 Nov; one copy is in `~/manut-ai-updater-key` on the Mac it was made on, for the owner's password manager | Added |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password | Same folder | Added |
+| `APPLE_CERTIFICATE` | The Developer ID Application certificate with its private key, as a `.p12` file turned into one line of base64 | See "Needs the owner", step 1 | Not added |
+| `APPLE_CERTIFICATE_PASSWORD` | The password chosen when exporting that `.p12` | Same step | Not added |
+| `APPLE_ID` | The email of an Apple ID that belongs to the business's developer team | The person who will notarize | Not added |
+| `APPLE_PASSWORD` | An app-specific password for that Apple ID (not its real password) | See step 3 | Not added |
+| `APPLE_TEAM_ID` | The team's ten-character ID | See step 2 | Not added |
+
+The five `APPLE_` names are the ones Tauri's macOS signing guide uses (https://v2.tauri.app/distribute/sign/macos/). With
+any of the five missing the build still runs, unsigned, and the summary names which are missing.
+
+The updater key and Apple's are different things: the updater key lets the app trust an update file; Apple's certificate
+lets macOS open the app without a warning.
+
+## Needs the owner
+
+The steps below are Apple's own and could not be checked from here; where Apple's screens differ, Apple's is right.
+The Apple Developer account is the business's, an organization, so the Account Holder does step 1.
+
+1. **Certificate.** In developer.apple.com, Certificates, IDs and Profiles, make a Developer ID Application certificate
+   (an organization's Account Holder can; others usually cannot). It asks for a certificate signing request: in Keychain
+   Access, Certificate Assistant, Request a Certificate from a Certificate Authority, saved to disk. Download the `.cer`,
+   double-click it, then in Keychain Access, My Certificates, right-click the certificate (with its key), Export as a
+   `.p12` and set a password (that is `APPLE_CERTIFICATE_PASSWORD`). Then in Terminal:
+   `openssl base64 -A -in certificate.p12 -out certificate-base64.txt`, and paste the file's contents as
+   `APPLE_CERTIFICATE`. Delete both files afterwards.
+2. **Team ID.** developer.apple.com, Account, Membership details, Team ID: `APPLE_TEAM_ID`.
+3. **Notarization login.** At appleid.apple.com, Sign-In and Security, App-Specific Passwords, make one for the Apple ID
+   that is a member of the team (it needs two-factor authentication on): that is `APPLE_PASSWORD`, and the ID's email is
+   `APPLE_ID`. The team's agreements on developer.apple.com must be accepted or Apple refuses the submission.
+4. Add the five secrets, then run the workflow once on a branch with `workflow_dispatch` and read the summary.
+
+An App Store Connect API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`) is Tauri's other way to
+notarize; this workflow does not use it.
+
+## Checking a build is signed and notarized
+
+The run checks the app itself when the secrets are present (`codesign --verify`, the Developer ID authority, the stapled
+ticket, Gatekeeper's assessment) and fails if any does not hold. By hand, on the downloaded `.dmg`, after dragging the
+app out of it:
+
+```sh
+codesign --verify --deep --strict --verbose=2 "/Applications/Manut AI.app"
+codesign -dv --verbose=2 "/Applications/Manut AI.app" 2>&1 | grep Authority
+xcrun stapler validate "/Applications/Manut AI.app"
+spctl --assess --type execute --verbose=2 "/Applications/Manut AI.app"
+```
+
+Authority should name "Developer ID Application" and the business's team, and `spctl` should say "accepted" with
+"source=Notarized Developer ID". On a Mac that has not seen the file before, the `.dmg` opening with no warning is the
+real test.
+
+## How the updater decides
+
+- `apps/desktop/src-tauri/tauri.conf.json` pins the public key (id `C74B6B3F298928A7`) and one endpoint:
+  `https://github.com/mygogocash/manut-ai/releases/latest/download/latest.json`.
+- GitHub serves that address from the newest release that is published and not a prerelease. A draft is skipped, so the
+  run's `latest.json` does nothing until the owner publishes. That needs the repository to be public, which it is.
+- `latest.json` carries the version and, per chip, the update bundle's address and signature. The app compares the
+  version with its own (semver), downloads the bundle for its chip and installs it only if the signature verifies against
+  the pinned key. A bundle signed with any other key is refused.
+- The app asks when it opens, every 6 hours, and when its window comes back after half an hour (`src/sidebar/updater.ts`).
+- Any other release in this repository must be marked a prerelease, or it becomes `latest` and the updater finds no
+  `latest.json` (the check fails quietly and retries).
+- The key cannot be changed after a release ships: installed apps trust only this key (`docs/decisions.md`, 25 Nov).
+
+A local `pnpm tauri build` now makes the updater's files too and so needs `TAURI_SIGNING_PRIVATE_KEY`; for a local build
+without it add `--config '{"bundle":{"createUpdaterArtifacts":false}}'`.
+
+## Not verified yet
+
+The workflow has never run: it is checked by `actionlint`, by its test, and against the documentation of Tauri's
+GitHub guide, macOS signing guide, updater guide and `tauri-apps/tauri-action` (pinned at action-v1.0.0). The first run
+should confirm that the draft holds both `.dmg` files and a `latest.json` that names both chips (`darwin-aarch64` and
+`darwin-x86_64`), and that the signed path passes its own check. How the action finds the draft and adds to
+`latest.json` was read in its own source at the pinned commit (`src/create-release.ts`, `src/upload-version-json.ts`).

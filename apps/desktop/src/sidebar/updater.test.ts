@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { percent, retryDelay, shortError, tauriHost, UPDATER_ENABLED, updateHost, watchForUpdates, type PendingUpdate } from "./updater";
 
 describe("updater helpers", () => {
@@ -15,6 +17,28 @@ describe("updater helpers", () => {
     expect(shortError("offline")).toBe("offline");
     expect(shortError({})).toBe("Update failed");
     expect(shortError("x".repeat(200))).toHaveLength(80);
+  });
+});
+
+/** The shell's own files, read as they are, so the pinned key and the endpoint cannot drift unseen. */
+const shellFile = (name: string) => JSON.parse(readFileSync(fileURLToPath(new URL(`../../src-tauri/${name}`, import.meta.url)), "utf8"));
+
+describe("the shell's updater config", () => {
+  const conf = shellFile("tauri.conf.json");
+
+  it("pins Manut AI's own public key, minisign key id C74B6B3F298928A7", () => {
+    const pub = Buffer.from(conf.plugins.updater.pubkey, "base64").toString("utf8");
+    expect(pub).toContain("minisign public key: C74B6B3F298928A7");
+  });
+
+  it("asks one https endpoint on this repository's releases that skips drafts, so it moves only when the owner publishes", () => {
+    expect(conf.plugins.updater.endpoints).toEqual(["https://github.com/mygogocash/manut-ai/releases/latest/download/latest.json"]);
+    expect(conf.plugins.updater.dangerousInsecureTransportProtocol).toBeUndefined();
+  });
+
+  it("makes the updater's files and lets the page call the updater", () => {
+    expect(conf.bundle.createUpdaterArtifacts).toBe(true);
+    expect(shellFile("capabilities/default.json").permissions).toContain("updater:default");
   });
 });
 
@@ -197,12 +221,16 @@ describe("an app left open keeps looking for a newer release", () => {
     expect(sent.map(([cmd, args]) => [cmd, args.timeout])).toEqual([["plugin:updater|check", 30_000]]);
   });
 
-  it("is switched off in the desktop app until Manut AI has its own update key: nothing is asked", async () => {
+  it("is on in the desktop app: outside Tauri nothing is asked, inside it the shell's updater is the host", async () => {
+    vi.stubGlobal("window", {});
+    expect(UPDATER_ENABLED).toBe(true);
+    expect(updateHost()).toBeNull();
     const sent: string[] = [];
     vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke: async (cmd: string) => (sent.push(cmd), null) } });
-    expect(UPDATER_ENABLED).toBe(false);
-    expect(updateHost()).toBeNull();
-    expect(sent).toEqual([]);
+    const host = updateHost();
+    expect(host).not.toBeNull();
+    expect(await host!.check()).toBeNull();
+    expect(sent).toEqual(["plugin:updater|check"]);
   });
 
   it("does not check while an install runs, and stops for good when the button is gone", async () => {

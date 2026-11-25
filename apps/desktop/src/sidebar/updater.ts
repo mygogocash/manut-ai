@@ -2,11 +2,9 @@
 // build signed with the key whose public half is pinned there. Outside Tauri (browser dev, e2e) there is no updater,
 // unless the page sets `window.__manutUpdateHost`, the e2e stand-in.
 //
-// The updater is switched off in this build (`UPDATER_ENABLED`): the endpoint and key this code was written against
-// are Oh My Hermes', so they were removed from tauri.conf.json and the shell no longer registers the plugin. With
-// the flag off the desktop app asks nothing and shows no update button. To turn it on: put Manut AI's own public key
-// and endpoint in tauri.conf.json, register `tauri_plugin_updater` in src-tauri/src/lib.rs with the `updater:default`
-// permission, and set the flag to true.
+// The updater is on (`UPDATER_ENABLED`) with Manut AI's own key: tauri.conf.json pins the public half and names a
+// `latest.json` under GitHub's releases/latest, which skips drafts, so it moves only when the owner publishes a
+// release (docs/releasing.md). The flag stays so a build can be made that asks nothing, and so tests can see it.
 import { t } from "../i18n";
 
 /** Download progress: bytes so far and the total when the server sent one. */
@@ -37,12 +35,12 @@ export const RETRY_GAP_MS = MIN;
 /** A check gives up after this long, so one request that never answers cannot hold back every later check. */
 export const CHECK_TIMEOUT_MS = 30 * 1000;
 
-/** Whether the desktop app looks for updates at all. Off until Manut AI has its own update key and endpoint. */
-export const UPDATER_ENABLED = false;
+/** Whether the desktop app looks for updates at all. */
+export const UPDATER_ENABLED = true;
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-/** The shell's updater plugin as an `UpdateHost`. Exported so its request shape stays tested while the updater is off. */
+/** The shell's updater plugin as an `UpdateHost`. Exported so its request shape stays tested. */
 export function tauriHost(): UpdateHost {
   return {
     async check() {
