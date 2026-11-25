@@ -178,7 +178,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 61, a shop's live feed, built and switched off: a hibernating WebSocket per shop session that only says
-     something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged.
+     something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged. Built and
+     reviewed on 25 Nov; one finding holds the merge: a page's socket sent the shop session as a
+     `Sec-WebSocket-Protocol` entry, which Cloudflare's request logs keep unmasked (they mask a header by its name
+     only). Item 61b, running (`feat/live-feed-ticket`, Opus), swaps it for a one-use ticket of 30 seconds minted
+     with the session in `Authorization`; both merge together.
    - item 62, the Runs layout tests made fast: profile `boxView.test.ts`'s six slow generator tests and speed the slow
      side with every answer proved the same (`feat/fast-box-tests`, Sonnet), started 25 Nov when item 60 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -315,7 +319,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
 3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
-   - running: item 61 (a shop's live feed, built and switched off) and item 62 (the Runs layout tests made fast);
+   - running: item 61b (the live feed's one-use ticket, which item 61 merges with) and item 62 (the Runs layout
+     tests made fast);
    - next, for the desktop's first release (the owner has an Apple Developer account; on 25 Nov the owner said sign-in
      is not needed for now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets) and
      item 65 (a Thai dictionary for the desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
