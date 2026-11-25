@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang, t } from "../../i18n";
 import type { BridgeError, BridgeEvent } from "../../lib/protocol";
+import { createStore } from "../../state/store";
 import { CACHE_VERSION, ShopCache, cacheKey } from "./cache";
 import { HttpHost, POLL_MS } from "./host";
 import { HttpRuntime } from "./index";
@@ -297,6 +298,38 @@ describe("keeping them while the shop is read again", () => {
     expect(nums((await req("jobs.list", {})).jobs)).toEqual(range(6, 82));
   });
 
+  it("does not add a page that a read made useless while it was on its way: 50 or more tasks were made, and the page would leave some out", async () => {
+    const { api, net, req, shopTasks } = await opened(80);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    net.hold = (cursor) => (cursor === "t31" ? held : null);
+    const press = req("jobs.older", {});
+    await settle();
+    shopTasks.push(...tasks(60, 81));
+    await minute(); // the newest read holds t91 .. t140 and shares no task with the last: the older pages are let go
+    release();
+    expect(await press).toEqual({ older: "more" });
+    // nothing was added: the page, t6 .. t30, would leave t31 .. t90 out
+    expect(nums((await req("jobs.list", {})).jobs)).toEqual(range(91, 140));
+    // the next press reads from the new cursor
+    expect(await req("jobs.older", {})).toEqual({ older: "more" });
+    expect(lastCursor(api)).toBe("t91");
+    expect(nums((await req("jobs.list", {})).jobs)).toEqual(range(66, 140));
+  });
+
+  it("leaves nothing behind when the first page could not be read: a task pushed out of the newest 50 afterwards is gone, as before", async () => {
+    const { net, req, shopTasks } = await opened(80);
+    net.force = (cursor) => (cursor === "t31" ? { status: 503, json: { error: "tasks_unavailable" } } : undefined);
+    expect(await refusal(req("jobs.older", {}))).toMatchObject({ code: "unavailable" });
+    net.force = null;
+    shopTasks.push(shopTask(81));
+    await minute();
+    // t31 fell out of the newest 50, and nothing was asked for, so it is not among the older ones
+    const jobs = await req("jobs.list", {});
+    expect(nums(jobs.jobs)).toEqual(range(32, 81));
+    expect(jobs.older).toBe("more");
+  });
+
   it("lists a task once, as the newer read has it, when tasks are deleted and the newest read reaches into the older pages", async () => {
     const { req, shopTasks } = await opened(80);
     await req("jobs.older", {}); // t6 .. t80
@@ -370,24 +403,28 @@ describe("what is live is only the newest read's", () => {
 
 describe("when a page cannot be read", () => {
   it("leaves what is shown and says so, whether the API did not answer, was down, or sent what is no page, and reads the page when pressed again", async () => {
-    const { net, req } = await opened(80);
-    const bad: [FakeAnswer, string, string][] = [
-      [{ status: 503, json: { error: "tasks_unavailable" } }, "unavailable", t("older.failed")],
-      [{ status: 500, text: "Internal error" }, "unavailable", t("older.failed")],
-      ["offline", "offline", t("older.offline")],
-      ["failed", "unavailable", t("older.failed")],
+    const { api, net, req } = await opened(80);
+    // each answer, what the person is told, and whether the shop is read again to find out what changed: an answer that is not a
+    // page or a refusal is, and an outage or a 5xx waits for the minute's read
+    const bad: [FakeAnswer, string, string, boolean][] = [
+      [{ status: 503, json: { error: "tasks_unavailable" } }, "unavailable", t("older.failed"), false],
+      [{ status: 500, text: "Internal error" }, "unavailable", t("older.failed"), false],
+      ["offline", "offline", t("older.offline"), false],
+      ["failed", "unavailable", t("older.failed"), false],
       // a 200 that is not a page is never an empty page, and never the end of the list
-      [{ status: 200, json: { error: "oops" } }, "unavailable", t("older.failed")],
-      [{ status: 200, json: { tasks: "none", next: null } }, "unavailable", t("older.failed")],
-      [{ status: 200, json: { tasks: [], next: 7 } }, "unavailable", t("older.failed")],
-      [{ status: 200, json: { tasks: [] } }, "unavailable", t("older.failed")],
-      [{ status: 403, json: { error: "owner_only" } }, "unavailable", t("older.failed")],
-      [{ status: 404, json: { error: "tenant_deleted" } }, "unavailable", t("older.failed")],
+      [{ status: 200, json: { error: "oops" } }, "unavailable", t("older.failed"), true],
+      [{ status: 200, json: { tasks: "none", next: null } }, "unavailable", t("older.failed"), true],
+      [{ status: 200, json: { tasks: [], next: 7 } }, "unavailable", t("older.failed"), true],
+      [{ status: 200, json: { tasks: [] } }, "unavailable", t("older.failed"), true],
+      [{ status: 403, json: { error: "owner_only" } }, "unavailable", t("older.failed"), true],
+      [{ status: 404, json: { error: "tenant_deleted" } }, "unavailable", t("older.failed"), true],
     ];
-    for (const [answer, code, message] of bad) {
+    for (const [answer, code, message, reread] of bad) {
+      const reads = api.to("GET", "/v1/approvals").length;
       net.force = (cursor) => (cursor === "t31" ? answer : undefined);
       expect(await refusal(req("jobs.older", {})), JSON.stringify(answer)).toEqual({ code, message });
       await settle();
+      expect(api.to("GET", "/v1/approvals").length > reads, JSON.stringify(answer)).toBe(reread);
       const jobs = await req("jobs.list", {});
       expect(nums(jobs.jobs), JSON.stringify(answer)).toEqual(range(31, 80));
       expect(jobs.older, JSON.stringify(answer)).toBe("more");
@@ -454,6 +491,8 @@ describe("offline", () => {
     net.down = true;
     await minute();
     expect(host.cache.kind).toBe("showing");
+    // the API can be reached again, but the host has not read it yet: only a kept read is shown, so nothing is asked
+    net.down = false;
     const asked = api.calls.length;
     expect(await refusal(req("jobs.older", {}))).toEqual({ code: "offline", message: t("older.offline") });
     expect(api.calls.length).toBe(asked);
@@ -537,5 +576,24 @@ describe("the offline cache", () => {
     expect(file.v).toBe(5);
     expect(file.snapshot.tasks.map((x: { id: string }) => x.id)).toEqual(range(31, 80).map((i) => `t${i}`));
     expect(Object.keys(file.snapshot).sort()).toEqual(["approvals", "attention", "attentionOff", "readAt", "schedules", "tasks"]);
+  });
+});
+
+describe("under the app's own store", () => {
+  it("lists the jobs and the log with what they say of older work, and reads the next page when a page asks, as History and the log do", async () => {
+    const { rt, api } = await opened(80);
+    const store = createStore(rt, { firstRoster: "all", watchSeen: { get: () => null, set: () => {} } });
+    await store.actions.init();
+    for (let i = 0; i < 12; i += 1) await vi.advanceTimersByTimeAsync(5);
+    const jobs = await store.actions.missionJobs();
+    expect(jobs.older).toBe("more");
+    expect(jobs.jobs).toHaveLength(50);
+    expect((await store.actions.missionActivity()).older).toBe("more");
+    expect(await store.actions.missionOlder()).toEqual({ older: "more" });
+    expect((await store.actions.missionJobs()).jobs).toHaveLength(75);
+    expect((await store.actions.missionActivity()).events).toHaveLength(75);
+    expect(await store.actions.missionOlder()).toEqual({ older: "end" });
+    expect(await store.actions.missionJobs()).toMatchObject({ older: "end", jobs: expect.any(Array) });
+    expect(pagesAsked(api).slice(-2)).toEqual([after("t31", OWNER_A), after("t6", OWNER_A)]);
   });
 });

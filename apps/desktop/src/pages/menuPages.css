@@ -116,6 +116,25 @@
   color: var(--aui-muted);
   font-size: 13px;
 }
+/* The desktop's own: under a list of the shop's work, one quiet line that says there is older work than the list holds (or that
+   nothing older is left) and the button that reads it. */
+.mpage .older {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 8px 10px;
+}
+.mpage .older p {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+}
+.mpage .older[data-state="failed"] p {
+  color: var(--aui-danger);
+}
 .mpage .rowl {
   display: flex;
   flex-wrap: wrap;

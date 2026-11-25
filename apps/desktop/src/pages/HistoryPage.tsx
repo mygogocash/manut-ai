@@ -17,7 +17,9 @@ import { Empty, MenuPageFrame } from "./MenuPage";
 import { byDay, dayBand, historyEntries, jobLane, lanesPresent, matchWords, threadLane, type HistoryLane, type LaneWho } from "./history";
 import { kitOf } from "./home";
 import { stageTag } from "./job";
-import { useJobs } from "./RecentWork";
+import { useShowOlder, type OlderView } from "./older";
+import { useJobList } from "./RecentWork";
+import { ShowOlder } from "./ShowOlder";
 
 /** One thread as its row shows it. */
 export interface HistoryRowView {
@@ -141,6 +143,7 @@ export function HistoryView({
   lanes,
   lane = "all",
   onLane,
+  older,
 }: {
   days: HistoryDayView[];
   query: string;
@@ -155,6 +158,8 @@ export function HistoryView({
   /** the kind pressed, or "all" */
   lane?: HistoryLane | "all";
   onLane?: (lane: HistoryLane | "all") => void;
+  /** the runtime has older work than the list holds, or Show older has shown all of it (older.ts): the line and the button under the list */
+  older?: OlderView;
 }) {
   const find = (
     <div className="find" role="search">
@@ -243,6 +248,7 @@ export function HistoryView({
         ) : (
           <Empty icon={<MenuIcon row="history" />} title={t("history.emptyTitle")} text={t("history.emptyText")} testId="history-empty" />
         )}
+        {older && <ShowOlder view={older} />}
       </div>
     </MenuPageFrame>
   );
@@ -263,7 +269,8 @@ export function HistoryPage() {
     box.current?.focus();
     box.current?.select();
   }, [find]);
-  const jobs = useJobs();
+  const { jobs, older, reload } = useJobList();
+  const more = useShowOlder(reload);
   const hasThreads = jobs.length > 0 || selectSidebarBots(s).some((b) => (s.threads[b.name]?.length ?? 0) > 0);
   // A kind that has no entry any more (its last one went) gives way to All, rather than leaving an empty list under a chip
   // that is gone.
@@ -281,6 +288,7 @@ export function HistoryPage() {
       lanes={lanes}
       lane={lane}
       onLane={setPicked}
+      older={older ? { state: older, ui: more.ui, onShow: more.show } : undefined}
     />
   );
 }
