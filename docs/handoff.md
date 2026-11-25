@@ -160,6 +160,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's pages were redeployed on 25 Nov at 11:47 from `caa40c3`, with item 57's Routines page in the console (pages
   `1258aef6`; the API is unchanged since 09:59). Only the pages Worker went; it has no route of its own, as the API's
   custom domain hands it the pages.
+- Dev's pages were redeployed on 25 Nov at 13:05 from `8f77e43`, with item 59's Make a routine form (pages `e64ce7e6`;
+  the API is unchanged since 09:59).
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
