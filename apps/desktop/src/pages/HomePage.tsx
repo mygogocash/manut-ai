@@ -151,7 +151,7 @@ export function HomeView(p: HomeViewProps) {
         )
       }
     >
-      <div className="home hero">
+      <div className="home hero" data-arrive="home" data-arrive-rows=".rows > li">
         <div className="lockup">
           <BrandMark size={46} />
           <span>Manut AI</span>

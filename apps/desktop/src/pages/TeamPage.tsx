@@ -298,13 +298,13 @@ export function TeamView({
     </div>
   ) : null;
   const list = members.length ? (
-    <ul className="rows">
+    <ul className="rows" data-arrive="team" data-arrive-rows=":scope > li" data-flip-list>
       {members.map((m) => {
         const st = STATUS[m.status];
         const open = menu === m.name && !!m.menu?.length;
         const restarts = !!m.menu?.some((a) => a.action === "restart" || a.action === "start");
         return (
-          <li key={m.name} className="tli" data-testid={`team-row-${m.name}`}>
+          <li key={m.name} className="tli" data-flip={m.name} data-testid={`team-row-${m.name}`}>
             <div className="rowl trow">
               <button type="button" className="rowmain" onClick={m.open} data-testid={`team-${m.name}`}>
                 <Avatar bot={m.name} size={40} />

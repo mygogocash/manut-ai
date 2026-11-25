@@ -41,6 +41,7 @@ import {
 } from "./activity";
 import { dayBand } from "./history";
 import { LOADING, load, type Load } from "./load";
+import { Loading } from "./Loading";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { useShowOlder, type OlderView } from "./older";
 import { OwnersOnly } from "./OwnersOnly";
@@ -439,9 +440,7 @@ export function ActivityView(p: ActivityViewProps) {
 
   if (p.load.kind === "loading")
     return frame(
-      <p className="none" role="status" data-testid="act-loading">
-        {t("act.loading")}
-      </p>,
+      <Loading label={t("act.loading")} testId="act-loading" />,
     );
   if (p.load.kind === "unavailable")
     return frame(
@@ -525,7 +524,7 @@ export function ActivityView(p: ActivityViewProps) {
       </div>
       {p.exporting.open && <ExportDialog log={log} p={p} />}
       <div className="split">
-        <div className="list">
+        <div className="list" data-arrive="activity" data-arrive-rows=".rowl.ev">
           {days.map((d) => {
             const band = dayBand(d, p.nowMs);
             return (

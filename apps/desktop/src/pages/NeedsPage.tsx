@@ -76,7 +76,7 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
     <MenuPageFrame page="needs" title={t("menu.needs")}>
       <div className="col">
         {rows.length ? (
-          <ul className="rows" aria-label={t("needs.list")}>
+          <ul className="rows" aria-label={t("needs.list")} data-arrive="needs" data-arrive-rows=":scope > li">
             {rows.map((r, i) => (
               <li key={r.key} className="tli">
                 <div className="rowl trow need" data-testid="needs-row">
