@@ -8,7 +8,7 @@ import { createRoutine, describeTrigger, nextRun, type ActionKind, type Trigger 
 import { confirm as confirmFact, correct as correctFact, emptyState, forget as forgetFact, propose, remember as rememberFact, type FactSource, type MemoryState, type Result } from "@manut/shop-memory";
 import { vi } from "vitest";
 import { cacheKey, encodeSnapshot, NoKeychain, openFile, sealFile, type CacheStore } from "./cache";
-import type { FeedSocket } from "./feed";
+import { TICKET_PROTOCOL, type FeedSocket } from "./feed";
 import { importSealKey } from "./seal";
 import { ApiSession } from "./session";
 import type { FetchLike, SessionVault } from "./shell";
@@ -956,9 +956,9 @@ export class FakeSocket implements FeedSocket {
     this.onerror?.();
     this.onclose?.({ code });
   }
-  /** The shop session the socket was opened with, from its protocol entry. */
-  get token(): string | undefined {
-    return this.protocols.find((p) => p.startsWith("manut-bearer."))?.slice("manut-bearer.".length);
+  /** The ticket the socket was opened with, from its protocol entry. */
+  get ticket(): string | undefined {
+    return this.protocols.find((p) => p.startsWith(TICKET_PROTOCOL))?.slice(TICKET_PROTOCOL.length);
   }
 }
 

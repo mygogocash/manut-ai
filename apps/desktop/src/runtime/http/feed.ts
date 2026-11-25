@@ -7,18 +7,23 @@
 // sessions could not read, and it decides nothing. A socket that closes or fails is never fatal: the minute's read goes on
 // whatever the feed does.
 //
-// Each shop's follower asks the API first (`FeedLink.look`, a plain `GET /v1/feed` with the shop's session through the
-// shell's request command, which opens the session again when it has ended), and opens the socket only when the answer
-// says the feed is on. Off, it asks again an hour later. The page's own WebSocket is the only socket the desktop has
-// (macOS's curl speaks no WebSocket, and the shell has no WebSocket crate), and a page's WebSocket can send no
-// `Authorization` header, so the shop session goes as one entry of the handshake's protocols, `manut-bearer.<token>`,
-// beside `manut-feed.v1`: never in the address, which a token never is. The app's CSP lets the page open a socket to
-// Manut AI's own API hosts and nowhere else (`feedUrl`), so a runtime connected to any other origin has no feed.
+// Each shop's follower asks the API first (`FeedLink.look`: `POST /v1/feed/ticket` with the shop's session, through the
+// shell's request command like every write of the shop's, which opens the session again when it has ended), and opens
+// the socket only when the answer says the feed is on, with the one-use ticket that answer carries. Off, it asks again an
+// hour later. The page's own WebSocket is the only socket the desktop has (macOS's curl speaks no WebSocket, and the shell
+// has no WebSocket crate), and a page's WebSocket can send no `Authorization` header, so the ticket goes as one entry of
+// the handshake's protocols, `manut-ticket.<ticket>`, beside `manut-feed.v1`. The shop session never goes there: the API's
+// host records that header in its logs as it is, and a session token never goes in a log, an address or a protocol entry.
+// A ticket there is spent by the socket it opens and dead 30 seconds after it was minted, so every socket mints its own,
+// and one a log keeps opens nothing. The app's CSP lets the page open a socket to Manut AI's own API hosts and nowhere else
+// (`feedUrl`), so a runtime connected to any other origin has no feed.
 
-/** The route, the one protocol the API answers, and the protocol entry that carries the shop session. */
+/** The socket's route, the route that mints its ticket, the one protocol the API answers, and the protocol entry that
+ *  carries the ticket. */
 export const FEED_PATH = "/v1/feed";
+export const FEED_TICKET_PATH = "/v1/feed/ticket";
 export const FEED_PROTOCOL = "manut-feed.v1";
-export const BEARER_PROTOCOL = "manut-bearer.";
+export const TICKET_PROTOCOL = "manut-ticket.";
 /** The first ping waits this long for others before the shops are read, so pings from several shops are one read. */
 export const FEED_DEBOUNCE_MS = 1_000;
 /** How often the socket says it is still there. The API's runtime answers without waking the shop's object, and a
@@ -56,8 +61,8 @@ export type OpenSocket = (url: string, protocols: string[]) => FeedSocket;
 
 /** What asking the API whether a shop's feed is on came to. */
 export type Look =
-  /** On: open the socket with this token, the shop session the look was just answered for. */
-  | { kind: "on"; token: string }
+  /** On: open the socket with this ticket, minted just now with the shop's session. It opens one socket, once. */
+  | { kind: "on"; ticket: string }
   /** The API says the feed is off, or is from before the feed: ask again in an hour. */
   | { kind: "off" }
   /** Offline, not answering, or an answer this build cannot read: back off and ask again. */
@@ -86,6 +91,15 @@ export function feedUrl(origin: string): string | null {
   // Built from the host alone, so nothing else of the origin, a user name least of all, can reach the address.
   if (url.protocol !== "https:" || !ours || url.port !== "") return null;
   return `wss://${host}${FEED_PATH}`;
+}
+
+/** The ticket of a mint's answer (`{ feed: "on", ticket }`), or null for an answer that does not say the feed is on with
+ *  one. A ticket is taken only as a string a protocol entry may carry: anything else would make the page's WebSocket throw,
+ *  and an answer this build cannot read is tried again, never guessed at. */
+export function ticketOf(json: unknown): string | null {
+  const answer = json && typeof json === "object" ? (json as { feed?: unknown; ticket?: unknown }) : null;
+  const ticket = answer?.ticket;
+  return answer?.feed === "on" && typeof ticket === "string" && /^[A-Za-z0-9._-]{1,1024}$/.test(ticket) ? ticket : null;
 }
 
 /** Whether a message is a ping, and nothing else is ever taken from one: it carries no data. */
@@ -141,16 +155,17 @@ class Follower {
     if (look.kind === "stop") return this.stop();
     if (look.kind === "off") return this.off();
     if (look.kind === "retry") return this.backoff();
-    this.openSocket(look.token);
+    this.openSocket(look.ticket);
   }
 
-  /** Opens the socket. Its handlers are taken off it whenever the follower stops listening to it (`release`), so a socket
-   *  let go says nothing more, and one the API closed fires nothing after its close. */
-  private openSocket(token: string): void {
+  /** Opens the socket with the ticket its own look minted, the only credential a protocol entry ever carries. Its handlers
+   *  are taken off it whenever the follower stops listening to it (`release`), so a socket let go says nothing more, and one
+   *  the API closed fires nothing after its close. */
+  private openSocket(ticket: string): void {
     this.state = "opening";
     let socket: FeedSocket;
     try {
-      socket = this.opts.open(this.opts.url, [FEED_PROTOCOL, `${BEARER_PROTOCOL}${token}`]);
+      socket = this.opts.open(this.opts.url, [FEED_PROTOCOL, `${TICKET_PROTOCOL}${ticket}`]);
     } catch {
       // A CSP that refuses the address throws here in some engines, and fails the socket in others: a drop either way.
       return this.backoff();

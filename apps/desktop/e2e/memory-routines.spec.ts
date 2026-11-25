@@ -382,10 +382,12 @@ async function stubShell(page: Page, shops: "one" | "several" = "one") {
   }, { several: shops === "several" });
 }
 
-/** The calls to the API that are not the shop's own read, in order: what the owner's changes sent, and with which session. */
+/** The calls to the API that are not the shop's own read, in order: what the owner's changes sent, and with which session.
+ *  The live feed's ticket is left out too: the app asks for one for each shop it follows (src/runtime/http/feed.ts), and
+ *  this fake answers it 404, as an API from before the feed does. */
 const changes = async (page: Page) =>
   (await page.evaluate(() => (window as unknown as Stage).__calls))
-    .filter((c) => c.method === "POST" && c.path !== "/v1/shops/session")
+    .filter((c) => c.method === "POST" && c.path !== "/v1/shops/session" && c.path !== "/v1/feed/ticket")
     .map((c) => [c.path, c.bearer, c.body]);
 const calls = (page: Page) => page.evaluate(() => (window as unknown as Stage).__calls);
 

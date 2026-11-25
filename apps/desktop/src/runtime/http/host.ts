@@ -52,7 +52,7 @@
 // notify.ts `showNewDevice`).
 //
 // The live feed (feed.ts; docs/runtime-adapter.md, "The live feed"). While the API says it is on, each shop the latest read
-// shows has a socket of its own, opened with that shop's session, and a ping on it moves the next read to a second from
+// shows has a socket of its own, opened with a ticket that shop's session mints, and a ping on it moves the next read to a second from
 // now, and never sooner than `FRESH_MS` after the last one (`onFeedPing`). The feed carries no data: the read that follows
 // is the minute's read, with each shop's own session. A feed that is off, closed or failing leaves the minute's read as it
 // was. Signing out, the person's place in a shop ending, and the host stopping close the sockets.
@@ -71,7 +71,7 @@ import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { closingFor, helperNames, RECENT_PATH, recentOf, type AskedOf, type DecidedContext } from "./decided";
 import { DeviceWatch, readDevices } from "./devices";
-import { FEED_DEBOUNCE_MS, FEED_PATH, feedUrl, ShopFeeds, type Look, type OpenSocket } from "./feed";
+import { FEED_DEBOUNCE_MS, FEED_TICKET_PATH, feedUrl, ShopFeeds, ticketOf, type Look, type OpenSocket } from "./feed";
 import { memoryHandlers } from "./memory";
 import { addPage, askOlder, dropOlder, forgetAsk, keepOlder, nextCursor, olderOf, type TaskList } from "./older";
 import { peopleHandlers } from "./people";
@@ -664,13 +664,15 @@ export class HttpHost {
     this.readBy(Math.max(this.now() + FEED_DEBOUNCE_MS, this.snapshot.readAt + FRESH_MS));
   }
 
-  /** Whether `shop`'s feed is on, asked with that shop's own session (`GET /v1/feed`), with the token to open it with: the
-   *  session the answer was just given for, which `shopSessions.read` opened again first if it had ended. A 401 that ends
+  /** Whether `shop`'s feed is on, with a one-use ticket to open it with: `POST /v1/feed/ticket` with exactly `{}`, sent with
+   *  that shop's own session as every write of the shop's is (`shopSessions.write`), which opens the session again first if
+   *  it had ended. The session goes only in that request's `Authorization`; the socket carries the ticket. A 401 that ends
    *  the person's place in the shop ends it here as it does for the minute's read (`depart`), and the shop is not followed.
    *  The API's `feature_disabled`, and the 404 of an API from before the feed, are off; anything else, a 200 this build
-   *  cannot read included, is tried again later. It only reads: a look never changes anything at the shop. */
+   *  cannot read included, is tried again later. It changes nothing the shop's screens show: a ticket that is never used
+   *  ends by itself. */
   private async lookAtFeed(shop: string): Promise<Look> {
-    const answer = await this.shopSessions.read(shop, FEED_PATH);
+    const answer = await this.shopSessions.write(shop, FEED_TICKET_PATH, {});
     // The host stopped while the look was asked: nothing it found is said, and the stopped follower ignores the answer.
     if (!this.running) return { kind: "stop" };
     if (answer.kind === "left") {
@@ -680,9 +682,8 @@ export class HttpHost {
     // An answer of signed out needs nothing here: a session that ends tells the host first, which stops every feed
     // (`onSession`), so the follower is stopped by the time this answer reaches it.
     if (answer.kind === "ok") {
-      const held = this.session.shopSession(shop);
-      const on = (answer.json as { feed?: unknown } | null)?.feed === "on";
-      return held && on ? { kind: "on", token: held.accessToken } : { kind: "retry" };
+      const ticket = ticketOf(answer.json);
+      return ticket ? { kind: "on", ticket } : { kind: "retry" };
     }
     if (answer.kind === "refused" && ((answer.status === 403 && answer.code === "feature_disabled") || answer.status === 404)) {
       return { kind: "off" };

@@ -1,11 +1,11 @@
 // The live feed's followers on their own (feed.ts), over a fake socket and fake timers: what each shop's follower asks, opens
 // and sends, how a ping is passed on and nothing else is, the backoff after a drop or a failed look, the hour's wait while
-// the feed is off, the keepalive, and that letting a shop go closes its socket and leaves nothing behind. The host's side,
-// end to end over a fake API, is feed.host.test.ts.
+// the feed is off, the keepalive, and that letting a shop go closes its socket and leaves nothing behind; and what a mint's
+// answer must hold to be a ticket. The host's side, end to end over a fake API, is feed.host.test.ts, and the check that no
+// file names the old session entry is feed.protocols.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import confText from "../../../src-tauri/tauri.conf.json?raw";
 import {
-  BEARER_PROTOCOL,
   FEED_OFF_MS,
   FEED_PROTOCOL,
   FEED_RETRY_MAX_MS,
@@ -15,6 +15,8 @@ import {
   KEEPALIVE_MS,
   PONG_WAIT_MS,
   ShopFeeds,
+  TICKET_PROTOCOL,
+  ticketOf,
   type Look,
 } from "./feed";
 import { FakeSocket } from "./testkit";
@@ -45,7 +47,7 @@ function world(...answers: Look[]) {
   return { feeds, sockets, looks, pings, answer: (...more: Look[]) => queue.splice(0, queue.length, ...more) };
 }
 
-const ON = (token = "mos1.shop-a.fake-1"): Look => ({ kind: "on", token });
+const ON = (ticket = "c2hvcC1h.ticket-1"): Look => ({ kind: "on", ticket });
 const PING = JSON.stringify({ v: 1, seq: 1795591574420 });
 
 async function settle() {
@@ -61,17 +63,33 @@ afterEach(() => {
 });
 
 describe("following a shop", () => {
-  it("looks first, then opens one socket to the feed's address with the shop session in its protocols, never in the address", async () => {
-    const w = world(ON("mos1.shop-a.fake-1"));
+  it("looks first, then opens one socket to the feed's address with the look's ticket in its protocols, never in the address", async () => {
+    const w = world(ON("c2hvcC1h.ticket-1"));
     w.feeds.follow(["pilot:shop-a"]);
     await settle();
     expect(w.looks).toEqual(["pilot:shop-a"]);
     expect(w.sockets).toHaveLength(1);
     expect(w.sockets[0]!.url).toBe(URL_);
-    expect(w.sockets[0]!.url).not.toContain("fake-1");
-    expect(w.sockets[0]!.protocols).toEqual([FEED_PROTOCOL, `${BEARER_PROTOCOL}mos1.shop-a.fake-1`]);
+    expect(w.sockets[0]!.url).not.toContain("ticket-1");
+    expect(w.sockets[0]!.protocols).toEqual([FEED_PROTOCOL, `${TICKET_PROTOCOL}c2hvcC1h.ticket-1`]);
     w.sockets[0]!.opened();
     expect(w.feeds.states()).toEqual({ "pilot:shop-a": "open" });
+  });
+
+  it("opens every socket with a ticket of its own look, a fresh one after a drop and at each hour's renewal, never one used before", async () => {
+    const w = world(ON("t.1"), ON("t.2"), ON("t.3"));
+    w.feeds.follow(["pilot:shop-a"]);
+    await settle();
+    w.sockets[0]!.opened();
+    w.sockets[0]!.drops();
+    await vi.advanceTimersByTimeAsync(FEED_RETRY_MIN_MS);
+    await settle();
+    w.sockets[1]!.opened();
+    await vi.advanceTimersByTimeAsync(FEED_STEADY_MS);
+    w.sockets[1]!.drops(4000);
+    await settle();
+    expect(w.looks).toHaveLength(3);
+    expect(w.sockets.map((s) => s.ticket)).toEqual(["t.1", "t.2", "t.3"]);
   });
 
   it("passes a ping on, naming its shop, and takes nothing else from any message", async () => {
@@ -349,5 +367,18 @@ describe("where a feed can be opened", () => {
       return protocol === "wss:" && port === "" && (hostname === "manut.xyz" || hostname.endsWith(".manut.xyz"));
     };
     for (const origin of ["https://dev.manut.xyz", "https://manut.xyz", "https://a.b.manut.xyz"]) expect(allowed(feedUrl(origin)!)).toBe(true);
+  });
+});
+
+describe("a mint's answer", () => {
+  it("is a ticket only when it says the feed is on and carries one that a protocol entry may hold, and nothing more", () => {
+    expect(ticketOf({ feed: "on", protocol: FEED_PROTOCOL, ticket: "cGlsb3Q6c2hvcC1h.AbC_d-9", expiresIn: 30 })).toBe("cGlsb3Q6c2hvcC1h.AbC_d-9");
+    expect(ticketOf({ feed: "on", ticket: "x".repeat(1024) })).toBe("x".repeat(1024));
+    // A comma or a space would put a protocol of the answer's own beside the feed's, and a colon is no token at all.
+    for (const answer of [null, "on", [], {}, { feed: "on" }, { feed: "off", ticket: "a.b" }, { ticket: "a.b" }, { feed: "on", ticket: 7 },
+      { feed: "on", ticket: "" }, { feed: "on", ticket: "a.b, chat.v2" }, { feed: "on", ticket: "a b" }, { feed: "on", ticket: "pilot:shop-a.b" },
+      { feed: "on", ticket: "x".repeat(1025) }]) {
+      expect(ticketOf(answer), JSON.stringify(answer)).toBeNull();
+    }
   });
 });
