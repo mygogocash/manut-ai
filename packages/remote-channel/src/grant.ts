@@ -1,4 +1,16 @@
-import { type Bytes, type RandomBytes, concatBytes, copyBytes, draw, systemRandom, toBase64Url, uuidFromBytes, uuidToBytes, uuidV4 } from "./bytes";
+import {
+  type Bytes,
+  type RandomBytes,
+  concatBytes,
+  copyBytes,
+  draw,
+  redactedWhenPrinted,
+  systemRandom,
+  toBase64Url,
+  uuidFromBytes,
+  uuidToBytes,
+  uuidV4,
+} from "./bytes";
 import { RemoteChannelError } from "./errors";
 import { SECRET_BYTES, sha256 } from "./keys";
 import { DOOR_TOKEN_BYTES } from "./offer";
@@ -31,11 +43,12 @@ export interface PairingGrant {
 
 /// A new device: id, door token and K drawn in that order from `random`.
 export function newPairingGrant(random: RandomBytes = systemRandom): PairingGrant {
-  return {
+  const grant: PairingGrant = {
     deviceId: uuidV4(draw(random, 16)),
     doorToken: draw(random, DOOR_TOKEN_BYTES),
     secret: draw(random, SECRET_BYTES),
   };
+  return redactedWhenPrinted(grant, ["doorToken", "secret"]);
 }
 
 export function encodePairingGrant(grant: PairingGrant): Bytes {
@@ -45,11 +58,12 @@ export function encodePairingGrant(grant: PairingGrant): Bytes {
 
 export function decodePairingGrant(bytes: Uint8Array): PairingGrant {
   if (bytes.length !== GRANT_BYTES || bytes[0] !== TYPE || bytes[1] !== VERSION) throw new RemoteChannelError("malformed");
-  return {
+  const grant: PairingGrant = {
     deviceId: uuidFromBytes(bytes.subarray(2, 18)),
     doorToken: copyBytes(bytes.subarray(18, 50)),
     secret: copyBytes(bytes.subarray(50, 82)),
   };
+  return redactedWhenPrinted(grant, ["doorToken", "secret"]);
 }
 
 /// The token hash the Mac registers with the relay's `device` message: base64url of the SHA-256

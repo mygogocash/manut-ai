@@ -180,6 +180,14 @@ describe("frames", () => {
     for (const frame of await small.phone.seal(text("fits"))) expect(read(await small.mac.open(frame))).toBe("fits");
   });
 
+  it("a session closed while a frame is on its way hands that frame over to nobody", async () => {
+    const { phone, mac } = await openSession(K);
+    const [frame] = await phone.seal(text("late"));
+    const opening = mac.open(frame!);
+    mac.close();
+    expect(await refusal(() => opening)).toBe("closed");
+  });
+
   it("a closed session seals and opens nothing", async () => {
     const { phone, mac } = await openSession(K);
     const [frame] = await phone.seal(text("x"));

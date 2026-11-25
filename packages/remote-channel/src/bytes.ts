@@ -137,6 +137,18 @@ export function uuidV4(random: Uint8Array): string {
   return uuidFromBytes(bytes);
 }
 
+/// Gives a value that holds secrets a printed form with each of them shown as `redacted`, as
+/// GoSpark prints a relay grant's token (`docs/relay-protocol-v1.md`, section 12, RT-4), so a
+/// stray `JSON.stringify` or a Node log of a pairing code or a grant shows no secret. Both hooks
+/// are non-enumerable, so a spread, a comparison or the value's own fields are unchanged.
+export function redactedWhenPrinted<T extends object>(value: T, secrets: readonly (keyof T & string)[]): T {
+  const printable = () =>
+    Object.fromEntries(Object.entries(value).map(([key, field]) => [key, (secrets as readonly string[]).includes(key) ? "redacted" : field]));
+  Object.defineProperty(value, "toJSON", { value: printable, enumerable: false });
+  Object.defineProperty(value, Symbol.for("nodejs.util.inspect.custom"), { value: printable, enumerable: false });
+  return value;
+}
+
 /// Where random bytes come from. Tests pass their own so every value is exact; everything else
 /// gets `crypto.getRandomValues`.
 export type RandomBytes = (length: number) => Uint8Array;

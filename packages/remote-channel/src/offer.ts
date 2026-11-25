@@ -1,4 +1,17 @@
-import { type Bytes, type RandomBytes, concatBytes, copyBytes, draw, fromBase64Url, systemRandom, toBase64Url, uuidFromBytes, uuidToBytes, uuidV4 } from "./bytes";
+import {
+  type Bytes,
+  type RandomBytes,
+  concatBytes,
+  copyBytes,
+  draw,
+  fromBase64Url,
+  redactedWhenPrinted,
+  systemRandom,
+  toBase64Url,
+  uuidFromBytes,
+  uuidToBytes,
+  uuidV4,
+} from "./bytes";
 import { RemoteChannelError } from "./errors";
 import { SECRET_BYTES } from "./keys";
 import { hostIdBytes } from "./session";
@@ -42,12 +55,13 @@ export interface PairingOffer {
 /// token, secret) from `random`.
 export function newPairingOffer(hostId: string, random: RandomBytes = systemRandom): PairingOffer {
   hostIdBytes(hostId);
-  return {
+  const offer: PairingOffer = {
     hostId,
     doorId: uuidV4(draw(random, 16)),
     doorToken: draw(random, DOOR_TOKEN_BYTES),
     secret: draw(random, SECRET_BYTES),
   };
+  return redactedWhenPrinted(offer, ["doorToken", "secret"]);
 }
 
 export function encodePairingOffer(offer: PairingOffer): string {
@@ -59,12 +73,13 @@ export function encodePairingOffer(offer: PairingOffer): string {
 export function decodePairingOffer(text: string): PairingOffer {
   const bytes = fromBase64Url(text);
   if (bytes.length !== OFFER_BYTES || bytes[0] !== VERSION) throw new RemoteChannelError("malformed");
-  return {
+  const offer: PairingOffer = {
     hostId: toBase64Url(bytes.subarray(1, 33)),
     doorId: uuidFromBytes(bytes.subarray(33, 49)),
     doorToken: copyBytes(bytes.subarray(49, 81)),
     secret: copyBytes(bytes.subarray(81, 113)),
   };
+  return redactedWhenPrinted(offer, ["doorToken", "secret"]);
 }
 
 /// The link the Mac shows as a QR code and copies: the app's address with the code in its

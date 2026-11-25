@@ -156,6 +156,7 @@ export class Channel {
         );
         frames.push(concatBytes(Uint8Array.of(RECORD_TYPE), new Uint8Array(box)));
       }
+      if (this.#closed) throw new RemoteChannelError("closed");
       return frames;
     } catch {
       // Counters were spent and nothing can be sent in their place, so the session cannot go on.
@@ -176,6 +177,8 @@ export class Channel {
         this.#receive.key,
         frame.subarray(1),
       ))));
+      // Closed while this frame was being opened: nothing more is handed over.
+      if (this.#closed) throw new RemoteChannelError("closed");
       this.#received = counter + 1;
       const flags = plain[0];
       if (flags !== MORE && flags !== LAST) throw new RemoteChannelError("malformed");
