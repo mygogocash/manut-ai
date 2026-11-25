@@ -890,6 +890,27 @@ fn ask_detail(name: &str, input: &Value) -> String {
     clip(&parts.join(" · "), 160)
 }
 
+/// Claude Code's own report of its MCP servers (`mcp_servers` in its `init` line: `name` and `status`, headless docs) as the
+/// page may see it: each name as one short line, and the status as one of a few fixed words (`connected`, `failed`,
+/// `needs_auth`, `pending`, `off`, else `other`), so nothing else the agent put there reaches the page.
+pub(crate) fn mcp_seen(list: &[Value]) -> Vec<Value> {
+    list.iter()
+        .take(100)
+        .filter_map(|x| {
+            let name: String = s(x, "name").chars().filter(|c| !c.is_control()).take(80).collect();
+            let status = match s(x, "status").as_str() {
+                "connected" => "connected",
+                "failed" => "failed",
+                "needs-auth" | "needs_auth" => "needs_auth",
+                "pending" => "pending",
+                "disabled" => "off",
+                _ => "other",
+            };
+            (!name.trim().is_empty()).then(|| json!({"name": name.trim(), "status": status}))
+        })
+        .collect()
+}
+
 /// An MCP tool's server and tool, from Claude Code's name for it (`mcp__<server>__<tool>`), or None for any other tool.
 pub(crate) fn mcp_parts(name: &str) -> Option<(String, String)> {
     let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
@@ -1356,6 +1377,10 @@ impl Adapter for Claude {
                 if !mode.is_empty() {
                     f["approval"] = Value::String(mode.clone());
                     f["mode"] = Value::String(mode);
+                }
+                // which MCP servers Claude Code connected (Settings › MCP and Skills shows it): names and a status word only
+                if let Some(list) = v.get("mcp_servers").and_then(Value::as_array) {
+                    f["mcp"] = Value::Array(mcp_seen(list));
                 }
                 st.emit(ev("session.info", f));
             }
@@ -5559,6 +5584,21 @@ mod tests {
         let said = s(&card, "command");
         assert!(said.starts_with("body: xxx") && said.ends_with('…') && said.chars().count() == 4_001, "{}", said.len());
         assert!(card.get("whole").is_none());
+    }
+
+    #[test]
+    fn the_mcp_servers_claude_code_reports_reach_the_page_as_names_and_status_words_only() {
+        let init = r#"{"type":"system","subtype":"init","session_id":"s1","model":"m","mcp_servers":[{"name":"github","status":"connected","url":"https://x/?key=SECRET","env":{"T":"SECRET"}},{"name":"docs","status":"needs-auth"},{"name":"off","status":"disabled"},{"name":"odd","status":"SECRET-ish"},{"name":"","status":"connected"}]}"#;
+        let st = run(&mut Claude::new("/w"), &[init.into()]);
+        let info = &of(&st.events, "session.info")[0];
+        assert_eq!(
+            info["mcp"],
+            json!([{"name": "github", "status": "connected"}, {"name": "docs", "status": "needs_auth"}, {"name": "off", "status": "off"}, {"name": "odd", "status": "other"}])
+        );
+        assert!(!info.to_string().contains("SECRET"));
+        // an init without the list says nothing about servers
+        let st = run(&mut Claude::new("/w"), &[r#"{"type":"system","subtype":"init","session_id":"s1","model":"m"}"#.into()]);
+        assert!(of(&st.events, "session.info")[0].get("mcp").is_none());
     }
 
     #[test]

@@ -4,6 +4,7 @@ mod api_link;
 mod acp_chat;
 mod acp_mcp;
 mod agent_chat;
+mod agent_config;
 mod app_menu;
 mod appimage;
 mod ask_tool;
@@ -750,6 +751,20 @@ async fn lane_worktree(cwd: String, names: Vec<String>, start: Option<lane::Star
     tauri::async_runtime::spawn_blocking(move || lane::make_with(&home, std::path::Path::new(&cwd), &names, &start)).await.map_err(|e| e.to_string())?
 }
 
+/// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
+/// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
+/// and names only: never a command, an argument, an environment value, a header or an address.
+#[tauri::command]
+async fn agent_config_list(cwd: Option<String>) -> Result<Vec<agent_config::AgentConfig>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let project = cwd.map(PathBuf::from).filter(|p| p.is_absolute());
+        agent_config::read(&home, project.as_deref(), &|k| std::env::var(k).ok())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
 /// path, or a short code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`).
 #[tauri::command]
@@ -1328,6 +1343,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_projects,
         lane_remove,
         lane_root_check,
+        agent_config_list,
         lane_release,
         lane_clean_merged,
         session_main_moved,

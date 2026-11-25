@@ -197,33 +197,10 @@ impl Place {
 /// The servers to hand an ACP agent working in `cwd`: see the module's note. `home` is the person's home folder and `env`
 /// this app's environment (the agent's own, which it inherits), read for `CLAUDE_CONFIG_DIR` and the `${VAR}`s.
 pub fn approved(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> Approved {
-    let place = Place::of(home, cwd);
-    let file = [cwd.join(".mcp.json"), place.top.join(".mcp.json")].into_iter().find(|p| p.is_file());
-    let Some(servers) = file.and_then(|f| read_json(&f, MAX_FILE)).and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned()) else {
-        return Approved::default();
-    };
-    // Claude Code's own record of this folder: trusted, and what was approved there
-    let claude = crate::past_chats::cli_home(home, "claude", &[], env).unwrap_or_else(|| home.join(".claude"));
-    let state_file = if env("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty()) { claude.join(".claude.json") } else { home.join(".claude.json") };
-    let state = read_json(&state_file, MAX_STATE).unwrap_or(Value::Null);
-    let projects = state.get("projects").and_then(Value::as_object);
-    let keys: Vec<String> = [place.root.clone(), place.root.canonicalize().unwrap_or_else(|_| place.root.clone())].iter().map(|p| p.to_string_lossy().into_owned()).collect();
-    let entry = projects.and_then(|p| keys.iter().find_map(|k| p.get(k))).cloned().unwrap_or(Value::Null);
-    if entry.get("hasTrustDialogAccepted").and_then(Value::as_bool) != Some(true) {
-        return Approved::default();
-    }
-    // the person's own settings only: their user settings, and the root's local settings while git does not track them
-    let local_rel = ".claude/settings.local.json";
-    let mut sources = vec![read_json(&claude.join("settings.json"), MAX_FILE).unwrap_or(Value::Null), entry];
-    if !place.tracked(local_rel) {
-        sources.push(read_json(&place.root.join(local_rel), MAX_FILE).unwrap_or(Value::Null));
-    }
-    let all = sources.iter().any(|s| s.get("enableAllProjectMcpServers").and_then(Value::as_bool) == Some(true));
-    let enabled: BTreeSet<String> = sources.iter().flat_map(|s| strings(s.get("enabledMcpjsonServers"))).collect();
-    let disabled: BTreeSet<String> = sources.iter().flat_map(|s| strings(s.get("disabledMcpjsonServers"))).collect();
+    let p = project(home, cwd, env);
     let mut out = Vec::new();
-    for (name, v) in servers.iter() {
-        if out.len() >= MAX_SERVERS || disabled.contains(name) || !(all || enabled.contains(name)) {
+    for (name, v) in p.servers.iter() {
+        if out.len() >= MAX_SERVERS || p.state(name) != "on" {
             continue;
         }
         if let Some(s) = server(name, v, env) {
@@ -231,6 +208,77 @@ pub fn approved(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -
         }
     }
     Approved(out)
+}
+
+/// Claude Code's own state file: `.claude.json` in `CLAUDE_CONFIG_DIR` when that is set, else in the home folder.
+pub(crate) fn claude_state(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> Value {
+    let claude = crate::past_chats::cli_home(home, "claude", &[], env).unwrap_or_else(|| home.join(".claude"));
+    let file = if env("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty()) { claude.join(".claude.json") } else { home.join(".claude.json") };
+    read_json(&file, MAX_STATE).unwrap_or(Value::Null)
+}
+
+/// A project's `.mcp.json` as Claude Code reads it there: its servers (their whole entries, kept in the shell), the
+/// repository's root, whether the folder is trusted, and what the person's own settings approve or turn off.
+pub(crate) struct ProjectMcp {
+    pub servers: serde_json::Map<String, Value>,
+    /// Claude Code's entry for the repository's root in its state file (`Value::Null` when there is none)
+    pub entry: Value,
+    trusted: bool,
+    all: bool,
+    enabled: BTreeSet<String>,
+    disabled: BTreeSet<String>,
+}
+
+impl ProjectMcp {
+    /// `on` (Claude Code connects it), `off` (the person turned it off) or `ask` (it waits for their yes in Claude Code).
+    pub fn state(&self, name: &str) -> &'static str {
+        if self.disabled.contains(name) {
+            "off"
+        } else if self.trusted && (self.all || self.enabled.contains(name)) {
+            "on"
+        } else {
+            "ask"
+        }
+    }
+}
+
+/// [`ProjectMcp`] for a session in `cwd`: the session folder's `.mcp.json`, else the work tree's top's; trust and the
+/// folder's entry under the root of the repository's first checkout (a lane's developer folder); approvals from the
+/// person's user settings, that entry, and the root's `.claude/settings.local.json` while git does not track it.
+pub(crate) fn project(home: &Path, cwd: &Path, env: &dyn Fn(&str) -> Option<String>) -> ProjectMcp {
+    let place = Place::of(home, cwd);
+    let file = [cwd.join(".mcp.json"), place.top.join(".mcp.json")].into_iter().find(|p| p.is_file());
+    let servers = file.and_then(|f| read_json(&f, MAX_FILE)).and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned()).unwrap_or_default();
+    let mut p = ProjectMcp { servers, entry: Value::Null, trusted: false, all: false, enabled: BTreeSet::new(), disabled: BTreeSet::new() };
+    if p.servers.is_empty() {
+        return p;
+    }
+    let state = claude_state(home, env);
+    let keys: Vec<String> = [place.root.clone(), place.root.canonicalize().unwrap_or_else(|_| place.root.clone())].iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    p.entry = state.get("projects").and_then(Value::as_object).and_then(|ps| keys.iter().find_map(|k| ps.get(k))).cloned().unwrap_or(Value::Null);
+    p.trusted = p.entry.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true);
+    // the person's own settings only: their user settings, and the root's local settings while git does not track them
+    let claude = crate::past_chats::cli_home(home, "claude", &[], env).unwrap_or_else(|| home.join(".claude"));
+    let local_rel = ".claude/settings.local.json";
+    let mut sources = vec![read_json(&claude.join("settings.json"), MAX_FILE).unwrap_or(Value::Null), p.entry.clone()];
+    if !place.tracked(local_rel) {
+        sources.push(read_json(&place.root.join(local_rel), MAX_FILE).unwrap_or(Value::Null));
+    }
+    p.all = sources.iter().any(|s| s.get("enableAllProjectMcpServers").and_then(Value::as_bool) == Some(true));
+    p.enabled = sources.iter().flat_map(|s| strings(s.get("enabledMcpjsonServers"))).collect();
+    p.disabled = sources.iter().flat_map(|s| strings(s.get("disabledMcpjsonServers"))).collect();
+    p
+}
+
+/// The root of the repository `cwd` is in (its first checkout's folder), or `cwd` outside one: where Claude Code keeps a
+/// folder's own state.
+pub(crate) fn repository_root(home: &Path, cwd: &Path) -> PathBuf {
+    Place::of(home, cwd).root
+}
+
+/// A JSON file of at most `max` bytes, read for another module of the shell.
+pub(crate) fn read_json_file(path: &Path, max: u64) -> Option<Value> {
+    read_json(path, max)
 }
 
 /// Every server of a `.mcp.json` body as if approved, for another module's test.
