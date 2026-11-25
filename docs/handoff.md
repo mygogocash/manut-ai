@@ -211,9 +211,6 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 75, source control: git and the CLIs' status, the default branch pulled when clean, a pull request made and
-     merged from a lane, each asked first (`feat/source-control`, Opus, worktree `cc-item75-source`), started 25 Nov at
-     23:10.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -243,7 +240,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,
+   Merged: 75 (Settings, Source control; a lane put up for review and its pull request merged, each one ask that shows
+   exactly what is sent and runs once, through a ledger in the shell whose runner takes a proof only the settle step
+   makes; a pull that only fast-forwards a clean default branch; agent credit lines taken out of a merge's message
+   on request; never yet run against a real remote), 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,
    and the chats History's search finds; it has no power of its own, and a test holds it to that), 71 (the lane pane's
    Diff read from the lane's own folder through git, read only and capped, so it is there
    after a restart and shows a subagent's and a hand's edits; planned by the lead and built by Sonnet in a quarter of
@@ -467,6 +467,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   enough: recognition for Thai goes through Apple's servers on this Mac (the app asks first), and the only Thai voice
   here is Kanya. Adding Thai to the Mac's Dictation might let it run on the Mac alone. macOS asks for the microphone
   and speech recognition again after every update until builds are signed.
+- **Source control (item 75):** it has never pushed, opened or merged against a real remote. In a built app, put a
+  lane of a test repository up for review and merge it, and read each ask against what GitHub then shows.
 - **Computer use (item 82, `docs/computer-use.md`):** it has never run against a real window. In a built app, turn on
   Accessibility and screen capture from Settings, Computer, then have Buddy look at TextEdit, type a line (No once,
   then Allow once) and press Command-S, and check that Command-Q, System Settings and Manut AI itself are refused with
@@ -567,6 +569,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": failed once in a loaded
+  gate on 25 Nov (it looks for the exact second, 0:42) and passed alone and in the next whole run.
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
   `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
   `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
