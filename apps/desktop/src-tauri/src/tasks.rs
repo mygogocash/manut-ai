@@ -36,8 +36,8 @@ const MAX_SEEN: usize = 100;
 pub const TIMEOUT: Duration = Duration::from_secs(20);
 /// How long an answer is kept for the same argv.
 pub const KEEP: Duration = Duration::from_secs(60);
-/// The most bytes of a program's output read.
-const MAX_OUT: u64 = 16 << 20;
+/// The most bytes of a program's output read (lane.rs takes a listing this long as one that may have been cut short).
+pub(crate) const MAX_OUT: u64 = 16 << 20;
 /// The most characters of an item's description or a comment passed to the page.
 const MAX_BODY: usize = 64 * 1024;
 /// The most comments passed to the page.

@@ -15,7 +15,8 @@
 //! A repository's own config can name programs git runs while it reads: a file monitor, an external diff, a text
 //! conversion, a clean filter. The first three are switched off on the command line. The note is read by itself whenever the
 //! page shows a session, so a repository whose own config names a clean filter, or any other program git would run
-//! (`lane::risky_setting`, item 86), is not read at all: there is no note, as for a folder that is not a repository.
+//! (`lane::risky_setting`, item 86), or one of whose submodules' own config does (`lane::config_risk_by`, item 90), is not
+//! read at all: there is no note, as for a folder that is not a repository. No diff here goes into a submodule (see `DIFF`).
 
 use std::path::{Path, PathBuf};
 
@@ -221,15 +222,9 @@ pub fn main_moved(cwd: &Path, base: Option<&str>, show: &[String]) -> Result<Opt
     let probe = Git { exe: exe.clone(), dir: cwd.to_path_buf() };
     let Some(top) = probe.line(&["rev-parse", "--show-toplevel"])? else { return Ok(None) };
     let git = Git { exe, dir: PathBuf::from(top) };
-    // the note is read by itself: nothing more is read where the repository's own config names a program git would run
-    let config = git.run(&["config", "--list", "--show-scope", "--includes", "-z"])?;
-    let risky = if config.code == Some(0) {
-        crate::lane::risky_setting(&config.out, true)
-    } else {
-        let local = git.run(&["config", "--list", "--local", "--includes", "-z"])?;
-        (local.code == Some(0)).then(|| crate::lane::risky_setting(&local.out, false)).flatten()
-    };
-    if risky.is_some() {
+    // the note is read by itself: nothing more is read where the repository's own config, or a submodule's, names a program
+    // git would run, or cannot be read
+    if crate::lane::config_risk_by(&|args: &[&str]| git.run(args).ok(), &git.dir).is_some() {
         return Ok(None);
     }
 
