@@ -325,8 +325,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
      the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
      now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets, Mac only in the draft
      release, and the updater on with the key made on 25 Nov, whose owner's copy is in `~/manut-ai-updater-key`), item
-     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice) and item 65 (a Thai dictionary for the
-     desktop). Item 64 (Apple sessions refused on the lifted routes, which turning
+     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 65 (a Thai dictionary for the
+     desktop) is parked: on 25 Nov the owner said Thai is not needed yet. Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
      - a helper's own session on the desktop (`docs/runtime-adapter.md`, "Next slices" 4);
