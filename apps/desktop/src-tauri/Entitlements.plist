@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Applied when the app is signed (bundle.macOS.entitlements in tauri.conf.json). Tauri signs with the hardened runtime,
+     signed or ad hoc, and under it the microphone needs this entitlement: the chat box's microphone and voice mode
+     (src/voice.rs, docs/voice.md). Nothing else is asked for. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

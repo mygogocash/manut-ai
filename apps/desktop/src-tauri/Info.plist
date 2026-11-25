@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by the Tauri CLI into the app's own Info.plist, and embedded in a debug build (docs/voice.md). macOS shows
+     each line in its own prompt the first time the chat box's microphone or voice mode is used (src/voice.rs). -->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Manut AI listens only while you use the microphone or voice mode in a chat, to turn what you say into text. Nothing is recorded or kept.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Manut AI turns what you say into a chat message with the Mac's own speech recognition. For a language this Mac cannot recognize by itself, Apple's servers do it, and Manut AI asks you first.</string>
+</dict>
+</plist>

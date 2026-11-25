@@ -48,10 +48,17 @@ security-framework = "3"
 # Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026),
 # and the navigation delegate whose navigation action says whether the page or one of its frames is navigating (the
 # features wry itself turns on, so nothing new is built).
-objc2 = "0.6"
+objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject", "NSURL", "NSURLRequest"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject", "NSURL", "NSURLRequest", "NSLocale", "NSSet", "NSEnumerator", "NSOperation"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKDownload"] }
+# Voice in the chat box (voice.rs, docs/voice.md): the Mac's own speech recognition (Speech), the microphone's audio
+# handed to it in memory (AVFAudio's AVAudioEngine) and the microphone's permission (AVFoundation's AVCaptureDevice).
+# The objc2 project's bindings to Apple's frameworks, as the crates above (Zlib OR Apache-2.0 OR MIT); only the classes
+# voice.rs names are built. objc2's `exception` (wry already turns it on) catches a tap the input device refuses.
+objc2-speech = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-avf-audio", "SFSpeechRecognizer", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFSpeechRecognitionTask", "SFSpeechRecognitionTaskHint", "SFTranscription"] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioBuffer", "AVAudioFormat", "AVAudioTime", "AVAudioTypes"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
 
 # In-app updates (docs/releasing.md): reads the endpoint and the pinned public key in tauri.conf.json and installs only
 # a build signed with the matching private key. Desktop only, as Tauri's own guide says; lib.rs registers it.

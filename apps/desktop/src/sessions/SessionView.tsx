@@ -211,6 +211,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         onFolder={takesFiles ? () => getSessions().pickFolder(rec.lane?.dir || rec.cwd) : undefined}
         actions={!!commands}
         rows
+        // the microphone and voice mode (item 81): voice mode talks with this session's agent, its asks on their cards
+        voice
         tools={
           <>
             <AgentFixed agent={rec.agent} />

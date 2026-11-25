@@ -141,3 +141,29 @@ describe("the app's updater is tied to the release", () => {
     assert.match(code, /desktop-v\$version/);
   });
 });
+
+describe("the Mac app may use the microphone for voice in the chat box", () => {
+  // Item 81 (docs/voice.md): Tauri signs with the hardened runtime, with a Developer ID or ad hoc, and under it the
+  // microphone needs the audio-input entitlement; macOS shows the two usage lines in its prompts, and an app that asks
+  // for speech recognition without its line is closed by macOS.
+  const conf = JSON.parse(read("apps/desktop/src-tauri/tauri.conf.json"));
+  const plistKeys = (text) => [...text.matchAll(/<key>([^<]+)<\/key>/g)].map((m) => m[1]);
+
+  it("signs both builds with the one entitlement the microphone needs, and nothing else", () => {
+    assert.equal(conf.bundle.macOS.entitlements, "./Entitlements.plist");
+    const ent = read("apps/desktop/src-tauri/Entitlements.plist");
+    assert.deepEqual(plistKeys(ent), ["com.apple.security.device.audio-input"]);
+    assert.match(ent, /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/);
+    // the unsigned build only changes the identity, so it keeps the entitlement; neither turns the hardened runtime off
+    assert.match(job("mac"), /--config '\{"bundle":\{"macOS":\{"signingIdentity":"-"\}\}\}'/);
+    assert.notEqual(conf.bundle.macOS.hardenedRuntime, false);
+    assert.doesNotMatch(code, /hardenedRuntime/);
+  });
+
+  it("says in Info.plist why it asks for the microphone and for speech recognition", () => {
+    const info = read("apps/desktop/src-tauri/Info.plist");
+    assert.deepEqual(plistKeys(info), ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription"]);
+    assert.match(info, /Nothing is recorded or kept\./);
+    assert.match(info, /Apple's servers do it, and Manut AI asks you first\./);
+  });
+});
