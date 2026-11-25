@@ -8,7 +8,8 @@ import { setLang } from "../i18n";
 import { MockHost, MockRuntime } from "../runtime/mock";
 import type { JobRow } from "../runtime/mission";
 import { createStore } from "../state/store";
-import { HistoryView, historyDays, historyLanes, type HistoryDayView, type HistoryRowView } from "./HistoryPage";
+import { HistoryView, historyArchive, historyDays, historyLanes, type HistoryDayView, type HistoryRowView } from "./HistoryPage";
+import { threadRowKey, type RowMarks } from "../sidebar/rows";
 
 const words = (html: string) =>
   html
@@ -148,5 +149,76 @@ describe("the days built from the store", () => {
     expect(find("kit")).toEqual(["Stock sync", "Thai date format"]);
     expect(find("kit", "team")).toEqual([]);
     expect(find("refund")).toEqual([]);
+  });
+});
+
+describe("the Archive (item 76)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function withThreads() {
+    vi.useFakeTimers();
+    const store = await demoStore();
+    await store.actions.startTaskThread("buddy", "Discount for a bulk order", "What can we offer for twenty candles?");
+    await store.actions.startTaskThread("buddy", "Weekend sale post", "Draft the weekend sale post.");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await store.actions.loadThreads("buddy");
+    const rows = store.getSnapshot().threads.buddy;
+    return { store, rows, key: (title: string) => threadRowKey("buddy", rows.find((r) => r.title === title)!.thread) };
+  }
+  const titles = (days: HistoryDayView[]) => days.flatMap((d) => d.rows.map((r) => r.title)).sort();
+
+  it("takes an archived chat out of the days and lists it in the Archive, which brings it back by its menu", async () => {
+    const { store, key } = await withThreads();
+    const marks: RowMarks = { [key("Weekend sale post")]: { archived: 5 } };
+    expect(titles(historyDays(store.getSnapshot(), "", Date.now(), [], "all", marks))).toEqual(["Discount for a bulk order"]);
+    expect(historyArchive(store.getSnapshot(), marks, Date.now()).map((r) => r.title)).toEqual(["Weekend sale post"]);
+    // with no marks (a list saved before them) everything is listed and the Archive is empty
+    expect(titles(historyDays(store.getSnapshot(), "", Date.now()))).toEqual(["Discount for a bulk order", "Weekend sale post"]);
+    expect(historyArchive(store.getSnapshot(), {}, Date.now())).toEqual([]);
+  });
+
+  it("keeps a snoozed, settled or pinned chat in History, tagged, so it can always be found", async () => {
+    const { store, key } = await withThreads();
+    const marks: RowMarks = { [key("Weekend sale post")]: { snoozed: Date.now() + 3_600_000 }, [key("Discount for a bulk order")]: { pinned: 1 } };
+    const rows = historyDays(store.getSnapshot(), "", Date.now(), [], "all", marks).flatMap((d) => d.rows);
+    expect(Object.fromEntries(rows.map((r) => [r.title, r.place]))).toEqual({ "Weekend sale post": "snoozed", "Discount for a bulk order": "pinned" });
+  });
+
+  it("draws the Archive under the days with its count, and no Archive when nothing is archived", async () => {
+    const { store, key } = await withThreads();
+    const marks: RowMarks = { [key("Weekend sale post")]: { archived: 5 } };
+    const archive = historyArchive(store.getSnapshot(), marks, Date.now());
+    const withIt = renderToString(<HistoryView days={historyDays(store.getSnapshot(), "", Date.now(), [], "all", marks)} archive={archive} query="" hasThreads onQuery={noop} />);
+    expect(withIt).toContain('data-testid="history-archive"');
+    expect(words(withIt)).toContain("Archive (1)");
+    // the list is shut until it is asked for
+    expect(withIt).not.toContain('data-testid="history-archive-row"');
+    const without = renderToString(<HistoryView days={historyDays(store.getSnapshot(), "", Date.now())} archive={[]} query="" hasThreads onQuery={noop} />);
+    expect(without).not.toContain("history-archive");
+  });
+
+  it("tags a chat's row with Pinned, Snoozed until a time and Done for now, and gives each chat row its menu button", () => {
+    const html = renderToString(
+      <HistoryView
+        days={[
+          day([
+            row({ key: "a", rowKey: "thread:buddy:a", place: "pinned", mark: { pinned: 1 } }),
+            row({ key: "b", rowKey: "thread:buddy:b", place: "snoozed", mark: { snoozed: new Date(2026, 10, 26, 9).getTime() } }),
+            row({ key: "c", rowKey: "thread:buddy:c", place: "settled", mark: { settled: true } }),
+            row({ key: "j", kind: "job" }),
+          ]),
+        ]}
+        nowMs={new Date(2026, 10, 25, 14).getTime()}
+        query=""
+        hasThreads
+        onQuery={noop}
+      />,
+    );
+    const text = words(html);
+    expect(text).toContain("Pinned");
+    expect(text).toMatch(/Snoozed until \w{3} 09:00/);
+    expect(text).toContain("Done for now");
+    // a job has no menu: three chats, three buttons
+    expect(count(html, 'data-testid="row-more"')).toBe(3);
   });
 });

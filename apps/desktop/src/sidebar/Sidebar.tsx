@@ -22,7 +22,11 @@ import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type ShopsState } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
-import { currentRow, MENU_ROWS, recentThreads, rowPage, type MenuRow } from "./menu";
+import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
+import { rowStatus } from "../threads/ThreadTree";
+import { MoreButton, useRowMenu } from "./RowMenu";
+import { threadRowKey, useRowMarks } from "./rows";
+import { RowsWatcher } from "./RowsWatcher";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
@@ -45,6 +49,38 @@ export interface RecentItem {
   key: string;
   title: string;
   open: () => void;
+  /** Pinned (on top, marked) or settled (below, small and quiet); none for a plain recent chat. */
+  place?: "pinned" | "settled";
+  /** The row's key for its menu (rows.ts); a row without one has no menu. */
+  rowKey?: string;
+}
+
+/** One chat of Recent: the row, and the menu of what can be done to it (Pin, Snooze, Done for now, Archive). */
+function RecentRow({ item }: { item: RecentItem }) {
+  const marks = useRowMarks();
+  const menu = useRowMenu({ rowKey: item.rowKey ?? "", kind: "chat", mark: item.rowKey ? marks[item.rowKey] : undefined, name: item.title });
+  return (
+    <li className={`rec-li${item.place ? ` ${item.place}` : ""}${menu.isOpen ? " menu-open" : ""}`} data-place={item.place} onContextMenu={item.rowKey ? menu.onContextMenu : undefined}>
+      <button type="button" className="rec" title={item.title} onClick={item.open} data-testid="menu-recent">
+        {item.place === "pinned" && (
+          <span className="rec-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="menu-recent-pin">
+            <PinGlyph />
+          </span>
+        )}
+        {item.title}
+      </button>
+      {item.rowKey && <MoreButton name={item.title} onOpen={menu.open} className="rec-more" />}
+      {menu.menu}
+    </li>
+  );
+}
+
+function PinGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M14.5 2.5l7 7-3 1-3.5 3.5.5 4.5-2 2-4-4-5.5 5.5-1-1L7 14.5l-4-4 2-2 4.5.5L13 5.5z" />
+    </svg>
+  );
 }
 
 export function SideMenu({
@@ -115,11 +151,7 @@ export function SideMenu({
           </div>
           <ul className="sb-recent" aria-labelledby="menu-recent-h">
             {recent.map((r) => (
-              <li key={r.key}>
-                <button type="button" className="rec" title={r.title} onClick={r.open} data-testid="menu-recent">
-                  {r.title}
-                </button>
-              </li>
+              <RecentRow key={r.key} item={r} />
             ))}
           </ul>
         </>
@@ -162,14 +194,21 @@ export function Sidebar() {
   const s = useStore();
   const members = selectSidebarBots(s).map((b) => b.name);
   const untitled = t("thread.untitled");
-  const recent = recentThreads(s.threads, members).map((r) => ({
+  const marks = useRowMarks();
+  const parts = recentParts(s.threads, members, marks, (bot, row) => rowStatus(s, bot, row) === "needs_you", Date.now());
+  const item = (place: RecentItem["place"]) => (r: { bot: string; thread: string; title: string }): RecentItem => ({
     key: `${r.bot}:${r.thread}`,
     title: r.title || untitled,
     open: () => void s.openThread(r.bot, r.thread),
-  }));
+    place,
+    rowKey: threadRowKey(r.bot, r.thread),
+  });
+  const recent = [...parts.pinned.map(item("pinned")), ...parts.recent.map(item(undefined)), ...parts.settled.map(item("settled"))];
   // New (and the brand mark) opens Home; every other row opens its own page.
   const go = (row: MenuRow) => s.openPage(rowPage(row));
   return (
+    <>
+    <RowsWatcher />
     <SideMenu
       current={currentRow(s.ui, s.selectedBot)}
       needs={selectAsks(s).length}
@@ -195,5 +234,6 @@ export function Sidebar() {
         </>
       }
     />
+    </>
   );
 }

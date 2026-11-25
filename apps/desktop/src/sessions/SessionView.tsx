@@ -37,6 +37,7 @@ import { FIND_EVENT, type FindRequest } from "./term/engine-find";
 import { sessionAccountSuffix } from "./SessionsSection";
 import { PanelToggle } from "../chat/parts/PanelButton";
 import { RewindButton } from "./RewindPanel";
+import { clearSuggestion, useSuggestion } from "../chat/suggestion";
 import { workingSubagents } from "./SessionPlans";
 import { waitingSubs } from "../chat/activity/Subagents";
 import { subagentEnded } from "../state/store";
@@ -176,6 +177,8 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
     [takesFiles, rec.agent, rec.id, label],
   );
   const commands = ss.live[rec.id]?.commands?.length ? ss.live[rec.id]!.commands : undefined;
+  // the agent's predicted next message, when the person turned suggestions on and this agent can give one (lib/suggest.ts)
+  const suggestion = useSuggestion(chatKey);
   return (
     <div className="pane ss-chat" data-pane={chatKey} data-testid="session-chat">
       <Timeline
@@ -194,8 +197,13 @@ function ChatPane({ rec, chatKey }: { rec: SessionRec; chatKey: string }) {
         asking={selectAsks(s).some((a) => a.bot === chatKey)}
         offline={rec.status !== "running"}
         offlineText={offlineText}
-        onSend={(t) => void getSessions().send(rec.id, t)}
-        onSendFiles={takesFiles ? (t, files) => getSessions().sendFiles(rec.id, t, files) : undefined}
+        suggestion={suggestion}
+        onSuggestionTaken={() => clearSuggestion(chatKey)}
+        onSend={(t) => {
+          clearSuggestion(chatKey);
+          void getSessions().send(rec.id, t);
+        }}
+        onSendFiles={takesFiles ? (t, files) => (clearSuggestion(chatKey), getSessions().sendFiles(rec.id, t, files)) : undefined}
         onStop={() => void getSessions().interrupt(rec.id)}
         commands={commands}
         // Add context: a folder is named by its path (the dial reads one outside the project as blocked, with Allow this

@@ -131,9 +131,9 @@ pub fn auth_argv(_source: Source) -> Vec<String> {
 }
 
 const GH_ISSUE_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt";
-const GH_PR_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,statusCheckRollup";
+const GH_PR_FIELDS: &str = "number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup";
 const GH_ISSUE_VIEW: &str = "number,title,state,url,body,author,createdAt,updatedAt,labels,comments";
-const GH_PR_VIEW: &str = "number,title,state,url,body,author,createdAt,updatedAt,labels,comments,isDraft,statusCheckRollup";
+const GH_PR_VIEW: &str = "number,title,state,url,body,author,createdAt,updatedAt,labels,comments,isDraft,headRefName,statusCheckRollup";
 
 fn s(v: &str) -> String {
     v.to_string()
@@ -274,6 +274,9 @@ pub struct Item {
     pub updated: i64,
     /// pull / merge requests only
     pub checks: Option<Checks>,
+    /// The branch a pull / merge request is made from ("" for an issue, and when the source did not say): what the Code page's lane
+    /// rows match to show their pull request (item 76), read from the list the page already asks for, never from a call of its own.
+    pub head: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -495,6 +498,7 @@ fn gh_item(v: &Value, change: bool) -> Item {
         created: epoch(&text(v, "createdAt")),
         updated: epoch(&text(v, "updatedAt")),
         checks: if change { Some(gh_checks(v).map(|c| c.0).unwrap_or_default()) } else { None },
+        head: if change { one_line(text(v, "headRefName"), 250) } else { String::new() },
     }
 }
 
@@ -538,6 +542,7 @@ fn gl_item(v: &Value, change: bool) -> Item {
         created: epoch(&text(v, "created_at")),
         updated: epoch(&text(v, "updated_at")),
         checks,
+        head: if change { one_line(text(v, "source_branch"), 250) } else { String::new() },
     }
 }
 
@@ -968,8 +973,8 @@ mod tests {
             (Source::Github, Kind::Issues, Filter::Assigned, 1, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 28 --assignee @me --search sort:created-desc created:<=2026-11-15T18:19:59Z")),
             (Source::Github, Kind::Issues, Filter::Created, 0, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 26 --author @me --search sort:created-desc")),
             (Source::Github, Kind::Issues, Filter::Mentioned, 0, Some("issue list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt --limit 26 --mention @me --search sort:created-desc")),
-            (Source::Github, Kind::Changes, Filter::Mentioned, 7, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,statusCheckRollup --limit 28 --search mentions:@me sort:created-desc created:<=2026-11-15T18:19:59Z")),
-            (Source::Github, Kind::Changes, Filter::Assigned, 0, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,statusCheckRollup --limit 26 --assignee @me --search sort:created-desc")),
+            (Source::Github, Kind::Changes, Filter::Mentioned, 7, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup --limit 28 --search mentions:@me sort:created-desc created:<=2026-11-15T18:19:59Z")),
+            (Source::Github, Kind::Changes, Filter::Assigned, 0, Some("pr list --repo rlaope/oh-my-hermes --state open --json number,title,state,url,labels,author,createdAt,updatedAt,isDraft,headRefName,statusCheckRollup --limit 26 --assignee @me --search sort:created-desc")),
             (Source::Gitlab, Kind::Issues, Filter::Open, 2, Some("issue list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 3")),
             (Source::Gitlab, Kind::Changes, Filter::Created, 0, Some("mr list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 1 --author=@me")),
             (Source::Gitlab, Kind::Changes, Filter::Assigned, 0, Some("mr list --repo rlaope/oh-my-hermes --output json --per-page 25 --page 1 --assignee=@me")),
@@ -999,7 +1004,7 @@ mod tests {
         assert_eq!(view_argv(Source::Github, Kind::Issues, r, 12).unwrap().join(" "), "issue view 12 --repo rlaope/oh-my-hermes --json number,title,state,url,body,author,createdAt,updatedAt,labels,comments");
         assert_eq!(
             view_argv(Source::Github, Kind::Changes, r, 2907).unwrap().join(" "),
-            "pr view 2907 --repo rlaope/oh-my-hermes --json number,title,state,url,body,author,createdAt,updatedAt,labels,comments,isDraft,statusCheckRollup"
+            "pr view 2907 --repo rlaope/oh-my-hermes --json number,title,state,url,body,author,createdAt,updatedAt,labels,comments,isDraft,headRefName,statusCheckRollup"
         );
         assert_eq!(view_argv(Source::Gitlab, Kind::Issues, "g/s/p", 3).unwrap().join(" "), "issue view 3 --repo g/s/p --output json");
         assert_eq!(view_argv(Source::Gitlab, Kind::Changes, "g/p", 9).unwrap().join(" "), "mr view 9 --repo g/p --output json");
@@ -1087,6 +1092,22 @@ mod tests {
         let (p, _) = parse_list(Source::Github, Kind::Changes, 0, None, draft).unwrap();
         assert_eq!(p.items[0].state, "draft");
         assert_eq!(p.items[0].checks, Some(Checks::default()));
+    }
+
+    #[test]
+    fn a_change_carries_the_branch_it_is_made_from_and_an_issue_none() {
+        // item 76: the Code page matches a lane's branch to the open pull requests it already lists
+        let gh = r#"[{"number":8,"title":"x","state":"OPEN","isDraft":false,"headRefName":"kit/promptpay-qr","statusCheckRollup":[]}]"#;
+        let (p, _) = parse_list(Source::Github, Kind::Changes, 0, None, gh).unwrap();
+        assert_eq!(p.items[0].head, "kit/promptpay-qr");
+        // an answer without the field (an older gh) reads as no branch, never an error
+        let old = r#"[{"number":9,"title":"x","state":"OPEN","statusCheckRollup":[]}]"#;
+        assert_eq!(parse_list(Source::Github, Kind::Changes, 0, None, old).unwrap().0.items[0].head, "");
+        let issue = r#"[{"number":3,"title":"x","state":"OPEN","headRefName":"not-a-branch"}]"#;
+        assert_eq!(parse_list(Source::Github, Kind::Issues, 0, None, issue).unwrap().0.items[0].head, "");
+        let gl = r#"[{"iid":4,"title":"x","state":"opened","source_branch":"kit/fix-sso","web_url":"https://gitlab.com/g/p/-/merge_requests/4"}]"#;
+        let (p, _) = parse_list(Source::Gitlab, Kind::Changes, 0, None, gl).unwrap();
+        assert_eq!(p.items[0].head, "kit/fix-sso");
     }
 
     #[test]

@@ -214,8 +214,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    - item 82, computer use, lifted from Orca: the Settings page for the two macOS permissions, and the skill and helper
      that read and work a window, each change asked first (`feat/computer-use`, Opus, worktree `cc-item82-computer`),
      started 25 Nov at 21:25.
-   - item 76, the sidebar and threads: pin, snooze, archive and a suggested next message (`feat/sidebar-threads`,
-     Sonnet, worktree `cc-item76-sidebar`), started 25 Nov at 20:50.
+   - item 74, a Providers page for the coding agents: on or off, status, name, path, home, arguments and environment
+     (`feat/providers`, Opus, worktree `cc-item74-providers`), started 25 Nov at 22:00.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -245,7 +245,10 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 81 (a microphone and a voice mode in the chat box, with Apple's Speech framework from the shell and the Mac's
+   Merged: 76 (a row's menu pins, snoozes, marks done for now and archives a chat or lane, with an ask always bringing a
+   row back; a lane's pull request on its row from what Tasks already read; and Claude Code's predicted next message
+   in an empty box, off by default, not yet seen from a real multi-turn chat), 81 (a microphone and a voice mode in
+   the chat box, with Apple's Speech framework from the shell and the Mac's
    own voices: English on the Mac, Thai through Apple after a yes, nothing recorded, an ask never answered by voice;
    `docs/voice.md` has the steps only a person with a microphone can check, and nobody has done them yet), 72 (the
    person's own MCP servers and Skills wherever an agent runs: a lane's untracked agent settings copied

@@ -17,6 +17,8 @@ import { RunningPanel } from "../running/RunningPanel";
 import { ruleText, type Rule } from "./command";
 import { BringBack } from "./BringBack";
 import { projectName, sessionsWithKeys, useKeysVersion } from "./kitAsks";
+import { showPull } from "../tasks/state";
+import { useRowMarks } from "../sidebar/rows";
 import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
@@ -46,7 +48,9 @@ export interface KitPanelProps {
   onNewLane?: () => void;
   /** The lane whose Bring it back is open, the link on its line that opens it, and what a lane's row shows under its line
    *  (KitPanel fills these: the panel under a Reverted lane reads the stores). */
-  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below">;
+  /** The pull request on a lane's row was pressed: Tasks opens on it (tasks/state.ts `showPull`). */
+  onOpenPull?: LanesProps["onPull"];
+  laneBack?: Pick<LanesProps, "backOpen" | "onBack" | "below" | "marks" | "away" | "onAway">;
   onProject: (root: string) => void;
   onLevel: (level: KitLevel) => void;
   onAllow: (folder: string) => void;
@@ -68,7 +72,7 @@ export function KitPanelView(p: KitPanelProps) {
   return (
     <section className="kitp" aria-labelledby="kit-dial-title" data-testid="kit-panel">
       {/* the project's lanes come first, as the canvas's Code board draws them: the work, then how much Kit does alone */}
-      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onNew={p.onNewLane} {...p.laneBack} />
+      <LanesView rows={p.lanes ?? []} now={p.now ?? 0} onOpen={p.onOpenLane ?? (() => undefined)} onPull={p.onOpenPull} onNew={p.onNewLane} {...p.laneBack} />
       {p.kept}
       <div className="band">
         <span id="kit-dial-title">{t("kit.dial")}</span>
@@ -218,6 +222,9 @@ export function KitPanel() {
   // the lane whose Bring it back panel is open: one at a time
   const [backFor, setBackFor] = useState<string | null>(null);
   const closeBack = useCallback(() => setBackFor(null), []);
+  // what the person did to each lane (pinned, snoozed, done for now, archived), and whether the snoozed and archived ones are open
+  const rowMarks = useRowMarks();
+  const [awayOpen, setAwayOpen] = useState(false);
   // the time a turn has run moves while one does
   const now = useNow(lanes.some((l) => l.status === "working"), 1_000);
   if (!root) return null;
@@ -236,10 +243,17 @@ export function KitPanel() {
         now={now}
         onOpenLane={openLane}
         onNewLane={() => openNewSessionMenu({ chat: true, folder: root })}
+        onOpenPull={(pull) => {
+          // the same place Tasks opens a request: its list for that repository, with the request selected
+          if (showPull(pull.source, pull.repo, pull.number, root)) getStore().actions.openTasks();
+        }}
         laneBack={{
           backOpen: backFor,
           onBack: (id) => setBackFor((now) => (now === id ? null : id)),
           below: (row) => <LaneBelow root={root} row={row} backOpen={backFor === row.id} onCloseBack={closeBack} />,
+          marks: rowMarks,
+          away: awayOpen,
+          onAway: () => setAwayOpen((v) => !v),
         }}
         onProject={setPicked}
         onLevel={(level) => updateKitProjects((x) => setLevel(x, root, level))}

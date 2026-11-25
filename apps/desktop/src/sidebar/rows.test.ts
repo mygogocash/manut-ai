@@ -1,0 +1,148 @@
+// The row marks (item 76): reading a saved record (an older build's, one with a field this build does not know, a broken one), the
+// places a row goes, that an ask always brings a snoozed or settled row back, and what is kept across a restart.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyRow, arrange, getRowMarks, markRow, nextWake, parseRowMarks, placeOf, resetRowMarks, ROWS_KEY, setRowMarks, snoozeUntil, sweep, threadRowKey, sessionRowKey, wakeAll, wakeRows, type RowMarks } from "./rows";
+
+const HOUR = 3_600_000;
+const T = threadRowKey("buddy", "t1");
+
+describe("reading a saved record", () => {
+  it("reads a record from a build before marks (none, an empty object, null, a list) as no marks", () => {
+    for (const raw of [null, "", "{}", "null", "[]", "5", "not json"]) expect(parseRowMarks(raw), String(raw)).toEqual({});
+  });
+
+  it("keeps the marks of a chat and drops a field this build does not know without failing", () => {
+    const raw = JSON.stringify({ [T]: { pinned: 5, colour: "red", pinnedBy: "x" }, "thread:buddy:t2": { settled: true, future: { a: 1 } }, "thread:buddy:t3": { snoozed: 9 } });
+    expect(parseRowMarks(raw)).toEqual({ [T]: { pinned: 5 }, "thread:buddy:t2": { settled: true }, "thread:buddy:t3": { snoozed: 9 } });
+  });
+
+  it("drops a mark of the wrong type, a row with no mark left and a key that is not a chat's", () => {
+    const raw = JSON.stringify({ [T]: { pinned: "yes", snoozed: -1, settled: false }, [sessionRowKey("s1")]: { pinned: 1 }, x: { pinned: 1 }, "thread:b:t": 5 });
+    expect(parseRowMarks(raw)).toEqual({});
+  });
+
+  it("puts a row in one place when a hand-edited record names several: archived, then pinned, snoozed, settled", () => {
+    expect(parseRowMarks(JSON.stringify({ [T]: { pinned: 1, snoozed: 2, settled: true, archived: 3 } }))).toEqual({ [T]: { archived: 3 } });
+    expect(parseRowMarks(JSON.stringify({ [T]: { snoozed: 2, settled: true } }))).toEqual({ [T]: { snoozed: 2 } });
+  });
+});
+
+describe("where a row goes", () => {
+  const NOW = 1_000_000;
+  it("is normal with no mark", () => expect(placeOf(undefined, false, NOW)).toBe("normal"));
+  it("is pinned, snoozed until its time, settled or archived by its mark", () => {
+    expect(placeOf({ pinned: 1 }, false, NOW)).toBe("pinned");
+    expect(placeOf({ snoozed: NOW + 1 }, false, NOW)).toBe("snoozed");
+    expect(placeOf({ snoozed: NOW }, false, NOW)).toBe("normal");
+    expect(placeOf({ settled: true }, false, NOW)).toBe("settled");
+    expect(placeOf({ archived: 1 }, false, NOW)).toBe("archived");
+  });
+
+  it("never hides an ask: a snoozed or settled row that needs the person is in its normal place", () => {
+    expect(placeOf({ snoozed: NOW + HOUR }, true, NOW)).toBe("normal");
+    expect(placeOf({ settled: true }, true, NOW)).toBe("normal");
+    // pinned stays on top; archived is the person's own word, and Needs you still lists its ask
+    expect(placeOf({ pinned: 1 }, true, NOW)).toBe("pinned");
+    expect(placeOf({ archived: 1 }, true, NOW)).toBe("archived");
+  });
+
+  it("orders the pinned by when they were pinned, first pinned on top, and keeps every other order", () => {
+    const items = ["a", "b", "c", "d", "e"].map((key) => ({ key }));
+    const marks: RowMarks = { c: { pinned: 20 }, a: { pinned: 30 }, e: { settled: true }, d: { snoozed: NOW + HOUR } };
+    const p = arrange(items, marks, NOW);
+    expect(p.pinned.map((x) => x.key)).toEqual(["c", "a"]);
+    expect(p.normal.map((x) => x.key)).toEqual(["b"]);
+    expect(p.settled.map((x) => x.key)).toEqual(["e"]);
+    expect(p.snoozed.map((x) => x.key)).toEqual(["d"]);
+  });
+});
+
+describe("changing a row", () => {
+  it("pins once (a second pin keeps its place), and unpins", () => {
+    const a = applyRow({}, "k", { do: "pin" }, 5);
+    expect(a).toEqual({ k: { pinned: 5 } });
+    expect(applyRow(a, "k", { do: "pin" }, 9)).toBe(a);
+    expect(applyRow(a, "k", { do: "unpin" }, 9)).toEqual({});
+    expect(applyRow({}, "k", { do: "unpin" }, 9)).toEqual({});
+  });
+
+  it("keeps a row in one place: each of snooze, settle and archive replaces a pin, and a pin replaces a snooze", () => {
+    const pinned: RowMarks = { k: { pinned: 1 } };
+    expect(applyRow(pinned, "k", { do: "snooze", until: 50 }, 2)).toEqual({ k: { snoozed: 50 } });
+    expect(applyRow(pinned, "k", { do: "settle" }, 2)).toEqual({ k: { settled: true } });
+    expect(applyRow(pinned, "k", { do: "archive" }, 2)).toEqual({ k: { archived: 2 } });
+    expect(applyRow({ k: { snoozed: 50 } }, "k", { do: "pin" }, 2)).toEqual({ k: { pinned: 2 } });
+  });
+
+  it("does not pin, snooze or settle an archived row; restore brings it back and nothing more", () => {
+    const gone: RowMarks = { k: { archived: 1 } };
+    for (const a of [{ do: "pin" }, { do: "snooze", until: 5 }, { do: "settle" }] as const) expect(applyRow(gone, "k", a, 9), a.do).toBe(gone);
+    expect(applyRow(gone, "k", { do: "restore" }, 9)).toEqual({});
+    expect(applyRow({ k: { pinned: 1 } }, "k", { do: "restore" }, 9)).toEqual({ k: { pinned: 1 } });
+  });
+
+  it("wakes a snoozed or settled row and leaves a pin alone; opening clears a settle but not a snooze", () => {
+    expect(applyRow({ k: { snoozed: 50 } }, "k", { do: "wake" }, 1)).toEqual({});
+    expect(applyRow({ k: { settled: true } }, "k", { do: "wake" }, 1)).toEqual({});
+    const pinned: RowMarks = { k: { pinned: 1 } };
+    expect(applyRow(pinned, "k", { do: "wake" }, 1)).toBe(pinned);
+    expect(applyRow({ k: { settled: true } }, "k", { do: "open" }, 1)).toEqual({});
+    const snoozed: RowMarks = { k: { snoozed: 50 } };
+    expect(applyRow(snoozed, "k", { do: "open" }, 1)).toBe(snoozed);
+  });
+
+  it("wakes every row an ask came to", () => {
+    const marks: RowMarks = { a: { settled: true }, b: { snoozed: 99 }, c: { pinned: 1 }, d: { settled: true } };
+    expect(wakeAll(marks, ["a", "b", "c"], 1)).toEqual({ c: { pinned: 1 }, d: { settled: true } });
+  });
+});
+
+describe("snoozing", () => {
+  // Wednesday 25 November 2026, 14:30 on this computer's clock
+  const wed = new Date(2026, 10, 25, 14, 30).getTime();
+  it("offers an hour, tomorrow morning at 9:00 and next Monday at 9:00", () => {
+    expect(snoozeUntil("hour", wed)).toBe(wed + HOUR);
+    expect(new Date(snoozeUntil("tomorrow", wed))).toEqual(new Date(2026, 10, 26, 9));
+    expect(new Date(snoozeUntil("week", wed))).toEqual(new Date(2026, 10, 30, 9));
+  });
+  it("makes next week a full week from a Monday", () => {
+    const mon = new Date(2026, 10, 23, 8).getTime();
+    expect(new Date(snoozeUntil("week", mon))).toEqual(new Date(2026, 10, 30, 9));
+    const sun = new Date(2026, 10, 29, 20).getTime();
+    expect(new Date(snoozeUntil("week", sun))).toEqual(new Date(2026, 10, 30, 9));
+  });
+  it("names the next time a snooze ends, and drops one that has ended and a closed session's marks", () => {
+    const marks: RowMarks = { a: { snoozed: 500 }, b: { snoozed: 300 }, c: { pinned: 1 }, "session:s1": { pinned: 2 }, "session:s2": { settled: true } };
+    expect(nextWake(marks, 100)).toBe(300);
+    expect(nextWake({ c: { pinned: 1 } }, 100)).toBeNull();
+    expect(sweep(marks, 400, (k) => k !== "session:s2")).toEqual({ a: { snoozed: 500 }, c: { pinned: 1 }, "session:s1": { pinned: 2 } });
+    // nothing to drop: the same object
+    expect(sweep(marks, 100, () => true)).toBe(marks);
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("what is kept", () => {
+  const disk = new Map<string, string>();
+  beforeEach(() => {
+    disk.clear();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => disk.get(k) ?? null, setItem: (k: string, v: string) => void disk.set(k, v) });
+    resetRowMarks({});
+  });
+
+  it("saves a chat's marks and not a lane's or a terminal's, which are of this run", () => {
+    markRow(T, { do: "pin" }, 7);
+    markRow(sessionRowKey("s1"), { do: "pin" }, 8);
+    expect(getRowMarks()[sessionRowKey("s1")]).toEqual({ pinned: 8 });
+    expect(JSON.parse(localStorage.getItem(ROWS_KEY) ?? "{}")).toEqual({ [T]: { pinned: 7 } });
+    // a restart reads what was kept
+    expect(parseRowMarks(localStorage.getItem(ROWS_KEY))).toEqual({ [T]: { pinned: 7 } });
+  });
+
+  it("clears a mark when an ask wakes the row, and says nothing for a row with none", () => {
+    setRowMarks({ [T]: { settled: true } });
+    wakeRows([T, "thread:buddy:other"]);
+    expect(getRowMarks()).toEqual({});
+  });
+});

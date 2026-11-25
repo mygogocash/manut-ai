@@ -559,7 +559,7 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 /// restarted session ran with, and the SESSIONS id (`s<digits>`, whose attachment folder a Claude Code chat may
 /// read) cross from the UI.
 #[tauri::command]
-async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
+async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, suggest: Option<bool>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
         // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
@@ -574,7 +574,7 @@ async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume:
             ("claude", Some(s)) => user_home().and_then(|h| session_files::session_dir(&h, s)).ok(),
             _ => None,
         };
-        chats.start_agent(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), move |out| {
+        chats.start_agent_with(&agent, std::path::Path::new(&cwd), resume.as_deref(), &account_env, files.as_deref(), suggest.unwrap_or(false), move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
                 ChatOut::Exit(code, error) => serde_json::json!({"event": "exit", "code": code, "error": error}),
