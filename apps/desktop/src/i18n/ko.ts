@@ -1854,7 +1854,6 @@ export const ko: Record<Key, string> = {
   "kit.say.check": "프로젝트 검사를 실행해요. 아무것도 바꾸지 않아요.",
   "kit.say.history": "프로젝트 기록을 읽어요. 아무것도 바꾸지 않아요.",
   "kit.say.fetch": "원격에서 최신 내용을 가져와요. 파일은 바꾸지 않아요.",
-  "kit.say.web": "인터넷의 페이지를 읽어요. 아무것도 바꾸지 않아요.",
   "kit.say.edit": "{path}을(를) 바꿔요.",
   "kit.say.change": "프로젝트의 파일을 바꿔요.",
   "kit.say.format": "코드 모양을 정리해요.",

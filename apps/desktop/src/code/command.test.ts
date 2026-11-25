@@ -159,7 +159,8 @@ describe("what a step does", () => {
     expect(read("curl file:///etc/passwd").outside).toEqual(["/etc/passwd"]);
     expect(read(`curl file://${root}/src/a.ts`).outside).toEqual([]);
     expect(action("curl -K ./curlrc https://example.com")).toBe("unknown");
-    expect(action("curl https://example.com/a")).toBe("read");
+    // reaching the network is no read: a request asks as anything that sends does (item 88)
+    expect(read("curl https://example.com/a")).toMatchObject({ action: "unknown", say: { key: "kit.say.send" } });
   });
 
   it("changes to this Mac outside the project ask every time", () => {

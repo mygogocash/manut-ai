@@ -1854,7 +1854,6 @@ export const zh: Record<Key, string> = {
   "kit.say.check": "运行项目的检查。不做任何改动。",
   "kit.say.history": "读取项目的历史。不做任何改动。",
   "kit.say.fetch": "从远程获取最新内容。不改动任何文件。",
-  "kit.say.web": "读取互联网上的页面。不做任何改动。",
   "kit.say.edit": "修改 {path}。",
   "kit.say.change": "修改项目中的文件。",
   "kit.say.format": "整理代码的格式。",

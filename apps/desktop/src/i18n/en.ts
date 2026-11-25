@@ -1864,7 +1864,6 @@ export const en = {
   "kit.say.check": "Runs the project's checks. Changes nothing.",
   "kit.say.history": "Reads the project's history. Changes nothing.",
   "kit.say.fetch": "Fetches the latest from the remote. Changes no file.",
-  "kit.say.web": "Reads a page from the internet. Changes nothing.",
   "kit.say.edit": "Changes {path}.",
   "kit.say.change": "Changes files in the project.",
   "kit.say.format": "Tidies the code's layout.",

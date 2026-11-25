@@ -1854,7 +1854,6 @@ export const ja: Record<Key, string> = {
   "kit.say.check": "プロジェクトのチェックを実行します。何も変えません。",
   "kit.say.history": "プロジェクトの履歴を読みます。何も変えません。",
   "kit.say.fetch": "リモートから最新の内容を取得します。ファイルは変えません。",
-  "kit.say.web": "インターネットのページを読みます。何も変えません。",
   "kit.say.edit": "{path} を変えます。",
   "kit.say.change": "プロジェクトのファイルを変えます。",
   "kit.say.format": "コードの体裁を整えます。",
