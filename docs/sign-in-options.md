@@ -80,7 +80,8 @@ it says "not on yet" wherever the API has the sign-in off, which is every enviro
 ## What needs the owner
 
 - Which way, or which first.
-- For Apple: enrolling the business in the Apple Developer Program ($99 a year) and adding the app's identifier.
+- For Apple: the owner has an Apple Developer account (said on 25 Nov 2026); what is left is adding the app's identifier
+  and a Services ID for Sign in with Apple there, and whether the account is the business's (an organization) or a person's.
 - For codes by email, which are built and off: the owner's yes to turn them on, the Workers Paid plan, if the account
   is not on it, and a domain to send from (the sender's name and address are what owners see).
 - For LINE Login: resuming LINE work, and a LINE Login channel.
