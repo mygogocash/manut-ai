@@ -2,13 +2,14 @@
 // picked shows for the coding session whose chat is beside it. Diff lists each file the session changed, the newest change to each,
 // drawn as the timeline draws a file edit's change (chat/activity/Work.tsx) with the same masker. Preview is the lane's project run
 // with its own dev server in the lane's own folder (LanePreview.tsx, previewStore.ts): the command first, then Start, its address
-// with Open and Stop, and how it ended; under it the Sample rows of the secrets Kit's changed code reads (PreviewSample.tsx).
+// with Open in browser and Stop, its page in a frame that fills the view while it runs, and how it ended; under it the Sample
+// rows of the secrets Kit's changed code reads (PreviewSample.tsx).
 // Tests shows what the lane keeps of its tests (lane.ts): the last run that finished, as testRun.ts read it, with when it finished
 // and the command that ran it, whether a file changed since, and any run still in progress. The lane keeps none of a test's output
 // (it can print anything), so the board's sample output is not drawn: what is shown is the result that was read.
 // `LanePaneView` takes everything it shows as props and uses no hooks, so a test can draw it; `LanePane` reads the stores.
 import "./lanepane.css";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { hhmm } from "../app/time";
 import { DiffView } from "../chat/activity/Work";
 import { t, type Key } from "../i18n";
@@ -20,6 +21,7 @@ import { laneOf, useLanesVersion } from "./laneStore";
 import { LanePreviewView, type LanePreviewProps } from "./LanePreview";
 import { PreviewSampleView } from "./PreviewSample";
 import { needsOfChat, onSample, usePreviewVersion, type Need } from "./preview";
+import { frameHere } from "./previewFrame";
 import { isLive, previewSecrets } from "./previewRun";
 import { openPreview, readPreview, startPreview, stopPreview, usePreviewRecord } from "./previewStore";
 
@@ -166,6 +168,9 @@ export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; c
   usePreviewVersion();
   const [view, setView] = useState<PaneView>("diff");
   const [asked, setAsked] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
+  // Where the page runs does not change while it is open.
+  const here = useMemo(frameHere, []);
   const files = useChangedFiles(chat);
   const record = usePreviewRecord(chatKey);
   const live = isLive(record.run);
@@ -184,6 +189,9 @@ export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; c
     },
     onStop: () => void stopPreview(chatKey),
     onOpen: () => void openPreview(chatKey),
+    here,
+    reloads,
+    onReload: () => setReloads((n) => n + 1),
   };
   return <LanePaneView view={view} onView={setView} files={files} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} />;
 }

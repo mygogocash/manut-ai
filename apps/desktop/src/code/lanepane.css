@@ -76,9 +76,11 @@
   outline: 2px solid var(--aui-border-strong);
   outline-offset: 1px;
 }
-/* The desktop's own: what the picked chip shows is a column of boxes and rows, 12px apart as the canvas's side pane spaces them. */
+/* The desktop's own: what the picked chip shows is a column of boxes and rows, 12px apart as the canvas's side pane spaces them. It
+   takes the pane's whole height, so the preview's page can fill what is left of it; the other views' boxes keep their own height. */
 .lpane .lp-view {
   display: flex;
+  flex: 1 0 auto;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
@@ -199,6 +201,26 @@
 .lpane .lp-samples {
   overflow-wrap: anywhere;
 }
+/* The preview's page (LanePreview.tsx, `PageFrame`): the board draws the page in a .box under the chips; here the frame fills the
+   rest of the view, with a floor so a short window still shows a part of it worth reading (the pane scrolls past it then). */
+.lpane .lp-page {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: hidden;
+}
+/* The desktop's own: a page that sets no background shows on white, as a browser tab shows it, in both themes. */
+.lpane .lp-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: inherit;
+  background: #fff;
+}
+.lpane .lp-frame-note {
+  overflow-wrap: anywhere;
+}
 
 /* The Sample rows (PreviewSample.tsx) as Kit's panel draws them: the canvas's .rowl, .tag and .lk, scoped here. */
 .lpane .rowl {
@@ -251,5 +273,9 @@
     max-height: 45vh;
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+  /* Under the chat the pane is at most 45% of the window, so the page's floor is lower; the pane scrolls to the rest. */
+  .lpane .lp-page {
+    min-height: 240px;
   }
 }

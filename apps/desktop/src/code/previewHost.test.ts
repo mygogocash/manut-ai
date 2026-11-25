@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockRunningHost } from "../running/host";
 import { TauriHost } from "../sessions/host";
-import { MOCK_PROJECT, MockPreviewHost, readEvent, TauriPreviewHost, type MockPreviewCall, type PreviewEvent } from "./previewHost";
+import { MOCK_PROJECT, MOCK_URL, MockPreviewHost, readEvent, StubbedPreviewHost, TauriPreviewHost, type MockPreviewCall, type PreviewEvent, type PreviewShellStub } from "./previewHost";
+import { findDevUrl } from "@manut/dev-url";
 import { START_WAIT_MS } from "./previewRun";
 
 /** The shell's bridge stood in by a function, recording what the page invoked. */
@@ -123,6 +124,29 @@ describe("the browser's fake preview", () => {
     expect(got.at(-1)).toEqual({ event: "exit", code: 1, stopped: false });
   });
 
+  it("prints the address a test gives it, as Vite prints one, and lists that port; Vite's own default otherwise", async () => {
+    const printed = async (url?: string) => {
+      const h = new MockPreviewHost(g);
+      if (url) h.control.url = url;
+      const got: PreviewEvent[] = [];
+      const id = await h.start(`/lanes/a/${url ?? "default"}`, ["pnpm", "run", "dev"], "{}", [], (ev) => got.push(ev));
+      await vi.advanceTimersByTimeAsync(h.control.delay);
+      // stopped again, so it leaves the page's list of what keeps running as it found it
+      await h.stop(id);
+      await vi.advanceTimersByTimeAsync(200);
+      return got.flatMap((e) => (e.event === "lines" ? e.lines : []));
+    };
+    expect(MOCK_URL).toBe("http://localhost:5173/");
+    expect(findDevUrl(await printed())?.url).toBe(MOCK_URL);
+    // the port in bold, as Vite writes it: the app reads the address through the escapes
+    const stand = await printed("http://localhost:5373/");
+    expect(stand.join("\n")).toContain(`http://localhost:\u001b[1m5373\u001b[22m/`);
+    expect(findDevUrl(stand)?.url).toBe("http://localhost:5373/");
+    expect(findDevUrl(await printed("http://[::1]:5374/"))?.url).toBe("http://[::1]:5374/");
+    // an address of another computer is printed, and never read as where it runs
+    expect(findDevUrl(await printed("http://192.168.1.5:5173/"))).toBeNull();
+  });
+
   it("refuses when told, with the shell's word", async () => {
     const h = new MockPreviewHost(g);
     h.control.mode = "refuse:missing:pnpm";
@@ -154,6 +178,74 @@ describe("the fake preview with what keeps running", () => {
       expect(list.rows).toEqual([]);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("a stubbed shell", () => {
+  /** A test's stand-in for the shell's preview commands, as a Playwright spec puts one in `window.__manutPreviewShell`. */
+  const stub = () => {
+    const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
+    let channel: { onmessage: (m: unknown) => void } | null = null;
+    class Channel {
+      onmessage: (m: unknown) => void = () => {};
+    }
+    const shell: PreviewShellStub = {
+      Channel,
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "preview_read") return { packageJson: "{}", files: ["package.json"], envExample: null };
+        if (cmd === "preview_start") {
+          channel = args?.onEvent as never;
+          return 7;
+        }
+        if (cmd === "preview_stop") return "stopping";
+        return null;
+      },
+    };
+    return { shell, calls, send: (m: unknown) => channel!.onmessage(m) };
+  };
+
+  it("runs the desktop's own host against it: the same commands, arguments and reading of its events", async () => {
+    const { shell, calls, send } = stub();
+    const h = new StubbedPreviewHost(shell);
+    expect(h).toBeInstanceOf(TauriPreviewHost);
+    expect(await h.read("/lanes/a/b")).toEqual({ packageJson: "{}", files: ["package.json"], envExample: null });
+    const got: PreviewEvent[] = [];
+    expect(await h.start("/lanes/a/b", ["pnpm", "run", "dev"], "{}", [], (ev) => got.push(ev))).toBe(7);
+    send({ event: "lines", lines: ["Local: http://localhost:5373/", 4] });
+    send({ event: "nonsense" });
+    expect(got).toEqual([{ event: "lines", lines: ["Local: http://localhost:5373/"] }]);
+    expect(await h.stop(7)).toBe("stopping");
+    await h.open("http://localhost:5373/");
+    expect(calls.map((c) => c.cmd)).toEqual(["preview_read", "preview_start", "preview_stop", "preview_open"]);
+    expect(calls[3].args).toEqual({ url: "http://localhost:5373/" });
+  });
+
+  it("is used only in a plain browser: inside the desktop app the shell is the real one, whatever a page sets", async () => {
+    const g = globalThis as { __manutPreviewShell?: PreviewShellStub; __TAURI_INTERNALS__?: unknown; window?: unknown };
+    const hadWindow = "window" in g;
+    try {
+      vi.resetModules();
+      g.window = globalThis;
+      g.__manutPreviewShell = stub().shell;
+      expect((await import("./previewHost")).getPreviewHost()).toBeInstanceOf((await import("./previewHost")).StubbedPreviewHost);
+      vi.resetModules();
+      g.__TAURI_INTERNALS__ = {};
+      const inApp = await import("./previewHost");
+      const host = inApp.getPreviewHost();
+      expect(host).toBeInstanceOf(inApp.TauriPreviewHost);
+      expect(host).not.toBeInstanceOf(inApp.StubbedPreviewHost);
+      vi.resetModules();
+      delete g.__TAURI_INTERNALS__;
+      delete g.__manutPreviewShell;
+      const plain = await import("./previewHost");
+      expect(plain.getPreviewHost()).toBeInstanceOf(plain.MockPreviewHost);
+    } finally {
+      delete g.__TAURI_INTERNALS__;
+      delete g.__manutPreviewShell;
+      if (!hadWindow) delete g.window;
+      vi.resetModules();
     }
   });
 });

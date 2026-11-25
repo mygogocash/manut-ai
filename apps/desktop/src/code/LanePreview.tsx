@@ -1,12 +1,16 @@
 // The Preview view beside a lane (the design canvas's Code board, "What to look at", Preview): the lane's project started with its
 // own dev server, in the lane's own folder. The view names the exact command before anything runs (`$ pnpm run dev`, then Start),
-// says in plain words why there is none, and follows the run: Starting, Running at its address with Open and Stop, Stopped, Ended
-// with its exit code and its last lines (any key hidden), and Could not start with why. A lane that works in the developer's own
-// folder gets no Start: their folder can hold a real `.env.local`. No page of the project is drawn here: the app's own pages may
-// frame nothing (`frame-src 'none'`), so Open hands the address to the person's browser. `LanePreviewView` takes everything it
-// shows as props and uses no hooks, so a test can draw it; LanePane.tsx reads the store (previewStore.ts) and hands it over.
-import { listText, t } from "../i18n";
+// says in plain words why there is none, and follows the run: Starting, Running at its address with Open in browser and Stop,
+// Stopped, Ended with its exit code and its last lines (any key hidden), and Could not start with why. A lane that works in the
+// developer's own folder gets no Start: their folder can hold a real `.env.local`. While it runs at an address, the page at that
+// address is drawn in a frame that fills the view, with Reload and Open in browser above it, as the board draws the page in a box;
+// the frame goes the moment the run is no longer Running. Only that very address is ever put in the frame, and only when
+// previewFrame.ts lets it (the shell's own loopback rule, a host the app's CSP names, not the app's own origin, not Windows);
+// otherwise the view says why and keeps Open in browser. `LanePreviewView` takes everything it shows as props and uses no hooks,
+// so a test can draw it; LanePane.tsx reads the store (previewStore.ts) and hands it over.
+import { listText, t, type Key } from "../i18n";
 import type { PreviewRecord } from "./previewStore";
+import { FRAME_SANDBOX, framePlan, type FrameHere, type NoFrame } from "./previewFrame";
 import { isLive, lastLines, NONE_WORDS, whyWords } from "./previewRun";
 
 export interface LanePreviewProps {
@@ -18,6 +22,42 @@ export interface LanePreviewProps {
   onStart: () => void;
   onStop: () => void;
   onOpen: () => void;
+  /** Where the page runs (its own origin, and whether this is Windows), which decides whether the preview's page is framed. */
+  here: FrameHere;
+  /** How many times Reload was pressed: the frame is made again at the preview's address each time. */
+  reloads: number;
+  onReload: () => void;
+}
+
+/** Why the page is not drawn, in words. */
+const NO_FRAME_WORDS: Readonly<Record<NoFrame, Key>> = {
+  not_loopback: "lane.preview.noFrame.not_loopback",
+  windows: "lane.preview.noFrame.windows",
+  unnamed: "lane.preview.noFrame.unnamed",
+  own: "lane.preview.noFrame.own",
+};
+
+/** The page at the preview's own address, in a frame that fills the view, sandboxed (previewFrame.ts says what each token is for).
+ *  Made again at that address on each Reload; it cannot be told to reload itself from here, since it is another origin's page. */
+function PageFrame({ src, reloads }: { src: string; reloads: number }) {
+  return (
+    <>
+      <div className="box lp-page" data-testid="lane-preview-page">
+        <iframe
+          key={`${src}#${reloads}`}
+          className="lp-frame"
+          src={src}
+          sandbox={FRAME_SANDBOX}
+          referrerPolicy="no-referrer"
+          title={t("lane.preview.frame", { url: src })}
+          data-testid="lane-preview-frame"
+        />
+      </div>
+      <p className="mut lp-frame-note" data-testid="lane-preview-frame-note">
+        {t("lane.preview.frameNote")}
+      </p>
+    </>
+  );
 }
 
 /** The command in a code line, as the board writes a command. */
@@ -54,7 +94,7 @@ function StopButton({ busy, onStop }: { busy: boolean; onStop: () => void }) {
   );
 }
 
-export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen }: LanePreviewProps) {
+export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen, here, reloads, onReload }: LanePreviewProps) {
   if (!dir) {
     return (
       <div className="box lp-box" data-testid="lane-preview" data-phase="only">
@@ -92,6 +132,8 @@ export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen 
       </p>
     );
   const why = run.why ? whyWords(run.why) : null;
+  // Only while it runs at an address: the frame goes the moment it stops, ends or is being stopped.
+  const frame = run.phase === "running" && run.url ? framePlan(run.url, here) : null;
   return (
     <>
       <div className="box lp-box" data-testid="lane-preview" data-phase={run.phase}>
@@ -119,11 +161,21 @@ export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen 
             </div>
             <Command label={run.label} />
             <div className="lp-acts">
+              {frame && "src" in frame && (
+                <button type="button" className="btn" onClick={onReload} data-testid="lane-preview-reload">
+                  {t("lane.preview.reload")}
+                </button>
+              )}
               <button type="button" className="btn dark" onClick={onOpen} data-testid="lane-preview-open">
                 {t("lane.preview.open")}
               </button>
               <StopButton busy={false} onStop={onStop} />
             </div>
+            {frame && "no" in frame && (
+              <p className="mut" data-testid="lane-preview-noframe" data-why={frame.no}>
+                {t(NO_FRAME_WORDS[frame.no])}
+              </p>
+            )}
             {record.openFailed && (
               <p className="mut lp-result err" role="status" data-testid="lane-preview-open-failed">
                 {t("lane.preview.openFailed")}
@@ -180,6 +232,7 @@ export function LanePreviewView({ dir, record, samples, onStart, onStop, onOpen 
           </>
         )}
       </div>
+      {frame && "src" in frame && <PageFrame src={frame.src} reloads={reloads} />}
       {samples.length > 0 && (live || ready) && (
         <p className="mut lp-samples" data-testid="lane-preview-samples">
           {t("lane.preview.samples", { names: listText(samples) })}
