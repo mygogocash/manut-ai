@@ -2,7 +2,9 @@ mod accounts;
 mod acp_agents;
 mod api_link;
 mod acp_chat;
+mod acp_mcp;
 mod agent_chat;
+mod agent_config;
 mod app_menu;
 mod appimage;
 mod ask_tool;
@@ -18,6 +20,7 @@ mod git_branch;
 mod git_moved;
 mod lane;
 mod lane_clean;
+mod lane_config;
 mod past_chats;
 mod platform;
 mod outpost;
@@ -319,8 +322,12 @@ async fn session_start(
     tauri::async_runtime::spawn_blocking(move || {
         // The account Settings › Accounts picked for new sessions of this agent's CLI (or, for a session started
         // again after a restart, the one it ran with): its home variable, or nothing ("This computer").
-        // chat_start passes the same.
+        // chat_start passes the same. An added account gets the person's MCP servers, skills and settings first, never
+        // their sign-in (`accounts::share`).
         let account_env = user_home().map(|h| accounts::session_env_for(&h, &agent, account.as_deref())).unwrap_or_default();
+        if let Ok(h) = user_home() {
+            accounts::prepare(&h, &agent, &account_env);
+        }
         sessions.start_agent(&agent, std::path::Path::new(&cwd), session_id.as_deref(), resume.as_deref(), link.as_deref(), &account_env, cols, rows, move |ev| match ev {
             Output::Data(b) => {
                 let _ = on_data.send(InvokeResponseBody::Raw(b));
@@ -553,8 +560,12 @@ async fn session_close_all(shell: State<'_, Shell>) -> Result<(), String> {
 async fn chat_start(shell: State<'_, Shell>, agent: String, cwd: String, resume: Option<String>, account: Option<String>, session: Option<String>, on_event: Channel<serde_json::Value>) -> Result<u32, String> {
     let chats = shell.chats.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // The same account as a terminal session of this agent: its home variable, or nothing ("This computer").
+        // The same account as a terminal session of this agent: its home variable, or nothing ("This computer"), with the
+        // person's configuration shared into an added account's home first.
         let account_env = user_home().map(|h| accounts::session_env_for(&h, &agent, account.as_deref())).unwrap_or_default();
+        if let Ok(h) = user_home() {
+            accounts::prepare(&h, &agent, &account_env);
+        }
         // Claude Code: the session's attachment folder (`s<digits>` under ~/.manut/session-files), made now so its
         // copies are readable without a card; no folder (a bad id, a link) only means a card per read
         let files = match (agent.as_str(), session.as_deref()) {
@@ -738,6 +749,20 @@ async fn lane_worktree(cwd: String, names: Vec<String>, start: Option<lane::Star
     let home = user_home()?;
     let start = start.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || lane::make_with(&home, std::path::Path::new(&cwd), &names, &start)).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
+/// from their own files for the person's own home and, when given, the project folder `cwd` (agent_config.rs). Only reads,
+/// and names only: never a command, an argument, an environment value, a header or an address.
+#[tauri::command]
+async fn agent_config_list(cwd: Option<String>) -> Result<Vec<agent_config::AgentConfig>, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let project = cwd.map(PathBuf::from).filter(|p| p.is_absolute());
+        agent_config::read(&home, project.as_deref(), &|k| std::env::var(k).ok())
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
@@ -961,6 +986,7 @@ async fn buddy_start(shell: State<'_, Shell>, agent: String, prompt: String, on_
     tauri::async_runtime::spawn_blocking(move || {
         let home = user_home()?;
         let account_env = accounts::session_env_for(&home, &agent, None);
+        accounts::prepare(&home, &agent, &account_env);
         buddy_chat::start(&buddy, &home, &agent, &prompt, &account_env, move |out| {
             let _ = on_event.send(match out {
                 ChatOut::Event(e) => e,
@@ -1335,6 +1361,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_projects,
         lane_remove,
         lane_root_check,
+        agent_config_list,
         lane_release,
         lane_clean_merged,
         session_main_moved,

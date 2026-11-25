@@ -32,6 +32,9 @@ zeroize = "1"
 # A rewind's copy of a folder that is not a git repository keeps each content once, under its sha256
 # (turn_files.rs); already in the tree via tauri
 sha2 = "0.10"
+# Settings › MCP and Skills reads the names of the MCP servers in Codex's own `config.toml` (agent_config.rs); already in
+# the tree via tauri
+toml = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
