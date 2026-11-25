@@ -171,6 +171,8 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 53, the preview itself, first slice: Start, Open in the system browser and Stop in the pane's Preview view,
      run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at 09:50.
+   - item 55, how a request that left was decided: one `state=recent` read for the shop an ask left closes its card
+     in plain words (`feat/how-decided`, Sonnet), started 25 Nov at 10:20.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
