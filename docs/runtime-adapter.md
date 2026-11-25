@@ -863,13 +863,14 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
 2. **Streaming events.** The API long-polls one task's events (`GET /v1/tasks/:id/events/wait`); following a whole
    shop needs a tenant-wide feed, or the relay once the owner turns it on (gate G3). That replaces the one-minute
    re-read and lets a task's row change live.
-3. **Asks of the API**, none built here: an index of a shop's open requests in its object, since
-   `GET /v1/approvals?state=open` still reads every task's requests on every read, as the export read every task before
-   the task list (A shop the person owns, above); a way for Pause everyone to stop a job already running, and for a request to wait while the team is paused, if the owner wants
-   the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
+3. **Asks of the API**, none built here: a way for Pause everyone to stop a job already running, and for a request to wait
+   while the team is paused, if the owner wants the canvas's pause; a way to link an owner's identity to their shop; `APPLE_CLIENT_ID` on dev, or a LINE Login
    provider; a tenant-wide event feed; and a helper's name with a decision (so "Already decided by Mint" does not depend on
    a note she passed on). A way to say how a request that left on its own was decided is built (When nobody here answered it, above:
-   `GET /v1/approvals?state=recent` read when an ask leaves, at one more request).
+   `GET /v1/approvals?state=recent` read when an ask leaves, at one more request). So is the index of a shop's open requests
+   this list asked for: the API's approval lookup (December item 48, `docs/pilot-api.md`, "How the shop's approvals are
+   found"), so `GET /v1/approvals?state=open` reads only the tasks that may hold an open request, and `state=recent` costs a
+   few more reads, not a walk of every task.
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
    time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
    already); a helper's own session on the desktop. (Older tasks than the newest 50, which a screen asks for with Show older, are

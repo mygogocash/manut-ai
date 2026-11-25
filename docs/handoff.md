@@ -174,11 +174,13 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 53, the preview itself, first slice: Start, Open in the system browser and Stop in the pane's Preview view,
      run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at about 09:40.
-   - item 55, how a request that left was decided: one `state=recent` read for the shop an ask left closes its card
-     in plain words (`feat/how-decided`, Sonnet), started 25 Nov at about 09:55.
+   - item 57, the console's Routines page for operators: a shop's routines and its team, with pause, resume and
+     remove asked first (`feat/console-routines`, Sonnet), started 25 Nov when item 55 reported.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
+   A Stop on the lead's thread also stops its helpers, and nothing resumes them: on 25 Nov items 53 and 55 were sent on
+   in their own threads (`t3_thread_send`), which keeps their context, after checking each worktree for unpushed work.
    On 25 Nov item 51's run failed with "Your organization has disabled Claude subscription access for Claude Code":
    it did not last, since a new helper started at 09:50 runs. Nothing resumes such a run; item 51's commits were all made, so the
    lead pushed its branch from its worktree. If it happens again, build as the lead and don't switch providers unasked.
@@ -187,7 +189,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 56 (the outpost sets switches and check boxes a page draws itself, `role="switch"` or `role="checkbox"`
+   Merged: 55 (how a request that left was decided: when an ask leaves the connected desktop's open approvals with no
+   answer from this app, one `state=recent` read for its shop, with that shop's own session, closes the card as approved
+   or declined by whom, withdrawn, ended or timed out, or as before when it cannot say; at most 4 seconds; desktop only),
+   56 (the outpost sets switches and check boxes a page draws itself, `role="switch"` or `role="checkbox"`
    with `aria-checked`, as it sets a check box, and refuses one half on, disabled or read-only; local pages in WebKit
    and Chromium only; the Rust tests run in CI, as `step.rs` changed only inside its `FIELDS` script),
    54 (the retention prune clears the approval lookup's entries of the requests it removes: the task notes
