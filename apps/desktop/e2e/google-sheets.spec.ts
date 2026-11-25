@@ -1,7 +1,8 @@
 // Customize › Connections' Google Sheets row (src/pages/GooglePane.tsx, google.ts; docs/connectors.md, 4b): in Practice, where the row
 // shows a sample sheet with two months already sent and sends nothing, and over a stubbed desktop shell against an API that has
 // Google off (which is what every real environment answers until the owner's Google client exists) and one that lets the owner
-// connect, where Google's page opens in the system browser and the row reads again when the window comes back to the front. Both run
+// connect, where Google's page opens in the system browser and the row reads again when the window comes back to the front, and where
+// Ton's request for a month's books, once the owner decided it somewhere else, closes its card in how it was settled. Both run
 // on the app's own runtime, so the page asks for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the
 // mock bridge, which has no Practice and no Connected. The clock is fixed at 24 November 2026, so the sample's months are October
 // and September 2026 whatever day the suite runs.
@@ -274,7 +275,15 @@ test.describe("in Practice", () => {
 
 // ---- over a stubbed desktop shell -----------------------------------------------------------------------------------------
 
-type Stage = { __calls: { cmd: string; method?: string; path?: string; bearer?: string | null; body?: unknown }[]; __opened: string[]; __consent: () => void };
+type Stage = {
+  __calls: { cmd: string; method?: string; path?: string; query?: string; bearer?: string | null; body?: unknown }[];
+  __opened: string[];
+  __consent: () => void;
+  /** Settles Ton's request somewhere else, as the API would then list it: the open requests lose it and the recent ones gain it */
+  __settle: (how: Settled) => void;
+};
+/** How Ton's request stopped waiting: decided by the owner's session or from the link on LINE, approved or declined; or taken back by the team */
+type Settled = "approved" | "declined" | "from_link" | "withdrawn";
 
 /** The desktop shell is stood in the page, as the connected runtime reaches the API only through its commands: a person who owns one
  *  shop, Baan Mali, and an API that answers `google` for it. `off` is what every environment says until the owner's Google client
@@ -288,6 +297,12 @@ async function stubShell(page: Page, google: "off" | "open", books = false) {
     const consent = { given: false };
     w.__consent = () => void (consent.given = true);
     const now = Date.now();
+    // what became of Ton's request elsewhere, null while it still waits
+    const settled: { how: string | null; at: number } = { how: null, at: 0 };
+    w.__settle = (how) => {
+      settled.how = how;
+      settled.at = Date.now();
+    };
     const iso = (ms: number) => new Date(ms).toISOString();
     const shop = { id: "pilot:shop-a", name: "Baan Mali", ownerName: "Fon" };
     const reply = (status: number, json: unknown) => ({ status, body: JSON.stringify(json) });
@@ -339,15 +354,23 @@ async function stubShell(page: Page, google: "off" | "open", books = false) {
         if (cmd !== "api_request") return null;
         const url = new URL(String(args.url));
         const body = args.body ? JSON.parse(args.body) : null;
-        w.__calls.push({ cmd, method: args.method, path: url.pathname, bearer: args.bearer ?? null, body });
+        w.__calls.push({ cmd, method: args.method, path: url.pathname, query: url.search, bearer: args.bearer ?? null, body });
         const key = `${args.method} ${url.pathname}`;
         switch (key) {
           case "GET /v1/shops":
             return reply(200, { shops: [{ ...shop, role: "owner" }] });
           case "POST /v1/shops/session":
             return reply(200, { shop, role: "owner", account: { id: "owner-account-1" }, session: { accessToken: "mos1.shop-a", expiresAt: iso(now + 30 * 86_400_000) } });
-          case "GET /v1/approvals":
-            return reply(200, { state: "open", approvals: books ? [append] : [] });
+          case "GET /v1/approvals": {
+            const state = url.searchParams.get("state");
+            if (state === "open") return reply(200, { state, approvals: books && !settled.how ? [append] : [] });
+            if (state !== "recent") return reply(400, { error: "invalid_state" });
+            if (!books || !settled.how) return reply(200, { state, approvals: [] });
+            // approval-core's record and standing for a request that stopped waiting, as apps/api lists them
+            const decision = { requestId: "append-1", optionId: settled.how === "declined" ? "decline" : "approve", seenRevision: 1, decidedBy: settled.how === "from_link" ? "owner-link" : "owner-session", role: "owner", decidedAt: settled.at };
+            if (settled.how === "withdrawn") return reply(200, { state, approvals: [{ ...append, record: { ...append.record, status: "withdrawn", withdrawnAt: settled.at }, standing: { state: "superseded", reason: "withdrawn" } }] });
+            return reply(200, { state, approvals: [{ ...append, record: { ...append.record, status: "decided", decision }, standing: { state: "decided", reason: "decided", decision } }] });
+          }
           // an owner's session reads the task list, its schedules and its attention items (src/runtime/http/shops.ts), not the export
           case "GET /v1/tasks":
             return reply(200, { tasks: [] });
@@ -504,6 +527,57 @@ test.describe("connected to an API", () => {
     await expect(need).toHaveCount(1);
     await expect(need.locator("code.act.whole")).toHaveText(WHOLE, { useInnerText: true });
     await expect(page.getByTestId("home-approve")).toBeVisible();
+  });
+
+  // The owner settles Ton's request somewhere else (the web app, the link on LINE, or the team takes it back). The next minute's read finds it
+  // gone from the open requests and asks the shop's recent ones how it was settled, with the shop's own session, and the card says so in
+  // words. The clock is the page's own, moved by hand, so the minute passes at once; 10:00 in Bangkok is when the request was settled.
+  for (const [how, words] of [
+    ["approved", "Approved by you at 10:00"],
+    ["declined", "Declined by you at 10:00"],
+    ["from_link", "Approved from your LINE link at 10:00"],
+    ["withdrawn", "Withdrawn: the team took it back"],
+  ] as const) {
+    test(`closes Ton's request as "${words}" when it was settled somewhere else, reading the shop's recent requests once`, async ({ page }) => {
+      await page.clock.install({ time: NOW });
+      await stubShell(page, "open", true);
+      await page.goto("/");
+      await page.getByTestId("menu-needs").click();
+      await expect(page.getByTestId("needs-row")).toHaveCount(1);
+      await page.getByTestId("needs-look").click();
+      await expect(page.getByTestId("card-approval")).toBeVisible();
+      await page.evaluate((how) => (window as unknown as Stage).__settle(how), how);
+      await page.clock.fastForward(60_000);
+      const line = page.getByTestId("card-line");
+      await expect(line).toContainText(words);
+      await expect(page.getByTestId("card-approval")).toHaveCount(0);
+      // Needs you has nothing waiting any more
+      await page.getByTestId("menu-needs").click();
+      await expect(page.getByTestId("needs-empty")).toBeVisible();
+      // one read of the recent requests, with the shop's own owner session, and nothing was decided, answered or sent
+      const calls = await page.evaluate(() => (window as unknown as Stage).__calls);
+      expect(calls.filter((c) => c.query === "?state=recent").map((c) => [c.method, c.path, c.bearer])).toEqual([["GET", "/v1/approvals", "mos1.shop-a"]]);
+      expect(calls.filter((c) => c.method === "POST" && c.path?.startsWith("/v1/approvals"))).toEqual([]);
+    });
+  }
+
+  test("closes the card as answered elsewhere, as before, when the read of the recent requests fails", async ({ page }) => {
+    await page.clock.install({ time: NOW });
+    await stubShell(page, "open", true);
+    // the shop's recent requests are not answering, though its open ones do: the card has no words for how it was settled
+    await page.addInitScript(() => {
+      const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args: { url?: string }) => Promise<unknown> } }).__TAURI_INTERNALS__;
+      const invoke = internals.invoke;
+      internals.invoke = async (cmd, args) => (cmd === "api_request" && String(args.url).endsWith("/v1/approvals?state=recent") ? { status: 503, body: JSON.stringify({ error: "approvals_unavailable" }) } : invoke(cmd, args));
+    });
+    await page.goto("/");
+    await page.getByTestId("menu-needs").click();
+    await page.getByTestId("needs-look").click();
+    await expect(page.getByTestId("card-approval")).toBeVisible();
+    await page.evaluate(() => (window as unknown as Stage).__settle("approved"));
+    await page.clock.fastForward(60_000);
+    await expect(page.getByTestId("card-line")).toContainText("Answered elsewhere");
+    await expect(page.getByTestId("card-line")).not.toContainText("Approved");
   });
 
   for (const [name, scheme, width] of [["light", "light", 1280], ["dark", "dark", 1280], ["narrow", "light", 900]] as const) {
