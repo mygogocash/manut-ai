@@ -229,7 +229,7 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    file into `~/.manut/workflows` without an ask that says what that folder is.
    Running on 26 Nov at 03:00, each a subagent of the lead's session in its own worktree:
    - item 78b, the Mac's side of reaching it from a phone and Settings, Sharing and access, built switched off
-     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`), on item 78a's package, which merged at 03:40 with 85b;
+     (`feat/remote-mac`, Opus, `cc-item78b-remote-mac`), on item 78a's package, which merged at about 03:00 with 85b;
    - item 78f part 1, reading Tailscale's state, read only (`feat/tailscale-state`, Opus,
      `cc-item78f1-tailscale-state`);
    - item 84, skills shared by a link, built switched off (`feat/skill-links`, Opus, `cc-item84-skill-links`);

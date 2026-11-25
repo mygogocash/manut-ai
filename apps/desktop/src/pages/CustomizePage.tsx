@@ -25,6 +25,7 @@ import { MenuIcon, OnGlyph } from "../sidebar/menuIcons";
 import { getStore, useStore } from "../state/store";
 import { formKeys } from "./formKeys";
 import { LOADING, load, type Load } from "./load";
+import { Loading } from "./Loading";
 import { Empty, MenuPageFrame } from "./MenuPage";
 import { ShopOutpostsPane, useConnections, VaultPane, type ConnectionsProps } from "./ConnectionsPane";
 import { GooglePane, useGoogle, type GoogleProps } from "./GooglePane";
@@ -191,7 +192,7 @@ function MemoryPane(p: MemoryPaneProps) {
   const loading = state.kind === "loading";
   const { known, waiting } = state.kind === "ready" ? groupFacts(state.value) : { known: [], waiting: [] };
   return (
-    <div className="pane" data-testid="memory-pane" aria-busy={loading || undefined}>
+    <div className="pane" data-arrive="memory" data-arrive-rows=".rowl.fact" data-testid="memory-pane" aria-busy={loading || undefined}>
       {ui.error && (
         <p className="msg err" role="alert" data-testid="memory-error">
           {ui.error}
@@ -200,9 +201,7 @@ function MemoryPane(p: MemoryPaneProps) {
       <div className="part" data-testid="memory-known">
         <Band left={t("memory.known")} right={t("memory.from")} />
         {loading && (
-          <p className="none" data-testid="memory-loading">
-            {t("memory.loading")}
-          </p>
+          <Loading label={t("memory.loading")} testId="memory-loading" strip={false} />
         )}
         {state.kind === "unavailable" && (
           <p className="none" role="status" data-testid="memory-unavailable">
@@ -443,7 +442,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
   const loading = state.kind === "loading";
   const rows = state.kind === "ready" ? state.value : [];
   return (
-    <aside className="side2" data-testid="routines" aria-busy={loading || undefined}>
+    <aside className="side2" data-arrive="routines" data-arrive-rows='[data-testid="routine"]' data-testid="routines" aria-busy={loading || undefined}>
       <div className="rhead">
         <h2 className="h2">{t("routines.title")}</h2>
         {state.kind === "ready" && (
@@ -463,9 +462,7 @@ function RoutinesPane({ p, automations, plugins }: { p: RoutinesPaneProps } & Cu
       )}
       {state.kind === "ready" && ui.form && <RoutineFormView p={p} f={ui.form} />}
       {loading && (
-        <p className="none" data-testid="routines-loading">
-          {t("routines.loading")}
-        </p>
+        <Loading label={t("routines.loading")} testId="routines-loading" strip={false} rows={2} />
       )}
       {state.kind === "unavailable" && (
         <p className="none" role="status" data-testid="routines-unavailable">
