@@ -693,6 +693,8 @@ export type AskTool = {
   paths?: string[];
   /** The folder the step runs in. */
   cwd?: string;
+  /** An MCP tool's server (Claude Code's `mcp__<server>__<tool>`): shown beside the tool, never decided on. */
+  server?: string;
 };
 
 export type BridgeEvent =

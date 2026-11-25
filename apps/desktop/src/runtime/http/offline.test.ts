@@ -431,7 +431,7 @@ describe("a look at the disk that ends late", () => {
 });
 
 describe("Practice", () => {
-  it("never reads or writes the saved read, whatever is on disk, and reaches no command of the shell at all", async () => {
+  it("never reads or writes the saved read, whatever is on disk, and reaches no command of the shell but Buddy's look for a coding agent", async () => {
     const store = memoryCacheStore(await savedRead(EARLIER));
     const shell = desktopShell(fakeApi(), store, storedSession(NOW));
     const rt = createRuntime({ mode: "practice" });
@@ -444,7 +444,8 @@ describe("Practice", () => {
     vi.useRealTimers();
     await vi.dynamicImportSettled();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(shell.calls).toEqual([]);
+    // the one thing the shell is asked is which coding agents this computer has, for Buddy to answer through (buddy.ts)
+    expect(shell.calls.filter((c) => c.cmd !== "sessions_agents")).toEqual([]);
     expect(store.calls).toEqual([]);
     expect(store.files.size).toBe(1);
   });

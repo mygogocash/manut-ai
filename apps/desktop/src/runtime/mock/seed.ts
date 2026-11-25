@@ -1,6 +1,7 @@
 // What the in-process runtime starts with: Buddy and a small team, a few lines of history each, and the model list
-// the picker shows. Everything here is staged. The names follow the design canvas's team (Nam, Pim, Ton, Kit); the
-// models are labelled as a demo so nobody reads them as a real provider.
+// the picker shows. Everything here is staged but Buddy's answers, which come from the person's own coding agent
+// (buddy.ts). The names follow the design canvas's team (Nam, Pim, Ton, Kit); the members' models are labelled as a
+// demo so nobody reads them as a real provider, and Buddy's is whatever answers it.
 import type { RoutineInput } from "@manut/routine-rules";
 import type { FactSource } from "@manut/shop-memory";
 import type { BotStatus, ModelProvider, Skill, SlashCommand } from "../../lib/protocol";
@@ -20,7 +21,8 @@ export interface BotSeed {
 export const DEMO_PROVIDER = "demo";
 
 export const BOT_SEED: readonly BotSeed[] = [
-  { name: "buddy", display_name: "Buddy", is_default: true, description: "Your assistant", status: "online", model: "demo-standard", provider: DEMO_PROVIDER, reasoning: "medium" },
+  // Buddy's model is whatever answers it, the person's own coding agent (host.ts reads it from buddy.ts), never a demo one
+  { name: "buddy", display_name: "Buddy", is_default: true, description: "Your assistant", status: "online", model: "", provider: "", reasoning: "" },
   { name: "nam", display_name: "Nam", is_default: false, description: "Sales chat", status: "online", model: "demo-standard", provider: DEMO_PROVIDER, reasoning: "low" },
   { name: "pim", display_name: "Pim", is_default: false, description: "Content", status: "online", model: "demo-standard", provider: DEMO_PROVIDER, reasoning: "medium" },
   { name: "ton", display_name: "Ton", is_default: false, description: "Books", status: "online", model: "demo-careful", provider: DEMO_PROVIDER, reasoning: "high" },
@@ -34,13 +36,9 @@ export const REASONING_LEVELS: readonly string[] = ["none", "low", "medium", "hi
 export type HistorySeed = readonly ["user" | "assistant", string, number];
 
 export const HISTORY_SEED: Readonly<Record<string, readonly HistorySeed[]>> = {
-  buddy: [
-    [
-      "assistant",
-      "Hi, I'm Buddy. This build runs on a demo runtime inside the app: nothing here reaches a real model, a real shop or a real customer.\n\nType anything for a sample answer, or try `/approve`, `/clarify`, `/interview` and `/delegate` to see how the team asks before it acts.",
-      3600,
-    ],
-  ],
+  // Buddy's welcome is in the person's language and says how Buddy answers (`buddy.hello`, host.ts): Buddy answers
+  // through the coding agent on this computer, never with a staged line
+  buddy: [],
   nam: [
     ["user", "Did anyone ask about delivery today?", 2 * 3600],
     ["assistant", "Three customers did. I drafted a reply for each and I am waiting for you before anything is sent.", 2 * 3600 - 30],

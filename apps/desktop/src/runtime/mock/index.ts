@@ -9,6 +9,27 @@ export { MockHost, OpError, sharedHost } from "./host";
 
 const DISCONNECTED: BridgeError = { code: "disconnected", message: "the runtime is not connected" };
 
+/** How long opening waits for the first look for a coding agent (MockHost.ready), so the team's first read names what
+ *  answers Buddy. The look is one call to the shell; past this the runtime opens anyway and says it when it knows. */
+const READY_MS = 2_000;
+
+/** `p`, or nothing after `ms`, whichever comes first. */
+function within(p: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((done) => {
+    timer = setTimeout(done, ms);
+  });
+  return Promise.race([p.catch(() => undefined), late]).finally(() => clearTimeout(timer));
+}
+
+/** A refusal as the protocol's reply frame carries it. */
+function refusal(e: unknown): BridgeError {
+  if (e instanceof OpError) return { code: e.code, message: e.message };
+  if (e instanceof Error) return { code: "internal", message: e.message };
+  if (e && typeof e === "object" && "code" in e && "message" in e) return e as BridgeError;
+  return { code: "internal", message: String(e) };
+}
+
 /** What the demo runtime can do beyond chat: none of the optional feature groups (it answers their reads empty). */
 export const MOCK_CAPABILITIES: RuntimeCapabilities = NO_CAPABILITIES;
 
@@ -29,7 +50,7 @@ export class MockRuntime implements RuntimeAdapter {
     if (this.opening) return this.opening;
     this.setStatus("connecting");
     // Opens a moment later, like any transport: callers that subscribe right after `connect()` see the change.
-    this.opening = Promise.resolve().then(() => {
+    this.opening = within(this.host.ready(), READY_MS).then(() => {
       this.opening = null;
       if (this.status !== "connecting") throw DISCONNECTED;
       this.unsubscribe = this.host.subscribe((ev) => this.deliver(ev));
@@ -46,16 +67,16 @@ export class MockRuntime implements RuntimeAdapter {
 
   request<K extends Op>(op: K, params?: OpParams<K>): Promise<OpResult<K>> {
     if (this.status !== "open") return Promise.reject<OpResult<K>>(DISCONNECTED);
-    // The answer arrives after the caller's own code has run on, as it would from another process.
-    return Promise.resolve().then(() => {
-      if (this.status !== "open") throw DISCONNECTED;
-      try {
-        return this.host.handle(op, (params ?? {}) as Record<string, unknown>) as OpResult<K>;
-      } catch (e) {
-        const error: BridgeError = e instanceof OpError ? { code: e.code, message: e.message } : { code: "internal", message: e instanceof Error ? e.message : String(e) };
-        throw error;
-      }
-    });
+    // The answer arrives after the caller's own code has run on, as it would from another process. An answer the host
+    // settles later (an ask of Buddy's agent, which approval-core decides) is waited for, and refused the same way.
+    return Promise.resolve()
+      .then(() => {
+        if (this.status !== "open") throw DISCONNECTED;
+        return this.host.handle(op, (params ?? {}) as Record<string, unknown>) as OpResult<K> | Promise<OpResult<K>>;
+      })
+      .catch((e: unknown) => {
+        throw refusal(e);
+      });
   }
 
   on<K extends EventName>(event: K, handler: (ev: EventOf<K>) => void): () => void {

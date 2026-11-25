@@ -4,14 +4,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeEvent } from "../../lib/protocol";
 import { ACTIVITY_KINDS, OWNER } from "../mission";
+import { AgentBuddy } from "./buddy";
+import { StandInBuddyHost } from "./buddyKit";
 import { MockHost, MockRuntime } from "./index";
 import { ACTIVITY_KEPT_MONTHS, ACTIVITY_SEED, BOT_SEED, JOB_SEED, ROUTINE_SEED } from "./seed";
 
 const T0 = 1_800_000_000;
 
-/** A fresh runtime with its own clock, connected, and every event it sends. */
+/** A fresh runtime with its own clock, connected, and every event it sends. Buddy answers through a stand-in Claude
+ *  Code, a second after each message. */
 async function open() {
-  const host = new MockHost({ now: () => T0 });
+  const agent = new StandInBuddyHost();
+  const host = new MockHost({ now: () => T0, buddy: new AgentBuddy(() => agent) });
   const rt = new MockRuntime(host);
   const events: BridgeEvent[] = [];
   rt.onAny((e) => events.push(e));
