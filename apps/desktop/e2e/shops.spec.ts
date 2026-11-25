@@ -43,8 +43,19 @@ test("a person in one shop sees no switcher, and the account row still opens Set
   await chatOpen(page);
   await startDone(page);
   await expect(page.getByTestId("shop-switch")).toHaveCount(0);
+  await expect(page.getByTestId("acct-role")).toHaveCount(0);
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("settings-view")).toBeVisible();
+});
+
+test("a person who only helps at one shop sees no switcher, and the account row marks the shop as one they help at", async ({ page }) => {
+  await mock("mock.shops", { shops: [HELPED] });
+  await page.goto("/");
+  await chatOpen(page);
+  await startDone(page);
+  await expect(page.getByTestId("shop-switch")).toHaveCount(0);
+  await expect(page.getByTestId("nav-settings")).toContainText("Ran Pa Noi");
+  await expect(page.getByTestId("acct-role")).toHaveText("Helper");
 });
 
 test("in two shops, the switch button lists them, owned first, and choosing one shows it on the account row", async ({ page }) => {
@@ -72,6 +83,8 @@ test("in two shops, the switch button lists them, owned first, and choosing one 
   await expect(menu).toHaveCount(0);
   await expect.poll(async () => (await calls("shops.switch")).map((c: any) => c.params.shop)).toEqual([HELPED.id]);
   await expect(page.getByTestId("nav-settings")).toContainText("Ran Pa Noi");
+  // the row marks a shop the person only helps at, as the list does
+  await expect(page.getByTestId("acct-role")).toHaveText("Helper");
   // Escape closes the list and gives the focus back to the button
   await button.click();
   await expect(menu).toBeVisible();
