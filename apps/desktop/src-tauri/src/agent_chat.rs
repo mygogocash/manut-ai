@@ -257,6 +257,12 @@ pub trait Adapter: Send {
     fn unrecognized(&self) -> bool {
         false
     }
+    /// The model values the agent itself listed in this process (Claude Code's `initialize` answer), in its order:
+    /// what a model pick may name where the page must not choose one of its own (Buddy's chat, `buddy_chat::check`).
+    /// Empty until the agent has listed them, and for every agent that lists none here.
+    fn models(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// The adapter for an allow-listed chat agent, or `None` for agents that have no chat mode here. `resume` is a
@@ -311,6 +317,9 @@ impl Adapter for Unrecognized {
     fn unrecognized(&self) -> bool {
         !self.spoke
     }
+    fn models(&self) -> Vec<String> {
+        self.inner.models()
+    }
     fn explain(&self, err: &str) -> String {
         let inner = self.inner.explain(err);
         // a program that spoke the protocol, or said it is not signed in, is the agent after all
@@ -359,6 +368,9 @@ impl Adapter for UsageTap {
     }
     fn explain(&self, err: &str) -> String {
         self.inner.explain(err)
+    }
+    fn models(&self) -> Vec<String> {
+        self.inner.models()
     }
 }
 
@@ -1117,6 +1129,8 @@ pub struct Claude {
     next_due: bool,
     /// model ids (`haiku`, `claude-haiku-5-5`) -> the name Claude Code shows for them
     labels: HashMap<String, String>,
+    /// the model values Claude Code listed at its start (`initialize`'s `models[].value`), in its order
+    offered: Vec<String>,
     /// the last assistant message carried an error kind (`authentication_failed`, …)
     error_kind: String,
     /// messages sent and not yet echoed back taken (`--replay-user-messages`)
@@ -1152,6 +1166,10 @@ pub struct Claude {
 
 /// Claude Code's todo tools: shown as the turn's checklist (`plan`), never as steps.
 const CLAUDE_TODO_TOOLS: [&str; 5] = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"];
+
+/// The reasoning levels Claude Code's `effortLevel` setting takes, the only ones its adapter sends
+/// (`apply_flag_settings`); Buddy's chat checks a level against the same list (`buddy_chat::allowed`).
+pub const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 impl Claude {
     pub fn new(cwd: &str) -> Claude {
@@ -1338,6 +1356,10 @@ impl Adapter for Claude {
         self.turn
     }
 
+    fn models(&self) -> Vec<String> {
+        self.offered.clone()
+    }
+
     fn on_line(&mut self, line: &str) -> Step {
         let mut st = Step::default();
         let Ok(v) = serde_json::from_str::<Value>(line) else { return st };
@@ -1471,6 +1493,7 @@ impl Adapter for Claude {
                             .map(|m| json!({"id": s(m, "value"), "label": s(m, "displayName"), "detail": s(m, "description")}))
                             .filter(|m| !m["id"].as_str().unwrap_or("").is_empty())
                             .collect();
+                        self.offered = options.iter().map(|m| s(m, "id")).collect();
                         st.emit(ev("session.models", json!({"options": options})));
                         if !self.model.is_empty() {
                             st.emit(ev("session.info", json!({"model": self.label(&self.model)})));
@@ -1928,7 +1951,7 @@ impl Adapter for Claude {
             }
             // for this process only (`apply_flag_settings`, never the settings file); manut sets it again on restart
             Input::Effort { effort } => {
-                if !["low", "medium", "high", "xhigh", "max"].contains(&effort.as_str()) {
+                if !CLAUDE_EFFORTS.contains(&effort.as_str()) {
                     return Err(format!("unknown effort {effort}"));
                 }
                 self.control(&mut st, "effort", json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": effort}}));
@@ -4024,6 +4047,12 @@ impl ChatSessions {
     pub(crate) fn roots(&self) -> Vec<(u32, u32, PathBuf)> {
         let g = self.live.lock().unwrap();
         g.iter().filter(|(_, c)| !c.exited.load(Ordering::SeqCst)).map(|(id, c)| (*id, c.pid, c.cwd.clone())).collect()
+    }
+
+    /// The model values chat `id`'s agent listed in this process ([`Adapter::models`]), or none for a chat that is gone.
+    pub fn models(&self, id: u32) -> Vec<String> {
+        let adapter = self.live.lock().unwrap().get(&id).map(|s| s.adapter.clone());
+        adapter.map(|a| a.lock().unwrap().models()).unwrap_or_default()
     }
 
     /// One thing the person did in chat `id`.
