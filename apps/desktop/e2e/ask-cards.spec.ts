@@ -322,6 +322,31 @@ for (const theme of THEMES) {
     await expect(page.getByTestId("timeline").getByTestId("card-approval")).toBeFocused();
   });
 
+  test(`${theme}: Home's Needs you is the board's compact rows, Approve the one black button where Home may settle the ask`, async ({ page }) => {
+    await open(page, theme);
+    // a plain command Home may approve, and a risky one it may not (its card in the chat is the one place for that)
+    await mock("mock.emit", {
+      events: [
+        { event: "turn.start", bot: "omh-tui" },
+        { event: "approval.request", bot: "omh-tui", request_id: "home-plain", title: "Run shell command", command: "git status --short", choices: ["once", "deny"] },
+      ],
+    });
+    await mock("mock.ask", { bot: "friren", kind: "approval" });
+    await page.getByTestId("menu-home").click();
+    const rows = page.getByTestId("home-need");
+    await expect(rows).toHaveCount(2);
+    const plain = rows.filter({ hasText: "git status --short" });
+    const risky = rows.filter({ hasText: "rm -rf build/" });
+    expect((await looks(plain)).map((l) => [l.text, l.filled])).toEqual([
+      ["Approve", true],
+      ["Look first", false],
+    ]);
+    expect((await looks(risky)).map((l) => [l.text, l.filled])).toEqual([["Look first", false]]);
+    for (const l of [...(await looks(plain)), ...(await looks(risky))]) expect(l.height).toBeGreaterThanOrEqual(34);
+    expect(await plain.evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    await shot(page.getByTestId("home-needs"), theme, "home-needs");
+  });
+
   test(`${theme}: Kit's card has Allow once as its one black button, and No still comes first`, async ({ page }) => {
     await page.addInitScript((t) => {
       localStorage.setItem("manut.theme", t);
