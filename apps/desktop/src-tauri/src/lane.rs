@@ -15,7 +15,9 @@
 //! said yes to what it holds.
 //!
 //! What comes along: the committed tree only. The developer's uncommitted changes stay in their folder, and nothing git
-//! ignores (installed dependencies, build output) is copied or linked. No hook runs while a folder is made or removed, so
+//! ignores (installed dependencies, build output) is copied or linked, with one named exception: the project's own agent
+//! settings git does not hold (`.mcp.json`, `.claude/settings.local.json`, untracked skills), copied by `lane_config.rs` and
+//! always ignored by git in the lane. No hook runs while a folder is made or removed, so
 //! nothing a project sets up on checkout happens by itself: Kit may install what the lane needs, and the dial asks first.
 //!
 //! Settings › Worktrees (item 73): the folder lanes are made under can be the person's own (`Start::root`, checked by
@@ -83,6 +85,10 @@ pub struct Made {
     /// `detached`, `ahead` (the local branch has commits the remote lacks), `diverged`, `not_in_remote` (the remote's commit has
     /// no such folder); "" when the setting was off or the remote was used. The page says it in the lane's first line.
     pub local: String,
+    /// How many of the project's own agent settings files that git does not hold came along (`lane_config.rs`): every one
+    /// ignored by git in the lane. `stayed`: how many did not, because git would see them there, or they are links or too big.
+    pub config: u32,
+    pub stayed: u32,
 }
 
 /// What Settings › Worktrees asks of a new lane: where its folder is made ("" is the default under `~/.manut/lanes`) and
@@ -701,9 +707,11 @@ pub fn make_with(home: &Path, cwd: &Path, names: &[String], start: &Start) -> Re
         if git_branch::branch(&wt) == *name {
             let inner = wt.join(&prefix);
             let dir = if prefix.is_empty() || !inner.is_dir() { wt.clone() } else { inner };
-            // read without the index's lock, so the developer's index is never written
-            let left = git.changed(cwd).unwrap_or(0);
-            return Ok(Made { branch: name.clone(), base, dir: dir.to_string_lossy().into_owned(), worktree: wt_s, left, from, local });
+            // the one exception to "the committed tree only": the project's own agent settings, each kept out of git
+            let brought = crate::lane_config::bring(&git, &top, &wt, &prefix);
+            // read without the index's lock, so the developer's index is never written; a file that came along is not "left"
+            let left = git.changed(cwd).unwrap_or(0).saturating_sub(brought.counted);
+            return Ok(Made { branch: name.clone(), base, dir: dir.to_string_lossy().into_owned(), worktree: wt_s, left, from, local, config: brought.files, stayed: brought.stayed });
         }
         let err = match &ran {
             Ok(r) => tasks::error_line(&r.err),
@@ -1018,7 +1026,7 @@ pub(crate) mod tests {
         let made = make(&home, &d, &names(&["kit/promptpay-qr", "kit/promptpay-qr-2"])).unwrap();
         let wt = home.join(".manut/lanes/web-app/promptpay-qr");
         // three of the developer's files did not come along: a change, a staged change and a new file (never what git ignores)
-        assert_eq!(made, Made { branch: "kit/promptpay-qr".into(), base: "main".into(), dir: wt.to_string_lossy().into(), worktree: wt.to_string_lossy().into(), left: 3, from: String::new(), local: String::new() });
+        assert_eq!(made, Made { branch: "kit/promptpay-qr".into(), base: "main".into(), dir: wt.to_string_lossy().into(), worktree: wt.to_string_lossy().into(), left: 3, from: String::new(), local: String::new(), config: 0, stayed: 0 });
         // the developer's folder: same branch, same index, same stash, same files
         assert_eq!((sh(&d, &["status", "--porcelain"]), sh(&d, &["stash", "list"]), sh(&d, &["symbolic-ref", "HEAD"])), before);
         assert_eq!(git_branch::branch(&d), "main");

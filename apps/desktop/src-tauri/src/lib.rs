@@ -18,6 +18,7 @@ mod git_branch;
 mod git_moved;
 mod lane;
 mod lane_clean;
+mod lane_config;
 mod past_chats;
 mod platform;
 mod outpost;
