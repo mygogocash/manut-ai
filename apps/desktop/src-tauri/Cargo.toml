@@ -50,6 +50,11 @@ block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSError", "NSObject", "NSURL", "NSURLRequest"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKDownload"] }
 
+# In-app updates (docs/releasing.md): reads the endpoint and the pinned public key in tauri.conf.json and installs only
+# a build signed with the matching private key. Desktop only, as Tauri's own guide says; lib.rs registers it.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+
 [dev-dependencies]
 # Only lib.rs's tests: Tauri's mock runtime (`tauri::test`), so a command can be sent through Tauri's own check as a framed
 # page's call arrives, and seen refused. The feature adds no crate (Cargo.lock is unchanged).
