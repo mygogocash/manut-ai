@@ -33,6 +33,13 @@ export type EndWhy =
   /** the app closed while it ran */
   | "app_closed";
 
+/** Why a run did not start (item 91): it is kept as skipped, with this reason. */
+export type BlockWhy =
+  /** the person never allowed this file: a new file, a renamed one, or one that took over another workflow's name */
+  | "not_allowed"
+  /** the file is not the text the person allowed */
+  | "changed";
+
 export type RunState = "running" | "done" | "failed" | "stopped" | "skipped";
 
 export interface RunRec {
@@ -51,7 +58,7 @@ export interface RunRec {
   /** the step it reached, 1-based (0: none sent) */
   reached: number;
   state: RunState;
-  why?: EndWhy | SkipWhy;
+  why?: EndWhy | SkipWhy | BlockWhy;
   /** the agent's own words for a failure, keys hidden and cut */
   detail?: string;
   /** the lane's session, while the app knows it */
@@ -60,7 +67,7 @@ export interface RunRec {
 }
 
 const STATES: readonly RunState[] = ["running", "done", "failed", "stopped", "skipped"];
-const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy"];
+const WHYS: readonly string[] = ["agent", "start", "send", "turn", "ended", "interrupted", "person", "off", "closed_lane", "app_closed", "closed", "asleep", "busy", "not_allowed", "changed"];
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const short = (v: unknown, max: number): string | undefined => (typeof v === "string" && v && v.length <= max ? v : undefined);
 

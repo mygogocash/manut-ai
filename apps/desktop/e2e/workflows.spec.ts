@@ -2,6 +2,8 @@
 // (`window.__manutMockWorkflows`), the switch off at first, Run now starting a lane that takes each step in order from the
 // stand-in coding agent (src/sessions/host.ts), the history saying it is done, the lane in the Code page's Lanes band, and the
 // command palette's "Run workflow: <name>", which presses the page's own Run now and is offered only while Workflows is on.
+// Item 91: a workflow runs only once the person allowed it from the card that shows every step, and a file changed since starts
+// nothing and says so.
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 import { usePlatform } from "./term-find-helpers";
@@ -58,6 +60,14 @@ test("off at first; turned on, Run now starts a lane that takes each step in ord
   await on.click();
   await expect(on).toHaveAttribute("aria-checked", "true");
   await expect(card.getByTestId("workflow-when")).toContainText("Every day at 02:00 · Next:");
+  // not allowed yet: its steps are open, every one in full, with the project, and Run now waits for Allow
+  await expect(card.getByTestId("workflow-standing")).toHaveText("Not allowed to run yet. Read its steps under Steps and project, then allow it.");
+  await expect(card.getByTestId("workflow-run-now")).toBeDisabled();
+  await expect(card.getByTestId("workflow-step")).toHaveText(["Run the tests.", "Tidy the README."]);
+  await expect(card.getByTestId("workflow-project")).toHaveText(ROOT);
+  await card.getByTestId("workflow-allow").click();
+  await expect(card.getByTestId("workflow-standing")).toHaveCount(0);
+  await expect(card.getByTestId("workflow-run-now")).toBeEnabled();
   await card.getByTestId("workflow-run-now").click();
   // step by step, then done
   await expect(card.getByTestId("workflow-run").first()).toHaveAttribute("data-state", "done", { timeout: 15_000 });
@@ -68,12 +78,25 @@ test("off at first; turned on, Run now starts a lane that takes each step in ord
   // the person's settings page stayed where it was: the lane did not open in front of them
   await expect(page.getByTestId("workflows-page")).toBeVisible();
 
+  // a step changed in the file since: Run now starts nothing, the card says so and the history keeps the skipped run
+  await page.evaluate(() => {
+    const f = (window as any).__manutMockWorkflows.files[0];
+    f.text = f.text.replace("Tidy the README.", "Push to main.");
+  });
+  await card.getByTestId("workflow-run-now").click();
+  await expect(card.getByTestId("workflow-standing")).toHaveText("This workflow's file changed. Look at it again.");
+  await expect(card.getByTestId("workflow-run").first()).toHaveAttribute("data-state", "skipped");
+  await expect(card.getByTestId("workflow-run").first()).toContainText("Skipped · This workflow's file changed. Look at it again.");
+  await expect(card.getByTestId("workflow-step")).toHaveText(["Run the tests.", "Push to main."]);
+  await expect(card.getByTestId("workflow-run-now")).toBeDisabled();
+  expect(await page.evaluate(() => (window as any).__manutSessions.getState().list.filter((r: { workflow?: string }) => r.workflow).length)).toBe(1);
+
   // the lane is listed where every lane is
   await openCode(page);
   await expect(page.getByTestId(`lane-${lane!.id}`)).toBeVisible();
 });
 
-test("the palette offers Run workflow only while Workflows is on, and presses the page's Run now", async ({ page }) => {
+test("the palette offers Run workflow only while Workflows is on and for a workflow the person allowed, and presses the page's Run now", async ({ page }) => {
   const key = (await page.evaluate(() => /Mac/.test(navigator.platform))) ? "Meta" : "Control";
   await page.keyboard.press(`${key}+k`);
   await page.getByTestId("palette-input").fill("run workflow");
@@ -82,6 +105,12 @@ test("the palette offers Run workflow only while Workflows is on, and presses th
 
   await openWorkflows(page);
   await page.getByTestId("workflows-on").click();
+  // on, but not allowed yet: still not offered
+  await page.keyboard.press(`${key}+k`);
+  await page.getByTestId("palette-input").fill("run workflow");
+  await expect(page.locator('[data-row^="do:workflow:"]')).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("workflow").filter({ hasText: "Nightly tests" }).getByTestId("workflow-allow").click();
   await page.keyboard.press(`${key}+k`);
   await page.getByTestId("palette-input").fill("run workflow");
   const row = page.locator('[data-row="do:workflow:nightly.json"]');

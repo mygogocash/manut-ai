@@ -15,6 +15,7 @@ import { openNewSessionMenu } from "../sessions/newMenu";
 import { closePalette, usePaletteOpen } from "./state";
 import { useLeaving } from "../ui/leave";
 import { getWorkflows, useWorkflows } from "../workflows/runner";
+import { standingOf } from "../workflows/allow";
 import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
 import { keyResult } from "./filter";
@@ -138,8 +139,9 @@ function OpenPalette({ leaving }: { leaving: boolean }) {
         if (getStore().getState().ui.view !== "code") s.openPage("code");
         openNewSessionMenu();
       },
-      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, or a run going
-      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
+      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, one the person has
+      // not allowed as it is now (item 91), or a run going
+      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] && standingOf(f.workflow, wf.allowed) === "allowed" ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
       // the Run now on its page: the page opens, so the run is seen starting where its button is
       runWorkflow: (file) => {
         s.openSettings("workflows");

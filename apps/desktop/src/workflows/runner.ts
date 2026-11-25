@@ -8,6 +8,11 @@
 // not ended. A turn that fails, one the person stops, the agent ending and the lane being closed each end the run. One run of a
 // workflow at a time. While Settings › Workflows is off nothing runs, nothing is scheduled, and a run going when it is turned off
 // finishes its turn and stops.
+//
+// Item 91: a run starts only from what the person allowed (allow.ts). Every way a run starts (the clock, Run now, the palette,
+// which presses Run now) goes through `begin`, which reads the folder's file as it is now and starts nothing unless its exact
+// text is the one the person allowed. The steps the run sends are the ones parsed from that same text. When it is not, the run
+// is kept as skipped with why, and the card says it.
 import { useSyncExternalStore } from "react";
 import { chatAgents, offeredAgents, type AgentId } from "../sessions/agents";
 import { getSessions, type SessionsStore } from "../sessions/sessions";
@@ -15,7 +20,8 @@ import type { ChatEvent } from "../sessions/host";
 import { getStore, type Store } from "../state/store";
 import { readFolder, type Workflow, type WorkflowFile } from "./file";
 import { clockStep, TICK_MS } from "./schedule";
-import { detailOf, keepRuns, parseRuns, settleLeftovers, type EndWhy, type RunRec, type RunState } from "./history";
+import { readAllowances, saveAllowances, standingOf, type Allowances } from "./allow";
+import { detailOf, keepRuns, parseRuns, settleLeftovers, type BlockWhy, type EndWhy, type RunRec, type RunState } from "./history";
 import { setWorkflowSettings, workflowSettings } from "./settings";
 import { getWorkflowsHost, type FolderState, type WorkflowsHost } from "./host";
 
@@ -41,10 +47,17 @@ export interface WorkflowsState {
   runs: RunRec[];
   /** the run going now, by workflow file */
   live: Record<string, LiveRun>;
+  /** what the person allowed, by workflow file (allow.ts) */
+  allowed: Allowances;
+  /** why the last run asked for did not start, by workflow file, whichever way it was asked for; cleared when one starts */
+  refused: Record<string, RunRefusal>;
 }
 
-/** Why Run now did not start a run. */
-export type RunRefusal = "off" | "running" | "unreadable";
+/** Why a run did not start. `off`, `running` and `unreadable` are Run now's own; the rest are kept in the history too. */
+export type RunRefusal = "off" | "running" | "unreadable" | BlockWhy;
+
+/** Why Allow did not record an allowance: the file is not the text the page showed. */
+export type AllowRefusal = "changed";
 
 const RUNS_KEY = "manut.workflows.runs";
 const CLOCK_KEY = "manut.workflows.clock";
@@ -84,6 +97,8 @@ export function createWorkflows(deps: WorkflowDeps) {
     files: [],
     runs: settleLeftovers(parseRuns(read(RUNS_KEY)), loadedAt),
     live: {},
+    allowed: readAllowances(),
+    refused: {},
   };
   let seq = 0;
   const set = (patch: Partial<WorkflowsState>) => {
@@ -127,7 +142,7 @@ export function createWorkflows(deps: WorkflowDeps) {
       const f = await host.read();
       const files = readFolder(f.files);
       noteSeen(files);
-      set({ folder: { path: f.path, state: f.state, more: f.more }, files });
+      set({ folder: { path: f.path, state: f.state, more: f.more }, files, allowed: readAllowances() });
     } catch {
       set({ folder: { ...state.folder, state: "unreadable" } });
     }
@@ -152,7 +167,23 @@ export function createWorkflows(deps: WorkflowDeps) {
 
   const setLive = (file: string, l: LiveRun) => set({ live: { ...state.live, [file]: l } });
 
-  /** Start a run of `wf`: its lane, with step 1 as the first message. */
+  /** Says on `file`'s card why the last run asked for did not start (null: it started, so nothing is said). */
+  const setRefused = (file: string, why: RunRefusal | null) => {
+    if ((state.refused[file] ?? null) === why) return;
+    const refused = { ...state.refused };
+    if (why) refused[file] = why;
+    else delete refused[file];
+    set({ refused });
+  };
+
+  /** A run of `wf` that did not start, kept as skipped with why and said on its card. */
+  const skip = (wf: Workflow, by: RunRec["by"], why: BlockWhy, due?: number): RunRefusal => {
+    addRun({ id: newId(), file: wf.file, name: wf.name, by, at: due ?? now(), ...(due !== undefined ? { due } : {}), steps: wf.steps.length, reached: 0, state: "skipped", why });
+    setRefused(wf.file, why);
+    return why;
+  };
+
+  /** Start a run of `wf`: its lane, with step 1 as the first message. `wf` is the file as read just now. */
   const begin = async (wf: Workflow, by: RunRec["by"], due?: number): Promise<RunRefusal | null> => {
     if (!workflowSettings().on) return "off";
     if (state.live[wf.file]) {
@@ -160,6 +191,10 @@ export function createWorkflows(deps: WorkflowDeps) {
       if (by === "schedule") addRun({ id: newId(), file: wf.file, name: wf.name, by, at: due ?? now(), ...(due !== undefined ? { due } : {}), steps: wf.steps.length, reached: 0, state: "skipped", why: "busy" });
       return "running";
     }
+    // only the exact text the person allowed: the allowances are read again here, so a record that cannot be read allows nothing
+    const standing = standingOf(wf, readAllowances());
+    if (standing !== "allowed") return skip(wf, by, standing, due);
+    setRefused(wf.file, null);
     const id = newId();
     setLive(wf.file, { run: id, session: null, step: -1, steps: [...wf.steps] });
     addRun({ id, file: wf.file, name: wf.name, by, at: now(), ...(due !== undefined ? { due } : {}), steps: wf.steps.length, reached: 0, state: "running" });
@@ -270,13 +305,36 @@ export function createWorkflows(deps: WorkflowDeps) {
     refresh,
     tick,
     /** Run now: the page's button and the palette's "Run workflow" press this. The file is read again first, so what runs is what is
-     *  in the folder now. */
+     *  in the folder now, and only while that is what the person allowed. Why it did not start is said on the card. */
     async runNow(file: string): Promise<RunRefusal | null> {
-      if (!workflowSettings().on) return "off";
-      await refresh();
+      const why = await (async (): Promise<RunRefusal | null> => {
+        if (!workflowSettings().on) return "off";
+        await refresh();
+        const wf = workflowOf(file);
+        if (!wf) return "unreadable";
+        return begin(wf, "person");
+      })();
+      setRefused(file, why);
+      return why;
+    },
+    /** "Allow this workflow to run", pressed on the card that shows every step of the text whose digest is `digest`. What is
+     *  allowed is that text: when the folder now holds anything else for `file` (read since the page drew it), nothing is
+     *  recorded and the page shows the file as it is now. */
+    async allow(file: string, digest: string): Promise<AllowRefusal | null> {
       const wf = workflowOf(file);
-      if (!wf) return "unreadable";
-      return begin(wf, "person");
+      if (!wf || wf.digest !== digest) return "changed";
+      saveAllowances({ ...readAllowances(), [file]: { digest, project: wf.project, at: now() } });
+      // read back, so the page never shows an allowance the storage did not keep
+      set({ allowed: readAllowances() });
+      if (standingOf(wf, state.allowed) === "allowed") setRefused(file, null);
+      return null;
+    },
+    /** "Stop allowing": the file is not allowed again until the person allows it again. A run going finishes as it would. */
+    disallow(file: string) {
+      const next = { ...readAllowances() };
+      delete next[file];
+      saveAllowances(next);
+      set({ allowed: readAllowances() });
     },
     /** The run sends no further step: it stops when the step it is on ends. */
     stopAfterStep(file: string) {

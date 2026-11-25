@@ -54,6 +54,98 @@
 .wf-live.ask {
   color: var(--ink);
 }
+/* item 91: why a workflow cannot run yet. Plain text, still: it waits for the person, so it does not move or take a colour */
+.wf-stand {
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 600;
+}
+/* "Steps and project", the kit's accordion (KitMore: acch, accp) in the card's own band */
+.wf-look {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.wf-look-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--body);
+  text-align: left;
+}
+.wf-look-h:hover {
+  background: var(--hov);
+}
+.wf-chev {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform var(--tr-switch);
+}
+.wf-look-h[aria-expanded="true"] .wf-chev {
+  transform: rotate(180deg);
+}
+.wf-look-p {
+  padding: 4px 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: var(--anim-rise);
+}
+.wf-look-p[hidden] {
+  display: none;
+}
+.wf-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: 12px;
+}
+.wf-facts dt {
+  color: var(--quiet);
+}
+.wf-facts dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.wf-facts dd.mono {
+  font-family: var(--mono);
+}
+/* every step in full: kept as written, line breaks and all, never cut */
+.wf-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.wf-steps li {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wf-allow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.wf-allow .wf-sub {
+  flex: 1 1 240px;
+  font-size: 12px;
+}
+.wf-allow .st-btn {
+  flex: none;
+  border: 1px solid var(--line);
+}
 .wf-hist {
   border-top: 1px solid var(--line);
   padding-top: 8px;

@@ -15,7 +15,12 @@
 // The schedule is a routine's trigger (`@manut/routine-rules`): every day, chosen days or a day of the month, each at a time,
 // checked by that package rather than by a second grammar. Every field is checked, and a file that fails says the first reason
 // in plain words; nothing here writes or removes a file (the shell only reads the folder, src-tauri/src/workflows.rs).
+//
+// Each workflow carries the digest of its file's exact text (item 91). A run starts only while that digest is the one the person
+// allowed (allow.ts), so the steps that run are always the ones they looked at: any change to the file, a space included, is a
+// file to look at again.
 import { createRoutine, type RoutineRefusal, type Trigger } from "@manut/routine-rules";
+import { sha256Hex } from "../runtime/http/sha256";
 
 /** The file's format version. A file may leave it out. */
 export const WORKFLOW_VERSION = 1;
@@ -41,6 +46,8 @@ export interface Workflow {
   schedule?: ScheduleTrigger;
   /** The zone its time is in; none: this computer's. */
   timeZone?: string;
+  /** SHA-256 of the file's exact text, as lowercase hex: what the person allows (allow.ts), and what a run is held to. */
+  digest: string;
 }
 
 /** Why a file is not a workflow. The shell's own reasons come first (src-tauri/src/workflows.rs). */
@@ -122,7 +129,7 @@ export function readWorkflow(file: string, text: string): WorkflowFile {
     steps.push(step);
   }
   if (v.timeZone !== undefined && (typeof v.timeZone !== "string" || routineWhy(name, { kind: "daily", at: "00:00" }, v.timeZone) === "zone")) return { file, why: "zone" };
-  const workflow: Workflow = { file, name, project: v.project, agent: v.agent, steps };
+  const workflow: Workflow = { file, name, project: v.project, agent: v.agent, steps, digest: sha256Hex(text) };
   if (typeof v.timeZone === "string") workflow.timeZone = v.timeZone;
   if (v.schedule !== undefined) {
     const s = v.schedule;

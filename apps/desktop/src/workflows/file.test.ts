@@ -1,5 +1,6 @@
 // A workflow file read and checked (item 77b): every field, each refusal with its reason, and the folder's list as the page shows it.
 import { describe, expect, it } from "vitest";
+import { sha256Hex } from "../runtime/http/sha256";
 import { plainFolder, readFolder, readWorkflow, STEP_MAX, STEPS_MAX } from "./file";
 
 const good = {
@@ -18,17 +19,33 @@ const why = (o: unknown) => {
 
 describe("a workflow file", () => {
   it("reads every field of a good file, the steps trimmed, the file's name as its id", () => {
-    const r = read({ ...good, version: 1, steps: ["  Run the tests.  ", "Fix them."] });
+    const text = JSON.stringify({ ...good, version: 1, steps: ["  Run the tests.  ", "Fix them."] });
+    const r = read(text);
     expect(r).toEqual({
       file: "nightly.json",
-      workflow: { file: "nightly.json", name: "Nightly tests", project: "/Users/nam/code/shop-site", agent: "claude", steps: ["Run the tests.", "Fix them."], schedule: { kind: "daily", at: "02:00" }, timeZone: "Asia/Bangkok" },
+      workflow: { file: "nightly.json", name: "Nightly tests", project: "/Users/nam/code/shop-site", agent: "claude", steps: ["Run the tests.", "Fix them."], schedule: { kind: "daily", at: "02:00" }, timeZone: "Asia/Bangkok", digest: sha256Hex(text) },
     });
   });
 
   it("needs no schedule, no zone and no version", () => {
     const { schedule: _s, timeZone: _z, ...plain } = good;
     const r = read(plain);
-    expect("workflow" in r && r.workflow).toEqual({ file: "nightly.json", name: good.name, project: good.project, agent: "claude", steps: good.steps });
+    expect("workflow" in r && r.workflow).toEqual({ file: "nightly.json", name: good.name, project: good.project, agent: "claude", steps: good.steps, digest: sha256Hex(JSON.stringify(plain)) });
+  });
+
+  it("carries the digest of the file's exact text: two files that read as the same workflow differ when their text does (item 91)", () => {
+    const digest = (text: string) => {
+      const r = read(text);
+      return "workflow" in r ? r.workflow.digest : null;
+    };
+    const plain = JSON.stringify(good);
+    expect(digest(plain)).toBe(sha256Hex(plain));
+    expect(digest(plain)).toMatch(/^[0-9a-f]{64}$/);
+    for (const same of [JSON.stringify(good, null, 2), `${plain}\n`, ` ${plain}`, JSON.stringify({ ...good, steps: good.steps.map((s) => ` ${s} `) })]) {
+      const r = read(same);
+      expect("workflow" in r && r.workflow.steps).toEqual(good.steps);
+      expect(digest(same), same).not.toBe(digest(plain));
+    }
   });
 
   it("takes a routine's three times: every day, chosen days and a day of the month", () => {

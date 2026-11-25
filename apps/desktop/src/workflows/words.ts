@@ -4,8 +4,10 @@
 import { lang, listText, locale, t, type Key } from "../i18n";
 import { computerZone, withZone } from "../lib/zone";
 import { nextLine } from "../pages/routines";
+import type { Standing } from "./allow";
 import type { Workflow, WorkflowWhy } from "./file";
 import type { RunRec } from "./history";
+import type { RunRefusal } from "./runner";
 import { nextAt, zoneOf } from "./schedule";
 
 /** A weekday's name in the page's language, 0 being Sunday. 4 January 1970 was a Sunday. */
@@ -37,6 +39,12 @@ export function nextWords(wf: Workflow, nowMs: number): string | null {
 
 /** Why a file is not a workflow, in words (`detail`: the field, the step's number or the other file). */
 export const fileWhyWords = (why: WorkflowWhy, detail?: string): string => t(`wf.file.${why}` as Key, { detail: detail ?? "" });
+
+/** Why a workflow cannot run yet (item 91): never allowed, or its file changed since it was. */
+export const standingWords = (s: Exclude<Standing, "allowed">): string => t(`wf.stand.${s}` as Key);
+
+/** Why a run did not start: Run now's own reasons, else the reason its skipped run keeps. */
+export const refusedWords = (r: RunRefusal): string => (r === "off" || r === "running" || r === "unreadable" ? t(`wf.refused.${r}` as Key) : t(`wf.why.${r}` as Key));
 
 /** "Done", "Failed", "Skipped", ... */
 export const stateWords = (r: Pick<RunRec, "state">): string => t(`wf.state.${r.state}` as Key);
