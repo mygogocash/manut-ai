@@ -28,6 +28,8 @@ import { composing, holdImeEnter } from "../../lib/ime";
 import { maskSecrets } from "../../lib/secrets";
 import { KitSays, kitButtons, kitDoneText, useKitCard } from "../../code/KitCardParts";
 import { addRule, updateKitProjects } from "../../code/project";
+import { computerAsk } from "../../computer/computer";
+import { computerWords } from "./computerCard";
 
 export const slot = "cards";
 
@@ -100,7 +102,10 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   useFocusRequest(bot, item.id, ref, open);
   // a closed card's line names the shop too, so a list of them from several shops still says whose each was; a key in
   // the command is never shown there (maskSecrets), as on a coding session's ask
-  const detail = [shop, maskSecrets(item.command || item.title)].filter(Boolean).join(" · ");
+  // a computer use card (item 82) is drawn in the person's language from what the shell named (computerCard.ts)
+  const comp = computerAsk(item.tool?.computer);
+  const said = comp ? computerWords(comp) : null;
+  const detail = [shop, said ? said.title : maskSecrets(item.command || item.title)].filter(Boolean).join(" · ");
   // a coding session's ask, read as one of Kit's steps (src/code/): its words, and Always allow in this project
   const kit = useKitCard(bot, item);
 
@@ -148,9 +153,10 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
     void pick(b.choice, !!b.keep);
   };
 
-  const risks = riskOf(item.command || "");
+  // a computer use card's lines are an app's words, not a command: no command risk is read in them
+  const risks = said ? [] : riskOf(item.command || "");
   // plan mode's end asks one thing in plain words: start on the plan below
-  const title = item.plan ? t("card.startPlan") : item.title || t("card.approvalNeeded");
+  const title = item.plan ? t("card.startPlan") : said ? said.title : item.title || t("card.approvalNeeded");
   return (
     <div
       ref={ref}
@@ -178,7 +184,13 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
       {/* a browser write's sentence is read whole before it is approved, exactly as the API wrote it: its block grows
           with it (cards.css .whole), and nothing in it is masked, since what is approved must be what is typed. Every
           other command hides any key in it (maskSecrets). */}
-      {item.command && <pre className={item.whole ? "card-cmd whole" : "card-cmd"}>{item.whole ? item.command : maskSecrets(item.command)}</pre>}
+      {said ? (
+        <pre className="card-cmd whole" data-testid="card-computer">
+          {said.lines}
+        </pre>
+      ) : (
+        item.command && <pre className={item.whole ? "card-cmd whole" : "card-cmd"}>{item.whole ? item.command : maskSecrets(item.command)}</pre>
+      )}
       {kit && <KitSays card={kit} />}
       {/* plan mode's plan: the agent's markdown as an answer reads, whole, scrolling inside the card */}
       {item.plan && (

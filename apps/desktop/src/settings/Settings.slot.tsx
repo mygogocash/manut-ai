@@ -30,6 +30,7 @@ import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
+import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 
 export const slot = "settings";
@@ -41,6 +42,7 @@ const APP_PAGES: { id: string; label: Key }[] = [
   { id: "terminal", label: "set.terminal" },
   // every coding agent: on or off, its program, home, arguments and variables; your own agents; the accounts (item 74)
   { id: "providers", label: "set.providers" },
+  // computer use: the two macOS permissions, read without asking, and what the agent may look at and do (ComputerPage.tsx)
   { id: "computer", label: "set.computer" },
   // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
   { id: "worktrees", label: "set.worktrees" },
@@ -678,21 +680,6 @@ function GeneralPage() {
           <Value>
             <i className={`st-dot ${s.conn === "open" ? "online" : "offline"}`} aria-hidden="true" />
             {s.conn === "open" ? t("bot.online") : s.conn === "connecting" ? t("bot.connecting") : t("bot.offline")}
-          </Value>
-        </Row>
-      </div>
-    </div>
-  );
-}
-
-function ComputerPage() {
-  return (
-    <div className="st-page">
-      <div className="st-gh st-gh0">{t("set.computer")}</div>
-      <div className="st-grp">
-        <Row title={t("set.useComputer")} hint={t("set.useComputerHint2")}>
-          <Value>
-            <span className="st-soon">{t("set.soon")}</span>
           </Value>
         </Row>
       </div>

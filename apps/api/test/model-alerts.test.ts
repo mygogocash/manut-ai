@@ -182,7 +182,9 @@ describe("crossings of a shop's cap", () => {
     ]);
     // Metadata only: the entries name a month, a cap and nothing else.
     for (const entry of entries) expect(Object.keys(entry).sort()).toEqual(["action", "actor", "amountSatang", "at", "id", "outcome", "subject"]);
-  });
+    // Several whole requests against real objects: about two seconds alone, and past the five-second default once on
+    // a slow CI runner (25 Nov 2026, `7ef8505`, three files in one run), so it has thirty.
+  }, 30_000);
 
   it("counts what was charged, not what is held: a reservation's worst case notes nothing", async () => {
     const tenant = fresh("held");

@@ -5,5 +5,9 @@ fn main() {
     if let Some(code) = manut_lib::statusline_relay(&args) {
         std::process::exit(code);
     }
+    // a chat's Claude Code runs this binary as computer use's MCP server (computer/mcp.rs): also before the app starts
+    if let Some(code) = manut_lib::computer_relay(&args) {
+        std::process::exit(code);
+    }
     manut_lib::run()
 }

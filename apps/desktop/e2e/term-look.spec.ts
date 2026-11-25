@@ -99,7 +99,8 @@ test("Terminal is a Settings page after General; manut's own two themes lead the
   await page.getByTestId("nav-settings").click();
   const nav = page.locator(".st-nav button");
   const names = await nav.allTextContents();
-  expect(names.indexOf("Terminal")).toBe(names.indexOf("General") + 1);
+  // Voice sits between them since the chat box got its microphone (item 81)
+  expect(names.slice(names.indexOf("General"), names.indexOf("Terminal") + 1)).toEqual(["General", "Voice", "Terminal"]);
   await page.getByTestId("settings-nav-terminal").click();
   await expect(page.getByTestId("settings-nav-terminal")).toHaveAttribute("aria-current", "page");
 

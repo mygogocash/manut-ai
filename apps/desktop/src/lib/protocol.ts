@@ -725,6 +725,20 @@ export type AskTool = {
   cwd?: string;
   /** An MCP tool's server (Claude Code's `mcp__<server>__<tool>`): shown beside the tool, never decided on. */
   server?: string;
+  /** A computer use ask (item 82): what will be done, and exactly where and with what, which the card draws in the
+   *  person's language (src/chat/cards/computerCard.ts). Kit's dial never decides one: its kind is `other`. */
+  computer?: ComputerAsk;
+};
+
+/** What a computer use card shows, as the shell sent it (src-tauri/src/computer/room.rs `Shown`). */
+export type ComputerAsk = {
+  act: "look" | "click" | "set" | "key" | "menu";
+  app: string;
+  window?: string;
+  control?: string;
+  text?: string;
+  keys?: string;
+  menu?: string[];
 };
 
 export type BridgeEvent =

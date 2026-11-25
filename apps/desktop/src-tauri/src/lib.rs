@@ -10,6 +10,7 @@ mod appimage;
 mod ask_tool;
 mod buddy_chat;
 mod claude_usage;
+mod computer;
 mod custom_agents;
 mod disk;
 mod dsh_chat;
@@ -1247,6 +1248,15 @@ fn window_prefs(app: AppHandle, hide: bool, open: Option<String>, quit: Option<S
 
 /// `manut --statusline-relay <account>` (a TERMINALS Claude Code's status line, `claude_usage.rs`): records the usage
 /// Claude Code reports, runs the person's own status line and returns its exit code. No app start-up happens.
+/// `manut --computer-mcp`: a chat's Claude Code runs this program as computer use's MCP server, which relays each call to
+/// the running app (computer/mcp.rs). Handled before anything of the app starts, as the status line relay is.
+pub fn computer_relay(args: &[std::ffi::OsString]) -> Option<i32> {
+    if args.get(1)?.to_str()? != computer::mcp::FLAG {
+        return None;
+    }
+    Some(computer::mcp::relay_main())
+}
+
 pub fn statusline_relay(args: &[std::ffi::OsString]) -> Option<i32> {
     if args.get(1)?.to_str()? != claude_usage::RELAY_FLAG {
         return None;
@@ -1331,6 +1341,14 @@ pub fn run() {
                     let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
                     term_link::arrived(&handle, &urls);
                 });
+            }
+            // computer use (computer/hub.rs): the socket the chats' MCP servers reach and the skill Claude Code is handed.
+            // Without it a chat simply gets no computer use; nothing else depends on it.
+            #[cfg(target_os = "macos")]
+            if let Ok(home) = user_home() {
+                if let Err(e) = computer::hub::start(&home) {
+                    eprintln!("Manut AI: no computer use: {e}");
+                }
             }
             app.manage(Shell {
                 logins: accounts::Logins::new(),
@@ -1504,7 +1522,9 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         outpost::outpost_register,
         voice::voice_status,
         voice::voice_listen,
-        voice::voice_stop
+        voice::voice_stop,
+        computer::computer_status,
+        computer::computer_open
     ];
     answer(invoke)
 }

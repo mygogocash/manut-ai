@@ -60,7 +60,13 @@ idea of the sidebar's places (pinned on top, snoozed and done-for-now below, an 
 next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied; and (at `1c3f0ee`) for
 Settings › Providers' layout and field names (a list of the agents with a switch each; for the chosen one a display name,
 the program's path, its home folder, launch arguments and environment variables whose values are never sent back):
-`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied.
+`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied. Orca
+(MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
+(`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
+`orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends
+(`computer-blocked-key-combos.ts`, which Orca ported from vercel-labs/agent-desktop, Apache-2.0), its lock check
+(`SessionLockProbe.swift`), the window number through `_AXUIElementGetWindow` (`AccessibilityWindowIdentity.swift`),
+the window picture and which windows count (`main.swift`), and the two System Settings addresses.
 
 Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which

@@ -3771,6 +3771,31 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
     }
 }
 
+/// Computer use for a chat of Claude Code that is starting (`on`): when the hub runs and macOS has given the app
+/// Accessibility (`computer::hub::attach`), its MCP server and skill are added to the command line, its asks go through
+/// computer use's adapter (`computer::tap`), and its room goes when the chat ends. Otherwise all three come back as they
+/// were.
+fn with_computer<F>(on: bool, mut argv: Vec<OsString>, adapter: Box<dyn Adapter>, mut sink: F) -> (Vec<OsString>, Box<dyn Adapter>, impl FnMut(ChatOut) + Send + 'static)
+where
+    F: FnMut(ChatOut) + Send + 'static,
+{
+    let attached = if on { crate::computer::hub::attach() } else { None };
+    let (adapter, token) = match attached {
+        Some(a) => {
+            argv.extend(a.args);
+            (crate::computer::tap::Tap::wrap(adapter, a.room), Some(a.token))
+        }
+        None => (adapter, None),
+    };
+    let sink = move |out: ChatOut| {
+        if let (ChatOut::Exit(..), Some(t)) = (&out, &token) {
+            crate::computer::hub::detach(t);
+        }
+        sink(out)
+    };
+    (argv, adapter, sink)
+}
+
 /// The arguments the setting "Suggested next message" adds to agent `agent_id`'s chat: Claude Code's `--prompt-suggestions true` when
 /// `suggest`, nothing otherwise and nothing for any other agent (none of them has a way to ask for one).
 pub fn suggest_args(agent_id: &str, suggest: bool) -> &'static [&'static str] {
@@ -3886,8 +3911,8 @@ impl ChatSessions {
         if let Some(dir) = files.filter(|_| agent_id == "claude") {
             argv.extend(add_dir_args(&argv[0], dir));
         }
-        // the person's own arguments (Settings › Providers), after every one added above
-        argv.extend(crate::providers::extra_args(agent_id, mine, through_cmd)?);
+        // the person's own arguments (Settings › Providers): checked here, and added last of all below
+        let extra = crate::providers::extra_args(agent_id, mine, through_cmd)?;
         // the person's variables and the home they set, then the account's home
         let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
         // an agent whose own default runs tools unasked (OpenCode) gets ask rules built from its own
@@ -3898,6 +3923,12 @@ impl ChatSessions {
             let rules = agent_rules(probe, label, &program, cwd, &path_env, &env)?;
             env.push(rules);
         }
+        // Claude Code's chat is handed computer use when the Mac allows it (computer/hub.rs): its asks come here as cards.
+        // It is attached only now, when nothing above can still refuse the start and leave its room behind.
+        let (mut argv, adapter, sink) = with_computer(agent_id == "claude", argv, adapter, sink);
+        // The person's arguments go after every one the app adds, computer use's included: an option of theirs that
+        // wants a value and was given none then has nothing of the app's to take for it.
+        argv.extend(extra);
         self.spawn(argv, cwd, Some(path_env), &env, adapter, sink)
     }
 
@@ -3925,6 +3956,8 @@ impl ChatSessions {
             adapter = Unrecognized::wrap(adapter, "claude", &path);
         }
         let argv = crate::buddy_chat::claude_argv(launch, prompt_file)?;
+        // Buddy's agent may use the computer as a coding chat's may, through the same card (computer/hub.rs)
+        let (argv, adapter, sink) = with_computer(true, argv, adapter, sink);
         let env = crate::providers::session_env("claude", mine, account_env, false);
         self.spawn(argv, cwd, Some(path_env), &env, adapter, sink)
     }

@@ -147,8 +147,10 @@ test("settings opens and closes; theme Light sets data-theme; bot pages", async 
   await expect(body).toContainText("medium");
   await expect(body).toContainText("friren");
 
+  // in a browser, as on Windows and Linux, computer use is the Mac's only (item 82)
   await page.getByTestId("settings-nav-computer").click();
-  await expect(page.getByTestId("settings-page-computer")).toContainText("Soon");
+  await expect(page.getByTestId("computer-not-here")).toHaveText("Computer use is on the Mac only for now.");
+  await expect(page.getByTestId("computer-open-accessibility")).toHaveCount(0);
 
   // close with the header button
   await page.getByRole("button", { name: "Close settings" }).click();
@@ -163,6 +165,35 @@ test("settings opens and closes; theme Light sets data-theme; bot pages", async 
   const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
   await page.keyboard.press(`${mod}+Comma`);
   await expect(page.getByTestId("settings-view")).toHaveCount(0);
+});
+
+test("Settings › Computer reads both permissions, opens each pane by name, and reads again on Re-check", async ({ page }) => {
+  // the Mac app's shell stood in for (src/computer/computer.ts): Accessibility on, Screen capture off, an unsigned copy
+  await page.addInitScript(() => {
+    const w = window as unknown as { __manutComputerMock: boolean; __manutComputer: unknown };
+    w.__manutComputerMock = true;
+    w.__manutComputer = { status: { accessibility: true, screen: false, signed: false }, opened: [] };
+  });
+  await open(page);
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-nav-computer").click();
+  const body = page.getByTestId("settings-page-computer");
+  await expect(page.getByTestId("computer-status")).toHaveAttribute("data-ready", "false");
+  await expect(body).toContainText("Almost ready: your agent can read app windows.");
+  await expect(page.getByTestId("computer-accessibility")).toHaveText("Allowed");
+  await expect(page.getByTestId("computer-screen")).toHaveText("Off");
+  await expect(page.getByTestId("computer-unsigned")).toBeVisible();
+  await page.getByTestId("computer-open-screen").click();
+  await page.getByTestId("computer-open-accessibility").click();
+  expect(await page.evaluate(() => (window as unknown as { __manutComputer: { opened: string[] } }).__manutComputer.opened)).toEqual(["screen", "accessibility"]);
+  // the person turns Screen capture on in System Settings and comes back: Re-check reads it
+  await page.evaluate(() => {
+    (window as unknown as { __manutComputer: { status: { screen: boolean } } }).__manutComputer.status.screen = true;
+  });
+  await page.getByTestId("computer-recheck").click();
+  await expect(page.getByTestId("computer-status")).toHaveAttribute("data-ready", "true");
+  await expect(body).toContainText("Computer use is ready");
+  await expect(page.getByTestId("computer-screen")).toHaveText("Allowed");
 });
 
 test("add bot: lists the profiles not in the list; Add attaches one, re-reads bots.list and opens it", async ({ page }) => {
