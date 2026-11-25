@@ -13,6 +13,7 @@ import { t } from "../i18n";
 import { steersOf } from "./controls";
 import type { DiskLevel, DiskState } from "../lib/disk";
 import type { ImportApp, ImportProfile } from "./term/import";
+import { readLaneFolder, type LaneFolder } from "../code/laneFolder";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
@@ -178,6 +179,9 @@ export interface SessionHost extends HistoryHost {
    *  are the paths whose two diffs are wanted; `base` names the branch it started from (none: `origin/HEAD`'s, else
    *  `main`, else `master`). null when there is nothing to say: not a repository, a detached HEAD, no git, the base itself. */
   mainMoved(cwd: string, o?: { base?: string | null; show?: string[] }): Promise<GitView | null>;
+  /** What really changed in the lane's own folder `worktree` since the lane started, from git (the Diff beside the lane): each file
+   *  with its state and text, bounded. null when this host cannot read a folder; rejects for a folder the app did not make. */
+  laneDiff(worktree: string): Promise<LaneFolder | null>;
   /** Show folder `cwd` in the file manager. */
   reveal(cwd: string): Promise<void>;
   /** Open the person's own system terminal in folder `cwd` (their shell; nothing typed into it). */
@@ -390,6 +394,10 @@ export class TauriHost implements SessionHost, BuddyHost {
   async laneRemove(worktree: string, ask: LaneRemoveAsk) {
     const { invoke } = await this.core();
     return readRemoved(await invoke<unknown>("lane_remove", { worktree, ask }));
+  }
+  async laneDiff(worktree: string) {
+    const { invoke } = await this.core();
+    return readLaneFolder(await invoke<unknown>("lane_diff", { worktree }));
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     const { invoke } = await this.core();
@@ -1361,6 +1369,10 @@ export class MockHost implements SessionHost, BuddyHost {
     if (ask.branch) this.g.__manutMockTaken = (this.g.__manutMockTaken ?? []).filter((b) => b !== lane.branch);
     this.log({ op: "lane.remove", path: worktree, size: changed, ...(ask.branch ? { branch: lane.branch } : {}) });
     return { removed: true, deleted: ask.branch, changed: null, ahead: null, error: null };
+  }
+  async laneDiff() {
+    // a browser reads no folder: the pane shows what the chat's events say
+    return null;
   }
   async mainMoved(cwd: string, o: { base?: string | null; show?: string[] } = {}) {
     this.log({ op: "main.moved", cwd, show: o.show ?? [], ...(o.base ? { base: o.base } : {}) });

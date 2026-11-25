@@ -24,7 +24,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx` |
-| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
+| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file that really differs in the lane's own folder from where the lane started, read from git (so it holds after a restart and shows a subagent's edits), with the added and removed counts, drawn as the timeline draws a change; from the chat's own events where the shell cannot read. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/laneFolder.ts`, `src-tauri/src/lane_diff.rs`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
 ## StatesCode: lanes, test output and artifacts
@@ -459,13 +459,34 @@ thing it starts is the lane's preview, when the person presses Start.
   side pane goes under the page under 920px: a top rule, at most 45% of the window's height, a scroll of its own, so the chat
   keeps its box for typing. The width is the session view's own (a container query), not the window's, since the side menu and
   the Plans panel take theirs first. `e2e/lane-pane.spec.ts` measures both.
-- **Diff.** The files the session changed, each once, with the newest change to each, the file that changed last first
-  (`changedFiles`). They are read from the chat's own steps (`Step.diff`, which is what the `tool.diff` events carried), so a
-  Rewind to before a turn, which cuts that turn's steps out of the chat, takes its files out of the list and leaves the earlier
-  turns' in. Each is drawn by the timeline's own diff view (`DiffView` in `chat/activity/Work.tsx`): the path, the added and
-  removed counts of that change, the lines in mono, and `maskSecrets` over every line, as the timeline does. The pane's diff
-  has ids of its own (`lane-diff-*`) and does not scroll itself into view, so the timeline's `diff-view` ids are the timeline's
-  alone. A file changed twice shows its later change, not both. "Kit has not changed any file yet." is said only while none is listed.
+- **Diff.** What really changed in the lane's own folder, read from git (item 71; `code/laneFolder.ts`, `code/useLaneFolder.ts`,
+  `src-tauri/src/lane_diff.rs`): every file that differs from the commit the lane started from, uncommitted work, files git has
+  not seen yet and the lane's own commits included, the file that changed last first. Each is drawn by the timeline's own diff
+  view (`DiffView` in `chat/activity/Work.tsx`): the path, its state (new, deleted, "renamed from `old`"; changed has no tag),
+  the added and removed counts, the lines in mono, and `maskSecrets` over every line (the shell masks them first, with the
+  same `mask_secrets` as every CLI answer, so a key is never shown nor sent to the page). The folder is the truth, so after an
+  app restart the pane is not empty, a subagent's edits and an edit by hand show, and a file the agent rewound disappears. The
+  chat's events are only the hint to read again (`changeMark`: a step began, ended or got its change, a subagent took a step
+  or ended, the turn ended) and the fallback. It is read when the lane opens, on such a hint, and never on a timer, at most
+  once a second and never two at once (`folderReader`); a read that fails keeps what was shown. Where the shell cannot read (a
+  plain browser, the tests' stand-in host, a session in the developer's own folder) the pane keeps the old behaviour: the
+  files the chat's own steps changed (`changedFiles`, from `Step.diff`, which `tool.diff` events carried; a Rewind to before a
+  turn takes its files out). The pane's diff has ids of its own (`lane-diff-*`) and does not scroll itself into view.
+  "Kit has not changed any file yet." is said only while none is listed.
+  - **What the shell reads** (`lane_diff`): only a folder the app made (the check the removal paths use, `own_lane`, plus git
+    listing it as a worktree of the recorded repository; a lane started in a subfolder is read at its subfolder too). It only
+    reads, through the lane's own `Git` runner (no hook, no file monitor, no prompt, no optional lock) with `--no-ext-diff
+    --no-textconv`, so no program the repository names runs to draw a diff; a clean filter can still run, as for the
+    developer's own `git status`. A file git ignores never shows, so a `.env` and the agent settings copied in (item 72) do not.
+  - **Bounded, and said.** At most 100 files ("and 12 more files"); a file whose diff is over 256 KiB or that is over 2 MiB on
+    disk says "Too large to show."; a binary file says it is binary; the diffs together stop at 1 MiB, and the files after that
+    are listed with "Not shown: this list is already long."; the whole read stops at 15 seconds the same way. A page draws at
+    most 400 lines of a file ("N more lines").
+  - **The start.** The commit the lane's branch was made at (its record's `at`), so a base branch that moved does not put its
+    changes in the Diff (the Code page's note says it moved). Once the base has been rebased onto or merged into the lane, the
+    commit where the lane and the base branch parted stands in, so only the lane's own work shows.
+  - **Renames.** Git pairs a deleted and an added file among the tracked ones (its default 50% similarity); a new file git has
+    not tracked yet shows as new next to the deleted old one until it is added.
 - **Preview.** The lane's project run with its own dev server in the lane's own folder (`LanePreview.tsx`; see
   [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, its page in a frame
   that fills the view while it runs ([The page in the pane](#the-page-in-the-pane)), the names of the
@@ -1015,11 +1036,9 @@ rewind.
 - A sign-in the app cannot read (pi, oh-my-pi, OpenCode, OmO, DeepSeek Harness, the ACP agents): no mark before the first
   message, only the chat's own words after it. A status command for each would need the shell's fixed list in
   `src-tauri/src/accounts.rs` to grow.
-- The pane beside a lane: a way to hide it (it is always there for a lane); a subagent's own edits in its Diff (they come as
-  `subagent` events, not `tool.diff`); the files that stay on disk after the agent's own rewind of the last message (its Diff
-  holds what the chat holds); the lane's own folder's real changes read from git, so a restart does not start the pane empty;
-  the totals of a file's several changes, not only the newest one; Diff, Preview and Tests of a lane from the Code page's row,
-  where only the session view has them.
+- The pane beside a lane: a way to hide it (it is always there for a lane); the totals of a file's several changes, not only the
+  newest one; Diff, Preview and Tests of a lane from the Code page's row, where only the session view has them; a Diff of a
+  session in the developer's own folder (it reads from the chat's events, as before).
 - A lane after a restart keeps its branch and its folder, but what its events showed (its test runs, Reverted) is of the run
   before and starts again.
 - The main-moved note for a lane whose folder has left its branch (Kit switched it): the shell reads only the branch the folder

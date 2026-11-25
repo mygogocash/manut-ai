@@ -915,6 +915,10 @@ export interface DiffFile {
   added: number;
   removed: number;
   more?: number;
+  /** Only in what a lane's folder says (code/laneFolder.ts): the file's old path when git paired it as a rename, and why it has
+   *  no lines when it has none (a binary file, a diff too large to show, or the answer's budget ran out before it). */
+  from?: string;
+  note?: "binary" | "too_large" | "left_out";
 }
 
 /** One row of an agent's todo list. */
