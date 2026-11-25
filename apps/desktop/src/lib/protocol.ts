@@ -733,13 +733,16 @@ export type AskTool = {
 
 /** What a computer use card shows, as the shell sent it (src-tauri/src/computer/room.rs `Shown`). */
 export type ComputerAsk = {
-  act: "look" | "click" | "set" | "key" | "menu";
+  /** `set` types into an empty field; `replace` puts the text in place of everything a field holds (`replaces`). */
+  act: "look" | "click" | "set" | "replace" | "key" | "menu";
   app: string;
   window?: string;
   control?: string;
   text?: string;
   keys?: string;
   menu?: string[];
+  /** For `replace`, how many characters the field holds at the ask, all of which the text takes the place of. */
+  replaces?: number;
   /** A small picture of the control at the moment of the ask, a PNG in base64, when Screen capture is on. */
   picture?: string;
 };

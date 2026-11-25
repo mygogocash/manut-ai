@@ -58,8 +58,11 @@ choose_menu_item {"app": "TextEdit", "menu": ["File", "Save…"]}
 ```
 
 - Prefer `set_value` for a text field and `click` for a button, check box or tab: they act on the element itself.
-- `set_value` replaces what the field holds and reads it back; its result says whether the field now holds exactly
-  that text. If not, look before going on rather than typing again.
+- `set_value` puts the text in place of everything the field holds, and reads it back. For an empty field the
+  person's card says "Type into"; for one that holds anything it says "Replace everything in" the field, with how many
+  characters it holds. To add to what a field holds, pass the whole new text. The result says whether the field now
+  holds exactly that text; if not, look before going on rather than typing again. If the field's text changed after
+  the person's yes, nothing is typed: look again and ask again.
 - `press_key` sends one key with its modifiers to the app's focused window: Return, Tab, Escape, the arrows, Home, End,
   Page Up, Page Down, Delete, letters, digits and punctuation. Shortcuts that quit the app (Cmd+Q), log out, lock the
   screen, open Force Quit or empty the Trash are never sent: reach the goal another way, such as the window's own

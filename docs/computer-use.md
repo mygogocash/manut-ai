@@ -153,6 +153,21 @@ Writes:
   - With Screen capture, the card shows a picture of just that part of the window (`CGWindowListCreateImage` with the
     control's frame), for a control up to 640 by 320 points and 256 KB; a larger one, such as a document's text area,
     has none (`a_card_shows_a_small_picture_of_the_control_with_screen_capture`, `computer.test.tsx`).
+- Typing says what it replaces (security review, 26 Nov 2026). The Mac puts typed text in place of a field's whole value
+  (`AXUIElementSetAttributeValue` with `AXValue`), so a card that read "Type into the text area: Thanks!" turned a page
+  of text into "Thanks!". Now what the field holds is read at the ask, as the Mac gives it:
+  - An empty field is typed into: "Type into <field> in <app>?".
+  - A field that holds anything (a space, an invisible character and a number count) is a different, stronger card:
+    "Replace everything in <field> (N characters) in <app>?", with "Replace with: <text>".
+  - The yes is bound to exactly what the field held at the ask. If it holds anything else when the action runs (filled
+    since a yes to type, or changed since a yes to replace), nothing is typed and the agent asks again, so a yes to type
+    never covers replacing (`typing_into_a_field_that_holds_text_says_it_replaces_everything`; the page draws a replace
+    card only with its count, `computer.test.ts`, `computerCard.test.ts`).
+  - A field whose content cannot be read is not asked about, since the card could not say what typing replaces.
+  - Inserting at the caret was not taken. Orca's `type-text` (at `a634526a`, `TextInput.replaceSelection`) reads the
+    field's whole value and its `AXSelectedTextRange`, splices the text in and writes the whole value back, skipping
+    Chromium, whose writes fire no input events: it still replaces a selection, and the app's text can change between
+    the read and the write. So the card could not promise it.
 - Nothing while the screen is locked, and a yes waiting then is spent (`nothing_runs_while_the_screen_is_locked`).
 - Never the Apple menu (`a_menu_item_is_chosen_by_its_path_and_never_from_the_apple_menu`), never a blocked shortcut
   (`keys.rs`).
@@ -180,9 +195,12 @@ On the Mac app built from this branch:
    socket's caller check with a real Claude Code: if every call says it did not come from the chat's server, the
    chat's server is not under the process Manut AI started, and that is a bug to report.) Then, from Terminal, run
    `ls ~/.manut/computer`: there is no `chats` folder.
-5. Ask "Type Hello into the TextEdit document": a card names TextEdit, the window, the text area and "Hello", and says the
-   control's name is the one TextEdit gives it. Press No: nothing is typed, and the agent does not ask again by itself.
-   Ask again and Allow once: Hello appears once. Ask it to click a button in a small dialog: with Screen capture on, the
+5. With an empty TextEdit document, ask "Type Hello into the TextEdit document": a card titled "Type into text area in
+   TextEdit?" names the window, the text area and "Hello", and says the control's name is the one TextEdit gives it.
+   Press No: nothing is typed, and the agent does not ask again by itself. Ask again and Allow once: Hello appears once.
+   Then ask "Type Thanks into the document": the card now reads "Replace everything in text area (5 characters) in
+   TextEdit?" with "Replace with: Thanks". Before answering, type a letter into the document yourself, then Allow once:
+   nothing is typed and the agent says the field changed. Ask it to click a button in a small dialog: with Screen capture on, the
    card shows a small picture of that button. Move the window after the card shows and before Allow once: the click is
    refused as moved, and the agent asks again.
 6. Ask for Cmd+S in TextEdit: a card says "Press Cmd+S in TextEdit?"; Allow once saves. Ask for Cmd+Q: refused, no card.

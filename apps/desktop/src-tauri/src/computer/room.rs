@@ -229,7 +229,8 @@ pub fn refused(app: &App, own_pid: i32) -> Option<String> {
 /// What a card shows, as the page draws it in the person's language (`tool.computer` on the ask).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Shown {
-    /// `look`, `click`, `set`, `key` or `menu`.
+    /// `look`, `click`, `set` (typing into an empty field), `replace` (typing in place of everything a field holds),
+    /// `key` or `menu`.
     pub act: &'static str,
     pub app: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,6 +243,9 @@ pub struct Shown {
     pub keys: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub menu: Option<Vec<String>>,
+    /// For `replace`, how many characters the field holds at the ask, all of which the text takes the place of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<usize>,
     /// A small picture of the control at the moment of the ask, a PNG in base64, when Screen capture is on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<String>,
@@ -254,6 +258,7 @@ impl Shown {
             "look" => format!("Let the agent look at {} in this chat?", self.app),
             "click" => format!("Click {} in {}?", self.control.as_deref().unwrap_or("a control"), self.app),
             "set" => format!("Type into {} in {}?", self.control.as_deref().unwrap_or("a field"), self.app),
+            "replace" => format!("Replace everything in {} ({}) in {}?", self.control.as_deref().unwrap_or("a field"), characters(self.replaces.unwrap_or(0)), self.app),
             "key" => format!("Press {} in {}?", self.keys.as_deref().unwrap_or(""), self.app),
             _ => format!("Choose {} in {}?", self.menu.as_deref().unwrap_or_default().join(" › "), self.app),
         }
@@ -268,7 +273,7 @@ impl Shown {
         if let Some(c) = &self.control {
             l.push(format!("Control: {c}"));
         }
-        if matches!(self.act, "click" | "set") {
+        if matches!(self.act, "click" | "set" | "replace") {
             l.push(format!("The control's name is the one {} gives it (a web page names its own controls), so check it is the one you mean.", self.app));
         }
         if let Some(k) = &self.keys {
@@ -278,7 +283,7 @@ impl Shown {
             l.push(format!("Menu: {}", m.join(" › ")));
         }
         if let Some(t) = &self.text {
-            l.push(format!("Text: {t}"));
+            l.push(if self.act == "replace" { format!("Replace with: {t}") } else { format!("Text: {t}") });
         }
         if self.act == "look" {
             l.push(format!("It may read the text and controls of {}'s windows and take their picture until this chat ends. Never what a password field holds.", self.app));
@@ -287,12 +292,18 @@ impl Shown {
     }
 }
 
+/// `n` characters, in words: "1 character", "10 characters".
+fn characters(n: usize) -> String {
+    if n == 1 { "1 character".into() } else { format!("{n} characters") }
+}
+
 /// What a yes is for: the very control, key or menu item the card named.
 #[derive(Clone)]
 enum Target {
     App { key: String },
-    /// A click, or with `value` the text put into a field; `place` is where the control was at the ask.
-    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, place: Place },
+    /// A click, or with `value` the text put into a field and `held` exactly what the field held at the ask (empty for
+    /// typing, else all that the text replaces); `place` is where the control was at the ask.
+    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, held: Option<String>, place: Place },
     Key { pid: i32, window: Option<String>, chord: Chord },
     Menu { pid: i32, path: Vec<String> },
 }
@@ -362,6 +373,10 @@ pub struct Room {
 pub const NO_YES: &str = "Manut AI has no yes from the person for this action. Each action runs only right after the person allows it once on its card in the chat, and that yes is used once. If they said no, do not try again unless they ask.";
 const LOCKED: &str = "The Mac's screen is locked or asleep, or someone else's session is in front, so computer use does nothing now. Ask the person to unlock the Mac and say when.";
 const NO_ACCESSIBILITY: &str = "macOS has not given Manut AI Accessibility, so computer use cannot read or work any window. The person turns it on in Manut AI's Settings › Computer.";
+/// Why typing into a field whose content cannot be read is not asked about: it would replace what it holds, unseen.
+const UNREAD: &str = "Computer use cannot read what that field holds now, so it cannot say whether typing would replace something there, and does not ask. Reach the goal another way, such as the window's own buttons.";
+/// Why typing whose field changed after the yes is not done.
+const HELD_CHANGED: &str = "The field holds other text than it did when the person said yes, so nothing was typed: typing puts the text in place of everything the field holds. Look again and ask again.";
 
 /// The key an app is allowed under: its bundle identifier, else its name.
 fn app_key(app: &App) -> String {
@@ -512,7 +527,7 @@ impl Room {
             return Ok(Decision::Free);
         }
         let app = self.target_app(args)?;
-        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None, picture: None };
+        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None, replaces: None, picture: None };
         match tool {
             LOOK => {
                 let key = app_key(&app);
@@ -533,19 +548,31 @@ impl Room {
                     (n.handle.clone(), look.title.clone())
                 };
                 // the control as it is at the moment of the ask, and where: what the card names and the yes is bound to
-                let n = self.again(&handle).ok_or("The control is gone from the window since the look, so nothing is asked. Look again.")?;
+                let raw = self.desk.again(&handle).ok_or("The control is gone from the window since the look, so nothing is asked. Look again.")?;
+                let n = Room::tidy(raw.clone());
                 if n.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
                 let place = self.desk.place(&handle).ok_or("Computer use cannot tell where that control is on the screen, so it does not ask about it. Look again.")?;
                 let mut s = Shown { window: Some(title), control: Some(control_name(&n)), ..shown(if tool == CLICK { "click" } else { "set" }) };
+                let mut held = None;
                 if tool == SET {
                     let t = args.get("value").and_then(Value::as_str).ok_or("Give the text to put in the field (`value`).")?;
                     typed_ok(t)?;
+                    // The Mac puts the text in place of the field's whole value, so what it holds now decides the card:
+                    // typing into an empty field, or replacing all of what it holds, said with how much. It is read as
+                    // the Mac gives it, before any tidying: an invisible character is still something replaced.
+                    let now = raw.value.ok_or(UNREAD)?;
+                    let count = now.chars().count();
+                    if count > 0 {
+                        s.act = "replace";
+                        s.replaces = Some(count);
+                    }
                     s.text = Some(t.to_string());
+                    held = Some(now);
                 }
                 s.picture = self.card_picture(&place);
-                let target = Target::Node { pid: app.pid, role: n.role, label: n.label, handle, value: s.text.clone(), place };
+                let target = Target::Node { pid: app.pid, role: n.role, label: n.label, handle, value: s.text.clone(), held, place };
                 Ok(Decision::Card(Ask { shown: s, target }))
             }
             KEY => {
@@ -702,9 +729,10 @@ impl Room {
     fn act(&self, target: Target) -> Result<Reply, String> {
         match target {
             Target::App { .. } => Err(NO_YES.into()),
-            Target::Node { pid, role, label, handle, value, place } => {
+            Target::Node { pid, role, label, handle, value, held, place } => {
                 let app = self.still_app(pid)?;
-                let now = self.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
+                let raw = self.desk.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
+                let now = Room::tidy(raw.clone());
                 if now.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
@@ -722,11 +750,17 @@ impl Room {
                         Ok(Reply::ok(format!("Clicked {name} in {}. Call `get_app_state` to see what changed.", app.name)))
                     }
                     Some(text) => {
+                        // the yes was for the field as it was at the ask: empty to type into, or holding exactly what
+                        // the card said the text replaces; a yes to type never covers a field filled since
+                        if raw.value != held {
+                            return Err(HELD_CHANGED.into());
+                        }
                         self.desk.set_value(&handle, &text)?;
                         // read back: an app can take the text, change it or ignore it
-                        let held = self.again(&handle).and_then(|n| n.value);
-                        let how = if held.as_deref() == Some(text.as_str()) { "it now holds exactly that text" } else { "it does not read back as exactly that text, so check with `get_app_state` before going on" };
-                        Ok(Reply::ok(format!("Typed into {name} in {}: {how}.", app.name)))
+                        let back = self.again(&handle).and_then(|n| n.value);
+                        let how = if back.as_deref() == Some(text.as_str()) { "it now holds exactly that text" } else { "it does not read back as exactly that text, so check with `get_app_state` before going on" };
+                        let did = if held.as_deref().is_some_and(|h| !h.is_empty()) { "Replaced everything in" } else { "Typed into" };
+                        Ok(Reply::ok(format!("{did} {name} in {}: {how}.", app.name)))
                     }
                 }
             }
@@ -786,7 +820,7 @@ pub fn tools() -> Value {
         {"name": CLICK, "title": "Click a control", "description": "Presses one element from the latest get_app_state. Asks the person first, every time.",
          "inputSchema": {"type": "object", "properties": {"app": app, "element_index": element}, "required": ["app", "element_index"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
-        {"name": SET, "title": "Type into a field", "description": "Puts text into one text field from the latest get_app_state, replacing what it holds. Asks the person first, every time. Never a password field.",
+        {"name": SET, "title": "Type into a field", "description": "Puts text into one text field from the latest get_app_state. An empty field is typed into; a field that holds anything has all of it replaced by the text, and the person's card says so and how many characters it holds. Asks the person first, every time. Never a password field.",
          "inputSchema": {"type": "object", "properties": {"app": app, "element_index": element, "value": {"type": "string", "maxLength": TEXT_CHARS}}, "required": ["app", "element_index", "value"]},
          "annotations": {"readOnlyHint": false, "destructiveHint": true}, "_meta": write_meta},
         {"name": KEY, "title": "Press a key", "description": "Presses one key, with modifiers if any (\"Return\", \"Escape\", \"Cmd+S\"), in the app's focused window. Asks the person first, every time. Shortcuts that quit, log out, lock the screen, force quit or empty the Trash are never sent.",
@@ -856,7 +890,7 @@ mod tests {
         let (s, r) = room();
         let args = json!({"app": "textedit"});
         let a = card(&r, LOOK, &args);
-        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None, picture: None });
+        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None, replaces: None, picture: None });
         assert_eq!(a.shown.title(), "Let the agent look at TextEdit in this chat?");
         // run before the person answered: refused, and the window was not read
         let before = r.run(LOOK, &args);
@@ -1214,6 +1248,55 @@ mod tests {
         s.add_app(App { pid: 500, name: "SecurityAgent".into(), bundle: String::new(), path: agent.into(), mine: false });
         assert!(refused(&r, LOOK, &json!({"app": "SecurityAgent"})).starts_with("Computer use never looks at or works"));
         assert!(!r.run(LIST, &json!({})).text.contains("SecurityAgent"));
+    }
+
+    /// Typing puts the text in place of everything the field holds (the Mac sets the field's value). So a field that
+    /// holds anything is a different, stronger card that says so and how much it holds, an empty one is typed into, and
+    /// a yes is bound to what the field held at the ask: a yes to type into an empty field never covers it once filled,
+    /// and a yes to replace never covers other text.
+    #[test]
+    fn typing_into_a_field_that_holds_text_says_it_replaces_everything() {
+        let (s, r) = room();
+        look(&r, "TextEdit");
+        // the text area holds "Dear bank," (10 characters)
+        let replace = json!({"app": "TextEdit", "element_index": 3, "value": "Thanks!"});
+        let a = card(&r, SET, &replace);
+        assert_eq!(a.shown.act, "replace");
+        assert_eq!(a.shown.title(), "Replace everything in text area (10 characters) in TextEdit?");
+        assert_eq!(serde_json::to_value(&a.shown).unwrap()["replaces"], json!(10));
+        assert!(a.shown.lines().ends_with("\nReplace with: Thanks!"), "{}", a.shown.lines());
+        // an empty field is typed into
+        let typing = json!({"app": "TextEdit", "element_index": 6, "value": "Mint"});
+        let t = card(&r, SET, &typing);
+        assert_eq!((t.shown.act, t.shown.title()), ("set", "Type into text field “Name” in TextEdit?".to_string()));
+        assert!(serde_json::to_value(&t.shown).unwrap().get("replaces").is_none());
+        // the yes to type, and the field filled before the run: nothing is typed
+        r.answered(SET, &typing, &t);
+        s.change(TEXTEDIT, 0, 5, |x| x.value = Some("Old name".into()));
+        let out = r.run(SET, &typing);
+        assert!(out.error && out.text.contains("holds other text"), "{}", out.text);
+        // the yes to replace, and the text changed (to as many characters) before the run: nothing is typed
+        r.answered(SET, &replace, &a);
+        s.change(TEXTEDIT, 0, 2, |x| x.value = Some("Dear Bank.".into()));
+        let out = r.run(SET, &replace);
+        assert!(out.error && out.text.contains("holds other text"), "{}", out.text);
+        assert!(s.acts().is_empty());
+        // asked again and allowed, it replaces exactly what the card said
+        let a = card(&r, SET, &replace);
+        r.answered(SET, &replace, &a);
+        assert!(!r.run(SET, &replace).error);
+        assert_eq!(s.acts(), [format!("set {TEXTEDIT} 0 2 Thanks!")]);
+        // what a field holds counts whole: a lone space, an invisible character, a number, one character
+        for (held, n, title) in [(" ", 1, "(1 character)"), ("\u{200B}", 1, "(1 character)"), ("42", 2, "(2 characters)"), ("ร้าน", 4, "(4 characters)")] {
+            s.change(TEXTEDIT, 0, 5, |x| x.value = Some(held.into()));
+            let a = card(&r, SET, &typing);
+            assert_eq!(a.shown.act, "replace", "{held:?}");
+            assert_eq!(serde_json::to_value(&a.shown).unwrap()["replaces"], json!(n), "{held:?}");
+            assert!(a.shown.title().contains(title), "{held:?}: {}", a.shown.title());
+        }
+        // a field whose content cannot be read is not asked about: the card could not say what typing replaces
+        s.change(TEXTEDIT, 0, 5, |x| x.value = None);
+        assert!(refused(&r, SET, &typing).contains("cannot read what"));
     }
 
     #[test]
