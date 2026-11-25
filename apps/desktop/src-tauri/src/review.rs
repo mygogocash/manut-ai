@@ -996,7 +996,7 @@ pub(crate) mod tests {
     /// A pull request as `gh pr view` answers it, made from the lane's branch, that can merge now unless `over` says otherwise.
     fn gh_view(home: &Path, head: &str, over: serde_json::Value) -> serde_json::Value {
         let mut v = serde_json::json!({
-            "number": 7, "title": "Add the PromptPay QR", "body": "Draws the QR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+            "number": 7, "title": "Add the PromptPay QR", "body": "Draws the QR.\n\n\u{1F916} Generated with [Claude Code](https://claude.com/claude-code)",
             "state": "OPEN", "isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
             "headRefName": "kit/qr", "headRefOid": head, "baseRefName": "main", "headRepositoryOwner": {"id": "x", "login": "mygogocash"},
             "commits": [
