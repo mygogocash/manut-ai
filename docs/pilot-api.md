@@ -1766,6 +1766,72 @@ order and the order of refusals are the ones above, and the desktop and the web 
   one call per task the shop ever had. A read now makes a few calls to the shop's own object and one per task with
   something to read.
 
+## The shop's live feed
+
+`GET /v1/feed` (`apps/api/src/feed.ts`, December item 61), with a shop's session: a WebSocket that says, and only says, that
+something the shop's screens read has changed, so a connected desktop reads again within seconds instead of at its next
+one-minute read (`docs/runtime-adapter.md`, "The live feed"). Built switched off: until the operator turns `shopFeed` on with
+`PUT /v1/admin/flags`, it answers 403 `{ error: "feature_disabled", feature: "shopFeed" }`, the look and the upgrade alike, and
+nothing else changes. What it costs on Cloudflare is in `docs/turning-on.md`.
+
+- **Who.** A shop's session, taken as the approvals list takes it (`callerOf`): an owner session (`mos1.`) or a helper session
+  (`mhs1.`), for the one shop it names. A person's own sign-in has a tenant but no shop, and answers 404 `not_found`, as the
+  shop's routes answer it. The bearer is the `Authorization` header, or, for a page's handshake, which can set no such header,
+  one `Sec-WebSocket-Protocol` entry, `manut-bearer.<token>`, beside `manut-feed.v1`. A token never goes in the address. The
+  Worker reads the entry, never answers it, and hands the shop's TenantObject only the token's SHA-256, the role and the shop.
+- **The look.** A plain `GET` answers 200 `{ feed: "on", protocol: "manut-feed.v1" }` with `cache-control: no-store`. The
+  desktop asks this first, through the shell's request command like any read, and opens the socket only on this answer.
+- **The socket.** An upgrade (`Upgrade: websocket`) answers 101, with `Sec-WebSocket-Protocol: manut-feed.v1` when the client
+  offered protocols (a browser fails a handshake that answers none); a client that offers protocols without `manut-feed.v1`
+  is refused 400 `invalid_request`. The shop's TenantObject accepts the socket with the hibernation API
+  (`ctx.acceptWebSocket`), so an idle socket costs no object time, checks the session once more against the shop's people
+  record, and keeps everything the socket needs in its attachment.
+- **Messages.** The server sends only pings, `{ "v": 1, "seq": n }`, `seq` growing with each one. A ping carries no data: the
+  client reads as it reads each minute, with its own session, so the feed can never show anyone what their session could not
+  read, and it decides nothing; approvals still settle only through approval-core. The client sends only the keepalive
+  `ping`, which the runtime answers `pong` without waking the object; anything else closes the socket with 4400.
+- **What pings.** Each write the shop's TenantObject takes that a screen reads: a task new to the index, a request about to
+  open (its entry in the approval lookup), a new attention item, any change to the routines and the team, and any change to
+  the shop's people (a note passed on, a helper's new device, a removal, a device signing out). And a task object's own
+  change, which it tells the shop's object in one call (`POST /feed/touch`, `feed-touch.ts`): the task written, a command, a
+  run claimed, its asks, its draft and its end, a sweep of runs that ran out, an action proposed, decided, begun or settled,
+  and a request decided. Never a read: a session check, what a read tells the approval lookup and the lookup's backfill ping
+  nothing, so the reads a ping sets off never set off another. Nor a run's progress (its heartbeats, steps and events), nor
+  the model meter, the audit log, what the team knows, consent or the pilot's own records, none of which a desktop reads each
+  minute. A write that changed nothing (a task indexed again, a delivery seen before) pings nothing.
+- **At most one ping a second.** The first write schedules the ping a second later (`ShopFeed.coalesceMs`), and every write
+  until it goes rides with it, so a burst of writes is one ping and one read.
+- **A shop nobody follows** pays nothing for its own writes: with no socket open, the object schedules nothing. A task object
+  learns it from its call's answer (`{ listening: 0 }`) and tells the shop nothing more for a minute, so while the switch is
+  off a busy task makes at most one extra call a minute.
+- **Limits.** 3 sockets for one session: the next answers 429 `feed_session_full`; 50 for the shop, all its sessions together:
+  429 `feed_shop_full`; both with `retry-after: 60`. A socket that sent no keepalive for 10 minutes gives up its place when its
+  session or its shop is at its limit, and a socket past its hour never holds one.
+- **How a socket ends.** 4000 `renew` after an hour, by the object's alarm or in place of a ping: the client opens it again,
+  which checks the session and the switch again, so a switch turned off reaches even a shop where nothing is written. 4401
+  `session_ended` when its session no longer works (signed out, run out, a helper removed, an owner unlinked): each ping checks
+  every socket's session first, and every change to the shop's people pings, so this comes within the second. 4503 `feed_off`
+  once the switch reads off: the object reads the switch at most once a minute while it pings (the upgrade's read counts as the
+  first), and a record it cannot read is the environment's default, which is off. 4410 `shop_deleted` when the shop's data is
+  deleted. 4400 `bad_request` for a message other than the keepalive. 4408 `silent` for a silent socket that gave up its place.
+  The runtime completes the close handshake itself on this compatibility date.
+
+Refusals, in this order:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 401 | `{ error: "unauthorized" }` | No session, an ended one, or the operator key |
+| 401 | `{ error: "removed", removedAt }` | A helper session of a helper the owner removed |
+| 401 | `{ error: "unlinked", unlinkedAt }` | An owner session whose account the operator unlinked |
+| 503 | `{ error: "people_unavailable" }` | The session could not be checked |
+| 404 | `{ error: "not_found" }` | A person's own sign-in, which is no shop's session |
+| 405 | `{ error: "method_not_allowed" }` | Anything but `GET` |
+| 400 | `{ error: "invalid_request" }` | A query naming `shop`, `tenant` or `role` |
+| 403 | `{ error: "feature_disabled", feature: "shopFeed" }` | The switch is off |
+| 400 | `{ error: "invalid_request" }` | An upgrade that offers protocols without `manut-feed.v1` |
+| 429 | `{ error: "feed_session_full" }`, `retry-after: 60` | The session already holds 3 sockets |
+| 429 | `{ error: "feed_shop_full" }`, `retry-after: 60` | The shop already holds 50 sockets |
+
 ## Signing in by email
 
 Built, and off until the owner turns it on (`docs/sign-in-options.md`). A person asks for a code of six digits at an

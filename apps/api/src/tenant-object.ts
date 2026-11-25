@@ -3,6 +3,7 @@ import { approvalIndexRoute, readyOnFirstTask, stepBackfill, wipeApprovalIndex }
 import { actorOr, auditPut, auditTenantRoute, wipeAuditTenant } from "./audit-log";
 import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
+import { FEED_CLOSE, ShopFeed } from "./feed";
 import type { AttentionItem } from "./inbound";
 import { memoryTenantRoute, wipeMemoryTenant } from "./memory-store";
 import { nextNoticeAt, noticesUnsent, sendCapNotices } from "./model-alerts";
@@ -50,14 +51,26 @@ const MAX_REMEMBERED_DELIVERIES = 1000;
 /// here (the pilot's records, routines, people, memory, the audit log) schedules
 /// anything, since routines' clocks are the ScheduleObject's alarm and the
 /// session sweep is AuthObject's. A job added later goes in `jobs`.
+///
+/// It also holds the shop's live feed (feed.ts): the sockets of the desktops
+/// that follow the shop, accepted with the hibernation API, and pinged after
+/// each write here that a screen reads, and after a task object says one of
+/// its own changed (`POST /feed/touch`).
 export class TenantObject extends DurableObject {
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env as never);
+    // The runtime answers a feed socket's keepalive itself, so a desktop that keeps its socket alive never wakes the
+    // object and is never billed for its time (docs/turning-on.md).
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // An object that wakes with work and no alarm sets one: holds made before the sweep existed, or an alarm lost.
     ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) await this.arm();
     });
   }
+
+  /// The shop's live feed. Every socket keeps what it needs in its attachment, so this instance holds nothing a socket
+  /// would lose when the object hibernates.
+  private readonly feed = new ShopFeed(this.ctx, this.env as unknown as ConstructorParameters<typeof ShopFeed>[1]);
 
   private get tenantEnv(): Pick<TenantDataEnv, "AUTH"> {
     return this.env as unknown as Pick<TenantDataEnv, "AUTH">;
@@ -89,6 +102,14 @@ export class TenantObject extends DurableObject {
       due: (kv) => noticesUnsent(kv),
       nextAt: nextNoticeAt,
       run: () => sendCapNotices(this.ctx.storage, this.tenantEnv),
+    },
+    {
+      // A feed socket's hour: closed with 4000 so its desktop opens it again, which checks its session and the switch.
+      // With no socket open it has no next time, so a shop nobody follows keeps the alarm it had.
+      name: "feed-renew",
+      due: (_kv, nowMs) => this.feed.renewDue(nowMs),
+      nextAt: () => this.feed.nextRenewAt(),
+      run: async (nowMs) => this.feed.renew(nowMs),
     },
   ];
 
@@ -167,9 +188,11 @@ export class TenantObject extends DurableObject {
       return response;
     }
     // The team's routines and their runs, whether the team is paused, and a shop template's first-week questions
-    // (routine-store.ts).
+    // (routine-store.ts). A write the desktop reads, its routines, its team and each routine's latest run, pings the feed.
     if (url.pathname === "/routines" || url.pathname.startsWith("/routines/")) {
-      return routineTenantRoute(this.ctx.storage, request, url);
+      const response = await routineTenantRoute(this.ctx.storage, request, url);
+      if (request.method !== "GET" && response.ok) this.feed.touch();
+      return response;
     }
     // The shop's audit log: who did what and when, metadata only (audit-log.ts).
     if (url.pathname === "/audit" || url.pathname.startsWith("/audit/")) {
@@ -179,16 +202,27 @@ export class TenantObject extends DurableObject {
     if (url.pathname === "/memory" || url.pathname.startsWith("/memory/")) {
       return memoryTenantRoute(this.ctx.storage, request, url);
     }
-    // The people around the shop: the owner's helpers, invites, cover and notes passed on (people-store.ts).
+    // The people around the shop: the owner's helpers, invites, cover and notes passed on (people-store.ts). A change to
+    // the record pings the feed: a note passed on shows on an ask, a helper's new device is told after the owner's next
+    // read, and the ping's own check of every socket's session closes the ones the change ended (feed.ts). A session check
+    // only reads, and pings nothing.
     if (url.pathname === "/people" || url.pathname.startsWith("/people/")) {
-      return peopleTenantRoute(this.ctx.storage, request, url);
+      return peopleTenantRoute(this.ctx.storage, request, url, () => this.feed.touch());
     }
     // Which task holds each of the shop's approval requests, and which may still be open (approval-index.ts).
     if (request.method === "POST" && url.pathname === "/approvals/backfill") {
       return this.backfillStep(request);
     }
     if (url.pathname.startsWith("/approvals/")) {
-      return approvalIndexRoute(this.ctx.storage, request, url);
+      const response = await approvalIndexRoute(this.ctx.storage, request, url);
+      // A request about to open is new to the shop's Needs you. What a read learned (`/approvals/learned`) pings nothing:
+      // the read that learned it already answered from the tasks, so a ping would only make reads beget reads.
+      if (request.method === "POST" && url.pathname === "/approvals/asked" && response.ok) this.feed.touch();
+      return response;
+    }
+    // The shop's live feed (feed.ts): a socket the Worker hands over, and a task object's word that a task changed.
+    if (url.pathname === "/feed" || url.pathname === "/feed/touch") {
+      return this.feedRoute(request, url);
     }
     if (request.method === "GET" && url.pathname === "/tombstone") {
       const tenant = url.searchParams.get("tenant") ?? "";
@@ -200,6 +234,33 @@ export class TenantObject extends DurableObject {
     }
     return new Response("Method Not Allowed", { status: 405 });
   }
+
+  /// `GET /feed`, a socket the Worker checked and hands over (feed.ts `feedRoute`), and `POST /feed/touch`, a task object
+  /// saying a change of its own reached what the screens read (feed-touch.ts `touchFeed`). Only the Worker and the shop's task
+  /// objects set `x-feed`, and no client route reaches this object's paths, as for `x-inbound` and `x-people`.
+  private async feedRoute(request: Request, url: URL): Promise<Response> {
+    if (request.headers.get("x-feed") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    if (request.method === "GET" && url.pathname === "/feed") {
+      const answer = this.feed.accept(request);
+      // The new socket's hour joins the alarm's jobs.
+      if (answer.status === 101) await this.arm();
+      return answer;
+    }
+    if (request.method === "POST" && url.pathname === "/feed/touch") {
+      return Response.json({ listening: this.feed.touch() });
+    }
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  /// A feed socket says nothing but the keepalive, which the runtime answers without waking the object
+  /// (`setWebSocketAutoResponse` above). Anything else closes the socket (feed.ts `ShopFeed.refuse`).
+  override async webSocketMessage(ws: WebSocket): Promise<void> {
+    this.feed.refuse(ws);
+  }
+
+  /// Nothing to do when a feed socket closes: on this compatibility date the runtime completes the close handshake
+  /// itself, and a socket keeps nothing outside its attachment, which goes with it.
+  override async webSocketClose(): Promise<void> {}
 
   /// Explicit cloud-work consent. Absent means not consented: an app upgrade
   /// or a new device never enables cloud processing by itself.
@@ -252,6 +313,9 @@ export class TenantObject extends DurableObject {
     if (!ids.includes(body.taskId)) {
       await this.ctx.storage.put({ [key]: [...ids, body.taskId],
         ...readyOnFirstTask(this.ctx.storage.kv, body.tenant, ids) });
+      // A new task is new on History and in Mission Control. The task object pings again once it is made, within the
+      // same second, so the two ride together.
+      this.feed.touch();
     }
     return Response.json({ indexed: true });
   }
@@ -327,6 +391,8 @@ export class TenantObject extends DurableObject {
       [itemsKey]: [...items, item].slice(-MAX_ATTENTION_ITEMS),
       [deliveriesKey]: [...deliveries, body.deliveryId].slice(-MAX_REMEMBERED_DELIVERIES),
     });
+    // A new note in Buddy's chat. A repeated delivery stored nothing above, and pings nothing.
+    this.feed.touch();
     return Response.json({ created: true });
   }
 
@@ -373,6 +439,9 @@ export class TenantObject extends DurableObject {
     await wipeAuditTenant(this.ctx.storage, body.tenant);
     const tombstone = { deletedAt: new Date().toISOString(), tasksWiped: ids.length };
     await this.ctx.storage.put(`tomb:${body.tenant}`, tombstone);
+    // The shop is gone, and so is every session that followed it: its sockets close, and each desktop learns why from
+    // its next read.
+    this.feed.closeAll(FEED_CLOSE.shopDeleted, "shop_deleted");
     // Nothing the wipe left has work for the alarm, so it is cleared rather than left to wake for nothing.
     await this.arm();
     return Response.json(tombstone);

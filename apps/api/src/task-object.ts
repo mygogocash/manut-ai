@@ -15,6 +15,7 @@ import {
 } from "@manut/approval-core";
 import { indexRequest, isReportableRequestId, OPEN_WINDOW_MS, reportGone } from "./approval-index";
 import { readJsonBody } from "./body";
+import { FEED_QUIET_MS, touchFeed } from "./feed-touch";
 import { BOOKS_KIND, booksDetail, booksPayloadOf, SHEETS_APPEND, type BooksDetail } from "./books-detail";
 import {
   BROWSER_SUBMIT,
@@ -649,11 +650,54 @@ function isDraft(value: unknown): value is Omit<DraftJSON, "attemptId" | "at"> {
 /// An answer worked out inside a synchronous storage transaction, sent once the transaction has committed.
 type SyncAnswer = { status: number; body: unknown };
 
+/// The routes whose writes change what the shop's task list shows (task-listing.ts), and so what its desktops show: the
+/// task itself, its commands, a run claimed, a run's asks, its draft and its end, a sweep of runs that ran out, an action
+/// proposed, decided, begun or settled, and a request decided. A run's progress (its heartbeats, steps and events) is left
+/// out: its start, its draft, its asks and its end are what the screens show, and progress would ping every few seconds
+/// while a job runs. Reads, the wipe and the prune are left out too: the wipe closes the shop's feed itself, and a prune
+/// only ages out what no screen shows.
+const FEED_ROUTES =
+  /^(PUT \/|POST \/commands|POST \/attempts|POST \/attempts\/sweep|POST \/attempts\/[^/]+\/(finish|end|ask|ask-submit|ask-books|draft)|POST \/actions|POST \/actions\/[^/]+\/(decision|begin|settle)|POST \/requests\/[^/]+\/decision)$/;
+
+/// Whether a write to this route, once it succeeded, tells the shop's live feed (`FEED_ROUTES`).
+export function touchesFeed(method: string, pathname: string): boolean {
+  return FEED_ROUTES.test(`${method} ${pathname}`);
+}
+
 /// Authoritative cloud copy of one SparkTaskRecord. SQLite-backed. Every caller is
 /// already authenticated in index.ts; this object validates shape, transitions,
 /// revisions, and write rate per record.
 export class TaskObject extends DurableObject {
+  /// Static so tests can shorten it, as the relay's are (feed-touch.ts `FEED_QUIET_MS`).
+  static feedQuietMs = FEED_QUIET_MS;
+
+  /// Until when this task tells its shop nothing: its shop said nobody follows it. Held in memory only, so a task object
+  /// that wakes again asks once more.
+  private feedQuietUntil = 0;
+
+  /// Every request goes to `route`, and a write that changed what the shop's screens read tells the shop's object, which
+  /// pings its live feed (feed.ts). The call is never waited on and can fail nothing: the task's caller has its answer
+  /// first, and the desktops' one-minute read stands whatever becomes of it. This is the one extra call the feed costs a
+  /// task, and none while the shop has nobody following it, beyond one a minute.
   override async fetch(request: Request): Promise<Response> {
+    const response = await this.route(request);
+    if (response.ok && touchesFeed(request.method, new URL(request.url).pathname)) this.touchFeed(request);
+    return response;
+  }
+
+  /// Tells the task's shop that the task changed, unless the shop said a moment ago that nobody follows it. The shop is
+  /// the task's own tenant, as for its approval requests (`ownerOf`).
+  private touchFeed(request: Request): void {
+    if (Date.now() < this.feedQuietUntil) return;
+    this.ctx.waitUntil((async () => {
+      const doc = await this.load();
+      if (!doc) return;
+      const listening = await touchFeed(this.tenantEnv, this.ownerOf(doc, request));
+      if (listening === 0) this.feedQuietUntil = Date.now() + TaskObject.feedQuietMs;
+    })().catch(() => undefined));
+  }
+
+  private async route(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/") {
       const doc = await this.load();

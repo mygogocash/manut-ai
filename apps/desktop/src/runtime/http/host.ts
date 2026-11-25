@@ -50,6 +50,12 @@
 // has not said yet is emitted once as `device.new`; the first look at a shop emits none, and what was seen is kept per shop
 // on this computer and goes with the shop. The store turns the event into the notification (store.ts `notifySessionEvent`,
 // notify.ts `showNewDevice`).
+//
+// The live feed (feed.ts; docs/runtime-adapter.md, "The live feed"). While the API says it is on, each shop the latest read
+// shows has a socket of its own, opened with that shop's session, and a ping on it moves the next read to a second from
+// now, and never sooner than `FRESH_MS` after the last one (`onFeedPing`). The feed carries no data: the read that follows
+// is the minute's read, with each shop's own session. A feed that is off, closed or failing leaves the minute's read as it
+// was. Signing out, the person's place in a shop ending, and the host stopping close the sockets.
 import { mayDecide } from "@manut/approval-core";
 import { t, type Key } from "../../i18n";
 import type { ApprovalChoice, BridgeEvent, OpMap, PassedOnNote, ShopLeft, ShopRow } from "../../lib/protocol";
@@ -65,6 +71,7 @@ import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
 import { closingFor, helperNames, RECENT_PATH, recentOf, type AskedOf, type DecidedContext } from "./decided";
 import { DeviceWatch, readDevices } from "./devices";
+import { FEED_DEBOUNCE_MS, FEED_PATH, feedUrl, ShopFeeds, type Look, type OpenSocket } from "./feed";
 import { memoryHandlers } from "./memory";
 import { addPage, askOlder, dropOlder, forgetAsk, keepOlder, nextCursor, olderOf, type TaskList } from "./older";
 import { peopleHandlers } from "./people";
@@ -130,6 +137,9 @@ export interface HostOptions {
   /** What the app has already said of its shops' helpers' devices, kept on this computer; this computer's own storage when
    *  absent. */
   devices?: DeviceWatch;
+  /** How the live feed opens a socket (feed.ts): the page's own WebSocket in the app. Without it, or for an origin the
+   *  app's CSP gives no socket, there is no feed and the minute's read is all there is. */
+  feed?: { open: OpenSocket };
 }
 
 const notFound = () => new OpError("not_found", t("rt.notFound"));
@@ -259,6 +269,12 @@ export class HttpHost {
   private clients = 0;
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When the scheduled read is due, so a ping can move it sooner and never later (`readBy`). */
+  private timerAt: number | null = null;
+  /** A ping came while a read was on its way, which may have been asked before the change: another read follows it. */
+  private pinged = false;
+  /** The shops' live feeds, or null when this runtime has none. */
+  private readonly feeds: ShopFeeds | null;
   private attempt = 0;
   private reading: Promise<ShopRead> | null = null;
   private offSession: (() => void) | null = null;
@@ -281,6 +297,10 @@ export class HttpHost {
     this.keeping = opts.keeping ?? (() => true);
     this.shopSessions = opts.shops ?? new ShopSessions(opts.session, this.now);
     this.devices = opts.devices ?? new DeviceWatch();
+    const url = opts.feed ? feedUrl(opts.session.origin) : null;
+    this.feeds = opts.feed && url
+      ? new ShopFeeds({ url, open: opts.feed.open, now: this.now, link: { look: (shop) => this.lookAtFeed(shop), ping: () => this.onFeedPing() } })
+      : null;
   }
 
   /** Whether the screens can be answered: the API answered, or its last answer is shown because it cannot be reached. */
@@ -338,6 +358,7 @@ export class HttpHost {
 
   private stop(): void {
     this.running = false;
+    this.feeds?.stop();
     this.clearTimer();
     this.offSession?.();
     this.offSession = null;
@@ -357,6 +378,7 @@ export class HttpHost {
     if (s.kind === "signed_in") {
       if (this.link !== "open") void this.cycle();
     } else if (s.kind === "signed_out" || s.kind === "no_keychain") {
+      this.feeds?.stop();
       this.clearTimer();
       this.snapshot = null;
       this.onDisk = null;
@@ -411,7 +433,12 @@ export class HttpHost {
     // In the step that takes the read, so no page Show older adds in between can be missed: what it read stays, and what the new
     // read pushed out of the newest tasks joins it (older.ts).
     if (r.ok) r = { ok: true, snapshot: this.keepingOlder(this.snapshot, r.snapshot) };
+    // A ping that came while this read was on its way may be of a change made after it was asked: one more read follows,
+    // when the API answered (`onFeedPing`). One that came during a failed read is the host's retries' to answer.
+    const pinged = this.pinged;
+    this.pinged = false;
     this.apply(r, standIn, ticket);
+    if (pinged) this.onFeedPing();
     return r;
   }
 
@@ -469,6 +496,7 @@ export class HttpHost {
    *  is written again without it. Its session already went (shops.ts). */
   private depart(left: readonly Left[], listed: readonly ShopRow[] = []): void {
     if (!left.length) return;
+    this.feeds?.drop(left.map((l) => l.shop));
     const was = this.snapshot;
     for (const { shop, departure } of left) {
       const row = partOf(was, shop)?.shop ?? listed.find((r) => r.id === shop) ?? { id: shop, name: "", owner: "", role: "helper" as const };
@@ -557,6 +585,9 @@ export class HttpHost {
     this.schedule(POLL_MS);
     this.keep(r.snapshot, ticket);
     this.lookAtDevices(r.snapshot);
+    // Every shop the read shows has its feed, and a shop it no longer shows lets its feed go. A person in no shop is read as
+    // their own sign-in's tenant, which is no shop and has none.
+    this.feeds?.follow((r.snapshot.shops ?? []).map((p) => p.shop.id));
   }
 
   /** After a read is taken: forgets what the app saw of the shops the person no longer owns, then asks each shop they own
@@ -596,8 +627,10 @@ export class HttpHost {
   private schedule(ms: number): void {
     this.clearTimer();
     if (!this.running) return;
+    this.timerAt = this.now() + ms;
     this.timer = setTimeout(() => {
       this.timer = null;
+      this.timerAt = null;
       void this.cycle();
     }, ms);
   }
@@ -605,6 +638,56 @@ export class HttpHost {
   private clearTimer(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.timerAt = null;
+  }
+
+  /** Moves the next read to `at` when the one scheduled is due later; never later than it was. */
+  private readBy(at: number): void {
+    if (this.timerAt !== null && this.timerAt <= at) return;
+    this.schedule(Math.max(0, at - this.now()));
+  }
+
+  // ---- the live feed ----------------------------------------------------------------------------------------------
+
+  /** A shop's feed said something its screens read changed (feed.ts). The shops are read again a second from now, so pings
+   *  from several shops are one read, and never sooner than `FRESH_MS` after the last read, so the feed never reads more
+   *  often than a screen may. A ping while a read is on its way gets another read after it, since that one may have been
+   *  asked before the change. Only while the API answers: during an outage the host's own retries decide when it reads,
+   *  and before the first read there is nothing to read sooner. */
+  private onFeedPing(): void {
+    // The feeds stop with the host, so a ping only ever comes while it runs; with the link open there is always a read.
+    if (this.link !== "open" || !this.snapshot) return;
+    if (this.reading) {
+      this.pinged = true;
+      return;
+    }
+    this.readBy(Math.max(this.now() + FEED_DEBOUNCE_MS, this.snapshot.readAt + FRESH_MS));
+  }
+
+  /** Whether `shop`'s feed is on, asked with that shop's own session (`GET /v1/feed`), with the token to open it with: the
+   *  session the answer was just given for, which `shopSessions.read` opened again first if it had ended. A 401 that ends
+   *  the person's place in the shop ends it here as it does for the minute's read (`depart`), and the shop is not followed.
+   *  The API's `feature_disabled`, and the 404 of an API from before the feed, are off; anything else, a 200 this build
+   *  cannot read included, is tried again later. It only reads: a look never changes anything at the shop. */
+  private async lookAtFeed(shop: string): Promise<Look> {
+    const answer = await this.shopSessions.read(shop, FEED_PATH);
+    // The host stopped while the look was asked: nothing it found is said, and the stopped follower ignores the answer.
+    if (!this.running) return { kind: "stop" };
+    if (answer.kind === "left") {
+      this.depart([{ shop, departure: answer.departure }]);
+      return { kind: "stop" };
+    }
+    // An answer of signed out needs nothing here: a session that ends tells the host first, which stops every feed
+    // (`onSession`), so the follower is stopped by the time this answer reaches it.
+    if (answer.kind === "ok") {
+      const held = this.session.shopSession(shop);
+      const on = (answer.json as { feed?: unknown } | null)?.feed === "on";
+      return held && on ? { kind: "on", token: held.accessToken } : { kind: "retry" };
+    }
+    if (answer.kind === "refused" && ((answer.status === 403 && answer.code === "feature_disabled") || answer.status === 404)) {
+      return { kind: "off" };
+    }
+    return { kind: "retry" };
   }
 
   /** Moves to a link and what stands in for the shop with it, and tells the listeners when either changed. */
