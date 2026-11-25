@@ -774,14 +774,35 @@ export function roundedPath(points: [number, number][], r = G.r, gaps?: (x: numb
 /** What the trials of one layout may cost together (see `layoutBoxes`): a third of a second or so. */
 const TRIAL_BUDGET = 60;
 
+/** A net's pins in a channel it has none in. One list for all of them: nothing adds to it. */
+const NO_PINS: readonly number[] = [];
+
+/** A trial's layout, and the way to draw its lines: the one that is kept draws them from what the trial worked out,
+ *  not from a second layout. */
+interface Made {
+  lay: BoxLayout;
+  draw: () => BoxLayout;
+}
+/** What the trials of one `layoutBoxes` have in common, so that none of them works it out again. */
+interface Trials {
+  /** The frontiers, by the most boxes a row holds (`Infinity`: no cap). */
+  shapes: Map<number, Frontiers>;
+  /** What every node ran on. */
+  facts?: Map<string, Facts>;
+  /** The layouts made so far, by where they put the boxes (see `layoutAt`). */
+  made: Map<string, Made>;
+}
+const shapeFor = (common: Trials, run: Run, cap: number) => common.shapes.get(cap) ?? common.shapes.set(cap, frontiers(run.nodes, cap)).get(cap)!;
+
 /** Where every box stands and how every edge runs. The margins are as narrow as the lines that pass the rows
  *  allow: `GEOMETRY.margin`, or more for a run whose passing lines need the room; a run they still do not fit gets
  *  fewer boxes to a row, down to half of them, for each line to have a place of its own. */
 export function layoutBoxes(run: Run, o: LayoutOpts): BoxLayout {
   const W = Math.max(BOX_MIN + 2 * G.margin, Math.floor(o.width));
+  const common: Trials = { shapes: new Map(), made: new Map() };
   // a frontier a little too long for the width stays on one row of the narrowest boxes where the drawing may be
   // wider: a wrapped frontier sends every line into its second row round the first
-  const longest = Math.max(1, ...frontiers(run.nodes).rows.map((r) => r.length));
+  const longest = Math.max(1, ...shapeFor(common, run, Infinity).rows.map((r) => r.length));
   // a trial costs more than the square of the run's size (some 10ms at sixty nodes, a quarter of a second at
   // 250), and the drawing is laid out again whenever a live run changes: a run of sixty nodes gets sixty
   // trials (its ladder is seldom that long), a run of a hundred ten, a run of a few hundred its first layout only
@@ -791,11 +812,12 @@ export function layoutBoxes(run: Run, o: LayoutOpts): BoxLayout {
   const afford = () => spent + cost <= TRIAL_BUDGET;
   /** The layout in which every passing line keeps `clear` px from the other nets' lines, where that can be. */
   const arrange = (clear: number) => {
-    // a trial places the boxes and gives every line its place; only the layout that is kept draws its lines
-    const at = (margin: number, gap: number, cols?: number, most = BOX_COMFORT, draw = false) => {
-      if (!draw) [spent, trials] = [spent + cost, trials + 1];
+    // a trial places the boxes and gives every line its place; only the layout that is kept draws its lines (it
+    // keeps what it needs for that, so it is not laid out a second time)
+    const at = (margin: number, gap: number, cols?: number, most = BOX_COMFORT) => {
+      [spent, trials] = [spent + cost, trials + 1];
       const need = longest * BOX_MIN + (longest - 1) * gap + 2 * margin;
-      return { margin, gap, cols, most, lay: layoutAt(run, o, need > W && need <= W * (o.stretch ?? 1) ? need : W, { margin, least: gap, cols, most, clear, draw }) };
+      return { margin, gap, cols, most, ...layoutAt(run, o, need > W && need <= W * (o.stretch ?? 1) ? need : W, { margin, least: gap, cols, most, clear }, common) };
     };
     let best = at(G.margin, G.gap);
     // lines that pass rows: the boxes stand a lane's width apart, so such a line takes the space between two
@@ -845,7 +867,7 @@ export function layoutBoxes(run: Run, o: LayoutOpts): BoxLayout {
     for (let cols = perRow - 1; best.lay.shared && cols >= fewest && afford(); cols--) tryAt(widest, cols, BOX_MIN);
     // and still: that many of the narrowest boxes, and all the width they leave at the sides for the lines
     if (best.lay.shared && fewest < perRow && afford()) tryAt(Math.max(widest, Math.floor((W - fewest * BOX_MIN - (fewest - 1) * gap) / 2)), fewest, BOX_MIN);
-    return { ...best, draw: () => at(best.margin, best.gap, best.cols, best.most, true).lay };
+    return best;
   };
   // two lanes clear of each other where the run has the room; a run so dense that lines then have to share a
   // place is laid out again with them one lane clear, which holds twice as many, and then nearer still
@@ -865,16 +887,16 @@ const worse = (a: BoxLayout, b: BoxLayout) => a.shared > b.shared || (a.shared =
 /** One layout: `margin` px free at each side, the boxes of a row at least `least` px apart, and at most `cols`
  *  boxes to a row when that is given (the boxes are then no wider than `most`, so the room they leave goes to
  *  the passing lines). A passing line keeps `clear` px from the other nets' lines where a place that clear is
- *  free, and `lane` px in any case (`clear` itself, when that is less). With `draw` off it places everything
- *  and counts what is crowded, but draws no line. */
-function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, most, clear, draw }: { margin: number; least: number; cols: number | undefined; most: number; clear: number; draw: boolean }): BoxLayout {
+ *  free, and `lane` px in any case (`clear` itself, when that is less). It places everything and counts what is
+ *  crowded, and draws no line until `draw` is called. */
+function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, most, clear }: { margin: number; least: number; cols: number | undefined; most: number; clear: number }, common: Trials): Made {
   const byId = new Map(run.nodes.map((n) => [n.id, n]));
   const measure = o.measure ?? estimate;
   const avail = W - 2 * margin;
   const widthFor = (k: number) => Math.floor((avail - (k - 1) * least) / k);
   const maxCols = Math.max(1, Math.min(cols ?? Infinity, Math.floor((avail + least) / (BOX_MIN + least))));
-  const shape = frontiers(run.nodes, maxCols);
-  const facts = new Map(run.nodes.map((n) => [n.id, factsOf(n, run, o.bot)]));
+  const shape = shapeFor(common, run, maxCols);
+  const facts = (common.facts ??= new Map(run.nodes.map((n) => [n.id, factsOf(n, run, o.bot)])));
 
   // one width for every box: what the widest node would like on one line, narrowed to put the widest frontier on
   // one row; a frontier that would need boxes under BOX_MIN wraps instead, and the boxes are then as narrow as
@@ -941,6 +963,13 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       xOf.set(id, Math.round(margin + (avail - (k * boxW + (k - 1) * gap)) / 2 + i * (boxW + gap)));
     });
   });
+  // from here on the layout depends on the width, the clearance, the most boxes to a row (the frontiers) and where
+  // the boxes stand, and on nothing else of the margin, the gap it was asked for or the box width it wanted. A wider
+  // margin often changes none of that (the room it takes is left over), so a trial that stands the boxes where an
+  // earlier one did has the layout that one made
+  const same = [W, clear, maxCols, perRow, boxW, gap, ...xOf.values()].join(" ");
+  const made = common.made.get(same);
+  if (made) return made;
   const mid = (id: string) => xOf.get(id)! + boxW / 2;
 
   // every box of a row is as tall as the row's longest box needs
@@ -968,6 +997,24 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
     .map((n) => ({ ...n, parents: n.parents.sort(order) }))
     .sort((a, b) => order(a.parents[0], b.parents[0]) || meanX(a.children) - meanX(b.children))
     .map((n, i) => ({ key: `n${i}`, ...n }));
+  type Net = (typeof nets)[number];
+  /** The pins of the nets by channel: for each net, the channels it has pins in, in the order it first reaches them,
+   *  and in each its parents' lines down from row c (`leave` says where each leaves its box) followed by its points
+   *  on the children of row c + 1 (`at` says where each stands). Every lane search and every level stretch asks for
+   *  them again and again, so each net's are worked out when first asked for, and kept. */
+  const pinTable = (leave: (parent: string) => number, at: (n: Net, child: string) => number) => {
+    const table = new Map<Net, Map<number, number[]>>();
+    return (n: Net) => {
+      let by = table.get(n);
+      if (!by) {
+        by = new Map();
+        for (const p of n.parents) (by.get(rowOf.get(p)!) ?? by.set(rowOf.get(p)!, []).get(rowOf.get(p)!)!).push(leave(p));
+        for (const k of n.children) (by.get(rowOf.get(k)! - 1) ?? by.set(rowOf.get(k)! - 1, []).get(rowOf.get(k)! - 1)!).push(at(n, k));
+        table.set(n, by);
+      }
+      return by;
+    };
+  };
 
   // ---- pins. A parent's line leaves its bottom middle. A child several nets lead into takes each at its own point,
   // `port` px apart (less only when its top edge is too short for that), left to right in the order of where they
@@ -1015,8 +1062,12 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
   }
   /** The name under which net n's line runs in channel c: its own, or the one it shares with the nets it joins there. */
   const lineOf = (n: (typeof nets)[number], c: number) => (endOf.has(n.key) && rowOf.get(endOf.get(n.key)!)! - 1 === c ? `>${endOf.get(n.key)}` : n.key);
-  const extent = (xs: number[]) => (xs.length ? Math.max(...xs) - Math.min(...xs) : 0);
   const beside = vrows.map((_, r) => free([r])); // per row, the free spaces beside its boxes
+  // per row, where its boxes begin and end: a lane outside them runs round the end of the row
+  const rowEnds = vrows.map((r) => {
+    const xs = r.ids.map((id) => xOf.get(id)!);
+    return [Math.min(...xs), Math.max(...xs) + boxW];
+  });
   const pitch = Math.min(G.lane, clear); // the least two passing lines stand apart in this layout
   /** One pass: every line into a child gets its point on the child's top, then every line that passes rows its
    *  place beside each. `arrive` says, per net and child, where the net's line comes down to the child (from a
@@ -1089,27 +1140,48 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       sorted.forEach((g, i) => g.forEach((n) => port.set(`${n.key}\n${child}`, xs[i])));
     }
 
+    // (the points on the children stand from here to the end of the pass, so a net's pins are worked out once)
+    const pinsBy = pinTable((p) => snap(mid(p)), (n, k) => port.get(`${n.key}\n${k}`)!);
     /** A net's pins in channel c: its parents' lines down from row c, and its points on the children of row c + 1. */
-    const pinsOf = (n: (typeof nets)[number], c: number) => [...n.parents.filter((p) => rowOf.get(p) === c).map((p) => snap(mid(p))), ...n.children.filter((k) => rowOf.get(k)! - 1 === c).map((k) => port.get(`${n.key}\n${k}`)!)];
+    const pinsOf = (n: (typeof nets)[number], c: number) => pinsBy(n).get(c) ?? NO_PINS;
     // channel -> every net's pins in it, under the name its line runs by there: the nets that end at one child
-    // are one line over it, and the lane of one of them may come down right over the point they share
-    const pinned = new Map<number, { x: number; net: string }[]>();
-    for (const n of nets) for (const c of new Set([...n.parents.map((p) => rowOf.get(p)!), ...n.children.map((k) => rowOf.get(k)! - 1)])) for (const x of pinsOf(n, c)) (pinned.get(c) ?? pinned.set(c, []).get(c)!).push({ x, net: lineOf(n, c) });
-    // per row, in order of x: the lines a place beside that row has to keep clear of. The pins of the channel above
-    // it and of the one below, and the lines that pass it or a row next to it (they reach into the same channels)
-    const lined: { x: number; net: string }[][] = vrows.map(() => []);
-    const line = (r: number, at: { x: number; net: string }) => {
-      const row = lined[r];
-      if (!row) return;
-      let [from, to] = [0, row.length];
+    // are one line over it, and the lane of one of them may come down right over the point they share. (A name is
+    // a number here, so that two are compared at once: the same name, the same number)
+    const names = new Map<string, number>();
+    const nameId = (name: string) => names.get(name) ?? names.set(name, names.size).get(name)!;
+    const pinned = new Map<number, { x: number; net: number }[]>();
+    for (const n of nets)
+      for (const [c, xs] of pinsBy(n)) {
+        const name = nameId(lineOf(n, c));
+        for (const x of xs) (pinned.get(c) ?? pinned.set(c, []).get(c)!).push({ x, net: name });
+      }
+    // per row, in order of x: the lines a place beside that row has to keep clear of (where each stands, and whose
+    // it is). The pins of the channel above it and of the one below, and the lines that pass it or a row next to
+    // it (they reach into the same channels)
+    const lineX: number[][] = vrows.map(() => []);
+    const lineNet: number[][] = vrows.map(() => []);
+    const line = (r: number, x: number, net: number) => {
+      const xs = lineX[r];
+      if (!xs) return;
+      let from = 0;
+      let to = xs.length;
       while (from < to) {
         const mid = (from + to) >> 1;
-        if (row[mid].x < at.x) from = mid + 1;
+        if (xs[mid] < x) from = mid + 1;
         else to = mid;
       }
-      row.splice(from, 0, at);
+      xs.splice(from, 0, x);
+      lineNet[r].splice(from, 0, net);
     };
-    for (const [c, pins] of pinned) for (const pin of pins) for (const r of [c, c + 1]) line(r, pin);
+    // every pin goes into the rows either side of its channel, and each row is put in order once, when it is full
+    // (where two stand at one x it does not matter which comes first: a place is asked whether any line is near it)
+    const staged = vrows.map(() => [] as [x: number, net: number][]);
+    for (const [c, pins] of pinned) for (const pin of pins) for (const r of [c, c + 1]) staged[r]?.push([pin.x, pin.net]);
+    staged.forEach((row, r) => {
+      row.sort((a, b) => a[0] - b[0]);
+      lineX[r] = row.map(([x]) => x);
+      lineNet[r] = row.map(([, net]) => net);
+    });
     const lanes = new Map<string, Map<number, number>>(); // net -> per row it passes, the x of its line beside that row's boxes
     let outer = 0; // the times such a line passes a row round its end
     for (const n of nets) {
@@ -1117,28 +1189,71 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       if (lo === hi) continue;
       // the lane joins the net's level stretches, one in each channel it has pins in: the shorter those are, the
       // better. Their length is least for a lane between the pins; among those places, the one nearest the middle pin
-      const spans = [...new Set([...n.parents.map((p) => rowOf.get(p)!), ...n.children.map((c) => rowOf.get(c)! - 1)])].map((c) => pinsOf(n, c)).map((xs) => [Math.min(...xs), Math.max(...xs)]);
-      const wire = (x: number) => spans.reduce((sum, [a, b]) => sum + Math.max(b, x) - Math.min(a, x), 0);
+      const spans = [...pinsBy(n).values()].map((xs) => [Math.min(...xs), Math.max(...xs)]);
+      const wire = (x: number) => {
+        let sum = 0;
+        for (const [a, b] of spans) sum = sum + Math.max(b, x) - Math.min(a, x);
+        return sum;
+      };
       const xs = [...n.parents.map(mid), ...n.children.map((c) => port.get(`${n.key}\n${c}`)!)].sort((a, b) => a - b);
       const middle = xs[Math.floor((xs.length - 1) / 2)];
-      const ideal = [middle, ...spans.flat()].sort((a, b) => wire(a) - wire(b) || Math.abs(a - middle) - Math.abs(b - middle))[0];
+      // the middle pin, or an end of one of the spans: the one with the shortest wire, then the nearest the middle
+      // pin, and the first of those that tie. (Each is measured once: sorting them with the measure in the
+      // comparison measured every span again at every step)
+      let ideal = middle;
+      let [shortest, nearest] = [wire(middle), 0];
+      for (const x of spans.flat()) {
+        const [w, d] = [wire(x), Math.abs(x - middle)];
+        if (w < shortest || (w === shortest && d < nearest)) [ideal, shortest, nearest] = [x, w, d];
+      }
       // a place beside row r is taken when another net's line stands within `lane` of it: one that passes this row
       // or the rows next to it (their lines reach into the same channels), or a pin in the channel above or below.
       // A place twice that far from every such line is better still
       const rows = Array.from({ length: hi - lo }, (_, i) => lo + 1 + i);
       const rooms = rows.map((r) => beside[r]);
       const own = lineOf(n, hi); // the name it shares with the nets it joins over its last child
-      /** Whether a place at `x` beside the i-th of these rows is within `apart` of another net's line there. */
-      const busy = (x: number, i: number, apart = pitch) => {
-        const taken = lined[rows[i]];
-        let [from, to] = [0, taken.length]; // the first of them right of x - apart
+      const [mine, joined] = [nameId(n.key), nameId(own)];
+      /** Where the lines within `apart` of `x` beside the i-th of these rows begin in order: the first of them right of x - apart. */
+      const firstNear = (x: number, i: number, apart: number) => {
+        const xs = lineX[rows[i]];
+        let from = 0;
+        let to = xs.length;
         while (from < to) {
           const mid = (from + to) >> 1;
-          if (taken[mid].x <= x - apart) from = mid + 1;
+          if (xs[mid] <= x - apart) from = mid + 1;
           else to = mid;
         }
-        for (; from < taken.length && taken[from].x < x + apart; from++) if (taken[from].net !== n.key && taken[from].net !== own) return true;
+        return from;
+      };
+      /** Whether a place at `x` beside the i-th of these rows is within `apart` of another net's line there. */
+      const busy = (x: number, i: number, apart = pitch) => {
+        const [xs, owners] = [lineX[rows[i]], lineNet[rows[i]]];
+        for (let at = firstNear(x, i, apart); at < xs.length && xs[at] < x + apart; at++) if (owners[at] !== mine && owners[at] !== joined) return true;
         return false;
+      };
+      /** The first place from `x` on that no other net's line is within `apart` of, going right (`dir` 1) or left
+       *  (-1) a `pitch` at a time and no further than `limit`; undefined where there is none. A line in the way takes
+       *  every place within `apart` of it, so the search steps over all of those at once: on to the first beyond
+       *  it, which is the same place asking one step at a time would come to. */
+      const firstFree = (x: number, i: number, dir: 1 | -1, limit: number, apart: number): number | undefined => {
+        const [xs, owners] = [lineX[rows[i]], lineNet[rows[i]]];
+        while (dir > 0 ? x <= limit : x >= limit) {
+          // the line that is in the way and reaches furthest the way we go: the last in the window going right,
+          // the first going left
+          let way: number | undefined;
+          for (let at = firstNear(x, i, apart); at < xs.length && xs[at] < x + apart; at++)
+            if (owners[at] !== mine && owners[at] !== joined) {
+              way = xs[at];
+              if (dir < 0) break;
+            }
+          if (way === undefined) return x;
+          let steps = Math.max(1, Math.ceil(dir > 0 ? (way + apart - x) / pitch : (x - way + apart) / pitch));
+          // (the quotient is exact for the half pixels the places stand on; this only guards against a rounding)
+          while (steps > 1 && (dir > 0 ? x + (steps - 1) * pitch >= way + apart : x - (steps - 1) * pitch <= way - apart)) steps--;
+          while (dir > 0 ? x + steps * pitch < way + apart : x - steps * pitch > way - apart) steps++;
+          x += dir * steps * pitch;
+        }
+        return undefined;
       };
       // per row and free space, the places nearest `to` that are not taken: the line stands as near its own ends as
       // it can while keeping `ease` from the boxes, and in the middle of a narrow space between two boxes; on a half
@@ -1153,16 +1268,9 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
         for (const apart of clear > pitch ? [clear, pitch] : [pitch]) {
           if (!busy(near, i, apart)) return [near];
           const sides: number[] = [];
-          for (let x = near + pitch; x <= b + 0.5; x += pitch)
-            if (!busy(x, i, apart)) {
-              sides.push(x);
-              break;
-            }
-          for (let x = near - pitch; x >= a - 0.5; x -= pitch)
-            if (!busy(x, i, apart)) {
-              sides.push(x);
-              break;
-            }
+          const [right, left] = [firstFree(near + pitch, i, 1, b + 0.5, apart), firstFree(near - pitch, i, -1, a - 0.5, apart)];
+          if (right !== undefined) sides.push(right);
+          if (left !== undefined) sides.push(left);
           if (sides.length) return sides;
         }
         return [];
@@ -1172,8 +1280,14 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       // straight on from one row to the next (twice, so a straight run can pass three rows)
       for (let round = 0; round < 2; round++)
         options = options.map((own, i) => {
-          const more = [...(options[i - 1] ?? []), ...(options[i + 1] ?? [])].filter((x) => !own.includes(x) && rooms[i].some(([a, b]) => x >= a - 0.5 && x <= b + 0.5) && !busy(x, i));
-          return [...own, ...new Set(more)];
+          const more: number[] = [];
+          for (const offered of [options[i - 1], options[i + 1]])
+            for (const x of offered ?? []) {
+              // (a place both neighbours offer is asked about once; busy is only asked of a place this row has the room for)
+              if (own.includes(x) || more.includes(x) || !rooms[i].some(([a, b]) => x >= a - 0.5 && x <= b + 0.5) || busy(x, i)) continue;
+              more.push(x);
+            }
+          return [...own, ...more];
         });
       // a row with no free place: the line shares one (the nearest it could have had), and the layout is crowded
       const full = options.some((o) => !o.length);
@@ -1184,22 +1298,48 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       }
       // the places that make the net's level stretches shortest, row by row: in the channel under row r the stretch
       // reaches over the net's pins there, the line that came down past row r and the line that goes on past row r + 1
-      const reaches = new Map(Array.from({ length: hi - lo + 1 }, (_, i) => [lo + i, pinsOf(n, lo + i)] as const).map(([c, pins]) => [c, pins.length ? ([Math.min(...pins), Math.max(...pins)] as const) : null])); // channel -> how far the net's pins there reach
+      // (per channel, how far the net's pins there reach: left and right, or the infinities where it has none, so
+      // that only the lines that pass stretch it. The cost of every pair of places is asked for below, thousands
+      // of times in a dense run, so it is plain arithmetic: no array made, nothing spread)
+      const reachLo: number[] = [];
+      const reachHi: number[] = [];
+      for (let c = lo; c <= hi; c++) {
+        const pins = pinsOf(n, c);
+        reachLo[c - lo] = pins.length ? Math.min(...pins) : Infinity;
+        reachHi[c - lo] = pins.length ? Math.max(...pins) : -Infinity;
+      }
       const stretch = (c: number, above?: number, below?: number) => {
-        const at = reaches.get(c);
-        const xs = [...(at ?? []), ...(above === undefined ? [] : [above]), ...(below === undefined ? [] : [below])];
+        let left = reachLo[c - lo];
+        let right = reachHi[c - lo];
+        if (above !== undefined) {
+          if (above < left) left = above;
+          if (above > right) right = above;
+        }
+        if (below !== undefined) {
+          if (below < left) left = below;
+          if (below > right) right = below;
+        }
         // a step aside between two rows costs a turn's worth; one too short to turn twice in (a kink) four
-        return extent(xs) + (above !== undefined && below !== undefined && above !== below ? (Math.abs(above - below) < 2 * G.r ? 4 * G.r : G.r) : 0);
+        return (right >= left ? right - left : 0) + (above !== undefined && below !== undefined && above !== below ? (Math.abs(above - below) < 2 * G.r ? 4 * G.r : G.r) : 0);
       };
       let costs = options[0].map((x) => stretch(lo, undefined, x) + Math.abs(x - ideal) / 1000);
       const from: number[][] = [];
       for (let i = 1; i < rows.length; i++) {
         const next: number[] = [];
         from[i] = [];
+        const [before, c] = [options[i - 1], rows[i] - 1];
         options[i].forEach((x, j) => {
-          const each = options[i - 1].map((prev, q) => costs[q] + stretch(rows[i] - 1, prev, x));
-          const at = each.indexOf(Math.min(...each));
-          next[j] = each[at] + Math.abs(x - ideal) / 1000;
+          // the cheapest way here from the places of the row above: the first of the equally cheap ones
+          let cheapest = Infinity;
+          let at = 0;
+          for (let q = 0; q < before.length; q++) {
+            const cost = costs[q] + stretch(c, before[q], x);
+            if (cost < cheapest) {
+              cheapest = cost;
+              at = q;
+            }
+          }
+          next[j] = cheapest + Math.abs(x - ideal) / 1000;
           from[i][j] = at;
         });
         costs = next;
@@ -1209,12 +1349,11 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       for (let i = rows.length - 1, j = last.indexOf(Math.min(...last)); i >= 0; j = from[i]?.[j] ?? 0, i--) chosen.set(rows[i], options[i][j]);
       lanes.set(n.key, chosen);
       for (const [r, x] of chosen) {
-        for (const q of [r - 1, r, r + 1]) line(q, { x, net: n.key });
-        const xs = vrows[r].ids.map((id) => xOf.get(id)!);
-        if (x < Math.min(...xs) || x > Math.max(...xs) + boxW) outer++;
+        for (const q of [r - 1, r, r + 1]) line(q, x, mine);
+        if (x < rowEnds[r][0] || x > rowEnds[r][1]) outer++;
       }
     }
-    return { port, pinsOf, lanes, crowded, shared, tight, outer };
+    return { port, lanes, crowded, shared, tight, outer };
   };
   /** Where each net's line comes down to each child in a pass (the mean of where its last level stretch at the
    *  child starts: its parents right above, and its lane), and how many children's points do not stand in the
@@ -1225,12 +1364,26 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
     for (const [child, ns] of into) {
       if (ns.length < 2) continue;
       const c = rowOf.get(child)! - 1;
-      const comes = (n: (typeof nets)[number]) => {
-        const xs = [...n.parents.filter((q) => rowOf.get(q) === c).map((q) => snap(mid(q))), ...(pass.lanes.get(n.key)?.has(c) ? [pass.lanes.get(n.key)!.get(c)!] : [])];
-        return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : meanX(n.parents);
-      };
-      for (const n of ns) arrive.set(`${n.key}\n${child}`, comes(n));
-      const arriving = [...ns].sort((a, b) => comes(a) - comes(b) || a.key.localeCompare(b.key)).map((n) => pass.port.get(`${n.key}\n${child}`)!);
+      // where a net's line comes down: the mean of the places its last level stretch starts at, the lines straight
+      // down from its parents in the row above and its lane there. Worked out once for each net, not at every
+      // step of the sort below
+      const comes = new Map<(typeof nets)[number], number>();
+      for (const n of ns) {
+        let [sum, count] = [0, 0];
+        for (const q of n.parents)
+          if (rowOf.get(q) === c) {
+            sum += snap(mid(q));
+            count++;
+          }
+        const lane = pass.lanes.get(n.key)?.get(c);
+        if (lane !== undefined) {
+          sum += lane;
+          count++;
+        }
+        comes.set(n, count ? sum / count : meanX(n.parents));
+      }
+      for (const n of ns) arrive.set(`${n.key}\n${child}`, comes.get(n)!);
+      const arriving = [...ns].sort((a, b) => comes.get(a)! - comes.get(b)! || a.key.localeCompare(b.key)).map((n) => pass.port.get(`${n.key}\n${child}`)!);
       if (arriving.some((x, i) => i && x < arriving[i - 1])) crossed++;
     }
     return { arrive, crossed };
@@ -1281,37 +1434,52 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
       for (const m of group) port.set(`${m.key}\n${k}`, at);
     }
   }
-  /** A net's pins in channel c: its parents' lines down from row c, and its points on the children of row c + 1. */
-  const pinsOf = (n: (typeof nets)[number], c: number) => [...n.parents.filter((q) => rowOf.get(q) === c).map(exitOf), ...n.children.filter((k) => rowOf.get(k)! - 1 === c).map((k) => port.get(`${n.key}\n${k}`)!)];
-  /** Where net n's line stands in channel c besides its pins: where it came down past row c, and where it goes on
-   *  past row c + 1. */
-  const through = (n: (typeof nets)[number], c: number) => {
-    const [lo, hi] = reach.get(n.key)!;
-    const own = lanes.get(n.key);
-    return { down: own && c > lo && c <= hi ? [own.get(c)!] : [], up: own && c >= lo && c < hi ? [own.get(c + 1)!] : [] };
-  };
 
   // ---- tracks: the level stretches of one channel that would overlap each take their own height
   const track = new Map<string, number>(); // `${net}\n${channel}` -> track
   const tracks: number[] = vrows.map(() => 0);
   for (let c = 0; c < vrows.length - 1; c++) {
     const lines = new Map<string, typeof nets>(); // the nets that run as one line here, by that line's name
-    for (const n of nets) (lines.get(lineOf(n, c)) ?? lines.set(lineOf(n, c), []).get(lineOf(n, c))!).push(n);
+    // (a net has no pin and no lane in a channel outside its reach: no stretch of it to stand at a height there)
+    for (const n of nets) {
+      const [first, last] = reach.get(n.key)!;
+      if (c >= first && c <= last) (lines.get(lineOf(n, c)) ?? lines.set(lineOf(n, c), []).get(lineOf(n, c))!).push(n);
+    }
     const items = [...lines]
       .map(([key, ns]) => {
-        const pins = ns.flatMap((n) => pinsOf(n, c));
-        const pass = ns.map((n) => through(n, c));
-        const xs = [...pins, ...pass.flatMap((p) => [...p.down, ...p.up])];
+        // the lines of these nets in this channel: those that come down into it (their parents', and a lane that
+        // came down past row c) and those that go on below it (the points on their children, and a lane that goes
+        // on past row c + 1), and how many of them are the nets' own pins, not lanes
+        const down: number[] = [];
+        const up: number[] = [];
+        let pins = 0;
+        for (const n of ns) {
+          for (const q of n.parents)
+            if (rowOf.get(q) === c) {
+              down.push(exitOf(q));
+              pins++;
+            }
+          for (const k of n.children)
+            if (rowOf.get(k)! - 1 === c) {
+              up.push(port.get(`${n.key}\n${k}`)!);
+              pins++;
+            }
+        }
+        for (const n of ns) {
+          const [first, last] = reach.get(n.key)!;
+          const own = lanes.get(n.key);
+          if (own && c > first && c <= last) down.push(own.get(c)!);
+          if (own && c >= first && c < last) up.push(own.get(c + 1)!);
+        }
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (const x of [...down, ...up]) {
+          if (x < lo) lo = x;
+          if (x > hi) hi = x;
+        }
         // a line that passes straight through, with no pin of its net here, has no level stretch in this channel
-        if (!xs.length || (!pins.length && extent(xs) < 0.5)) return null;
-        return {
-          key,
-          ns,
-          lo: Math.min(...xs),
-          hi: Math.max(...xs),
-          down: [...ns.flatMap((n) => n.parents.filter((q) => rowOf.get(q) === c).map(exitOf)), ...pass.flatMap((p) => p.down)],
-          up: [...ns.flatMap((n) => n.children.filter((k) => rowOf.get(k)! - 1 === c).map((k) => port.get(`${n.key}\n${k}`)!)), ...pass.flatMap((p) => p.up)],
-        };
+        if (hi < lo || (!pins && hi - lo < 0.5)) return null;
+        return { key, ns, lo, hi, down, up };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
       .sort((a, b) => a.lo - b.lo || a.hi - b.hi);
@@ -1328,14 +1496,17 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
     // from above (a parent's, or a lane coming down) passes the stretches over its own; a line going below (into a
     // child, or a lane going on) passes the ones under it.
     const marks = items.map((it) => ({ ...it, tr: on.get(it.key)! }));
+    // how many of a's lines from above, and how many of its lines going below, pass over b's stretch: the same
+    // whatever the order of the tracks, so each pair is counted once and not again for every order tried
+    let over: [down: number, up: number][][] | undefined;
     const crossings = (place: number[]) => {
+      over ??= marks.map((a) => marks.map((b) => [a.down.filter((x) => b.lo < x && x < b.hi).length, a.up.filter((x) => b.lo < x && x < b.hi).length]));
       let count = 0;
-      for (const a of marks)
-        for (const b of marks) {
-          if (a === b || place[a.tr] === place[b.tr]) continue;
-          const xs = place[b.tr] < place[a.tr] ? a.down : a.up;
-          count += xs.filter((x) => b.lo < x && x < b.hi).length;
-        }
+      marks.forEach((a, i) =>
+        marks.forEach((b, j) => {
+          if (i !== j && place[a.tr] !== place[b.tr]) count += over![i][j][place[b.tr] < place[a.tr] ? 0 : 1];
+        }),
+      );
       return count;
     };
     let place = ends.map((_, i) => i);
@@ -1383,45 +1554,8 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
   // child's point (past the rows between them at the net's place beside each, when the child stands further
   // down), and down to its arrowhead.
   const busY = (key: string, c: number) => snap(chTop[c] + G.stub + (track.get(`${key}\n${c}`) ?? 0) * G.track);
-  const tones = new Map(run.nodes.map((n) => [n.id, statusOf(n, run).tone]));
-  const tone = (id: string) => tones.get(id)!;
-  const routes: { net: string; from: string; to: string; pts: [number, number][] }[] = [];
-  const heads: EdgeHead[] = [];
-  const headOf = new Map<string, EdgeHead>(); // child and line -> the head the line's nets end in
-  const drawn = new Set<string>();
-  for (const net of draw ? nets : []) {
-    const own = lanes.get(net.key);
-    for (const c of net.children) {
-      const cc = rowOf.get(c)! - 1;
-      const xc = port.get(`${net.key}\n${c}`)!;
-      const end = rowY[rowOf.get(c)!] - G.arrow;
-      for (const p of net.parents) {
-        const cp = rowOf.get(p)!;
-        const xp = exitOf(p);
-        const pts: [number, number][] = [[xp, rowY[cp] + rowH[cp]]];
-        if (cp === cc || !own) pts.push([xp, busY(net.key, cc)]);
-        else {
-          pts.push([xp, busY(net.key, cp)]);
-          for (let r = cp + 1; r <= cc; r++) pts.push([own.get(r)!, busY(net.key, r - 1)], [own.get(r)!, busY(net.key, r)]);
-        }
-        pts.push([xc, busY(net.key, cc)], [xc, end]);
-        drawn.add(`${p}>${c}`);
-        routes.push({ net: net.key, from: p, to: c, pts });
-      }
-      const shared = headOf.get(`${c}\n${lineOf(net, cc)}`);
-      if (shared) {
-        shared.nets.push(net.key);
-        shared.from = [...shared.from, ...net.parents].sort(order);
-      } else {
-        const head: EdgeHead = { key: `${net.key}:h:${c}`, net: net.key, nets: [net.key], x: xc, y: end + G.arrow, from: [...net.parents], to: c };
-        headOf.set(`${c}\n${lineOf(net, cc)}`, head);
-        heads.push(head);
-      }
-    }
-  }
-  const drawnLines = drawLines(routes.map((rt) => ({ ...rt, key: `${rt.net}:${rt.from}>${rt.to}`, tone: tone(rt.from) })));
-  const flows = flowsOf(routes, (id) => byId.get(id)!.state === "running");
-  return {
+  const netsOut = nets.map(({ key, parents, children }) => ({ key, parents, children }));
+  const build = (lines: EdgeLine[], heads: EdgeHead[], flows: EdgeFlow[], drawn: Set<string>): BoxLayout => ({
     inner,
     perRow,
     boxW,
@@ -1434,8 +1568,8 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
     boxes,
     at,
     more,
-    nets: nets.map(({ key, parents, children }) => ({ key, parents, children })),
-    lines: drawnLines,
+    nets: netsOut,
+    lines,
     heads,
     flows,
     drawn,
@@ -1444,7 +1578,51 @@ function layoutAt(run: Run, o: LayoutOpts, W: number, { margin, least, cols, mos
     tight,
     hang,
     shape,
+  });
+  const draw = () => {
+    const tones = new Map(run.nodes.map((n) => [n.id, statusOf(n, run).tone]));
+    const tone = (id: string) => tones.get(id)!;
+    const routes: { net: string; from: string; to: string; pts: [number, number][] }[] = [];
+    const heads: EdgeHead[] = [];
+    const headOf = new Map<string, EdgeHead>(); // child and line -> the head the line's nets end in
+    const drawn = new Set<string>();
+    for (const net of nets) {
+      const own = lanes.get(net.key);
+      for (const c of net.children) {
+        const cc = rowOf.get(c)! - 1;
+        const xc = port.get(`${net.key}\n${c}`)!;
+        const end = rowY[rowOf.get(c)!] - G.arrow;
+        for (const p of net.parents) {
+          const cp = rowOf.get(p)!;
+          const xp = exitOf(p);
+          const pts: [number, number][] = [[xp, rowY[cp] + rowH[cp]]];
+          if (cp === cc || !own) pts.push([xp, busY(net.key, cc)]);
+          else {
+            pts.push([xp, busY(net.key, cp)]);
+            for (let r = cp + 1; r <= cc; r++) pts.push([own.get(r)!, busY(net.key, r - 1)], [own.get(r)!, busY(net.key, r)]);
+          }
+          pts.push([xc, busY(net.key, cc)], [xc, end]);
+          drawn.add(`${p}>${c}`);
+          routes.push({ net: net.key, from: p, to: c, pts });
+        }
+        const joined = headOf.get(`${c}\n${lineOf(net, cc)}`);
+        if (joined) {
+          joined.nets.push(net.key);
+          joined.from = [...joined.from, ...net.parents].sort(order);
+        } else {
+          const head: EdgeHead = { key: `${net.key}:h:${c}`, net: net.key, nets: [net.key], x: xc, y: end + G.arrow, from: [...net.parents], to: c };
+          headOf.set(`${c}\n${lineOf(net, cc)}`, head);
+          heads.push(head);
+        }
+      }
+    }
+    const lines = drawLines(routes.map((rt) => ({ ...rt, key: `${rt.net}:${rt.from}>${rt.to}`, tone: tone(rt.from) })));
+    const flows = flowsOf(routes, (id) => byId.get(id)!.state === "running");
+    return build(lines, heads, flows, drawn);
   };
+  const result = { lay: build([], [], [], new Set()), draw };
+  common.made.set(same, result);
+  return result;
 }
 
 /** The lines through their points. Where an upright stretch of one passes over another net's level stretch it
