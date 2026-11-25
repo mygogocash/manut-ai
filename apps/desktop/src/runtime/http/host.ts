@@ -28,6 +28,12 @@
 // other write answers `not_yet`, Buddy's chat included, which would need a model. While only a kept read is shown every write
 // answers `offline` instead (an ask from it: "Connect to answer this"), and none is queued.
 //
+// An ask that leaves the shop's open approvals with no answer from here closes in how its request was settled. A shop session reads
+// no tasks, so the two reads alone cannot tell a decision from a withdrawal; the host reads the shop's recent requests, once for each
+// shop that has such an ask (`closeFromRecent`, with that shop's own session; the sign-in's for the signed-in tenant's own shop), and
+// the card says approved or declined and by whom, taken back, ended, or timed out (decided.ts). That read only reads, holds a card open
+// for a few seconds at most, and leaves the card to close as it always did whenever it does not say. Nothing of it is kept on disk.
+//
 // Several shops (docs/several-shops.md). Each read starts with the person's shops (`GET /v1/shops`, with the sign-in).
 // When they are in none, the signed-in tenant is read as above, as before shops. When they are in some, each shop is read
 // with its own shop session (shops.ts): what waits there, and for a shop the person owns its tasks, schedules, attention
@@ -51,12 +57,13 @@ import { leftWords, onlyOwnerWords } from "../../lib/shops";
 import type { NodeSessionResult } from "../../harness/session";
 import type { ThreadEvent, ThreadOps } from "../../threads/types";
 import { OpError } from "../mock/host";
-import { decisionPath, outcomeOf, type Closing } from "./answer";
+import { decisionPath, outcomeOf, type Closing, type Outcome } from "./answer";
 import { answerable, isAsk, optionFor, parseAskId, parseShopAskId, type ShopApproval } from "./approvals";
 import { CACHE_MAX_AGE_MS, type CachedRead, type ShopCache } from "./cache";
 import { connectionHandlers, type OwnerLink } from "./connections";
 import { googleHandlers } from "./google";
 import { shopRoutines, teamRoutineRow } from "./customize";
+import { closingFor, helperNames, RECENT_PATH, recentOf, type AskedOf, type DecidedContext } from "./decided";
 import { DeviceWatch, readDevices } from "./devices";
 import { memoryHandlers } from "./memory";
 import { addPage, askOlder, dropOlder, forgetAsk, keepOlder, nextCursor, olderOf, type TaskList } from "./older";
@@ -74,6 +81,9 @@ import { activityOf, jobOf, jobRows, teamStateOf } from "./work";
 export const POLL_MS = 60_000;
 /** A list asked for within this long of the last read is answered from it. */
 export const FRESH_MS = 15_000;
+/** How long the card of an ask that left the open approvals waits for the shop's recent requests to say how it was settled: a few
+ *  seconds, and no more. A slow or silent API leaves the card open that long, and it then closes as it would have without the read. */
+export const LEFT_READ_MS = 4_000;
 /** After a failed read: wait this long, doubling each time, up to the most. */
 export const RETRY_MIN_MS = 2_000;
 export const RETRY_MAX_MS = 60_000;
@@ -159,30 +169,57 @@ const shopsSig = (s: ShopSnapshot | null) => JSON.stringify([s?.shops?.map((p) =
  *  that moved) sends the ask again and its card follows. */
 const askSig = (a: { choices: unknown; pass_on?: unknown; passed_on?: unknown; shop?: unknown; outdated?: unknown }) => JSON.stringify([a.choices, a.pass_on ?? null, a.passed_on ?? null, a.shop ?? null, a.outdated ?? null]);
 
+/** What the two reads alone say of an ask that left the open approvals: how its card closes, and, when the request itself is no longer
+ *  asked, which shop's recent requests may say more of how, with the request and the revision the card showed. A request asked again
+ *  at another revision, or a shop the person's place in ended, has no `over`: the recent requests have nothing to add to either. */
+interface Gone {
+  closing: Closing;
+  over?: { shop: string; asked: AskedOf };
+}
+
 /** How an ask of one of several shops that left the open approvals closes: in the words of its shop's departure when the
  *  person's place there ended; "changed" when the request is asked again at another revision; else, by its expiry, timed
- *  out or answered elsewhere (a shop session reads no tasks, so nothing tells a decision from a withdrawal). */
-function leftShopHow(askRef: string, was: ShopSnapshot, now: ShopSnapshot, departed: (shop: string) => string | null, at: number): Closing {
+ *  out or answered elsewhere (a shop session reads no tasks, so nothing tells a decision from a withdrawal; `closeFromRecent`
+ *  asks the shop's recent requests for that). */
+function leftShopHow(askRef: string, was: ShopSnapshot, now: ShopSnapshot, departed: (shop: string) => string | null, at: number): Gone {
   const ref = parseShopAskId(askRef);
-  if (!ref) return { reason: "cancelled" };
+  if (!ref) return { closing: { reason: "cancelled" } };
   const part = partOf(now, ref.shop);
   if (!part) {
     const words = departed(ref.shop);
-    return words ? { reason: "cancelled", note: words } : { reason: "cancelled" };
+    return { closing: words ? { reason: "cancelled", note: words } : { reason: "cancelled" } };
   }
-  if (part.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { reason: "cancelled", note: t("rt.ask.changed") };
+  if (part.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { closing: { reason: "cancelled", note: t("rt.ask.changed") } };
   const before = partOf(was, ref.shop)?.approvals.find((a) => a.record.request.id === ref.id);
   const expiresAt = before?.record.request.expiresAt;
-  return { reason: expiresAt !== undefined && expiresAt <= at ? "timeout" : "resolved" };
+  return {
+    closing: { reason: expiresAt !== undefined && expiresAt <= at ? "timeout" : "resolved" },
+    over: { shop: ref.shop, asked: { id: ref.id, revision: ref.revision } },
+  };
 }
 
-/** How an ask that left the open approvals with no answer from here closes, as `now` tells it. */
-function leftHow(askRef: string, now: ShopSnapshot): Closing {
+/** How an ask that left the open approvals with no answer from here closes, as `now` tells it: the signed-in tenant's own. */
+function leftHow(askRef: string, now: ShopSnapshot): Gone {
   const ref = parseAskId(askRef);
-  if (ref && now.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { reason: "cancelled", note: t("rt.ask.changed") };
+  if (ref && now.approvals.some((a) => a.record.request.id === ref.id && isAsk(a))) return { closing: { reason: "cancelled", note: t("rt.ask.changed") } };
   const action = ref ? now.tasks.flatMap((task) => task.actions).find((a) => a.id === ref.id) : undefined;
-  return { reason: !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved" };
+  const closing: Closing = { reason: !action ? "cancelled" : action.state === "expired" || action.state === "proposed" ? "timeout" : "resolved" };
+  return ref ? { closing, over: { shop: "", asked: ref } } : { closing };
 }
+
+/** An ask whose request is over, waiting for the shop's recent requests to say how it was settled. */
+interface Unsettled {
+  /** the ask's id, as the store knows it */
+  id: string;
+  /** how its card closes when the recent requests do not say */
+  closing: Closing;
+  /** the shop it was asked at; "" for the signed-in tenant's own */
+  shop: string;
+  asked: AskedOf;
+}
+
+/** What one shop's recent requests came to: the records, or that the person's place in the shop ended. */
+type Recent = { records: ShopApproval[] } | { left: Departure };
 
 /** The signature of what a schedule and a team routine show, so a read that changed none of them stays quiet. */
 const scheduleSig = (s: ShopSnapshot) =>
@@ -227,6 +264,9 @@ export class HttpHost {
   /** How the card of an ask the person answered here closes, in the API's words, kept until the ask leaves the shop's
    *  open approvals (`emitLeft`). By ask id. */
   private closings = new Map<string, Closing>();
+  /** Counts the times the host forgot the shop (it stopped, or the person signed out), so a read of recent requests that ends after
+   *  one closes no card of a shop that is no longer shown (`closeFromRecent`). */
+  private forgotten = 0;
   /** Show older's requests on their way, by the shop whose list they read ("" for the signed-in tenant's own), so a second press
    *  while one is on its way is answered by it. */
   private readonly pressing = new Map<string, Promise<{ older: OlderState }>>();
@@ -301,6 +341,7 @@ export class HttpHost {
     this.snapshot = null;
     this.onDisk = null;
     this.closings.clear();
+    this.forgotten += 1;
     this.viewing = null;
     this.departed = [];
     this.attempt = 0;
@@ -317,6 +358,7 @@ export class HttpHost {
       this.snapshot = null;
       this.onDisk = null;
       this.closings.clear();
+      this.forgotten += 1;
       this.viewing = null;
       this.departed = [];
       this.show("signed_out", NO_CACHE);
@@ -576,17 +618,114 @@ export class HttpHost {
 
   /** Each ask that was waiting in `was` and is not in `now`, as the event that takes it out of Needs you. An ask the
    *  person answered here closes in the words the API gave (`closings`). Any other is read from `now`: a request asked
-   *  again at another revision changed, and its new version is an ask of its own; otherwise its action says how it went.
-   *  An action that ran out of time timed out, one that is gone with its task was cancelled, any other was decided. */
+   *  again at another revision changed, and its new version is an ask of its own; a shop the person's place in ended says so.
+   *  Otherwise the request is over and nothing here says how: it was decided, taken back, ended or timed out. Its card closes
+   *  at once as the two reads tell it (an action that ran out of time timed out, one that is gone with its task was cancelled,
+   *  any other was decided) only when the shop's recent requests cannot say better, and they are read once for each shop
+   *  that has such an ask (`closeFromRecent`), never when no ask left and never for an ask the person answered here. */
   private emitLeft(was: ShopSnapshot, now: ShopSnapshot): void {
     const still = new Set(pendingAsks(now).map((a) => a.request_id));
     const shops = !!(was.shops || now.shops);
+    const unsettled: Unsettled[] = [];
     for (const { request_id: id } of pendingAsks(was)) {
       if (still.has(id)) continue;
-      const closing = this.closings.get(id) ?? (shops ? leftShopHow(id, was, now, (shop) => this.departedWords(shop), this.now()) : leftHow(id, now));
+      const own = this.closings.get(id);
       this.closings.delete(id);
-      this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason: closing.reason, ...(closing.note ? { note: closing.note } : {}) });
+      if (own) {
+        this.emitClosing(id, own);
+        continue;
+      }
+      const gone = shops ? leftShopHow(id, was, now, (shop) => this.departedWords(shop), this.now()) : leftHow(id, now);
+      if (gone.over) unsettled.push({ id, closing: gone.closing, ...gone.over });
+      else this.emitClosing(id, gone.closing);
     }
+    if (unsettled.length) void this.closeFromRecent(unsettled, was).catch(() => undefined);
+  }
+
+  /** The event that closes an ask's card. */
+  private emitClosing(id: string, closing: Closing): void {
+    this.emit({ event: "prompt.expired", bot: TEAM, request_id: id, reason: closing.reason, ...(closing.note ? { note: closing.note } : {}) });
+  }
+
+  /** Closes the cards of asks whose requests are over, in how each was settled. Each shop that has such an ask has its recent
+   *  requests read once (`GET /v1/approvals?state=recent`, with that shop's own session, or the sign-in's for the signed-in
+   *  tenant's own shop), all at the same time, so one shop's ask never waits for another's read. This only reads: nothing is
+   *  decided, answered or passed on here, so approval-core's rules stay the one way round a request.
+   *
+   *  A card is held open for the read for `LEFT_READ_MS` at most. One that the read does not speak for (it failed, answered
+   *  anything but that list, does not list the request, lists another revision of it, or says it is still waiting) closes as the
+   *  two reads said (`Unsettled.closing`), and so does every card whose read has not answered by then; an answer that comes
+   *  later is never used. Each card is closed once, whatever goes wrong in saying how. */
+  private async closeFromRecent(asks: readonly Unsettled[], was: ShopSnapshot): Promise<void> {
+    const forgotten = this.forgotten;
+    const byShop = new Map<string, Unsettled[]>();
+    for (const ask of asks) byShop.set(ask.shop, [...(byShop.get(ask.shop) ?? []), ask]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), LEFT_READ_MS);
+    });
+    try {
+      await Promise.all(
+        [...byShop].map(async ([shop, group]) => {
+          const read = await Promise.race([this.readRecent(shop), deadline]);
+          // The host forgot the shop while it was read (it stopped, or the person signed out, and perhaps someone else signed in): no
+          // card of theirs is left to close, and what was read is of a shop that is no longer shown.
+          if (forgotten !== this.forgotten) return;
+          let closings: Closing[];
+          try {
+            closings = this.settledClosings(read, shop, group, was);
+          } catch {
+            // Whatever went wrong in saying how, a card is never left open for it: it closes as the two reads said.
+            closings = group.map((ask) => ask.closing);
+          }
+          group.forEach((ask, i) => this.emitClosing(ask.id, closings[i]));
+        }),
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** How each card of `group`, the asks of `shop` whose requests are over, closes, given what the read of the shop's recent requests
+   *  came to: the words of each request's record when the list speaks for it (decided.ts); the words of the shop's departure when the
+   *  person's place in it ended in that read, which is handled as in any other (its session went at once, `depart`); and the closing
+   *  the two reads gave for every card the read does not speak for. */
+  private settledClosings(read: Recent | null, shop: string, group: readonly Unsettled[], was: ShopSnapshot): Closing[] {
+    if (read && "left" in read) {
+      this.depart([{ shop, departure: read.left }]);
+      const words = this.departedWords(shop);
+      return group.map((ask) => (words ? { reason: "cancelled", note: words } : ask.closing));
+    }
+    const part = shop ? partOf(was, shop) : undefined;
+    const ctx: DecidedContext = {
+      names: helperNames(shop ? (part?.approvals ?? []) : was.approvals, read?.records ?? []),
+      // to a helper the owner's decision is the owner's, by name, and never "yours"
+      ...(part?.shop.role === "helper" ? { owner: part.shop.owner } : {}),
+      now: this.now(),
+    };
+    return group.map((ask) => (read && closingFor(read.records, ask.asked, ctx)) || ask.closing);
+  }
+
+  /** One shop's recent requests, read with its own session ("" is the signed-in tenant's own, read with the sign-in): the
+   *  records, or that the person's place in the shop ended. Null for anything else, which fails nothing: the card then closes as
+   *  it did before there was a read. */
+  private async readRecent(shop: string): Promise<Recent | null> {
+    try {
+      const answer = shop ? await this.shopSessions.read(shop, RECENT_PATH) : await this.session.read(RECENT_PATH);
+      if (answer.kind === "left") return { left: answer.departure };
+      const records = recentOf(answer);
+      return records ? { records } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keeps how the card of an ask the person answered here closes once the shop is read again: in the API's words when it said the
+   *  request is over, and, when the API took the answer, as decided, so the read that finds the ask gone has nothing to look up.
+   *  The card is marked answered by the store by then, and `prompt.expired` leaves an answered card as it is. */
+  private keepClosing(askRef: string, outcome: Outcome): void {
+    if (outcome.ok) this.closings.set(askRef, { reason: "resolved" });
+    else if (outcome.closing) this.closings.set(askRef, outcome.closing);
   }
 
   /** The person's answer to an ask, sent to the decide route as exactly the option that does what they chose and the
@@ -608,7 +747,7 @@ export class HttpHost {
     const answered = await this.session.write(decisionPath(request.id), { optionId: option.id, seenRevision: ref.revision });
     const names = new Map(snapshot.approvals.flatMap((a) => (a.passedOn?.name ? [[a.passedOn.by, a.passedOn.name] as const] : [])));
     const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now() });
-    if (!outcome.ok && outcome.closing) this.closings.set(askRef, outcome.closing);
+    this.keepClosing(askRef, outcome);
     void this.refresh().catch(() => undefined);
     if (!outcome.ok) throw new OpError(outcome.code, outcome.words);
     return {};
@@ -643,7 +782,7 @@ export class HttpHost {
     }
     const names = new Map(part.approvals.flatMap((a) => (a.passedOn?.name ? [[a.passedOn.by, a.passedOn.name] as const] : [])));
     const outcome = outcomeOf(answered, { kind: request.kind, names, now: this.now() });
-    if (!outcome.ok && outcome.closing) this.closings.set(askRef, outcome.closing);
+    this.keepClosing(askRef, outcome);
     void this.refresh().catch(() => undefined);
     if (!outcome.ok) throw new OpError(outcome.code, outcome.words);
     return {};
