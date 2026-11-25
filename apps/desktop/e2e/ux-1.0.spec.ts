@@ -120,5 +120,6 @@ test("Settings: a profile id chip stays on one line", async ({ page }) => {
   await expect(chip).toHaveText("omh-tui");
   expect(await chip.evaluate((c) => c.getClientRects().length)).toBe(1);
   const h = await chip.evaluate((c) => c.getBoundingClientRect().height);
-  expect(h).toBeLessThan(20);
+  // one line of 12px text, the scale's smallest since item 85h (it was 10.5px); a second line would be over 30
+  expect(h).toBeLessThan(26);
 });
