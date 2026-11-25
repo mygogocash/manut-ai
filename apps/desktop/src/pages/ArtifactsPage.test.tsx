@@ -7,7 +7,7 @@ import { setLang, t } from "../i18n";
 import type { BridgeError } from "../lib/protocol";
 import { MockHost, MockRuntime } from "../runtime/mock";
 import type { ArtifactLink, SharePlan } from "../runtime/artifacts";
-import { ArtifactsPage, ArtifactsView, type ArtifactsViewProps } from "./ArtifactsPage";
+import { ArtifactsPage, ArtifactsView, gate, type ArtifactsViewProps } from "./ArtifactsPage";
 import { blockedReason, planFromFile, sizeText } from "./artifacts";
 
 const words = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
@@ -51,6 +51,16 @@ describe("why Share cannot be used yet", () => {
     expect(draw({ state: { kind: "switched_off" } })).toContain('data-testid="art-open-settings"');
     expect(blockedReason({ kind: "ready", shop: "s", publishing: "on" })).toBeNull();
     expect(shareDisabled(draw({}))).toBe(false);
+  });
+
+  it("waits for the switch, then the runtime, then the sign-in, before anything is read", () => {
+    expect(gate(false, false, { kind: "signed_in" })).toEqual({ kind: "switched_off" });
+    expect(gate(true, true, null)).toEqual({ kind: "practice" });
+    // the keychain has not answered yet: nobody is told to sign in who may be signed in
+    expect(gate(true, false, { kind: "loading" })).toEqual({ kind: "reading" });
+    expect(gate(true, false, { kind: "signed_out" })).toEqual({ kind: "signed_out" });
+    expect(gate(true, false, { kind: "no_keychain" })).toEqual({ kind: "signed_out" });
+    expect(gate(true, false, { kind: "signed_in" })).toBeNull();
   });
 
   it("opens with the switch off by default, saying so, before anything is read", () => {

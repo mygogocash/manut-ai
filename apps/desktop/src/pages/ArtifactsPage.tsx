@@ -171,11 +171,13 @@ export function ArtifactsView(p: ArtifactsViewProps) {
 /** How long "Copied" shows on a row. */
 const COPIED_MS = 2000;
 
-/** Where the page stands before anything is sent: the Settings switch first, then the runtime, then the sign-in. */
-function gate(publish: boolean, origin: string | null, signedIn: boolean, practice: boolean): ArtifactsState | null {
+/** Where the page stands before anything is sent: the Settings switch first, then the runtime, then the sign-in, which is
+ *  `reading` while the keychain has not said yet, so nobody is told to sign in who is signed in. */
+export function gate(publish: boolean, practice: boolean, signIn: { kind: string } | null): ArtifactsState | null {
   if (!publish) return { kind: "switched_off" };
   if (practice) return { kind: "practice" };
-  if (origin && !signedIn) return { kind: "signed_out" };
+  if (signIn === null || signIn.kind === "loading" || signIn.kind === "signing_in") return { kind: "reading" };
+  if (signIn.kind !== "signed_in") return { kind: "signed_out" };
   return null;
 }
 
@@ -186,7 +188,7 @@ export function ArtifactsPage() {
   const origin = kind === "http" && setting.mode === "connected" ? setting.origin : null;
   const signIn = useSignIn(origin);
   // Links are made only through the API: Practice, and the WebSocket bridge used in development, have none to make.
-  const before = gate(settings.publish, origin, signIn?.kind === "signed_in", kind !== "http");
+  const before = gate(settings.publish, kind !== "http" || origin === null, signIn);
   const [state, setState] = useState<ArtifactsState>({ kind: "reading" });
   const [links, setLinks] = useState<ArtifactLink[]>([]);
   const [ask, setAsk] = useState<ArtifactAsk | null>(null);
