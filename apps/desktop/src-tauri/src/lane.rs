@@ -230,8 +230,9 @@ fn in_progress(git_dir: &Path) -> bool {
     IN_PROGRESS.iter().any(|f| git_dir.join(f).exists())
 }
 
-/// The environment variables that would point `git` at another repository than the folder it is run in.
-const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
+/// The environment variables that would point `git` at another repository than the folder it is run in, or at another one's
+/// objects (`GIT_ALTERNATE_OBJECT_DIRECTORIES`, which git_moved.rs and turn_files.rs take out too).
+const REDIRECTS: [&str; 8] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
 
 /// The person's own `git`, run with no hook and no file-system monitor (each can run a program the repository names: a
 /// post-checkout hook that installs dependencies, a reference-transaction hook on a deleted branch), English messages, no
@@ -2027,6 +2028,29 @@ pub(crate) mod tests {
         assert_eq!(git.config_risk(&folder).as_deref(), Some("?"));
         drop(cases);
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn other_ways_a_folder_points_git_elsewhere_are_read_as_git_reads_them() {
+        let Some((home, d)) = repo("elsewhere") else { return };
+        let git = Git::automatic(&home).unwrap();
+        // a bare repository committed inside the project, its own config naming a program: from a folder inside it git uses
+        // that repository (unless the person's own `safe.bareRepository` says not to), and this reads the same config, or `?`
+        let bare = d.join("vendor/evil.git");
+        fs::create_dir_all(&bare).unwrap();
+        sh(&home, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        sh(&home, &["--git-dir", bare.to_str().unwrap(), "config", "core.sshCommand", "x"]);
+        assert!(git.config_risk(&bare).is_some());
+        assert!(git.config_risk(&bare.join("refs")).is_some());
+        // the automatic pull from there does nothing: it has no work tree of its own
+        assert_ne!(crate::git_pull::pull(&home, &bare).why, "pulled");
+        // from the project's own folder it is a folder of files like any other
+        assert_eq!(git.config_risk(&d), None);
+        // what the app was started with cannot send git to another repository's files or objects
+        for k in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"] {
+            assert!(REDIRECTS.contains(&k), "{k}");
+        }
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]
