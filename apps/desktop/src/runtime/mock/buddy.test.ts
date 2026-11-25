@@ -136,6 +136,14 @@ describe("Buddy, with Claude Code installed and signed in", () => {
     expect(said()).toEqual([]);
   });
 
+  it("refuses a steer while the agent answers, so the app sends that message next instead of losing it", async () => {
+    const { rt, agent } = await open();
+    await rt.request("chat.send", { bot: "buddy", text: "first" });
+    expect(await rt.request("chat.steer", { bot: "buddy", text: "and this" })).toEqual({ status: "rejected" });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(agent.sent()).toEqual(["first"]);
+  });
+
   it("an agent's ask is Buddy's card: yes once or no, settled once through approval-core, and only then sent to the agent", async () => {
     const { rt, agent, of, said } = await open();
     agent.answer = null;

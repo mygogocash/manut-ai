@@ -919,11 +919,12 @@ export class MockHost {
       else this.startTurn(b.name, text);
       return { input_id };
     },
-    // taken while that chat's turn runs, else rejected; never sent another way
+    // taken while that chat's turn runs, else rejected; never sent another way. A turn of Buddy's agent takes no steer:
+    // refused, the app sends the message as the next one once the answer is done, so the agent never misses it
     "chat.steer": (p) => {
       const key = this.target(p);
       this.needText(p.text, "text");
-      return { status: this.turns[key] ? "queued" : "rejected" };
+      return { status: this.turns[key] && !this.turns[key].agent ? "queued" : "rejected" };
     },
     "chat.interrupt": (p) => {
       const key = this.target(p);
