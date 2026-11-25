@@ -194,6 +194,11 @@ body.side-resizing * {
   color: var(--muted);
   padding: 6px;
 }
+/* the + menu's two ways, Chat with Kit and In a terminal, each under its own heading: the second keeps a little air
+   above it, so its heading reads as the start of a part and not as one more row */
+.ss-scroll > .ss-way-h:not(:first-child) {
+  margin-top: 6px;
+}
 .ss-item {
   display: flex;
   align-items: center;

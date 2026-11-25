@@ -1,5 +1,7 @@
-// SESSIONS in the sidebar: the `+` menu of agents (picking one opens its New session chat at once; the folder is
-// picked in that chat, see DraftPane in SessionView), and one row per session started in this run of the app. A draft row reads "New
+// SESSIONS in the sidebar: the `+` menu of agents, each two ways (owner, 25 Nov 2026, item 66): Chat with Kit opens its
+// New session chat at once, whose first message starts a lane (see DraftPane in SessionView, and code/Lanes.tsx, which
+// lists it), and In a terminal starts it in its own terminal at once, as since 16 Nov. One row per terminal session
+// started in this run of the app. A draft row reads "New
 // session" over its folder until its first message. A chat row shows the bot row's live states: the
 // answer ring around the agent mark and the turn's elapsed time while a turn runs, and the amber dot with
 // "waiting" while one of its approvals or questions is open (the same asks the Needs-you strip lists). A
@@ -20,7 +22,7 @@ import { busyFor, shortTime } from "../app/time";
 import { t } from "../i18n";
 import { composing } from "../lib/ime";
 import { AgentMark } from "./AgentMark";
-import { agentDef, agentLabel, draftFolder, folderChoices, folderName, installLine, offeredAgents, isTerminalRec, menuFocus, menuOrder, missingNote, parentPath, SHELL, splitPaneName, termActivity, termFallbackName, terminalAgents, termMarkAgent, termStatus, tildePath, type AgentId, type AgentInfo, type RowMark, type SessionRec, type TermStatus, type Unseen } from "./agents";
+import { agentDef, agentLabel, chatAgents, draftFolder, folderChoices, folderName, installLine, offeredAgents, isTerminalRec, menuFocus, menuOrder, missingNote, parentPath, SHELL, splitPaneName, termActivity, termFallbackName, terminalAgents, termMarkAgent, termStatus, tildePath, type AgentId, type AgentInfo, type RowMark, type SessionRec, type TermStatus, type Unseen } from "./agents";
 import { TermRowMark } from "./TermRowMark";
 import { SplitGlyph, splitWith, useSplit, useSplitPrune } from "./SplitView";
 import { pressToSplit } from "./splitDrag";
@@ -88,12 +90,13 @@ export function SessionsHeader() {
       <span>{t("nav.terminals")}</span>
       <span className="ss-add">
         <CollapseAllButton />
+        {/* "New session", not "New terminal": the menu it opens starts a chat with Kit too */}
         <button
           ref={plus}
           type="button"
           className="ss-plus"
-          aria-label={t("term.new")}
-          title={t("term.new")}
+          aria-label={t("sessions.new")}
+          title={t("sessions.new")}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
@@ -223,11 +226,12 @@ function useMoreBelow(el: RefObject<HTMLDivElement | null>, on: boolean, shape: 
   return more;
 }
 
-/** The SESSIONS + menu: the installed agents with their mark and name (by tier; the last one used has the focus), then one "More
- *  agents" row that opens the agents that are not installed, dimmed, each with its install line as text (picking one
- *  copies that line; manut installs nothing), then "Continue a conversation", there as the menu first opens. Picking
- *  an installed agent opens its New session chat at once (the folder is the chip under that chat's composer). Arrow
- *  keys move, Enter picks, Esc closes. */
+/** The SESSIONS + menu, under the folder chip: first Chat with Kit ([`ChatWay`]), each installed agent that runs as the
+ *  app's chat, whose pick opens its New session chat in the chip's folder (a lane once its first message goes); then In a
+ *  terminal, as before item 66: the Shell, the installed agents with their mark and name (by tier; the last one used has
+ *  the focus, so ⌘N then Enter still starts a terminal), then one "More agents" row that opens the agents that are not
+ *  installed, dimmed, each with its install line as text (picking one copies that line; manut installs nothing). Picking
+ *  one of those starts it in its own terminal at once. Arrow keys move through both parts, Enter picks, Esc closes. */
 function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: RefObject<HTMLButtonElement | null> }) {
   const ss = useSessions();
   const accounts = useAccounts();
@@ -237,6 +241,8 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
   }, [ss.agents]);
   const parts = ss.agents ? terminalAgents(offeredAgents(ss.agents), ss.recent) : null;
   const agents = parts ? [...parts.shown, ...parts.more] : null;
+  // Chat with Kit: the installed agents that run as the app's chat
+  const chats = ss.agents ? chatAgents(offeredAgents(ss.agents), ss.recent) : [];
   // the agents that are not installed stay folded until the person opens them
   const [unfold, setUnfold] = useState(false);
   const [copied, setCopied] = useState<AgentId | null>(null);
@@ -269,6 +275,11 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
   const pick = (id: AgentId) => {
     close("pick");
     getSessions().startTerminal(id, at || undefined);
+  };
+  /** Chat with Kit ▸ an agent: its New session chat in the chip's folder, where the person says what Kit should do. */
+  const pickChat = (id: AgentId) => {
+    close("pick");
+    getSessions().draftChat(id, at || undefined);
   };
   /** Shell ▸: a Shell row that runs shell `shell` (an id from the shell's own list). */
   const pickShell = (shell: string) => {
@@ -356,11 +367,11 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
       </Popover>
     );
   return (
-    <Popover open onClose={close} align="left" side={fit?.side ?? "bottom"} width={MENU_W} label={t("term.new")} className={`ss-pop${ready && !fit ? " ss-pop-measuring" : ""}`}>
+    <Popover open onClose={close} align="left" side={fit?.side ?? "bottom"} width={MENU_W} label={t("sessions.new")} className={`ss-pop${ready && !fit ? " ss-pop-measuring" : ""}`}>
       <div
         ref={box}
         role="menu"
-        aria-label={t("term.new")}
+        aria-label={t("sessions.new")}
         data-testid="session-menu"
         onKeyDown={(e) => {
           // inside Shell ▸: Esc and ← close the list only, back on its chevron
@@ -385,7 +396,7 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
           next?.scrollIntoView({ block: "nearest" });
         }}
       >
-        <div className="ss-h">{t("term.new")}</div>
+        <div className="ss-h">{t("sessions.new")}</div>
         {agents === null && <div className="ss-empty">{t("ss.lookingAgents")}</div>}
         <button
           type="button"
@@ -430,6 +441,17 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         )}
         <div className="ss-sep" />
         <div ref={list} className={`ss-scroll${more ? " more" : ""}`} style={fit ? { maxHeight: fit.max } : undefined} data-testid="session-menu-list">
+        {ready && (
+          <ChatWay
+            agents={chats.map((a) => ({ id: a.id, label: agentLabel(a.id, ss.agents), account: sessionAccountSuffix(accounts.groups, a.id) }))}
+            onPick={pickChat}
+          />
+        )}
+        {ready && (
+          <div className="ss-h ss-way-h" data-testid="session-term-head">
+            {t("ss.way.terminal")}
+          </div>
+        )}
         {ready && (
           <div className="ss-shell-row" key="shell">
             <button type="button" role="menuitem" className="ss-item" title={t("term.shellTip")} onClick={() => pick(SHELL)} data-testid="session-agent-shell">
@@ -506,6 +528,49 @@ function NewSessionMenu({ onClose, trigger }: { onClose: () => void; trigger: Re
         )}
       </div>
     </Popover>
+  );
+}
+
+/** One coding agent the + menu offers as a chat with Kit: its id, its name here, and the quiet "as …" of the account a
+ *  new session of it runs as ("" for the CLI's own). */
+export interface ChatWayAgent {
+  id: AgentId;
+  label: string;
+  account: string;
+}
+
+/** The + menu's first part, Chat with Kit (owner, 25 Nov 2026, item 66): a heading, then one row per agent, as the terminal
+ *  part draws its own (the mark, the name, the account). Picking one opens its New session chat, which becomes a lane, with
+ *  Kit's dial, the pane beside it, Rewind and Bring it back, as the design canvas's Code board draws it. With none installed
+ *  it says so in one quiet line, and the terminal part's More agents row has their install lines. Props only and no hooks,
+ *  so a test can draw it and press its rows. */
+export function ChatWay({ agents, onPick }: { agents: ChatWayAgent[]; onPick: (id: AgentId) => void }) {
+  return (
+    <>
+      <div className="ss-h ss-way-h" data-testid="session-chat-head">
+        {t("ss.way.chat")}
+      </div>
+      {agents.length === 0 && (
+        <div className="ss-empty" data-testid="session-chat-none">
+          {t("ss.way.chatNone")}
+        </div>
+      )}
+      {agents.map((a) => (
+        <button key={a.id} type="button" role="menuitem" className="ss-item" title={t("ss.way.chatTip", { agent: a.label })} onClick={() => onPick(a.id)} data-testid={`session-chat-${a.id}`}>
+          <span className="ss-ic">
+            <AgentMark agent={a.id} />
+          </span>
+          <span className="ss-n ss-n-as">
+            <span className="ss-l">{a.label}</span>
+            {a.account && (
+              <span className="ss-as" data-testid={`session-chat-account-${a.id}`}>
+                {a.account}
+              </span>
+            )}
+          </span>
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -616,8 +681,9 @@ function PastList({ agent, onBack, onPick }: { agent: PastAgent; onBack: () => v
   );
 }
 
-/** The empty section: one "New session" row built like the sidebar's nav rows, opening the same + menu under it.
- *  What it does and the installed coding agents sit in its tooltip; nothing else shows, nothing is centred or boxed. */
+/** The empty section: one "New session" row built like the sidebar's nav rows, opening the same + menu under it, whose
+ *  Chat with Kit and In a terminal both start from here. What it does and the installed coding agents sit in its tooltip;
+ *  nothing else shows, nothing is centred or boxed. */
 function SessionStart() {
   const ss = useSessions();
   const [open, setOpen] = useState(false);
@@ -644,7 +710,7 @@ function SessionStart() {
           data-testid="session-start"
         >
           <PlusIcon size={16} />
-          {t("term.new")}
+          {t("sessions.new")}
         </button>
         {open && <NewSessionMenu onClose={() => setOpen(false)} trigger={btn} />}
       </div>

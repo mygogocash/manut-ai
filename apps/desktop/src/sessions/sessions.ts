@@ -1207,6 +1207,20 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     return id;
   };
 
+  /**
+   * The + menu's Chat with Kit: a New session chat on `agent` in `cwd` (none: the last folder used, else home), opened
+   * as the app's chat whatever way was picked for the agent before, so its first message starts a lane (`startLane`: a
+   * branch and a folder of its own) that the Code page's Lanes band lists. Nothing starts until that message: the lane's
+   * branch is named from it. An open draft is reused, as `draft` does.
+   */
+  const draftChat = (agent: AgentId, cwd?: string): string => {
+    const id = draft(agent);
+    if (cwd) setDraft(id, { cwd });
+    // kept for the agent on this computer, as the draft's own Chat or Terminal choice is (an agent with no chat keeps none)
+    setOpen(id, "chat");
+    return id;
+  };
+
   /** New session here: a draft with session `id`'s agent and folder (an open draft takes them instead). */
   const draftHere = (id: string): string | null => {
     const r = rec(id);
@@ -2596,6 +2610,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     loadAgents,
     endAgent,
     draft,
+    draftChat,
     draftHere,
     startTerminal,
     setSessionFg,
