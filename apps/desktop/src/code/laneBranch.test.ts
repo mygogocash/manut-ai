@@ -110,6 +110,9 @@ describe("the shell's answers about a lane's folder", () => {
     // the files git ignores in it that may be the developer's, named when there are any
     expect(readKept([{ ...k, ignored: [".env.local", null, "data/"] }])[0].ignored).toEqual([".env.local", "data/"]);
     expect(readKept([{ ...k, ignored: [] }])[0]).not.toHaveProperty("ignored");
+    // a folder with submodules, said only by a plain true
+    expect(readKept([{ ...k, submodules: true }])[0].submodules).toBe(true);
+    for (const no of [false, "true", 1, null]) expect(readKept([{ ...k, submodules: no }])[0]).not.toHaveProperty("submodules");
   });
 
   it("takes nothing as removed unless the shell said so", () => {

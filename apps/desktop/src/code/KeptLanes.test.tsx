@@ -145,6 +145,23 @@ describe("what a clean-up left, said where the kept folders are listed", () => {
     expect(byId(props({ rows: [kept()], open: opened() }), "kept-lose-ignored")).toHaveLength(0);
   });
 
+  it("says a folder with submodules is not counted inside them, so a clean-up leaves it and Remove does not force it", () => {
+    const words = "It has submodules. Changes inside them are not counted here, so a clean-up leaves it and Remove does not force it.";
+    expect(text(props({ rows: [kept({ changed: 0, submodules: true })] }))).toEqual([words]);
+    // the merged clean-up's reason alone, before the list read the folder
+    expect(text(props({ rows: [kept({ changed: 0 })], why: { "kit/promptpay-qr": "submodules" } }))).toEqual([words]);
+    // a reason of its own comes first, and a folder that is gone says nothing of its submodules
+    expect(text(props({ rows: [kept({ changed: null, submodules: true })], why: { "kit/promptpay-qr": "config" } }))).toEqual(["This project's own git settings name a program for git to run, so the clean-up did nothing here."]);
+    expect(text(props({ rows: [kept({ exists: false, submodules: true })] }))).toEqual([]);
+    for (const l of ["ko", "ja", "zh"] as const) {
+      setLang(l);
+      const line = text(props({ rows: [kept({ changed: 0, submodules: true })] }))[0];
+      expect(line, l).toBeTruthy();
+      expect(line, l).not.toMatch(/submodule|lane\.kept/);
+    }
+    setLang("en");
+  });
+
   it("says it could not tell, and why, even with no folder to list", () => {
     for (const [code, words] of [["no_remote", "remote is not on GitHub or GitLab"], ["not_installed", "gh or glab is not installed"], ["not_signed_in", "gh or glab is not signed in"]]) {
       const p = props({ rows: [kept()], cannot: code });
