@@ -16,6 +16,7 @@ mod gh_me;
 mod git_branch;
 mod git_moved;
 mod lane;
+mod lane_clean;
 mod past_chats;
 mod platform;
 mod outpost;
@@ -729,9 +730,36 @@ async fn session_branch(cwd: String) -> Result<String, String> {
 /// refusal is a short code (`not_a_repository`, `no_commit`, `not_committed`, `busy`, `taken`, `bad_name`, `git_missing`,
 /// `no_folder`) or git's own last line.
 #[tauri::command]
-async fn lane_worktree(cwd: String, names: Vec<String>) -> Result<lane::Made, String> {
+async fn lane_worktree(cwd: String, names: Vec<String>, start: Option<lane::Start>) -> Result<lane::Made, String> {
     let home = user_home()?;
-    tauri::async_runtime::spawn_blocking(move || lane::make(&home, std::path::Path::new(&cwd), &names)).await.map_err(|e| e.to_string())?
+    let start = start.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || lane::make_with(&home, std::path::Path::new(&cwd), &names, &start)).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Worktrees: the folder the person chose for lanes' folders, checked and made (lane.rs `check_lanes_root`): its real
+/// path, or a short code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`).
+#[tauri::command]
+async fn lane_root_check(root: String) -> Result<String, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::check_lanes_root(&home, &root).map(|p| p.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())?
+}
+
+/// A clean-up removes a lane's folder (a deleted chat's) only when nothing in it is changed or new, git is not partway through
+/// something there and every commit on its branch is on a remote (lane.rs `release`); the branch stays.
+#[tauri::command]
+async fn lane_release(worktree: String) -> Result<lane::Released, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || lane::release(&home, &worktree, true)).await.map_err(|e| e.to_string())?
+}
+
+/// A clean-up of the lanes whose pull request merged, for the repository `cwd` is in (lane_clean.rs): reads pull requests
+/// through the person's own `gh` or `glab`, and removes only folders with nothing of their own in them. `held`: the folders a
+/// session still works in, which are left alone.
+#[tauri::command]
+async fn lane_clean_merged(tasks: State<'_, Arc<tasks::Tasks>>, cwd: String, held: Vec<String>) -> Result<lane_clean::Cleaned, String> {
+    let home = user_home()?;
+    let tasks = tasks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || lane_clean::merged(&home, std::path::Path::new(&cwd), &held, &tasks)).await.map_err(|e| e.to_string())?
 }
 
 /// The lanes' working folders the app made for the repository `cwd` is in, with what is in each (lane.rs). Only reads.
@@ -1235,6 +1263,9 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         lane_list,
         lane_projects,
         lane_remove,
+        lane_root_check,
+        lane_release,
+        lane_clean_merged,
         session_main_moved,
         chat_close_all,
         session_reveal,
