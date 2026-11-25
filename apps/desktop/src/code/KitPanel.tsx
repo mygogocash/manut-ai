@@ -5,7 +5,7 @@
 // The project is a folder the Code page lists (a session's or an added one). `KitPanelView` takes everything it shows
 // as props and uses no hooks, so a test can draw it; `KitPanel` reads the stores.
 import "./kit.css";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { KIT_LEVELS, type KitLevel } from "@manut/member-grants";
 import { t } from "../i18n";
 import { addedFolders, folderGroups, pathKey, useFolderPrefs } from "../sessions/folders";
@@ -21,6 +21,7 @@ import { showPull } from "../tasks/state";
 import { useRowMarks } from "../sidebar/rows";
 import { laneBase, LanesView, openLane, useLaneRows, type LaneRow, type LanesProps } from "./Lanes";
 import { openNewSessionMenu } from "../sessions/newMenu";
+import { usePlace } from "../palette/places";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
 import { PreviewSample } from "./PreviewSample";
@@ -219,6 +220,9 @@ export function KitPanel() {
   const root = picked && projects.includes(picked) ? picked : (projects[0] ?? "");
   const project = useKitProject(root);
   const lanes = useLaneRows(root);
+  // The command palette offers New lane while a project is open here, and presses this very link's function.
+  const laneAction = useMemo(() => (root ? { newLane: () => openNewSessionMenu({ chat: true, folder: root }) } : null), [root]);
+  usePlace("lane", laneAction);
   // the lane whose Bring it back panel is open: one at a time
   const [backFor, setBackFor] = useState<string | null>(null);
   const closeBack = useCallback(() => setBackFor(null), []);

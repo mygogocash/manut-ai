@@ -109,7 +109,7 @@ test("Notify me can be turned off in Settings and stays off", async ({ page }) =
   expect(await notes(page)).toEqual([]);
 });
 
-test("shortcuts: Mod+2 opens the second bot, Mod+K searches, Mod+. toggles Details, Mod+, opens Settings", async ({ page }) => {
+test("shortcuts: Mod+2 opens the second bot, Mod+K opens the palette, Mod+. toggles Details, Mod+, opens Settings", async ({ page }) => {
   await open(page);
   // the page picks Cmd or Ctrl from navigator.platform, so press the one it expects
   const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
@@ -120,10 +120,11 @@ test("shortcuts: Mod+2 opens the second bot, Mod+K searches, Mod+. toggles Detai
   await page.keyboard.press(`${key}+1`);
   await chatOpen(page);
 
-  // Mod+K opens History with its search field focused (the menu's Search does the same)
+  // Mod+K opens the command palette with its field focused (the menu's Search does the same); Esc closes it
   await page.keyboard.press(`${key}+k`);
-  await expect(page.getByRole("searchbox", { name: "Search history" })).toBeFocused();
+  await expect(page.getByTestId("palette-input")).toBeFocused();
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("palette")).toHaveCount(0);
 
   const details = page.getByTestId("details");
   await page.keyboard.press(`${key}+.`);
@@ -145,9 +146,11 @@ test("Esc stops a running answer, but not while the search field has focus", asy
   await open(page);
   await send(page, "check the 502s");
   await expect(page.getByTestId("stop")).toBeVisible();
-  // Esc inside the search field only clears the search: the menu's Search opens History with its field focused, and
+  // Esc inside the search field only clears the search: the palette's last row opens History with its field focused, and
   // the answer goes on running there; back in the chat it is still running, with its stop button
   await page.getByTestId("menu-search").click();
+  await page.getByTestId("palette-input").fill("a");
+  await page.getByTestId("palette-row").last().click();
   await page.getByRole("searchbox", { name: "Search history" }).focus();
   await page.keyboard.press("Escape");
   expect((await mock("mock.calls")).calls.filter((c: any) => c.op === "chat.interrupt")).toEqual([]);

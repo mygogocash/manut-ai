@@ -989,6 +989,14 @@ describe("store", () => {
     expect(store.getState().ui.findSeq).toBe(seq + 2);
   });
 
+  it("the palette's Search History for ... carries its words, and a plain press carries none", () => {
+    const store = createStore(fakeBridge().bridge);
+    store.actions.openPage("history", { find: true, query: "refund" });
+    expect(store.getState().ui.findQuery).toBe("refund");
+    store.actions.openPage("history", { find: true });
+    expect(store.getState().ui.findQuery).toBe("");
+  });
+
   it("a draft put in from Settings opened on a menu page lands in the chat, where its composer is", async () => {
     const f = fakeBridge();
     const store = createStore(f.bridge, { now: () => T0 });

@@ -1,6 +1,7 @@
 // App-wide keyboard shortcuts. ⌘ on macOS, Ctrl elsewhere:
-//   ⌘1…⌘9  open team member 1 to 9 (the Team page's order)   ⌘K  the menu's Search: History with its search box
-//          focused (in a terminal on macOS it clears the terminal instead: engine-input.ts)
+//   ⌘1…⌘9  open team member 1 to 9 (the Team page's order)   ⌘K  the command palette (src/palette): where to go, what to
+//          do and the chats History finds; ⌘K again closes it (in a terminal on macOS it clears the terminal instead:
+//          engine-input.ts, and Ctrl+K in a terminal is the program's)
 //   ⌘.     show or hide Details                    ⌘,  Settings
 //   ⌘J     jump to the next approval or question waiting on you (any bot or SESSIONS chat)
 //   ⌘⇧G   maximise the side panel in place, or restore it (Esc restores; a closed panel opens on Plans)
@@ -25,6 +26,7 @@ import { composing } from "../lib/ime";
 import { getTermPanel, toggleTerminal } from "../terminal/state";
 import { isFirstRunOpen } from "../onboarding/flow";
 import { listenMenuClose } from "./menuClose";
+import { paletteOpen, togglePalette } from "../palette/state";
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -124,6 +126,10 @@ export function onShortcutKey(e: KeyboardEvent): void {
   if (!SESSIONS_ENTRY && (hit.kind === "new-session" || hit.kind === "session")) return;
   // In a terminal session, Ctrl+<key> belongs to the program (Ctrl+K kills a line); ⌘ on macOS stays ours.
   if (!isMac() && inTerminal(e.target)) return;
+  // ⌘K in a macOS terminal clears it (engine-input.ts); the terminal keeps the key
+  if (hit.kind === "search" && inTerminal(e.target)) return;
+  // While the palette is open its field has the keys: only ⌘K (which closes it) is still a shortcut.
+  if (paletteOpen() && hit.kind !== "search") return;
   const store = getStore();
   const s = store.getState();
   const a = store.actions;
@@ -176,8 +182,8 @@ export function onShortcutKey(e: KeyboardEvent): void {
     const n = nextAsk(selectAsks(s), s.ui.focusAsk);
     if (n) void a.jumpToAsk(n.bot, n.item.id);
   } else if (hit.kind === "search") {
-    // This is the menu's Search button: History opens with its search box focused (HistoryPage.tsx reads ui.findSeq).
-    a.openPage("history", { find: true });
+    // The menu's Search button does the same: the palette opens over whatever is open, and Esc gives the focus back.
+    togglePalette();
   } else if (hit.kind === "details") {
     // a SESSIONS chat has its own panel (its Plans); anywhere else the bot's chat comes back first
     if (s.ui.view !== "chat" && s.ui.view !== "session") a.closeSettings();

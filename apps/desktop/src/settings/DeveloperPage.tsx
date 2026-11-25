@@ -11,7 +11,8 @@
 // `DeveloperView` draws a given state, so the tests draw every one; `DeveloperPage` keeps the form's state and acts.
 // The markup is Settings' own row (DevRow.tsx, as Settings.slot.tsx `Row` draws it), so the page looks like the rest of
 // Settings.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { usePlace } from "../palette/places";
 import { Seg } from "../chat/model/Seg";
 import { t, type Key } from "../i18n";
 import { runtimeKind } from "../runtime";
@@ -231,6 +232,18 @@ export function DeveloperPage() {
     setSaved(next);
   };
 
+  const pick = (next: Mode) => {
+    setMode(next);
+    setOriginError(null);
+    // Practice needs nothing more, so it is saved at once; Connected waits for its origin.
+    if (next === "practice") save({ mode: "practice" });
+  };
+  // The command palette offers the other of Practice and Connected, and presses this segment's own function.
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+  const place = useMemo(() => ({ mode, set: (m: Mode) => pickRef.current(m) }), [mode]);
+  usePlace("runtime", place);
+
   return (
     <DeveloperView
       saved={saved}
@@ -244,12 +257,7 @@ export function DeveloperPage() {
       nonce={nonce}
       email={<EmailSignIn key={origin ?? "practice"} origin={origin} held={signingIn} />}
       make={offer ? <MakeShop key={origin ?? "practice"} practice={offer === "practice"} onMade={() => setMade(true)} /> : undefined}
-      onMode={(next) => {
-        setMode(next);
-        setOriginError(null);
-        // Practice needs nothing more, so it is saved at once; Connected waits for its origin.
-        if (next === "practice") save({ mode: "practice" });
-      }}
+      onMode={pick}
       onOriginText={setOriginText}
       onSave={() => {
         const parsed = parseOrigin(originText);

@@ -11,7 +11,8 @@
 // was running and what still happens. Pausing is the runtime's to do (`team.pause`): the demo runtime stops its members,
 // and the connected one answers "not yet", which the page shows in the runtime's own words instead of a question it could
 // not act on. Pausing never unsends anything and never takes a page offline; the rules and words are pause.ts's.
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { usePlace } from "../palette/places";
 import "./mission.css";
 import { t, type Key } from "../i18n";
 import type { TeamState } from "../runtime/mission";
@@ -455,6 +456,14 @@ export function TeamPage() {
     };
   }, [held]);
 
+  // The command palette offers Pause everyone while this page offers it: the button's own question, nothing more.
+  const offersPause = members.length > 0 && !(state.kind === "ready" && (state.value.paused || state.value.members.length === 0)) && state.kind !== "loading" && !ui.busy;
+  const askPause = () => (state.kind === "unavailable" ? dispatch({ type: "failed", message: state.message }) : dispatch({ type: "ask" }));
+  const askRef = useRef(askPause);
+  askRef.current = askPause;
+  const pausePlace = useMemo(() => (offersPause ? { ask: () => askRef.current() } : null), [offersPause]);
+  usePlace("pause", pausePlace);
+
   const run = async (resuming: boolean) => {
     dispatch({ type: "begin" });
     const step = await pauseStep(() => (resuming ? s.teamResume() : s.teamPause()), resuming);
@@ -475,7 +484,7 @@ export function TeamPage() {
         nowMs: Date.now(),
         nameOf: (bot) => s.bots.find((b) => b.name === bot)?.display_name ?? bot,
         // A runtime that cannot say who is working cannot pause them either: its own "not yet" shows instead of a question.
-        onAsk: () => (state.kind === "unavailable" ? dispatch({ type: "failed", message: state.message }) : dispatch({ type: "ask" })),
+        onAsk: askPause,
         onKeep: () => dispatch({ type: "keep" }),
         onPause: () => void run(false),
         onResume: () => void run(true),

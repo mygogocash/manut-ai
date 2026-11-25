@@ -427,8 +427,10 @@ export interface Ui {
   view: "chat" | "settings" | "session" | "automations" | "plugins" | "tasks" | "job" | "activity" | MenuPage;
   /** Where a page's back arrow (and Settings' ×) returns: the chat, the session or the menu page it was opened from. */
   back: "chat" | "session" | MenuPage;
-  /** Bumped by the menu's Search button (and ⌘K): the History page's search box takes the focus on each new value. */
+  /** Bumped by the command palette's "Search History for ..." row: the History page's search box takes the focus on each new value. */
   findSeq: number;
+  /** The words the last such press carried; History puts them in its box when it takes the focus. */
+  findQuery: string;
   /** Automations: the job the detail panel shows (`<bot>:<id>`); Plugins: the bot whose plugins the page shows. */
   automation: string | null;
   /** The job view: the job it shows (a `jobs.list` id). */
@@ -715,6 +717,7 @@ export function initialState(): AppState {
       view: "chat",
       back: "chat",
       findSeq: 0,
+      findQuery: "",
       settingsPage: "general",
       pinned: readList("manut.pinned"),
       roster: readRoster(),
@@ -1063,7 +1066,7 @@ export type Action =
   | { type: "ui.job"; job: string }
   | { type: "ui.activity" }
   /** A page of the side menu fills the main column; `find` also asks History's search box for the focus. */
-  | { type: "ui.page"; page: MenuPage; find?: boolean }
+  | { type: "ui.page"; page: MenuPage; find?: boolean; query?: string }
   | { type: "ui.lang"; lang: Lang }
   /** The person and their shop as now kept on this computer (the first-run setup). */
   | { type: "ui.shop"; shop: ShopProfile }
@@ -1674,7 +1677,7 @@ export function reduce(state: AppState, a: Action): AppState {
     case "ui.page":
       // A menu page is a place of its own, not a page in front of one, so it keeps no way back: the shortcuts that
       // leave a page for the chat (⌘., ⌘⇧G) call closeSettings, and from here that must land on the chat.
-      return { ...state, ui: { ...state.ui, view: a.page, back: "chat", ...(a.find ? { findSeq: state.ui.findSeq + 1 } : {}) } };
+      return { ...state, ui: { ...state.ui, view: a.page, back: "chat", ...(a.find ? { findSeq: state.ui.findSeq + 1, findQuery: a.query ?? "" } : {}) } };
     case "ui.lang":
       return { ...state, ui: { ...state.ui, lang: a.lang } };
     case "ui.shop":
@@ -2112,8 +2115,8 @@ export interface Actions {
   openPlugins(bot?: string | null): void;
   /** Open the Tasks page (src/tasks: issues and pull requests, read-only). */
   openTasks(): void;
-  /** Open one of the side menu's pages; `find` (the menu's Search button, ⌘K) also focuses History's search box. */
-  openPage(page: MenuPage, opts?: { find?: boolean }): void;
+  /** Open one of the side menu's pages; `find` (the palette's "Search History for ...") also focuses History's search box, with `query` in it. */
+  openPage(page: MenuPage, opts?: { find?: boolean; query?: string }): void;
   /** Open one job's page (`jobs.list`'s id), and the shop's activity log. Each returns to where it was opened from. */
   openJob(job: string): void;
   openActivity(): void;
@@ -3103,7 +3106,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
       void loadAutomations();
     },
     openTasks: () => dispatch({ type: "ui.tasks" }),
-    openPage: (page, opts) => dispatch({ type: "ui.page", page, find: opts?.find }),
+    openPage: (page, opts) => dispatch({ type: "ui.page", page, find: opts?.find, query: opts?.query }),
     openJob: (job) => dispatch({ type: "ui.job", job }),
     openActivity: () => dispatch({ type: "ui.activity" }),
     missionJobs: () => bridge.request("jobs.list", {}),

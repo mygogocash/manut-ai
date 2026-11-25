@@ -1,8 +1,8 @@
 // History: every thread of the team and every job the runtime lists, newest first, grouped by day (Today, Yesterday, then
 // dates), each opening its thread or its page, as the design canvas's History board lists them. Each row says which kind it
 // is (Chat, Team or Code) and the chips above filter by kind. The search box finds an entry by its title, the last thing said
-// in it and who it is with; history.ts holds the rules. The menu's Search button and ⌘K open this page with the box focused,
-// through the store's `ui.findSeq`.
+// in it and who it is with; history.ts holds the rules. The command palette's last row ("Search History for ...") opens this page
+// with the box focused and the words in it, through the store's `ui.findSeq` and `ui.findQuery`.
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { hhmm } from "../app/time";
 import { t, type Key } from "../i18n";
@@ -370,6 +370,8 @@ export function HistoryPage() {
   useEffect(() => {
     if (find <= focusedFind) return;
     focusedFind = find;
+    // the palette's "Search History for ..." brings its words
+    setQuery(s.ui.findQuery);
     box.current?.focus();
     box.current?.select();
   }, [find]);

@@ -1,0 +1,88 @@
+/* The command palette: a modal box near the top of the window, in the popover's own colours. */
+.pal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: color-mix(in srgb, var(--bg, #000) 45%, transparent);
+}
+.pal {
+  width: min(560px, 92vw);
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--pop);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--pop-shadow);
+  animation: pop 0.16s ease both;
+  overflow: hidden;
+}
+.pal-in {
+  flex: none;
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  outline: none;
+}
+.pal-in::placeholder {
+  color: var(--muted);
+}
+.pal-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.pal-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pal-h {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 8px 8px 4px;
+}
+.pal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pal-row.on {
+  background: var(--raise2);
+}
+.pal-n {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pal-sub {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.pal-none {
+  padding: 14px 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
