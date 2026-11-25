@@ -28,7 +28,7 @@
         "img-src": "'self' data: blob:",
         "media-src": "'self' data: blob:",
         "font-src": "'self' data:",
-        "connect-src": "'self' ipc: http://ipc.localhost data: blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost data: blob: wss://manut.xyz wss://*.manut.xyz",
         "worker-src": "'self' blob:",
         "frame-src": "http://localhost:* https://localhost:*",
         "object-src": "'none'",
@@ -42,7 +42,7 @@
         "img-src": "'self' data: blob: http://localhost:5207",
         "media-src": "'self' data: blob:",
         "font-src": "'self' data: http://localhost:5207",
-        "connect-src": "'self' ipc: http://ipc.localhost data: blob: http://localhost:5207 ws://localhost:5207 ws://127.0.0.1:*",
+        "connect-src": "'self' ipc: http://ipc.localhost data: blob: http://localhost:5207 ws://localhost:5207 ws://127.0.0.1:* wss://manut.xyz wss://*.manut.xyz",
         "worker-src": "'self' blob:",
         "frame-src": "http://localhost:* https://localhost:*",
         "object-src": "'none'",
@@ -59,6 +59,7 @@
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -71,7 +72,6 @@
     "shortDescription": "Chat, an AI team and a code editor for your shop",
     "copyright": "Manut AI. Portions (c) 2026 oh-my-hermes contributors, MIT License.",
     "macOS": {
-      "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
     },
     "windows": {
@@ -84,6 +84,10 @@
     }
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3NEI2QjNGMjk4OTI4QTcKUldTbktJa3BQMnRMeDcrQUdYVVhsL0FDMmVZVjlxd08xSDVsQjE4NWhSbG5XNDdqakcvWmpEWk4K",
+      "endpoints": ["https://github.com/mygogocash/manut-ai/releases/latest/download/latest.json"]
+    },
     "deep-link": {
       "desktop": {
         "schemes": ["manut"]

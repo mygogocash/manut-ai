@@ -83,7 +83,8 @@ describe("the frame's sandbox", () => {
 });
 
 describe("the app's CSP", () => {
-  // Item 53's CSP, every directive as it was but frame-src: a change to any of them is a decision of its own.
+  // Item 53's CSP, every directive as it was but frame-src: a change to any of them is a decision of its own. Item 61's
+  // live feed added Manut AI's own API hosts to connect-src, for the page's WebSocket (runtime/http/feed.ts).
   const BEFORE = {
     "default-src": "'self'",
     "script-src": "'self' 'wasm-unsafe-eval'",
@@ -91,7 +92,7 @@ describe("the app's CSP", () => {
     "img-src": "'self' data: blob:",
     "media-src": "'self' data: blob:",
     "font-src": "'self' data:",
-    "connect-src": "'self' ipc: http://ipc.localhost data: blob:",
+    "connect-src": "'self' ipc: http://ipc.localhost data: blob: wss://manut.xyz wss://*.manut.xyz",
     "worker-src": "'self' blob:",
     "object-src": "'none'",
     "base-uri": "'self'",
@@ -103,7 +104,7 @@ describe("the app's CSP", () => {
     "style-src": "'self' 'unsafe-inline' http://localhost:5207",
     "img-src": "'self' data: blob: http://localhost:5207",
     "font-src": "'self' data: http://localhost:5207",
-    "connect-src": "'self' ipc: http://ipc.localhost data: blob: http://localhost:5207 ws://localhost:5207 ws://127.0.0.1:*",
+    "connect-src": "'self' ipc: http://ipc.localhost data: blob: http://localhost:5207 ws://localhost:5207 ws://127.0.0.1:* wss://manut.xyz wss://*.manut.xyz",
   };
 
   it("lets frames load http and https on localhost at any port, and nothing else, in both entries", () => {

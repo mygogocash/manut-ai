@@ -162,6 +162,12 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   custom domain hands it the pages.
 - Dev's pages were redeployed on 25 Nov at 13:05 from `8f77e43`, with item 59's Make a routine form (pages `e64ce7e6`;
   the API is unchanged since 09:59).
+- Dev's API was redeployed on 25 Nov at 16:20 from `6325080`, with items 61 and 61b's live feed, switched off (API
+  `19001525`, deployed whole; the pages are unchanged since `e64ce7e6`). Smoke-tested: `/v1/health` 200,
+  `POST /v1/feed/ticket` 401 without a session and 415 for `text/plain`, `GET /v1/feed` 401 with no ticket and with
+  one that names no shop, the approvals list 401 without a session, the pages 200 and `/ops` 302 to Access. The
+  Deploy dev workflow cannot be started from `pilot/week-1` (GitHub starts a workflow by hand only when its file is
+  on the default branch, and `main` does not have it yet), so dev is deployed from this Mac until the owner merges.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -175,16 +181,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    pushed anything. At 16:02 the review and item 40 were sent on in their own threads; item 39 waits for one of them
    to finish, as three heavy helpers at once reached the limit three times on 24 Nov. A
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
-   to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
+   to wait with `t3_background_wait`.
+   On 25 Nov at 16:06 the owner moved the lead from T3 Code to a Claude Code session on this Mac ("continue this
+   session"). Nothing runs in T3 Code now. The two helpers that were running there (items 61b and 62) had stopped
+   with their commits made but not pushed and one uncommitted edit each; the lead finished and merged both (below).
+   Helpers are now that Claude Code session's own subagents, each in a worktree the lead made beside T3's
+   (`~/.t3/worktrees/manut-ai/cc-item<N>-<name>`), and they stop when that session ends: check each worktree for
+   commits that were never pushed before starting anything again.
+   They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 61, a shop's live feed, built and switched off: a hibernating WebSocket per shop session that only says
-     something changed, behind an off switch (`feat/live-feed`, Opus), started 25 Nov when item 59 merged. Built and
-     reviewed on 25 Nov; one finding holds the merge: a page's socket sent the shop session as a
-     `Sec-WebSocket-Protocol` entry, which Cloudflare's request logs keep unmasked (they mask a header by its name
-     only). Item 61b, running (`feat/live-feed-ticket`, Opus), swaps it for a one-use ticket of 30 seconds minted
-     with the session in `Authorization`; both merge together.
-   - item 62, the Runs layout tests made fast: profile `boxView.test.ts`'s six slow generator tests and speed the slow
-     side with every answer proved the same (`feat/fast-box-tests`, Sonnet), started 25 Nov when item 60 merged.
+   - item 66, Kit as a chat from the + menu, beside the terminal (`feat/kit-chat-lane`, Opus, worktree
+     `cc-item66-kit-chat`), started 25 Nov at 16:13.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -198,7 +205,20 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 60 (the offline cache sealed at rest: AES-256-GCM in the webview's Web Crypto, a fresh nonce each write
+   Merged: 63 (the desktop's release builds and the updater: `.github/workflows/release-desktop.yml` runs only by hand
+   or on a `desktop-vX.Y.Z` tag, builds the Mac app for both chips one after the other into a draft release only the
+   owner publishes, signed and notarized once the five Apple secrets are added and unsigned with a plain warning
+   until then, keeps the Windows installer as a workflow artifact, and the app's updater is on with Manut AI's own key
+   pinned and asks GitHub's latest release, which skips drafts; `docs/releasing.md`. The workflow has never run: it
+   cannot be started by hand until its file is on `main`, and a `desktop-v` tag would make a public tag, so its first
+   run is the owner's to start), 61 with 61b (a shop's live feed, switched off: a hibernating WebSocket per shop session that says only
+   that something changed, opened with a one-use ticket of 30 seconds that the session mints in `Authorization`,
+   so no session reaches a header Cloudflare's logs keep; the helper's last uncommitted edit was a probe that took
+   out the mint's refusal of a body with fields, a test fails with it out, and the lead put the line back), 62
+   (the Runs layout made faster without changing an answer: the lead ran every exported function of `boxView.ts`
+   beside the file from before the speed-up, on every call the tests make and on 750 layouts of 150 fresh seeded
+   runs, 13,254 calls in all, and every pair of answers was equal; the file takes 19 seconds here, from about 50),
+   60 (the offline cache sealed at rest: AES-256-GCM in the webview's Web Crypto, a fresh nonce each write
    and the version, origin and tenant bound in, under a key made from SecRandomCopyBytes and held only in the macOS
    keychain; version 6, a version-5 file deleted unread; the key deleted whenever the kept read is forgotten; no copy
    kept where there is no keychain; both usage-limit stops resumed by themselves at 13:50; desktop only, Rust changed),
@@ -319,13 +339,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    packages to `docs/plan.md` as the phases need them; a run that finds the queue empty stops and says so.
 3. Next, from the December list in `docs/plan.md`, as slots free (two heavy helpers at a time on this Mac; three or four
    at once swapped hard and reached the usage limit on 24 and 25 Nov):
-   - running: item 61b (the live feed's one-use ticket, which item 61 merges with) and item 62 (the Runs layout
-     tests made fast);
-   - next, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
+   - running, for the desktop's first release, which is Practice mode and the code editor on the Mac (the owner, 25 Nov;
      the owner's Apple Developer account is the business's, an organization; sign-in and a model key are not needed for
-     now): item 63 (release builds in CI, signed and notarized once the owner adds the secrets, Mac only in the draft
-     release, and the updater on with the key made on 25 Nov, whose owner's copy is in `~/manut-ai-updater-key`), item
-     66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 65 (a Thai dictionary for the
+     now): item 66 (Kit as a chat from the + menu, beside the terminal, the owner's choice). Item 63 (the release
+     builds and the updater, whose key's owner's copy is in `~/manut-ai-updater-key`) merged on 25 Nov. Item 65 (a Thai dictionary for the
      desktop) is parked: on 25 Nov the owner said Thai is not needed yet. Item 64 (Apple sessions refused on the lifted routes, which turning
      Sign in with Apple on needs first) is parked until sign-in is wanted;
    - candidates that need no owner:
@@ -358,8 +375,15 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - **Confirm the console behind Access:** open https://dev.manut.xyz/ops, log in with the emailed code, and
   paste the operator key (`security find-generic-password -s manut-dev-operator-key -w | pbcopy`). The shop
   list should load. That proves the admin gate gets `ctx.access` on the deployed front door.
-- **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan and
-  the Deploy dev button, because GitHub reads those from the default branch.
+- **Merge pull request #1 into `main`** when happy. That also switches on Dependabot, the weekly CodeQL scan, the
+  Deploy dev button and the Release desktop button, because GitHub reads those from the default branch.
+- **The Mac release (item 63, `docs/releasing.md`):** add five GitHub Actions secrets from the business's Apple
+  Developer account (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`;
+  the doc says where each comes from), then start Release desktop once and read its summary. Without them the run
+  still builds, unsigned, into a draft titled UNSIGNED that must not be published. The workflow has never run, so its
+  first run is also its test: the draft should hold a `.dmg` for each chip and a `latest.json` naming both. Publishing
+  the draft is what sends an update to installed apps. Any other release made in this repository must be marked a
+  prerelease, or the updater finds no `latest.json`.
 - **A test LINE Official Account** for the dry run (later, by the owner's choice).
 - **Staging and production in a separate Cloudflare account** before they exist. A Cloudflare token cannot be
   limited to one Worker.
@@ -443,13 +467,19 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `apps/desktop` `src/lib/sounds.test.ts` and `apps/web` `test/RoutinesView.test.tsx` ("pauses everyone in practice"): each
   failed once in the gate of 25 Nov at load 7 with a helper's gate beside it (the second waited past testing-library's one
   second for "Everyone is paused since 10:00 today."), and both passed when run alone. The web tests' waits are three
-  seconds since `6771bc3` (`apps/web/test/setup.ts`), and item 62 is speeding up `boxView.test.ts`.
-- `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take 6 to 9 seconds each on an idle Mac
-  (47 seconds for the file). Each now has 120 seconds (24 Nov); before that one had 30 and timed out under load.
+  seconds since `6771bc3` (`apps/web/test/setup.ts`).
+- `apps/desktop` `src/runs/boxView.test.ts`: its six layout property checks take about 3 seconds each on an idle Mac
+  (19 seconds for the file) since item 62 merged on 25 Nov; before it they took 6 to 9 (47 seconds). Each has 120
+  seconds. GitHub's runner is far slower at them than this Mac: before item 62 the file took 615 seconds in CI's
+  Desktop tests on `ab8521e` and one check passed its 120 seconds, which failed that run. If CI still comes near
+  the limit, profile the layout again rather than raise the limit.
 - `apps/desktop` `src/pages/PausePage.test.tsx`, `src/sessions/attach.test.ts`, `packages/agent-events` and a few
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
+  tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
+  for a moment after its row shows, and the test looked at once; it waits for the read since then.
 - `apps/desktop` `src/runtime/http/browserWrite.test.tsx`, "the chat's card, Home and Needs you": its first imports of
   three whole pages take about two seconds alone and went past the five-second default in four loaded gates on 24 Nov;
   it has thirty seconds since.
@@ -469,7 +499,8 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - `pnpm --filter @manut/api dev` runs both Workers on one origin at localhost:8787.
 - Deploy dev from `apps/api`: `wrangler deploy -c wrangler.web.jsonc --env dev`, then `wrangler deploy --env dev`.
   Wrangler on this Mac is signed in with the owner's Cloudflare login, which sees more than one account, so set
-  `CLOUDFLARE_ACCOUNT_ID` for the command (the value is in the GitHub `dev` environment's secrets). Run
+  `CLOUDFLARE_ACCOUNT_ID` for the command (the value is in the GitHub `dev` environment's secrets, and
+  `wrangler whoami` lists the accounts by name: the dev Workers are in the one named GoGoCash). Run
   `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
   Worker whose name does not end in `-dev`.
 - GitHub: `git push` works as it is. For `gh`, prefix commands with
