@@ -15,12 +15,13 @@
 /// - The TenantObject (`ShopFeed`) accepts the socket with the hibernation API, so an idle socket costs no object time,
 ///   and keeps everything a socket needs in its attachment, never in a field that hibernation would lose. It pings its
 ///   sockets after each write it takes that a screen reads (a task indexed, a request about to open, an attention item,
-///   the routines and the team, the people), and after a task object tells it of a change of its own (`touchFeed`), at
+///   the routines and the team, the people), and after a task object tells it of a change of its own (feed-touch.ts), at
 ///   most once a second (`ShopFeed.coalesceMs`).
 /// - Limits: `MAX_FEEDS_PER_SESSION` sockets for one session and `ShopFeed.maxPerShop` for one shop, each refusal its own
 ///   code. A socket lives an hour at most and is then closed with 4000, so its desktop opens it again, which checks the
-///   session and the switch again. A socket whose session no longer works is closed with 4401, and every socket with 4503
-///   once the switch reads off.
+///   session and the switch again. Each ping first checks every socket's session and the switch: a socket whose session
+///   no longer works is closed with 4401 instead, and every socket with 4503 once the switch reads off. Every change to
+///   the shop's people pings, so a helper the owner removes or a device that signs out is closed within the second.
 ///
 /// Nothing here logs, so no token, hash or shop can reach a log.
 
@@ -28,7 +29,7 @@ import { sha256Hex } from "./auth";
 import { isValidTenant } from "./companies";
 import { callerOf, isShopSession, queryNamesSession, type PeopleEnv } from "./people";
 import { shopSessionWorks } from "./people-store";
-import { authCall, tenantCall, tenantStub, type TenantDataEnv } from "./tenant-data";
+import { authCall, tenantStub, type TenantDataEnv } from "./tenant-data";
 
 export const FEED_PATH = "/v1/feed";
 /// The one protocol the feed speaks, and the only one it ever answers. A client that offers protocols must offer this
@@ -122,29 +123,6 @@ export async function feedRoute(request: Request, url: URL, env: PeopleEnv, flag
   if (offered.length > 0) headers.set("x-feed-protocol", FEED_PROTOCOL);
   return tenantStub(env, caller.shop).fetch(new Request("https://tenant/feed", { headers }));
 }
-
-/// A task object telling its shop's TenantObject that something its screens read changed in the task (task-object.ts):
-/// one call to the shop's object, which pings within a second. Answers how many sockets the shop has open, so a task
-/// object of a shop nobody follows can stay quiet a while, or null when the object could not be told; nothing waits on
-/// it and nothing fails with it, since the desktop's one-minute read stands whatever the feed does.
-export async function touchFeed(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<number | null> {
-  if (!isValidTenant(tenant)) return null;
-  try {
-    const response = await tenantCall(env, tenant, "/feed/touch", { method: "POST", headers: { "x-feed": "1" } });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return null;
-    }
-    const body = (await response.json()) as { listening?: unknown };
-    return typeof body.listening === "number" ? body.listening : null;
-  } catch {
-    return null;
-  }
-}
-
-/// How long a task object stays quiet after its shop said nobody follows it: a desktop that connects meanwhile sees that
-/// task's changes at its next one-minute read, as it would without the feed.
-export const FEED_QUIET_MS = 60_000;
 
 type FeedObjectEnv = Pick<TenantDataEnv, "AUTH"> & { SHOP_FEED?: string };
 
@@ -299,17 +277,6 @@ export class ShopFeed {
           // A socket that dropped as the ping went out is the runtime's to close.
         }
       }
-    }
-  }
-
-  /// The shop's people record changed: every socket whose session no longer works is closed now, so a helper the owner
-  /// removed, a device that signed out of the shop and an account the operator unlinked hear nothing more.
-  dropEnded(): void {
-    const now = Date.now();
-    const kv = this.ctx.storage.kv;
-    for (const ws of this.sockets()) {
-      const { tenant, session } = attachmentOf(ws);
-      if (!shopSessionWorks(kv, tenant, session, now)) end(ws, FEED_CLOSE.sessionEnded, "session_ended");
     }
   }
 

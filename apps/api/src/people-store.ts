@@ -219,8 +219,8 @@ function checkOwnerSession(record: PeopleRecord, session: OwnerSession, nowMs: n
 
 /// Whether the shop session whose token hashes to `tokenHash` still works at `nowMs`, a helper's or an owner's, by the
 /// same checks the routes make (`checkHelperSession`, `checkOwnerSession`). The shop's live feed (feed.ts) asks before
-/// each ping and after each change to the record, and closes a socket whose session no longer works, so a helper the
-/// owner removed, a device that signed out or an account the operator unlinked hears nothing more from the shop.
+/// each ping, and every change to the record brings one, so a helper the owner removed, a device that signed out or an
+/// account the operator unlinked is closed within the second and hears nothing more from the shop.
 export function shopSessionWorks(kv: SyncKvStorage, tenant: string, tokenHash: string, nowMs: number): boolean {
   const record = readRecord(kv, tenant);
   const helper = heldSession(record.sessions, tokenHash);

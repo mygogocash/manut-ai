@@ -203,13 +203,11 @@ export class TenantObject extends DurableObject {
       return memoryTenantRoute(this.ctx.storage, request, url);
     }
     // The people around the shop: the owner's helpers, invites, cover and notes passed on (people-store.ts). A change to
-    // the record closes the feed's sockets whose sessions it ended, and pings the rest: a note passed on shows on an ask,
-    // and a helper's new device is told after the owner's next read. A session check only reads, and pings nothing.
+    // the record pings the feed: a note passed on shows on an ask, a helper's new device is told after the owner's next
+    // read, and the ping's own check of every socket's session closes the ones the change ended (feed.ts). A session check
+    // only reads, and pings nothing.
     if (url.pathname === "/people" || url.pathname.startsWith("/people/")) {
-      return peopleTenantRoute(this.ctx.storage, request, url, () => {
-        this.feed.dropEnded();
-        this.feed.touch();
-      });
+      return peopleTenantRoute(this.ctx.storage, request, url, () => this.feed.touch());
     }
     // Which task holds each of the shop's approval requests, and which may still be open (approval-index.ts).
     if (request.method === "POST" && url.pathname === "/approvals/backfill") {
@@ -238,7 +236,7 @@ export class TenantObject extends DurableObject {
   }
 
   /// `GET /feed`, a socket the Worker checked and hands over (feed.ts `feedRoute`), and `POST /feed/touch`, a task object
-  /// saying a change of its own reached what the screens read (feed.ts `touchFeed`). Only the Worker and the shop's task
+  /// saying a change of its own reached what the screens read (feed-touch.ts `touchFeed`). Only the Worker and the shop's task
   /// objects set `x-feed`, and no client route reaches this object's paths, as for `x-inbound` and `x-people`.
   private async feedRoute(request: Request, url: URL): Promise<Response> {
     if (request.headers.get("x-feed") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });

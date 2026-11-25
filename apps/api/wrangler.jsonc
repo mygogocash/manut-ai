@@ -12,6 +12,8 @@
   // unreachable until the operator turns officeInbound on (OFFICE_INBOUND is
   // deliberately unset here). OFFICE_SHARING is unset for the same reason:
   // every OFC-21 sharing route refuses until officeSharing is turned on.
+  // SHOP_FEED is unset too: GET /v1/feed, a shop's live feed, answers 403
+  // feature_disabled until the operator turns shopFeed on (docs/turning-on.md).
   // RELAY_ENABLED is deliberately unset in every environment: until the owner
   // turns the relay on at gate G3, every /relay/ route answers 503
   // relay_disabled (docs/relay-protocol-v1.md, the kill switch).

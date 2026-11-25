@@ -2,8 +2,9 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../src/auth";
 import { BEARER_PROTOCOL, FEED_CLOSE, FEED_PROTOCOL, MAX_FEEDS_PER_SESSION, ShopFeed } from "../src/feed";
+import { TaskObject, touchesFeed } from "../src/task-object";
 import { tenantCall, tenantStub } from "../src/tenant-data";
-import { tenantSession } from "./authenticated-fixtures";
+import { tenantSession, trustedTaskPut } from "./authenticated-fixtures";
 import {
   admin,
   asSession,
@@ -17,6 +18,7 @@ import {
   setupShop,
   shopTask,
   stubLine,
+  taskStub,
   type Shop,
 } from "./people-fixtures";
 import { sourceWorker } from "./source-worker";
@@ -130,6 +132,7 @@ async function asked(shop: Shop, taskId: string): Promise<void> {
 
 const DEFAULTS = { coalesceMs: ShopFeed.coalesceMs, maxAgeMs: ShopFeed.maxAgeMs, silentMs: ShopFeed.silentMs,
   maxPerShop: ShopFeed.maxPerShop, switchFreshMs: ShopFeed.switchFreshMs };
+const QUIET = TaskObject.feedQuietMs;
 
 beforeEach(async () => {
   expect((await setFlags({ shopFeed: true, officeInbound: true, officeCloud: true, officeExternalWrites: true })).status)
@@ -140,6 +143,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   Object.assign(ShopFeed, DEFAULTS);
+  TaskObject.feedQuietMs = QUIET;
   vi.restoreAllMocks();
 });
 
@@ -260,7 +264,7 @@ describe("who may open it", () => {
     expect(line.pushes()).toBe(0);
   });
 
-  it("refuses a removed helper and an unlinked owner as the approvals list does, and closes their sockets at once", async () => {
+  it("refuses a removed helper and an unlinked owner as the approvals list does, and closes their sockets within the second", async () => {
     const shop = await setupShop();
     const owner = await linkedOwner(shop);
     const helper = await joinHelper(shop);
@@ -442,6 +446,23 @@ describe("pings", () => {
     expect(asked).toEqual(["/flags"]);
   });
 
+  it("read the switch as off when its record cannot be read, and close every socket with 4503 rather than ping", async () => {
+    const shop = await setupShop();
+    const owner = await linkedOwner(shop);
+    const feed = await openFeed(owner.headers);
+    ShopFeed.switchFreshMs = 0;
+    await insideFeed(shop, (inside) => {
+      const auth = inside.env.AUTH;
+      inside.env = { ...inside.env, AUTH: {
+        idFromName: (name: string) => auth.idFromName(name),
+        get: () => ({ fetch: async () => Response.json({ error: "fixture" }, { status: 500 }) }),
+      } as unknown as DurableObjectNamespace };
+    });
+    await attention(shop);
+    expect(await feed.next(1_000)).toBeNull();
+    expect(await feed.closed).toEqual({ code: FEED_CLOSE.off, reason: "feed_off" });
+  });
+
   it("are not sent to a socket whose session ran out, which is closed with 4401 instead", async () => {
     const shop = await setupShop();
     const owner = await linkedOwner(shop);
@@ -478,6 +499,15 @@ describe("pings", () => {
     expect(await feed.next(1_300)).toBeNull();
   }, 20_000);
 
+  it("leave a new shop's object with nothing of its making open, so it can hibernate at once", async () => {
+    const made = await admin<{ tenant: string }>("POST", "/v1/admin/pilot/shops", { name: "Khao Hom", ownerName: "Fon" });
+    expect(made.status).toBe(200);
+    // An answer the Worker left unread would hold the object until the runtime gave up on it, seconds later.
+    const evicted = await Promise.race([evictDurableObject(tenantStub(bindings, made.body.tenant)).then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_500))]);
+    expect(evicted).toBe(true);
+  });
+
   it("reach a socket the object hibernated, and the keepalive is answered while it sleeps", async () => {
     const shop = await setupShop();
     const owner = await linkedOwner(shop);
@@ -492,6 +522,121 @@ describe("pings", () => {
     await evictDurableObject(stub);
     await shopTask(shop.tenant);
     expect(await feed.next()).toEqual(PING);
+  }, 20_000);
+});
+
+/// A queued task of the shop's, as the create route leaves one: in the index, then made.
+async function queuedTask(shop: Shop, taskId: string): Promise<void> {
+  await indexed(shop, taskId);
+  const made = await trustedTaskPut(taskId, { id: taskId, title: "Answer the parcel question", objective: "Reply to the customer",
+    state: "queued", location: "cloud", funding: "cloudBYOK", criteria: [], updatedAt: new Date().toISOString() }, shop.tenant);
+  expect(made.status).toBe(200);
+  await made.text();
+}
+
+/// A call to the task object as the job flow makes it, read whole: its status and its body.
+async function onTask(shop: Shop, taskId: string, path: string, body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  const response = await taskStub(taskId).fetch(new Request(`https://task${path}`, { method: "POST",
+    headers: { "content-type": "application/json", "x-tenant": shop.tenant }, body: JSON.stringify(body) }));
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+describe("a task's own changes", () => {
+  it("ping when the task itself changes, a run is claimed, its draft is kept and it finishes, and never for its progress", async () => {
+    const shop = await setupShop();
+    const owner = await linkedOwner(shop);
+    const taskId = `feed-task-${crypto.randomUUID()}`;
+    await indexed(shop, taskId);
+    const feed = await openFeed(owner.headers);
+    const made = await trustedTaskPut(taskId, { id: taskId, title: "Answer the parcel question", objective: "Reply to the customer",
+      state: "queued", location: "cloud", funding: "cloudBYOK", criteria: [], updatedAt: new Date().toISOString() }, shop.tenant);
+    expect(made.status).toBe(200);
+    await made.text();
+    expect(await feed.next(), "the task made").toEqual(PING);
+    const claimed = await onTask(shop, taskId, "/attempts", { executorId: "exec-1", inputRevision: "rev-1" });
+    expect(claimed.status).toBe(200);
+    expect(await feed.next(), "a run claimed").toEqual(PING);
+    const { id, fence } = claimed.body as { id: string; fence: number };
+    expect((await onTask(shop, taskId, `/attempts/${id}/heartbeat`, { fence })).status).toBe(200);
+    expect(await feed.next(600), "a heartbeat").toBeNull();
+    expect((await onTask(shop, taskId, `/attempts/${id}/draft`, { fence, draft: { member: "nam", job: "reply", text: "It ships today." } }))
+      .status).toBe(200);
+    expect(await feed.next(), "a draft").toEqual(PING);
+    // A write the task refused changed nothing, and tells nobody.
+    expect((await onTask(shop, taskId, `/attempts/${id}/draft`, { fence, draft: { member: "nam", job: "reply", text: "Again." } }))
+      .status).toBe(409);
+    expect(await feed.next(600), "a refused draft").toBeNull();
+    expect((await onTask(shop, taskId, `/attempts/${id}/finish`, { fence, outcome: "done" })).status).toBe(200);
+    expect(await feed.next(), "a run finished").toEqual(PING);
+  }, 20_000);
+
+  it("ping when a request is decided, from the request's own task", async () => {
+    // The reply's task told its shop when it was proposed, before anyone followed, and would stay quiet for a minute; the
+    // quiet is the next test's, so here it is none.
+    TaskObject.feedQuietMs = 0;
+    stubLine((impl) => vi.spyOn(globalThis, "fetch").mockImplementation(impl));
+    const shop = await setupShop();
+    const owner = await linkedOwner(shop);
+    const reply = await proposeReply(shop, "We open at nine");
+    const feed = await openFeed(owner.headers);
+    expect((await decide(owner.headers, reply.actionId, { optionId: "decline", seenRevision: 1 })).status).toBe(200);
+    expect(await feed.next()).toEqual(PING);
+  });
+
+  it("come from exactly the task routes that change what the shop's list shows", () => {
+    const touching: [string, string][] = [["PUT", "/"], ["POST", "/commands"], ["POST", "/attempts"], ["POST", "/attempts/sweep"],
+      ["POST", "/attempts/a1/finish"], ["POST", "/attempts/a1/end"], ["POST", "/attempts/a1/ask"], ["POST", "/attempts/a1/ask-submit"],
+      ["POST", "/attempts/a1/ask-books"], ["POST", "/attempts/a1/draft"], ["POST", "/actions"], ["POST", "/actions/x1/decision"],
+      ["POST", "/actions/x1/begin"], ["POST", "/actions/x1/settle"], ["POST", "/requests/r1/decision"]];
+    const quiet: [string, string][] = [["GET", "/"], ["GET", "/listing"], ["GET", "/requests"], ["GET", "/requests/r1"],
+      ["POST", "/attempts/a1/heartbeat"], ["POST", "/attempts/a1/steps"], ["POST", "/attempts/a1/events"],
+      ["POST", "/attempts/a1/outpost-events"], ["POST", "/prune"], ["DELETE", "/wipe"], ["POST", "/detach-company"],
+      ["PUT", "/attempts"], ["POST", "/attempts/a1/draft/extra"], ["POST", "/requests/r1"]];
+    for (const [method, path] of touching) expect(touchesFeed(method, path), `${method} ${path}`).toBe(true);
+    for (const [method, path] of quiet) expect(touchesFeed(method, path), `${method} ${path}`).toBe(false);
+  });
+
+  it("cost a shop nobody follows one call from a busy task, and then nothing for TaskObject.feedQuietMs", async () => {
+    TaskObject.feedQuietMs = 1_500;
+    const shop = await setupShop();
+    const owner = await linkedOwner(shop);
+    const taskId = `feed-task-${crypto.randomUUID()}`;
+    // Every call the task object makes to its shop's object, by path, and how many of its touches were answered.
+    const calls: string[] = [];
+    let answered = 0;
+    await runInDurableObject(taskStub(taskId), (instance) => {
+      const holder = instance as unknown as { env: Record<string, unknown> };
+      const tenants = holder.env.TENANT as DurableObjectNamespace;
+      holder.env = { ...holder.env, TENANT: {
+        idFromName: (name: string) => tenants.idFromName(name),
+        get: (objectId: DurableObjectId) => {
+          const stub = tenants.get(objectId);
+          return { fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = new Request(input, init);
+            const path = new URL(request.url).pathname;
+            calls.push(path);
+            const response = await stub.fetch(request);
+            if (path === "/feed/touch") answered += 1;
+            return response;
+          } };
+        },
+      } as unknown as DurableObjectNamespace };
+    });
+    const touches = () => calls.filter((path) => path === "/feed/touch").length;
+    await queuedTask(shop, taskId);
+    // Quiet from when the shop answered that nobody follows it: a write before that answer would still tell it.
+    await vi.waitFor(() => expect(answered).toBe(1));
+    const claimed = await onTask(shop, taskId, "/attempts", { executorId: "exec-1", inputRevision: "rev-1" });
+    const { id, fence } = claimed.body as { id: string; fence: number };
+    const feed = await openFeed(owner.headers);
+    expect((await onTask(shop, taskId, `/attempts/${id}/draft`, { fence, draft: { member: "nam", job: "reply", text: "Soon." } })).status)
+      .toBe(200);
+    expect(await feed.next(400)).toBeNull();
+    expect(touches()).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect((await onTask(shop, taskId, `/attempts/${id}/finish`, { fence, outcome: "done" })).status).toBe(200);
+    expect(await feed.next()).toEqual(PING);
+    expect(touches()).toBe(2);
   }, 20_000);
 });
 
