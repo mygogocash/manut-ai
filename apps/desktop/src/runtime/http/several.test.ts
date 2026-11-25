@@ -4,6 +4,7 @@
 // on, sent with the session of the card's own shop and never the one the switcher shows; a shop the person's place in
 // ended dropped at once and said so; signing out ending every shop session; and each shop's asks kept apart offline.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dayTime } from "../../app/time";
 import { settleApproval } from "../../chat/cards/respond";
 import { setLang } from "../../i18n";
 import { newestFirst } from "../../pages/NeedsPage";
@@ -177,6 +178,20 @@ describe("a decision goes with its own shop's session", () => {
       ["/v1/approvals/a-reply/decision", OWNER_A, { optionId: "approve", seenRevision: 1 }],
     ]);
     for (const id of ["b-reply-1", "b-reply-2", "b-reply-3", "a-reply"]) expect(cardEvenClosed(store, id)?.resolved, id).toBe("once");
+  });
+
+  it("says the owner decided first, by name, to a helper whose answer met it, and that the person did to the owner", async () => {
+    const { api, store } = await opened();
+    const first = NOW - 120_000;
+    const met = (id: string, decidedBy: string) => () => {
+      const decision = { requestId: id, optionId: "approve", seenRevision: 1, decidedBy, role: "owner", decidedAt: first };
+      return { status: 409, json: { error: "already_decided", result: { ok: false, refused: "already_decided", decision }, action: "confirmed" } };
+    };
+    api.on("POST", "/v1/approvals/b-reply-1/decision", met("b-reply-1", "owner-link")).on("POST", "/v1/approvals/a-reply/decision", met("a-reply", "owner-session"));
+    // Noi's own LINE link decided the reply at Ran Pa Noi, where the person is a helper: it was Noi's decision, not theirs
+    expect(await settleApproval(store, "buddy", card(store, "b-reply-1")!, "once")).toBe(`Already decided by Noi at ${dayTime(first, NOW)}`);
+    // and at Baan Mali, which the person owns, their own session decided it
+    expect(await settleApproval(store, "buddy", card(store, "a-reply")!, "once")).toBe(`Already decided by you at ${dayTime(first, NOW)}`);
   });
 
   it("refuses here, sending nothing, what the person's role at the card's shop may not decide", async () => {

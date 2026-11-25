@@ -314,9 +314,11 @@ describe("staying current", () => {
     await rt.connect();
     serveShop(api, { tasks: [taskJson({ actions: [actionJson({ state: "expired" })] })] });
     await vi.advanceTimersByTimeAsync(POLL_MS);
+    // the card closes once the shop's recent requests have been asked how it was settled (decided.host.test.ts), which is after
+    // the changes the read itself shows; the shop lists none, so it closes as its action says
     expect(events).toEqual([
-      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "timeout" },
       { event: "thread.removed", bot: "buddy", thread: "task-2" },
+      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "timeout" },
     ]);
   });
 
@@ -335,9 +337,10 @@ describe("staying current", () => {
     await rt.connect();
     serveShop(api, { tasks: [] });
     await vi.advanceTimersByTimeAsync(POLL_MS);
+    // the shop's recent requests do not list it, so it closes as cancelled, after the changes the read itself shows
     expect(events).toEqual([
-      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" },
       { event: "thread.removed", bot: "buddy", thread: "task-1" },
+      { event: "prompt.expired", bot: "buddy", request_id: "action-1@1", reason: "cancelled" },
     ]);
   });
 
