@@ -872,8 +872,9 @@ instead of an empty screen, and says so (`src/runtime/http/cache.ts`, `host.ts`,
    found"), so `GET /v1/approvals?state=open` reads only the tasks that may hold an open request, and `state=recent` costs a
    few more reads, not a walk of every task.
 4. **Asks of the desktop:** the Sign in with Apple button; keychain support on Windows and Linux; showing a schedule's
-   time zone when it is not this computer's; showing a note a helper passed on with its request (it is read and kept
-   already); a helper's own session on the desktop. (Older tasks than the newest 50, which a screen asks for with Show older, are
+   time zone when it is not this computer's; a helper's own session on the desktop. (A note a helper passed on with its
+   request is drawn on the owner's card, "Passed on by Mint" and the note, and on the helper's as "Passed on to Noi":
+   `shopAskLines` in `src/lib/shops.ts`, drawn by `chat/cards/Cards.slot.tsx`.) (Older tasks than the newest 50, which a screen asks for with Show older, are
    built: Older tasks, above. What it leaves for later is at the end of that section.)
 
 ## Undoing it
