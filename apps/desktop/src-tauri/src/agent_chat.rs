@@ -890,6 +890,39 @@ fn ask_detail(name: &str, input: &Value) -> String {
     clip(&parts.join(" · "), 160)
 }
 
+/// An MCP tool's server and tool, from Claude Code's name for it (`mcp__<server>__<tool>`), or None for any other tool.
+pub(crate) fn mcp_parts(name: &str) -> Option<(String, String)> {
+    let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
+    (!server.is_empty() && !tool.is_empty()).then(|| (server.to_string(), tool.to_string()))
+}
+
+/// The most of an MCP tool's input an ask carries. A longer input is cut there, and the ask is then not marked whole.
+const MCP_INPUT_CHARS: usize = 4_000;
+
+/// What an MCP tool is given, for its ask: each top-level field as `name: value` on a line of its own (a nested value as
+/// compact JSON), by name, and whether that is all of it. What an MCP tool writes, sends or
+/// posts is in its input, so the person reads it whole before allowing it.
+fn mcp_input(input: &Value) -> (String, bool) {
+    let text = match input {
+        Value::Object(m) => m
+            .iter()
+            .filter_map(|(k, v)| match v {
+                Value::Null => None,
+                Value::String(t) => Some(format!("{k}: {t}")),
+                other => Some(format!("{k}: {other}")),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    if text.chars().count() <= MCP_INPUT_CHARS {
+        (text, true)
+    } else {
+        (format!("{}…", text.chars().take(MCP_INPUT_CHARS).collect::<String>()), false)
+    }
+}
+
 /// The bot chat's tool names for the verbs on the progress line ("Running", "Reading", "Editing" …).
 pub(crate) fn tool_kind(name: &str) -> &str {
     match name.to_ascii_lowercase().as_str() {
@@ -1544,8 +1577,14 @@ impl Adapter for Claude {
                     // plan mode's end: the plan the agent wrote (markdown, whole), asked as one yes or no; Claude Code
                     // offers no rule to keep for it, so there is no "for session"
                     let plan = if name == "ExitPlanMode" { input.get("plan").and_then(Value::as_str).map(|p| p.chars().take(PLAN_CHARS).collect::<String>()) } else { None };
+                    // an MCP tool: its server and tool by name, and everything it is given, read whole before it is allowed
+                    let mcp = mcp_parts(&name).map(|(server, _)| (server, mcp_input(&input)));
                     let (title, command) = match tool_kind(&name) {
                         _ if plan.is_some() => ("Start working on this plan?".to_string(), String::new()),
+                        _ if mcp.is_some() => {
+                            let (server, (said, _)) = mcp.as_ref().unwrap();
+                            (format!("Allow {shown} from {server}?"), said.clone())
+                        }
                         "terminal" => ("Run this command?".to_string(), tool_detail(&input)),
                         "patch" => {
                             let path = ["file_path", "path", "notebook_path"].iter().map(|k| s(&input, k)).find(|p| !p.is_empty()).unwrap_or_default();
@@ -1558,6 +1597,9 @@ impl Adapter for Claude {
                     let tool = claude_tool(&name, &input, &s(req, "blocked_path"), &self.cwd);
                     self.pending.insert(rid.clone(), ClaudeAsk::Tool(name, input, req.get("permission_suggestions").cloned().unwrap_or(Value::Null)));
                     let mut f = json!({"request_id": rid, "title": title, "command": command, "choices": CHOICES, "tool": tool});
+                    if mcp.as_ref().is_some_and(|(_, (said, whole))| *whole && !said.is_empty()) {
+                        f["whole"] = Value::Bool(true);
+                    }
                     if let Some(p) = plan {
                         f["plan"] = Value::String(p);
                         f["choices"] = json!(["deny", "once"]);
@@ -3747,6 +3789,22 @@ impl ChatSessions {
         self.spawn(argv, cwd, Some(path_env), &env, adapter, sink)
     }
 
+    /// Start Buddy's chat ([`crate::buddy_chat`]): Claude Code in its chat mode with Buddy's fixed arguments and the
+    /// instructions file `prompt_file`, in Buddy's own folder `cwd`, through the same Claude adapter a coding session
+    /// uses, so its asks reach the page as cards in the same way. The program comes from the allow-list, as always.
+    pub fn start_buddy<F>(&self, cwd: &Path, prompt_file: &Path, account_env: &[(String, String)], sink: F) -> Result<u32, String>
+    where
+        F: FnMut(ChatOut) + Send + 'static,
+    {
+        let mut adapter = adapter_for("claude", &cwd.to_string_lossy(), None).ok_or("no chat adapter")?;
+        let (launch, path_env) = launch_for("claude")?;
+        if let Some(path) = unrecognized_program("claude") {
+            adapter = Unrecognized::wrap(adapter, "claude", &path);
+        }
+        let argv = crate::buddy_chat::claude_argv(launch, prompt_file)?;
+        self.spawn(argv, cwd, Some(path_env), account_env, adapter, sink)
+    }
+
     /// Start custom agent `c` (Settings › Agents, confirmed on its card) as a chat through the generic ACP adapter:
     /// its program resolved now, then exactly its stored arguments ([`crate::custom_agents::launch_here`]), on pipes,
     /// through no shell, with the environment a generic ACP agent gets (`account_env`, which is empty for any agent
@@ -5470,6 +5528,50 @@ mod tests {
             claude_ask_tools("claude-14-plan-allow.jsonl"),
             [json!({"kind": "other", "name": "ExitPlanMode", "cwd": "/w/proj"}), json!({"kind": "edit", "name": "Edit", "paths": ["/w/proj/calc.py"], "cwd": "/w/proj"}), json!({"kind": "edit", "name": "Edit", "paths": ["/w/proj/README.md"], "cwd": "/w/proj"})]
         );
+    }
+
+    #[test]
+    fn an_mcp_tool_ask_names_its_server_its_tool_and_its_whole_input() {
+        // what Claude Code 2.1.332 asked for an MCP tool in Buddy's chat (25 Nov 2026): its name, its display name and
+        // its input as they came (the request also carried `mcp_server`, `permission_suggestions` and
+        // `server_policy_ask_only`, which the card does not read)
+        let ask = |input: Value| {
+            json!({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "mcp__mobbin__list_collections", "display_name": "List Collections", "input": input, "tool_use_id": "t1"}}).to_string()
+        };
+        let mut c = Claude::new("/w/buddy");
+        c.start();
+        c.on_input(Input::send("list my collections")).unwrap();
+        let card = run(&mut c, &[ask(json!({"output_destination": "chat", "task_intent": "List the user's saved Mobbin collections."}))]).events.pop().unwrap();
+        assert_eq!(s(&card, "event"), "approval.request");
+        assert_eq!(card["title"], "Allow List Collections from mobbin?");
+        assert_eq!(card["command"], "output_destination: chat\ntask_intent: List the user's saved Mobbin collections.");
+        assert_eq!(card["whole"], true);
+        assert_eq!(card["tool"], json!({"kind": "other", "name": "mcp__mobbin__list_collections", "server": "mobbin", "cwd": "/w/buddy"}));
+        // an input too long to carry whole is cut, and the card is then not marked whole
+        let mut c = Claude::new("/w/buddy");
+        c.start();
+        c.on_input(Input::send("post it")).unwrap();
+        let card = run(&mut c, &[ask(json!({"body": "x".repeat(5_000), "to": ["a", "b"]}))]).events.pop().unwrap();
+        let said = s(&card, "command");
+        assert!(said.starts_with("body: xxx") && said.ends_with('…') && said.chars().count() == 4_001, "{}", said.len());
+        assert!(card.get("whole").is_none());
+    }
+
+    #[test]
+    fn mcp_tools_are_read_from_claude_codes_own_names() {
+        assert_eq!(mcp_parts("mcp__mobbin__list_collections"), Some(("mobbin".into(), "list_collections".into())));
+        assert_eq!(mcp_parts("mcp__claude_ai_Gmail__search_threads"), Some(("claude_ai_Gmail".into(), "search_threads".into())));
+        for not in ["Bash", "mcp__mobbin", "mcp____tool", "mcp__server__", "Skill"] {
+            assert_eq!(mcp_parts(not), None, "{not}");
+        }
+        // any other tool keeps its card as before
+        let mut c = Claude::new("/w/proj");
+        c.start();
+        c.on_input(Input::send("hi")).unwrap();
+        let req = json!({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "WebFetch", "input": {"url": "https://example.com"}, "tool_use_id": "t1"}});
+        let card = run(&mut c, &[req.to_string()]).events.pop().unwrap();
+        assert_eq!(card["title"], "Allow WebFetch?");
+        assert!(card.get("whole").is_none() && card["tool"].get("server").is_none());
     }
 
     #[test]
