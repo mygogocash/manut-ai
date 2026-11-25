@@ -67,6 +67,8 @@ function snapshot(): ResumeSnap {
         ...(r.shell ? { shell: r.shell } : {}),
         // a lane comes back in its own folder
         ...(r.lane ? { lane: r.lane } : {}),
+        // a workflow's lane stays careful after a restart (src/workflows/)
+        ...(r.workflow ? { workflow: r.workflow } : {}),
       })),
       messages: (id) => {
         const key = ss.chatKey(id);

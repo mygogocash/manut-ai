@@ -13,6 +13,8 @@ import { historyDays } from "../pages/HistoryPage";
 import { useJobList } from "../pages/RecentWork";
 import { openNewSessionMenu } from "../sessions/newMenu";
 import { closePalette, usePaletteOpen } from "./state";
+import { getWorkflows, useWorkflows } from "../workflows/runner";
+import { useWorkflowSettings } from "../workflows/settings";
 import { usePlaces } from "./places";
 import { keyResult } from "./filter";
 import { buildGroups, flat, type Group } from "./groups";
@@ -100,6 +102,8 @@ function OpenPalette() {
   const s = useStore();
   const places = usePlaces();
   const { jobs } = useJobList();
+  const wf = useWorkflows();
+  const wfOn = useWorkflowSettings().on;
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -126,6 +130,13 @@ function OpenPalette() {
         if (getStore().getState().ui.view !== "code") s.openPage("code");
         openNewSessionMenu();
       },
+      // what Settings › Workflows offers Run now for: none while Workflows is off, a file that is no workflow, or a run going
+      workflows: wfOn ? wf.files.flatMap((f) => ("workflow" in f && !wf.live[f.file] ? [{ file: f.file, name: f.workflow.name }] : [])) : [],
+      // the Run now on its page: the page opens, so the run is seen starting where its button is
+      runWorkflow: (file) => {
+        s.openSettings("workflows");
+        void getWorkflows().runNow(file);
+      },
     };
     // what History's own search finds for the same words: the same rows, so nothing is lost
     const chats: Row[] = query.trim()
@@ -133,7 +144,7 @@ function OpenPalette() {
       : [];
     return buildGroups(ctx, query, chats);
     // the store's state is the whole of what these rows read
-  }, [s, places, jobs, query]);
+  }, [s, places, jobs, query, wf, wfOn]);
   const rows = flat(groups);
   const at = Math.min(cursor, Math.max(0, rows.length - 1));
 
