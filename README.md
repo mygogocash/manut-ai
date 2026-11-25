@@ -82,9 +82,16 @@ the window picture and which windows count (`main.swift`), and the two System Se
 GoSpark again (at `a7537c80`) for the remote channel (item 78a, `packages/remote-channel`): `RemoteAuthentication.proof` and
 `RemotePairingInvitation` (`Shared/Remote/RemoteHandshake.swift`), `RemoteDecisionChallenges` and the refusals in
 `Tests/Shared/RemoteAuthenticationTests.swift`, ported to TypeScript and Web Crypto; and the W3C Web Authentication Level 3
-specification's section 16 test vectors (read 25 Nov 2026), copied into its tests.
+specification's section 16 test vectors (read 25 Nov 2026), copied into its tests. GoSpark again (at `a7537c80`) for the
+Mac's side of it (item 78b, `apps/desktop/src/remote/`): `RemoteEventJournal` (the last 500 events or 1 MB a chat, catch-up
+from a cursor or the whole chat again), ported as `journal.ts` with its rules; the consent sheet's points, their order and
+the consent kept with the version of its words (`RemoteRelayConsent.swift`, `Shared/Remote/RemoteRelayNotice.swift`),
+reworded for this app with the operator's sentence left for the owner; and `docs/relay-protocol-v1.md` and
+`docs/security/remote-relay-threat-model.md`, copied into `docs/` with a note on where this app differs.
 
-Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
+Libraries added for one feature are named here too: `qrcode` 1.5.4 (MIT, soldair/node-qrcode), already the web app's,
+pinned in the desktop for the pairing code's QR image (`apps/desktop/src/remote/QrCode.tsx`, lifted from
+`apps/web/src/ops/QrCode.tsx`); only its `create` is used, which returns the modules and reaches no network; `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
 reach the Mac's own speech recognition and the microphone for voice in the chat box (`apps/desktop/src-tauri/src/voice.rs`,
 `docs/voice.md`).
