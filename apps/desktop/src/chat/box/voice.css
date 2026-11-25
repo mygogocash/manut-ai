@@ -11,7 +11,7 @@
   align-self: center;
   color: var(--muted);
   background: transparent;
-  transition: background 0.2s, color 0.2s;
+  transition: var(--tr-control);
 }
 .bx-voice:not(:disabled):hover {
   background: var(--raise2);
@@ -51,32 +51,22 @@
   flex: none;
   background: var(--quiet);
 }
-/* listening: a red dot that breathes, so it is plain the microphone is on */
+/* listening: a red dot that pulses (the board's Pulse, the working dot), so it is plain the microphone is on */
 .vc-line[data-state="listening"] .vc-dot,
 .vc-mode.vc-listening .vc-dot,
 .vc-mode.vc-finishing .vc-dot {
   background: var(--danger);
-  animation: vc-breathe 1.4s ease-in-out infinite;
+  animation: var(--anim-pulse);
 }
 .vc-mode.vc-speaking .vc-dot {
   background: var(--accent);
-  animation: vc-breathe 0.9s ease-in-out infinite;
+  animation: var(--anim-pulse);
 }
 .vc-mode.vc-paused {
   border-color: var(--danger);
 }
 .vc-mode.vc-paused .vc-dot {
   background: var(--danger);
-}
-@keyframes vc-breathe {
-  50% {
-    opacity: 0.35;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .vc-dot {
-    animation: none !important;
-  }
 }
 .vc-t {
   flex: 1;

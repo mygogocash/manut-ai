@@ -37,7 +37,7 @@
 }
 .mp svg {
   color: var(--muted);
-  transition: transform 0.16s ease;
+  transition: transform var(--tr-switch);
 }
 .mp.on svg {
   transform: rotate(180deg);

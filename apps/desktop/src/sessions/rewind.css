@@ -40,7 +40,6 @@
   text-align: left;
   color: var(--ink);
   background: none;
-  transition: background 0.15s;
 }
 .rw-turn:hover {
   background: var(--hov);

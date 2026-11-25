@@ -108,7 +108,6 @@
   color: var(--ink);
   font-size: 13px;
   white-space: nowrap;
-  transition: background 0.15s;
 }
 .jobv .chip:hover {
   background: var(--hov);
@@ -181,10 +180,6 @@
   border-radius: var(--rad-pill);
   background: var(--aui-primary);
   color: var(--aui-on-primary);
-  transition: transform 0.2s;
-}
-.jobv .send:active {
-  transform: scale(0.94);
 }
 .jobv .send:disabled {
   opacity: 0.45;
