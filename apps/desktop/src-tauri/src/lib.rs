@@ -32,6 +32,7 @@ mod pty_bench;
 mod running;
 mod session_files;
 mod sessions;
+mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
 mod tasks;
@@ -697,6 +698,15 @@ async fn tasks_me(me: State<'_, Arc<gh_me::Me>>, account: String, section: Strin
     let sec = gh_me::Section::parse(&section).map_err(|e| gh_me::MeError::new("other", e))?;
     let m = Arc::clone(&me);
     tauri::async_runtime::spawn_blocking(move || m.list(&account, sec, page, fresh.unwrap_or(false))).await.map_err(|e| gh_me::MeError::new("other", e.to_string()))?
+}
+
+/// Settings › Source control (item 75): git, gh and glab, each on this computer or not, its version, and for the two CLIs
+/// whether it is signed in and as whom (names only), read through the runners Tasks already uses (source_tools.rs). `fresh`
+/// asks the CLIs again. Only reads.
+#[tauri::command]
+async fn source_tools(tasks: State<'_, Arc<tasks::Tasks>>, me: State<'_, Arc<gh_me::Me>>, fresh: Option<bool>) -> Result<source_tools::Tools, String> {
+    let (t, m) = (Arc::clone(&tasks), Arc::clone(&me));
+    tauri::async_runtime::spawn_blocking(move || source_tools::read(&t, &m, fresh.unwrap_or(false))).await.map_err(|e| e.to_string())
 }
 
 /// Settings › Accounts › GitHub: gh's own sign-in for one more account in a terminal-panel tab (`gh auth login`, or
@@ -1410,6 +1420,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         tasks_view,
         tasks_remote,
         gh_accounts,
+        source_tools,
         tasks_me,
         gh_login_start,
         window_close,

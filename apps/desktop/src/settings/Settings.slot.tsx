@@ -1,6 +1,6 @@
 // Settings view (main column while `ui.view === "settings"`). Left list: You (Accounts, when the runtime keeps them),
-// Bots (one page per bot: Profile, Model, Work) and App (General, Voice, Terminal, Agents, Computer, Worktrees, MCP and
-// Skills, Developer). Pages are `bot:<name>`
+// Bots (one page per bot: Profile, Model, Work) and App (General, Voice, Terminal, Agents, Computer, Worktrees, Source
+// control, MCP and Skills, Developer). Pages are `bot:<name>`
 // and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
 // Oh My Hermes also had Providers (`hermes auth`) and Remote machines (Hermes over SSH) here; both needed its bridge.
 import { useEffect, useState } from "react";
@@ -29,6 +29,7 @@ import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
+import { SourceControlPage } from "./SourceControlPage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
@@ -46,6 +47,9 @@ const APP_PAGES: { id: string; label: Key }[] = [
   { id: "computer", label: "set.computer" },
   // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
   { id: "worktrees", label: "set.worktrees" },
+  // git, gh and glab with their versions and accounts, the default branch pulled when clean, how pull requests merge (item 75,
+  // SourceControlPage.tsx)
+  { id: "source", label: "set.source" },
   // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
   { id: "mcp", label: "set.mcp" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
@@ -124,6 +128,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <VoicePage />
         ) : current === "worktrees" ? (
           <WorktreesPage />
+        ) : current === "source" ? (
+          <SourceControlPage />
         ) : current === "mcp" ? (
           <McpSkillsPage />
         ) : current === "developer" ? (
