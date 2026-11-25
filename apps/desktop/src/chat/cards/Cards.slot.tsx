@@ -15,6 +15,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, t
 import type { SlotProps } from "../../features";
 import type { ApprovalChoice, AskSubagent, ClarifyAnswers, ClarifyQuestion } from "../../lib/protocol";
 import { useShowingCache } from "../../runtime/link";
+import { useLanded } from "../parts/arrival";
 import { askOpen, getStore, shopName, useStore, type ApprovalItem, type AskExpiry, type ClarifyItem } from "../../state/store";
 import { answerOf, EMPTY, type Pick } from "./answers";
 import { clearAskNote, useAskNote } from "./askNote";
@@ -64,9 +65,9 @@ function useFocusRequest(bot: string, id: string, ref: RefObject<HTMLElement | n
   }, [req, bot, id, open, ref]);
 }
 
-function Line({ icon, text, detail, testid }: { icon: string; text: string; detail?: string; testid: string }) {
+function Line({ icon, text, detail, testid, landed }: { icon: string; text: string; detail?: string; testid: string; landed?: boolean }) {
   return (
-    <div className="line card-line" data-testid={testid}>
+    <div className={`line card-line${landed ? " landed" : ""}`} data-testid={testid}>
       <span className="line-ic">{icon}</span>
       <span className="line-t">
         {text}
@@ -109,10 +110,12 @@ function Approval({ bot, item }: { bot: string; item: ApprovalItem }) {
   // a coding session's ask, read as one of Kit's steps (src/code/): its words, and Always allow in this project
   const kit = useKitCard(bot, item);
 
+  // Allow or No landing while the person watched settles into the row; a card that was decided before it mounted is still
+  const landed = useLanded(!!item.resolved);
   if (item.resolved) {
     const denied = item.resolved === "deny";
     // an ask Kit's dial answered by itself says how
-    return <Line icon={denied ? "✕" : "✓"} text={kitDoneText(bot, item.request_id) ?? t(ALLOW_LABEL[item.resolved])} detail={detail} testid="card-line" />;
+    return <Line icon={denied ? "✕" : "✓"} text={kitDoneText(bot, item.request_id) ?? t(ALLOW_LABEL[item.resolved])} detail={detail} testid="card-line" landed={landed} />;
   }
   // the runtime's own words for why it stopped waiting ("Already decided by Mint at 19:42"), when it gave them
   if (item.expired && !busy) return <Line icon="–" text={item.expiredNote || t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
@@ -520,7 +523,8 @@ function Clarify({ bot, item }: { bot: string; item: ClarifyItem }) {
   useFocusRequest(bot, item.id, interview ? formRef : ref, open);
 
   const detail = interview ? t("card.questions", { n: item.questions!.length }) : item.question;
-  if (item.answer !== undefined) return <Line icon="✓" text={t("card.answeredWith", { answer: item.answer })} detail={detail} testid="card-line" />;
+  const landed = useLanded(item.answer !== undefined);
+  if (item.answer !== undefined) return <Line icon="✓" text={t("card.answeredWith", { answer: item.answer })} detail={detail} testid="card-line" landed={landed} />;
   if (item.expired && !busy) return <Line icon="–" text={t(EXPIRED_LABEL[item.expired])} detail={detail} testid="card-line" />;
   if (!open && !busy) return <Line icon="–" text={t("card.notAnswered")} detail={detail} testid="card-line" />;
   if (interview) return <Interview bot={bot} item={item} cardRef={formRef} />;
