@@ -215,7 +215,17 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
      `cc-item67-buddy-real`), started 25 Nov at 17:25.
    - item 68, a New lane link in the Lanes band and a signed-out agent marked in the + menu (`feat/new-lane-link`,
      Sonnet, worktree `cc-item68-new-lane`), started 25 Nov at 17:45.
-   Next, as each finishes: items 69 and 71, then the developer features the owner asked for (below).
+   Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
+   everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
+   (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
+   address of their own and the owner's words of use). Items 80 and 81 are from four more
+   screenshots the owner sent that day, of another app's chat box. On 25 Nov the owner sent five screenshots of T3 Code's settings (Providers, Worktrees, Source control and
+   issues, Labs, Sharing and access) with "support these features as well", and asked that the person's own MCP
+   servers and Skills work seamlessly. A survey of the desktop that day is what items 72 to 79 in `docs/plan.md` are
+   built from: MCP and Skills already load for Claude Code and Codex in lanes and terminals (their own home, nothing
+   stripped), most settings are partly built, and reaching the app from another device (item 78) has nothing in the
+   desktop and waits for the owner (a sign-in on, the relay's cost). T3 Code is MIT licensed, so helpers may lift from
+   `pingdotgg/t3code` with a credit.
    The owner also asked for the worktrees and branches to be cleaned up (25 Nov): 85 merged, clean worktrees and their
    local branches were removed, and 84 merged remote branches (`feat/`, `fix/`, `test/`, `ci/`). Kept: the night build's
    `cloud/*` branches, which it reads to know which tasks are done; `feat/owner-line-cards`, which is not merged; and
