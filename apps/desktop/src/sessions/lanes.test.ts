@@ -3,7 +3,8 @@
 // laneBranch.test.ts; this is the sessions store keeping them: in what order the shell is asked, where the agent works, what
 // is kept on the row and in the lane, and the folder letting go when the session closes.
 import { beforeEach, expect, test } from "vitest";
-import { laneOf, resetLanes } from "../code/laneStore";
+import { isLaneChat, laneOf, resetLanes } from "../code/laneStore";
+import { isTerminalRec } from "./agents";
 import { testState } from "../code/lane";
 import { kitProjects, resetKitProjects } from "../code/project";
 import { resetKitAsks } from "../code/kitAsks";
@@ -249,4 +250,33 @@ test("a lane that comes back after a restart works in its own folder again, neve
   expect(t.row("s7")?.paused).toBe(true);
   await t.ss.resume("s7");
   expect(t.s.started).toEqual([dir]);
+});
+
+test("the + menu's Chat with Kit opens a New session chat in the menu's folder, and its first message starts a lane", async () => {
+  const t = await setup();
+  // a draft that was left open with Terminal picked for the agent (its own Chat or Terminal choice)
+  const before = t.ss.draft("claude" as never);
+  t.ss.setOpen(before, "terminal");
+  const id = t.ss.draftChat("claude" as never, "/w/one");
+  // the open draft is reused, in the folder the menu's chip named, and it opens as the app's chat, which is kept for the agent
+  expect(id).toBe(before);
+  expect(t.row(id)).toMatchObject({ agent: "claude", cwd: "/w/one", status: "draft", view: "chat" });
+  expect(t.ss.getState().opens.claude).toBe("chat");
+  expect(t.store.getState().ui).toMatchObject({ view: "session", session: id });
+  // nothing starts until the person says what Kit should do: the lane's branch is named from it
+  expect(t.s.calls).toEqual([]);
+  await t.ss.start(id, "Add a PromptPay QR to the checkout.");
+  const dir = laneDir("kit/add-promptpay-qr-checkout", "/w/one");
+  expect(t.row(id)?.lane).toEqual({ name: "kit/add-promptpay-qr-checkout", base: "main", dir, worktree: dir });
+  expect(t.s.started).toEqual([dir]);
+  expect(t.sent).toEqual(["Add a PromptPay QR to the checkout."]);
+  // a lane: the app's own chat, which the Lanes band lists, and not a terminal, which TERMINALS would list
+  expect(isLaneChat(t.ss.chatKey(id))).toBe(true);
+  expect(isTerminalRec(t.ss.getState().agents, t.row(id)!)).toBe(false);
+});
+
+test("Chat with Kit with no folder named starts where a New session chat does, the last folder used, else home", async () => {
+  const t = await setup();
+  const id = t.ss.draftChat("claude" as never);
+  expect(t.row(id)).toMatchObject({ cwd: "/w", status: "draft" });
 });

@@ -28,7 +28,7 @@ async function startIn(page: Page, first: string, root = ROOT): Promise<string> 
   );
 }
 
-/** The session fills the main column, as a notification would open it: the Code page lists only terminals. */
+/** The session fills the main column, as a notification would open it, without going through its row in the Lanes band. */
 const openSession = (page: Page, id: string) =>
   page.evaluate(async (i) => {
     const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };

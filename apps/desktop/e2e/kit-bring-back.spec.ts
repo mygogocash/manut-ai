@@ -2,8 +2,8 @@
 // turn puts the files and the chat back, the lane says Reverted, and Bring it back puts the files back as they were just before
 // the rewind while the chat stays where the rewind left it. The stand-in coding agent (src/sessions/host.ts) writes one note for
 // each turn into a pretend folder (src/sessions/turnFiles.ts), which the spec changes as the person would by hand
-// (`__manutMockFolders`). The lane runs as a chat, as the canvas's Code board draws it; the + menu starts agents in their own
-// terminal only (docs/code-editor.md), so the spec starts it through the sessions store, as kit-lanes.spec.ts does.
+// (`__manutMockFolders`). The lane runs as a chat, as the canvas's Code board draws it. The spec starts it through the
+// sessions store, as the + menu's Chat with Kit does and as kit-lanes.spec.ts does.
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 
@@ -24,7 +24,7 @@ async function startIn(page: Page, first: string): Promise<string> {
   );
 }
 
-/** The session fills the main column, as a notification would open it: the Code page lists only terminals. */
+/** The session fills the main column, as a notification would open it, without going through its row in the Lanes band. */
 const openSession = (page: Page, id: string) =>
   page.evaluate(async (i) => {
     const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };

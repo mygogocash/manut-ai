@@ -3,7 +3,8 @@
 // for, under ~/.manut/lanes), and a state read from what happened in it. The developer's folder stays on its own branch. The stand-in coding
 // agent (src/sessions/host.ts) edits a file and runs the tests when told `/kit pass`, `fail`, `unread` or `slow`, with the
 // output on the step's end as the shell sends it; the page reads the result from that output. As in kit-code.spec.ts the
-// session runs as a chat, so the spec starts it through the sessions store (the + menu starts terminals only).
+// session runs as a chat, and most tests start it through the sessions store, which is what the + menu's Chat with Kit
+// calls; the first test starts one from the menu itself, as a person does.
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 
@@ -26,7 +27,7 @@ async function startIn(page: Page, first: string, cwd = ROOT): Promise<string> {
   );
 }
 
-/** The session fills the main column, as a notification would open it: the Code page lists only terminals. */
+/** The session fills the main column, as a notification would open it, without going through its row in the Lanes band. */
 const openSession = (page: Page, id: string) =>
   page.evaluate(async (i) => {
     const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
@@ -48,6 +49,52 @@ test.beforeEach(async ({ page }) => {
     (window as any).__manutMockTaken = [];
   }, ROOT);
   await page.goto("/");
+});
+
+test("the + menu's Chat with Kit starts a lane: a New session chat in the chip's folder, then the lane with its pane, listed on the Code page", async ({ page }) => {
+  await openCode(page);
+  // no lane yet: the band is not drawn, and the empty terminals section opens the same + menu
+  await expect(page.getByTestId("lanes")).toHaveCount(0);
+  await page.getByTestId("session-new").or(page.getByTestId("session-start")).first().click();
+  const menu = page.getByTestId("session-menu");
+  await expect(menu).toBeVisible();
+  // the folder chip: the canvas's project, picked in the native dialog the mock stands in for
+  await page.evaluate((root) => ((window as any).__manutPickFolder = root), ROOT);
+  await menu.getByTestId("session-folder").click();
+  await menu.getByTestId("session-choose").click();
+  await expect(menu.getByTestId("session-folder")).toHaveAttribute("title", ROOT);
+  await expect(menu.getByTestId("session-chat-claude")).toHaveAttribute("title", "Claude Code in a chat with Kit, on a branch and in a folder of its own. It starts with your first message.");
+  await menu.getByTestId("session-chat-claude").click();
+  await expect(menu).toHaveCount(0);
+
+  // its New session chat, in that folder: nothing runs until the first message, which names the lane's branch
+  const chat = page.getByTestId("session-chat");
+  await expect(chat).toHaveAttribute("data-draft", "true");
+  await expect(page.getByTestId("draft-note")).toHaveText("Claude Code starts in baanmali-preorder with your first message");
+  await expect(page.getByTestId("session-way-chat")).toHaveAttribute("aria-checked", "true");
+  expect((await calls(page)).filter((c) => c.op === "chat.start" || c.op === "start")).toEqual([]);
+  await page.getByTestId("composer").fill("Add a PromptPay QR to the checkout.");
+  await page.getByTestId("composer").press("Enter");
+
+  // the lane: its own branch and folder, the chat with the pane beside it (Diff, Preview, Tests)
+  const dir = `${LANES}/add-promptpay-qr-checkout`;
+  await expect(page.getByTestId("session-branch")).toContainText("kit/add-promptpay-qr-checkout");
+  await expect(page.getByTestId("lane-pane")).toBeVisible();
+  await expect(page.getByRole("group", { name: "What to look at" }).getByRole("button")).toHaveText(["Diff", "Preview", "Tests"]);
+  expect((await calls(page)).filter((c) => c.op === "chat.start").map((c) => c.cwd)).toEqual([dir]);
+  // no terminal was started for it
+  expect((await calls(page)).some((c) => c.op === "start")).toBe(false);
+
+  // on the Code page, the Lanes band lists it, and its row opens it again; TERMINALS does not list it
+  await openCode(page);
+  const id = await page.evaluate(() => (window as any).__manutSessions.getState().list[0].id as string);
+  const row = lane(page, id);
+  await expect(row).toContainText("Add a PromptPay QR to the checkout");
+  await expect(row).toContainText("Kit · Claude Code");
+  await expect(row.getByTestId("lane-branch")).toHaveText("kit/add-promptpay-qr-checkout");
+  await expect(page.getByTestId(`session-${id}`)).toHaveCount(0);
+  await row.locator(".rowl").click();
+  await expect(page.getByTestId("lane-pane")).toBeVisible();
 });
 
 test("a lane gets a branch and a folder of its own, made from the branch the developer's folder is on, which stays on it", async ({ page }) => {

@@ -6,7 +6,7 @@
 //
 // The canvas's Open pull request, Revert this turn and New lane are not here. A lane cannot push or open a pull request from
 // the app (going live always asks, and Tasks is where pull requests are), Rewind (the session's line under the box) is the way
-// to take a turn back, and the Code page's + menu starts agents in their own terminal only (docs/code-editor.md). A lane that
+// to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md). A lane that
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
 import { useSyncExternalStore, type ReactNode } from "react";

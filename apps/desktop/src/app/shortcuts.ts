@@ -4,7 +4,8 @@
 //   ⌘.     show or hide Details                    ⌘,  Settings
 //   ⌘J     jump to the next approval or question waiting on you (any bot or SESSIONS chat)
 //   ⌘⇧G   maximise the side panel in place, or restore it (Esc restores; a closed panel opens on Plans)
-//   ⌘N ⌘T  the Code page's TERMINALS + menu (Shell or a CLI, in a terminal); the Code page opens first
+//   ⌘N ⌘T  the Code page's TERMINALS + menu (a CLI as a chat with Kit, or the Shell or a CLI in a terminal, which has
+//          the focus); the Code page opens first
 //   ⌘⇧]    the next terminal session (the Code page's order, wrapping)  ⌘⇧[  the previous one
 //   ⌘W     (the menu's Close Window) closes the focused split pane while a split has the keyboard, else the window
 //   Esc    stop the running answer (only when no popover, field or dialog wants Esc first)

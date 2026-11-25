@@ -391,7 +391,7 @@ export function termActivity(rec: Pick<SessionRec, "agent" | "fgAgent" | "lastLi
 }
 
 /** TERMINALS: whether a session is listed there. Only terminal sessions are (the Shell, or an agent opened in its
- *  own terminal); a saved chat-mode session is not listed and opens nowhere (its records stay untouched). */
+ *  own terminal); a session that runs as a chat is a lane, listed in the Lanes band of Kit's panel (code/Lanes.tsx). */
 export function isTerminalRec(agents: AgentInfo[] | null | undefined, rec: Pick<SessionRec, "agent" | "open" | "status">): boolean {
   if (rec.status === "draft") return false;
   return isShell(rec.agent) || sessionMode(agents, rec) === "terminal";
@@ -401,6 +401,17 @@ export function isTerminalRec(agents: AgentInfo[] | null | undefined, rec: Pick<
 export function terminalAgents(agents: AgentInfo[], list: Recent[]): { shown: AgentInfo[]; more: AgentInfo[] } {
   const { shown, more } = menuParts(agents.filter((a) => opensAs(a.id, agents).terminal), list);
   return { shown, more };
+}
+
+/** The agents the + menu offers as a chat with Kit, a lane of its own (docs/code-editor.md, item 66): each installed one
+ *  that runs as the app's own chat, in the menu's order. Grok has no chat here and a Hermes folder chat is not a coding
+ *  agent's, so neither is listed. One that is not installed is not listed either: the terminal part's More agents row
+ *  already names it with its install line, and a chat could not start it. */
+export function chatAgents(agents: AgentInfo[], list: Recent[]): AgentInfo[] {
+  return menuOrder(
+    agents.filter((a) => !!a.path && opensAs(a.id, agents).chat && sessionMode(agents, { agent: a.id }) === "chat"),
+    list,
+  );
 }
 
 /** TERMINALS groups: sessions by folder, in the order each folder first appears in `list` (newest first). */
