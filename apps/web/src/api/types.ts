@@ -576,8 +576,8 @@ export type OutpostRemoval = { removed: true; outpostId: string; stepsRefused: n
 export type OutpostCredential = { outpost: Outpost; credential: string };
 
 /// A shop's routines as the operator reads and changes them (docs/pilot-api.md, "Routines"): what Buddy's team does on its own
-/// schedule. A run only ever makes a draft for the owner to read, and the console makes no routine: operators make one through
-/// `POST /v1/admin/routines`, and this app has no page for it yet.
+/// schedule. A run only ever makes a draft for the owner to read, and a routine that would reply, send, pay or delete asks the
+/// owner first. The operator makes one with `POST /v1/admin/routines` (the console's Make a routine form).
 ///
 /// When a routine starts: a time of day, some weekdays, a day of the month, a window of the day, or an event. `at`, `from` and
 /// `to` are "HH:MM" in the routine's own time zone, and weekdays count Sunday as 0.
@@ -642,11 +642,45 @@ export type RoutinesView = { tenant: string; team: Team; routines: Routine[] };
 /// One routine of one shop, for pausing, resuming or removing it.
 export type RoutineRef = { tenant: string; routineId: string };
 
+/// What `POST /v1/admin/routines` takes to make a routine (docs/pilot-api.md, "Routines"). `timeZone`, `asksFirst` and `member` are
+/// the route's optional fields, and a field left out is decided by the API (Asia/Bangkok; true for a reply, a send, a payment and a
+/// deletion, false for a brief and a draft; Nam for a reply and Ton for the rest). The console's form gives all of them, so what the
+/// operator read before saying yes is exactly what is sent and never what a default would have decided.
+export type NewRoutine = {
+  tenant: string;
+  name: string;
+  action: RoutineAction;
+  trigger: RoutineTrigger;
+  timeZone?: string;
+  asksFirst?: boolean;
+  member?: WorkerMember;
+};
+
 /// What removing a routine answers: the routine, its runs and its clock are gone.
 export type RoutineRemoval = { removed: string };
 
 /// Buddy's team members who run as workers, as the API names them (docs/pilot-api.md, "Workers' drafts").
 export type WorkerMember = "nam" | "pim" | "ton";
+
+/// The kinds of routine each member's job can carry out, in the order the console offers them: "Who runs it" in docs/pilot-api.md, and
+/// `WORK` in apps/api/src/routine-setup.ts, which refuses any other pair as `wrong_member`. Nam drafts replies to customers; Pim drafts
+/// posts, and a post that sending will ask for; Ton drafts the owner's briefs and the books, which is also where paying and deleting
+/// are asked from. A test reads the API's own table and holds this one to it.
+export const ROUTINE_WORK: Readonly<Record<WorkerMember, readonly RoutineAction[]>> = {
+  nam: ["reply"],
+  pim: ["draft", "send"],
+  ton: ["brief", "draft", "send", "pay", "delete"],
+};
+
+/// Whose job a routine is when the request says nobody's: Nam for a reply and Ton for everything else (`defaultMember` in
+/// apps/api/src/routine-setup.ts).
+export function defaultRoutineMember(action: RoutineAction): WorkerMember {
+  return action === "reply" ? "nam" : "ton";
+}
+
+/// The most routines one shop may have (`MAX_ROUTINES` in apps/api/src/routine-store.ts): making the 51st is refused as 409 `full`. A
+/// test reads the API's own number and holds this one to it.
+export const MAX_ROUTINES = 50;
 
 /// What a job is: a reply to a customer's message, a post about a topic, yesterday's sales summary, or a month of the books
 /// appended to the owner's Google Sheet once the owner approves its rows.
@@ -842,12 +876,18 @@ export interface PilotApi {
   /// of the new one beats. Rejects with 404 `outpost_not_found`.
   replaceOutpostCredential(input: OutpostRef): Promise<OutpostCredential>;
 
-  /// The shop's routines (docs/pilot-api.md, "Routines"). The operator reads them and may pause, resume or remove a routine, and
-  /// pause or resume the whole team; there is no route here to make one. Each rejects with 400 `tenant_required` and 503
-  /// `routines_unavailable`, and each change with 404 `shop_not_found` for a tenant that is no pilot shop and 503
-  /// `shop_unavailable`. A routine change also rejects with 400 `invalid_request` for an id that is not a routine's.
+  /// The shop's routines (docs/pilot-api.md, "Routines"). The operator reads them, makes one, and may pause, resume or remove a
+  /// routine, and pause or resume the whole team. Each rejects with 400 `tenant_required` and 503 `routines_unavailable`, and each
+  /// change with 404 `shop_not_found` for a tenant that is no pilot shop and 503 `shop_unavailable`. A routine change also rejects
+  /// with 400 `invalid_request` for an id that is not a routine's.
   /// `GET /v1/admin/routines?tenant=`: the team and every routine, each with its next run and its latest run.
   getRoutines(tenant: string): Promise<RoutinesView>;
+  /// `POST /v1/admin/routines`: the routine as the API made it, switched on, with its own id, its words (`when`) and its next run.
+  /// Rejects with 400 for what is wrong with a field (`invalid_name`, `invalid_action`, `invalid_time_zone`, `invalid_trigger`,
+  /// `invalid_time`, `invalid_weekdays`, `invalid_day`, `invalid_window`, `invalid_threshold`, `must_ask_first`, `unknown_member`,
+  /// `wrong_member`) or `invalid_request` for any other, with 409 `full` once the shop has 50 routines, and with 503
+  /// `clock_unavailable` (nothing was made) or `routines_unavailable` (it may or may not have been). Nothing is kept for a refusal.
+  createRoutine(input: NewRoutine): Promise<Routine>;
   /// `POST /v1/admin/routines/pause`: the routine as it now stands, with no next run. Pausing a paused routine changes nothing and
   /// logs nothing. Rejects with 404 `not_found` when the shop has no routine with that id.
   pauseRoutine(input: RoutineRef): Promise<Routine>;

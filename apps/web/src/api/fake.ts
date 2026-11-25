@@ -1,8 +1,11 @@
 import {
   ApiError,
+  defaultRoutineMember,
   isLiveShop,
   isSending,
+  MAX_ROUTINES,
   REPLY_MAX_LENGTH,
+  ROUTINE_WORK,
   SIGN_IN_MEMBERS,
   type ApprovalState,
   type ApprovalView,
@@ -56,7 +59,7 @@ import { PRACTICE_SHOPS, practiceOwner, type PracticeOwner } from "./practiceOwn
 import { isCode, normalizeEmail } from "./email";
 import { endOfShopDay, formatIsoDate } from "../format";
 import * as peopleRules from "@manut/people-rules";
-import { describeTrigger, nextRun, type Routine as RuleRoutine } from "@manut/routine-rules";
+import { createRoutine as makeRule, describeTrigger, nextRun, type Routine as RuleRoutine } from "@manut/routine-rules";
 import type { Away, Invite, PeopleState } from "@manut/people-rules";
 import * as shopMemory from "@manut/shop-memory";
 import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
@@ -142,9 +145,10 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 ///
 /// A shop's routines (docs/pilot-api.md, "Routines") are kept as the API's shop object keeps them: the team (paused since when, and
 /// which members are on), the routines in the order they were made and each routine's runs. A routine's words and next run are
-/// `@manut/routine-rules`' own, and a list is read as the API reads it, from the clock. An operator may pause, resume and remove a
-/// routine and pause or resume the team, each recorded in the shop's audit log by the routine's id only; a change that changes
-/// nothing is not logged. A shop made from a template starts with the template's routines, each paused, and its members on. Baan
+/// `@manut/routine-rules`' own, and a list is read as the API reads it, from the clock. An operator may make a routine, by the API's
+/// own rules and refusals (`@manut/routine-rules`' `createRoutine`, then whose job it is, then the shop's limit of 50), pause, resume
+/// and remove one, and pause or resume the team, each recorded in the shop's audit log by the routine's id only; a change that
+/// changes nothing is not logged. A shop made from a template starts with the template's routines, each paused, and its members on. Baan
 /// Mali starts with six routines that show every way a run can stand: done, failed, skipped (paused, nothing to answer) and
 /// missed, a routine paused, one with no run yet and one that waits for a stock feed. Sabai Tea has none. The routines are exported
 /// with the shop and deleted with it.
@@ -266,7 +270,7 @@ type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: 
 /// is recorded nowhere else.
 type FakeHelperSession = { tenant: string | null; helperId: string; sessionId: string };
 type FakeDb = {
-  version: 13;
+  version: 14;
   seq: number;
   shops: FakeShop[];
   /// Shops that only the owner's page practises on (a long Thai name, a long link), so they answer `shopOf` and a reply link
@@ -302,8 +306,9 @@ type FakeDb = {
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
 /// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8), before
 /// the sample log of the owner's own changes, this Mac and browser writes (version 9), before the shops and links the owner's
-/// page practises its long words on (version 10), before the shops' vaults (version 11) or before the shops' routines (version
-/// 12) is replaced by a fresh one rather than read without them.
+/// page practises its long words on (version 10), before the shops' vaults (version 11), before the shops' routines (version
+/// 12) or before a routine could be made here with the API's limit and its log (version 13) is replaced by a fresh one rather than
+/// read without them. Version 14 holds what version 13 did, and is a world only a build that makes routines has written.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -429,7 +434,7 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 13 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
+      return parsed && parsed.version === 14 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
         Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
@@ -1730,6 +1735,41 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         };
       }),
 
+    // A routine is made in the API's order (`createRoutine` in apps/api/src/routines.ts and `buildRoutine` in routine-setup.ts): the key,
+    // the tenant, the pilot shop, then the body: a field the route does not take, `asksFirst` that is no boolean, `@manut/routine-rules`'
+    // own refusals in its own order, and whose job it is (`unknown_member`, then `wrong_member`), and last the shop's limit, which the
+    // shop's object checks as it writes. A refusal keeps nothing and logs nothing. The routine is switched on, has the id and the time
+    // it was made at, and is answered as a list shows it, with its words and next run, so the page can put it in the list as it is.
+    createRoutine: (input) =>
+      run((): Routine => {
+        admin();
+        const tenant = routinesTenant(input.tenant);
+        pilotShop(tenant);
+        const nowMs = now();
+        if (!Object.keys(input).every((key) => key === "tenant" || NEW_ROUTINE_FIELDS.includes(key))) throw new ApiError(400, "invalid_request");
+        if (input.asksFirst !== undefined && typeof input.asksFirst !== "boolean") throw new ApiError(400, "invalid_request");
+        const built = makeRule({
+          id: sortableId("rt", nowMs, 0),
+          name: input.name,
+          action: input.action,
+          trigger: input.trigger,
+          ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
+          ...(input.asksFirst !== undefined ? { asksFirst: input.asksFirst } : {}),
+        });
+        if (!built.ok) throw new ApiError(400, built.reason);
+        const member = input.member === undefined ? defaultRoutineMember(built.routine.action) : input.member;
+        if (!isWorkerMember(member)) throw new ApiError(400, "unknown_member");
+        if (!ROUTINE_WORK[member].includes(built.routine.action)) throw new ApiError(400, "wrong_member");
+        const state = (db.routines[tenant] ??= routinesOf(tenant));
+        if (state.routines.length >= MAX_ROUTINES) throw new ApiError(409, "full");
+        // The trigger is copied, so what the caller still holds is never what the saved world holds.
+        const routine: FakeRoutine = { ...built.routine, trigger: JSON.parse(JSON.stringify(built.routine.trigger)) as RoutineTrigger, member,
+          paused: false, createdAt: iso(nowMs) };
+        state.routines.push(routine);
+        audit(tenant, PRACTICE_OPERATOR, "routine.created", { routineId: routine.id });
+        return routineView(routine, state.team, null, nowMs);
+      }),
+
     pauseRoutine: (input) => run(() => changeRoutine(input, "routine.paused", (routine) => (routine.paused ? routine : { ...routine, paused: true }))),
 
     resumeRoutine: (input) => run(() => changeRoutine(input, "routine.resumed", (routine) => (routine.paused ? { ...routine, paused: false } : routine))),
@@ -1955,6 +1995,10 @@ const WORKER_TASK = /^worker-task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 /// The ids the API mints for routines (`ROUTINE_ID` in apps/api/src/routine-store.ts): `rt-` and an id that sorts by when it was
 /// made, with no colon. A test holds this to the API's own text.
 const ROUTINE_ID = /^rt-[0-9a-z-]{1,64}$/;
+
+/// The fields a new routine's body may hold besides its tenant (`NEW_ROUTINE_FIELDS` in apps/api/src/routines.ts): a body with any other
+/// is refused as `invalid_request`. A test holds this to the API's own list.
+const NEW_ROUTINE_FIELDS: readonly string[] = ["name", "action", "trigger", "timeZone", "asksFirst", "member"];
 
 function auditId(ms: number, seq: number): string {
   return sortableId("aud", ms, seq);
@@ -2217,7 +2261,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 13,
+    version: 14,
     seq: 100,
     demoShops,
     shops: [

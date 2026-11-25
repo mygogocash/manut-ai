@@ -55,6 +55,7 @@ export function stubApi(overrides: Partial<PilotApi>): PilotApi {
     removeOutpost: missing("removeOutpost"),
     replaceOutpostCredential: missing("replaceOutpostCredential"),
     getRoutines: missing("getRoutines"),
+    createRoutine: missing("createRoutine"),
     pauseRoutine: missing("pauseRoutine"),
     resumeRoutine: missing("resumeRoutine"),
     removeRoutine: missing("removeRoutine"),
