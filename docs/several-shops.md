@@ -8,7 +8,9 @@ the owner's account kept beside the helpers in `people.ts` and `people-store.ts`
 `docs/pilot-api.md`, "Several shops". The console's owner link (slice 3), owner sessions on more routes (slice 4) and
 ending a shop session (slice 5) are built too, and so is the desktop (slice 2, 24 Nov 2026): the switcher, one Needs
 you across the shops, and each shop kept apart offline. Since then the desktop shows a shop the person owns whole (24 Nov
-2026, `feat/connected-whole-shop`): its tasks, its team, Mission Control and the owner's routine and pause writes.
+2026, `feat/connected-whole-shop`): its tasks, its team, Mission Control and the owner's routine and pause writes. And a
+shop the person helps at is theirs to help at on the desktop (25 Nov 2026, `feat/helper-session`, December item 69): marked
+so, its asks read and answered with their helper session, and each page that is the owner's saying whose it is.
 
 ## Where things stood
 
@@ -198,8 +200,21 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
   (`GET /v1/routines`), so its pages show what the signed-in tenant's show and more: its tasks as Buddy's threads in
   History, its team (Buddy, then Nam, Pim and Ton as the shop has them on), Mission Control's jobs, activity log and Pause
   everyone, and its routines (`docs/runtime-adapter.md`, "A shop the person owns"). A shop the person helps at shows Buddy
-  with its requests and nothing more: what a helper sees is the owner's call, and the export and the routines answer a
-  helper's session 403 `owner_only`. A person in no shop sees their own signed-in tenant, as before shops.
+  with its requests and nothing more: what a helper sees is the owner's call, and the task list, the schedules, the
+  attention items and the routines answer a helper's session 403 `owner_only`. So each page that is the owner's says whose
+  it is, in place of an empty list (below).
+- **A shop the person helps at** (`docs/runtime-adapter.md`, "A shop the person helps at"). It is opened with the person's
+  helper session (`mhs1.`) as an owned shop is with its owner session: asked for with the sign-in and exactly `{ shop }`,
+  kept with the sign-in, opened again when it ends, and ended at sign-out. That session is sent what waits there
+  (`GET /v1/approvals?state=open`, and `state=recent` when an ask left with no answer from here), the live feed's ticket, a
+  decision and a note passed on, and nothing else. While the switcher shows it, the account row marks it "Helper" and Home
+  says "Helping Noi at Ran Pa Noi". The Team page lists Buddy, who holds what waits, and says the team and Pause everyone
+  are Noi's, with no Pause offered; History, the activity log and Automations say its past work, its log and its routines
+  are Noi's to see; Home says only Noi sees who is working; each with a way to Needs you. Customize and Settings › People
+  say whose they are as they already did. The helper approves and declines what their role may decide, through the same
+  decide route, and every refusal names the owner ("Only Noi can approve money", "Already decided by Noi at 19:42"). A
+  removal closes the shop's asks in the API's words. Offline, its record in the kept read holds its asks and nothing of its
+  work, sealed with the rest.
 - **One switcher, in the account row.** The account row still opens Settings, and names the person and the shop being
   viewed. With two or more shops a small button at the row's end (two chevrons, "Switch shop") opens the list above it:
   the shops the person owns first, each with "Owner" or "Helper" and a tick on the one shown. Choosing one switches every
@@ -228,7 +243,7 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
   have access to Ran Pa Noi. Noi removed you on Sunday, November 22. Ask Noi if this is a mistake".
 - **Practice** lists two sample shops: the person's own (the demo team's, named as the first-run setup named it) and Ran
   Pa Noi, where they help Noi. Typing `/shops` in a chat puts both shops' requests in Needs you; viewing Ran Pa Noi shows
-  Buddy alone with them, as a helper's shop shows when connected.
+  Buddy alone with them, and the pages that are Noi's say so, as a helper's shop shows when connected.
 - **This Mac as a shop's outpost** (`docs/browser-control.md`, "This Mac for the shop the switcher shows"). Register this
   Mac goes with the owner session of the shop the switcher shows, so a pilot shop can have this Mac as its outpost; a shop
   the person helps at is refused with nothing sent. The outpost runs while the person holds a live owner session of the
@@ -264,6 +279,9 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 7. **LINE Login as an identity**, parked with the rest of LINE.
 8. **Done here (desktop):** this Mac as a pilot shop's outpost, registered and run through the owner session of the shop
    (24 Nov 2026), above. The API needed no change: `POST /v1/outposts/register` already took an owner session.
+9. **Done here (desktop):** a helper's own session on the desktop (25 Nov 2026, December item 69), "A shop the person helps
+   at", above. The API needed no change, and was not widened: what a helper's session reads is what `docs/people.md` says a
+   helper may.
 
 ## Known limits of the first slice
 
@@ -283,9 +301,10 @@ Built in `apps/desktop` (`src/runtime/http/shops.ts`, `host.ts`, `session.ts`, `
 
 ## Known limits of the desktop slice
 
-- A shop the person helps at shows only what waits there. Whether a helper sees more of it (its tasks, its team) is the
-  owner's to decide. A shop the person owns is read whole each minute, its export included, which carries every task's
-  history; a list route for a session's tasks would make that lighter (`docs/runtime-adapter.md`, "Next slices").
+- A shop the person helps at shows only what waits there, and says the rest is its owner's. Whether a helper sees more of
+  it (its tasks, its team) is the owner's to decide. Its card says a worker's request by its operation and where it goes,
+  since a helper's session reads no tasks; a request that carried its action's words would say more (an ask of the API,
+  `docs/runtime-adapter.md`, "Next slices").
 - The owner's writes from the desktop are pausing and resuming a routine and Pause everyone, the shop's vault and outposts
   (Customize › Connections), and the shop's helpers (Settings › People, 24 Nov 2026). Making a routine, the shop's own
   schedules, what the team knows and the consent have routes an owner session reaches, and no screen on the desktop that
