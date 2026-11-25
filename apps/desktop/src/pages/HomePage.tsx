@@ -303,7 +303,7 @@ export function HomeView(p: HomeViewProps) {
               {p.working.map((w) => (
                 <li key={w.name}>
                   <button type="button" className="rowl" onClick={w.open} data-testid="home-worker">
-                    <Avatar bot={w.name} size={32} />
+                    <Avatar bot={w.name} size={32} live />
                     <span className="grow">
                       <span className="l1">{w.displayName}</span>
                       {w.description && <span className="l2">{w.description}</span>}
@@ -374,7 +374,7 @@ export function needsYouRows(
       who: askFrom(s, a.bot),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       age: age(a.ts, nowMs),
-      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
+      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} live />,
       settled: a.settled && resolved ? t(ALLOW_LABEL[resolved]) : null,
       ...(!a.settled && canApproveHere(a.item) ? { approve: () => onApprove(a) } : {}),
       look: () => void s.jumpToAsk(a.bot, a.item.id),

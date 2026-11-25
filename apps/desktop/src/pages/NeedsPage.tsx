@@ -59,7 +59,7 @@ export function needRows(s: AppState & Actions, nowMs: number): NeedRow[] {
       kind: a.item.kind,
       text: askText(a.item),
       age: age(a.ts, nowMs),
-      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
+      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} live />,
       open: () => void s.jumpToAsk(a.bot, a.item.id),
       ...(role ? { role } : {}),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
