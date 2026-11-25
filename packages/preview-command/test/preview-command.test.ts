@@ -98,6 +98,26 @@ describe("refused scripts", () => {
       none: "refused",
     });
   });
+
+  // npm, yarn 1 and bun run `predev` before `dev` and `postdev` after it without being asked, and pnpm does once a project
+  // turns pre and post scripts on, so what runs with a script is checked as the script is.
+  it("refuses a script whose pre or post script publishes, and answers the next", () => {
+    for (const hook of ["predev", "postdev"]) {
+      const r = previewCommand({ packageJson: pj({ dev: "vite", [hook]: "vercel --prod", start: "node server.js" }), files: [] });
+      expect(r).toEqual({ argv: ["npm", "run", "start"], manager: "npm", script: "start" });
+    }
+  });
+
+  it("refuses when the one script there is has a pre script that publishes", () => {
+    expect(previewCommand({ packageJson: pj({ dev: "vite", predev: "npm publish" }), files: [] })).toEqual({ none: "refused" });
+  });
+
+  it("answers a script whose pre and post scripts do not publish, whatever other scripts do", () => {
+    const scripts = { dev: "vite", predev: "node scripts/check.js", postdev: "echo done", prestart: "wrangler deploy", deploy: "wrangler deploy" };
+    expect(previewCommand({ packageJson: pj(scripts), files: [] })).toMatchObject({ script: "dev" });
+    // a pre script that is not text is no script, as on the list
+    expect(previewCommand({ packageJson: pj({ dev: "vite", predev: 5 }), files: [] })).toMatchObject({ script: "dev" });
+  });
 });
 
 describe("nothing to run", () => {

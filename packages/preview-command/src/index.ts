@@ -45,6 +45,18 @@ function publishes(text: string): boolean {
   return false;
 }
 
+/// The texts of the scripts that may run with `name` without being asked: npm,
+/// yarn 1 and bun run `predev` before `dev` and `postdev` after it, and pnpm
+/// does once a project turns pre and post scripts on. They are checked as the
+/// script itself is, whatever the manager, so no setting decides whether the
+/// preview can publish.
+function hooksOf(table: Record<string, unknown>, name: string): string[] {
+  return [`pre${name}`, `post${name}`].flatMap((hook) => {
+    const text = Object.hasOwn(table, hook) ? table[hook] : undefined;
+    return typeof text === "string" ? [text] : [];
+  });
+}
+
 function managerOf(pkg: Record<string, unknown>, files: readonly string[]): Manager {
   // The field wins over the lockfile. A manager this does not run (deno, an
   // empty or odd value) is ignored so the lockfile decides.
@@ -80,7 +92,7 @@ export function previewCommand(input: PreviewInput): PreviewCommand {
     const text = table[name];
     if (typeof text !== "string" || text.trim() === "") continue;
     found = true;
-    if (publishes(text)) continue;
+    if (publishes(text) || hooksOf(table, name).some(publishes)) continue;
     const manager = managerOf(pkg, input.files);
     return { argv: [manager, "run", name], manager, script: name };
   }
