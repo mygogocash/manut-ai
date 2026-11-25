@@ -38,6 +38,10 @@ const MODE_HINT: Record<string, Key> = {
 };
 
 export const modesOf = (agent: AgentId): readonly string[] => MODES[agent] ?? [];
+
+/** The mode a workflow's lane starts in, for an agent that has modes here: the one that asks (Claude Code's Ask, Codex's Ask).
+ *  Plan and Read-only are more careful still, but they change nothing, so a workflow's steps could not be done in them. */
+export const ASK_MODE: Partial<Record<AgentId, string>> = { claude: "default", codex: "ask" };
 /** The mode's name as the composer row shows it; a mode the agent runs that manut does not offer reads "Agent's own". */
 export const modeLabel = (mode: string | undefined): string => (mode && MODE_LABEL[mode] ? t(MODE_LABEL[mode]) : t("ctl.mode.own"));
 export const modeHint = (mode: string): string => (MODE_HINT[mode] ? t(MODE_HINT[mode]) : "");

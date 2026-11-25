@@ -6,7 +6,7 @@ import type { ApprovalKind } from "@manut/approval-core";
 import { longDay } from "../app/time";
 import { t, type Key } from "../i18n";
 import type { ApprovalItem } from "../state/store";
-import type { ShopLeft } from "./protocol";
+import type { ShopLeft, ShopRow } from "./protocol";
 
 /** What the app says when the person's place in a shop ended: removed as its helper, or unlinked as its owner's account,
  *  each with when the API said it happened (`at`, seconds), or gone from their list with nothing said. */
@@ -20,6 +20,32 @@ export function leftWords(left: Pick<ShopLeft, "name" | "owner" | "why" | "at">)
   }
   if (left.why === "unlinked") return date ? t("shops.left.unlinked", { shop, date }) : t("shops.left.unlinkedNoDate", { shop });
   return t("shops.left.gone", { shop });
+}
+
+/** The shop every page shows, when the person only helps there; null for a shop they own, for a runtime that shows no shops
+ *  (the signed-in tenant's own, and Practice before its shops are listed) and before the list is read. A helper's session
+ *  reads what waits for them at the shop and nothing else (docs/people.md, "The helper's session"), so the pages that would
+ *  show the owner's things (the team and Pause everyone, past work, the activity log, the routines) say whose they are
+ *  instead of an empty list (pages/OwnersOnly.tsx). */
+export function helpedShop(shops: { list: readonly ShopRow[]; current: string | null }): ShopRow | null {
+  const viewed = shops.list.find((s) => s.id === shops.current);
+  return viewed?.role === "helper" ? viewed : null;
+}
+
+/** The pages that are a shop's owner's to see, which a helper's shop shows in words of their own. */
+export type OwnersScreen = "team" | "history" | "activity" | "automations";
+
+const OWNERS_TEXT: Record<OwnersScreen, Key> = {
+  team: "owners.team",
+  history: "owners.history",
+  activity: "owners.activity",
+  automations: "owners.automations",
+};
+
+/** What a page that is the owner's says at a shop the person only helps at: whose it is, and where what waits for them is. */
+export function ownersWords(screen: OwnersScreen, shop: Pick<ShopRow, "name" | "owner">): { title: string; text: string } {
+  const named = { owner: shop.owner || t("owners.theOwner"), shop: shop.name || t("shops.aShop") };
+  return { title: t("owners.title", named), text: t(OWNERS_TEXT[screen], named) };
 }
 
 /** What only a shop's owner may decide, in the words a helper's card says it ("Only Noi can approve money"). */

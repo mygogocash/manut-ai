@@ -15,6 +15,8 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { usePlace } from "../palette/places";
 import "./mission.css";
 import { t, type Key } from "../i18n";
+import type { ShopRow } from "../lib/protocol";
+import { helpedShop } from "../lib/shops";
 import type { TeamState } from "../runtime/mission";
 import { useNow } from "../elsewhere/useNow";
 import { can } from "../runtime";
@@ -28,6 +30,7 @@ import { NewThreadIcon } from "../threads/NewThreadIcon";
 import { Avatar } from "../ui";
 import { LOADING, load, type Load } from "./load";
 import { Empty, MenuPageFrame } from "./MenuPage";
+import { OwnersOnly } from "./OwnersOnly";
 import { goneOut, jobsLine, memberNames, pausedJobLine, PAUSE_START, pauseReduce, pauseStep, pauseWords, routinesLine, sinceText, type PauseUi } from "./pause";
 import { useJobs } from "./RecentWork";
 import { asksOf, memberActions, memberStatus, tryAction, type MemberAction, type MemberMenuItem, type MemberStatus } from "./team";
@@ -252,9 +255,16 @@ export function TeamView({
   onMenu,
   error,
   nowMs,
+  helped = null,
+  onNeeds,
 }: {
   members: TeamRow[];
   pause?: TeamPauseProps;
+  /** The shop shown, when the person only helps there: its team and Pause everyone are its owner's, so the page lists Buddy,
+   *  who holds what waits for them, and says whose the rest is. Pause is never offered for it. */
+  helped?: Pick<ShopRow, "name" | "owner"> | null;
+  /** opens Needs you, from the words a helper's shop shows */
+  onNeeds?: () => void;
   /** the time the lines are told against (ms); the clock when not given */
   nowMs?: number;
   /** the member whose menu is open */
@@ -370,15 +380,16 @@ export function TeamView({
         );
       })}
     </ul>
-  ) : (
+  ) : helped ? null : (
     <Empty icon={<MenuIcon row="team" />} title={t("team.emptyTitle")} text={t("team.emptyText")} testId="team-empty" />
   );
-  if (!pause)
+  if (!pause || helped)
     return (
       <MenuPageFrame page="team" title={t("menu.team")}>
         <div className="pane">
           {notice}
           {list}
+          {helped && <OwnersOnly shop={helped} screen="team" icon={<MenuIcon row="team" />} onNeeds={onNeeds} />}
         </div>
       </MenuPageFrame>
     );
@@ -444,9 +455,13 @@ export function TeamPage() {
   const now = useNow(s.bots.some((b) => b.running || !!s.chats[b.name]?.turn), 5_000);
   const pausedSince = state.kind === "ready" && state.value.paused ? state.value.since : null;
   const members = teamRows(s, { jobs, pausedSince }).map((r) => ({ ...r, menu: r.menu?.map((item) => ({ ...item, run: () => report(item.run) })) }));
-  // The team's state is read when the page opens and again whenever a member is paused or resumed, from anywhere.
+  // A shop the person only helps at: its team is its owner's, so it is never read here and never paused from here.
+  const helped = helpedShop(s.shops);
+  // The team's state is read when the page opens and again whenever a member is paused or resumed, from anywhere, and when
+  // the switcher shows another shop.
   const held = s.bots.map((b) => (b.paused ? b.name : "")).join();
   useEffect(() => {
+    if (helped) return;
     let live = true;
     void load(() => getStore().actions.teamState()).then((r) => {
       if (live) setState(r);
@@ -454,10 +469,12 @@ export function TeamPage() {
     return () => {
       live = false;
     };
-  }, [held]);
+    // `helped` is read by its id: a new object for the same shop reads nothing again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held, helped?.id]);
 
   // The command palette offers Pause everyone while this page offers it: the button's own question, nothing more.
-  const offersPause = members.length > 0 && !(state.kind === "ready" && (state.value.paused || state.value.members.length === 0)) && state.kind !== "loading" && !ui.busy;
+  const offersPause = !helped && members.length > 0 && !(state.kind === "ready" && (state.value.paused || state.value.members.length === 0)) && state.kind !== "loading" && !ui.busy;
   const askPause = () => (state.kind === "unavailable" ? dispatch({ type: "failed", message: state.message }) : dispatch({ type: "ask" }));
   const askRef = useRef(askPause);
   askRef.current = askPause;
@@ -478,6 +495,8 @@ export function TeamPage() {
       menu={menu}
       onMenu={setMenu}
       error={error}
+      helped={helped}
+      onNeeds={() => s.openPage("needs")}
       pause={{
         state,
         ui,

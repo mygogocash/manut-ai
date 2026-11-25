@@ -18,6 +18,9 @@ export const APP_PAGES: { id: string; label: Key }[] = [
   { id: "source", label: "set.source" },
   // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
   { id: "mcp", label: "set.mcp" },
+  // workflows run from files in ~/.manut/workflows: the switch, skipped runs kept, each workflow with Run now and its history
+  // (item 77b, workflows/WorkflowsPage.tsx)
+  { id: "workflows", label: "set.workflows" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
   { id: "developer", label: "set.developer" },
 ];
