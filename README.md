@@ -54,3 +54,8 @@ of GoSpark's services.
 
 Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gospark`, our own); Oh My Hermes
 (MIT, `apps/desktop`, see its `NOTICE.md` and `THIRD_PARTY_NOTICES.md`; its `omher-release.yml` for the release workflow's tag check and target matrix, `.github/workflows/release-desktop.yml`); Orca (MIT) as its code arrives; dtinth/promptpay-qr (MIT) for the PromptPay format and test vectors.
+
+Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
+(the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which
+reach the Mac's own speech recognition and the microphone for voice in the chat box (`apps/desktop/src-tauri/src/voice.rs`,
+`docs/voice.md`).

@@ -38,6 +38,7 @@ mod term_share;
 mod this_host;
 mod tray;
 mod turn_files;
+mod voice;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1393,7 +1394,10 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         outpost::outpost_signed_in,
         outpost::outpost_signed_out,
         outpost::outpost_run,
-        outpost::outpost_register
+        outpost::outpost_register,
+        voice::voice_status,
+        voice::voice_listen,
+        voice::voice_stop
     ];
     answer(invoke)
 }
