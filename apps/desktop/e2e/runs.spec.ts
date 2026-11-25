@@ -1264,6 +1264,8 @@ test("88 sub-runs: the first 8 rows, running then failed first; 'Show all 88' op
   const long = await box.locator('[data-testid="run-node"][data-node="sub-0"] [data-testid="node-title"]').evaluate((e) => [e.getAttribute("data-lines"), getComputedStyle(e).webkitLineClamp, getComputedStyle(e).overflow, e.scrollHeight > e.clientHeight + 1, Math.round(e.getBoundingClientRect().height)]);
   expect(long).toEqual(["2", "2", "hidden", true, 36]);
   expect(await box.locator('[data-testid="run-node"][data-node="sub-1"] [data-testid="node-title"]').evaluate((e) => [e.getAttribute("data-lines"), Math.round(e.getBoundingClientRect().height)])).toEqual(["1", 18]);
+  // the boxes rise in one by one (Rise, docs/motion.md): read their tops once the last has landed
+  await settled(page);
   const rows = await cards.evaluateAll((els) => els.map((e) => [e.getAttribute("data-row"), Math.round(e.getBoundingClientRect().height), Math.round(e.getBoundingClientRect().top)]));
   for (const row of new Set(rows.map((r) => r[0]))) {
     expect(new Set(rows.filter((r) => r[0] === row).map((r) => r[1])).size, `row ${row}: one height`).toBe(1);
