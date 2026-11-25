@@ -70,6 +70,8 @@ export interface SavedSession {
   /** A chat's lane: its branch, the branch it was made from, and its own working folder (src/code/laneBranch.ts), so a lane
    *  that comes back works where it did, never in the developer's folder. */
   lane?: SavedLane;
+  /** A lane a workflow started: the workflow's name (SessionRec `workflow`), so it keeps asking before every change. */
+  workflow?: string;
 }
 
 export interface SavedLane {
@@ -146,7 +148,7 @@ function parseSession(v: unknown): SavedSession | null {
   if (typeof v.exitCode === "number" || v.exitCode === null) out.exitCode = v.exitCode;
   const error = str(v.error, MAX_TEXT);
   if (error) out.error = error;
-  for (const k of ["agentSession", "account", "bot", "model", "title", "agentTitle", "promptTitle", "mode", "effort"] as const) {
+  for (const k of ["agentSession", "account", "bot", "model", "title", "agentTitle", "promptTitle", "mode", "effort", "workflow"] as const) {
     const s = str(v[k], 200);
     if (s) out[k] = s;
   }

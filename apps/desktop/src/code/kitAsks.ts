@@ -15,9 +15,9 @@ import type { ApprovalItem } from "../state/store";
 import { decideAsk, readAsk, type AskRead, type AskWords } from "./ask";
 import { ruleMatches, type Rule, type Say } from "./command";
 import { noteReads, resetPreview } from "./preview";
-import { kitProjects, noteBlocked, projectOf, updateKitProjects } from "./project";
+import { kitProjects, noteBlocked, projectOf, updateKitProjects, type KitProject } from "./project";
 import { keyFiles, keysAfter } from "./secrets";
-import type { KitLevel } from "@manut/member-grants";
+import { DEFAULT_KIT_LEVEL, type KitLevel } from "@manut/member-grants";
 
 /** Where a session's ask is asked: its chat, the folder the dial reads as inside (`root`: where the session works, a lane's own
  *  folder), the project whose level, kept rules and allowed folders the dial uses (`project`: the folder the session started
@@ -29,10 +29,19 @@ export interface AskContext {
   project?: string;
   home: string | null;
   branch?: string;
+  /** A lane a workflow started (src/workflows/), which nobody may be watching: the dial reads its asks at the most careful level,
+   *  Asks every time, with no kept rule, whatever the project's dial says. */
+  careful?: boolean;
 }
 
 /** The project's folder: where its settings are kept, which is also the folder Kit's panel names. */
 const projectRoot = (ctx: AskContext): string => ctx.project ?? ctx.root;
+
+/** The project's settings as the dial reads them for this ask: a careful lane's at the lowest level and with no kept rule. */
+const projectFor = (ctx: AskContext): KitProject => {
+  const p = projectOf(kitProjects(), projectRoot(ctx));
+  return ctx.careful ? { ...p, level: DEFAULT_KIT_LEVEL, rules: [] } : p;
+};
 
 /** How Kit's dial settled an ask by itself, for its card's settled line. */
 export type KitAnswer =
@@ -67,7 +76,7 @@ export const askOfItem = (chat: string, item: ApprovalItem): EventOf<"approval.r
 
 function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | null {
   if (ev.outdated) return null;
-  const project = projectOf(kitProjects(), projectRoot(ctx));
+  const project = projectFor(ctx);
   return readAsk(wordsOf(ev), { cwd: ev.cwd || ctx.root, root: ctx.root, home: ctx.home ?? undefined, allowed: project.folders, branch: ctx.branch });
 }
 
@@ -76,7 +85,7 @@ function readIn(ev: EventOf<"approval.request">, ctx: AskContext): AskRead | nul
 export function kitAnswer(ev: EventOf<"approval.request">, ctx: AskContext, now: number = Date.now()): { choice: ApprovalChoice; answer: KitAnswer } | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
-  const project = projectOf(kitProjects(), projectRoot(ctx));
+  const project = projectFor(ctx);
   const d = decideAsk(read, project, keysIn(ctx.chat), now);
   let out: { choice: ApprovalChoice; answer: KitAnswer } | null = null;
   if (d.answer === "alone" && ev.choices.includes("once")) {
@@ -109,7 +118,7 @@ export interface KitCard {
 export function kitCard(ev: EventOf<"approval.request">, ctx: AskContext): KitCard | null {
   const read = readIn(ev, ctx);
   if (!read) return null;
-  const project = projectOf(kitProjects(), projectRoot(ctx));
+  const project = projectFor(ctx);
   const keys = keysIn(ctx.chat);
   const d = decideAsk(read, project, keys);
   // a rule is matched against the line that was read, never the card's one-line command

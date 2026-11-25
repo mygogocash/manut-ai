@@ -29,6 +29,10 @@ export interface PaletteCtx {
   setLanguage(lang: Lang): void;
   /** the Code page's + menu, as ⌘N opens it */
   openNewSessionMenu(): void;
+  /** the workflows Settings › Workflows offers Run now for at this moment (Workflows on, the file readable, no run going) */
+  workflows: { file: string; name: string }[];
+  /** Settings › Workflows' Run now for workflow `file`, on its page */
+  runWorkflow(file: string): void;
 }
 
 export interface Row {
@@ -115,6 +119,13 @@ export const ACTIONS: ActionDef[] = [
     id: "pause-question",
     elsewhere: "pause-open",
     offer: (c) => (c.places.pause ? [{ id: "do:pause-question", label: t("pause.button"), run: () => c.places.pause!.ask() }] : []),
+  },
+  {
+    // Settings › Workflows' Run now, a row for each workflow it is offered for now: the run is a lane whose every ask is still its
+    // card's, and the dial reads it at its most careful level
+    id: "workflow",
+    elsewhere: "workflow-run-now",
+    offer: (c) => c.workflows.map((w) => ({ id: `do:workflow:${w.file}`, label: t("wf.palette", { name: w.name }), run: () => c.runWorkflow(w.file) })),
   },
   {
     id: "language",
