@@ -107,7 +107,7 @@ describe("every action it lists is reachable elsewhere in the app", () => {
     const settings = calls.filter((c) => c.startsWith("openSettings"));
     expect(settings).toEqual([
       "openSettings(general)", "openSettings(bots)", "openSettings(bot:buddy)", "openSettings(bot:nam)", "openSettings(people)", "openSettings(voice)",
-      "openSettings(terminal)", "openSettings(providers)", "openSettings(computer)", "openSettings(worktrees)", "openSettings(mcp)", "openSettings(developer)",
+      "openSettings(terminal)", "openSettings(providers)", "openSettings(computer)", "openSettings(worktrees)", "openSettings(source)", "openSettings(mcp)", "openSettings(developer)",
     ]);
   });
 
