@@ -1131,3 +1131,13 @@
   white-space: nowrap;
   padding: 0 10px;
 }
+/* Settings › Voice (VoicePage.tsx): the Mac voice that reads answers aloud */
+.vc-select {
+  height: 28px;
+  max-width: 240px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--raise);
+  color: var(--ink);
+}
