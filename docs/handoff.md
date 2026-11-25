@@ -477,6 +477,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
+  tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
+  for a moment after its row shows, and the test looked at once; it waits for the read since then.
 - `apps/desktop` `src/runtime/http/browserWrite.test.tsx`, "the chat's card, Home and Needs you": its first imports of
   three whole pages take about two seconds alone and went past the five-second default in four loaded gates on 24 Nov;
   it has thirty seconds since.

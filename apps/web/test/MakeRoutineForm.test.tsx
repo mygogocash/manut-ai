@@ -766,8 +766,11 @@ describe("the Make a routine form, once the routine is made", () => {
     await waitFor(() => expect(rowsOf()).toHaveLength(3));
     expect(rowsOf().map((row) => within(row).getAllByText(/^(Morning brief|First|Second)$/)[0]!.textContent)).toEqual(["Morning brief", "First", "Second"]);
     expect(within(screen.getByRole("region", { name: "Routines for Baan Mali" })).getByText("3 routines")).toBeTruthy();
-    // Neither read has answered: the list is the one the page held and the two routines the API made.
-    expect(getRoutines).toHaveBeenCalledTimes(3);
+    // Neither read has answered: the list is the one the page held and the two routines the API made. The read after
+    // the second routine is asked for a moment after its row shows, so it is waited for: CI's Web tests on `0646cc1`
+    // looked at once and counted two.
+    await waitFor(() => expect(getRoutines).toHaveBeenCalledTimes(3));
+    expect(rowsOf()).toHaveLength(3);
   });
 
   it("keeps the routine in the list when the read after it fails, and says that the read failed", async () => {
