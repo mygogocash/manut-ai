@@ -410,7 +410,7 @@ session closed.
 - **No way into the app.** Tauri (2.12.5) puts its scripts, the invoke key among them, in the main frame only on macOS and Linux
   (WKWebView's and WebKitGTK's main-frame user scripts), so the frame has no `__TAURI_INTERNALS__`. It can still reach wry's `ipc`
   message handler and the `ipc://` scheme, and both reach Tauri, which drops a call without the key unanswered; a call with the key
-  from the frame's origin is refused by Tauri's check, since no capability names a remote page (mod.rs's test keeps it so). Tauri
+  from the frame's origin is refused by Tauri's check, since no capability names a remote page (`src-tauri/src/outpost/mod.rs`'s test keeps it so, and lib.rs's sends every command from a preview's origin). Tauri
   lets one command skip that check for any page with the key (`plugin:__TAURI_CHANNEL__|fetch`, a channel's data), which is why
   the frame stays off on Windows: WebView2 puts every script in every frame. The app listens to no `message` from a frame.
 - **macOS versions.** Drawn on every macOS the app supports, with no version gate. Checked on this Mac (macOS 27.2.1, Safari 27.2's
