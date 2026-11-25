@@ -24,6 +24,8 @@ import { openNewSessionMenu } from "../sessions/newMenu";
 import { usePlace } from "../palette/places";
 import { KeptLanes, useLaneProjects } from "./KeptLanes";
 import { MainMoved } from "./MainMoved";
+import { AutoPull } from "./AutoPull";
+import { LaneReview } from "./Review";
 import { PreviewSample } from "./PreviewSample";
 import { allowFolder, dropRule, mayAllow, removeFolder, setLevel, updateKitProjects, useKitProject, type KitProject } from "./project";
 
@@ -191,7 +193,7 @@ export function codeProjects(cwds: readonly string[], added: readonly string[], 
 
 /** What a lane's row shows under its line: Bring it back's panel, while the person has it open and the lane can still bring its
  *  files back, then the note that the branch it was made from changed the files it changed (read in the lane's own folder for its
- *  own base, while that folder is on its branch). */
+ *  own base, while that folder is on its branch), then Put up for review for a lane with a folder and a branch of its own. */
 function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: LaneRow; backOpen: boolean; onCloseBack: () => void }) {
   // a lane that can no longer bring its files back (a turn began, or they were brought back) shuts its panel for good
   useEffect(() => {
@@ -202,6 +204,7 @@ function LaneBelow({ root, row, backOpen, onCloseBack }: { root: string; row: La
     <>
       {backOpen && row.canBringBack ? <BringBack id={row.id} onClose={onCloseBack} /> : null}
       {own && <MainMoved root={root} {...(row.dir ? { dir: row.dir } : {})} base={own.base} branch={own.branch} lane={row.id} />}
+      {own && row.worktree && <LaneReview root={root} worktree={row.worktree} branch={own.branch} title={row.title} />}
     </>
   );
 }
@@ -267,6 +270,8 @@ export function KitPanel() {
         onOpenSession={(id) => getStore().actions.openSession(id)}
         kept={<KeptLanes root={root} />}
       >
+        {/* Settings › Source control › Automatically pull: what the last pull of this project's default branch did, or why not */}
+        <AutoPull root={root} />
         <PreviewSample root={root} />
         {/* a lane's row carries its own note, read in its own folder. The developer's folder keeps one here while Kit works in it:
             a session with no folder of its own (a terminal, a lane that could not have one), or no session yet; with every

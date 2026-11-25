@@ -17,10 +17,10 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | State | Desktop | Where |
 | --- | --- | --- |
 | Lanes: a band with New lane, a row per lane with its title, "Kit, Careful" and a status tag | Part (this branch): the Kit panel opens with a Lanes band with a quiet New lane link (drawn even while the project has no lane), a row for each coding session that runs as a chat, with its title, "Kit · Claude Code", its branch and a state tag. Terminals stay in their folder groups below. Under the lanes, Kit's folders kept: a lane's folder that outlived its session, with Show folder and Remove. A lane is started from the + menu's Chat with Kit (item 66), or from New lane in the band, which opens that menu (item 68; see [Starting a lane](#starting-a-lane)). No effort word | `code/Lanes.tsx`, `code/KeptLanes.tsx`, `code/KitPanel.tsx`, `sessions/SessionsSection.tsx` (`ChatWay`) |
-| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged from here. See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
+| The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged but through the asks of [Source control](#source-control). See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
-| Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)) | `tasks/`, `tasks/pulls.ts`, `code/Lanes.tsx` |
+| Open pull request | Has (item 75): Put up for review under a lane's row and in its pane pushes the lane's branch and opens its pull request through `gh` or `glab`, after one ask that names the repository, branch, base, title and body exactly as sent, settled once; an open one then offers Merge, asked with its method and exact message. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)). See [Source control](#source-control) | `code/Review.tsx`, `code/reviewAsk.ts`, `src-tauri/src/review.rs`, `tasks/pulls.ts`, `code/Lanes.tsx` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx` |
@@ -140,8 +140,10 @@ The states whose rules are pure functions, with their tests, then the screens th
   and Codex), or says `declined` when the person said no and it never ran.
 - `apps/desktop/src-tauri/src/git_moved.rs`: the main branch moving, read with the person's own `git`: the folder's
   branch, the branch it started from, and the files each side changed since. It only reads. The shell changes a
-  repository in two places only: `lane.rs` makes and removes a lane's folder and its branch, and `turn_files.rs` keeps
-  Rewind's snapshots under refs of the app's own and puts a turn's files back.
+  repository in four places only: `lane.rs` makes and removes a lane's folder and its branch, `turn_files.rs` keeps
+  Rewind's snapshots under refs of the app's own and puts a turn's files back, `git_pull.rs` moves a clean default branch
+  forward to its remote's commit (Automatically pull), and `review.rs` pushes a lane's branch and opens or merges its pull
+  request, each only after a settled ask (see [Source control](#source-control)).
 - `apps/desktop/src/code/moved.ts`: what that means. The files both sides changed, the shell's answer checked before it is
   believed (and, for a lane, that it is about the lane's own branch), one side's diff as the diff view draws it, and the ask
   Let Kit merge sends. `useMoved.ts` reads it again while the page is open, for a lane's own base or the project's default,
@@ -158,6 +160,11 @@ The states whose rules are pure functions, with their tests, then the screens th
   may show and why it shows none, and holds its sandbox; `code/LanePreview.tsx` draws the frame; tauri.conf.json's `frame-src`
   bounds every frame; `src-tauri/src/preview.rs` (`app_window_may_load`) is the app window's navigation hook (lib.rs
   `app_window_guard`). `e2e/preview-frame.spec.ts` and `e2e/preview-frame-webkit.spec.ts` walk it.
+- Source control (item 75, see [Source control](#source-control)): `src-tauri/src/source_tools.rs` reads git, gh and glab for
+  `settings/SourceControlPage.tsx`; `src-tauri/src/git_pull.rs` and `code/AutoPull.tsx` pull a clean default branch;
+  `src-tauri/src/review.rs` writes down and runs the asks that push and open a pull request or merge one, `code/reviewAsk.ts` settles
+  them through approval-core and `code/Review.tsx` draws them; `src-tauri/src/credits.rs` takes agent credit lines out of a merge's
+  message, from the list in `src/lib/agentCredits.json`; `src/lib/sourceControl.ts` keeps the page's choices.
 - The stand-in coding agent (`sessions/host.ts`) answers `/kit install`, `test`, `edit`, `outside`, `key`, `shop`, `merge`,
   `commit` and `deploy`, and the mock host answers what git would say for the canvas's project (`code/mockMoved.ts`), so each
   state can be seen in a browser; `e2e/kit-code.spec.ts` and `e2e/kit-preview-moved.spec.ts` walk them. It also answers
@@ -737,6 +744,78 @@ another's files or the developer's folder.
   folder; the app moves nothing. That folder may still be on the old lane's `kit/` branch; switching it back is the
   developer's to do.
 
+### Source control
+
+Settings › Source control (item 75, from T3 Code's Source control and issues page the owner sent; `src/settings/SourceControlPage.tsx`,
+its choices kept on this computer by `src/lib/sourceControl.ts`). The page has three parts:
+
+- **Version control** and **Source control providers.** Git with its version, and GitHub's CLI (`gh`) and GitLab's (`glab`), each
+  installed or not, its version and who is signed in, by name only (`source_tools.rs`). Everything is read through the runners that
+  already exist: `tasks::find` and `tasks::run_env` (no shell, nothing on stdin, a time limit), `--version`'s first line of which
+  only the digits are kept, `Tasks::status` (signed in by `auth status`'s exit code alone), gh's accounts from `gh_me.rs` (`gh auth
+  status --json hosts`: host and login), and for glab `glab api user`, of which only `username` is read. Nothing is installed or
+  signed in from here: a missing or signed-out CLI says how, with its own login command in a terminal. Check again reads afresh,
+  as coming back to the window does.
+- **Automatically pull** (default off). When on, the Code page asks `source_pull` for the project it opens and when the window is
+  looked at again, at most every fifteen minutes for a project, never on a timer. `git_pull.rs` brings the default branch up to
+  date only when the folder is not a lane's; git is not partway through a rebase, merge, cherry-pick, revert or bisect and holds
+  no index lock; the checkout is on a branch that tracks a remote branch and both are, by name, the remote's default branch (where
+  `<remote>/HEAD` points, else `main`, else `master`, as the merged clean-up reads it); `git status --porcelain=v1
+  --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
+  --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
+  password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
+  --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase, a stash or a force; no
+  hook runs. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
+  how many commits came, or why nothing was done (changes, commits on no remote, busy, another branch, no upstream, could not
+  fetch, both moved).
+- **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
+  merging** (default off), for the asks below. The recognised credit lines are listed on the page as the code holds them.
+
+**Put up for review** (`code/Review.tsx`, under a lane's row and at the top of its pane, for a lane with a folder and a branch of
+its own and no open pull request yet). The link opens a draft: a title (the one commit's subject, else the lane's title) and a
+description (the commits' subjects), both the person's to change. Ask has the shell read the lane now (`review.rs` `ask_open`):
+the app's own folder, on its own branch, with commits the base on the remote lacks, a GitHub or GitLab remote that is not a
+mirror, and that CLI installed and signed in. Otherwise it says why and asks nothing. It writes down the exact plan, `git -c
+push.followTags=false push --recurse-submodules=no <remote> refs/heads/<branch>:refs/heads/<branch>` (no `+`, no flag that forces,
+deletes, mirrors or sends tags) and `gh pr create --repo <r> --base <base> --head <branch> --title=<title> --body=<body>` (`glab
+mr create --repo <r> --source-branch <branch> --target-branch <base> --title=<title> --description=<body> --yes --push=false
+--remove-source-branch=false`), and answers the ask: the repository, the branch with its commits and remote, the base, and the
+title and body in boxes, exactly as they will be sent, with how many uncommitted files stay behind. Push and open, or Not now.
+
+**Merge** (the same place, once the lane's pull request is open and not a draft). The method starts from the setting and can be
+changed; Ask has the shell read the pull request (`gh pr view --json ...`, `glab mr view --output json`) and ask only when it is
+open, not a draft, made from the lane's branch and can merge now: GitHub's `mergeable` is `MERGEABLE` and `mergeStateStatus` is
+`CLEAN`, `HAS_HOOKS` or `UNSTABLE` (`BLOCKED` is refused, since gh would turn on auto-merge for it), GitLab's
+`detailed_merge_status` is `mergeable`. The ask names the pull request, the method and the message exactly as sent: GitHub's own
+defaults (`Merge pull request #<n> from <owner>/<branch>` with the title and description; `<title> (#<n>)` with each commit's
+message for a squash), GitLab's (`Merge branch '<branch>' into '<base>'` with the title, description and request; the title and
+description for a squash, sent as both `--squash-message` and `--message`), and for a rebase none, since it makes no message
+and changes no commit's. The merge runs as `gh pr merge <n> --repo <r> --merge|--squash|--rebase --match-head-commit <sha>
+[--subject=<s> --body=<b>]` (`glab mr merge <n> --repo <r> --yes --auto-merge=false [--squash] [--rebase] [--sha <sha>]
+[--message=<m>] [--squash-message=<m>]`): never `--auto`, `--admin` or a branch deletion; the app never deletes the remote branch
+(a repository's own "delete head branches" setting on GitHub is GitHub's). It is always asked; no setting skips it. After a merge,
+item 73's clean-up may remove the lane's folder as it already does. With Remove agent credits on, the proposed message has the
+recognised lines taken out before the ask shows it (`credits.rs`, T3 Code's `removeAgentCredits`): a `Co-authored-by:` for an agent's
+address (`noreply@anthropic.com`, `noreply@openai.com`, ...; GitHub's `noreply@github.com` only as Copilot) and a line that is only
+"Generated with" or "Generated by" a named agent; every human co-author, a fenced or indented example and a quote stay. A message
+of credits alone becomes the title, so the host never writes its own with them back in. Commits that exist are never rewritten.
+
+**How a write is tied to the ask, and runs once.** The shell's ask (`review.rs`, a `Ledger` of this run's asks) holds the plan; the
+page holds none. The page opens the ask as an approval-core request (`code/reviewAsk.ts`: kind `public_post`, options yes this once
+or no, the ask as its detail) and the person's answer settles it there, through approval-core's rules, once. Only a request
+approval-core settled reaches `review_settle`, which sends the ask's id and the answer and nothing else. The ledger takes the ask
+out of waiting under its lock before anything runs, so a second answer is `already_decided`; an ask taken back (the panel closed,
+the draft or the method changed) is `withdrawn`; one older than fifteen minutes is `expired`; an id this run never made is
+`not_found`. A No runs nothing. A Yes runs the plan written at ask time, after reading again that the branch is still the commit
+shown (open) or that the pull request is still open, mergeable and at the head shown (merge); otherwise nothing runs (`changed`). The
+function that runs a plan takes a proof only `settle` can make, and `lib.rs` names only the asks, `settle` and `withdraw`
+(`the_page_reaches_the_writes_only_through_a_settled_ask`). Tasks (`tasks.rs`) stays the read-only reader its tests say it is.
+
+The tests run against temporary repositories, with a bare one behind a `https://github.com/o/r.git` address that git is told, in
+that repository only, to rewrite to the bare folder, and stand-ins for `gh` and `glab` that record what they were asked: nothing
+reaches a real remote. `glab` is not installed on the Mac this was built on, so its argv follows its documentation and is
+covered by the stand-in only.
+
 ### MCP servers and skills
 
 What a person already has works wherever an agent runs here (item 72). Chats, terminals and Buddy start the agent with the
@@ -1032,7 +1111,7 @@ rewind.
   confirmed. More runners than the nine: Cypress, ava, `deno test` and `cargo nextest` are recognised as test runs and always
   Not confirmed, since no reader takes their output yet. A mocha run whose counts the shell's 8 KiB tail cut off is Not
   confirmed (mocha prints its counts before its failures); the shell could hand on more of a long output.
-- Open pull request and Ask Kit to fix it on a lane, and the effort word. A pull request needs a push, which asks.
+- Ask Kit to fix it on a lane, and the effort word. (Open pull request is item 75's Put up for review.)
 - A sign-in the app cannot read (pi, oh-my-pi, OpenCode, OmO, DeepSeek Harness, the ACP agents): no mark before the first
   message, only the chat's own words after it. A status command for each would need the shell's fixed list in
   `src-tauri/src/accounts.rs` to grow.

@@ -13,6 +13,9 @@ export const APP_PAGES: { id: string; label: Key }[] = [
   { id: "computer", label: "set.computer" },
   // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
   { id: "worktrees", label: "set.worktrees" },
+  // git, gh and glab with their versions and accounts, the default branch pulled when clean, how pull requests merge (item 75,
+  // SourceControlPage.tsx)
+  { id: "source", label: "set.source" },
   // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
   { id: "mcp", label: "set.mcp" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)

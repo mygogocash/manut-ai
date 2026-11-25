@@ -1,5 +1,5 @@
 // Settings view (main column while `ui.view === "settings"`). Left list: Bots (one page per bot: Profile, Model, Work)
-// and App (General, Voice, Terminal, Providers, Computer, Worktrees, MCP and Skills, Developer). Providers (item 74) is
+// and App (General, Voice, Terminal, Providers, Computer, Worktrees, Source control, MCP and Skills, Developer). Providers (item 74) is
 // the coding agents with their settings, the person's own agents and the accounts, in every mode; the page ids of the
 // two pages it replaced, `agents` and `accounts`, open it (`accounts` at its accounts). Pages are `bot:<name>`
 // and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
@@ -28,6 +28,7 @@ import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
+import { SourceControlPage } from "./SourceControlPage";
 import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
@@ -98,6 +99,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <VoicePage />
         ) : current === "worktrees" ? (
           <WorktreesPage />
+        ) : current === "source" ? (
+          <SourceControlPage />
         ) : current === "mcp" ? (
           <McpSkillsPage />
         ) : current === "developer" ? (

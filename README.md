@@ -60,7 +60,12 @@ idea of the sidebar's places (pinned on top, snoozed and done-for-now below, an 
 next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied; and (at `1c3f0ee`) for
 Settings › Providers' layout and field names (a list of the agents with a switch each; for the chosen one a display name,
 the program's path, its home folder, launch arguments and environment variables whose values are never sent back):
-`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied. Orca
+`apps/desktop/src/settings/providers/` and `src-tauri/src/providers.rs`, read for behaviour and wording, no code copied. T3 Code again (MIT, at `8f5fd28`) for
+Settings › Source control (item 75): the page's shape and its words (Automatically pull, keeping the default branch current
+when the checkout has no local changes or commits; Default merge method with the last one chosen; Remove agent credits when
+merging, keeping human co-authors), and `removeAgentCredits` with its tests and its list of agent addresses and names
+(`packages/source-control-core/src/server/mergeMessage.ts`), ported to Rust in `apps/desktop/src-tauri/src/credits.rs` and
+`apps/desktop/src/lib/agentCredits.json`. Orca
 (MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
 (`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
 `orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends

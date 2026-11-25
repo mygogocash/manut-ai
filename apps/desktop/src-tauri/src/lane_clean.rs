@@ -74,8 +74,9 @@ pub fn read_merged(source: Source, out: &str) -> Option<(bool, Vec<String>)> {
 }
 
 /// The remote-tracking branch of the default branch on `remote`: where `origin/HEAD` points, else `main`, else `master`; the
-/// branch name on the remote and its local ref.
-fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(String, String)> {
+/// branch name on the remote and its local ref. git_pull.rs reads the default branch by the same rule, so the clean-up and the
+/// pull never disagree about which branch it is.
+pub(crate) fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(String, String)> {
     let head = format!("refs/remotes/{remote}/HEAD");
     let pointed = git.line(cwd, &["symbolic-ref", "--short", &head]).and_then(|s| s.strip_prefix(&format!("{remote}/")).map(str::to_string));
     for name in pointed.into_iter().chain(["main".to_string(), "master".to_string()]) {
@@ -91,7 +92,8 @@ fn default_branch(git: &Git, cwd: &Path, remote: &str) -> Option<(String, String
 }
 
 /// The remote a folder's pull requests are read from: `origin`, else the first remote, as `tasks::folder_remote` reads it.
-fn remote_name(git: &Git, cwd: &Path) -> Option<String> {
+/// review.rs pushes a lane's branch to this same remote.
+pub(crate) fn remote_name(git: &Git, cwd: &Path) -> Option<String> {
     let ran = git.run(cwd, &["remote"]).ok().filter(|r| r.code == Some(0))?;
     let all: Vec<&str> = ran.out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     all.iter().find(|r| **r == "origin").or(all.first()).map(|r| r.to_string()).filter(|r| safe_rev(r))

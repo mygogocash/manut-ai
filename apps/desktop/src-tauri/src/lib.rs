@@ -10,6 +10,7 @@ mod appimage;
 mod ask_tool;
 mod buddy_chat;
 mod claude_usage;
+mod credits;
 mod computer;
 mod custom_agents;
 mod disk;
@@ -19,6 +20,7 @@ mod folder_open;
 mod gh_me;
 mod git_branch;
 mod git_moved;
+mod git_pull;
 mod lane;
 mod lane_clean;
 mod lane_config;
@@ -27,6 +29,7 @@ mod past_chats;
 mod platform;
 mod outpost;
 mod power;
+mod review;
 mod preview;
 mod providers;
 #[cfg(all(test, unix))]
@@ -34,6 +37,7 @@ mod pty_bench;
 mod running;
 mod session_files;
 mod sessions;
+mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
 mod tasks;
@@ -771,6 +775,15 @@ async fn tasks_me(me: State<'_, Arc<gh_me::Me>>, account: String, section: Strin
     tauri::async_runtime::spawn_blocking(move || m.list(&account, sec, page, fresh.unwrap_or(false))).await.map_err(|e| gh_me::MeError::new("other", e.to_string()))?
 }
 
+/// Settings › Source control (item 75): git, gh and glab, each on this computer or not, its version, and for the two CLIs
+/// whether it is signed in and as whom (names only), read through the runners Tasks already uses (source_tools.rs). `fresh`
+/// asks the CLIs again. Only reads.
+#[tauri::command]
+async fn source_tools(tasks: State<'_, Arc<tasks::Tasks>>, me: State<'_, Arc<gh_me::Me>>, fresh: Option<bool>) -> Result<source_tools::Tools, String> {
+    let (t, m) = (Arc::clone(&tasks), Arc::clone(&me));
+    tauri::async_runtime::spawn_blocking(move || source_tools::read(&t, &m, fresh.unwrap_or(false))).await.map_err(|e| e.to_string())
+}
+
 /// Settings › Accounts › GitHub: gh's own sign-in for one more account in a terminal-panel tab (`gh auth login`, or
 /// `--hostname <host>` for GitHub Enterprise; rule 18). The page sends only the host (checked) and a size.
 #[tauri::command]
@@ -863,6 +876,58 @@ async fn lane_clean_merged(tasks: State<'_, Arc<tasks::Tasks>>, cwd: String, hel
     let home = user_home()?;
     let tasks = tasks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || lane_clean::merged(&home, std::path::Path::new(&cwd), &held, &tasks)).await.map_err(|e| e.to_string())?
+}
+
+/// Settings › Source control › Automatically pull (item 75): bring the default branch checked out in the project folder `cwd`
+/// up to date with its remote, only when nothing in it is changed, new, unpushed or in progress and only by a fast-forward
+/// (git_pull.rs). Never a lane's folder. The answer says what happened or why nothing was done.
+#[tauri::command]
+async fn source_pull(cwd: String) -> Result<git_pull::Pulled, String> {
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || git_pull::pull(&home, std::path::Path::new(&cwd))).await.map_err(|e| e.to_string())
+}
+
+/// A lane put up for review (item 75): what it would go up with, its branch, base and commits' subjects (review.rs `draft`).
+/// Only reads.
+#[tauri::command]
+async fn review_draft(asks: State<'_, Arc<review::Ledger>>, worktree: String) -> Result<review::Draft, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.draft(&home, &worktree)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to push the lane at `worktree` and open its pull request with `title` and `body` (review.rs `ask_open`): the exact
+/// repository, branch, base, title and body, or why it cannot go up. Writes nothing.
+#[tauri::command]
+async fn review_ask_open(asks: State<'_, Arc<review::Ledger>>, worktree: String, title: String, body: String) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_open(&home, &worktree, &title, &body)).await.map_err(|e| e.to_string())?
+}
+
+/// The ask to merge pull request `number`, made from the lane at `worktree`, with `method` (`merge`, `squash` or `rebase`;
+/// review.rs `ask_merge`): asked only when it can merge now, naming the method and exactly the message that will be sent, with
+/// the recognised agent credit lines taken out when `credits` (Settings › Source control). Writes nothing.
+#[tauri::command]
+async fn review_ask_merge(asks: State<'_, Arc<review::Ledger>>, worktree: String, number: u64, method: String, credits: Option<bool>) -> Result<review::Ask, String> {
+    let home = user_home()?;
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.ask_merge(&home, &worktree, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
+}
+
+/// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs
+/// what the ask named, once. Only the id and the answer cross; never an argv, a branch or a text.
+#[tauri::command]
+async fn review_settle(asks: State<'_, Arc<review::Ledger>>, id: String, yes: bool) -> Result<review::Done, String> {
+    let l = Arc::clone(&asks);
+    tauri::async_runtime::spawn_blocking(move || l.settle(&id, yes)).await.map_err(|e| e.to_string())?
+}
+
+/// Takes a waiting ask back, so a later answer to it runs nothing (review.rs `withdraw`).
+#[tauri::command]
+async fn review_withdraw(asks: State<'_, Arc<review::Ledger>>, id: String) -> Result<(), String> {
+    asks.withdraw(&id);
+    Ok(())
 }
 
 /// The lanes' working folders the app made for the repository `cwd` is in, with what is in each (lane.rs). Only reads.
@@ -1324,6 +1389,8 @@ pub fn run() {
             app.manage(outpost::Outposts::new(app.handle().clone()));
             app.manage(Arc::new(tasks::Tasks::default()));
             app.manage(Arc::new(gh_me::Me::default()));
+            // the asks that push a lane and open or merge its pull request, each settled once (review.rs)
+            app.manage(Arc::new(review::Ledger::default()));
             // free space on the home folder's volume, read once a minute (disk.rs)
             app.manage(disk::Disk::start(app.handle().clone(), user_home().ok()));
             // close = hide to the tray / menu bar, and the keep-awake assertion's worker (tray.rs, power.rs)
@@ -1472,6 +1539,12 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         agent_config_list,
         lane_release,
         lane_clean_merged,
+        source_pull,
+        review_draft,
+        review_ask_open,
+        review_ask_merge,
+        review_settle,
+        review_withdraw,
         session_main_moved,
         lane_diff,
         chat_close_all,
@@ -1500,6 +1573,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         tasks_view,
         tasks_remote,
         gh_accounts,
+        source_tools,
         tasks_me,
         gh_login_start,
         window_close,

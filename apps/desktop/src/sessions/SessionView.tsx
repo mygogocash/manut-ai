@@ -50,6 +50,7 @@ import { groupOf } from "./splitState";
 import { isCopyLinkKey, LINK_COPIED_EVENT } from "./termLink";
 import { TermShareCards } from "./TermShareCard";
 import { LanePane } from "../code/LanePane";
+import { LaneReview } from "../code/Review";
 import { isLaneChat } from "../code/laneStore";
 
 const STATUS: Record<string, Key> = { starting: "ss.starting", running: "ss.running", exited: "ss.ended", failed: "ss.couldNotStart" };
@@ -237,7 +238,13 @@ function LaneSplit({ rec, chatKey, chat }: { rec: SessionRec; chatKey: string; c
         <ChatPane rec={rec} chatKey={chatKey} />
         {/* a new key for each lane, so each opens on Diff and keeps its own question about a secret; a preview runs only in the
             lane's own folder */}
-        <LanePane key={chatKey} chatKey={chatKey} chat={chat} laneDir={rec.lane?.dir || null} />
+        <LanePane
+          key={chatKey}
+          chatKey={chatKey}
+          chat={chat}
+          laneDir={rec.lane?.dir || null}
+          review={rec.lane?.worktree ? <LaneReview root={rec.cwd} worktree={rec.lane.worktree} branch={rec.lane.name} title={pickTitle(rec, folderName(rec.cwd)).title} /> : undefined}
+        />
       </div>
     </div>
   );

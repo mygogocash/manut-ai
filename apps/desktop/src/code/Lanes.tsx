@@ -8,9 +8,10 @@
 // The canvas's New lane is the band's quiet link (item 68). It is not a second way to start a lane: it opens the + menu on its
 // Chat with Kit choice, with the folder chip on this project, so which agent and which folder are chosen where they always
 // were. The band shows with that link while the project has no lane, since a person with none has the most need of it.
-// The canvas's Open pull request and Revert this turn are not here. A lane cannot push or open a pull request from
-// the app (going live always asks, and Tasks is where pull requests are), Rewind (the session's line under the box) is the way
-// to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md), which New lane opens. A lane that
+// The canvas's Open pull request is Put up for review under the row (item 75, Review.tsx, filled in by `below`): the app pushes
+// the lane's branch and opens its pull request only after one ask that names exactly what goes, settled once, because going live
+// always asks; Tasks is still where pull requests are read. Revert this turn is not here: Rewind (the session's line under the
+// box) is the way to take a turn back, and a lane is started from the Code page's + menu, Chat with Kit (item 66, docs/code-editor.md), which New lane opens. A lane that
 // was rewound says Reverted, and offers Bring it back while the shell still keeps the files from before the rewind (until the
 // next turn starts): its panel (BringBack.tsx) opens under the row, filled in by `below`.
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
@@ -41,6 +42,8 @@ export interface LaneRow {
   id: string;
   /** The folder of its own the lane works in, where its main-moved note reads git; null: it works in the session's folder. */
   dir: string | null;
+  /** The lane's worktree, the folder the app made for it (lane.rs): what Put up for review names to the shell (Review.tsx). */
+  worktree?: string;
   title: string;
   /** The agent's name, as the session's row names it. */
   agent: string;
@@ -101,6 +104,7 @@ export function laneRowOf(i: LaneRowInput, time: (ms: number) => string = (ms) =
   return {
     id: rec.id,
     dir: own?.dir ?? null,
+    ...(own?.worktree ? { worktree: own.worktree } : {}),
     title: pickTitle(rec, folderName(rec.cwd)).title,
     agent: i.agent,
     branch,

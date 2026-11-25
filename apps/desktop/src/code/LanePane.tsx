@@ -9,7 +9,7 @@
 // (it can print anything), so the board's sample output is not drawn: what is shown is the result that was read.
 // `LanePaneView` takes everything it shows as props and uses no hooks, so a test can draw it; `LanePane` reads the stores.
 import "./lanepane.css";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { hhmm } from "../app/time";
 import { DiffView } from "../chat/activity/Work";
 import { t, type Key } from "../i18n";
@@ -49,6 +49,8 @@ export interface LanePaneProps {
   tests: LaneTests;
   /** How a time (ms) is written; the time of day by default. */
   time?: (ms: number) => string;
+  /** Put up for review and its ask (Review.tsx), over the chips, for a lane with a folder and a branch of its own. */
+  review?: ReactNode;
 }
 
 // Memoised on its files, which stay the same array while no step's change moved: a long diff is not drawn again for each word of
@@ -143,9 +145,10 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
   );
 }
 
-export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)) }: LanePaneProps) {
+export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
   return (
     <aside className="lpane" data-testid="lane-pane" data-view={view}>
+      {review}
       <div className="fgroup" role="group" aria-label={t("lane.pane.title")}>
         {VIEWS.map((v) => (
           <button key={v} type="button" className="fchip" aria-pressed={view === v} onClick={() => onView(v)} data-testid={`lane-chip-${v}`}>
@@ -175,7 +178,7 @@ function useChangedFiles(chat: Chat | undefined): DiffFile[] {
 
 /** The pane of the lane whose chat has key `chatKey`, which holds `chat`. `laneDir` is the lane's own folder, or null when the
  *  session works in the developer's own folder, where no preview is started. */
-export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; chat: Chat | undefined; laneDir?: string | null }) {
+export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: string; chat: Chat | undefined; laneDir?: string | null; review?: ReactNode }) {
   // the lane and what Kit's changes read move with the session's events
   useLanesVersion();
   usePreviewVersion();
@@ -209,5 +212,5 @@ export function LanePane({ chatKey, chat, laneDir = null }: { chatKey: string; c
     reloads,
     onReload: () => setReloads((n) => n + 1),
   };
-  return <LanePaneView view={view} onView={setView} files={files} moreFiles={folder?.moreFiles ?? 0} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} />;
+  return <LanePaneView view={view} onView={setView} files={files} moreFiles={folder?.moreFiles ?? 0} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} review={review} />;
 }

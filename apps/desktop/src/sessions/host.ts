@@ -18,6 +18,7 @@ import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
 import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
+import { readAsk, readDone, readDraft, readPulled, readTools, type MergeMethod, type Pulled, type ReviewAsk, type ReviewDone, type ReviewDraft, type SourceTools } from "../code/source";
 import { checkArgs, checkVars, homeVarOf, rulesOf, versionAgent, type ProviderPatch, type ProviderView } from "../settings/providers/model";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
@@ -160,6 +161,29 @@ export interface SessionHost extends HistoryHost {
    *  from their own files (src-tauri/src/agent_config.rs) for the person's own home and, when given, the project folder `cwd`.
    *  Only reads. Null where this computer's files cannot be read (a plain browser). */
   agentConfig?(cwd?: string): Promise<AgentConfig[] | null>;
+  /** Settings › Source control: git, gh and glab, each on this computer or not, its version, and for the two CLIs whether it is
+   *  signed in and as whom (names only; src-tauri/src/source_tools.rs). `fresh` asks the CLIs again. Only reads. */
+  sourceTools?(fresh?: boolean): Promise<SourceTools>;
+  /** Settings › Source control › Automatically pull: bring the default branch checked out in project folder `cwd` up to date,
+   *  only when nothing in it is changed, new, unpushed or in progress and only by a fast-forward (src-tauri/src/git_pull.rs).
+   *  Never a lane's folder. Null for an answer that is not one. */
+  sourcePull?(cwd: string): Promise<Pulled | null>;
+  /** A lane put up for review (src-tauri/src/review.rs): what it would go up with. Only reads. */
+  reviewDraft?(worktree: string): Promise<ReviewDraft | null>;
+  /** The ask to push the lane at `worktree` and open its pull request with `title` and `body`: the exact repository, branch,
+   *  base, title and body. Writes nothing; rejects with a code (`no_remote`, `not_signed_in`, `no_commits`, ...). */
+  reviewAsk?(worktree: string, title: string, body: string): Promise<ReviewAsk>;
+  /** The ask to merge pull request `number`, made from the lane at `worktree`, with `method`: asked only when it can merge now,
+   *  with the method and exactly the message that will be sent, the recognised agent credit lines taken out when `credits`.
+   *  Writes nothing; rejects with a code (`cannot_merge:<why>`,
+   *  `not_this_lane`, `not_signed_in`, ...). */
+  reviewMerge?(worktree: string, number: number, method: MergeMethod, credits?: boolean): Promise<ReviewAsk>;
+  /** The person's answer to ask `id`, after approval-core settled it (code/reviewAsk.ts is the only caller): a No runs nothing, a
+   *  Yes runs what the ask named, once. Only the id and the answer go to the shell. Rejects with `already_decided`,
+   *  `withdrawn`, `expired` or `not_found`. */
+  reviewSettle?(id: string, yes: boolean): Promise<ReviewDone>;
+  /** Takes a waiting ask back. */
+  reviewWithdraw?(id: string): Promise<void>;
   /** A clean-up removes a deleted chat's folder only when nothing in it is changed, new or unpushed; the branch stays. */
   laneRelease?(worktree: string): Promise<LaneReleased>;
   /** A clean-up of the lanes of `cwd`'s repository whose pull request merged, through the person's own `gh` or `glab`;
@@ -368,6 +392,40 @@ export class TauriHost implements SessionHost, BuddyHost {
     const { invoke } = await this.core();
     return readAgentConfig(await invoke<unknown>("agent_config_list", { cwd: cwd || null }));
   }
+  async sourceTools(fresh = false) {
+    const { invoke } = await this.core();
+    return readTools(await invoke<unknown>("source_tools", { fresh }));
+  }
+  async sourcePull(cwd: string) {
+    const { invoke } = await this.core();
+    return readPulled(await invoke<unknown>("source_pull", { cwd }));
+  }
+  async reviewDraft(worktree: string) {
+    const { invoke } = await this.core();
+    return readDraft(await invoke<unknown>("review_draft", { worktree }));
+  }
+  async reviewAsk(worktree: string, title: string, body: string) {
+    const { invoke } = await this.core();
+    const ask = readAsk(await invoke<unknown>("review_ask_open", { worktree, title, body }));
+    if (!ask) throw new Error("unread");
+    return ask;
+  }
+  async reviewMerge(worktree: string, number: number, method: MergeMethod, credits = false) {
+    const { invoke } = await this.core();
+    const ask = readAsk(await invoke<unknown>("review_ask_merge", { worktree, number, method, credits }));
+    if (!ask || ask.kind !== "merge") throw new Error("unread");
+    return ask;
+  }
+  async reviewSettle(id: string, yes: boolean) {
+    const { invoke } = await this.core();
+    const done = readDone(await invoke<unknown>("review_settle", { id, yes }));
+    if (!done) throw new Error("unread");
+    return done;
+  }
+  async reviewWithdraw(id: string) {
+    const { invoke } = await this.core();
+    await invoke("review_withdraw", { id });
+  }
   async laneRelease(worktree: string) {
     const { invoke } = await this.core();
     return readReleased(await invoke<unknown>("lane_release", { worktree }));
@@ -558,6 +616,10 @@ export interface MockCall {
     | "lane.root"
     | "lane.release"
     | "lane.clean"
+    | "source.tools"
+    | "source.pull"
+    | "review.ask"
+    | "review.settle"
     | "buddy.start"
     | "buddy.input"
     | "buddy.close"
@@ -602,6 +664,12 @@ export interface MockCall {
   show?: string[];
   /** history: the terminal's key (a session id or `panel-<n>`) */
   key?: string;
+  /** source.tools: the CLIs were asked again */
+  fresh?: boolean;
+  /** review.settle: the person's answer, and on a Yes the title and body the mock would have sent */
+  yes?: boolean;
+  title?: string;
+  body?: string;
 }
 
 const BANNER: Record<string, string> = {
@@ -684,6 +752,13 @@ export type MockGlobals = MockTurnGlobals & {
   __manutLaneUnpushed?: Record<string, number>;
   /** e2e: the remote branch (`origin/main`) a folder's base starts a lane from when asked to; a folder left out has no remote */
   __manutRemoteFrom?: Record<string, string>;
+  /** e2e: what the shell says of git, gh and glab for Settings › Source control (its `source_tools` answer) */
+  __manutSourceTools?: unknown;
+  /** e2e: what a pull of each project's default branch answers, by folder (the shell's `source_pull` answer) */
+  __manutPulled?: Record<string, unknown>;
+  /** e2e: what each lane would go up for review with, by worktree: its repository, its commits' subjects, a code its ask is
+   *  refused with, or the step its Yes fails at */
+  __manutReview?: Record<string, { source?: "github" | "gitlab"; repo?: string; commits?: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string }>;
   /** e2e: what a merged clean-up of each project's lanes finds */
   __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
@@ -1321,6 +1396,81 @@ export class MockHost implements SessionHost, BuddyHost {
     if (checkouts.some((c) => root === c || root.startsWith(`${c}/`))) throw new Error("root_in_checkout");
     this.log({ op: "lane.root", path: root });
     return root.replace(/\/+$/, "");
+  }
+  /** What e2e says git, gh and glab are (`__manutSourceTools`); none: all three here, the two CLIs signed out. */
+  async sourceTools(fresh = false): Promise<SourceTools> {
+    this.log({ op: "source.tools", ...(fresh ? { fresh } : {}) });
+    return readTools(this.g.__manutSourceTools ?? { git: { installed: true, version: "2.54.0" }, github: { installed: true, version: "2.104.0", signed_in: false, accounts: [] }, gitlab: { installed: false } });
+  }
+  /** What e2e says a pull of each project finds (`__manutPulled`, the shell's answer); none: the branch is up to date. */
+  async sourcePull(cwd: string): Promise<Pulled | null> {
+    this.log({ op: "source.pull", cwd });
+    return readPulled(this.g.__manutPulled?.[cwd] ?? { done: false, why: "current", branch: this.g.__manutBranches?.[cwd] ?? "main", remote: "origin", from: "", to: "", count: 0 });
+  }
+  /** The mock's asks, by id, as review.rs keeps them: each answered once. */
+  private asks = new Map<string, { state: "waiting" | "decided" | "withdrawn"; ask: ReviewAsk }>();
+  /** What e2e says a lane would go up with (`__manutReview`, by worktree); none: one commit, on github.com/you/<project>. */
+  private reviewOf(worktree: string): { source: "github" | "gitlab"; repo: string; commits: string[]; refuse?: string; fail?: { step: string; error: string }; cannot?: string; title?: string } {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    if (!lane) return { source: "github", repo: "", commits: [], refuse: "not_a_lane" };
+    const name = lane.project.split("/").filter(Boolean).pop() ?? "project";
+    return { source: "github", repo: `you/${name}`, commits: ["Work in this lane"], ...(this.g.__manutReview?.[worktree] ?? {}) };
+  }
+  async reviewDraft(worktree: string): Promise<ReviewDraft | null> {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    const r = this.reviewOf(worktree);
+    if (!lane || r.refuse === "not_a_lane") throw new Error("not_a_lane");
+    return { branch: lane.branch, base: lane.base, commits: r.commits, count: r.commits.length };
+  }
+  async reviewAsk(worktree: string, title: string, body: string): Promise<ReviewAsk> {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    const r = this.reviewOf(worktree);
+    if (!lane || r.refuse) throw new Error(r.refuse ?? "not_a_lane");
+    if (r.commits.length === 0) throw new Error("no_commits");
+    if (!title.trim() || /[\u0000-\u001f]/.test(title)) throw new Error("bad_title");
+    const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
+    this.asks.set(id, { state: "waiting", ask });
+    this.log({ op: "review.ask", path: worktree, branch: lane.branch });
+    return ask;
+  }
+  /** As the shell: a merge is asked only for a pull request that can merge (`__manutReview[worktree].merge`: why it cannot, or
+   *  the title it has), with GitHub's own messages. */
+  async reviewMerge(worktree: string, number: number, method: MergeMethod, credits = false): Promise<ReviewAsk> {
+    const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
+    const r = this.reviewOf(worktree);
+    if (!lane || r.refuse) throw new Error(r.refuse ?? "not_a_lane");
+    if (r.cannot) throw new Error(`cannot_merge:${r.cannot}`);
+    const title = r.title ?? "Work in this lane";
+    const [subject, full] = method === "rebase" ? ["", ""] : method === "squash" ? [`${title} (#${number})`, r.commits.map((c) => `* ${c}`).join("\n\n")] : [`Merge pull request #${number} from ${lane.branch}`, title];
+    // a browser has no shell to take the credit lines out: it takes out the one line Kit's stand-in agent signs with, so a walk
+    // sees the count change
+    const lines = full.split("\n");
+    const kept = credits && method !== "rebase" ? lines.filter((l) => !/^co-authored-by: .*<noreply@anthropic\.com>$/i.test(l.trim())) : lines;
+    const message = kept.join("\n");
+    const dropped = lines.length - kept.length;
+    const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message, dropped };
+    this.asks.set(id, { state: "waiting", ask });
+    this.log({ op: "review.ask", path: worktree, branch: lane.branch });
+    return ask;
+  }
+  async reviewSettle(id: string, yes: boolean): Promise<ReviewDone> {
+    const e = this.asks.get(id);
+    if (!e) throw new Error("not_found");
+    if (e.state !== "waiting") throw new Error(e.state === "decided" ? "already_decided" : "withdrawn");
+    e.state = "decided";
+    this.log({ op: "review.settle", path: e.ask.branch, yes, ...(yes ? (e.ask.kind === "merge" ? { title: e.ask.subject, body: e.ask.message } : { title: e.ask.title, body: e.ask.body }) : {}) });
+    if (!yes) return { outcome: "declined", pushed: false, url: "", number: 0, step: "", error: "" };
+    const fail = this.reviewOf((this.g.__manutLanes ?? []).find((l) => l.branch === e.ask.branch)?.worktree ?? "").fail;
+    if (fail) return { outcome: "failed", pushed: fail.step === "create", url: "", number: 0, step: fail.step, error: fail.error };
+    if (e.ask.kind === "merge") return { outcome: "merged", pushed: false, url: e.ask.url, number: e.ask.number, step: "", error: "" };
+    const number = 100 + this.asks.size;
+    return { outcome: "opened", pushed: true, url: `https://github.com/${e.ask.repo}/pull/${number}`, number, step: "", error: "" };
+  }
+  async reviewWithdraw(id: string): Promise<void> {
+    const e = this.asks.get(id);
+    if (e?.state === "waiting") e.state = "withdrawn";
   }
   /** As the shell: a folder with changed files, or commits on no remote, is kept; the branch always stays. */
   async laneRelease(worktree: string): Promise<LaneReleased> {
