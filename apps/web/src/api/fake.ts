@@ -33,20 +33,30 @@ import {
   type People,
   type PilotApi,
   type ReplyAction,
+  type Routine,
+  type RoutineAction,
+  type RoutineRef,
+  type RoutineRemoval,
+  type RoutineRun,
+  type RoutinesView,
+  type RoutineTrigger,
   type Shop,
   type SignIn,
   type SignInRemoval,
   type SubscriptionPayment,
+  type Team,
   type UnlinkedOwner,
   type WebSession,
   type WorkerDraft,
   type WorkerJobEntry,
+  type WorkerMember,
 } from "./types";
 import { pilotGate } from "./gate";
 import { PRACTICE_SHOPS, practiceOwner, type PracticeOwner } from "./practiceOwner";
 import { isCode, normalizeEmail } from "./email";
 import { endOfShopDay, formatIsoDate } from "../format";
 import * as peopleRules from "@manut/people-rules";
+import { describeTrigger, nextRun, type Routine as RuleRoutine } from "@manut/routine-rules";
 import type { Away, Invite, PeopleState } from "@manut/people-rules";
 import * as shopMemory from "@manut/shop-memory";
 import type { MemoryState, Refusal, Result } from "@manut/shop-memory";
@@ -129,6 +139,15 @@ import type { ShopQuestion, ShopTemplate } from "./types";
 /// starts with the two sign-ins and two outposts its audit log tells the story of: a Shopee sign-in that broke and was mended, a
 /// carrier's portal that broke two days ago and still is, Fon's Mac, which beats while the page is open, and a cloud outpost that
 /// never has. Sabai Tea has nothing in its vault. The vault is exported with the shop and deleted with it.
+///
+/// A shop's routines (docs/pilot-api.md, "Routines") are kept as the API's shop object keeps them: the team (paused since when, and
+/// which members are on), the routines in the order they were made and each routine's runs. A routine's words and next run are
+/// `@manut/routine-rules`' own, and a list is read as the API reads it, from the clock. An operator may pause, resume and remove a
+/// routine and pause or resume the team, each recorded in the shop's audit log by the routine's id only; a change that changes
+/// nothing is not logged. A shop made from a template starts with the template's routines, each paused, and its members on. Baan
+/// Mali starts with six routines that show every way a run can stand: done, failed, skipped (paused, nothing to answer) and
+/// missed, a routine paused, one with no run yet and one that waits for a stock feed. Sabai Tea has none. The routines are exported
+/// with the shop and deleted with it.
 ///
 /// Joining a shop from an invite link (docs/people.md, "Invites") is answered as the API answers it: a code by email first,
 /// with the API's limits (one a minute, ten a day, ten minutes, five wrong tries), then the accept. Practice sends no email,
@@ -227,6 +246,13 @@ type FakeOwnerCode = { code: string; subject: string; ranOut?: boolean };
 type FakeWorkerJob = WorkerJobEntry & { tenant: string };
 /// One shop's vault: its sign-ins, which are the operator's own view because the fake keeps no password to seal, and its outposts.
 type FakeVault = { signIns: SignIn[]; outposts: FakeOutpost[] };
+/// A routine as the shop's object keeps it: what the list shows, less the words, the next run, the stock feed it waits for and the
+/// latest run, which a list works out.
+type FakeRoutine = Omit<Routine, "when" | "next" | "waitsFor" | "lastRun">;
+/// The team as the shop's object keeps it: `members` is null for a shop with no template, where every worker is on.
+type FakeTeam = { paused: boolean; since: string | null; members: WorkerMember[] | null };
+/// One shop's routines: the team, the routines in the order they were made, and the runs kept, oldest first.
+type FakeRoutines = { team: FakeTeam; routines: FakeRoutine[]; runs: RoutineRun[] };
 /// An outpost as the vault keeps it, without the credential's digest, which nothing here checks. `status` is read from the clock
 /// as the API reads it, so it is not kept. `beats` is a machine that is awake and beats every 30 seconds, as the desktop app does
 /// while it runs: its last heartbeat is read as the latest of those beats, so the sample Mac stays online while the page is
@@ -240,7 +266,7 @@ type FakeEmailCode = { live: { expiresAt: number; wrong: number } | null; sent: 
 /// is recorded nowhere else.
 type FakeHelperSession = { tenant: string | null; helperId: string; sessionId: string };
 type FakeDb = {
-  version: 12;
+  version: 13;
   seq: number;
   shops: FakeShop[];
   /// Shops that only the owner's page practises on (a long Thai name, a long link), so they answer `shopOf` and a reply link
@@ -267,6 +293,8 @@ type FakeDb = {
   workers: FakeWorkerJob[];
   /// Each shop's vault. A shop with no entry has no sign-in and no outpost.
   vault: Record<string, FakeVault>;
+  /// Each shop's routines. A shop with no entry has none, and its team is on.
+  routines: Record<string, FakeRoutines>;
 };
 
 /// The saved world's `version` decides whether it is read: a world saved before deletions needed an owner's yes
@@ -274,8 +302,8 @@ type FakeDb = {
 /// (version 3), before what the team knows (version 4), before the model meter (version 5), before the workers' jobs
 /// (version 6), before the owner's people (version 7), before the owner's linked account and its codes (version 8), before
 /// the sample log of the owner's own changes, this Mac and browser writes (version 9), before the shops and links the owner's
-/// page practises its long words on (version 10) or before the shops' vaults (version 11) is replaced by a fresh one rather
-/// than read without them.
+/// page practises its long words on (version 10), before the shops' vaults (version 11) or before the shops' routines (version
+/// 12) is replaced by a fresh one rather than read without them.
 const STORAGE_KEY = "manut.pilot.fake.v1";
 const FAKE_API_ORIGIN = "https://pilot-api.invalid";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -401,13 +429,13 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
       const raw = storage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as FakeDb;
-      return parsed && parsed.version === 12 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
+      return parsed && parsed.version === 13 && Array.isArray(parsed.demoShops) && Array.isArray(parsed.actions) &&
         Array.isArray(parsed.confirmations) &&
         Array.isArray(parsed.subscriptionPayments) && Array.isArray(parsed.audit) &&
         typeof parsed.memory === "object" && parsed.memory !== null && Array.isArray(parsed.model?.calls) &&
         Array.isArray(parsed.model.overrides) && Array.isArray(parsed.model.holds) && Array.isArray(parsed.workers) &&
         typeof parsed.people === "object" && parsed.people !== null && Array.isArray(parsed.ownerCodes) &&
-        typeof parsed.vault === "object" && parsed.vault !== null
+        typeof parsed.vault === "object" && parsed.vault !== null && typeof parsed.routines === "object" && parsed.routines !== null
         ? parsed
         : null;
     } catch {
@@ -630,6 +658,8 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     delete db.people[record.tenant];
     // The vault goes with its sign-ins and outposts.
     delete db.vault[record.tenant];
+    // The routines go with the team's setting and every run.
+    delete db.routines[record.tenant];
     wipeMeter(db.model, record.tenant);
     // The jobs of its team go with it, drafts included.
     db.workers = db.workers.filter((job) => !mine(job));
@@ -909,6 +939,59 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
     return { ...outpost, status: online ? "online" : "asleep", lastHeartbeatAt };
   }
 
+  /// The API's check before any routine route reads or changes a shop: a tenant of 1 to 256 characters, as the vault's.
+  const routinesTenant = vaultTenant;
+
+  /// A change needs an existing pilot shop, as the console's other writes do: 404 `shop_not_found` for any tenant that is not one,
+  /// one that was deleted included (the shop's record is what the API looks for).
+  function pilotShop(tenant: string): void {
+    if (!db.shops.some((shop) => shop.tenant === tenant)) throw new ApiError(404, "shop_not_found");
+  }
+
+  /// A routine's id as the API mints it (`ROUTINE_ID`, apps/api/src/routine-store.ts), which any id sent is checked against.
+  function routineIdOf(value: unknown): string {
+    if (typeof value !== "string" || !ROUTINE_ID.test(value)) throw new ApiError(400, "invalid_request");
+    return value;
+  }
+
+  /// A shop's routines, or the empty state its object answers for a tenant it has none for: the team on, and no routine.
+  function routinesOf(tenant: string): FakeRoutines {
+    return db.routines[tenant] ?? { team: { paused: false, since: null, members: null }, routines: [], runs: [] };
+  }
+
+  /// A change to one routine, in the API's order: the tenant, the pilot shop, the id's form, then the routine itself. A change that
+  /// leaves the routine as it was writes nothing and logs nothing.
+  function changeRoutine(input: RoutineRef, action: "routine.paused" | "routine.resumed",
+    change: (routine: FakeRoutine) => FakeRoutine): Routine {
+    admin();
+    const tenant = routinesTenant(input.tenant);
+    pilotShop(tenant);
+    const routineId = routineIdOf(input.routineId);
+    const state = routinesOf(tenant);
+    const index = state.routines.findIndex((one) => one.id === routineId);
+    const before = state.routines[index];
+    if (!before) throw new ApiError(404, "not_found");
+    const after = change(before);
+    if (after !== before) {
+      state.routines[index] = after;
+      audit(tenant, PRACTICE_OPERATOR, action, { routineId });
+    }
+    return routineView(after, state.team, lastRunOf(state.runs, routineId), now());
+  }
+
+  /// Pause everyone, or resume: pausing a paused team changes nothing and keeps when it began.
+  function changeTeam(input: { tenant: string }, paused: boolean): Team {
+    admin();
+    const tenant = routinesTenant(input.tenant);
+    pilotShop(tenant);
+    const state = (db.routines[tenant] ??= routinesOf(tenant));
+    if (state.team.paused !== paused) {
+      state.team = { ...state.team, paused, since: paused ? iso(now()) : null };
+      audit(tenant, PRACTICE_OPERATOR, paused ? "team.paused" : "team.resumed", {});
+    }
+    return teamView(state.team);
+  }
+
   return {
     reset() {
       db = seed(now());
@@ -993,7 +1076,14 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
             questions: template.questions.map((text, index) => ({ id: `q${index + 1}`, text })) } : {}) };
         db.shops.push(shop);
         audit(shop.tenant, PRACTICE_OPERATOR, "shop.created", {});
-        if (template) audit(shop.tenant, PRACTICE_OPERATOR, "template.applied", { templateId: template.id });
+        if (template) {
+          // As the API: the template's members on and its routines made, each paused until the owner turns it on, and the log says
+          // the template was applied and then names each routine made.
+          const made = templateRoutines(template.id, now());
+          db.routines[shop.tenant] = { team: { paused: false, since: null, members: made.members }, routines: made.routines, runs: [] };
+          audit(shop.tenant, PRACTICE_OPERATOR, "template.applied", { templateId: template.id });
+          for (const routine of made.routines) audit(shop.tenant, PRACTICE_OPERATOR, "routine.created", { routineId: routine.id });
+        }
         return { tenant: shop.tenant, name: shop.name, ownerName: shop.ownerName,
           ...(template ? { template: template.id } : {}) };
       }),
@@ -1198,6 +1288,9 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
           // The vault's sign-ins and outposts as the operator lists them: never a password, a credential or a digest of one.
           signIns: vaultOf(tenant).signIns,
           outposts: vaultOf(tenant).outposts.map(outpostView),
+          // The team, every routine as it is stored, the first-week questions and every run kept, as the API's export carries them.
+          routines: { team: routinesOf(tenant).team, routines: routinesOf(tenant).routines, questions: shop.questions ?? [],
+            runs: routinesOf(tenant).runs },
         };
       }),
 
@@ -1621,6 +1714,45 @@ export function createFakeApi(options: FakeApiOptions = {}): PilotApi & { reset(
         return { outpost: outpostView(outpost), credential: mintCredential() };
       }),
 
+    // The shop's routines, as the API's admin routes answer them: the admin key, then the tenant (400 `tenant_required`). A read
+    // answers for any tenant that is one, as the API's does, with the empty state for a shop that has none; a change needs a pilot
+    // shop (404 `shop_not_found`) before its own checks (`changeRoutine`). Each change is recorded in the shop's audit log by the
+    // routine's id only, and nothing is recorded for one that changes nothing.
+    getRoutines: (tenant) =>
+      run((): RoutinesView => {
+        admin();
+        const key = routinesTenant(tenant);
+        const state = routinesOf(key);
+        return {
+          tenant: key,
+          team: teamView(state.team),
+          routines: state.routines.map((routine) => routineView(routine, state.team, lastRunOf(state.runs, routine.id), now())),
+        };
+      }),
+
+    pauseRoutine: (input) => run(() => changeRoutine(input, "routine.paused", (routine) => (routine.paused ? routine : { ...routine, paused: true }))),
+
+    resumeRoutine: (input) => run(() => changeRoutine(input, "routine.resumed", (routine) => (routine.paused ? { ...routine, paused: false } : routine))),
+
+    // The routine and its runs go, as the API's routine and its clock do; the log keeps how each run ended, and here that is nothing.
+    removeRoutine: (input) =>
+      run((): RoutineRemoval => {
+        admin();
+        const tenant = routinesTenant(input.tenant);
+        pilotShop(tenant);
+        const routineId = routineIdOf(input.routineId);
+        const state = db.routines[tenant];
+        if (!state?.routines.some((one) => one.id === routineId)) throw new ApiError(404, "not_found");
+        state.routines = state.routines.filter((one) => one.id !== routineId);
+        state.runs = state.runs.filter((one) => one.routineId !== routineId);
+        audit(tenant, PRACTICE_OPERATOR, "routine.removed", { routineId });
+        return { removed: routineId };
+      }),
+
+    pauseTeam: (input) => run(() => changeTeam(input, true)),
+
+    resumeTeam: (input) => run(() => changeTeam(input, false)),
+
     // As the API: the tenant, then the page (a size of 1 to 25, ten when absent, and a cursor that is a job's task id), then
     // the shop, then that the cursor is one of its jobs. Newest first; the page after a job is the jobs older than it.
     listWorkerJobs: (tenant, query = {}) =>
@@ -1819,6 +1951,10 @@ const AUDIT_ID = /^aud-[0-9a-z]{9}-[0-9a-z]{3}-[0-9a-f]{8}$/;
 
 /// The ids the API gives a worker job's task, which are also all a page's cursor may be.
 const WORKER_TASK = /^worker-task-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/// The ids the API mints for routines (`ROUTINE_ID` in apps/api/src/routine-store.ts): `rt-` and an id that sorts by when it was
+/// made, with no colon. A test holds this to the API's own text.
+const ROUTINE_ID = /^rt-[0-9a-z-]{1,64}$/;
 
 function auditId(ms: number, seq: number): string {
   return sortableId("aud", ms, seq);
@@ -2081,7 +2217,7 @@ function seed(at: number): FakeDb {
   ];
 
   return {
-    version: 12,
+    version: 13,
     seq: 100,
     demoShops,
     shops: [
@@ -2137,6 +2273,7 @@ function seed(at: number): FakeDb {
     model: seedModel(at, tenant),
     workers: sampleWorkers(at, tenant),
     vault: { [tenant]: sampleVault(at) },
+    routines: { [tenant]: sampleRoutines(at) },
   };
 }
 
@@ -2431,6 +2568,141 @@ function sampleVault(at: number): FakeVault {
       // Registered by Fon's desktop app as "This Mac" and renamed by her, which `sampleAudit` says. It beats while the page is open.
       { id: SAMPLE_MAC_OUTPOST, name: "Fon's MacBook", kind: "this_mac", lastHeartbeatAt: ago(0), createdAt: ago(2 * day - 40),
         beats: true },
+    ],
+  };
+}
+
+/// The members of a shop's team that run as workers, as the API names them.
+function isWorkerMember(value: string): value is WorkerMember {
+  return value === "nam" || value === "pim" || value === "ton";
+}
+
+/// The team as the API answers it: every worker is on until a shop template says which are.
+function teamView(team: FakeTeam): Team {
+  return { paused: team.paused, since: team.since, members: team.members ? [...team.members] : ["nam", "pim", "ton"] };
+}
+
+/// A routine's newest run: the runs are kept oldest first, and the instants are the API's, all written the same way.
+function lastRunOf(runs: readonly RoutineRun[], routineId: string): RoutineRun | null {
+  return runs.reduce<RoutineRun | null>(
+    (newest, run) => (run.routineId === routineId && (newest === null || run.instant > newest.instant) ? run : newest), null);
+}
+
+/// A routine as a list shows it, by the API's own rule (`routineView`, apps/api/src/routine-setup.ts): its trigger in words and its
+/// next run are `@manut/routine-rules`', and there is no next run while the routine, the whole team or its member is off.
+function routineView(routine: FakeRoutine, team: FakeTeam, lastRun: RoutineRun | null, nowMs: number): Routine {
+  const rules: RuleRoutine = { id: routine.id, name: routine.name, action: routine.action, timeZone: routine.timeZone,
+    trigger: routine.trigger, asksFirst: routine.asksFirst };
+  const runs = !routine.paused && !team.paused && (team.members === null || team.members.includes(routine.member));
+  const next = runs ? nextRun(rules, nowMs) : null;
+  return {
+    ...routine,
+    when: describeTrigger(rules),
+    next: next === null ? null : new Date(next).toISOString(),
+    ...(routine.trigger.kind === "stockBelow" ? { waitsFor: "stock_feed" as const } : {}),
+    lastRun,
+  };
+}
+
+/// What each shop template's routines are made of, in the template's own order: the kind of work and the member whose job it is,
+/// as the API works them out from the template's kinds and words (`ACTION_OF` and `memberOf` in apps/api/src/routine-setup.ts), and
+/// the trigger its words say (`triggerOf` there). The words themselves are in `SHOP_TEMPLATES`; a test holds both to the
+/// `@manut/shop-templates` package and to that code.
+const TEMPLATE_ROUTINES: Readonly<Record<string, readonly { action: RoutineAction; trigger: RoutineTrigger; member: WorkerMember }[]>> = {
+  handmade: [
+    { action: "brief", trigger: { kind: "daily", at: "08:00" }, member: "ton" },
+    { action: "brief", trigger: { kind: "weekly", weekdays: [1], at: "08:00" }, member: "ton" },
+    { action: "draft", trigger: { kind: "stockBelow", threshold: 5 }, member: "ton" },
+    { action: "send", trigger: { kind: "monthly", day: "last", at: "18:00" }, member: "ton" },
+  ],
+  fashion: [
+    { action: "brief", trigger: { kind: "daily", at: "08:00" }, member: "ton" },
+    { action: "draft", trigger: { kind: "weekly", weekdays: [5], at: "10:00" }, member: "pim" },
+    { action: "draft", trigger: { kind: "stockBelow", threshold: 3 }, member: "ton" },
+    { action: "send", trigger: { kind: "monthly", day: "last", at: "18:00" }, member: "ton" },
+  ],
+  food: [
+    { action: "brief", trigger: { kind: "daily", at: "08:00" }, member: "ton" },
+    { action: "brief", trigger: { kind: "daily", at: "09:00" }, member: "ton" },
+    { action: "brief", trigger: { kind: "daily", at: "15:00" }, member: "ton" },
+    { action: "send", trigger: { kind: "monthly", day: "last", at: "18:00" }, member: "ton" },
+  ],
+};
+
+/// A new shop's setup from a template: the members it turns on, and its routines, each paused until the owner turns it on so that
+/// nothing runs by surprise, naming the template. Each has an id that sorts by when it was made.
+function templateRoutines(templateId: string, nowMs: number): { members: WorkerMember[]; routines: FakeRoutine[] } {
+  const template = SHOP_TEMPLATES.find((candidate) => candidate.id === templateId)!;
+  const setups = TEMPLATE_ROUTINES[templateId]!;
+  return {
+    members: template.team.filter(isWorkerMember),
+    routines: template.routines.map((words, index) => {
+      const setup = setups[index]!;
+      return { id: sortableId("rt", nowMs, index), name: words.does, action: setup.action, trigger: setup.trigger,
+        timeZone: "Asia/Bangkok", asksFirst: words.asksFirst, member: setup.member, paused: true, template: templateId,
+        createdAt: new Date(nowMs).toISOString() };
+    }),
+  };
+}
+
+/// The shop's zone is Bangkok, which has no daylight saving, so its offset from UTC never changes.
+const SHOP_OFFSET_MS = 7 * 60 * MINUTE_MS;
+
+/// The latest start of a routine's clock at or before `now`, as the API's claim would have recorded the run meant for it: the scan
+/// `nextRun` makes, backwards, a day at a time on the shop's calendar. A window and a stock routine have no set time to place.
+function previousStart(trigger: RoutineTrigger, nowMs: number): number {
+  if (trigger.kind === "window" || trigger.kind === "stockBelow") throw new Error("a routine with no set time has no start to place");
+  const [hours, minutes] = trigger.at.split(":").map(Number) as [number, number];
+  const local = nowMs + SHOP_OFFSET_MS;
+  for (let back = 0; back < 400; back++) {
+    const day = new Date(local - back * DAY_MS);
+    const [year, month, date] = [day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()] as const;
+    const fits = trigger.kind === "daily" || (trigger.kind === "weekly" && trigger.weekdays.includes(day.getUTCDay())) ||
+      (trigger.kind === "monthly" && date === (trigger.day === "last" ? new Date(Date.UTC(year, month + 1, 0)).getUTCDate() : trigger.day));
+    const start = Date.UTC(year, month, date, hours, minutes) - SHOP_OFFSET_MS;
+    if (fits && start <= nowMs) return start;
+  }
+  throw new Error("the sample routine never started");
+}
+
+/// Baan Mali's routines as its sample world would have kept them, in the order they were made, and the newest run of each, which
+/// together show every way a run can stand in the list: a brief that was done, a brief that failed because the books could not be
+/// read, the Friday post paused (so its run was skipped and says why), a reply routine with no customer waiting, the month's books
+/// that missed because their alarm came late, and a stock routine that has not run since there is no stock feed to wake it. The
+/// team is on. Each run was meant for the latest start of its routine's clock and written two minutes later, as the API writes one;
+/// the done and the failed run name the sample jobs (`sampleWorkers`) whose drafts and reason they report.
+function sampleRoutines(at: number): FakeRoutines {
+  const ago = (minutes: number) => new Date(at - minutes * MINUTE_MS).toISOString();
+  const day = 24 * 60;
+  const made = (id: string, minutesAgo: number, routine: Omit<FakeRoutine, "id" | "timeZone" | "createdAt">): FakeRoutine =>
+    ({ id, timeZone: "Asia/Bangkok", createdAt: ago(minutesAgo), ...routine });
+  const morning = made("rt-sample-morning-brief", 13 * day, { name: "Morning brief", action: "brief",
+    trigger: { kind: "daily", at: "08:00" }, asksFirst: false, member: "ton", paused: false });
+  const growth = made("rt-sample-growth-brief", 13 * day - 5, { name: "Weekly growth brief", action: "brief",
+    trigger: { kind: "weekly", weekdays: [1], at: "08:00" }, asksFirst: false, member: "ton", paused: false });
+  const replies = made("rt-sample-answer-messages", 13 * day - 10, { name: "Answer new customer messages", action: "reply",
+    trigger: { kind: "daily", at: "12:00" }, asksFirst: true, member: "nam", paused: false });
+  const post = made("rt-sample-friday-post", 9 * day, { name: "Draft the Friday post", action: "draft",
+    trigger: { kind: "weekly", weekdays: [5], at: "10:00" }, asksFirst: true, member: "pim", paused: true });
+  const books = made("rt-sample-month-books", 9 * day - 5, { name: "Month-end books", action: "send",
+    trigger: { kind: "monthly", day: "last", at: "18:00" }, asksFirst: true, member: "ton", paused: false });
+  const stock = made("rt-sample-low-stock", 2 * day, { name: "Tell me when candles run low", action: "draft",
+    trigger: { kind: "stockBelow", threshold: 5 }, asksFirst: false, member: "ton", paused: false });
+  const run = (routine: FakeRoutine, status: RoutineRun["status"], rest: { reason?: string; taskId?: string } = {}): RoutineRun => {
+    const instant = previousStart(routine.trigger, at);
+    return { routineId: routine.id, instant: new Date(instant).toISOString(), status, ...rest, member: routine.member,
+      at: new Date(instant + 2 * MINUTE_MS).toISOString() };
+  };
+  const task = (n: number) => `worker-task-6a7c1f00-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  return {
+    team: { paused: false, since: null, members: null },
+    routines: [morning, growth, replies, post, books, stock],
+    runs: [
+      run(morning, "done", { taskId: task(1) }),
+      run(growth, "failed", { reason: "payments_unavailable", taskId: task(4) }),
+      run(replies, "skipped", { reason: "nothing_to_answer" }),
+      run(post, "skipped", { reason: "routine_paused" }),
+      run(books, "missed"),
     ],
   };
 }
