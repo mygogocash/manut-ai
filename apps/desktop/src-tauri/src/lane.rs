@@ -233,7 +233,8 @@ const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT
 ///
 /// Work the app starts by itself (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list, the lane's
 /// Diff) first reads the repository's own config ([`Git::config_risk`]) and does nothing while it names a program git would
-/// run or another address to fetch from. Work the person asked for by pressing something (a lane started, a push after a Yes,
+/// run or another address to fetch from, and it never goes into a submodule (item 90): a git started inside one reads that
+/// submodule's own config and attributes, which neither that read nor any `-c` here reaches. Work the person asked for by pressing something (a lane started, a push after a Yes,
 /// Remove) runs with the person's and the repository's settings, as the same git in a terminal would, hooks and the file
 /// monitor aside.
 pub(crate) struct Git {
@@ -329,6 +330,11 @@ impl Git {
         let mut argv: Vec<String> = vec!["-C".into(), cwd.to_string_lossy().into_owned(), "-c".into(), self.hooks.clone(), "-c".into(), "core.fsmonitor=false".into()];
         if self.automatic {
             argv.extend(["-c".into(), "protocol.ext.allow=never".into()]);
+            // Never into a submodule (item 90): a git started inside one reads that submodule's own config and attributes,
+            // which no `-c` here reaches, so its clean filter would run. Each command that can descend says so itself
+            // (`--ignore-submodules=all` on status and diff, `--no-recurse-submodules` on the fetch); these two are the
+            // defaults for anything that does not, by `git help config`.
+            argv.extend(["-c".into(), "submodule.recurse=false".into(), "-c".into(), "diff.ignoreSubmodules=all".into()]);
         }
         argv.extend(args.iter().map(|a| (*a).to_string()));
         let mut env: Vec<(&str, &str)> = vec![("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")];
@@ -373,9 +379,11 @@ impl Git {
         Some(ran.out.lines().filter_map(|l| l.strip_prefix("worktree ")).map(|p| real(Path::new(p))).collect())
     }
 
-    /// How many files in worktree `wt` are changed or new (not ignored), or None when git could not say.
+    /// How many files in worktree `wt` are changed or new (not ignored), or None when git could not say. A submodule is not
+    /// counted, changed or not (item 90): to say whether one changed git runs `status` inside it, which reads the submodule's
+    /// own config and attributes and so runs any clean filter they name.
     pub(crate) fn changed(&self, wt: &Path) -> Option<u32> {
-        let ran = self.run(wt, &["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"]).ok()?;
+        let ran = self.run(wt, &["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=all"]).ok()?;
         (ran.code == Some(0)).then(|| ran.out.lines().filter(|l| !l.trim().is_empty()).count() as u32)
     }
 
@@ -1540,6 +1548,75 @@ pub(crate) mod tests {
         std::thread::sleep(Duration::from_millis(1100));
         fs::write(&a, text).unwrap();
         marker
+    }
+
+    /// A repository `subsrc` in `home` with one commit, added to `d` as its submodule `sub` (checked out in `d`, its git folder
+    /// under `d`'s modules folder) and committed, so every lane made from `d` afterwards has it too, not checked out.
+    pub(crate) fn with_submodule(home: &Path, d: &Path) {
+        let src = home.join("subsrc");
+        fs::create_dir_all(&src).unwrap();
+        sh(&src, &["init", "-q"]);
+        sh(&src, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        commit_in(&src, "s.txt", "inside\n");
+        sh(d, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", src.to_str().unwrap(), "sub"]);
+        sh(d, &["commit", "-q", "-m", "sub"]);
+    }
+
+    /// `wt`'s submodule `sub` checked out (when it is not yet), its OWN config naming a clean filter for every file, as in a
+    /// folder someone sent, and its file touched so git has to read it through the filter to compare it. Nothing in the
+    /// repository's own config names a program. The filter is a stand-in that notes it ran in `home/ran`.
+    pub(crate) fn filter_in_submodule(home: &Path, wt: &Path) -> PathBuf {
+        let sub = wt.join("sub");
+        if fs::symlink_metadata(sub.join(".git")).is_err() {
+            sh(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        }
+        let (script, marker) = spy(home, "subfilter", false);
+        sh(&sub, &["config", "filter.spy.clean", &script]);
+        let attrs = sh(&sub, &["rev-parse", "--git-path", "info/attributes"]);
+        let attrs = if Path::new(&attrs).is_absolute() { PathBuf::from(attrs) } else { sub.join(attrs) };
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "* filter=spy\n").unwrap();
+        let s = sub.join("s.txt");
+        let text = fs::read(&s).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        fs::write(&s, text).unwrap();
+        marker
+    }
+
+    #[test]
+    fn no_automatic_read_or_clean_up_runs_a_program_a_submodule_s_own_config_names() {
+        let Some((home, d)) = repo("sub-auto") else { return };
+        with_origin(&home, &d);
+        with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let made = pushed_lane(&home, &d, "sub");
+        let wt = Path::new(&made.worktree);
+        let marker = filter_in_submodule(&home, wt);
+        let ran = || fs::read_to_string(&marker).unwrap_or_default();
+        // git's own count of the folder, the kept list's counts and a deleted chat's clean-up, each the app's own doing
+        let _ = Git::automatic(&home).unwrap().changed(wt);
+        assert!(!marker.exists(), "a program ran for the count: {}", ran());
+        let _ = list(&home, &d).unwrap();
+        assert!(!marker.exists(), "a program ran for the kept list: {}", ran());
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert!(!marker.exists(), "a program ran for the clean-up: {}", ran());
+        assert!(!r.removed, "{r:?}");
+        assert!(wt.join("sub/s.txt").exists() && wt.join("sub.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_main_moved_note_runs_no_program_a_submodule_s_own_config_names() {
+        let Some((home, d)) = repo("sub-moved") else { return };
+        with_submodule(&home, &d);
+        let a = make(&home, &d, &names(&["kit/a"])).unwrap();
+        let marker = filter_in_submodule(&home, Path::new(&a.worktree));
+        commit_in(&d, "a.txt", "one\nmain\n");
+        fs::write(Path::new(&a.dir).join("a.txt"), "one\nlane\n").unwrap();
+        let m = crate::git_moved::main_moved(Path::new(&a.dir), Some("main"), &names(&["a.txt"])).unwrap().unwrap();
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert_eq!((m.ours.clone(), m.theirs.clone()), (vec!["a.txt".to_string()], vec!["a.txt".to_string()]));
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]

@@ -74,8 +74,10 @@ const UNSET: &[&str] = &[
 ];
 
 /// The flags of every diff: no external program, no text conversion, no colour, and a rename is a delete and an add, so a
-/// file one side moved and the other edited counts as changed on both.
-const DIFF: &[&str] = &["diff", "--no-ext-diff", "--no-textconv", "--no-renames"];
+/// file one side moved and the other edited counts as changed on both. A submodule is hidden and, if one reached a diff
+/// anyway, drawn as two commit names (item 90): comparing one with the work tree runs `status` inside it, and `diff.submodule`'s
+/// `log` and `diff` forms read or diff inside it, each with the submodule's own config, whose clean filter no flag here reaches.
+const DIFF: &[&str] = &["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=all", "--submodule=short"];
 
 /// A `diff` call's arguments: the flags every diff has, `extra`, then `tail`.
 fn diff_args(extra: &[&str], tail: &[&str]) -> Vec<String> {
@@ -92,9 +94,10 @@ struct Git {
 }
 
 impl Git {
-    /// `git -C <dir> <args>`, with the file monitor off. Err only when git could not run or did not answer in time.
+    /// `git -C <dir> <args>`, with the file monitor off and nothing going into a submodule unless a command is told to (see
+    /// [`DIFF`]). Err only when git could not run or did not answer in time.
     fn run(&self, args: &[&str]) -> Result<Ran, String> {
-        let mut argv: Vec<String> = vec!["-c".into(), "core.fsmonitor=false".into(), "-C".into(), self.dir.to_string_lossy().into_owned()];
+        let mut argv: Vec<String> = vec!["-c".into(), "core.fsmonitor=false".into(), "-c".into(), "submodule.recurse=false".into(), "-c".into(), "diff.ignoreSubmodules=all".into(), "-C".into(), self.dir.to_string_lossy().into_owned()];
         argv.extend(args.iter().map(|a| a.to_string()));
         run_env(&self.exe, &argv, true, ENV, UNSET)
     }

@@ -403,6 +403,19 @@ mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    #[test]
+    fn a_pull_runs_no_program_a_submodule_s_own_config_names() {
+        let Some((home, d)) = repo("pull-submodule") else { return };
+        let bare = with_origin(&home, &d);
+        crate::lane::tests::with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        advance(&home, &bare, 1);
+        let marker = crate::lane::tests::filter_in_submodule(&home, &d);
+        let got = pull(&home, &d);
+        assert!(!marker.exists(), "a program ran: {} ({got:?})", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
     /// Where HEAD is, the remote-tracking branch and the stash, read without refreshing the index (which would run a filter).
     fn state_quiet(d: &Path) -> (String, String, String) {
         (sh(d, &["rev-parse", "HEAD"]), sh(d, &["rev-parse", "refs/remotes/origin/main"]), sh(d, &["stash", "list"]))

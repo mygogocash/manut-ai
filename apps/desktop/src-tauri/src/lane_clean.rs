@@ -382,6 +382,21 @@ mod tests {
     }
 
     #[test]
+    fn a_merged_lane_s_clean_up_runs_no_program_a_submodule_s_own_config_names_and_keeps_the_folder() {
+        let Some((home, d)) = repo("clean-submodule") else { return };
+        with_origin(&home, &d);
+        crate::lane::tests::with_submodule(&home, &d);
+        sh(&d, &["push", "-q", "origin", "main"]);
+        let (made, tip) = lane(&home, &d, "sub", true);
+        let marker = crate::lane::tests::filter_in_submodule(&home, Path::new(&made.worktree));
+        let out = run(&home, &d, Source::Github, &|_| Some(said(&tip)));
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert_eq!(out.removed, Vec::<String>::new(), "{out:?}");
+        assert!(Path::new(&made.worktree).join("sub/s.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn says_it_cannot_tell_and_does_nothing_without_a_github_or_gitlab_remote() {
         let Some((home, d)) = repo("clean-cannot") else { return };
         with_origin(&home, &d);
