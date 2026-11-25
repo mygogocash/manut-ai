@@ -111,6 +111,10 @@ const COSE_Y = Uint8Array.of(0x22, 0x58, 0x20);
 const COSE_KEY_BYTES = COSE_PREFIX.length + 32 + COSE_Y.length + 32;
 
 type Refused = { readonly ok: false; readonly refused: PasskeyRefusal };
+
+function allBytes(...values: unknown[]): boolean {
+  return values.every((value) => value instanceof Uint8Array);
+}
 const refuse = (refused: PasskeyRefusal): Refused => ({ ok: false, refused });
 
 /// Steps 8 to 14 of sections 7.1 and 7.2: the client data, read as UTF-8 (a leading byte-order
@@ -196,6 +200,8 @@ export async function verifyPasskeyAssertion(
   answer: PasskeyAssertion,
   expected: { readonly challenge: Uint8Array; readonly rp: RelyingParty; readonly passkey: StoredPasskey },
 ): Promise<AssertionResult> {
+  // The answer arrives decoded from the phone, so its fields are checked to be bytes before use.
+  if (!allBytes(answer.credentialId, answer.clientDataJSON, answer.authenticatorData, answer.signature)) return refuse("malformed");
   const clientDataJSON = copyBytes(answer.clientDataJSON);
   const authenticatorData = copyBytes(answer.authenticatorData);
   const signature = copyBytes(answer.signature);
@@ -237,6 +243,7 @@ export async function verifyPasskeyRegistration(
   registration: PasskeyRegistration,
   expected: { readonly challenge: Uint8Array; readonly rp: RelyingParty },
 ): Promise<RegistrationResult> {
+  if (!allBytes(registration.credentialId, registration.clientDataJSON, registration.authenticatorData)) return refuse("malformed");
   const clientDataJSON = copyBytes(registration.clientDataJSON);
   const data = copyBytes(registration.authenticatorData);
   const client = readClientData(clientDataJSON, "webauthn.create", copyBytes(expected.challenge), expected.rp);

@@ -220,6 +220,20 @@ describe("pairing", () => {
     expect(await refusal(() => own.phone.channel.open(recordedGrant!))).toBe("unauthenticated");
   });
 
+  it("the photographed code's secret is not K, so it opens no session as the paired phone", async () => {
+    // The relay knows the paired phone's device id (it forwards its hello), and the photograph
+    // gives the code's secret. K was drawn by the Mac after Allow and only ever crossed inside the
+    // pairing channel, so a session proved with the code's secret is refused.
+    const offer = newPairingOffer(HOST_ID, seededRandom(1));
+    const grant = newPairingGrant(seededRandom(200));
+    const started = await startSession({ hostId: HOST_ID, deviceId: grant.deviceId, secret: offer.secret });
+    const accepted = await acceptSession(started.hello, { hostId: HOST_ID, secretFor: (id) => (id === grant.deviceId ? grant.secret : undefined) });
+    expect(await refusal(() => started.phone.receiveWelcome(accepted.welcome))).toBe("unauthenticated");
+    // And the code's door is not a paired device at all.
+    const door = await startSession({ hostId: HOST_ID, deviceId: offer.doorId, secret: offer.secret });
+    expect(await refusal(() => acceptSession(door.hello, { hostId: HOST_ID, secretFor: (id) => (id === grant.deviceId ? grant.secret : undefined) }))).toBe("unknown_device");
+  });
+
   it("with the secret, someone in the middle still meets two different check codes", async () => {
     // A relay that also has the secret (photographed within its two minutes) pairs with each side
     // on its own. The phone committed to its key first and the relay committed to its key before

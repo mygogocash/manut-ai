@@ -6,6 +6,7 @@ import {
   PUBLIC_KEY_BYTES,
   type HandshakeKeys,
   derive,
+  SECRET_BYTES,
   ephemeralKeyPair,
   exportPublicKey,
   handshakeKeys,
@@ -72,9 +73,20 @@ function commitment(phoneKey: Bytes): Promise<Bytes> {
   return sha256(COMMIT_LABEL, phoneKey);
 }
 
+/// Which Mac and which door a pairing belongs to: the parts of the code that are not secret, kept
+/// so neither side holds the code's raw secret longer than it needs to.
+interface PairingContext {
+  readonly hostId: Bytes;
+  readonly doorId: Bytes;
+}
+
+function contextOf(offer: PairingOffer): PairingContext {
+  return { hostId: hostIdBytes(offer.hostId), doorId: uuidToBytes(offer.doorId) };
+}
+
 /// What both sides compute once the transcript is complete.
-async function pairingKeys(secret: CryptoKey, ecdh: Bytes, offer: PairingOffer, commit: Bytes, key: Bytes, proofCore: Bytes) {
-  const th = await sha256(LABEL, hostIdBytes(offer.hostId), uuidToBytes(offer.doorId), commit, key, proofCore);
+async function pairingKeys(secret: CryptoKey, ecdh: Bytes, context: PairingContext, commit: Bytes, key: Bytes, proofCore: Bytes) {
+  const th = await sha256(LABEL, context.hostId, context.doorId, commit, key, proofCore);
   const keys = await handshakeKeys("pair", secret, ecdh, th);
   const code = await derive(secret, ecdh, "manut-remote-v1 pair check code", th, 4);
   const checkCode = String(new DataView(code.buffer).getUint32(0) % 10_000).padStart(4, "0");
@@ -89,7 +101,7 @@ export interface PairingOptions {
 
 /// The phone's side, after it scanned the code and sent its commitment.
 export class PhonePairing {
-  readonly #offer: PairingOffer;
+  readonly #context: PairingContext;
   readonly #secret: CryptoKey;
   readonly #ephemeral: CryptoKeyPair;
   readonly #phoneKey: Bytes;
@@ -98,8 +110,8 @@ export class PhonePairing {
   #state: "commit sent" | "proof sent" | "done" | "failed" = "commit sent";
   #pending: { th: Bytes; keys: HandshakeKeys; checkCode: string } | null = null;
 
-  constructor(offer: PairingOffer, secret: CryptoKey, ephemeral: CryptoKeyPair, phoneKey: Bytes, commit: Bytes, channel: ChannelOptions) {
-    this.#offer = offer;
+  constructor(context: PairingContext, secret: CryptoKey, ephemeral: CryptoKeyPair, phoneKey: Bytes, commit: Bytes, channel: ChannelOptions) {
+    this.#context = context;
     this.#secret = secret;
     this.#ephemeral = ephemeral;
     this.#phoneKey = phoneKey;
@@ -116,7 +128,7 @@ export class PhonePairing {
     header(bytes, KEY, KEY_BYTES);
     const ecdh = await sharedSecret(this.#ephemeral, bytes.slice(2));
     const proofCore = concatBytes(Uint8Array.of(PROOF, VERSION), this.#phoneKey);
-    this.#pending = await pairingKeys(this.#secret, ecdh, this.#offer, this.#commit, bytes, proofCore);
+    this.#pending = await pairingKeys(this.#secret, ecdh, this.#context, this.#commit, bytes, proofCore);
     const proof = concatBytes(proofCore, await hmac(this.#pending.keys.phoneConfirm, this.#pending.th));
     this.#state = "proof sent";
     return proof;
@@ -139,28 +151,30 @@ export class PhonePairing {
 
 /// The phone scanned a code: it makes its throwaway key and sends only its commitment.
 export async function startPairing(offer: PairingOffer, options: PairingOptions = {}): Promise<{ commit: Bytes; phone: PhonePairing }> {
-  hostIdBytes(offer.hostId);
-  uuidToBytes(offer.doorId);
+  const context = contextOf(offer);
   const secret = await importSharedSecret(offer.secret);
   const channel = options.channel ?? {};
   validateChannelOptions(channel);
   const ephemeral = options.ephemeral ?? (await ephemeralKeyPair());
   const phoneKey = await exportPublicKey(ephemeral);
   const commit = concatBytes(Uint8Array.of(COMMIT, VERSION), await commitment(phoneKey));
-  return { commit, phone: new PhonePairing(offer, secret, ephemeral, phoneKey, commit, channel) };
+  return { commit, phone: new PhonePairing(context, secret, ephemeral, phoneKey, commit, channel) };
 }
 
 /// The Mac's side of one code, from when it is shown.
 export class MacPairing {
   /// The first instant at which the code no longer pairs.
   readonly expiresAt: number;
-  readonly #offer: PairingOffer;
+  readonly #context: PairingContext;
+  /// The code's raw secret, a private copy, zeroed at the first commit whatever it brings.
+  readonly #secret: Bytes;
   readonly #channel: ChannelOptions;
   #state: "open" | "key sent" | "done" | "failed" = "open";
-  #exchange: { ephemeral: CryptoKeyPair; commit: Bytes; key: Bytes } | null = null;
+  #exchange: { secret: CryptoKey; ephemeral: CryptoKeyPair; commit: Bytes; key: Bytes } | null = null;
 
-  constructor(offer: PairingOffer, createdAt: number, ttlMs: number, channel: ChannelOptions) {
-    this.#offer = offer;
+  constructor(context: PairingContext, secret: Bytes, createdAt: number, ttlMs: number, channel: ChannelOptions) {
+    this.#context = context;
+    this.#secret = secret;
     this.expiresAt = createdAt + ttlMs;
     this.#channel = channel;
   }
@@ -171,14 +185,20 @@ export class MacPairing {
     // Whatever became of the first try, the code is spent: a person at the Mac shows a new one.
     if (this.#state !== "open") throw new RemoteChannelError("used");
     this.#state = "failed";
-    if (!(now < this.expiresAt)) throw new RemoteChannelError("expired");
-    const bytes = copyBytes(commit);
-    header(bytes, COMMIT, COMMIT_BYTES);
-    const ephemeral = options.ephemeral ?? (await ephemeralKeyPair());
-    const key = concatBytes(Uint8Array.of(KEY, VERSION), await exportPublicKey(ephemeral));
-    this.#exchange = { ephemeral, commit: bytes, key };
-    this.#state = "key sent";
-    return key;
+    try {
+      if (!(now < this.expiresAt)) throw new RemoteChannelError("expired");
+      const bytes = copyBytes(commit);
+      header(bytes, COMMIT, COMMIT_BYTES);
+      const secret = await importSharedSecret(this.#secret);
+      const ephemeral = options.ephemeral ?? (await ephemeralKeyPair());
+      const key = concatBytes(Uint8Array.of(KEY, VERSION), await exportPublicKey(ephemeral));
+      this.#exchange = { secret, ephemeral, commit: bytes, key };
+      this.#state = "key sent";
+      return key;
+    } finally {
+      // Best effort, as in keys.ts: from here the secret lives only as a key script cannot read.
+      this.#secret.fill(0);
+    }
   }
 
   /// Checks that the phone's key opens its commitment and that its proof holds. Only then does the
@@ -187,16 +207,15 @@ export class MacPairing {
     if (this.#state === "failed") throw new RemoteChannelError("closed");
     if (this.#state !== "key sent" || this.#exchange === null) throw new RemoteChannelError("used");
     this.#state = "failed";
-    const { ephemeral, commit, key } = this.#exchange;
+    const { secret, ephemeral, commit, key } = this.#exchange;
     this.#exchange = null;
     if (!(now < this.expiresAt)) throw new RemoteChannelError("expired");
     const bytes = copyBytes(proof);
     header(bytes, PROOF, PROOF_BYTES);
     const phoneKey = bytes.slice(2, 2 + PUBLIC_KEY_BYTES);
     if (!equalBytes(await commitment(phoneKey), commit.subarray(2))) throw new RemoteChannelError("unauthenticated");
-    const secret = await importSharedSecret(this.#offer.secret);
     const ecdh = await sharedSecret(ephemeral, phoneKey);
-    const { th, keys, checkCode } = await pairingKeys(secret, ecdh, this.#offer, commit, key, bytes.subarray(0, PROOF_CORE_BYTES));
+    const { th, keys, checkCode } = await pairingKeys(secret, ecdh, this.#context, commit, key, bytes.subarray(0, PROOF_CORE_BYTES));
     if (!equalBytes(await hmac(keys.phoneConfirm, th), bytes.subarray(PROOF_CORE_BYTES))) throw new RemoteChannelError("unauthenticated");
     const confirm = concatBytes(Uint8Array.of(CONFIRM, VERSION), await hmac(keys.macConfirm, th));
     this.#state = "done";
@@ -207,14 +226,13 @@ export class MacPairing {
 /// The Mac starts showing a code at `createdAt`. It pairs for two minutes at most; `ttlMs` may
 /// only shorten that.
 export function macPairing(offer: PairingOffer, createdAt: number, options: { ttlMs?: number; channel?: ChannelOptions } = {}): MacPairing {
-  hostIdBytes(offer.hostId);
-  uuidToBytes(offer.doorId);
-  if (offer.secret.length !== 32) throw new RemoteChannelError("invalid");
+  const context = contextOf(offer);
+  if (offer.secret.length !== SECRET_BYTES) throw new RemoteChannelError("invalid");
   const ttlMs = options.ttlMs ?? PAIRING_TTL_MS;
   if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > PAIRING_TTL_MS || !Number.isFinite(createdAt)) {
     throw new RemoteChannelError("invalid");
   }
   const channel = options.channel ?? {};
   validateChannelOptions(channel);
-  return new MacPairing({ ...offer, secret: copyBytes(offer.secret), doorToken: copyBytes(offer.doorToken) }, createdAt, ttlMs, channel);
+  return new MacPairing(context, copyBytes(offer.secret), createdAt, ttlMs, channel);
 }

@@ -130,6 +130,13 @@ describe("decision challenges", () => {
     expect(await vault.verify({ ...answer, signature }, context())).toEqual({ ok: false, refused: "bad_signature" });
   });
 
+  it("an answer whose fields are not bytes is refused, not thrown, and spends the challenge", async () => {
+    const { vault, answer, context } = await scenario();
+    const garbled = { ...answer, signature: "MEUCIQ" as unknown as Uint8Array };
+    expect(await vault.verify(garbled, context())).toEqual({ ok: false, refused: "malformed" });
+    expect(await vault.verify(answer, context())).toEqual({ ok: false, refused: "unknown" });
+  });
+
   it("a challenge the Mac never issued, or one from another Mac, is refused", async () => {
     const { answer, context } = await scenario();
     const fresh = new DecisionChallenges();
