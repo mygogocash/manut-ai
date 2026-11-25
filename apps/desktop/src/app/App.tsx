@@ -13,6 +13,7 @@ import { DetailsFallback } from "./DetailsFallback";
 import { PanelResizer } from "./PanelResizer";
 import { TermMenu } from "../sessions/term/TermMenu";
 import { CloseToasts } from "../sessions/CloseToasts";
+import { Palette } from "../palette/Palette";
 import { SettingsView } from "./SettingsView";
 import { AutomationsPage } from "../pages/Automations";
 import { PluginsPage } from "../pages/Plugins";
@@ -145,6 +146,8 @@ export function App() {
       {/* The undo toasts of a closed terminal belong to the app, not to the Code page's list: ⌘W closes the terminal in
           view, and the list is not drawn then. */}
       <CloseToasts />
+      {/* ⌘K and the menu's Search open it over whatever is showing */}
+      <Palette />
     </div>
     </MentionContext.Provider>
   );

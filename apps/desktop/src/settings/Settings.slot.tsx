@@ -32,25 +32,10 @@ import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { ComputerPage } from "./ComputerPage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
+import { APP_PAGES } from "./pages";
 
 export const slot = "settings";
 
-const APP_PAGES: { id: string; label: Key }[] = [
-  { id: "general", label: "set.general" },
-  // the chat box's microphone and voice mode: the language spoken, this Mac or Apple, the voice (VoicePage.tsx)
-  { id: "voice", label: "set.voice" },
-  { id: "terminal", label: "set.terminal" },
-  // every coding agent: on or off, its program, home, arguments and variables; your own agents; the accounts (item 74)
-  { id: "providers", label: "set.providers" },
-  // computer use: the two macOS permissions, read without asking, and what the agent may look at and do (ComputerPage.tsx)
-  { id: "computer", label: "set.computer" },
-  // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
-  { id: "worktrees", label: "set.worktrees" },
-  // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
-  { id: "mcp", label: "set.mcp" },
-  // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
-  { id: "developer", label: "set.developer" },
-];
 
 const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offline", starting: "bot.starting" };
 /** A bot's status in words; a status manut does not know stays as the bridge wrote it. */

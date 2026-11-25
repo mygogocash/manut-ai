@@ -28,6 +28,7 @@ import { rowStatus } from "../threads/ThreadTree";
 import { MoreButton, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
+import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
@@ -219,7 +220,7 @@ export function Sidebar() {
       shops={{ list: s.shops.list.map((r) => ({ ...r, name: shopName(s, r) })), current: s.shops.current, onSwitch: (id) => void s.switchShop(id) }}
       notice={shopNotice(s.shops, s.dismissShopNotice)}
       onRow={go}
-      onSearch={() => s.openPage("history", { find: true })}
+      onSearch={() => togglePalette()}
       onAccount={() => s.openSettings()}
       foot={
         <>
