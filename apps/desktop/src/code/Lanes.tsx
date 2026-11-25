@@ -27,7 +27,7 @@ import { isLaneChat, laneOf, useLanesVersion } from "./laneStore";
 import type { Say } from "./command";
 import { usePullRequests, type LanePull } from "../tasks/pulls";
 import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
-import { arrange, sessionRowKey, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
+import { arrange, sessionRowKey, untilWord, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
 /** The branch a lane's row shows, and why: Kit's own for the lane (with the folder of its own it works in), the folder's
  *  branch now that it is not the lane's, or the folder's own for a lane that made none. */
@@ -291,15 +291,9 @@ export function LaneMore({ row, mark }: { row: LaneRow; mark: RowMark | undefine
 /** Words for where a put-away lane is: Snoozed until a time, or Archived. */
 function awayWord(mark: RowMark | undefined, now: number): string {
   if (mark?.archived !== undefined) return t("row.archived");
-  return mark?.snoozed !== undefined ? t("row.snoozed", { when: elapsedUntil(mark.snoozed, now) }) : "";
+  return mark?.snoozed !== undefined ? t("row.snoozed", { when: untilWord(mark.snoozed, now) }) : "";
 }
 
-/** A time ahead as the day's time, with the day when it is not today ("09:00", "Thu 09:00"). */
-function elapsedUntil(at: number, now: number): string {
-  const d = new Date(at);
-  const same = d.toDateString() === new Date(now).toDateString();
-  return same ? hhmm(d) : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hhmm(d)}`;
-}
 
 export function LanesView({ rows, now, onOpen, onPull, onNew, backOpen = null, onBack, below, marks = {}, away = false, onAway }: LanesProps) {
   if (rows.length === 0 && !onNew) return null;

@@ -3080,4 +3080,6 @@ export const zh: Record<Key, string> = {
   "lane.away": "已稍后提醒和已归档 ({n})",
   "lane.pr": "拉取请求 #{n}（{state}）",
   "lane.prTip": "在任务中打开",
+  "history.archive": "归档",
+  "history.archiveN": "归档 ({n})",
 };

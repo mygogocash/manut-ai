@@ -3111,4 +3111,6 @@ export const en = {
   "lane.away": "Snoozed and archived ({n})",
   "lane.pr": "Pull request #{n} ({state})",
   "lane.prTip": "Open it in Tasks",
+  "history.archive": "Archive",
+  "history.archiveN": "Archive ({n})",
 };

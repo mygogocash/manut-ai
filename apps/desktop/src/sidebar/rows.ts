@@ -17,6 +17,7 @@
 //  - A record saved by an older build has none of these keys and reads as no marks; a field this build does not know is dropped
 //    on reading, never an error.
 import { useSyncExternalStore } from "react";
+import { hhmm } from "../app/time";
 
 export const ROWS_KEY = "manut.sidebar.rows";
 
@@ -163,6 +164,12 @@ export function snoozeUntil(id: SnoozeId, now: number): number {
   if (id === "tomorrow") return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 9).getTime();
   const toMonday = ((8 - d.getDay()) % 7) || 7;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + toMonday, 9).getTime();
+}
+
+/** A time ahead as the day's time, with the weekday when it is not today ("09:00", "Thu 09:00"). */
+export function untilWord(at: number, now: number): string {
+  const d = new Date(at);
+  return d.toDateString() === new Date(now).toDateString() ? hhmm(d) : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hhmm(d)}`;
 }
 
 // ---- the store ----------------------------------------------------------------------------------------------------

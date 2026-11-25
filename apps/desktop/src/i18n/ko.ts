@@ -3080,4 +3080,6 @@ export const ko: Record<Key, string> = {
   "lane.away": "다시 알림과 보관됨 ({n})",
   "lane.pr": "풀 리퀘스트 #{n} ({state})",
   "lane.prTip": "작업에서 열기",
+  "history.archive": "보관함",
+  "history.archiveN": "보관함 ({n})",
 };

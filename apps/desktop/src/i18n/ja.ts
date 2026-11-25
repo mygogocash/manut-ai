@@ -3080,4 +3080,6 @@ export const ja: Record<Key, string> = {
   "lane.away": "スヌーズ中とアーカイブ ({n})",
   "lane.pr": "プルリクエスト #{n}（{state}）",
   "lane.prTip": "タスクで開く",
+  "history.archive": "アーカイブ",
+  "history.archiveN": "アーカイブ ({n})",
 };
