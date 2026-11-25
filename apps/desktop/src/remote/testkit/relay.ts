@@ -49,7 +49,8 @@ class MacEnd implements RelaySocket {
   close(code = 1000, reason = ""): void {
     if (!this.open) return;
     this.open = false;
-    this.relay.macClosed(this, code, reason);
+    // After whatever this socket sent before closing, as a real socket delivers it.
+    later(() => this.relay.macClosed(this, code, reason));
   }
 
   deliver(data: string | Uint8Array): void {
@@ -84,7 +85,7 @@ class PhoneEnd implements PhoneSocket {
   close(code = 1000, reason = ""): void {
     if (!this.open) return;
     this.open = false;
-    this.relay.phoneClosed(this, code, reason);
+    later(() => this.relay.phoneClosed(this, code, reason));
   }
 
   deliver(data: string | Uint8Array): void {
@@ -165,8 +166,8 @@ export class FakeRelay {
   }
 
   async fromMac(socket: MacEnd, data: string | Uint8Array): Promise<void> {
-    if (!socket.open) return;
     if (!socket.authed) {
+      if (!socket.open) return;
       const hello = typeof data === "string" ? (JSON.parse(data) as Record<string, unknown>) : null;
       const ok = hello?.t === "hello" && typeof hello.key === "string" && typeof hello.sig === "string" && (await this.#verify(socket.hostId, socket.nonce, hello.key, hello.sig));
       if (!ok) return socket.shut(4401, "unauthenticated");
@@ -199,8 +200,8 @@ export class FakeRelay {
   }
 
   async fromPhone(phone: PhoneEnd, data: string | Uint8Array): Promise<void> {
-    if (!phone.open) return;
     if (phone.device === null) {
+      if (!phone.open) return;
       const hello = typeof data === "string" ? (JSON.parse(data) as Record<string, unknown>) : null;
       const device = typeof hello?.device === "string" ? hello.device : "";
       const token = typeof hello?.token === "string" ? hello.token : "";
