@@ -107,6 +107,9 @@ describe("the shell's answers about a lane's folder", () => {
     const k = { worktree: "/h/.manut/lanes/a/qr", dir: "/h/.manut/lanes/a/qr", branch: "kit/qr", base: "main", made: 5, exists: true, changed: 2, ahead: 0, unpushed: 1 };
     expect(readKept([k, { ...k, branch: "main" }, null, { ...k, worktree: "" }, { ...k, changed: -1, ahead: "2", unpushed: -1, exists: "yes" }])).toEqual([k, { ...k, changed: null, ahead: null, unpushed: null, exists: false }]);
     expect(readKept({})).toEqual([]);
+    // the files git ignores in it that may be the developer's, named when there are any
+    expect(readKept([{ ...k, ignored: [".env.local", null, "data/"] }])[0].ignored).toEqual([".env.local", "data/"]);
+    expect(readKept([{ ...k, ignored: [] }])[0]).not.toHaveProperty("ignored");
   });
 
   it("takes nothing as removed unless the shell said so", () => {
@@ -145,7 +148,11 @@ describe("the shell's answers to a clean-up", () => {
     expect(readReleased({ removed: true, kept: null, changed: null, unpushed: null })).toEqual({ removed: true, kept: null, changed: null, unpushed: null });
     expect(readReleased({ removed: "yes", kept: "unpushed", changed: 0, unpushed: 2 })).toEqual({ removed: false, kept: "unpushed", changed: 0, unpushed: 2 });
     expect(readReleased(undefined)).toEqual({ removed: false, kept: null, changed: null, unpushed: null });
+    // the files git ignores a folder was kept for: strings only
+    expect(readReleased({ removed: false, kept: "ignored", changed: 0, unpushed: null, ignored: [".env.local", 3, "", "dev.db"] })).toEqual({ removed: false, kept: "ignored", changed: 0, unpushed: null, ignored: [".env.local", "dev.db"] });
+    expect(readReleased({ removed: true, kept: null, changed: null, unpushed: null, ignored: [] })).not.toHaveProperty("ignored");
     expect(readCleaned({ removed: ["kit/a", "main", 3], kept: [{ branch: "kit/b", why: "changes" }, { branch: "kit/c" }, null], cannot: "not_signed_in" })).toEqual({ removed: ["kit/a"], kept: [{ branch: "kit/b", why: "changes" }], cannot: "not_signed_in" });
     expect(readCleaned("x")).toEqual({ removed: [], kept: [], cannot: null });
+    expect(readCleaned({ removed: [], kept: [], cannot: "config", setting: "filter.lfs.smudge" })).toEqual({ removed: [], kept: [], cannot: "config", setting: "filter.lfs.smudge" });
   });
 });

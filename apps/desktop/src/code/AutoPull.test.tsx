@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 afterEach(() => setLang("en"));
 
-const P = (o: Partial<Pulled>): Pulled => ({ done: false, why: "current", branch: "main", remote: "origin", from: "a1b2c3d", to: "a1b2c3d", count: 0, ...o });
+const P = (o: Partial<Pulled>): Pulled => ({ done: false, why: "current", branch: "main", remote: "origin", from: "a1b2c3d", to: "a1b2c3d", count: 0, setting: "", ...o });
 
 describe("the switch", () => {
   it("is off by default and a damaged value is the default", () => {
@@ -81,6 +81,10 @@ describe("what the line says", () => {
     expect(pullLine(P({}))).toBe("main is up to date with origin.");
     expect(pullLine(P({ why: "changes" }))).toBe("Did not pull main: the folder has changed or new files.");
     expect(pullLine(P({ why: "diverged" }))).toContain("cannot simply move forward");
+    // the project's own git config names a program: the line says which setting, in one line
+    expect(pullLine(P({ why: "config", setting: "core.sshcommand" }))).toBe(
+      "Did not pull: this project's own git settings name a program for git to run, or another address to fetch from (core.sshcommand). The app does not run those by itself; pull in a terminal if you trust them.",
+    );
     // a folder that is not a repository, or a lane's: nothing on the page
     expect(pullLine(P({ why: "not_a_repository" }))).toBeNull();
     expect(pullLine(P({ why: "lane" }))).toBeNull();
@@ -108,5 +112,7 @@ describe("what the line says", () => {
     expect(readPulled({ done: true, why: "changes" })?.done).toBe(false);
     for (const bad of [null, "pulled", { why: "merged" }, { done: true }, []]) expect(readPulled(bad), JSON.stringify(bad)).toBeNull();
     expect(readPulled({ why: "pulled", count: -4 })?.count).toBe(0);
+    expect(readPulled({ why: "config", setting: "url.*.insteadof" })).toMatchObject({ done: false, why: "config", setting: "url.*.insteadof" });
+    expect(readPulled({ why: "current", setting: 3 })?.setting).toBe("");
   });
 });

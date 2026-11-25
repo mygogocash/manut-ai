@@ -26,11 +26,22 @@ describe("a computer use card", () => {
     setLang("en");
     const html = renderToString(<Cards bot="buddy" item={ask({ act: "set", app: "Safari", window: "Shopee Seller Centre", control: "text field “Search”", text: "sk-live-4242 order 2291" })} />);
     expect(html).toContain("Type into text field “Search” in Safari?");
-    expect(html).toMatch(/data-testid="card-computer"[^>]*>App: Safari\nWindow: Shopee Seller Centre\nControl: text field “Search”\nText: sk-live-4242 order 2291</);
+    expect(html).toMatch(/data-testid="card-computer"[^>]*>App: Safari\nWindow: Shopee Seller Centre\nControl: text field “Search”\nThe control&#x27;s name is the one Safari gives it \(a web page names its own controls\), so check it is the one you mean\.\nText: sk-live-4242 order 2291</);
     expect(html).toContain('data-choice="deny"');
     expect(html).toContain('data-choice="once"');
     expect(html).not.toContain('data-choice="session"');
     expect(html).not.toContain('data-testid="card-risk"');
+  });
+
+  it("shows the control's picture beside its name, and says the name is the app's own", () => {
+    setLang("en");
+    const html = renderToString(<Cards bot="buddy" item={ask({ act: "click", app: "Safari", window: "Shopee", control: "button “Pay”", picture: "iVBORw0KGgo=" })} />);
+    expect(html).toContain('data-testid="card-computer-picture"');
+    expect(html).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(html).toContain('alt="How the control looks in Safari now"');
+    expect(html).toContain("The control&#x27;s name is the one Safari gives it");
+    // without a picture, no image
+    expect(renderToString(<Cards bot="buddy" item={ask({ act: "click", app: "Safari", control: "button “Pay”" })} />)).not.toContain("card-computer-picture");
   });
 
   it("is drawn in the person's language", () => {

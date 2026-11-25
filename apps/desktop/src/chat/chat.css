@@ -672,6 +672,17 @@
   animation: var(--anim-pulse);
 }
 
+/* a row that arrived while the chat was open: an ask (an approval, a question) fades where it stands and stays still,
+   never bouncing (docs/motion.md, "Rise: never on an ask") */
+.row.arrived-ask {
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+}
+/* a decision that landed in its row: the settled line (Settle) */
+.line.landed {
+  animation: var(--anim-settle);
+}
+
 /* plain one-line fallbacks (replaced by feature slots) */
 .line {
   display: flex;
@@ -827,8 +838,6 @@
   padding: 6px 9px;
   font-size: 11.5px;
   color: var(--muted);
-  --rise-by: var(--arrive-by);
-  animation: var(--anim-arrive);
 }
 .hint-k {
   font-family: var(--mono);
@@ -940,19 +949,14 @@
   /* a ring in the page colour, so the answer's edge reads over the faded quote in both themes */
   box-shadow: 0 0 0 2px var(--bg);
 }
-/* the message a quote pointed at, lit for a moment (one of motionRule.test.ts's own moves: nothing takes .lit away, so
-   the keyframes end it; item 85b settles it on the board) */
-.row-user.lit .msg.u .b {
-  animation: msg-lit 1.4s ease-out;
+/* the message a quote pointed at: a ring settles on it (the board's Settle) and Timeline.tsx takes the class away a
+   moment later, so the ring fades out quicker than it came (Hover's fade) */
+.row-user .msg.u .b {
+  transition: box-shadow var(--tr-hover);
 }
-@keyframes msg-lit {
-  0%,
-  35% {
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-  100% {
-    box-shadow: 0 0 0 2px transparent;
-  }
+.row-user.lit .msg.u .b {
+  box-shadow: 0 0 0 2px var(--accent);
+  animation: var(--anim-settle);
 }
 .msg-reply {
   display: inline-flex;

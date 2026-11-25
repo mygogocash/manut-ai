@@ -25,6 +25,7 @@ import { t } from "../../i18n";
 import { useBotReady } from "../connect/ready";
 import { isMac } from "../../app/shortcuts";
 import { JumpPill, PinnedOwn, useTimelineNav } from "./TimelineJump";
+import { useArrivals } from "./arrival";
 
 /** A time label goes in when the day changes, or after a quiet gap within the same day. */
 const GAP = 30 * 60;
@@ -63,6 +64,19 @@ export function Timeline({
   // the answer being written, in whole lines: never word by word, never the commentary beside a tool call
   const writing = chat?.turn ? answerSoFar(chat.turn) : "";
   const typing = awaitingFirstToken(chat);
+  // rows that arrived while this chat was open Rise once; the answer that was already on screen as it streamed, an
+  // error and a note do not (docs/motion.md)
+  const wasWriting = useRef(false);
+  const fresh = useArrivals(
+    bot.name,
+    items.map((i) => i.id),
+    !!chat?.loaded,
+    (id) => {
+      const it = items.find((i) => i.id === id);
+      return !it || it.kind === "system" || (it.kind === "assistant" && wasWriting.current) || ("error" in it && !!it.error);
+    },
+  );
+  wasWriting.current = !!writing;
   // the one row of the live run that carries the bot's ringed face
   const faceRow = liveFaceRow(items, chat?.turn, typing);
   const ref = useRef<HTMLDivElement>(null);
@@ -118,6 +132,7 @@ export function Timeline({
     el.classList.remove("lit");
     void el.offsetWidth;
     el.classList.add("lit");
+    window.setTimeout(() => el.classList.remove("lit"), 1400);
   };
 
   const render = (it: TimelineItem, prev?: TimelineItem, at = -1): ReactNode => {
@@ -271,7 +286,8 @@ export function Timeline({
             {it.id === slotId && !aboveLine && typingRow}
             {label && <div className="day">{label}</div>}
             {aboveLine && it.id === liveId && typingRow}
-            <div className={`row row-${it.kind}${liveLine ? " live-line" : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
+            <div
+              className={`row row-${it.kind}${liveLine ? " live-line" : ""}${fresh.has(it.id) ? (it.kind === "approval" || it.kind === "clarify" ? " arrived-ask" : " mo-rise") : ""}`} data-kind={it.kind} {...(it.kind === "user" ? { "data-item": it.id } : {})}>
               {liveFace && <LiveFace bot={bot.name} face={face} />}
               {render(it, label ? undefined : items[i - 1], i)}
             </div>

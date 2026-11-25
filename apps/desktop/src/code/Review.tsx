@@ -56,6 +56,10 @@ const WHY_CODES = [
   "changed",
   "no_shell",
   "not_this_lane",
+  "other_repo",
+  "lane_ahead",
+  "pull_ahead",
+  "not_pushed",
   "bad_method",
   "bad_number",
 ] as const;
@@ -188,10 +192,10 @@ function MergeAsk({ a, s, p }: { a: ReviewAsk; s: { busy: boolean; why: string |
           {t("review.ask.repoOn", { repo: a.repo, where })}
         </dd>
         <dt>{t("review.merge.pull")}</dt>
-        <dd data-testid="review-pull">{t("review.merge.pullLine", { n: a.number, title: a.title })}</dd>
+        <dd data-testid="review-pull">{t("review.merge.pullLine", { n: a.number, title: a.title, head: a.head.slice(0, 7) })}</dd>
         <dt>{t("review.ask.branch")}</dt>
         <dd className="mono" data-testid="review-branch">
-          {t("review.merge.into", { branch: a.branch, base: a.base })}
+          {t("review.merge.into", { branch: a.branch, from: a.from, base: a.base })}
         </dd>
         <dt>{t("review.merge.method")}</dt>
         <dd data-testid="review-method" data-method={method}>
@@ -378,7 +382,7 @@ export function Review({ worktree, title, pull = null }: ReviewProps) {
     // an opened pull request shows on the lane's row at once, as Tasks would list it, until the next read of the list; a merged
     // one leaves it
     if (got.done.outcome === "opened" && got.done.number > 0) {
-      notePulls(a.source, a.repo, [{ number: got.done.number, title: a.title, state: "open", url: got.done.url, labels: [], author: "", created: 0, updated: 0, checks: null, head: a.branch }], Date.now());
+      notePulls(a.source, a.repo, [{ number: got.done.number, title: a.title, state: "open", url: got.done.url, labels: [], author: "", created: 0, updated: 0, checks: null, head: a.branch, same: true }], Date.now());
     }
     if (got.done.outcome === "merged") dropPull(a.source, a.repo, a.number);
     setStep({ at: "closed", kind: a.kind, done: got.done.outcome === "declined" ? null : got.done });

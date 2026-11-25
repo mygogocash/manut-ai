@@ -204,8 +204,13 @@ mod tests {
         let st = a.on_line(&request("r2", "mcp__manut-computer__click", click.clone()));
         let card = st.events.iter().find(|e| e["event"] == "approval.request").unwrap();
         assert_eq!(card["title"], "Click button “Save” in TextEdit?");
-        assert_eq!(card["command"], "App: TextEdit\nWindow: Untitled\nControl: button “Save”");
+        assert_eq!(
+            card["command"],
+            "App: TextEdit\nWindow: Untitled\nControl: button “Save”\nThe control's name is the one TextEdit gives it (a web page names its own controls), so check it is the one you mean."
+        );
         assert_eq!(card["tool"]["computer"]["control"], "button “Save”");
+        // a small picture of the control as it is at the ask, for the page to draw
+        assert_eq!(card["tool"]["computer"]["picture"], crate::computer::hub::base64(b"\x89PNG control"));
         // never "for this session", which would let Claude Code act again unasked
         assert!(a.on_input(Input::Approve { request_id: "r2".into(), choice: "session".into() }).is_err());
         assert_eq!(room.run("click", &click).text, NO_YES);

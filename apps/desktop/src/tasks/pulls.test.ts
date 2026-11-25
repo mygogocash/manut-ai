@@ -2,11 +2,11 @@
 // read at most once while its cache is fresh (never one call per lane, never on a timer), and a failed read shows nothing.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskHost } from "./host";
-import { notePulls, PULLS_MAX_AGE, pullFor, readPulls, remoteOf, resetPulls, shouldRead } from "./pulls";
+import { dropPull, notePulls, PULLS_MAX_AGE, pullFor, readPulls, remoteOf, resetPulls, shouldRead } from "./pulls";
 import { clearOpen, getTasks, resetTasks, showPull } from "./state";
 import type { TaskItem } from "./types";
 
-const pr = (number: number, head: string, state: TaskItem["state"] = "open"): TaskItem => ({ number, title: `change ${number}`, state, url: "", labels: [], author: "p", created: 0, updated: 0, checks: null, head });
+const pr = (number: number, head: string, state: TaskItem["state"] = "open", same = true): TaskItem => ({ number, title: `change ${number}`, state, url: "", labels: [], author: "p", created: 0, updated: 0, checks: null, head, same, from: same ? "o/r" : "stranger/r" });
 const NOW = 1_000_000;
 
 const fakeHost = (over: Partial<TaskHost> = {}): TaskHost & { list: ReturnType<typeof vi.fn>; remote: ReturnType<typeof vi.fn> } =>
@@ -43,6 +43,23 @@ describe("matching a lane's branch to a pull request", () => {
   it("ignores a closed or merged request and one whose branch is not known (an older shell)", () => {
     notePulls("github", "o/r", [pr(1, "a", "merged"), pr(2, "b", "closed"), pr(3, "")], NOW);
     for (const b of ["a", "b", ""]) expect(pullFor("github", "o/r", b), b).toBeNull();
+  });
+
+  it("never lets a request from another repository with the lane's branch name stand for the lane's", () => {
+    // a stranger's fork opens a request on `kit/qr`, numbered after the lane's own
+    notePulls("github", "o/r", [pr(5, "kit/qr"), pr(9, "kit/qr", "open", false)], NOW);
+    expect(pullFor("github", "o/r", "kit/qr")?.number).toBe(5);
+    // the fork's alone: the lane has no pull request (so Put up for review is offered, never the stranger's Merge)
+    notePulls("github", "o/r", [pr(9, "kit/x", "open", false)], NOW, true);
+    expect(pullFor("github", "o/r", "kit/x")).toBeNull();
+    // a request whose host did not say where its branch is (an older shell) is not taken as this repository's
+    const { same: _s, from: _f, ...old } = pr(3, "kit/old");
+    notePulls("github", "o/r", [old], NOW);
+    expect(pullFor("github", "o/r", "kit/old")).toBeNull();
+    // and a merged one leaving takes only this repository's own off the row
+    notePulls("github", "o/r", [pr(5, "kit/qr"), pr(9, "kit/qr", "open", false)], NOW, true);
+    dropPull("github", "o/r", 5);
+    expect(pullFor("github", "o/r", "kit/qr")).toBeNull();
   });
 
   it("takes the newer of two open requests from one branch", () => {

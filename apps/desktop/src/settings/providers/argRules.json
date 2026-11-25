@@ -51,22 +51,63 @@
       ],
       "config": [],
       "config_keys": [],
-      "vars": []
+      "config_allow": [],
+      "allow": [
+        "model",
+        "fallback-model",
+        "effort",
+        "n",
+        "name",
+        "d",
+        "debug",
+        "betas",
+        "ax-screen-reader",
+        "disallowedTools",
+        "disallowed-tools",
+        "disable-slash-commands"
+      ],
+      "vars": [
+        "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS",
+        "CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT",
+        "CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT",
+        "CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT",
+        "CLAUDE_CODE_DISABLE_SUBSTITUTION_RM_PROMPT",
+        "CLAUDE_CODE_DISABLE_POWERSHELL_CMD_RM_DENY",
+        "CLAUDE_CODE_SANDBOXED",
+        "CLAUDE_CODE_IGNORE_PERSISTED_TRUST",
+        "CLAUDE_CODE_SESSION_KIND",
+        "CLAUDE_BG_SESSION_PERMISSION_RULES",
+        "CLAUDE_BG_WORKSPACE_TRUSTED",
+        "CLAUDE_CHROME_PERMISSION_MODE",
+        "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
+        "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
+        "CLAUDE_CODE_PLUGIN_DIRS",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+        "CLAUDE_CODE_PLUGIN_SEED_DIR",
+        "CLAUDE_CODE_SHELL_PREFIX",
+        "CLAUDE_ENV_FILE"
+      ]
     },
     {
       "id": "codex",
       "skips": [
         "dangerously-bypass-approvals-and-sandbox",
+        "yolo",
+        "full-auto",
         "dangerously-bypass-hook-trust",
         "a",
         "ask-for-approval",
         "s",
         "sandbox",
         "approve-for-me",
+        "not-so-yolo",
         "add-dir",
         "search",
         "p",
-        "profile"
+        "profile",
+        "enable",
+        "disable",
+        "trust"
       ],
       "own": [
         "C",
@@ -98,14 +139,39 @@
       "config_keys": [
         "approval",
         "sandbox",
-        "profile"
+        "profile",
+        "default_permissions",
+        "permissions",
+        "projects",
+        "mcp_servers",
+        "features",
+        "shell_environment_policy"
       ],
-      "vars": []
+      "config_allow": [
+        "model",
+        "model_reasoning_effort",
+        "model_reasoning_summary",
+        "model_verbosity"
+      ],
+      "allow": [
+        "m",
+        "model",
+        "oss",
+        "local-provider",
+        "strict-config",
+        "no-alt-screen"
+      ],
+      "vars": [
+        "CODEX_EXEC_SERVER_URL",
+        "CODEX_EXEC_SERVER_NOISE_REGISTRY_URL"
+      ]
     },
     {
       "id": "opencode",
       "skips": [
-        "auto"
+        "auto",
+        "yolo",
+        "dangerously-skip-permissions"
       ],
       "own": [
         "standalone",
@@ -125,7 +191,22 @@
       ],
       "config": [],
       "config_keys": [],
-      "vars": []
+      "config_allow": [],
+      "allow": [
+        "log-level",
+        "print-logs"
+      ],
+      "vars": [
+        "OPENCODE_CONFIG",
+        "OPENCODE_CONFIG_DIR",
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_CONFIG_PROJECT_DISABLE",
+        "OPENCODE_DISABLE_CLAUDE_CODE",
+        "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
+        "OPENCODE_FLAGS",
+        "OPENCODE_TEST_HOME",
+        "XDG_CONFIG_HOME"
+      ]
     },
     {
       "id": "gemini",
@@ -167,18 +248,51 @@
       ],
       "config": [],
       "config_keys": [],
-      "vars": []
+      "config_allow": [],
+      "allow": [
+        "m",
+        "model",
+        "d",
+        "debug",
+        "screen-reader"
+      ],
+      "vars": [
+        "GEMINI_CLI_TRUST_WORKSPACE",
+        "GEMINI_CLI_INTEGRATION_TEST",
+        "VITEST",
+        "SANDBOX",
+        "GEMINI_SANDBOX",
+        "SEATBELT_PROFILE",
+        "SANDBOX_FLAGS",
+        "SANDBOX_MOUNTS",
+        "SANDBOX_ENV",
+        "SANDBOX_PORTS",
+        "GEMINI_SANDBOX_IMAGE",
+        "GEMINI_SANDBOX_PROXY_COMMAND",
+        "BUILD_SANDBOX",
+        "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+        "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
+        "GEMINI_CLI_TRUSTED_FOLDERS_PATH",
+        "GEMINI_CLI_IDE_WORKSPACE_PATH"
+      ]
     },
     {
       "id": "omp",
       "skips": [
         "auto-approve",
         "approval-mode",
+        "yolo",
         "plan-yolo",
         "plan-yolo-into",
         "add-dir",
         "config",
-        "profile"
+        "profile",
+        "allow-home",
+        "hook",
+        "e",
+        "extension",
+        "trusted-extension",
+        "plugin-dir"
       ],
       "own": [
         "mode",
@@ -204,7 +318,27 @@
       ],
       "config": [],
       "config_keys": [],
-      "vars": []
+      "config_allow": [],
+      "allow": [
+        "model",
+        "smol",
+        "slow",
+        "plan",
+        "models",
+        "thinking",
+        "hide-thinking",
+        "no-title",
+        "max-time",
+        "warn-cost",
+        "max-cost",
+        "motion"
+      ],
+      "vars": [
+        "PI_CONFIG_DIR",
+        "PI_CONFIG_FILES",
+        "PI_SHELL_PREFIX",
+        "CLAUDE_CODE_SHELL_PREFIX"
+      ]
     },
     {
       "id": "grok",
@@ -244,8 +378,29 @@
       ],
       "config": [],
       "config_keys": [],
+      "config_allow": [],
+      "allow": [
+        "m",
+        "model",
+        "reasoning-effort",
+        "debug",
+        "disable-web-search",
+        "disallowed-tools",
+        "no-alt-screen",
+        "max-turns"
+      ],
       "vars": [
-        "GROK_SANDBOX"
+        "GROK_SANDBOX",
+        "GROK_SANDBOX_MODE",
+        "GROK_SANDBOX_AUTO_ALLOW_BASH",
+        "GROK_AUTO_PERMISSION_MODE",
+        "GROK_DEFAULT_SELECTED_PERMISSION",
+        "GROK_REMEMBER_TOOL_APPROVALS",
+        "GROK_WORKTREE_INHERITS_MAIN_APPROVALS",
+        "GROK_FOLDER_TRUST",
+        "GROK_CONFIG",
+        "GROK_CONFIG_PATH",
+        "GROK_MANAGED_CONFIG_URL"
       ]
     },
     {
@@ -258,7 +413,8 @@
         "sandbox",
         "approve-mcps",
         "trust",
-        "add-dir"
+        "add-dir",
+        "plugin-dir"
       ],
       "own": [
         "p",
@@ -283,7 +439,16 @@
       ],
       "config": [],
       "config_keys": [],
-      "vars": []
+      "config_allow": [],
+      "allow": [
+        "model"
+      ],
+      "vars": [
+        "CURSOR_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "CURSOR_SANDBOX_POLICY_DIR",
+        "CURSOR_STATSIG_OVERRIDES"
+      ]
     },
     {
       "id": "agy",
@@ -325,6 +490,12 @@
       ],
       "config": [],
       "config_keys": [],
+      "config_allow": [],
+      "allow": [
+        "model",
+        "effort",
+        "disable-slash-commands"
+      ],
       "vars": []
     }
   ],
@@ -339,10 +510,10 @@
   "homeVars": {
     "claude": "CLAUDE_CONFIG_DIR",
     "codex": "CODEX_HOME",
-    "pi": "PI_CODING_AGENT_DIR",
-    "omp": "PI_CODING_AGENT_DIR",
+    "gemini": "GEMINI_CLI_HOME",
     "grok": "GROK_HOME",
-    "gemini": "GEMINI_CLI_HOME"
+    "omp": "PI_CODING_AGENT_DIR",
+    "pi": "PI_CODING_AGENT_DIR"
   },
   "versionAgents": [
     "claude",

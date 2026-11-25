@@ -41,8 +41,19 @@ describe("computer use on the page", () => {
   it("takes a card's fields only when it can draw them whole", () => {
     expect(computerAsk({ act: "click", app: "TextEdit", window: "Untitled", control: "button “Save”" })).toEqual({ act: "click", app: "TextEdit", window: "Untitled", control: "button “Save”" });
     expect(computerAsk({ act: "menu", app: "TextEdit", menu: ["File", "Save…"] })).toEqual({ act: "menu", app: "TextEdit", menu: ["File", "Save…"] });
-    for (const bad of [null, undefined, "click", [], {}, { act: "drag", app: "TextEdit" }, { act: "click" }, { act: "click", app: "" }, { act: "set", app: "X", text: 3 }, { act: "menu", app: "X", menu: ["File", 2] }, { act: "menu", app: "X", menu: "File" }]) {
+    for (const bad of [null, undefined, "click", [], {}, { act: "drag", app: "TextEdit" }, { act: "click" }, { act: "click", app: "" }, { act: "set", app: "X", text: 3 }, { act: "menu", app: "X", menu: ["File", 2] }, { act: "menu", app: "X", menu: "File" }, { act: "look", app: "\u202e" }]) {
       expect(computerAsk(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("never draws an invisible format character, and draws only a small base64 picture", () => {
+    // a right-to-left override, an isolate or a zero-width space can make a line read otherwise than it is
+    expect(computerAsk({ act: "click", app: "Safari\u200b", window: "Pay \u202e0001\u202c", control: "button “Pay \u2067now\u2069”" })).toEqual({ act: "click", app: "Safari", window: "Pay 0001", control: "button “Pay now”" });
+    expect(computerAsk({ act: "menu", app: "TextEdit", menu: ["File\ufeff", "Save…"] })?.menu).toEqual(["File", "Save…"]);
+    expect(computerAsk({ act: "click", app: "TextEdit", control: "button “Save”", picture: "iVBORw0KGgo=" })?.picture).toBe("iVBORw0KGgo=");
+    for (const picture of ["javascript:alert(1)", "data:image/png;base64,iVBOR", "iVBOR w0K", "x".repeat(350_001), 42]) {
+      const c = computerAsk({ act: "click", app: "TextEdit", control: "button “Save”", picture });
+      expect(c, String(picture).slice(0, 30)).toEqual({ act: "click", app: "TextEdit", control: "button “Save”" });
     }
   });
 });

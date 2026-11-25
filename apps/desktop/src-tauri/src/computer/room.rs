@@ -15,6 +15,12 @@
 //!    on the very control the card named. So a rule in the person's own Claude Code settings that would let a tool run
 //!    unasked does not let it act: with no yes here, it is refused.
 //!
+//! What an app says about itself is the app's own words, and a web page in an allowed browser chooses its controls' names
+//! freely. So every name, title and value shown or compared is first stripped of invisible format characters
+//! ([`clean`]), text to type that holds any is refused, the card says that a control's name comes from the app, and a
+//! yes is bound to more than the name: the control's window, its place in that window's tree and its position and size
+//! on screen at the moment of the ask ([`Place`]), checked again just before acting.
+//!
 //! Never, for a look or an action: Manut AI's own windows (an agent must not read or answer its own asks), System
 //! Settings, the places macOS keeps passwords (Keychain Access, Passwords) and the prompts where macOS asks for a
 //! password, a fingerprint or a permission ([`REFUSED`]); what a password field holds; anything while the screen is
@@ -40,6 +46,10 @@ pub struct App {
     pub name: String,
     /// Its bundle identifier, or empty when it has none.
     pub bundle: String,
+    /// The program file it runs, or empty when that cannot be read.
+    pub path: String,
+    /// It runs as this user (its real and effective user both).
+    pub mine: bool,
 }
 
 /// One element of a window's accessibility tree, in the order the tree is walked.
@@ -62,6 +72,57 @@ impl Node {
     pub fn secure(&self) -> bool {
         self.role == SECURE || self.subrole == SECURE
     }
+}
+
+/// Where a control is, as the Mac says now: what a yes is bound to besides the control's role and name, because a web
+/// page can keep those while it changes what the control does. An action whose control moved or changed place since the
+/// ask is refused and asked again. It cannot see a page change what a click does while keeping all of these; the card
+/// says that a control's name is the app's own.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Place {
+    /// The number of the window it is in (`_AXUIElementGetWindow`), when the Mac says it.
+    pub window: Option<u32>,
+    /// Its index among its siblings at each level, from the window down.
+    pub path: Vec<usize>,
+    /// Its position and size on screen in whole points (x, y, width, height), when the Mac says them.
+    pub frame: Option<[i64; 4]>,
+}
+
+/// The ranges of Unicode's general category Cf (format characters: the bidi embeddings, overrides, marks and isolates,
+/// zero-width spaces and joiners, the byte order mark, tags and the rest), as Unicode 18.0 lists them (read from Node's
+/// ICU on 25 Nov 2026 with `/\p{Cf}/u`).
+const FORMAT: [(char, char); 21] = [
+    ('\u{AD}', '\u{AD}'),
+    ('\u{600}', '\u{605}'),
+    ('\u{61C}', '\u{61C}'),
+    ('\u{6DD}', '\u{6DD}'),
+    ('\u{70F}', '\u{70F}'),
+    ('\u{890}', '\u{891}'),
+    ('\u{8E2}', '\u{8E2}'),
+    ('\u{180E}', '\u{180E}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{2064}'),
+    ('\u{2066}', '\u{206F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFF9}', '\u{FFFB}'),
+    ('\u{110BD}', '\u{110BD}'),
+    ('\u{110CD}', '\u{110CD}'),
+    ('\u{13430}', '\u{1343F}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0001}', '\u{E0001}'),
+    ('\u{E0020}', '\u{E007F}'),
+];
+
+/// An invisible format character (general category Cf), which can make text read otherwise than it is.
+pub fn format_char(c: char) -> bool {
+    FORMAT.iter().any(|(a, b)| (*a..=*b).contains(&c))
+}
+
+/// `t` without its invisible format characters: what an app says, as a card or the tree may show it.
+pub fn clean(t: &str) -> String {
+    t.chars().filter(|c| !format_char(*c)).collect()
 }
 
 /// Apple's `kAXSecureTextFieldSubrole`.
@@ -87,6 +148,11 @@ pub trait Desk: Send + Sync {
     fn picture(&self, pid: i32, window: usize) -> Result<Vec<u8>, String>;
     /// The control read again now, or None when it is gone.
     fn again(&self, handle: &Handle) -> Option<Node>;
+    /// Where the control is now (its window's number, its place in the window's tree, its frame), or None when that
+    /// cannot be told.
+    fn place(&self, handle: &Handle) -> Option<Place>;
+    /// A PNG picture of the part of window `place.window` that `place.frame` covers: the control as it looks.
+    fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String>;
     /// The title of the app's focused window, where its keys go.
     fn focused_window(&self, pid: i32) -> Option<String>;
     fn press(&self, handle: &Handle) -> Result<(), String>;
@@ -103,6 +169,9 @@ pub const GRANT_TTL: Duration = Duration::from_secs(120);
 /// The longest text `set_value` types, a label or a value shown, and a menu item's name.
 pub const TEXT_CHARS: usize = 2_000;
 const SHOWN_CHARS: usize = 200;
+/// The largest control a card shows a picture of, in points, and the largest picture: a small likeness, not a window.
+const CARD_PICTURE_POINTS: (i64, i64) = (640, 320);
+const CARD_PICTURE_BYTES: usize = 256 * 1024;
 const MENU_ITEM_CHARS: usize = 100;
 const MENU_DEPTH: usize = 6;
 
@@ -137,12 +206,24 @@ pub const REFUSED: [(&str, &str); 12] = [
     ("com.apple.coreservices.uiagent", "a prompt about opening an app or file"),
 ];
 
-/// Why computer use stays away from `app`, or None when it may look at it.
+/// Why computer use stays away from `app`, or None when it may look at it. Besides Manut AI and the list above: any
+/// window of a program that does not run as this person (the login window, and macOS's prompts that run as the system),
+/// and any of a program with no bundle identifier that is part of macOS (under `/System/`) or whose program cannot be
+/// read, so a prompt this list does not name yet is still left alone.
 pub fn refused(app: &App, own_pid: i32) -> Option<String> {
     if app.pid == own_pid || app.bundle.eq_ignore_ascii_case(OWN_BUNDLE) {
         return Some("Manut AI's own windows, where you are asked before anything acts".into());
     }
-    REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)).map(|(_, why)| (*why).to_string())
+    if let Some((_, why)) = REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)) {
+        return Some((*why).to_string());
+    }
+    if !app.mine {
+        return Some("a window of a program that does not run as you, such as the login window or a macOS prompt".into());
+    }
+    if app.bundle.trim().is_empty() && (app.path.is_empty() || app.path.starts_with("/System/")) {
+        return Some("a window of macOS itself, such as one of its prompts".into());
+    }
+    None
 }
 
 /// What a card shows, as the page draws it in the person's language (`tool.computer` on the ask).
@@ -161,6 +242,9 @@ pub struct Shown {
     pub keys: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub menu: Option<Vec<String>>,
+    /// A small picture of the control at the moment of the ask, a PNG in base64, when Screen capture is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
 }
 
 impl Shown {
@@ -184,6 +268,9 @@ impl Shown {
         if let Some(c) = &self.control {
             l.push(format!("Control: {c}"));
         }
+        if matches!(self.act, "click" | "set") {
+            l.push(format!("The control's name is the one {} gives it (a web page names its own controls), so check it is the one you mean.", self.app));
+        }
         if let Some(k) = &self.keys {
             l.push(format!("Keys: {k}"));
         }
@@ -204,8 +291,8 @@ impl Shown {
 #[derive(Clone)]
 enum Target {
     App { key: String },
-    /// A click, or with `value` the text put into a field.
-    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String> },
+    /// A click, or with `value` the text put into a field; `place` is where the control was at the ask.
+    Node { pid: i32, role: String, label: String, handle: Handle, value: Option<String>, place: Place },
     Key { pid: i32, window: Option<String>, chord: Chord },
     Menu { pid: i32, path: Vec<String> },
 }
@@ -281,9 +368,9 @@ fn app_key(app: &App) -> String {
     if app.bundle.is_empty() { app.name.to_lowercase() } else { app.bundle.to_lowercase() }
 }
 
-/// `t` cut to `n` characters on one line, for a card or a tree.
+/// `t` cut to `n` characters on one line, without invisible format characters, for a card or a tree.
 fn short(t: &str, n: usize) -> String {
-    let one = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one = clean(t).split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() <= n { one } else { format!("{}…", one.chars().take(n - 1).collect::<String>()) }
 }
 
@@ -316,13 +403,20 @@ fn index_arg(args: &Value, k: &str) -> Option<usize> {
     args.get(k).and_then(Value::as_u64).filter(|n| *n >= 1 && *n <= 100_000).map(|n| n as usize)
 }
 
-/// Text the agent may type: not too long, and no control character but a line break or a tab.
+/// Why text that holds an invisible format character is refused.
+const INVISIBLE: &str = "The text holds an invisible formatting character (such as a right-to-left mark or a zero-width space), so what the person would read on the card is not exactly what would be typed. Send it without that character.";
+
+/// Text the agent may type: not too long, no control character but a line break or a tab, and no invisible format
+/// character, so the person reads on the card exactly what is typed.
 fn typed_ok(t: &str) -> Result<(), String> {
     if t.chars().count() > TEXT_CHARS {
         return Err(format!("The text is longer than {TEXT_CHARS} characters."));
     }
     if t.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
         return Err("The text holds a control character that cannot be typed.".into());
+    }
+    if t.chars().any(format_char) {
+        return Err(INVISIBLE.into());
     }
     Ok(())
 }
@@ -338,10 +432,47 @@ impl Room {
         Room { desk, state: Mutex::new(State::default()) }
     }
 
+    /// The running apps, their names without invisible format characters (an app names itself).
+    fn apps(&self) -> Vec<App> {
+        self.desk.apps().into_iter().map(|a| App { name: clean(&a.name), bundle: clean(&a.bundle), ..a }).collect()
+    }
+
+    /// An app's window titles, without invisible format characters.
+    fn windows(&self, pid: i32) -> Result<Vec<String>, String> {
+        Ok(self.desk.windows(pid)?.iter().map(|t| clean(t)).collect())
+    }
+
+    /// The title of an app's focused window, without invisible format characters.
+    fn focused_window(&self, pid: i32) -> Option<String> {
+        self.desk.focused_window(pid).map(|t| clean(&t))
+    }
+
+    /// A control as the Mac reads it, its name and value without invisible format characters.
+    fn tidy(n: Node) -> Node {
+        Node { label: clean(&n.label), value: n.value.map(|v| clean(&v)), role: clean(&n.role), subrole: clean(&n.subrole), ..n }
+    }
+
+    /// The control read again now, tidied.
+    fn again(&self, handle: &Handle) -> Option<Node> {
+        self.desk.again(handle).map(Room::tidy)
+    }
+
+    /// A small picture of the control at `place` for its card, in base64, when Screen capture is on and the control is
+    /// small enough to be a likeness rather than a window's content. Nothing when it cannot be had: the card is whole
+    /// without it.
+    fn card_picture(&self, place: &Place) -> Option<String> {
+        let [_, _, w, h] = place.frame?;
+        if place.window.is_none() || w < 1 || h < 1 || w > CARD_PICTURE_POINTS.0 || h > CARD_PICTURE_POINTS.1 || !self.desk.screen() {
+            return None;
+        }
+        let png = self.desk.snapshot(place).ok()?;
+        (png.len() <= CARD_PICTURE_BYTES).then(|| super::hub::base64(&png))
+    }
+
     /// The running app the agent names, by bundle identifier or name, in any case.
     fn find(&self, args: &Value) -> Result<App, String> {
         let q = text_arg(args, "app").ok_or("Name the app (`app`): its name or bundle identifier, as `list_windows` gives them.")?.trim();
-        let apps = self.desk.apps();
+        let apps = self.apps();
         if let Some(a) = apps.iter().find(|a| !a.bundle.is_empty() && a.bundle.eq_ignore_ascii_case(q)) {
             return Ok(a.clone());
         }
@@ -381,7 +512,7 @@ impl Room {
             return Ok(Decision::Free);
         }
         let app = self.target_app(args)?;
-        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None };
+        let shown = |act| Shown { act, app: app.name.clone(), window: None, control: None, text: None, keys: None, menu: None, picture: None };
         match tool {
             LOOK => {
                 let key = app_key(&app);
@@ -392,19 +523,29 @@ impl Room {
             }
             CLICK | SET => {
                 let i = index_arg(args, "element_index").ok_or("Name the control by its `element_index` from the latest `get_app_state`.")?;
-                let st = self.state.lock().unwrap();
-                let look = st.looks.get(&app.pid).ok_or_else(|| format!("Call `get_app_state` for {} first, then name a control from it.", app.name))?;
-                let n = look.nodes.get(i - 1).ok_or_else(|| format!("There is no element [{i}] in the latest look at {}.", app.name))?;
+                let (handle, title) = {
+                    let st = self.state.lock().unwrap();
+                    let look = st.looks.get(&app.pid).ok_or_else(|| format!("Call `get_app_state` for {} first, then name a control from it.", app.name))?;
+                    let n = look.nodes.get(i - 1).ok_or_else(|| format!("There is no element [{i}] in the latest look at {}.", app.name))?;
+                    if n.secure() {
+                        return Err("Computer use never touches a password field.".into());
+                    }
+                    (n.handle.clone(), look.title.clone())
+                };
+                // the control as it is at the moment of the ask, and where: what the card names and the yes is bound to
+                let n = self.again(&handle).ok_or("The control is gone from the window since the look, so nothing is asked. Look again.")?;
                 if n.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
-                let mut s = Shown { window: Some(look.title.clone()), control: Some(control_name(n)), ..shown(if tool == CLICK { "click" } else { "set" }) };
+                let place = self.desk.place(&handle).ok_or("Computer use cannot tell where that control is on the screen, so it does not ask about it. Look again.")?;
+                let mut s = Shown { window: Some(title), control: Some(control_name(&n)), ..shown(if tool == CLICK { "click" } else { "set" }) };
                 if tool == SET {
                     let t = args.get("value").and_then(Value::as_str).ok_or("Give the text to put in the field (`value`).")?;
                     typed_ok(t)?;
                     s.text = Some(t.to_string());
                 }
-                let target = Target::Node { pid: app.pid, role: n.role.clone(), label: n.label.clone(), handle: n.handle.clone(), value: s.text.clone() };
+                s.picture = self.card_picture(&place);
+                let target = Target::Node { pid: app.pid, role: n.role, label: n.label, handle, value: s.text.clone(), place };
                 Ok(Decision::Card(Ask { shown: s, target }))
             }
             KEY => {
@@ -412,7 +553,7 @@ impl Room {
                 if let Some(effect) = chord.blocked() {
                     return Err(format!("{} would {effect}, so computer use never sends it. Reach the goal another way, such as the window's own button or menu item.", chord.shown()));
                 }
-                let window = self.desk.focused_window(app.pid);
+                let window = self.focused_window(app.pid);
                 let s = Shown { window: window.clone(), keys: Some(chord.shown()), ..shown("key") };
                 Ok(Decision::Card(Ask { shown: s, target: Target::Key { pid: app.pid, window, chord } }))
             }
@@ -425,6 +566,10 @@ impl Room {
                 let n = args.get("menu").and_then(Value::as_array).map_or(0, Vec::len);
                 if path.len() < 2 || path.len() != n || path.len() > MENU_DEPTH || path.iter().any(|p| p.is_empty() || p.chars().count() > MENU_ITEM_CHARS || p.chars().any(char::is_control)) {
                     return Err(format!("Name the menu item as its path of titles (`menu`), from the menu bar down, for example [\"File\", \"Save…\"]: two to {MENU_DEPTH} titles."));
+                }
+                // the card shows the path exactly as it is matched; a menu's own invisible characters are matched without
+                if path.iter().any(|p| p.chars().any(format_char)) {
+                    return Err("A menu title holds an invisible formatting character, so the card could not show exactly what is chosen. Name it as `get_app_state` or the menu bar shows it, without that character.".into());
                 }
                 if apple_menu(&path[0]) {
                     return Err("Computer use never chooses from the Apple menu, which reaches System Settings, logging out and shutting down.".into());
@@ -491,10 +636,10 @@ impl Room {
         let own = self.desk.own_pid();
         let allowed = self.state.lock().unwrap().allowed.clone();
         let mut out = vec!["Apps with windows on this Mac. You may look at an app with `get_app_state`; the first look at each app in this chat asks the person.".to_string()];
-        for app in self.desk.apps().iter().filter(|a| refused(a, own).is_none()) {
+        for app in self.apps().iter().filter(|a| refused(a, own).is_none()) {
             let id = if app.bundle.is_empty() { String::new() } else { format!(" ({})", app.bundle) };
             if allowed.contains(&app_key(app)) {
-                let titles = self.desk.windows(app.pid).unwrap_or_default();
+                let titles = self.windows(app.pid).unwrap_or_default();
                 out.push(format!("- {}{id}, allowed in this chat, {} window(s):", app.name, titles.len()));
                 for (i, t) in titles.iter().enumerate() {
                     out.push(format!("  {}. {}", i + 1, if t.trim().is_empty() { "(untitled)".to_string() } else { short(t, SHOWN_CHARS) }));
@@ -512,7 +657,7 @@ impl Room {
         if !self.state.lock().unwrap().allowed.contains(&app_key(&app)) {
             return Err(format!("The person has not let this chat look at {}. Looking asks them first, on a card in the chat.", app.name));
         }
-        let titles = self.desk.windows(app.pid)?;
+        let titles = self.windows(app.pid)?;
         if titles.is_empty() {
             return Err(format!("{} has no window open.", app.name));
         }
@@ -523,7 +668,7 @@ impl Room {
         if w > titles.len() {
             return Err(format!("{} has {} window(s); there is no window {w}.", app.name, titles.len()));
         }
-        let mut nodes = self.desk.tree(app.pid, w - 1)?;
+        let mut nodes: Vec<Node> = self.desk.tree(app.pid, w - 1)?.into_iter().map(Room::tidy).collect();
         nodes.truncate(MAX_NODES);
         for n in nodes.iter_mut().filter(|n| n.secure()) {
             n.value = None;
@@ -547,7 +692,7 @@ impl Room {
 
     /// The app `pid` names, when it still runs and computer use may still touch it.
     fn still_app(&self, pid: i32) -> Result<App, String> {
-        let app = self.desk.apps().into_iter().find(|a| a.pid == pid).ok_or("The app is no longer open, so nothing was done.")?;
+        let app = self.apps().into_iter().find(|a| a.pid == pid).ok_or("The app is no longer open, so nothing was done.")?;
         if let Some(why) = refused(&app, self.desk.own_pid()) {
             return Err(format!("Computer use never looks at or works {why}."));
         }
@@ -557,14 +702,18 @@ impl Room {
     fn act(&self, target: Target) -> Result<Reply, String> {
         match target {
             Target::App { .. } => Err(NO_YES.into()),
-            Target::Node { pid, role, label, handle, value } => {
+            Target::Node { pid, role, label, handle, value, place } => {
                 let app = self.still_app(pid)?;
-                let now = self.desk.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
+                let now = self.again(&handle).ok_or("The control is gone from the window, so nothing was done. Look again.")?;
                 if now.secure() {
                     return Err("Computer use never touches a password field.".into());
                 }
                 if now.role != role || now.label != label {
                     return Err("The control changed since the person said yes, so nothing was done. Look again and ask again.".into());
+                }
+                // the same name is not enough: the same window, the same place in its tree, the same spot on screen
+                if self.desk.place(&handle).as_ref() != Some(&place) {
+                    return Err("The control moved or changed its place in the window since the person said yes, so nothing was done. Look again and ask again.".into());
                 }
                 let name = control_name(&now);
                 match value {
@@ -575,7 +724,7 @@ impl Room {
                     Some(text) => {
                         self.desk.set_value(&handle, &text)?;
                         // read back: an app can take the text, change it or ignore it
-                        let held = self.desk.again(&handle).and_then(|n| n.value);
+                        let held = self.again(&handle).and_then(|n| n.value);
                         let how = if held.as_deref() == Some(text.as_str()) { "it now holds exactly that text" } else { "it does not read back as exactly that text, so check with `get_app_state` before going on" };
                         Ok(Reply::ok(format!("Typed into {name} in {}: {how}.", app.name)))
                     }
@@ -586,7 +735,7 @@ impl Room {
                 if chord.blocked().is_some() {
                     return Err("Computer use never sends that shortcut.".into());
                 }
-                if window.is_some() && self.desk.focused_window(pid) != window {
+                if window.is_some() && self.focused_window(pid) != window {
                     return Err(format!("A different window of {} is in front now, so the key was not pressed. Look again and ask again.", app.name));
                 }
                 self.desk.key(pid, &chord)?;
@@ -654,6 +803,9 @@ mod tests {
     use super::*;
     use crate::computer::stand::{Stand, KEYCHAIN, NOTES, OWN, SETTINGS, TEXTEDIT};
 
+    /// The card's line that says a control's name is the app's own.
+    const NAMED: &str = "The control's name is the one TextEdit gives it (a web page names its own controls), so check it is the one you mean.";
+
     fn room() -> (Arc<Stand>, Room) {
         let s = Arc::new(Stand::new());
         (s.clone(), Room::new(s))
@@ -704,7 +856,7 @@ mod tests {
         let (s, r) = room();
         let args = json!({"app": "textedit"});
         let a = card(&r, LOOK, &args);
-        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None });
+        assert_eq!(a.shown, Shown { act: "look", app: "TextEdit".into(), window: None, control: None, text: None, keys: None, menu: None, picture: None });
         assert_eq!(a.shown.title(), "Let the agent look at TextEdit in this chat?");
         // run before the person answered: refused, and the window was not read
         let before = r.run(LOOK, &args);
@@ -764,11 +916,11 @@ mod tests {
             assert!(!list.contains(hidden), "{hidden}");
         }
         assert!(!s.calls().iter().any(|c| [OWN, SETTINGS, KEYCHAIN].iter().any(|p| c.contains(&format!(" {p}")))));
+        let app = |bundle: &str, path: &str, mine: bool| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine };
         for (bundle, _) in REFUSED {
-            let app = App { pid: 9, name: "x".into(), bundle: bundle.to_uppercase() };
-            assert!(super::refused(&app, 1).is_some(), "{bundle}");
+            assert!(super::refused(&app(&bundle.to_uppercase(), "/Applications/x.app/Contents/MacOS/x", true), 1).is_some(), "{bundle}");
         }
-        assert!(super::refused(&App { pid: 9, name: "Notes".into(), bundle: "com.apple.Notes".into() }, 1).is_none());
+        assert!(super::refused(&app("com.apple.Notes", "/System/Applications/Notes.app/Contents/MacOS/Notes", true), 1).is_none());
     }
 
     /// One yes, one action: a write runs only after the person's Allow once on its own card, exactly as asked, once.
@@ -779,7 +931,7 @@ mod tests {
         let click = json!({"app": "TextEdit", "element_index": 2});
         let a = card(&r, CLICK, &click);
         assert_eq!(a.shown.title(), "Click button “Save” in TextEdit?");
-        assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nControl: button “Save”");
+        assert_eq!(a.shown.lines(), format!("App: TextEdit\nWindow: Untitled\nControl: button “Save”\n{NAMED}"));
         // asked but not answered: nothing runs
         assert_eq!(r.run(CLICK, &click).text, NO_YES);
         r.answered(CLICK, &click, &a);
@@ -815,7 +967,7 @@ mod tests {
         let args = json!({"app": "TextEdit", "element_index": 6, "value": "Mint Shop\nBangkok"});
         let a = card(&r, SET, &args);
         assert_eq!(a.shown.title(), "Type into text field “Name” in TextEdit?");
-        assert_eq!(a.shown.lines(), "App: TextEdit\nWindow: Untitled\nControl: text field “Name”\nText: Mint Shop\nBangkok");
+        assert_eq!(a.shown.lines(), format!("App: TextEdit\nWindow: Untitled\nControl: text field “Name”\n{NAMED}\nText: Mint Shop\nBangkok"));
         r.answered(SET, &args, &a);
         let done = r.run(SET, &args);
         assert!(done.text.contains("it now holds exactly that text"), "{}", done.text);
@@ -948,6 +1100,120 @@ mod tests {
         assert!(matches!(r.ask(LOOK, &json!({"app": " com.apple.textedit "})), Decision::Card(_)));
         assert!(refused(&r, "run_shell", &json!({"app": "TextEdit"})).contains("not a computer use tool"));
         assert!(r.run("run_shell", &json!({})).error);
+    }
+
+    /// An app names its own controls and windows, and a web page in an allowed browser does so freely. Invisible format
+    /// characters (a right-to-left override, a zero-width space) are taken out of everything shown and compared, so a
+    /// card cannot read otherwise than what it names, and text to type that holds any is refused: the person sees
+    /// exactly what is typed.
+    #[test]
+    fn invisible_format_characters_are_never_shown_and_never_typed() {
+        let (s, r) = room();
+        s.change(TEXTEDIT, 0, 1, |x| x.label = "Pay \u{202E}0001 THB\u{202C} now\u{200B}".into());
+        let seen = look(&r, "TextEdit").text;
+        assert!(seen.contains("[2] button “Pay 0001 THB now”"), "{seen}");
+        let click = json!({"app": "TextEdit", "element_index": 2});
+        let a = card(&r, CLICK, &click);
+        for shown in [a.shown.title(), a.shown.lines(), serde_json::to_string(&a.shown).unwrap()] {
+            assert!(!shown.chars().any(|c| matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200B}'..='\u{200F}' | '\u{FEFF}')), "{shown:?}");
+        }
+        for bad in ["Mint\u{202E}", "a\u{2067}b", "zero\u{200B}width", "\u{FEFF}x", "tag\u{E0041}"] {
+            let why = refused(&r, SET, &json!({"app": "TextEdit", "element_index": 6, "value": bad}));
+            assert!(why.contains("invisible"), "{bad:?}: {why}");
+        }
+        // Thai, with its combining vowels and tone marks, and an emoji with its variation selector, type as written
+        for ok in ["ร้านมิ้นท์", "สวัสดีค่ะ ☕️"] {
+            assert!(matches!(r.ask(SET, &json!({"app": "TextEdit", "element_index": 6, "value": ok})), Decision::Card(_)), "{ok}");
+        }
+    }
+
+    /// A yes is bound to the control's window, its place in the window's tree and its spot on screen at the moment of the
+    /// ask, not only to its role and name, which a web page keeps as it likes: a control that moved, changed its place
+    /// or is now in another window is not touched, and the agent asks again.
+    #[test]
+    fn a_yes_is_bound_to_where_the_control_was_at_the_ask() {
+        let click = json!({"app": "TextEdit", "element_index": 2});
+        let yes = |r: &Room| {
+            let a = card(r, CLICK, &click);
+            r.answered(CLICK, &click, &a);
+        };
+        let edits: [(&str, Box<dyn Fn(&mut crate::computer::stand::Facts)>); 4] = [
+            ("moved on screen", Box::new(|x| x.frame[1] += 40)),
+            ("resized", Box::new(|x| x.frame[2] = 300)),
+            ("another place in the tree, same name", Box::new(|x| x.path = vec![3])),
+            ("deeper in the tree, same name", Box::new(|x| x.path = vec![0, 0])),
+        ];
+        for (what, edit) in edits {
+            let (s, r) = room();
+            look(&r, "TextEdit");
+            yes(&r);
+            s.change(TEXTEDIT, 0, 1, edit);
+            let out = r.run(CLICK, &click);
+            assert!(out.error && out.text.contains("moved or changed its place"), "{what}: {}", out.text);
+            assert!(s.acts().is_empty(), "{what}");
+            // asked again where it is now, it runs
+            yes(&r);
+            assert!(!r.run(CLICK, &click).error, "{what}");
+        }
+        // the name and role are taken as they are at the ask, not at the look
+        let (s, r) = room();
+        look(&r, "TextEdit");
+        s.change(TEXTEDIT, 0, 1, |x| x.label = "Delete all".into());
+        assert_eq!(card(&r, CLICK, &click).shown.control.as_deref(), Some("button “Delete all”"));
+        // a control that went between the look and the ask is not asked about
+        s.remove(TEXTEDIT, 0, 1);
+        assert!(refused(&r, CLICK, &click).contains("gone"));
+    }
+
+    /// With Screen capture, a click or typing card carries a small picture of the control as it is at the ask; without
+    /// it, or for a control as large as a window's content, none, and the card is whole without one.
+    #[test]
+    fn a_card_shows_a_small_picture_of_the_control_with_screen_capture() {
+        let (s, r) = room();
+        look(&r, "TextEdit");
+        let a = card(&r, CLICK, &json!({"app": "TextEdit", "element_index": 2}));
+        assert_eq!(a.shown.picture.as_deref(), Some(super::super::hub::base64(b"\x89PNG control").as_str()));
+        assert!(s.calls().contains(&format!("snapshot {} [100, 130, 80, 24]", crate::computer::stand::window_number(TEXTEDIT, 0))));
+        assert_eq!(serde_json::to_value(&a.shown).unwrap()["picture"], json!(super::super::hub::base64(b"\x89PNG control")));
+        // a key or a menu item has no control to show
+        assert!(card(&r, KEY, &json!({"app": "TextEdit", "key": "Return"})).shown.picture.is_none());
+        // the text area as large as a document: no picture of its content
+        s.change(TEXTEDIT, 0, 2, |x| x.frame = [100, 100, 600, 400]);
+        let n = s.calls().len();
+        assert!(card(&r, CLICK, &json!({"app": "TextEdit", "element_index": 3})).shown.picture.is_none());
+        assert_eq!(s.calls().len(), n, "nothing was captured");
+        let s = Arc::new(Stand::new().no_screen());
+        let r = Room::new(s.clone());
+        look(&r, "TextEdit");
+        assert!(card(&r, CLICK, &json!({"app": "TextEdit", "element_index": 2})).shown.picture.is_none());
+        assert!(!s.calls().iter().any(|c| c.starts_with("snapshot")));
+    }
+
+    /// macOS's password prompt (SecurityAgent) and its Touch ID and password prompt (`coreautha`) run from `.bundle`s,
+    /// not `.app`s: refused by their bundle identifiers, and refused anyway when one is not read, as any window of a
+    /// program that is part of macOS with no bundle identifier, or of one that does not run as this person.
+    #[test]
+    fn macos_prompts_are_refused_whatever_kind_of_bundle_they_are() {
+        let app = |bundle: &str, path: &str, mine: bool| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine };
+        let agent = "/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent";
+        let touch = "/System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha";
+        for (bundle, path) in [("com.apple.SecurityAgent", agent), ("com.apple.LocalAuthentication.UIAgent", touch)] {
+            assert_eq!(super::refused(&app(bundle, path, true), 1).as_deref(), REFUSED.iter().find(|(b, _)| *b == bundle).map(|(_, w)| *w), "{bundle}");
+            // the identifier not read: part of macOS with none
+            assert!(super::refused(&app("", path, true), 1).unwrap().contains("macOS itself"), "{path}");
+            // running as another user (the system), whatever its identifier
+            assert!(super::refused(&app(bundle, path, false), 1).is_some(), "{path}");
+        }
+        assert!(super::refused(&app("com.apple.TextEdit", "/System/Applications/TextEdit.app/Contents/MacOS/TextEdit", false), 1).unwrap().contains("does not run as you"));
+        // a program whose path cannot be read and has no identifier is left alone too
+        assert!(super::refused(&app("", "", true), 1).is_some());
+        // the person's own program with no bundle (a script's window, say) outside /System stays possible
+        assert!(super::refused(&app("", "/Users/k/bin/tool", true), 1).is_none());
+        // and through the room: such an app is never offered or looked at
+        let (s, r) = room();
+        s.add_app(App { pid: 500, name: "SecurityAgent".into(), bundle: String::new(), path: agent.into(), mine: false });
+        assert!(refused(&r, LOOK, &json!({"app": "SecurityAgent"})).starts_with("Computer use never looks at or works"));
+        assert!(!r.run(LIST, &json!({})).text.contains("SecurityAgent"));
     }
 
     #[test]
