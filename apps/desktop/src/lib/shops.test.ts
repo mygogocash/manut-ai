@@ -3,7 +3,7 @@
 // several shops says who may decide what the person may not, and who passed a request on with what note.
 import { beforeEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
-import { leftWords, onlyOwnerWords, shopAskLines } from "./shops";
+import { helpedShop, leftWords, onlyOwnerWords, ownersWords, shopAskLines } from "./shops";
 
 const SUNDAY = Date.UTC(2026, 10, 22, 3, 0, 0) / 1000;
 const HELPED = { id: "pilot:b", name: "Ran Pa Noi", owner: "Noi", role: "helper" as const };
@@ -35,6 +35,43 @@ describe("a shop the person's place in ended", () => {
       expect(words, lang).toContain("Ran Pa Noi");
       expect(words, lang).toContain("Noi");
       expect(words, lang).not.toContain("{");
+    }
+  });
+});
+
+describe("a shop the person only helps at", () => {
+  it("is the shop shown when the person's role there is helper, and nothing else is", () => {
+    expect(helpedShop({ list: [OWNED, HELPED], current: HELPED.id })).toEqual(HELPED);
+    expect(helpedShop({ list: [OWNED, HELPED], current: OWNED.id })).toBeNull();
+    // a runtime that shows no shops (the signed-in tenant's own), and a list not read yet
+    expect(helpedShop({ list: [], current: null })).toBeNull();
+    expect(helpedShop({ list: [HELPED], current: null })).toBeNull();
+    expect(helpedShop({ list: [OWNED], current: HELPED.id })).toBeNull();
+  });
+
+  it("says whose each of the owner's pages is, in the owner's and the shop's names, and where what waits is", () => {
+    expect(ownersWords("team", HELPED)).toEqual({
+      title: "Only Noi sees this",
+      text: "You help at Ran Pa Noi. Its team, what each member is doing and Pause everyone are Noi's. What waits for you there is in Needs you.",
+    });
+    expect(ownersWords("history", HELPED).text).toBe("You help at Ran Pa Noi. Its past work is Noi's to see. What waits for you there is in Needs you.");
+    expect(ownersWords("activity", HELPED).text).toBe("You help at Ran Pa Noi. Its activity log is Noi's to see. What waits for you there is in Needs you.");
+    expect(ownersWords("automations", HELPED).text).toBe("You help at Ran Pa Noi. Its routines are Noi's to see and change. What waits for you there is in Needs you.");
+    // a shop the API named no one for still says whose
+    expect(ownersWords("team", { name: "", owner: "" }).title).toBe("Only the owner sees this");
+    expect(ownersWords("team", { name: "", owner: "" }).text).toContain("You help at a shop.");
+  });
+
+  it("says each in every language, with both names and no slot left", () => {
+    for (const lang of ["ko", "ja", "zh"] as const) {
+      setLang(lang);
+      for (const screen of ["team", "history", "activity", "automations"] as const) {
+        const { title, text } = ownersWords(screen, HELPED);
+        expect(title, `${lang} ${screen}`).toContain("Noi");
+        expect(text, `${lang} ${screen}`).toContain("Ran Pa Noi");
+        expect(text, `${lang} ${screen}`).toContain("Noi");
+        expect(title + text, `${lang} ${screen}`).not.toContain("{");
+      }
     }
   });
 });
