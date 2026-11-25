@@ -213,8 +213,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 67, Buddy answering for real through the person's own coding agent (`feat/buddy-real-answers`, Opus, worktree
      `cc-item67-buddy-real`), started 25 Nov at 17:25.
-   - item 68, a New lane link in the Lanes band and a signed-out agent marked in the + menu (`feat/new-lane-link`,
-     Sonnet, worktree `cc-item68-new-lane`), started 25 Nov at 17:45.
+   - item 73, worktree settings for lanes (`feat/worktree-settings`, Sonnet, worktree `cc-item73-worktrees`), started
+     25 Nov at 18:25.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -244,7 +244,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 70 (a schedule's time zone named beside a routine's time and next run whenever it is not this computer's,
+   Merged: 68 (a New lane link in the Lanes band that opens the + menu on Chat with Kit, and "Not signed in" on the
+   row of an agent the app has read as signed out: Claude Code, Codex and Grok), 70 (a schedule's time zone named beside a routine's time and next run whenever it is not this computer's,
    judged by the clock through a year and not by the zone's name; `apps/desktop/src/lib/zone.ts`), 66 (Kit as a chat from the + menu, beside the terminal: under the folder chip the menu has Chat with Kit,
    each installed agent that runs as the app's chat, then In a terminal as before; a pick opens the agent's New session
    chat, whose first message starts a lane the Lanes band lists; the first focus stays on a terminal row, so Command-N
