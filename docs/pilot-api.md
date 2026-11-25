@@ -1719,6 +1719,13 @@ order and the order of refusals are the ones above, and the desktop and the web 
   complete.
 - **Deletion and export.** Deleting the shop's data wipes its lookup with its task index. The export leaves the lookup
   out: it only says where the shop's requests are, and the requests are in the export's tasks.
+- **The retention prune.** The operator's prune (`POST /v1/admin/prune`) removes a dead request (declined or expired,
+  30 days after its last change) from its task, and now its entry from the lookup too. The task notes the ids before it
+  deletes them, then reports them to its shop's lookup as gone through the same report a read sends, so only the task an
+  entry names can clear it. A report that fails stays noted on the task and goes with that task's next prune; until one
+  lands, the prune answers 500 `prune_incomplete` with `approval-lookup` in `failed`, and a retry finishes it. Before,
+  such an entry stayed until a read of the settled list happened to reach it, which for an old request is never. That
+  read still clears what no prune reported (a task notes at most 2,000 ids).
 - **Cloudflare's limit on calls.** Each call one request makes to another object is a subrequest. The Workers Free plan
   allows 50 per request (1,000 to Cloudflare's own services, objects among them) and the Paid plan 10,000 by default,
   which a Worker may raise to 10 million (developers.cloudflare.com/workers/platform/limits/#subrequests). The walk made

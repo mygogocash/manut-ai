@@ -191,6 +191,7 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
   let tasksPruned = 0;
   let attemptsPruned = 0;
   let actionsPruned = 0;
+  let lookupLeft = false;
   const failed: string[] = [];
   for (const id of index.taskIds ?? []) {
     const stub = env.TASK.get(env.TASK.idFromName(id));
@@ -207,12 +208,16 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
       const counts = (await response.json()) as {
         attemptsPruned?: number;
         actionsPruned?: number;
+        lookupPending?: number;
         notOwned?: unknown;
       };
       if (!counts.notOwned) {
         tasksPruned++;
         attemptsPruned += typeof counts.attemptsPruned === "number" ? counts.attemptsPruned : 0;
         actionsPruned += typeof counts.actionsPruned === "number" ? counts.actionsPruned : 0;
+        // The task removed requests its shop's approval lookup has not heard of yet. The task keeps them and the next
+        // prune sends them, so the prune says it is not done rather than leave the lookup's entries unsaid.
+        if (typeof counts.lookupPending === "number" && counts.lookupPending > 0) lookupLeft = true;
       }
     } else if (response.status !== 404) {
       // A 404 is the indexed-but-never-created task the export already
@@ -234,6 +239,7 @@ export async function tenantPrune(env: TenantDataEnv, tenant: string, nowMs: num
   } else {
     failed.push("pilot");
   }
+  if (lookupLeft) failed.push("approval-lookup");
   if (failed.length > 0) {
     return json({ error: "prune_incomplete", tasksPruned, failed }, 500);
   }

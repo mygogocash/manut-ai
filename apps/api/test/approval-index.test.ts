@@ -4,7 +4,7 @@ import { BACKFILL_TASKS, indexRequest, STALE_AFTER_MS } from "../src/approval-in
 import worker, { type Env } from "../src/index";
 import { startAttempt, workerPort, type JobFlags, type WorkerPort } from "../src/job-flow";
 import type { ActionProposalJSON } from "../src/task-object";
-import { tenantCall, tenantDelete, tenantStub } from "../src/tenant-data";
+import { tenantCall, tenantDelete, tenantPrune, tenantStub } from "../src/tenant-data";
 import { adminFetch, tenantSession, trustedTaskPut } from "./authenticated-fixtures";
 import { joinHelper, plantRequest, setupShop, shopTask } from "./people-fixtures";
 
@@ -722,4 +722,88 @@ describe("deleting a shop", () => {
     expect(stepped.status).toBe(200);
     expect(await lookupKeys(tenant)).toEqual([]);
   });
+});
+
+describe("the retention prune", () => {
+  const DAY = 24 * 3600_000;
+
+  /// The operator's retention prune of the shop as it would run `days` from now. The task objects age their records by
+  /// the clock the prune hands them, and the lookup reads its own, which the spy moves too.
+  async function pruneLater(tenant: string, days: number) {
+    const later = Date.now() + days * DAY;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+    try {
+      const response = await tenantPrune(bindings, tenant, later);
+      return { status: response.status, body: (await response.json()) as { actionsPruned?: number; failed?: string[] } };
+    } finally {
+      clock.mockRestore();
+    }
+  }
+
+  /// What the task still has to tell its shop's lookup (task-object.ts, `pruneExpired`).
+  function noted(taskId: string) {
+    return runInDurableObject(task(taskId), (_instance, state) => state.storage.get("lookup-gone"));
+  }
+
+  const keysOf = async (tenant: string, requestId: string) =>
+    (await lookupKeys(tenant)).filter((key) => key.endsWith(`:${requestId}`));
+
+  it("clears the entry of each request it removes once a read has settled it, and keeps every other", async () => {
+    const { tenant, headers } = await session();
+    const taskId = await ownTask(tenant);
+    const reply = await proposeReply(tenant, taskId, "a reply still waiting");
+    const { requestId: declined } = await workerAsks(tenant, taskId);
+    await decideInTask(tenant, taskId, declined);
+    // A read moves the declined request to the settled list.
+    expect((await list(headers, "state=recent")).status).toBe(200);
+    expect(await keysOf(tenant, declined)).toHaveLength(2);
+    // Nothing is old enough yet: the prune removes nothing, and the lookup keeps both requests.
+    expect((await pruneLater(tenant, 0)).body.actionsPruned).toBe(0);
+    expect(await keysOf(tenant, declined)).toHaveLength(2);
+    // A month on, the declined request goes from its task and its entry from the lookup.
+    const swept = await pruneLater(tenant, 31);
+    expect(swept.status).toBe(200);
+    expect(swept.body.actionsPruned).toBe(1);
+    expect(await keysOf(tenant, declined)).toEqual([]);
+    // The reply still waits: no dead proposal, so its request and its entry stay.
+    expect(await lookupValue(tenant, `appr-open:${tenant}:${reply.id}`)).toBe(taskId);
+    expect(await noted(taskId)).toBeUndefined();
+  });
+
+  it("clears an entry no read settled, as its task no longer holds the request", async () => {
+    const { tenant } = await session();
+    const taskId = await ownTask(tenant);
+    const { requestId } = await workerAsks(tenant, taskId);
+    await decideInTask(tenant, taskId, requestId);
+    expect(await lookupValue(tenant, `appr-open:${tenant}:${requestId}`)).toBe(taskId);
+    const swept = await pruneLater(tenant, 31);
+    expect(swept.status).toBe(200);
+    expect(swept.body.actionsPruned).toBe(1);
+    expect(await keysOf(tenant, requestId)).toEqual([]);
+  });
+
+  it("keeps on the task what the lookup did not hear, says the prune is not done, and tells it at the next prune",
+    async () => {
+      const { tenant } = await session();
+      const taskId = await ownTask(tenant);
+      const { requestId } = await workerAsks(tenant, taskId);
+      await decideInTask(tenant, taskId, requestId);
+      for (const failure of ["answers 500", "throws"]) {
+        const down = namespaceWith("TENANT", (request) => new URL(request.url).pathname !== "/approvals/learned" ? null
+          : failure === "throws" ? Promise.reject(new Error("tenant object down"))
+          : Promise.resolve(Response.json({ error: "down" }, { status: 500 })));
+        const failed = await withObjectBinding(task(taskId), "TENANT", down, () => pruneLater(tenant, 31));
+        expect(failed.status).toBe(500);
+        expect(failed.body.failed).toEqual(["approval-lookup"]);
+        // The request is gone from its task, its entry is still in the lookup, and the task holds on to its id.
+        expect(await keysOf(tenant, requestId)).toHaveLength(2);
+        expect(await noted(taskId)).toEqual([requestId]);
+      }
+      // The next prune has nothing more to remove, but tells the lookup what the last ones could not.
+      const swept = await pruneLater(tenant, 31);
+      expect(swept.status).toBe(200);
+      expect(swept.body.actionsPruned).toBe(0);
+      expect(await keysOf(tenant, requestId)).toEqual([]);
+      expect(await noted(taskId)).toBeUndefined();
+    });
 });

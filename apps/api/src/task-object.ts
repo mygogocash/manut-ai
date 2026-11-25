@@ -13,7 +13,7 @@ import {
   type Role,
   type Standing,
 } from "@manut/approval-core";
-import { indexRequest, OPEN_WINDOW_MS } from "./approval-index";
+import { indexRequest, isReportableRequestId, OPEN_WINDOW_MS, reportGone } from "./approval-index";
 import { readJsonBody } from "./body";
 import { BOOKS_KIND, booksDetail, booksPayloadOf, SHEETS_APPEND, type BooksDetail } from "./books-detail";
 import {
@@ -110,6 +110,12 @@ const MAX_EXPORT_ATTEMPTS = 200;
 export const MAX_NAMED_REQUESTS = 100;
 /// The longest request id that read takes: every request shares its action's id, a UUID.
 const MAX_REQUEST_ID = 128;
+/// The ids of the requests the retention prune removed that the shop's approval lookup has not yet heard of
+/// (`pruneExpired`), kept until a report lands.
+const LOOKUP_GONE = "lookup-gone";
+/// The most ids that note keeps, newest last. It grows only while reports fail, prune after prune; 2,000 UUIDs stay far
+/// inside what one stored value may hold. An id it drops is the old case: its entry stays until a read reaches it.
+const MAX_LOOKUP_GONE = 2_000;
 
 /// One execution of a task by one executor. The fencing token plus the lease
 /// decide who may publish: a stale or fenced-out executor's steps and finish
@@ -764,7 +770,9 @@ export class TaskObject extends DurableObject {
       } catch {
         // No body on the worker-built call is fine; the server clock stands.
       }
-      return Response.json(await this.pruneExpired(nowMs));
+      // The shop whose lookup lists this task's requests, as `openingInLookup` wrote them. A task with no document holds
+      // no proposal, so it has nothing to tell a lookup.
+      return Response.json(await this.pruneExpired(nowMs, doc ? { tenant: this.ownerOf(doc, request), taskId: doc.id } : null));
     }
     if (request.method === "POST" && url.pathname === "/detach-company") {
       return this.detachCompany(request);
@@ -2317,7 +2325,11 @@ export class TaskObject extends DurableObject {
   /// time and dead (rejected/expired) action proposals past the ops-metadata
   /// window. Everything else stays. Storage keys are listed, not scanned by
   /// prefix, because the store holds no other per-record keys by construction.
-  private async pruneExpired(nowMs: number): Promise<{ attemptsPruned: number; actionsPruned: number }> {
+  /// The retention sweep's part in one task. `lookup` names the shop whose approval lookup lists this task's requests:
+  /// the requests that go are reported gone to it, so their entries go too, rather than staying until a read happens to
+  /// reach them. `lookupPending` is how many this prune could not report; they stay noted, and the next prune sends them.
+  private async pruneExpired(nowMs: number, lookup: { tenant: string; taskId: string } | null):
+    Promise<{ attemptsPruned: number; actionsPruned: number; lookupPending: number }> {
     const listed = await this.ctx.storage.list({ prefix: "attempt:" });
     let attemptsPruned = 0;
     for (const [key, value] of listed) {
@@ -2328,16 +2340,47 @@ export class TaskObject extends DurableObject {
     }
     const actions = await this.ctx.storage.list({ prefix: "action:" });
     let actionsPruned = 0;
+    const doomed: string[][] = [];
+    const gone: string[] = [];
     for (const [key, value] of actions) {
       const action = value as ActionProposalJSON;
-      if (isPrunableAction(action, nowMs)) {
-        // An action a worker asked for goes with its approval request, which
-        // means nothing without it.
-        await this.ctx.storage.delete(action.requestId ? [key, `request:${action.requestId}`] : [key]);
-        actionsPruned++;
-      }
+      if (!isPrunableAction(action, nowMs)) continue;
+      // An action a worker asked for goes with its approval request, which
+      // means nothing without it.
+      doomed.push(action.requestId ? [key, `request:${action.requestId}`] : [key]);
+      if (isReportableRequestId(action.requestId)) gone.push(action.requestId);
+      actionsPruned++;
     }
-    return { attemptsPruned, actionsPruned };
+    // Noted before they go, so a report that fails below, or an object that stops before it, leaves the ids for the next
+    // prune: no read may ever come back for an old settled entry. A request is dead and final before it is pruned, so
+    // telling the lookup it is gone a second time changes nothing.
+    if (gone.length > 0) {
+      const merged = [...new Set([...(await this.lookupGone()), ...gone])];
+      await this.ctx.storage.put(LOOKUP_GONE, merged.slice(-MAX_LOOKUP_GONE));
+    }
+    for (const keys of doomed) await this.ctx.storage.delete(keys);
+    return { attemptsPruned, actionsPruned, lookupPending: await this.tellLookupGone(lookup) };
+  }
+
+  /// The ids `pruneExpired` noted that the shop's lookup has not yet taken.
+  private async lookupGone(): Promise<string[]> {
+    const noted = await this.ctx.storage.get<unknown>(LOOKUP_GONE);
+    return Array.isArray(noted) ? noted.filter(isReportableRequestId) : [];
+  }
+
+  /// Reports the noted ids to the shop's lookup (approval-index.ts, `reportGone`), and takes off the note what it took.
+  /// Answers how many this call could not report: 0 once the lookup took them all.
+  private async tellLookupGone(lookup: { tenant: string; taskId: string } | null): Promise<number> {
+    const noted = await this.lookupGone();
+    if (noted.length === 0 || lookup === null) return noted.length;
+    if (!(await reportGone(this.tenantEnv, lookup.tenant, lookup.taskId, noted))) return noted.length;
+    // Read again before writing: a prune that ran while the report was on its way may have noted more, and those stay
+    // for that prune to report.
+    const told = new Set(noted);
+    const left = (await this.lookupGone()).filter((id) => !told.has(id));
+    if (left.length > 0) await this.ctx.storage.put(LOOKUP_GONE, left);
+    else await this.ctx.storage.delete(LOOKUP_GONE);
+    return 0;
   }
 
   private async load(): Promise<TaskDocJSON | null> {

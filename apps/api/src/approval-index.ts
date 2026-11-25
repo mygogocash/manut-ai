@@ -422,6 +422,32 @@ export async function reportLearned(env: Pick<TenantDataEnv, "TENANT">, tenant: 
   }
 }
 
+/// Tells the lookup that `taskId` no longer holds `requestIds`, because the retention prune removed them from it
+/// (task-object.ts, `pruneExpired`). Each goes as a `missing` entry, the way a read reports a request its task does not
+/// hold, so the same rule decides: only the task an entry names can clear it, and an entry is never cleared while its
+/// request could still be opening. Unlike a read's report, the prune waits on this one: the task keeps the ids the lookup
+/// did not take and sends them again with its next prune, since no read may ever come back for an old settled entry.
+/// Whether the lookup took every one.
+export async function reportGone(env: Pick<TenantDataEnv, "TENANT">, tenant: string, taskId: string,
+  requestIds: readonly string[]): Promise<boolean> {
+  for (let i = 0; i < requestIds.length; i += MAX_LEARNED) {
+    const missing = requestIds.slice(i, i + MAX_LEARNED).map((requestId) => ({ requestId, taskId }));
+    try {
+      const response = await tenantCall(env, tenant, "/approvals/learned",
+        { method: "POST", headers: approvalsHeaders, body: JSON.stringify({ tenant, found: [], missing }) });
+      await response.body?.cancel();
+      if (!response.ok) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Whether the lookup would take `requestId` in a report: what the task object notes after a prune is only ever an id
+/// the lookup takes, so one it would refuse can never hold the note up.
+export const isReportableRequestId = (requestId: unknown): requestId is string => isId(requestId, MAX_REQUEST_ID);
+
 /// Runs one step of the shop's backfill (`stepBackfill`). Nothing waits on it either: the read that runs it answers by
 /// walking the index, and the next read runs the next step.
 export async function runBackfillStep(env: Pick<TenantDataEnv, "TENANT">, tenant: string): Promise<void> {

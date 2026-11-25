@@ -171,7 +171,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 53, the preview itself, first slice: Start, Open in the system browser and Stop in the pane's Preview view,
      run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at 09:50.
-   - item 54, the retention prune clearing the approval lookup's entries of the requests it removes: the lead's.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
@@ -183,7 +182,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 51 (the pane beside a lane: Diff lists each file the session changed, from the chat's own steps, so a
+   Merged: 54 (the retention prune clears the approval lookup's entries of the requests it removes: the task notes
+   the ids before it deletes them, reports them gone through the lookup's own report, and keeps what did not land
+   for its next prune, the prune answering `prune_incomplete` with `approval-lookup` meanwhile; the API changed, so
+   the next dev deploy carries it),
+   51 (the pane beside a lane: Diff lists each file the session changed, from the chat's own steps, so a
    rewound turn's files leave it; Preview says the app has no preview yet and shows the Sample rows; Tests shows the
    last run's result, when, and its command with any key masked before it is cut, never its output; mocha, Playwright
    Test and `unittest` are read with the same pass rule, a flaky Playwright test counting as passed as its exit status
