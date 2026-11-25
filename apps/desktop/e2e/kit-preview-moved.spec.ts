@@ -2,8 +2,8 @@
 // moved" (main changed while Kit worked: the file, Let Kit merge, Show me both) and "No secret in the preview" (a sample
 // until the owner adds one). There is no shell in a browser, so the mock host answers what git would say for the canvas's
 // project (src/code/mockMoved.ts), and the stand-in coding agent writes a change that reads the shop ID (`/kit shop`).
-// The lane runs as a chat, as the canvas's Code board draws it; the + menu starts agents in their own terminal only
-// (docs/code-editor.md), so the spec starts it through the sessions store.
+// The lane runs as a chat, as the canvas's Code board draws it. The spec starts it through the sessions store, as the + menu's
+// Chat with Kit does (kit-lanes.spec.ts walks the menu itself).
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 

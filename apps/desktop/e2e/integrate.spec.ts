@@ -2,7 +2,8 @@
 // fix the parent asked for after layer 1.
 // - thread rows carry HarnessStack marks from the thread's live subagents; the thread chat shows the same subagent row
 // - the terminal panel's next tab starts in the open thread's folder (home in the main chat)
-// - SESSIONS is back as TERMINALS only (2026-11-16): ⌘N opens its + menu (no chat choice)
+// - SESSIONS is back as TERMINALS (2026-11-16): ⌘N opens its + menu, which offers a chat with Kit too since item 66 (2026-11-25),
+//   with the focus on a terminal row as before
 // - threads: connector lighter than the hairline, running spinner in the running amber (--term-run) at 1.5px, needs-you pulse >= 0.6 in
 //   the strip's amber, idle rows a hollow dot, titles >= 20px past the bot name and smaller, the bot row's time
 //   follows its newest thread
@@ -181,7 +182,7 @@ test("a restored thread listed without a folder: opening it gives the row its fo
   expect((await page.evaluate(() => (window as unknown as { __manutShellCalls: { op: string; at?: string }[] }).__manutShellCalls)).find((c) => c.op === "start")?.at).toBe("/work/restored");
 });
 
-test("SESSIONS is back as TERMINALS only (2026-11-16): ⌘N opens its + menu with no chat choice; ⌘⇧] with no terminal opens nothing", async ({ page }) => {
+test("SESSIONS is back as TERMINALS (2026-11-16): ⌘N opens its + menu, a terminal row focused beside Chat with Kit; ⌘⇧] with no terminal opens nothing", async ({ page }) => {
   await setup(page);
   const mod = await page.evaluate(() => (/Mac/.test(navigator.platform) ? "Meta" : "Control"));
   await page.keyboard.press(`${mod}+Shift+BracketRight`);
@@ -192,7 +193,11 @@ test("SESSIONS is back as TERMINALS only (2026-11-16): ⌘N opens its + menu wit
   await expect(page.getByTestId("page-code").getByTestId("side-sessions")).toBeVisible();
   await expect(page.getByTestId("session-menu")).toBeVisible();
   await expect(page.getByTestId("session-agent-shell")).toBeVisible();
+  // the draft's old Chat or Terminal choice is not in the menu: each way is its own row (item 66)
   await expect(page.getByTestId("session-menu").getByText(/^Chat$/)).toHaveCount(0);
+  await expect(page.getByTestId("session-chat-head")).toBeVisible();
+  // ⌘N then Enter still starts a terminal: the focus is on the last agent's terminal row, never on a chat row
+  await expect(page.getByTestId("session-menu").locator("[data-testid^=session-agent-]:focus")).toHaveCount(1);
 });
 
 test("thread rows: connector, spinner, pulse, idle dot, indent and size; bot row follows its newest thread", async ({ page }) => {

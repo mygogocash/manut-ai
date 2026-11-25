@@ -174,12 +174,21 @@ test.describe("shots", () => {
   }
 });
 
-test("the + menu: Shell first, then CLIs with official marks; no chat choice; picking starts a terminal in the chip's folder", async ({ page }) => {
+test("the + menu: Chat with Kit, then In a terminal with the Shell first and the CLIs; picking a terminal row starts a terminal in the chip's folder", async ({ page }) => {
   await open(page);
   await openCode(page);
   await page.getByTestId("session-start").click();
   const menu = page.getByTestId("session-menu");
   await expect(menu).toBeVisible();
+  // item 66 (owner, 25 Nov: both): each installed agent that runs as a chat is offered first as a chat with Kit, a lane
+  // (kit-lanes.spec.ts starts one from here); Grok has no chat here, so it is a terminal row only
+  await expect(menu.getByTestId("session-chat-head")).toHaveText("Chat with Kit");
+  expect(await menu.locator("[role=menuitem][data-testid^=session-chat-]").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")))).toEqual(
+    ["claude", "codex", "omo", "pi", "omp", "opencode"].map((a) => `session-chat-${a}`),
+  );
+  await expect(menu.getByTestId("session-term-head")).toHaveText("In a terminal");
+  // the terminal part is as it was: the Shell first, then the CLIs; the last one used (none yet: the first) has the focus
+  await expect(menu.getByTestId("session-agent-claude")).toBeFocused();
   const rows = menu.locator("[data-testid^=session-agent-]");
   await expect(rows.first()).toHaveAttribute("data-testid", "session-agent-shell");
   await expect(rows.first().getByTestId("term-row-mark")).toHaveAttribute("data-agent", "shell");

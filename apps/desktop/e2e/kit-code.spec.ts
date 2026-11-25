@@ -1,8 +1,8 @@
 // Kit on the Code page and on a coding session's asks (src/code/, the design canvas's StatesCodeDev board): the
 // stand-in coding agent asks for each of Kit's steps when told `/kit <step>` (src/sessions/host.ts), in a session
 // started in the canvas's project. What Kit's dial settles by itself still shows in the chat, settled. The session
-// runs as a chat, as the canvas's Code board draws Kit's lane; the + menu starts agents in their own terminal only
-// (docs/code-editor.md), so the spec starts it through the sessions store.
+// runs as a chat, as the canvas's Code board draws Kit's lane. The spec starts it through the sessions store, as the + menu's
+// Chat with Kit does (kit-lanes.spec.ts walks the menu itself).
 import { expect, test, type Page } from "@playwright/test";
 import { openCode } from "./start";
 
@@ -73,7 +73,7 @@ test("the dial's level changes what Kit does alone, and going live still asks", 
   await expect(page.getByTestId("kit-line")).toHaveText("Kit edits, installs, deletes and pushes its own branch alone, inside this project. Anything outside it is stopped.");
   await expect(page.getByTestId("kit-panel")).toContainText("Going live always asks, at every level.");
 
-  // a chat-mode session has no row on the Code page (TERMINALS lists terminals only): open it as a notification would
+  // open the session as a notification would (its row is in the Lanes band, which kit-lanes.spec.ts walks)
   await page.evaluate(async (i) => {
     const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
     store.getStore().actions.openSession(i);

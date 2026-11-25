@@ -1,9 +1,8 @@
 // The pane beside a lane (src/code/LanePane.tsx, the design canvas's Code board, "What to look at"), walked in a browser: Diff, Preview
 // and Tests beside the session's chat (the preview's run itself is walked by e2e/preview-run.spec.ts). The stand-in coding agent
 // (src/sessions/host.ts) edits a file and runs the tests when told `/kit pass`, `fail`, `unread` or `slow`, and reads the shop ID from
-// the environment when told `/kit shop`. The lane runs as a chat, as the canvas's Code board draws it; the + menu starts agents in their
-// own terminal only (docs/code-editor.md), so the spec starts it through the sessions store, as kit-lanes.spec.ts does, and opens it as
-// a notification would.
+// the environment when told `/kit shop`. The lane runs as a chat, as the canvas's Code board draws it. The spec starts it through the sessions
+// store, as the + menu's Chat with Kit does and as kit-lanes.spec.ts does, and opens it as a notification would.
 import { expect, test, type Page } from "@playwright/test";
 
 const ROOT = "/home/you/code/baanmali-preorder";
@@ -23,7 +22,7 @@ async function startIn(page: Page, first: string): Promise<string> {
   );
 }
 
-/** The session fills the main column, as a notification would open it: the Code page lists only terminals. */
+/** The session fills the main column, as a notification would open it, without going through its row in the Lanes band. */
 const openSession = (page: Page, id: string) =>
   page.evaluate(async (i) => {
     const store = (await import(/* @vite-ignore */ "/src/state/store.ts" as string)) as { getStore(): { actions: { openSession(id: string): void } } };
