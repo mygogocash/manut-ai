@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`pairing > pins every byte of a pairing run with fixed keys, so the layout in the README cannot drift 1`] = `
+{
+  "checkCode": "5692",
+  "commit": "10015e1e2093c16ffb11cead4b7c3c2e4ce3c9113c71231f9c54ebe4ed056ea64560",
+  "confirm": "1301981cc4d8fdb4b0bde5f88272c996c965465aa3a37c083b1bec4933b300ac45e2",
+  "key": "11010439fb0f3d8ff0000f7c4f63e50886d09b1a0c6c9232c1c46a0f6621323cf3badcafe32f4f40b850c51045b4fd4756f523091d1285bb5ca3ab3fe6aa9096818d5c",
+  "proof": "12010409878d28ab05f892ff00964c903997e5af9b0759b5b9743175856de92b5f7ab563369199861b8a2d465c62bce22762af162bd9addef196029e0089a17b1b621a26af1cbb1a6a617a2aaf030487741bfd8b9402d4f555f47ab82d59da6d007b9e",
+  "record": "308dc9d895ce465e10a8e562c35ffe48a74baeb8a67cc7",
+}
+`;

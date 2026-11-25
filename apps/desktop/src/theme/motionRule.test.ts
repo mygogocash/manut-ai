@@ -40,10 +40,6 @@ const OWN_MOVES: Record<string, { file: string; why: string }> = {
     file: "runs/runs.css",
     why: "a dash riding an SVG edge into a running node, the Shimmer's idea on a drawn line, which the kit's background shimmer cannot paint; it runs at the Shimmer's time",
   },
-  "msg-lit": {
-    file: "chat/chat.css",
-    why: "a quote's message lit for a moment: the ring holds, then fades, and nothing takes the class away, so its keyframes are what end it; no named move points at what is already there (item 85b settles it)",
-  },
 };
 
 /** Classes named like a button that are rows: they answer with the Hover fade only, as the kit's rows do. */

@@ -56,6 +56,26 @@ came:
 
 The focus ring appears and stays still: no transition may name `outline` or `all`.
 
+## Lists and pages (item 85c)
+
+Decided once in `src/lib/firstPaint.ts`; a page only names what it has, with attributes and no hook (`data-arrive`,
+`data-arrive-rows`, `data-arrive-body`, `data-flip-list`, `data-flip`, `data-flip-scope`), and one driver started in
+`main.tsx` does the rest.
+
+- **Rows arrive once.** The first time a page shows its rows in a session they rise in order (Rise, 50 ms a step, at most
+  four, counted per list). Never again: not on a re-render, a refetch, a filter, a sort, a row added later, or coming back
+  to the page. The key is spent for the session, and the class comes off after 0.8 s so nothing is left to play twice.
+  Home, Needs you, Team, History, Artifacts, Customize (Memory and routines), the activity log, a job, Automations, People
+  and the menu's Recent chats use it. A row that IS an ask or a decision waiting (Home's and Needs you's rows, marked `data-ask`) does not rise: it fades where it stands (`.mo-fade`, Rise with no distance), so its transform is the same at every frame (asserted in `e2e/motion-lists.spec.ts`). A new ask appears and stays still.
+- **The body fades in once** (the Arrive move with no distance) under a header that does not move (`MenuPageFrame`).
+- **Rows that move.** A row pinned, snoozed, settled or removed slides to its place on the plain ease in the Switch's time
+  (a small FLIP on the Web Animations API, no dependency): Team, History and the menu's Recent chats. A change of filter or
+  search is another list and does not slide. A removed row is not faded out where it stood: it goes at once and the rows
+  below slide up.
+- **Meters fill once** (`.uc-bar > i`, Fill). No budget pill or job progress bar exists yet; they take `.mo-fill` when built.
+- **Loading** is `src/pages/Loading.tsx`: a strip and rows in the Loading shimmer, in the shape of StatesSystem's board,
+  with the words kept for a screen reader.
+
 ## Reduced motion
 
 One block in motion.css. Every animation ends at once in its end state (0.01 ms, one iteration, no delay) and no
@@ -81,7 +101,7 @@ no dash on a run's edges). A held button still shows its 97%, as the kit's does,
 
 Its own short list of exceptions, each with why: `ui-ring-turn` (the live ring's period is also `Live.tsx`'s
 `ringDelay`), `bv-flow` (a dash on an SVG edge, the Shimmer's idea where a background shimmer cannot paint),
-`msg-lit` (a quote's message lit for a moment, left for item 85b), and the team faces' own moves as the kit draws them.
+and the team faces' own moves as the kit draws them.
 
 ## Team faces
 

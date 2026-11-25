@@ -278,6 +278,7 @@ describe("every surface that can approve it shows its whole text", () => {
     vi.unstubAllGlobals();
   });
 
+  // A long walk through the page: it passes five seconds on a loaded Mac (26 Nov 2026), so it has its own limit.
   it("the owner's card, Home and Needs you, line for line, with Approve where the whole text is", async () => {
     const { store, card } = await opened([append()]);
     expect(card).toMatchObject({ command: EN, whole: true, choices: ["once", "deny"], approvalKind: "command", title: "Ton asks to add the books for October 2026 to Google Sheets" });
@@ -304,7 +305,7 @@ describe("every surface that can approve it shows its whole text", () => {
     const needs = needRows(store.getSnapshot(), START);
     expect(needs[0]).toMatchObject({ action: EN, whole: true });
     expect(renderToString(<NeedsView rows={needs} />)).toContain(`<code class="act whole">${escaped(EN)}</code>`);
-  });
+  }, 30_000);
 
   it("a request whose detail this build cannot read whole is shown with no Approve anywhere, and says to update the app", async () => {
     const { store, card } = await opened([append(ownerDetail({ totals: undefined }))]);

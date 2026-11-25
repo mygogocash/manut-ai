@@ -168,6 +168,14 @@
   animation: var(--anim-rise);
   animation-delay: calc(min(var(--i, 0), 4) * var(--move-step));
 }
+/* A fade where it stands: an ask, an approval or a decision waiting arrives in the first frame's place and never moves
+   (the board: money, approvals and errors appear and stay still). Rise's keyframes with no distance, so the row's
+   transform is the same at every frame; it keeps Rise's step so a list still comes in order. */
+.mo-fade {
+  --rise-by: 0px;
+  animation: var(--anim-arrive);
+  animation-delay: calc(min(var(--i, 0), 4) * var(--move-step));
+}
 .mo-settle {
   animation: var(--anim-settle);
 }
