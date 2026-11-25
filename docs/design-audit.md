@@ -31,8 +31,8 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
    with no bubble, and only the person's message has one. The serif is not bundled (`theme/fonts.css`), `--font-read`
    is used only in `pages/mission.css`, and `--fs-msg` starts at 13px. Seen, and code. *Item 85f (26 Nov):* the answer
    is on the page in `--font-read` at 17px / 1.65 in a 696px column, the person's message alone in a bubble at 15px,
-   and Settings › Appearance's text size moves both a step along the scale. The serif's files are still to be bundled
-   (`docs/decisions.md`), so it reads in Georgia until then.
+   and Settings › Appearance's text size moves both a step along the scale. The serif, Source Serif 4, is bundled
+   for Latin text; Thai and the CJK languages read in the stack's next serif until theirs are bundled.
 3. **Languages.** Settings and the palette offer English, Korean, Japanese and Chinese, and no Thai. The Type board
    treats Thai as a first language. Not changed: the owner said on 25 Nov that the first release speaks those four and
    Thai waits.
