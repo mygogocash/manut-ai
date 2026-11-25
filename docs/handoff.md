@@ -211,6 +211,14 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them. Since then three
+   builders run at once, their gates one at a time (`gate.sh` takes a lock), beside two read-only agents:
+   - item 69, a helper's own session on the connected desktop (`feat/helper-session`, Opus, `cc-item69-helper-session`);
+   - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
+   - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
+   - a security review of the twelve features merged on 25 Nov, findings only, whose report the lead turns into fixes;
+   - a design for reaching the app from another device (item 78), for the owner to decide from.
+   All started 25 Nov at about 23:45. Item 84 follows 83.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
