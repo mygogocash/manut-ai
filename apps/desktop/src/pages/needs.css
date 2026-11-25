@@ -1,0 +1,108 @@
+/* Needs you (NeedsPage.tsx), as the design canvas's Approvals board draws it: one card a decision, 12px apart. A card is
+   the kit's .box (packages/ui-kit/app.css) with 16px inside and 10px between its parts: a head row of the face, who asks
+   in the kit's second line and the kind as a tag pushed to the right; what is asked as the kit's .big (17px); the exact
+   action in the kit's quiet panel, whole; then the buttons. The tag is amber, the canvas's colour for waiting for a
+   person (BrandColour), so it reads as the card's mark and never as a button: the only buttons are the kit's 34px .btn.
+   menuPages.css gives the page's frame, tags and empty state under .mpage. */
+.mpage .needs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mpage .need {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+}
+/* The desktop's own: the card opens its ask, as the row did. Its button holds the head, the line and the action, and
+   reaches over the whole card, so a press anywhere on it opens the chat; Look first sits above it. The edge darkens
+   under the pointer (the Hover fade), and the focus ring goes round the card. */
+.mpage .need:hover {
+  border-color: var(--line-strong);
+}
+.mpage .need-open {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  text-align: left;
+  color: var(--ink);
+}
+.mpage .need-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.mpage .need-open:focus-visible {
+  outline: 0;
+}
+.mpage .need:has(.need-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.mpage .need-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mpage .need-who {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--aui-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.mpage .need-h .tag {
+  flex: none;
+  margin-left: auto;
+}
+/* what is asked: the kit's .big */
+.mpage .need .l1 {
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+/* The exact action, set as its chat card sets its command (chat/cards/cards.css .card-cmd): the kit's quiet panel, in the
+   mono face, wrapped and never cut, scrolling past the same height as the card's. */
+.mpage .need code.act {
+  display: block;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 172px;
+  overflow-y: auto;
+  /* above the card's reach, so a long one scrolls under the pointer; a press on it still opens the ask */
+  position: relative;
+  z-index: 1;
+}
+/* A browser write's sentence, whole, as its card shows it (cards.css .card-cmd.whole). */
+.mpage .need code.act.whole {
+  max-height: none;
+  overflow-y: visible;
+}
+.mpage .need-acts {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

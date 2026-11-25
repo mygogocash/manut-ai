@@ -1,59 +1,73 @@
-/* Approval / clarify cards. Neutral gray; no brand gradient or pink (selection and actions stay gray). */
+/* The ask cards of a chat: an approval, a question, several questions at once (Cards.slot.tsx), the "Send this to a
+   thread?" card (ThreadNotes.tsx) and a bot's request to type into a terminal (src/sessions/TermShareCard.tsx), all
+   one family, as the design canvas draws a decision (KitApproval, StatesApproval, StatesAsks, StatesCodeDev) in its
+   own sheet (packages/ui-kit/app.css): the kit's .box with 16px inside and 10px between its parts, what it asks as the
+   kit's .big (17px), the exact action in the kit's quiet panel (.codeb), and a row of the kit's 34px buttons (.btn) in
+   which the main choice the board names (Allow once, Submit, Send there) is the one black button (.btn.dark) and every
+   other choice is quiet. No button is tinted: colour keeps its four meanings only, so red is for what cannot be undone
+   or did not go, and a settled Allow's tick is the green of done.
+   The order of the choices, what each does and the keys stay the card's own (Cards.slot.tsx): this sheet only draws
+   them. A card appears and stays still; only its settled line Settles (chat.css .line.landed). */
 .card {
-  background: var(--raise);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 9px 10px 9px 12px;
+  max-width: 76%;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  max-width: 76%;
-  font-size: 12px;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
 }
+/* What it asks, as the kit's .big: the one line that says what follows. */
 .card-title {
   color: var(--ink);
-  font-weight: 600;
-  font-size: 12.5px;
-  line-height: 1.45;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 500;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
-/* A risky command gets a red rail and one warning line; the buttons stay exactly as they are. */
-.card.risky {
-  box-shadow: inset 3px 0 0 var(--danger);
+/* Who asks (a subagent) and whose shop it is: the kit's second line (.mut, 13px), whole, never cut. */
+.card-who,
+.card-shop {
+  color: var(--aui-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
+/* A command that cannot be undone says so in the kit's red tag (.tag.err): red is what cannot be undone. Only this tag
+   is added; the buttons stay exactly as on any other card. */
 .card-risk {
-  display: flex;
+  align-self: flex-start;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--danger);
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--errbg);
+  color: var(--aui-danger);
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
-.card-risk-ic {
-  display: inline-grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--danger);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
-  flex: none;
-}
+/* The exact action, in the kit's quiet panel (.codeb), wrapped and never cut sideways. A long one scrolls inside it; its
+   height leaves the same 148px of text in view as the card's 160px box did before the kit's padding (decisions,
+   24 Nov 2026: every other request keeps its words and its scroll box). */
 .card-cmd {
   margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad-lg);
+  background: var(--soft);
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--body);
-  background: var(--bg);
-  border-radius: var(--r-sm);
-  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 160px;
+  max-height: 172px;
   overflow-y: auto;
 }
 /* A browser write's sentence names the site, the page, the form and every value it will type, and is read whole before it
@@ -65,21 +79,21 @@
 /* A computer use card's picture of the control it names: small, whole, never stretched past its own size. */
 .card-computer-picture {
   display: block;
+  align-self: flex-start;
   max-width: 100%;
   max-height: 120px;
-  margin-top: 6px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: var(--rad);
   object-fit: contain;
 }
-/* plan mode's plan: rendered as an answer is, in its own scroll; the card keeps its width */
+/* plan mode's plan: rendered as an answer is, in the kit's quiet panel, in its own scroll; the card keeps its width */
 .card-plan {
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.55;
-  color: var(--body);
-  background: var(--bg);
-  border-radius: var(--r-sm);
-  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: var(--rad-lg);
+  padding: 12px 14px;
   max-height: 320px;
   overflow-y: auto;
   overflow-wrap: anywhere;
@@ -92,157 +106,127 @@
 .card-plan h2,
 .card-plan h3,
 .card-plan h4 {
-  font-size: 12.5px;
+  font-size: 14px;
+  font-weight: 600;
 }
-.card-who {
-  margin-bottom: 2px;
-  font-size: 11.5px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* The folder the command runs in, whole: a long path wraps rather than hiding its end behind a hover. */
 .card-cwd {
-  margin-top: -2px;
   font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--quiet);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--aui-muted);
+  overflow-wrap: anywhere;
 }
+/* The row of answers: the kit's .chips. */
 .card-acts {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
 }
+/* Every answer is the kit's quiet .btn: 34px, a hairline edge on the card's own ground, ink words. */
 .card-btn {
-  height: 24px;
-  padding: 0 10px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  font-weight: 600;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  background: var(--aui-surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
 }
+.card-btn:not(:disabled):hover {
+  background: var(--hov);
+}
 .card-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
 }
-.card-btn.soft {
-  background: var(--raise2);
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--ink);
-}
-/* Light theme: the card sits on a near-white page, so the buttons need a firmer edge to read as buttons. */
-[data-theme="light"] .card-btn.soft {
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 0 rgba(0, 0, 0, 0.04);
-}
-[data-theme="light"] .card {
-  border-color: var(--line-strong);
-}
-.card-btn.soft:not(:disabled):hover {
-  background: var(--line-strong);
-}
-/* The approval buttons carry their meaning in colour, the same weight and order (Deny first): Deny in the danger
-   red, Allow once in the link violet, Allow for session in amber, since it allows more than this one command (never
-   green: the broadest choice must not read as the safe one). A tint fill and an edge of the colour, the label in it;
-   on hover the tint deepens. */
-.card-btn.soft.deny,
-.card-btn.soft.once,
-.card-btn.soft.session {
-  --tone: var(--danger);
-  background: color-mix(in srgb, var(--tone) 14%, var(--raise2));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 45%, transparent);
-  color: color-mix(in srgb, var(--tone) 80%, var(--ink));
-}
-.card-btn.soft.once {
-  --tone: var(--link);
-}
-.card-btn.soft.session {
-  --tone: #e8a33c;
-}
-[data-theme="light"] .card-btn.soft.session {
-  --tone: #9a5f06;
-}
-[data-theme="light"] .card-btn.soft.deny,
-[data-theme="light"] .card-btn.soft.once,
-[data-theme="light"] .card-btn.soft.session {
-  background: color-mix(in srgb, var(--tone) 9%, var(--bg));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 50%, transparent), 0 1px 0 rgba(0, 0, 0, 0.04);
-  color: color-mix(in srgb, var(--tone) 88%, var(--ink));
-}
-.card-btn.soft.deny:not(:disabled):hover,
-.card-btn.soft.once:not(:disabled):hover,
-.card-btn.soft.session:not(:disabled):hover {
-  background: color-mix(in srgb, var(--tone) 26%, var(--raise2));
-}
-[data-theme="light"] .card-btn.soft.deny:not(:disabled):hover,
-[data-theme="light"] .card-btn.soft.once:not(:disabled):hover,
-[data-theme="light"] .card-btn.soft.session:not(:disabled):hover {
-  background: color-mix(in srgb, var(--tone) 18%, var(--bg));
-}
-/* The one primary action of a card (Submit): the app's neutral primary, ink on page, as on the setup screen. Never
-   the accent gradient, and not the gray of a selected chip. */
+/* The main choice the board names is the one black button (.btn.dark): Allow once on an approval (a terminal's Resume
+   and send is its Allow once), Send to the owner in a note being passed on, Submit and Answer on a question, Send there
+   on a thread's card. Deny, Allow for session and Always allow stay quiet, and Deny still comes first. */
+.card-btn.once,
 .card-btn.primary {
-  height: 26px;
-  padding: 0 16px;
-  background: var(--ink);
-  color: var(--bg);
+  border-color: var(--aui-primary);
+  background: var(--aui-primary);
+  color: var(--aui-on-primary);
 }
+.card-btn.once:not(:disabled):hover,
 .card-btn.primary:not(:disabled):hover {
-  background: var(--body);
+  background: var(--aui-primary);
+  opacity: 0.88;
+}
+/* The kit's larger touch target: each button reaches a few pixels past its top and bottom. */
+.card-btn::after {
+  content: "";
+  position: absolute;
+  inset: -5px 0;
 }
 .card-ask {
   display: flex;
-  gap: 5px;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
+/* A field in a card: the kit's .input, 40px. */
 .card-in {
   flex: 1;
   min-width: 0;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line);
-  background: var(--bg);
-  font-size: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: var(--rad);
+  border: 1px solid var(--line-strong);
+  background: var(--aui-surface);
+  font-size: 14px;
   color: var(--ink);
   outline: 0;
 }
+.card-in:hover {
+  border-color: var(--ink);
+}
 .card-in:focus {
-  border-color: var(--quiet);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 .card-in::placeholder {
-  color: var(--quiet);
+  color: var(--aui-placeholder);
 }
+/* why an answer did not go: red is what did not go */
 .card-err {
-  font-size: 11px;
-  color: var(--danger);
+  font-size: 13px;
+  color: var(--aui-danger);
 }
-/* an ask shown from a kept read: it says why it cannot be answered, quietly (it is not a failure) */
+/* an ask shown from a kept read, one this version cannot answer, or one only the owner may decide: it says why, quietly
+   (it is not a failure) */
 .card-note {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 13px;
+  color: var(--aui-muted);
 }
-/* collapsed: one gray line */
+/* collapsed: one quiet line; an Allow's tick is the green of done */
 .card-line .line-t {
-  color: var(--muted);
+  color: var(--aui-muted);
+}
+.card-line .line-ic {
+  font-size: 12px;
+}
+.card-line.ok .line-ic {
+  color: var(--aui-success);
 }
 .card-line-d {
-  color: var(--quiet);
+  color: var(--aui-muted);
 }
-/* A card that has focus (Needs-you strip, ⌘J, or a click) shows a gray ring; its number keys work then only. */
+/* A card that has focus (Needs you, ⌘J, or a click) shows a calm ring; its number keys work then only. */
 .card:focus {
   outline: 0;
 }
 .card:focus-within {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 2px var(--line);
-}
-.card.risky:focus-within {
-  box-shadow: inset 3px 0 0 var(--danger), 0 0 0 2px var(--line);
 }
 .card-keys {
   margin-left: 4px;
@@ -256,54 +240,51 @@
   opacity: 1;
 }
 
-/* Interview: several questions in one card, one Submit. Chips are gray; the selected one is a darker gray. */
-.iv {
-  gap: 9px;
-}
+/* A question's choices, and several questions in one card with one Submit: numbered rows, each the kit's quiet .chip
+   at the buttons' height, full width; a picked one takes the kit's hover grey and its edge darkens. */
 .iv-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 .iv-q {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 .iv-text {
-  color: var(--body);
-  font-size: 12.5px;
-  line-height: 1.45;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .iv-n {
   display: inline-grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 6px;
-  border-radius: 4px;
-  background: var(--raise2);
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: var(--rad-sm);
+  background: var(--aui-subtle);
+  color: var(--aui-muted);
+  font-size: 12px;
+  font-weight: 600;
   vertical-align: 1px;
 }
 .iv-hint {
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 500;
+  color: var(--aui-muted);
+  font-size: 13px;
 }
 /* one choice per row, numbered, full width; long text wraps inside the card */
 .iv-chips {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
-  padding-left: 22px;
+  gap: 6px;
+  padding-left: 28px;
   min-width: 0;
 }
 .iv-chips.flat {
@@ -312,37 +293,40 @@
 /* text fields line up with the rows: same indent, same right edge */
 .iv-q > .card-in {
   flex: none;
-  margin-left: 22px;
-  width: calc(100% - 22px);
+  margin-left: 28px;
+  width: calc(100% - 28px);
 }
 .iv-chip {
-  min-height: 26px;
-  padding: 4px 9px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  line-height: 1.4;
+  position: relative;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: var(--rad);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
   text-align: left;
-  color: var(--body);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink);
+  background: var(--aui-surface);
+  box-shadow: inset 0 0 0 1px var(--line);
   display: flex;
   align-items: flex-start;
-  gap: 7px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
 }
 .iv-num {
   flex: none;
-  min-width: 10px;
-  color: var(--muted);
-  font-size: 11px;
+  min-width: 12px;
+  color: var(--aui-muted);
+  font-size: 12px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 .iv-body {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -350,70 +334,59 @@
   font-weight: 500;
 }
 .iv-desc {
-  color: var(--muted);
-  font-size: 11.5px;
+  color: var(--aui-muted);
+  font-size: 13px;
   font-weight: 400;
 }
-.iv-chip.on .iv-badge {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--quiet);
-}
+/* "Recommended": the kit's quiet .tag */
 .iv-badge {
-  margin-left: 7px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: var(--raise2);
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 600;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--rad-pill);
+  background: var(--aui-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
-  vertical-align: 1px;
+}
+.iv-chip.on .iv-badge {
+  background: var(--aui-surface);
 }
 .iv-chip:not(:disabled):hover {
-  background: var(--hover);
+  background: var(--hov);
 }
 .iv-chip.on {
-  background: var(--seg-on);
+  background: var(--hov);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--ink);
-  font-weight: 600;
-}
-[data-theme="light"] .iv-chip.on {
-  background: var(--raise2);
-  box-shadow: inset 0 0 0 1px var(--muted);
 }
 .iv-chip:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
 }
+/* a multi-select row's box: the kit's .check, small; ticked, it is ink */
 .iv-box {
   flex: none;
   margin-top: 2px;
-  width: 11px;
-  height: 11px;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px var(--quiet);
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
   display: inline-grid;
   place-items: center;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1;
 }
-/* "Other…" is a chip like the rest (selected like the rest once it has text); its field takes the row under
-   the chips. Fields in the card rest on a firm edge, so a filled one and an empty one look the same. */
-.iv .card-in {
-  border-color: var(--line-strong);
+.iv-chip.on .iv-box {
+  background: var(--aui-primary);
+  box-shadow: none;
+  color: var(--aui-on-primary);
 }
-.iv .card-in:focus {
-  border-color: var(--quiet);
-  box-shadow: 0 0 0 2px var(--line);
-}
-.iv .card-acts {
-  margin-top: 2px;
-}
+/* "Other…" is a row like the rest (picked like the rest once it has text); its field takes the line under the rows. */
 .iv-chips > .iv-other {
   flex: none;
-  margin-top: 1px;
 }
 .iv-count {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -459,59 +432,54 @@
   color: var(--ink);
   text-decoration-color: currentColor;
 }
+/* what would be sent to the thread, whole, in the kit's quiet panel under its name */
 .th-route .th-route-q {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--rad-lg);
+  background: var(--soft);
   min-width: 0;
 }
 .th-route .th-route-l {
-  flex: none;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 13px;
+  color: var(--aui-muted);
 }
 .th-route .th-route-text {
   min-width: 0;
-  font-size: 12px;
-  color: var(--body);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 14px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
-/* An ask from one of several shops (docs/several-shops.md): its shop's name above its title, quiet, so the card says
-   whose it is first; a note a helper passed on with it, set off as a quote; and the note a helper writes for the owner. */
-.card-shop {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: 0.01em;
-}
+/* A note a helper passed on with an ask of one of several shops (docs/several-shops.md), in the kit's quiet panel: who
+   passed it on, then the note; and the note a helper writes for the owner. */
 .card-passed {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px;
-  border-left: 2px solid var(--line-strong);
-  font-size: 11.5px;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--rad-lg);
+  background: var(--soft);
 }
 .card-passed-h {
-  font-weight: 600;
-  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aui-muted);
 }
 .card-passed-n {
-  color: var(--body);
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 .card-pass {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 .card-pass-in {
-  height: auto;
-  min-height: 44px;
-  padding: 5px 8px;
+  min-height: 72px;
+  padding: 10px 12px;
   resize: vertical;
   font-family: inherit;
-  line-height: 1.45;
+  line-height: 1.5;
 }
