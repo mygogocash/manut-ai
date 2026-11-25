@@ -129,6 +129,14 @@
         "limit": 20,
         "period": 60
       }
+    },
+    {
+      "name": "ARTIFACT_READ_LIMITER",
+      "namespace_id": "2026100453",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
     }
   ],
   "durable_objects": {
