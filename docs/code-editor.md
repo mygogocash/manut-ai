@@ -874,14 +874,25 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   where it keeps local settings with the worktree.
 - **An added account** (`accounts.rs`, `share` and `prepare`). Before a session of Claude Code or Codex starts as an added
   account, the account's home gets links to the person's own home (the home folder set on Settings › Providers, else the
-  CLI's default) for an allow-list of configuration: Codex's `config.toml`
-  (settings and MCP servers), `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`, `plugins`; Claude Code's `skills`,
+  CLI's default) for an allow-list of configuration: Codex's `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`,
+  `plugins`; Claude Code's `skills`,
   `commands`, `agents`, `output-styles`, `rules`, `workflows`, `plugins`, `CLAUDE.md`. An entry the account has of its own
   stays its own, a link elsewhere is left alone, and nothing is written in the person's home. Claude Code's `settings.json` is
   a copy without `env` and the keys its settings reference lists under Authentication and providers (`apiKeyHelper`,
   `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`, `forceLoginMethod`, `forceLoginOrgUUID`,
   `forceLoginGatewayUrl`, `enforceAnthropicSignIn`, `allowedProviders`, `otelHeadersHelper`), written again on each start
-  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Never shared: `auth.json`, `auth.lock`,
+  while the account has not changed it (a hash beside it, `.manut-settings-copy`). Codex's `config.toml` (settings and MCP
+  servers) is the same kind of copy (`.manut-config-copy`), since the security review of 25 Nov 2026: it used to be linked
+  whole, and it can hold a provider's key or headers and an MCP server's tokens, so the added account could use the
+  person's own key. The copy leaves out, wherever they sit (a provider, an MCP server, a profile, OpenTelemetry's
+  exporters, the network proxy, an agent's role), every key Codex's configuration reference and its `rust-v0.169.0` schema
+  name as holding a credential (`experimental_bearer_token`, `http_headers`, `query_params`, `headers`, `env`,
+  `client_secret`, `oauth` and the rest of `CODEX_LOGIN_KEYS`), naming where one is read (`env_key`, `env_http_headers`,
+  `bearer_token_env_var`, `credential_file`, `config_file`...) or running a command that prints one (`auth`,
+  `gateway_oauth`, `aws`, `http_headers_helper`), and the tables `mcp_enterprise_managed_auth` and
+  `shell_environment_policy.set`; the model, providers' addresses, the MCP servers themselves and project trust stay. An
+  earlier version's link is replaced by the copy; the copy keeps no comments; a key pasted into an MCP server's `command`
+  or `args` is not recognised. Never shared: `auth.json`, `auth.lock`,
   `.credentials.json`, `.claude.json`. On macOS Claude Code keeps an account's sign-in in the keychain under its config folder,
   so the shared files carry none. Left as before: Claude Code's servers added with `claude mcp add` (user scope, and a folder's
   local scope) live in its `.claude.json` beside the account's own details, and Claude Code rewrites that file while it runs,

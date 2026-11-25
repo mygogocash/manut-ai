@@ -149,11 +149,13 @@ pub fn session_env_for(home: &Path, agent: &str, account: Option<&str>) -> Vec<(
 ///   ([`CLAUDE_LOGIN_KEYS`]). Its `.claude.json` is not shared at all: it holds the account's own identity beside the
 ///   person's user-scope MCP servers, and Claude Code rewrites it while it runs, so no part of it can be split off safely.
 /// - Codex (its config, AGENTS.md and custom prompts pages; `skills` and `plugins` are the skill roots `codex debug
-///   prompt-input` names): `config.toml` (settings and MCP servers), the instructions files, skills, prompts and plugins.
+///   prompt-input` names): the instructions files, skills, prompts and plugins. Its `config.toml` (settings and MCP
+///   servers) is shared as a copy without the keys that hold or fetch a credential ([`CODEX_LOGIN_KEYS`]): it can hold a
+///   provider's key or headers and an MCP server's tokens, and a link would hand them all to the account.
 pub fn shared_names(cli: &str) -> &'static [&'static str] {
     match cli {
         "claude" => &["skills", "commands", "agents", "output-styles", "rules", "workflows", "plugins", "CLAUDE.md"],
-        "codex" => &["config.toml", "AGENTS.md", "AGENTS.override.md", "skills", "prompts", "plugins"],
+        "codex" => &["AGENTS.md", "AGENTS.override.md", "skills", "prompts", "plugins"],
         _ => &[],
     }
 }
@@ -179,9 +181,76 @@ pub const CLAUDE_LOGIN_KEYS: [&str; 11] = [
     "otelHeadersHelper",
 ];
 
+/// The keys of Codex's `config.toml` an added account's copy leaves out, wherever they sit (a model provider, an MCP
+/// server, a profile, OpenTelemetry's exporters, the network proxy's credentials, an agent's role): each holds a
+/// credential, names the variable or file one is read from, or runs a command that prints one, as Codex's configuration
+/// reference and its `rust-v0.169.0` schema (`core/config.schema.json`) list them. With them, the account would sign in
+/// to a provider, an MCP server or a telemetry endpoint as the person's own home does.
+pub const CODEX_LOGIN_KEYS: [&str; 27] = [
+    // the secret itself
+    "experimental_bearer_token",
+    "bearer_token",
+    "http_headers",
+    "query_params",
+    "model_catalog_url",
+    "headers",
+    "client_secret",
+    "oauth",
+    "env",
+    "secret_access_key",
+    "access_key_id",
+    "session_token",
+    // where one is read from
+    "env_key",
+    "env_http_headers",
+    "bearer_token_env_var",
+    "secret_env_var",
+    "secret_file",
+    "credential_file",
+    "client-private-key",
+    "config_file",
+    // a command that prints one
+    "auth",
+    "gateway_oauth",
+    "aws",
+    "aws_sigv4",
+    "http_headers_helper",
+    "headers_helper",
+    "body_secret_substitution",
+];
+
+/// Tables of Codex's `config.toml` left out whole: the enterprise sign-in, and the shell's set variables (any of which
+/// can be a key handed to every command).
+const CODEX_LOGIN_TABLES: [(&str, &str); 2] = [("", "mcp_enterprise_managed_auth"), ("shell_environment_policy", "set")];
+
+/// Codex `config.toml` text without [`CODEX_LOGIN_KEYS`] and [`CODEX_LOGIN_TABLES`], or `None` when it is not TOML.
+pub fn codex_config_copy(text: &str) -> Option<String> {
+    fn strip(t: &mut toml::Table, parent: &str) {
+        t.retain(|k, _| !CODEX_LOGIN_KEYS.contains(&k) && !CODEX_LOGIN_TABLES.contains(&(parent, k)));
+        for (k, v) in t.iter_mut() {
+            match v {
+                toml::Value::Table(inner) => strip(inner, k),
+                toml::Value::Array(items) => {
+                    for i in items.iter_mut() {
+                        if let toml::Value::Table(inner) = i {
+                            strip(inner, k);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut t: toml::Table = text.parse().ok()?;
+    strip(&mut t, "");
+    toml::to_string(&t).ok()
+}
+
 /// The app's note, in an added Claude Code account's home, of the settings copy it last wrote (a sha256), so a copy the
 /// account changed since (a plugin it turned on, a model it picked) is the account's own and never written over.
 const SETTINGS_NOTE: &str = ".manut-settings-copy";
+/// The same note for an added Codex account's `config.toml` copy.
+const CONFIG_NOTE: &str = ".manut-config-copy";
 /// The largest `settings.json` copied.
 const SETTINGS_MAX: u64 = 1 << 20;
 
@@ -254,22 +323,25 @@ pub fn share(home: &Path, cli: &str, id: &str, own: &Path) -> Result<Shared, Str
             Ok(_) => out.own.push((*name).to_string()),
         }
     }
-    if cli == "claude" {
-        out.settings = Some(share_claude_settings(&own, &dir));
+    match cli {
+        "claude" => out.settings = Some(share_copy(&own, &dir, "settings.json", SETTINGS_NOTE, claude_settings_copy)),
+        "codex" => out.settings = Some(share_copy(&own, &dir, "config.toml", CONFIG_NOTE, codex_config_copy)),
+        _ => {}
     }
     Ok(out)
 }
 
-/// The Claude Code settings copy ([`share`]): `copied`, `own` or `none`.
-fn share_claude_settings(own: &Path, dir: &Path) -> String {
-    let src = own.join("settings.json");
-    let dst = dir.join("settings.json");
-    let note = dir.join(SETTINGS_NOTE);
+/// The copy of the settings file `name` without its sign-in keys (`copy`, [`share`]): `copied`, `own` or `none`. An
+/// earlier version linked Codex's `config.toml` whole; that link, the app's own, is replaced by the copy.
+fn share_copy(own: &Path, dir: &Path, name: &str, note_name: &str, copy: fn(&str) -> Option<String>) -> String {
+    let src = own.join(name);
+    let dst = dir.join(name);
+    let note = dir.join(note_name);
     let Some(text) = std::fs::symlink_metadata(&src)
         .ok()
         .filter(|m| m.is_file() && m.len() <= SETTINGS_MAX)
         .and_then(|_| std::fs::read_to_string(&src).ok())
-        .and_then(|t| claude_settings_copy(&t))
+        .and_then(|t| copy(&t))
     else {
         return "none".into();
     };
@@ -279,13 +351,14 @@ fn share_claude_settings(own: &Path, dir: &Path) -> String {
             let now = std::fs::read(&dst).map(|b| sha256_hex(&b)).unwrap_or_default();
             std::fs::read_to_string(&note).map(|n| n.trim() == now).unwrap_or(false)
         }
+        Ok(m) if m.file_type().is_symlink() => std::fs::read_link(&dst).ok().as_deref() == Some(src.as_path()),
         Ok(_) => false,
     };
     if !ours {
         return "own".into();
     }
-    // written beside it and moved over it, so Claude Code never reads half a file
-    let tmp = dir.join(format!("{SETTINGS_NOTE}.tmp"));
+    // written beside it and moved over it (a link of the app's own included), so the CLI never reads half a file
+    let tmp = dir.join(format!("{note_name}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
@@ -1418,8 +1491,11 @@ mod tests {
         std::fs::write(acct.join("auth.json"), r#"{"auth_mode":"chatgpt"}"#).unwrap();
         let own = home.join(".codex").canonicalize().unwrap();
         let s = share(&home, "codex", "work", &own).unwrap();
-        assert_eq!(s.linked, vec!["config.toml", "skills"]);
-        assert_eq!(std::fs::read_link(acct.join("config.toml")).unwrap(), own.join("config.toml"));
+        assert_eq!(s.linked, vec!["skills"]);
+        // its configuration is a copy, without the MCP server's token
+        assert_eq!(s.settings.as_deref(), Some("copied"));
+        let copy = std::fs::read_to_string(acct.join("config.toml")).unwrap();
+        assert!(copy.contains("gh-mcp") && !copy.contains(SECRET), "{copy}");
         assert!(acct.join("skills/review/SKILL.md").exists());
         // its sign-in is its own and stays so; the person's sessions are not shared
         assert_eq!(std::fs::read_to_string(acct.join("auth.json")).unwrap(), r#"{"auth_mode":"chatgpt"}"#);
@@ -1428,11 +1504,111 @@ mod tests {
         std::fs::create_dir_all(home.join(".codex/prompts")).unwrap();
         std::fs::create_dir_all(acct.join("prompts")).unwrap();
         let again = share(&home, "codex", "work", &own).unwrap();
-        assert_eq!((again.linked, again.own), (vec!["config.toml".to_string(), "skills".into()], vec!["prompts".to_string()]));
+        assert_eq!((again.linked, again.own, again.settings), (vec!["skills".to_string()], vec!["prompts".to_string()], Some("copied".to_string())));
         assert!(!std::fs::symlink_metadata(acct.join("prompts")).unwrap().file_type().is_symlink());
         // the person's home is never written: no link, no new file there
         let names: Vec<String> = std::fs::read_dir(&own).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names.len(), 5, "{names:?}");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// A made-up `config.toml` with a credential in every place Codex's configuration reference names one: a provider's
+    /// bearer token, headers, query and helper command, an MCP server's environment, headers and OAuth secret, a
+    /// profile's provider, OpenTelemetry's exporter headers, the shell's set variables and the enterprise sign-in.
+    const CODEX_CONFIG: &str = r#"model = "o3"
+model_provider = "acme"
+approval_policy = "on-request"
+
+[model_providers.acme]
+name = "Acme"
+base_url = "https://llm.example.com/v1"
+env_key = "ACME_KEY"
+experimental_bearer_token = "sk-made-up-bearer"
+http_headers = { "X-Api-Key" = "sk-made-up-header" }
+query_params = { key = "sk-made-up-query" }
+auth = { command = "print-made-up-token", args = [] }
+
+[mcp_servers.gh]
+command = "gh-mcp"
+env = { GITHUB_TOKEN = "ghp_made_up" }
+
+[mcp_servers.docs]
+url = "https://mcp.example.com"
+http_headers = { Authorization = "Bearer made-up-mcp" }
+bearer_token_env_var = "DOCS_TOKEN"
+oauth = { client_secret = "made-up-client-secret" }
+
+[profiles.work.model_providers.inner]
+base_url = "https://inner.example.com"
+experimental_bearer_token = "sk-made-up-profile"
+
+[otel.exporter.otlp-http]
+endpoint = "https://otel.example.com"
+headers = { "x-otlp-key" = "made-up-otel" }
+
+[shell_environment_policy]
+inherit = "core"
+set = { DEPLOY_KEY = "made-up-deploy" }
+
+[mcp_enterprise_managed_auth.idp]
+client_secret = "made-up-idp"
+
+[projects."/Users/k/shop"]
+trust_level = "trusted"
+"#;
+
+    /// Codex's `config.toml` can hold provider keys, headers and an MCP server's tokens, so an added account gets a copy
+    /// without them, as Claude Code's settings are copied without their sign-in keys: written again on each start while
+    /// the account has not changed it, and an earlier version's link to the person's file is replaced by the copy.
+    #[cfg(unix)]
+    #[test]
+    fn an_added_codex_account_gets_the_configuration_without_its_credentials() {
+        let home = shared_home("codex-keys");
+        std::fs::write(home.join(".codex/config.toml"), CODEX_CONFIG).unwrap();
+        let acct = home.join(".manut/accounts/codex/work");
+        let own = home.join(".codex").canonicalize().unwrap();
+        let s = share(&home, "codex", "work", &own).unwrap();
+        assert!(!std::fs::symlink_metadata(acct.join("config.toml")).unwrap().file_type().is_symlink(), "a copy, not a link");
+        assert_eq!(s.settings.as_deref(), Some("copied"));
+        let copy = std::fs::read_to_string(acct.join("config.toml")).unwrap();
+        for secret in ["made-up", "ghp_", "ACME_KEY", "DOCS_TOKEN", "print-made-up-token"] {
+            assert!(!copy.contains(secret), "{secret} in the account's config.toml:\n{copy}");
+        }
+        // what is not a credential is kept: the model, the provider's address, the MCP servers themselves, trust, policy
+        let kept: toml::Table = copy.parse().unwrap();
+        assert_eq!(kept["model"].as_str(), Some("o3"));
+        assert_eq!(kept["model_providers"]["acme"]["base_url"].as_str(), Some("https://llm.example.com/v1"));
+        assert_eq!(kept["mcp_servers"]["gh"]["command"].as_str(), Some("gh-mcp"));
+        assert_eq!(kept["mcp_servers"]["docs"]["url"].as_str(), Some("https://mcp.example.com"));
+        assert_eq!(kept["shell_environment_policy"]["inherit"].as_str(), Some("core"));
+        assert_eq!(kept["otel"]["exporter"]["otlp-http"]["endpoint"].as_str(), Some("https://otel.example.com"));
+        assert_eq!(kept["projects"]["/Users/k/shop"]["trust_level"].as_str(), Some("trusted"));
+        assert!(kept.get("mcp_enterprise_managed_auth").is_none());
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(acct.join("config.toml")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // the person changes theirs: the unchanged copy follows; the account changes its own: never written over
+        std::fs::write(own.join("config.toml"), "model = \"o4\"\n[model_providers.x]\nexperimental_bearer_token = \"made-up-2\"\n").unwrap();
+        assert_eq!(share(&home, "codex", "work", &own).unwrap().settings.as_deref(), Some("copied"));
+        let copy = std::fs::read_to_string(acct.join("config.toml")).unwrap();
+        assert!(copy.contains("o4") && !copy.contains("made-up"));
+        std::fs::write(acct.join("config.toml"), "model = \"mine\"\n").unwrap();
+        assert_eq!(share(&home, "codex", "work", &own).unwrap().settings.as_deref(), Some("own"));
+        assert_eq!(std::fs::read_to_string(acct.join("config.toml")).unwrap(), "model = \"mine\"\n");
+        // an account an earlier version linked to the person's file gets the copy instead; anyone else's link stays
+        std::fs::remove_file(acct.join("config.toml")).unwrap();
+        std::os::unix::fs::symlink(own.join("config.toml"), acct.join("config.toml")).unwrap();
+        assert_eq!(share(&home, "codex", "work", &own).unwrap().settings.as_deref(), Some("copied"));
+        assert!(!std::fs::symlink_metadata(acct.join("config.toml")).unwrap().file_type().is_symlink());
+        std::fs::remove_file(acct.join("config.toml")).unwrap();
+        std::os::unix::fs::symlink("/tmp/elsewhere.toml", acct.join("config.toml")).unwrap();
+        assert_eq!(share(&home, "codex", "work", &own).unwrap().settings.as_deref(), Some("own"));
+        // a file that is not TOML is not copied at all
+        std::fs::remove_file(acct.join("config.toml")).unwrap();
+        std::fs::write(own.join("config.toml"), "not = [toml").unwrap();
+        assert_eq!(share(&home, "codex", "work", &own).unwrap().settings.as_deref(), Some("none"));
+        assert!(std::fs::symlink_metadata(acct.join("config.toml")).is_err());
         let _ = std::fs::remove_dir_all(home);
     }
 
