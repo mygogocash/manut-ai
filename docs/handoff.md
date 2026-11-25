@@ -211,8 +211,8 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 80, the chat box for Buddy and Kit: model, effort, approval and added context (`feat/chat-box`, Opus, worktree
-     `cc-item80-chat-box`), started 25 Nov at 18:35.
+   - item 81, voice in the chat box: a microphone and a voice mode, with the Mac's own speech and voices first
+     (`feat/voice`, Opus, worktree `cc-item81-voice`), started 25 Nov at 20:05.
    - item 72, MCP servers and Skills everywhere an agent runs, and a page that lists them (`feat/mcp-skills`, Opus,
      worktree `cc-item72-mcp-skills`), started 25 Nov at 19:35.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
@@ -244,7 +244,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 73 (Settings, Worktrees: where a lane's folder is made, starting from the remote's latest commit, the
+   Merged: 80 (one chat box for Buddy and Kit, `apps/desktop/src/chat/box/`: a + for context, the model with its
+   effort, the approval level; the shell checks each choice sent to Buddy against a fixed list, and Buddy's approval
+   is Ask or Plan only), 73 (Settings, Worktrees: where a lane's folder is made, starting from the remote's latest commit, the
    branch's prefix, and clean-up for a deleted chat and a merged pull request that never forces and keeps any folder
    with work of its own; after merging a branch that adds a dependency, run `pnpm install --frozen-lockfile` in the
    other worktrees before their gate, or every desktop test fails on the missing package), 67 (Buddy answers through

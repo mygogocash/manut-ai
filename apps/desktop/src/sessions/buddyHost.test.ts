@@ -31,6 +31,17 @@ describe("Buddy's chat in the app", () => {
     expect(Object.keys(h.calls[0][1] ?? {}).sort()).toEqual(["agent", "onEvent", "prompt"]);
     expect(h.calls[1][1]).toEqual({ id: 4, input: { kind: "send", text: "hi" } });
   });
+
+  it("sends the box's choices through the same Buddy command, and an attached file's bytes raw to its own", async () => {
+    const h = new Host();
+    await h.buddyInput(4, { kind: "model", model: "opus" });
+    await h.buddyInput(4, { kind: "effort", effort: "low" });
+    await h.buddyInput(4, { kind: "mode", mode: "plan" });
+    await h.buddySaveFile("메뉴 사진.png", new Uint8Array([1, 2, 3]));
+    expect(h.calls.map(([cmd]) => cmd)).toEqual(["buddy_input", "buddy_input", "buddy_input", "buddy_file_save"]);
+    expect(h.calls.slice(0, 3).map(([, a]) => a?.input)).toEqual([{ kind: "model", model: "opus" }, { kind: "effort", effort: "low" }, { kind: "mode", mode: "plan" }]);
+    expect(h.calls[3][1]).toEqual(new Uint8Array([1, 2, 3]));
+  });
 });
 
 describe("Buddy's chat in a plain browser", () => {
@@ -50,6 +61,22 @@ describe("Buddy's chat in a plain browser", () => {
     await h.buddyInput(id, { kind: "send", text: "still there?" });
     await h.buddyCloseAll();
     await expect(h.buddyInput(id, { kind: "send", text: "gone" })).rejects.toThrow("no such session");
+  });
+
+  it("takes the box's choices as the shell does: Buddy's own levels, and a model the stand-in listed", async () => {
+    const h = new MockHost({});
+    const events: ChatEvent[] = [];
+    const id = await h.buddyStart("claude", "You are Buddy.", (ev) => events.push(ev));
+    await wait(50);
+    expect(events.find((e) => e.event === "session.models")).toBeTruthy();
+    await h.buddyInput(id, { kind: "mode", mode: "plan" });
+    await h.buddyInput(id, { kind: "model", model: "haiku" });
+    await expect(h.buddyInput(id, { kind: "mode", mode: "acceptEdits" })).rejects.toThrow("Buddy's chat takes");
+    await expect(h.buddyInput(id, { kind: "mode", mode: "bypassPermissions" })).rejects.toThrow("Buddy's chat takes");
+    await expect(h.buddyInput(id, { kind: "model", model: "gpt-6.1-sol" })).rejects.toThrow("not a model Claude Code offered");
+    expect(await h.buddySaveFile("notes.txt", new Uint8Array([104, 105]))).toBe("/home/you/.manut/buddy/files/1-notes.txt");
+    expect(await h.buddySaveFile("notes.txt", new Uint8Array([104]))).toBe("/home/you/.manut/buddy/files/2-notes.txt");
+    await h.buddyCloseAll();
   });
 
   it("refuses an agent that does not answer as Buddy, or one that is not installed", async () => {

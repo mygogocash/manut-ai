@@ -998,15 +998,33 @@ async fn buddy_start(shell: State<'_, Shell>, agent: String, prompt: String, on_
     .map_err(|e| e.to_string())?
 }
 
-/// What the person did in Buddy's chat `id`: a message (text only), Stop, or the answer to an ask or a question
-/// (`buddy_chat::allowed`). Anything else is refused.
+/// What the person did in Buddy's chat `id`: a message (text only), Stop, the answer to an ask or a question, or one of
+/// the chat box's choices, each checked against its fixed list (`buddy_chat::check`: an approval level of
+/// `BUDDY_MODES`, Claude Code's own effort levels, a model this chat's Claude Code itself listed). Anything else is
+/// refused.
 #[tauri::command]
 async fn buddy_input(shell: State<'_, Shell>, id: u32, input: agent_chat::Input) -> Result<(), String> {
-    if !buddy_chat::allowed(&input) {
-        return Err("Buddy's chat takes a message, Stop or an answer only".into());
-    }
     let buddy = shell.buddy.clone();
-    tauri::async_runtime::spawn_blocking(move || buddy.input(id, input)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        buddy_chat::check(&input, &buddy.models(id))?;
+        buddy.input(id, input)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Save one file the person attached in Buddy's chat as `~/.manut/buddy/files/<n>-<name>` and return that path, which the
+/// page names in the message (`buddy_chat::save_file`). The body is the file's bytes; the name comes percent-encoded in
+/// `x-name`. Nothing else is written, and the agent asks before it reads the copy.
+#[tauri::command]
+async fn buddy_file_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(session_files::percent_decode).unwrap_or_default();
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else { return Err("expected the file's bytes".into()) };
+    let data = data.clone();
+    let home = user_home()?;
+    tauri::async_runtime::spawn_blocking(move || buddy_chat::save_file(&home, &name, &data).map(|p| p.to_string_lossy().into_owned()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Stop Buddy's chat `id`.
@@ -1350,6 +1368,7 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         chat_close_all,
         buddy_start,
         buddy_input,
+        buddy_file_save,
         buddy_close,
         buddy_close_all,
         session_reveal,

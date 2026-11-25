@@ -62,7 +62,8 @@ import { PracticePeople, type PeopleResult } from "./people";
 import { PracticeGoogle, readPracticeGoogleStart, type GoogleResult } from "./google";
 import { isShopTemplateId, MADE_SHOPS_LIMIT, shopNameOf } from "../makeShop";
 import { PracticeVault, type VaultResult } from "./vault";
-import { AgentBuddy, NO_AGENTS, type BuddyLine, type BuddyMind, type BuddyOut } from "./buddy";
+import { AgentBuddy, fileLine, NO_AGENTS, type BuddyLine, type BuddyMind, type BuddyOut } from "./buddy";
+import { bytesOf } from "../../sessions/attach";
 import { getHost } from "../../sessions/host";
 import { t } from "../../i18n";
 
@@ -82,7 +83,8 @@ interface ExtraOps {
   "tasks.linear": { params: { bot: string }; result: { configured: boolean; server: string } };
 }
 type AllOps = OpMap & ThreadOps & ExtraOps;
-type Handlers = { [K in keyof AllOps]: (p: AllOps[K]["params"]) => AllOps[K]["result"] };
+/** An answer is given at once, except where the shell has to act first (a file Buddy's chat attaches). */
+type Handlers = { [K in keyof AllOps]: (p: AllOps[K]["params"]) => AllOps[K]["result"] | Promise<AllOps[K]["result"]> };
 
 export type MockEvent = BridgeEvent | ThreadEvent;
 
@@ -241,6 +243,8 @@ export class MockHost {
       this.models.buddy = { ...this.models.buddy, ...this.mind.who() };
       this.broadcast({ event: "bots.update", bot: "buddy" });
     });
+    // what Buddy's chat boxes offer, or one of them chose, changed: the app reads the boxes it shows again
+    this.mind.onBox(() => this.broadcast({ event: "agent.box", bot: "buddy" }));
   }
 
   /** Settles once the first look for a coding agent has, so the first read of the team names what answers Buddy. */
@@ -679,7 +683,7 @@ export class MockHost {
           detail: { title: a.title, command: a.command },
         });
         this.pending.set(request_id, { key, kind: "approval", agent: a.id });
-        this.ev(key, "approval.request", { request_id, title: a.title, command: a.command, choices: [...AGENT_CHOICES], ...(a.whole ? { whole: true } : {}), ...(a.tool ? { tool: a.tool } : {}) });
+        this.ev(key, "approval.request", { request_id, title: a.title, command: a.command, choices: [...AGENT_CHOICES], ...(a.whole ? { whole: true } : {}), ...(a.tool ? { tool: a.tool } : {}), ...(a.plan ? { plan: a.plan } : {}) });
       },
       question: (q) => {
         if (!live()) return;
@@ -1132,13 +1136,49 @@ export class MockHost {
       this.models[b.name] = next;
       return { ...next };
     },
+    // The chat box of a chat that answers through the person's own coding agent: Buddy's, main chat or thread. The models
+    // and efforts are what the agent listed (buddy.ts), the approval levels Buddy's own; a member's chat has none.
+    "agent.box": (p) => {
+      const key = this.target(p);
+      return { box: this.needBot(p).name === "buddy" ? this.mind.box(key) : null };
+    },
+    "agent.set": (p) => {
+      const key = this.target(p);
+      if (this.needBot(p).name !== "buddy") throw new OpError("bad_request", "only Buddy's chat answers through your coding agent");
+      const choice = { ...(typeof p.model === "string" ? { model: p.model } : {}), ...(typeof p.effort === "string" ? { effort: p.effort } : {}), ...(typeof p.approval === "string" ? { approval: p.approval } : {}) };
+      try {
+        return { box: this.mind.set(key, choice) };
+      } catch (e) {
+        throw new OpError("bad_request", e instanceof Error ? e.message : String(e));
+      }
+    },
     "skills.list": (p) => (this.needBot(p), { skills: SKILL_SEED.map((x) => ({ ...x })) }),
-    "commands.list": (p) => (this.needBot(p), { commands: COMMAND_SEED.map((x) => ({ ...x })) }),
-    // Stages a file for the next message. The demo keeps no bytes: it answers the line a real runtime would add.
+    // Buddy's `/` menu: the demo's own commands, then the commands and skills the person's agent listed (their own
+    // skills run by name, as any other slash command goes to the agent)
+    "commands.list": (p) => {
+      const b = this.needBot(p);
+      const demo = COMMAND_SEED.map((x) => ({ ...x }));
+      if (b.name !== "buddy") return { commands: demo };
+      const own = this.mind.commands().filter((c) => !(DEMO_COMMANDS as readonly string[]).includes(`/${c.name}`));
+      return { commands: [...demo, ...own] };
+    },
+    // Stages a file for the next message. Buddy's goes to the shell, which keeps a copy outside the folder its agent runs
+    // in (buddy_chat.rs), and the message names that copy, so the agent asks before it reads it. A member's demo keeps
+    // no bytes: it answers the line a real runtime would add.
     "chat.attach": (p) => {
-      this.needBot(p);
+      const b = this.needBot(p);
       const name = this.needText(p.name, "name");
-      this.needText(p.data_base64, "data_base64");
+      const data = this.needText(p.data_base64, "data_base64");
+      if (b.name === "buddy") {
+        if (p.kind !== "image" && p.kind !== "pdf" && p.kind !== "file") throw new OpError("bad_request", "need kind image|pdf|file");
+        const kind = p.kind;
+        return this.mind.saveFile(name, bytesOf(data)).then(
+          (path) => ({ kind, name, text: "", ref_text: fileLine(path) }),
+          (e: unknown) => {
+            throw new OpError("internal", e instanceof Error ? e.message : String(e));
+          },
+        );
+      }
       if (p.kind === "image") return { kind: p.kind, name, text: `[User attached image: ${name}]`, ref_text: "" };
       if (p.kind === "pdf") return { kind: p.kind, name, text: `[User attached PDF: ${name}]`, ref_text: "" };
       if (p.kind === "file") return { kind: p.kind, name, text: "", ref_text: `@file:attachments/${name}` };

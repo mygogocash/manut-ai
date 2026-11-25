@@ -9,6 +9,8 @@ export class StandInBuddyHost implements BuddyHost {
   readonly starts: { id: number; agent: string; prompt: string }[] = [];
   readonly inputs: { id: number; input: BuddyChatInput }[] = [];
   readonly closed: number[] = [];
+  /** The files the runtime handed over to keep, with the path each was given (the shell's `buddy_file_save`). */
+  readonly files: { name: string; size: number; path: string }[] = [];
   closedAll = 0;
   /** What the agent answers to a message by itself, `answerMs` after it; null: it answers nothing, and the test emits. */
   answer: ((text: string) => string) | null = (text) => `Answered: ${text}`;
@@ -55,6 +57,12 @@ export class StandInBuddyHost implements BuddyHost {
   async buddyCloseAll(): Promise<void> {
     this.closedAll += 1;
     this.sinks.clear();
+  }
+
+  async buddySaveFile(name: string, data: Uint8Array): Promise<string> {
+    const path = `/home/you/.manut/buddy/files/${this.files.length + 1}-${name}`;
+    this.files.push({ name, size: data.length, path });
+    return path;
   }
 
   /** The agent of chat `id` (the newest when none is named) sends `ev`. */

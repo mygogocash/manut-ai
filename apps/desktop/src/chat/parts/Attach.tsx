@@ -49,25 +49,38 @@ export function chipsFor(files: File[], have: number): Chip[] {
 
 const mod = () => (isMac() ? "⌘" : "Ctrl+");
 
-/** The + at the composer's left edge. In a bot's chat it opens a two-row menu: "Add photos and files" (one picker
- *  for every kind of file) and "Plugins ›", whose submenu beside it lists the bot's enabled plugins (a colour tile and
- *  the name; the description is the tooltip) and Manage plugins. Picking a plugin names it at the start of the
- *  message. Where there are no plugins (a SESSIONS agent) the + opens the picker straight away. Pasting into the box
- *  and dropping on the chat add files too. */
+/** The + at the composer's left edge: Add context (item 80). Its menu has a row for each way of adding something that
+ *  works in this chat, and no other: "Add photos and files" (one picker for every kind of file), "Folder" (named by its
+ *  path, never copied), "Mention" (the `@` menu of the team) and "Actions" (the `/` menu of the agent's commands and
+ *  skills), then, in a bot's chat, "Plugins ›", whose submenu beside it lists the bot's enabled plugins (a colour tile
+ *  and the name; the description is the tooltip) and Manage plugins. Picking a plugin names it at the start of the
+ *  message. With files as its only row, the + opens the picker straight away. Pasting into the box and dropping on the
+ *  chat add files too. */
 export function AttachButton({
   disabled,
   onFiles,
   plugins,
   onPlugin,
   onManage,
+  onFolder,
+  onMention,
+  onActions,
 }: {
   disabled: boolean;
-  onFiles: (files: File[]) => void;
+  /** Files are taken here; without it there is no files row. */
+  onFiles?: (files: File[]) => void;
   /** Reads the bot's plugins when the menu opens (a bot's chat only). */
   plugins?: () => Promise<PluginRow[]>;
   onPlugin?: (p: PluginRow) => void;
   onManage?: () => void;
+  /** Folder: the chat picks a folder and names it in the message. */
+  onFolder?: () => void;
+  /** Mention: the `@` menu opens in the box. */
+  onMention?: () => void;
+  /** Actions: the `/` menu opens in the box. */
+  onActions?: () => void;
 }) {
+  const menu = !!(plugins || onFolder || onMention || onActions);
   const input = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -88,14 +101,14 @@ export function AttachButton({
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const m = isMac() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!m || e.altKey || e.shiftKey || disabled || e.key.toLowerCase() !== "o") return;
+      if (!m || e.altKey || e.shiftKey || disabled || !onFiles || e.key.toLowerCase() !== "o") return;
       e.preventDefault();
       setOpen(false);
       input.current?.click();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [disabled]);
+  }, [disabled, onFiles]);
 
   useEffect(() => {
     if (!open) return;
@@ -131,11 +144,16 @@ export function AttachButton({
   const picked = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])];
     e.target.value = "";
-    if (files.length) onFiles(files);
+    if (files.length) onFiles?.(files);
   };
   const pickFiles = () => {
     setOpen(false);
     input.current?.click();
+  };
+  /** A row that hands the focus back to the box (Folder, Mention, Actions): the menu closes first. */
+  const then = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
   };
 
   return (
@@ -143,12 +161,12 @@ export function AttachButton({
       <button
         type="button"
         className="att-plus"
-        aria-label={t("att.attach")}
-        title={t("att.attach")}
-        aria-haspopup={plugins ? "menu" : undefined}
-        aria-expanded={plugins ? open : undefined}
+        aria-label={onFolder || onMention || onActions ? t("box.addContext") : t("att.attach")}
+        title={onFolder || onMention || onActions ? t("box.addContext") : t("att.attach")}
+        aria-haspopup={menu ? "menu" : undefined}
+        aria-expanded={menu ? open : undefined}
         disabled={disabled}
-        onClick={() => (plugins ? setOpen((o) => !o) : input.current?.click())}
+        onClick={() => (menu ? setOpen((o) => !o) : input.current?.click())}
         data-testid="attach"
       >
         <PlusIcon size={14} />
@@ -156,96 +174,134 @@ export function AttachButton({
       <input ref={input} type="file" multiple hidden onChange={picked} data-testid="attach-file-input" />
       {open && (
         <div className="att-menu" role="menu" data-testid="attach-menu">
-          <button type="button" role="menuitem" className="att-row" onClick={pickFiles} onMouseEnter={() => setSub(false)} data-testid="attach-files">
-            <span className="att-ic">
-              <ClipIcon />
-            </span>
-            <span className="att-n">{t("att.addFiles")}</span>
-            <kbd>{mod()}O</kbd>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={`att-row att-more${sub ? " on" : ""}`}
-            aria-haspopup="menu"
-            aria-expanded={sub}
-            onMouseEnter={() => setSub(true)}
-            onClick={() => setSub(true)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowRight" || e.key === "Enter") {
-                e.preventDefault();
-                focusSub.current = true;
-                setSub(true);
-              }
-            }}
-            data-testid="attach-plugins"
-          >
-            <span className="att-ic">
-              <PlugIcon size={15} />
-            </span>
-            <span className="att-n">{t("att.plugins")}</span>
-            <span className="att-chev" aria-hidden="true">
-              ›
-            </span>
-          </button>
-          {sub && (
-            <div
-              className="att-sub"
-              role="menu"
-              onKeyDown={(e) => {
-                if (e.key === "ArrowLeft") {
-                  e.preventDefault();
-                  setSub(false);
-                  wrap.current?.querySelector<HTMLButtonElement>("[data-testid=attach-plugins]")?.focus();
-                }
-              }}
-              data-testid="attach-sub"
-            >
-              {rows === null ? (
-                <div className="att-empty">{t("att.pluginsLoading")}</div>
-              ) : (
-                rows.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    role="menuitem"
-                    className="att-row"
-                    title={p.description || pluginName(p)}
-                    onClick={() => {
-                      setOpen(false);
-                      onPlugin?.(p);
-                    }}
-                    data-testid="attach-plugin"
-                    data-name={p.name}
-                  >
-                    <PluginTile p={p} />
-                    <span className="att-n">{pluginName(p)}</span>
-                  </button>
-                ))
-              )}
-              {!!rows?.length && <div className="att-sep" />}
+          {onFiles && (
+            <button type="button" role="menuitem" className="att-row" onClick={pickFiles} onMouseEnter={() => setSub(false)} data-testid="attach-files">
+              <span className="att-ic">
+                <ClipIcon />
+              </span>
+              <span className="att-n">{t("att.addFiles")}</span>
+              <kbd>{mod()}O</kbd>
+            </button>
+          )}
+          {onFolder && (
+            <button type="button" role="menuitem" className="att-row" onClick={then(onFolder)} onMouseEnter={() => setSub(false)} data-testid="attach-folder">
+              <span className="att-ic">
+                <FolderGlyph />
+              </span>
+              <span className="att-n">{t("box.folder")}</span>
+            </button>
+          )}
+          {onMention && (
+            <button type="button" role="menuitem" className="att-row" onClick={then(onMention)} onMouseEnter={() => setSub(false)} data-testid="attach-mention">
+              <span className="att-ic att-sigil" aria-hidden="true">
+                @
+              </span>
+              <span className="att-n">{t("box.mention")}</span>
+              <kbd>@</kbd>
+            </button>
+          )}
+          {onActions && (
+            <button type="button" role="menuitem" className="att-row" onClick={then(onActions)} onMouseEnter={() => setSub(false)} data-testid="attach-actions">
+              <span className="att-ic att-sigil" aria-hidden="true">
+                /
+              </span>
+              <span className="att-n">{t("box.actions")}</span>
+              <kbd>/</kbd>
+            </button>
+          )}
+          {plugins && (
+            <>
               <button
                 type="button"
                 role="menuitem"
-                className="att-row att-manage"
-                onClick={() => {
-                  setOpen(false);
-                  onManage?.();
+                className={`att-row att-more${sub ? " on" : ""}`}
+                aria-haspopup="menu"
+                aria-expanded={sub}
+                onMouseEnter={() => setSub(true)}
+                onClick={() => setSub(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight" || e.key === "Enter") {
+                    e.preventDefault();
+                    focusSub.current = true;
+                    setSub(true);
+                  }
                 }}
-                data-testid="attach-manage"
+                data-testid="attach-plugins"
               >
                 <span className="att-ic">
-                  <GearIcon />
+                  <PlugIcon size={15} />
                 </span>
-                <span className="att-n">{rows && !rows.length ? t("att.pluginsNone") : t("att.pluginsManage")}</span>
+                <span className="att-n">{t("att.plugins")}</span>
+                <span className="att-chev" aria-hidden="true">
+                  ›
+                </span>
               </button>
-            </div>
+              {sub && (
+                <div
+                  className="att-sub"
+                  role="menu"
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowLeft") {
+                      e.preventDefault();
+                      setSub(false);
+                      wrap.current?.querySelector<HTMLButtonElement>("[data-testid=attach-plugins]")?.focus();
+                    }
+                  }}
+                  data-testid="attach-sub"
+                >
+                  {rows === null ? (
+                    <div className="att-empty">{t("att.pluginsLoading")}</div>
+                  ) : (
+                    rows.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        role="menuitem"
+                        className="att-row"
+                        title={p.description || pluginName(p)}
+                        onClick={() => {
+                          setOpen(false);
+                          onPlugin?.(p);
+                        }}
+                        data-testid="attach-plugin"
+                        data-name={p.name}
+                      >
+                        <PluginTile p={p} />
+                        <span className="att-n">{pluginName(p)}</span>
+                      </button>
+                    ))
+                  )}
+                  {!!rows?.length && <div className="att-sep" />}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="att-row att-manage"
+                    onClick={() => {
+                      setOpen(false);
+                      onManage?.();
+                    }}
+                    data-testid="attach-manage"
+                  >
+                    <span className="att-ic">
+                      <GearIcon />
+                    </span>
+                    <span className="att-n">{rows && !rows.length ? t("att.pluginsNone") : t("att.pluginsManage")}</span>
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
     </div>
   );
 }
+
+const FolderGlyph = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.4l2 2h8.6A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
+  </svg>
+);
 
 /** A plugin's name for people: the catalog title, else its folder name with the dashes spaced and a capital. */
 export function pluginName(p: Pick<PluginRow, "title" | "name">): string {
