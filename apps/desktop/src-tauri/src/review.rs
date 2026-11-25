@@ -86,6 +86,8 @@ pub struct Ask {
     pub method: String,
     pub subject: String,
     pub message: String,
+    /// How many agent credit lines were taken out of the message (Settings › Source control › Remove agent credits when merging).
+    pub dropped: u32,
 }
 
 /// What a settled ask did. `outcome`: `declined` (the person said no; nothing ran), `opened`, `merged`, or `failed` with the
@@ -604,7 +606,10 @@ impl Ledger {
     /// Asks to merge pull request `number`, made from the lane at `worktree`, with `method`: it reads the pull request now, and
     /// asks only when it is open, not a draft, made from the lane's own branch and can merge now; the answer names the method and
     /// the message exactly as they will be sent. Writes nothing: only [`Ledger::settle`] with its id and a Yes runs it.
-    pub fn ask_merge(&self, home: &Path, worktree: &str, number: u64, method: &str) -> Result<Ask, String> {
+    ///
+    /// `credits`: the person turned on Remove agent credits when merging, so the proposed message has the recognised agent credit
+    /// lines taken out (credits.rs), every human co-author kept. The ask shows the message after that, which is the message sent.
+    pub fn ask_merge(&self, home: &Path, worktree: &str, number: u64, method: &str, credits: bool) -> Result<Ask, String> {
         let method = Method::parse(method)?;
         let l = self.lane(home, worktree)?;
         let view = view_argv(l.source, &l.repo, number)?;
@@ -619,7 +624,14 @@ impl Ledger {
         if let Some(why) = &p.cannot {
             return Err(format!("cannot_merge:{why}"));
         }
-        let (subject, message) = message_for(l.source, method, &l.repo, &p);
+        let (subject, mut message) = message_for(l.source, method, &l.repo, &p);
+        let mut dropped = 0;
+        if credits && method != Method::Rebase {
+            let (cleaned, n) = crate::credits::remove_agent_credits(&message);
+            dropped = n;
+            // an empty message would let the host write its own, which brings the credits back: the title stands in, as T3 Code does
+            message = if n > 0 && cleaned.trim().is_empty() { p.title.clone() } else { cleaned };
+        }
         let merge = merge_argv(l.source, &l.repo, number, method, &p.head, &subject, &message)?;
         let plan = Plan::Merge { source: l.source, cli: l.cli.clone(), view, head: p.head.clone(), number, url: p.url.clone(), merge };
         let id = self.keep(plan);
@@ -641,6 +653,7 @@ impl Ledger {
             method: method.word().into(),
             subject,
             message,
+            dropped,
         })
     }
 
@@ -1015,13 +1028,13 @@ pub(crate) mod tests {
             (serde_json::json!({"number": 8}), "not_this_lane"),
         ] {
             gh_view(&home, &head, over.clone());
-            assert_eq!(l.ask_merge(&home, &made.worktree, 7, "merge"), Err(why.to_string()), "{over}");
+            assert_eq!(l.ask_merge(&home, &made.worktree, 7, "merge", false), Err(why.to_string()), "{over}");
         }
         gh_view(&home, &head, serde_json::json!({}));
-        assert_eq!(l.ask_merge(&home, &made.worktree, 7, "fast-forward"), Err("bad_method".into()));
-        assert_eq!(l.ask_merge(&home, &made.worktree, 0, "merge"), Err("bad_number".into()));
+        assert_eq!(l.ask_merge(&home, &made.worktree, 7, "fast-forward", false), Err("bad_method".into()));
+        assert_eq!(l.ask_merge(&home, &made.worktree, 0, "merge", false), Err("bad_number".into()));
         // a merge that can go: nothing has run but reads
-        let ask = l.ask_merge(&home, &made.worktree, 7, "merge").unwrap();
+        let ask = l.ask_merge(&home, &made.worktree, 7, "merge", false).unwrap();
         assert_eq!((ask.kind.as_str(), ask.number, ask.method.as_str(), ask.base.as_str()), ("merge", 7, "merge", "main"));
         assert!(writes(&home, "gh").is_empty(), "{:?}", writes(&home, "gh"));
         let _ = fs::remove_dir_all(home);
@@ -1033,7 +1046,7 @@ pub(crate) mod tests {
         let l = ledger(&home);
         let head = sh(Path::new(&made.worktree), &["rev-parse", "HEAD"]);
         gh_view(&home, &head, serde_json::json!({}));
-        let ask = l.ask_merge(&home, &made.worktree, 7, "squash").unwrap();
+        let ask = l.ask_merge(&home, &made.worktree, 7, "squash", false).unwrap();
         assert_eq!(ask.subject, "Add the PromptPay QR (#7)");
         assert_eq!(ask.message, "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Read the amount");
         let done = l.settle(&ask.id, true).unwrap();
@@ -1043,15 +1056,44 @@ pub(crate) mod tests {
         assert_eq!(l.settle(&ask.id, true), Err("already_decided".into()));
         assert_eq!(writes(&home, "gh").len(), 1);
         // a merge commit says where it came from, with the title and the description
-        let m = l.ask_merge(&home, &made.worktree, 7, "merge").unwrap();
+        let m = l.ask_merge(&home, &made.worktree, 7, "merge", false).unwrap();
         assert_eq!(m.subject, "Merge pull request #7 from mygogocash/kit/qr");
         assert!(m.message.starts_with("Add the PromptPay QR\n\nDraws the QR."), "{}", m.message);
         // a rebase makes no message and sends none
-        let r = l.ask_merge(&home, &made.worktree, 7, "rebase").unwrap();
+        let r = l.ask_merge(&home, &made.worktree, 7, "rebase", false).unwrap();
         assert_eq!((r.subject.as_str(), r.message.as_str()), ("", ""));
         l.settle(&r.id, true).unwrap();
         let last = writes(&home, "gh").pop().unwrap();
         assert!(last.contains(&"--rebase".to_string()) && !last.iter().any(|a| a.starts_with("--subject") || a.starts_with("--body")), "{last:?}");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn with_credits_off_the_message_is_untouched_and_on_the_message_sent_is_the_one_shown_with_every_human_kept() {
+        let Some((home, _, _, made)) = lane_with_work("review-merge-credits") else { return };
+        let l = ledger(&home);
+        let head = sh(Path::new(&made.worktree), &["rev-parse", "HEAD"]);
+        gh_view(&home, &head, serde_json::json!({}));
+        let off = l.ask_merge(&home, &made.worktree, 7, "squash", false).unwrap();
+        assert!(off.message.contains("noreply@anthropic.com") && off.dropped == 0);
+        let on = l.ask_merge(&home, &made.worktree, 7, "squash", true).unwrap();
+        assert_eq!(on.message, "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\n\n* Read the amount");
+        assert_eq!(on.dropped, 1);
+        l.settle(&on.id, true).unwrap();
+        let sent = writes(&home, "gh").pop().unwrap();
+        assert!(sent.contains(&format!("--body={}", on.message)), "{sent:?}");
+        assert!(sent.contains(&format!("--subject={}", on.subject)));
+        assert!(!sent.iter().any(|a| a.contains("noreply@anthropic.com")));
+        assert!(sent.iter().any(|a| a.contains("Co-authored-by: Ana <ana@shop.co>")));
+        // the generated footer in a merge commit's description goes too
+        let merge = l.ask_merge(&home, &made.worktree, 7, "merge", true).unwrap();
+        assert_eq!((merge.message.as_str(), merge.dropped), ("Add the PromptPay QR\n\nDraws the QR.", 1));
+        // a message of credits alone becomes the title, so the host never writes its own with them back in
+        gh_view(&home, &head, serde_json::json!({"body": "", "commits": [{"oid": head, "messageHeadline": "Generated with Claude Code", "messageBody": ""}]}));
+        let only = l.ask_merge(&home, &made.worktree, 7, "squash", true).unwrap();
+        assert_eq!((only.message.as_str(), only.dropped), ("Add the PromptPay QR", 1));
+        // the commits that exist are never rewritten: the lane's own commit keeps its message
+        assert_eq!(sh(Path::new(&made.worktree), &["log", "-1", "--format=%H %s"]), format!("{head} qr.txt"));
         let _ = fs::remove_dir_all(home);
     }
 
@@ -1061,13 +1103,13 @@ pub(crate) mod tests {
         let l = ledger(&home);
         let head = sh(Path::new(&made.worktree), &["rev-parse", "HEAD"]);
         gh_view(&home, &head, serde_json::json!({}));
-        let ask = l.ask_merge(&home, &made.worktree, 7, "merge").unwrap();
+        let ask = l.ask_merge(&home, &made.worktree, 7, "merge", false).unwrap();
         // someone pushed to the pull request since: another commit at its head
         gh_view(&home, &"b".repeat(40), serde_json::json!({}));
         assert_eq!(l.settle(&ask.id, true).unwrap(), Done::failed("check", "changed".into(), false));
         // or it can no longer merge
         gh_view(&home, &head, serde_json::json!({}));
-        let ask = l.ask_merge(&home, &made.worktree, 7, "merge").unwrap();
+        let ask = l.ask_merge(&home, &made.worktree, 7, "merge", false).unwrap();
         gh_view(&home, &head, serde_json::json!({"mergeStateStatus": "BLOCKED"}));
         assert_eq!(l.settle(&ask.id, true).unwrap(), Done::failed("check", "changed".into(), false));
         assert!(writes(&home, "gh").is_empty());

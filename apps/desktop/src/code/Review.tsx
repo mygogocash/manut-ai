@@ -3,8 +3,9 @@
 // - A lane with no open pull request offers Put up for review. One ask covers both steps, in the app's own words: the repository,
 //   the branch, the base, the title and the body exactly as they will be sent, with Push and open or Not now.
 // - A lane whose pull request is open (not a draft) offers Merge. Its ask names the pull request, the method (merge, squash or
-//   rebase, starting from Settings › Source control › Default merge method) and exactly what the merge's message will be. Merging
-//   cannot be undone, so it is always asked: there is no auto-merge and no setting that skips the ask, and the branch stays.
+//   rebase, starting from Settings › Source control › Default merge method) and exactly what the merge's message will be, with the
+//   recognised agent credit lines taken out when the person turned that on. Merging cannot be undone, so it is always asked: there
+//   is no auto-merge and no setting that skips the ask, and the branch stays.
 //
 // Nothing is pushed, opened or merged until the person says yes, and the answer is settled once (code/reviewAsk.ts: approval-core,
 // then the shell's own once, src-tauri/src/review.rs). The steps: the link opens a draft (a title and a description from the
@@ -204,6 +205,11 @@ function MergeAsk({ a, s, p }: { a: ReviewAsk; s: { busy: boolean; why: string |
           <p>{t(a.source === "gitlab" && method === "squash" ? "review.merge.messageBoth" : "review.merge.message")}</p>
           <TextBox text={a.subject} testId="review-subject" />
           <TextBox text={a.message} testId="review-message" />
+          {a.dropped > 0 && (
+            <p className="mut" data-testid="review-dropped">
+              {a.dropped === 1 ? t("review.merge.droppedOne") : t("review.merge.droppedMany", { n: a.dropped })}
+            </p>
+          )}
         </>
       )}
       <p className="mut">{t("review.merge.never")}</p>
@@ -357,7 +363,7 @@ export function Review({ worktree, title, pull = null }: ReviewProps) {
     // the method the person chose is the one "the last one I chose" starts with next time
     setSourceSettings({ lastMethod: method });
     setStep({ ...step, busy: true, why: null });
-    await asking(() => host.reviewMerge!(worktree, pull.number, method), { at: "method", method, busy: false, why: null });
+    await asking(() => host.reviewMerge!(worktree, pull.number, method, sourceSettings().dropCredits), { at: "method", method, busy: false, why: null });
   };
   const answer = async (yes: boolean) => {
     if (step.at !== "ask" || step.busy) return;

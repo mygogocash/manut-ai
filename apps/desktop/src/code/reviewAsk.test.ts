@@ -6,7 +6,7 @@ import { MockHost, TauriHost, type MockCall } from "../sessions/host";
 import { answerReviewAsk, openReviewAsk, resetReviewAsks, reviewAskRecord, withdrawReviewAsk } from "./reviewAsk";
 import type { ReviewAsk, ReviewDone } from "./source";
 
-const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two", number: 0, url: "", method: "", subject: "", message: "" };
+const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two", number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
 const OPENED: ReviewDone = { outcome: "opened", pushed: true, url: "https://github.com/o/r/pull/7", number: 7, step: "", error: "" };
 
 const shell = (answer: () => Promise<ReviewDone> = async () => OPENED) => {
@@ -110,11 +110,15 @@ describe("the host's way to the shell", () => {
     await expect(new Host(() => ({ outcome: "merged-maybe" })).reviewSettle(ASK.id, true)).rejects.toThrow("unread");
   });
 
-  it("sends a merge's pull request and method to be checked, and believes only a merge's ask", async () => {
-    const MERGE = { ...ASK, kind: "merge", number: 7, url: "https://github.com/o/r/pull/7", method: "squash", subject: "Add the PromptPay QR (#7)", message: "* one" };
+  it("sends a merge's pull request, method and the credit switch to be checked, and believes only a merge's ask", async () => {
+    const MERGE = { ...ASK, kind: "merge", number: 7, url: "https://github.com/o/r/pull/7", method: "squash", subject: "Add the PromptPay QR (#7)", message: "* one", dropped: 2 };
     const h = new Host(() => MERGE);
+    expect(await h.reviewMerge("/w/qr", 7, "squash", true)).toEqual(MERGE);
     expect(await h.reviewMerge("/w/qr", 7, "squash")).toEqual(MERGE);
-    expect(h.sent).toEqual([{ cmd: "review_ask_merge", args: { worktree: "/w/qr", number: 7, method: "squash" } }]);
+    expect(h.sent).toEqual([
+      { cmd: "review_ask_merge", args: { worktree: "/w/qr", number: 7, method: "squash", credits: true } },
+      { cmd: "review_ask_merge", args: { worktree: "/w/qr", number: 7, method: "squash", credits: false } },
+    ]);
     await expect(new Host(() => ASK).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
     await expect(new Host(() => ({ ...MERGE, method: "fast-forward" })).reviewMerge("/w/qr", 7, "merge")).rejects.toThrow("unread");
   });

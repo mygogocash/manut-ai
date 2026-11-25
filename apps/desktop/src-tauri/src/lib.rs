@@ -10,6 +10,7 @@ mod appimage;
 mod ask_tool;
 mod buddy_chat;
 mod claude_usage;
+mod credits;
 mod computer;
 mod custom_agents;
 mod disk;
@@ -833,13 +834,13 @@ async fn review_ask_open(asks: State<'_, Arc<review::Ledger>>, worktree: String,
 }
 
 /// The ask to merge pull request `number`, made from the lane at `worktree`, with `method` (`merge`, `squash` or `rebase`;
-/// review.rs `ask_merge`): asked only when it can merge now, naming the method and exactly the message that will be sent.
-/// Writes nothing.
+/// review.rs `ask_merge`): asked only when it can merge now, naming the method and exactly the message that will be sent, with
+/// the recognised agent credit lines taken out when `credits` (Settings › Source control). Writes nothing.
 #[tauri::command]
-async fn review_ask_merge(asks: State<'_, Arc<review::Ledger>>, worktree: String, number: u64, method: String) -> Result<review::Ask, String> {
+async fn review_ask_merge(asks: State<'_, Arc<review::Ledger>>, worktree: String, number: u64, method: String, credits: Option<bool>) -> Result<review::Ask, String> {
     let home = user_home()?;
     let l = Arc::clone(&asks);
-    tauri::async_runtime::spawn_blocking(move || l.ask_merge(&home, &worktree, number, &method)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || l.ask_merge(&home, &worktree, number, &method, credits.unwrap_or(false))).await.map_err(|e| e.to_string())?
 }
 
 /// The person's answer to ask `id`, once approval-core settled it on the page (review.rs `settle`): a No runs nothing, a Yes runs

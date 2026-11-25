@@ -27,6 +27,7 @@ const ASK: ReviewAsk = {
   method: "",
   subject: "",
   message: "",
+  dropped: 0,
 };
 const MERGE: ReviewAsk = { ...ASK, kind: "merge", number: 12, url: "https://github.com/mygogocash/web-app/pull/12", method: "squash", subject: "Add the PromptPay QR (#12)", message: "* Draw the QR\n\nCo-authored-by: Ana <ana@shop.co>\n\n* Read the amount", uncommitted: 0 };
 const PULL = { source: "github" as const, repo: "mygogocash/web-app", number: 12, state: "open" as const, title: "Add the PromptPay QR" };
@@ -92,6 +93,9 @@ describe("Put up for review", () => {
     // GitLab's squash sends the one message for both commits it may make, and says so
     expect(words(draw({ at: "ask", ask: { ...MERGE, source: "gitlab" }, busy: false, why: null }))).toContain(t("review.merge.messageBoth"));
     expect(doneWords({ outcome: "merged", pushed: false, url: "", number: 12, step: "", error: "" }, "merge")).toBe("Merged pull request #12.");
+    // how many agent credit lines went, when the switch took any out; nothing said when none did
+    expect(words(draw({ at: "ask", ask: { ...MERGE, dropped: 2 }, busy: false, why: null }))).toContain("2 agent credit lines were taken out (Settings, Source control). Every human co-author stays.");
+    expect(draw({ at: "ask", ask: MERGE, busy: false, why: null })).not.toContain('data-testid="review-dropped"');
     expect(doneWords({ outcome: "failed", pushed: false, url: "", number: 0, step: "check", error: "changed" }, "merge")).toBe(t("review.done.mergeCheck"));
   });
 

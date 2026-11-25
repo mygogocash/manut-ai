@@ -115,6 +115,8 @@ export interface ReviewAsk {
   method: MergeMethod | "";
   subject: string;
   message: string;
+  /** How many agent credit lines were taken out of the message (Settings › Source control › Remove agent credits). */
+  dropped: number;
 }
 
 export function readAsk(v: unknown): ReviewAsk | null {
@@ -142,6 +144,7 @@ export function readAsk(v: unknown): ReviewAsk | null {
     method,
     subject: str(v.subject),
     message: str(v.message),
+    dropped: num(v.dropped),
   };
 }
 

@@ -172,9 +172,10 @@ export interface SessionHost extends HistoryHost {
    *  base, title and body. Writes nothing; rejects with a code (`no_remote`, `not_signed_in`, `no_commits`, ...). */
   reviewAsk?(worktree: string, title: string, body: string): Promise<ReviewAsk>;
   /** The ask to merge pull request `number`, made from the lane at `worktree`, with `method`: asked only when it can merge now,
-   *  with the method and exactly the message that will be sent. Writes nothing; rejects with a code (`cannot_merge:<why>`,
+   *  with the method and exactly the message that will be sent, the recognised agent credit lines taken out when `credits`.
+   *  Writes nothing; rejects with a code (`cannot_merge:<why>`,
    *  `not_this_lane`, `not_signed_in`, ...). */
-  reviewMerge?(worktree: string, number: number, method: MergeMethod): Promise<ReviewAsk>;
+  reviewMerge?(worktree: string, number: number, method: MergeMethod, credits?: boolean): Promise<ReviewAsk>;
   /** The person's answer to ask `id`, after approval-core settled it (code/reviewAsk.ts is the only caller): a No runs nothing, a
    *  Yes runs what the ask named, once. Only the id and the answer go to the shell. Rejects with `already_decided`,
    *  `withdrawn`, `expired` or `not_found`. */
@@ -396,9 +397,9 @@ export class TauriHost implements SessionHost, BuddyHost {
     if (!ask) throw new Error("unread");
     return ask;
   }
-  async reviewMerge(worktree: string, number: number, method: MergeMethod) {
+  async reviewMerge(worktree: string, number: number, method: MergeMethod, credits = false) {
     const { invoke } = await this.core();
-    const ask = readAsk(await invoke<unknown>("review_ask_merge", { worktree, number, method }));
+    const ask = readAsk(await invoke<unknown>("review_ask_merge", { worktree, number, method, credits }));
     if (!ask || ask.kind !== "merge") throw new Error("unread");
     return ask;
   }
@@ -1290,22 +1291,28 @@ export class MockHost implements SessionHost, BuddyHost {
     if (r.commits.length === 0) throw new Error("no_commits");
     if (!title.trim() || /[\u0000-\u001f]/.test(title)) throw new Error("bad_title");
     const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "" };
+    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
     this.asks.set(id, { state: "waiting", ask });
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;
   }
   /** As the shell: a merge is asked only for a pull request that can merge (`__manutReview[worktree].merge`: why it cannot, or
    *  the title it has), with GitHub's own messages. */
-  async reviewMerge(worktree: string, number: number, method: MergeMethod): Promise<ReviewAsk> {
+  async reviewMerge(worktree: string, number: number, method: MergeMethod, credits = false): Promise<ReviewAsk> {
     const lane = (this.g.__manutLanes ?? []).find((l) => l.worktree === worktree);
     const r = this.reviewOf(worktree);
     if (!lane || r.refuse) throw new Error(r.refuse ?? "not_a_lane");
     if (r.cannot) throw new Error(`cannot_merge:${r.cannot}`);
     const title = r.title ?? "Work in this lane";
-    const [subject, message] = method === "rebase" ? ["", ""] : method === "squash" ? [`${title} (#${number})`, r.commits.map((c) => `* ${c}`).join("\n\n")] : [`Merge pull request #${number} from ${lane.branch}`, title];
+    const [subject, full] = method === "rebase" ? ["", ""] : method === "squash" ? [`${title} (#${number})`, r.commits.map((c) => `* ${c}`).join("\n\n")] : [`Merge pull request #${number} from ${lane.branch}`, title];
+    // a browser has no shell to take the credit lines out: it takes out the one line Kit's stand-in agent signs with, so a walk
+    // sees the count change
+    const lines = full.split("\n");
+    const kept = credits && method !== "rebase" ? lines.filter((l) => !/^co-authored-by: .*<noreply@anthropic\.com>$/i.test(l.trim())) : lines;
+    const message = kept.join("\n");
+    const dropped = lines.length - kept.length;
     const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message };
+    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message, dropped };
     this.asks.set(id, { state: "waiting", ask });
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;

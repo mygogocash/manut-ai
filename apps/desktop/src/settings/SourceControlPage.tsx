@@ -7,6 +7,8 @@
 // - Repositories: Automatically pull (off by default; lib/sourceControl.ts says why), which keeps a project's default branch
 //   current only when its checkout is clean, by a fast-forward (src-tauri/src/git_pull.rs, code/AutoPull.tsx); and Default merge
 //   method, what a merge's ask starts with ("the last one I chose" by default). Every merge is still asked (code/Review.tsx).
+// - Remove agent credits when merging (off by default): the recognised lines, fixed in `src/lib/agentCredits.json` and shown here
+//   as they are, go from the message the app proposes for a merge; every human co-author stays (src-tauri/src/credits.rs).
 //
 // `SourceControlView` draws a given state so a test can draw each one; `SourceControlPage` reads the shell and acts.
 import { useCallback, useEffect, useState } from "react";
@@ -16,6 +18,7 @@ import { MERGE_METHODS, type MergeMethod, type SourceTool, type SourceTools } fr
 import { setSourceSettings, SOURCE_DEFAULTS, useSourceSettings, type SourceSettings } from "../lib/sourceControl";
 import { Toggle } from "../pages/kit";
 import { Row } from "./DevRow";
+import CREDITS from "../lib/agentCredits.json";
 
 export interface SourceControlViewProps {
   /** What the shell read; null while it reads, or where nothing can be read (a plain browser with no stand-in). */
@@ -27,6 +30,7 @@ export interface SourceControlViewProps {
   saved?: SourceSettings;
   onAutoPull?: (on: boolean) => void;
   onMergeMethod?: (method: MergeMethod | "last") => void;
+  onDropCredits?: (on: boolean) => void;
 }
 
 /** The two CLIs, with the words each one's rows use. */
@@ -116,6 +120,12 @@ export function SourceControlView(p: SourceControlViewProps) {
             ))}
           </select>
         </Row>
+        <Row title={t("src.credits.title")} hint={t("src.credits.hint")}>
+          <Toggle on={saved.dropCredits} label={t("src.credits.title")} onChange={(on) => p.onDropCredits?.(on)} testId="src-drop-credits" />
+        </Row>
+      </div>
+      <div className="st-note" data-testid="src-credits-list">
+        {t("src.credits.list", { emails: CREDITS.emails.join(", "), names: CREDITS.githubNoreplyNames.join(", "), agents: CREDITS.agents.join(", ") })}
       </div>
       <div className="st-note">
         <button type="button" className="st-btn" onClick={p.onCheck} disabled={reading && !p.failed} data-testid="src-check">
@@ -155,5 +165,5 @@ export function SourceControlPage() {
     return () => window.removeEventListener("focus", again);
   }, [read]);
   const saved = useSourceSettings();
-  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} saved={saved} onAutoPull={(autoPull) => setSourceSettings({ autoPull })} onMergeMethod={(mergeMethod) => setSourceSettings({ mergeMethod })} />;
+  return <SourceControlView tools={tools} failed={failed} onCheck={() => read(true)} saved={saved} onAutoPull={(autoPull) => setSourceSettings({ autoPull })} onMergeMethod={(mergeMethod) => setSourceSettings({ mergeMethod })} onDropCredits={(dropCredits) => setSourceSettings({ dropCredits })} />;
 }

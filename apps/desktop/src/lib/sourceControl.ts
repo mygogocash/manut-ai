@@ -8,6 +8,9 @@
 // - Default merge method: default "the last one I chose", which starts as a merge commit (GitHub's and GitLab's own first choice)
 //   until the person picks another in a merge's ask. It only picks what the ask starts with: every merge is still asked, with the
 //   method shown and changeable there, and no setting merges without asking.
+// - Remove agent credits when merging: default OFF. Whose name goes in a merge's message is the person's call, and a co-author
+//   line is a credit someone wrote on purpose; the person who wants them out turns it on. It changes only the message the app
+//   proposes for its own merge (shown in the ask as sent), never a commit that exists (src-tauri/src/credits.rs).
 import { useSyncExternalStore } from "react";
 import { MERGE_METHODS, type MergeMethod } from "../code/source";
 
@@ -17,9 +20,11 @@ export interface SourceSettings {
   mergeMethod: MergeMethod | "last";
   /** The method the person last chose in a merge's ask on this computer. */
   lastMethod: MergeMethod;
+  /** Take the recognised agent credit lines out of the merge or squash message the app proposes. */
+  dropCredits: boolean;
 }
 
-export const SOURCE_DEFAULTS: SourceSettings = { autoPull: false, mergeMethod: "last", lastMethod: "merge" };
+export const SOURCE_DEFAULTS: SourceSettings = { autoPull: false, mergeMethod: "last", lastMethod: "merge", dropCredits: false };
 
 const KEY = "manut.source";
 const PULLED_KEY = "manut.source.pulled";
@@ -59,6 +64,7 @@ export function parseSource(text: string | null): SourceSettings {
     autoPull: typeof o.autoPull === "boolean" ? o.autoPull : d.autoPull,
     mergeMethod: o.mergeMethod === "last" ? "last" : (method(o.mergeMethod) ?? d.mergeMethod),
     lastMethod: method(o.lastMethod) ?? d.lastMethod,
+    dropCredits: typeof o.dropCredits === "boolean" ? o.dropCredits : d.dropCredits,
   };
 }
 
