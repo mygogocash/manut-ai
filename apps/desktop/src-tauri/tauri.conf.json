@@ -30,7 +30,7 @@
         "font-src": "'self' data:",
         "connect-src": "'self' ipc: http://ipc.localhost data: blob:",
         "worker-src": "'self' blob:",
-        "frame-src": "'none'",
+        "frame-src": "http://localhost:* https://localhost:*",
         "object-src": "'none'",
         "base-uri": "'self'",
         "form-action": "'none'"
@@ -44,7 +44,7 @@
         "font-src": "'self' data: http://localhost:5207",
         "connect-src": "'self' ipc: http://ipc.localhost data: blob: http://localhost:5207 ws://localhost:5207 ws://127.0.0.1:*",
         "worker-src": "'self' blob:",
-        "frame-src": "'none'",
+        "frame-src": "http://localhost:* https://localhost:*",
         "object-src": "'none'",
         "base-uri": "'self'",
         "form-action": "'none'"

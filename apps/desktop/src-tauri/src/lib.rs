@@ -1066,6 +1066,8 @@ pub fn run() {
         // endpoint in tauri.conf.json (and flip `UPDATER_ENABLED` in src/sidebar/updater.ts). The process plugin
         // stays for the restart that follows an update.
         .plugin(tauri_plugin_process::init())
+        // The app's window keeps to the app's own pages and this computer's addresses, frames included (preview.rs)
+        .plugin(app_window_guard())
         .on_menu_event(|app, event| {
             if app_menu::is_close(event.id().as_ref()) {
                 let _ = app.emit(app_menu::CLOSE_EVENT, ());
@@ -1152,6 +1154,20 @@ pub fn run() {
             }
         }
     });
+}
+
+/// The label of the app's own window (tauri.conf.json's window, which names none).
+const MAIN: &str = "main";
+
+/// The app's window loads only its own pages, empty frames and pages on this computer's addresses (preview.rs
+/// `app_window_may_load`): the frame beside a lane shows a preview's page there, and a link in that page to another site, or
+/// anything that would take the window away from the app, is cancelled. The shell's second look at what the frame shows,
+/// after the page's own (src/code/previewFrame.ts) and beside the CSP's `frame-src`, which WebKit applies first. Only the
+/// main window: the outpost's has its own guard (outpost/browser.rs), which is asked before this one.
+fn app_window_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("app-window")
+        .on_navigation(|webview, url| webview.label() != MAIN || preview::app_window_may_load(url.as_str()))
+        .build()
 }
 
 /// Every command the page may call (`invoke_handler` in `run` refuses them all to the outpost's window).
@@ -1340,6 +1356,106 @@ mod tests {
         assert!(!allowed_external("https://example.com/\nx"));
         assert!(!allowed_external("HTTPS://example.com/"));
         assert!(!allowed_external("https:\\\\evil.io\\x"));
+    }
+
+    /// The names of the commands the page may call, as `commands` lists them (the last part of each path).
+    fn command_names() -> Vec<String> {
+        let src = include_str!("lib.rs");
+        let list = &src[src.find("fn commands(").unwrap()..];
+        let list = &list[list.find("generate_handler![").unwrap() + "generate_handler![".len()..];
+        let list = &list[..list.find("];").unwrap()];
+        list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(|s| s.rsplit("::").next().unwrap().to_string()).collect()
+    }
+
+    type MockApp = (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<tauri::test::MockRuntime>, std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    /// The app's own capabilities and config (tauri.conf.json, capabilities/), in Tauri's mock runtime, with a stand-in for
+    /// every command that answers `ran` and notes its name, and the app's window, which the capability names (a mock build
+    /// makes no window of the config's).
+    fn mock_app() -> MockApp {
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let noted = ran.clone();
+        let app = tauri::test::mock_builder()
+            .invoke_handler(move |invoke| {
+                noted.lock().unwrap().push(invoke.message.command().to_string());
+                invoke.resolver.resolve("ran");
+                true
+            })
+            .build(tauri::generate_context!(test = true))
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, super::MAIN, Default::default()).build().unwrap();
+        (app, main, ran)
+    }
+
+    #[test]
+    fn a_framed_pages_call_reaches_no_command_or_plugin_of_the_app() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::webview::InvokeRequest;
+        let (_app, main, ran) = mock_app();
+        // What Tauri's own `on_message` answers a call from a page at `origin`: the origin it was asked from is the frame's
+        // own (wry reads the frame of a message, WebKit sends the frame's Origin with an ipc:// request), and the call
+        // carries the key, which a framed page never has on macOS and Linux (Tauri's scripts are the main frame's alone),
+        // so this is the next check: the one a page that somehow had the key would meet.
+        let call = |cmd: &str, origin: &str| {
+            tauri::test::get_ipc_response(
+                &main,
+                InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: origin.parse().unwrap(),
+                    body: InvokeBody::default(),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+        };
+        let names = command_names();
+        assert!(names.len() >= 90, "{}", names.len());
+        for name in ["preview_open", "preview_start", "open_external", "api_request", "chat_start"] {
+            assert!(names.iter().any(|n| n == name), "{name}");
+        }
+        // The app's own page reaches each command and a core plugin: the refusals below are the origin's alone.
+        for name in &names {
+            assert!(call(name, "tauri://localhost").is_ok(), "{name}");
+        }
+        assert!(call("plugin:app|version", "tauri://localhost").is_ok());
+        assert_eq!(ran.lock().unwrap().len(), names.len());
+        // A page at a preview's address, framed or not, reaches none of them and no plugin: no capability names a remote page.
+        let plugins = ["plugin:app|version", "plugin:event|listen", "plugin:event|emit", "plugin:window|show", "plugin:window|set_focus",
+            "plugin:window|set_badge_count", "plugin:webview|print", "plugin:path|resolve_directory", "plugin:notification|notify",
+            "plugin:dialog|open", "plugin:process|restart", "plugin:opener|open_url"];
+        for origin in ["http://localhost:5173/", "https://localhost:3000/", "http://127.0.0.1:8080/", "http://[::1]:5173/", "https://example.com/"] {
+            for name in names.iter().map(String::as_str).chain(plugins) {
+                let refused = call(name, origin).expect_err(name);
+                assert!(refused.to_string().contains("not allowed"), "{name} from {origin}: {refused}");
+            }
+        }
+        assert_eq!(ran.lock().unwrap().len(), names.len(), "a refused call ran a command");
+        // A debug build's own dev server is the app's page to Tauri: the page never frames the app's own origin
+        // (previewFrame.ts `own`), since a frame there would be the app.
+        assert!(call("preview_open", "http://localhost:5207/").is_ok());
+        // Tauri lets any page with the key fetch a channel's data (FETCH_CHANNEL_DATA_COMMAND skips the check), so only the
+        // key keeps a frame from it: on Windows, where every script reaches every frame, the page frames nothing.
+        assert_eq!(call("plugin:__TAURI_CHANNEL__|fetch", "http://localhost:5173/").unwrap_err(), serde_json::json!("missing channel id header"));
+    }
+
+    #[test]
+    fn the_app_window_guard_cancels_another_site_in_the_main_window_and_leaves_the_outpost_to_its_own() {
+        use tauri::plugin::Plugin;
+        let (app, main, _) = mock_app();
+        let outpost = tauri::WebviewWindowBuilder::new(&app, "outpost", Default::default()).build().unwrap();
+        assert!(crate::outpost::is_outpost_webview(outpost.label()));
+        let mut guard = super::app_window_guard::<tauri::test::MockRuntime>();
+        let url = |u: &str| tauri::Url::parse(u).unwrap();
+        for ok in ["tauri://localhost", "http://localhost:5173/checkout", "about:blank"] {
+            assert!(guard.on_navigation(main.as_ref(), &url(ok)), "{ok}");
+        }
+        for bad in ["https://example.com/", "http://192.168.1.5:5173/", "tauri://evil.example/", "file:///etc/passwd"] {
+            assert!(!guard.on_navigation(main.as_ref(), &url(bad)), "{bad}");
+        }
+        // the outpost's window shows the shop's sites: its own guard decides, and this one lets it be
+        assert!(guard.on_navigation(outpost.as_ref(), &url("https://example.com/")));
     }
 
     #[test]

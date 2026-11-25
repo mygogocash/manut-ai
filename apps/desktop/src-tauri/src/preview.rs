@@ -24,6 +24,11 @@
 //! Stop ends the program's process group, as a chat's close does: a hang-up to the group, and a kill after a grace. So do the
 //! lane's session closing (the page asks), a reload of the page (`preview_close_all`) and the app quitting
 //! ([`Previews::close_all`]). What keeps running lists each preview as a kind of its own (running.rs `Kind::Preview`).
+//!
+//! Its page: the page draws the preview's address in a frame beside the lane (src/code/previewFrame.ts), and the app's
+//! window lets itself and its frames load only its own pages and addresses of this computer ([`app_window_may_load`], which
+//! lib.rs makes the main window's navigation hook). Open and the frame keep one rule for what an address of this computer
+//! is ([`loopback_url`]), tested on the page's own table (src/code/__fixtures__/loopback.json).
 #![cfg_attr(not(unix), allow(dead_code))]
 
 use std::collections::{BTreeMap, HashMap};
@@ -186,24 +191,53 @@ fn child_path(program: &Path, dirs: &[PathBuf]) -> Result<OsString, String> {
     std::env::join_paths(all.iter().filter(|d| d.is_dir())).map_err(|e| e.to_string())
 }
 
-/// Whether `url` is an address of this computer that a preview printed, as `@manut/dev-url` shows one: `http` or `https`,
-/// then `localhost`, `127.0.0.1` or `[::1]`, a port or none, and a closing `/` with nothing after it. Open sends that and only
-/// that to the browser: no other host, no sign-in part (`localhost@evil.example`), no path, no space.
-pub fn loopback_url(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) else { return false };
-    let Some(authority) = rest.strip_suffix('/') else { return false };
+/// The path of `url` when it is on an address of this computer, as `@manut/dev-url` shows one: `http` or `https`, then
+/// `localhost`, `127.0.0.1` or `[::1]`, a port or none, and then the path, which starts at the first `/`. None otherwise: no
+/// other host, no sign-in part (`localhost@evil.example`), no space, no look-alike (`localhost.evil.example`).
+fn loopback_path(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
+    let (authority, path) = rest.split_at(rest.find('/')?);
     // the host, and what follows it: nothing, or `:` and the port
     let (host, port) = match authority.strip_prefix("[::1]") {
         Some(after) => ("[::1]", after),
         None => authority.split_at(authority.find(':').unwrap_or(authority.len())),
     };
     if !matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
-        return false;
+        return None;
     }
-    match port.strip_prefix(':') {
+    let port_ok = match port.strip_prefix(':') {
         None => port.is_empty(),
         Some(digits) => (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && digits.parse::<u32>().is_ok_and(|p| (1..=65_535).contains(&p)),
-    }
+    };
+    port_ok.then_some(path)
+}
+
+/// Whether `url` is an address of this computer that a preview printed, as `@manut/dev-url` shows one: [`loopback_path`]'s
+/// rule, and a closing `/` with nothing after it. Open sends that and only that to the browser, and the page puts that and only
+/// that in the frame beside a lane (src/code/previewFrame.ts `loopbackUrl`, tested on the same table).
+pub fn loopback_url(url: &str) -> bool {
+    loopback_path(url) == Some("/")
+}
+
+/// `url` is `base` or a page under it: nothing more of the host or port may follow (`tauri://localhost.evil` is not).
+fn under(url: &str, base: &str) -> bool {
+    url.strip_prefix(base).is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+}
+
+/// Whether the app's own window may load `url`, in itself or in one of its frames: the app's own pages (`tauri://localhost`
+/// on macOS and Linux, `http(s)://tauri.localhost` on Windows, and in a debug build the dev server, which is on this computer),
+/// an empty frame (`about:blank`, `about:srcdoc`), or a page on an address of this computer by [`loopback_path`]'s rule, which
+/// is where the frame beside a lane shows a preview's page and where a dev server's own pages lead. Nothing else: a link in
+/// the preview's page to another site, or anything that would take the window away from the app, is cancelled here. The
+/// navigation hook is told only the address, not whether the window or a frame is moving, so this one rule is the frame's
+/// and the window's; the frame's sandbox keeps the window out of its reach, and the app's CSP lets a frame load only
+/// localhost (tauri.conf.json `frame-src`), never the app's own pages.
+pub fn app_window_may_load(url: &str) -> bool {
+    matches!(url.split(['?', '#']).next(), Some("about:blank" | "about:srcdoc"))
+        || under(url, "tauri://localhost")
+        || under(url, "http://tauri.localhost")
+        || under(url, "https://tauri.localhost")
+        || loopback_path(url).is_some()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -661,37 +695,82 @@ mod tests {
         assert_eq!(check_secrets(&many), Err("bad_env".to_string()));
     }
 
+    /// The page's own table (src/code/previewFrame.test.ts runs it against `loopbackUrl`), so the shell's rule and the page's
+    /// are one rule: the address Open hands the browser is the address the frame may show.
+    fn loopback_table() -> (Vec<String>, Vec<String>) {
+        let table: serde_json::Value = serde_json::from_str(include_str!("../../src/code/__fixtures__/loopback.json")).unwrap();
+        let list = |key: &str| table[key].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
+        (list("ok"), list("bad"))
+    }
+
     #[test]
     fn open_takes_only_an_address_of_this_computer_as_the_dev_url_reader_shows_one() {
-        for ok in ["http://localhost:5173/", "https://localhost:3000/", "http://localhost/", "http://127.0.0.1:8080/", "http://[::1]:5173/", "http://[::1]/", "http://localhost:65535/", "http://localhost:1/"] {
-            assert!(loopback_url(ok), "{ok}");
+        let (ok, bad) = loopback_table();
+        assert!(ok.len() > 10 && bad.len() > 40);
+        for url in &ok {
+            assert!(loopback_url(url), "{url}");
         }
-        for bad in [
-            "",
-            "localhost:5173",
-            "http://localhost:5173",
-            "http://localhost:5173/app",
-            "http://localhost:5173/?x=1",
+        for url in &bad {
+            assert!(!loopback_url(url), "{url:?}");
+        }
+    }
+
+    #[test]
+    fn the_app_window_loads_its_own_pages_empty_frames_and_this_computers_addresses_and_nothing_else() {
+        for url in [
+            // the app's own page, as each system serves it, and its pages under it
+            "tauri://localhost",
+            "tauri://localhost/",
+            "tauri://localhost/index.html?x=1#y",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/settings",
+            // a debug build's dev server
+            "http://localhost:5207/",
+            // the frame beside a lane, and a dev server's own pages in it
+            "http://localhost:5173/",
+            "http://localhost:5173/checkout?step=2#pay",
+            "https://localhost:3000/@vite/client",
+            "http://127.0.0.1:8080/admin",
+            "http://[::1]:5173/about",
+            "about:blank",
+            "about:srcdoc",
+            "about:blank#top",
+        ] {
+            assert!(app_window_may_load(url), "{url}");
+        }
+        for url in [
+            "https://example.com/",
+            "http://192.168.110.34:5382/other.html",
+            "http://localhost.evil.example:5173/",
+            "http://localhost:5173@evil.example/",
+            "http://you@localhost:5173/",
+            "http://0.0.0.0:5173/",
+            "http://127.0.0.2:5173/",
             "http://localhost:0/",
             "http://localhost:65536/",
-            "http://localhost:123456/",
-            "http://localhost:/",
-            "http://localhost:5a/",
-            "http://localhost.evil.example:5173/",
-            "http://evil.example/",
-            "http://192.168.1.5:5173/",
-            "http://0.0.0.0:5173/",
-            "http://you@localhost:5173/",
-            "http://localhost:5173@evil.example/",
-            "http://[::1]x/",
-            "http://[::2]:5173/",
-            "ftp://localhost:21/",
+            "tauri://localhost.evil.example/",
+            "tauri://localhost@evil.example/",
+            "tauri://evil.example/",
+            "http://tauri.localhost.evil.example/",
+            "https://tauri.localhost:8443/",
+            "ipc://localhost/preview_open",
+            "asset://localhost/etc/passwd",
+            "about:config",
+            "data:text/html,<p>hi</p>",
+            "blob:tauri://localhost/0f0f",
             "file:///etc/passwd",
-            "javascript:alert(1)//localhost/",
-            "http://localhost :5173/",
-            "http://LOCALHOST:5173/",
+            "javascript:alert(1)",
+            "manut://terminal/1",
+            "ws://localhost:5173/",
+            "",
         ] {
-            assert!(!loopback_url(bad), "{bad}");
+            assert!(!app_window_may_load(url), "{url}");
+        }
+        // every address Open takes, the window may show; any path on one is the dev server's own page
+        let (ok, _) = loopback_table();
+        for url in &ok {
+            assert!(app_window_may_load(url), "{url}");
+            assert!(app_window_may_load(&format!("{url}page?q=1")), "{url}page");
         }
     }
 
