@@ -211,29 +211,42 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them. Since then three
-   builders run at once, their gates one at a time (`gate.sh` takes a lock), beside two read-only agents:
-   - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
-   - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
-   - a security review of the twelve features merged on 25 Nov: done. Nine findings, one high (in merging a pull request
-     from a lane), four medium, four low, none in the published 0.1.1. Two helpers fix them before any more features
-     merge on those files: item 86 (`feat/fix-source-control`, Opus, `cc-item86-fix-git`) and item 87
-     (`feat/fix-computer-providers`, Opus, `cc-item87-fix-computer`), started 26 Nov at about 00:35. No build is cut
-     until both are merged. The findings are written into each fix's commits and tests, not into the public docs
-     before they are fixed. The reviewer's next places to look: MCP approvals keyed to the developer's folder but
-     applied to a lane's file, whether a preview starts a repository's script without a click, and other names for
-     the settings that skip an agent's asks.
-   - a design for reaching the app from another device (item 78): done, `docs/remote-access.md`. Its first two phases
-     need nothing from the owner, so item 78a, the channel both sides use (`feat/remote-channel`, Opus,
-     `cc-item78a-remote-channel`), started 26 Nov at about 00:20.
-   All started 25 Nov at about 23:45. Item 84 follows 83.
-   The owner then set the session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the
-   owner, and an app that feels premium and quiet, with motion on its states and details. The canvas's Motion board is
-   the rule for that (`BrandMotion.dc.html`; items 85a to 85i; the look at every page beside its board is done, 21
-   findings in `docs/design-audit.md`, whose fixes start once 85a has merged, since they touch the same stylesheets):
-   85a, the moves as a foundation and the controls
-   (`feat/motion`, Opus, `cc-item85a-motion`), and a read-only look at every page beside its board, started 26 Nov at
-   about 00:05.
+   Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them, and set the
+   session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the owner, and an app that
+   feels premium and quiet, with motion on its states and details (the canvas's Motion board is the rule:
+   `docs/motion.md`, items 85a to 85i, and the 21 findings of `docs/design-audit.md`). Since then up to seven helpers
+   build at once. The gate, not the building, sets the pace, so from 26 Nov a helper runs only the tests it touched,
+   the type check and the Rust suite if it changed Rust, and the lead gates each item once after merging it, stacking
+   items that are ready together and gating the top of the stack (`gate.sh` takes a lock, and runs the Rust suite a
+   second time when it fails).
+   Merged on 26 Nov by 03:00: item 77b (workflows, off by default), 83 (artifact links, switched off), 85a (the motion
+   foundation) and the security fixes 86 and 87. The review of the features merged on 25 Nov had nine findings, one
+   high (the Merge ask could be made for someone else's pull request with the lane's branch name), four medium and
+   four low, none in the published 0.1.1; each was confirmed with a failing test and fixed, and the commits say what
+   was wrong. A build may be cut again when the owner asks. The reviewer's next places to look, not yet read: MCP
+   approvals keyed to the developer's folder but applied to a lane's file, whether a preview starts a repository's
+   script without a click, other names for the settings that skip an agent's asks, and whether an agent can write a
+   file into `~/.manut/workflows` without an ask that says what that folder is.
+   Running on 26 Nov at 03:00, each a subagent of the lead's session in its own worktree:
+   - item 78a, the channel for reaching the Mac from a phone (`feat/remote-channel`, Opus,
+     `cc-item78a-remote-channel`): built, read by a second reviewer, and now tightening the seven things that review
+     found (`docs/decisions.md`, 25 Nov);
+   - item 78f part 1, reading Tailscale's state, read only (`feat/tailscale-state`, Opus,
+     `cc-item78f1-tailscale-state`);
+   - item 84, skills shared by a link, built switched off (`feat/skill-links`, Opus, `cc-item84-skill-links`);
+   - item 85b, motion in the chats (`feat/motion-chat`, Sonnet, `cc-item85b-motion-chat`), and 85c, motion in the
+     lists and pages (`feat/motion-lists`, Sonnet, `cc-item85c-motion-lists`);
+   - item 85e, the brand's faces (`feat/brand-faces`, Opus, `cc-item85e-faces`), and 85h, Settings as one column
+     (`feat/settings-column`, Opus, `cc-item85h-settings-column`).
+   Next: 78b (the Mac side and Settings, Sharing and access) once 78a merges, 85f (the chat's type) after 85b, 85g (an
+   approval's card and Needs you), then 85i. The briefs the helpers were given are not kept in the repository; each
+   item's row in `docs/plan.md` says what it is.
+   At 23:55 on 25 Nov the account reached its five-hour limit and six helpers stopped mid-work; the limit reset at
+   02:50 and each was sent on in its own thread, with its uncommitted work intact. From about 22:50 the Mac had also
+   been sleeping fifteen minutes in every seventeen once the owner was away, which timed tests out and failed two
+   gates; the lead holds it awake with `caffeinate -i -s` for ten hours from 23:26 (it changes no setting and ends by
+   itself; `killall caffeinate` ends it sooner). If gates time out by about 925 seconds again, read `pmset -g log` for
+   sleeps first.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -598,6 +611,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/desktop/src-tauri` `shop_cache_key::tests::keychain::*` and
+  `outpost::item::tests::keeps_this_macs_outpost_in_its_own_keychain_item_beside_the_session`: six failed once on 25
+  Nov with `Err("keychain")` in a suite that took ten minutes, while the Mac slept between dark wakes; alone the same
+  tree passed. The gate now runs the Rust suite a second time by itself.
 - `apps/web` `test/JoinPage.test.tsx`, "counts down to a new code from when the answer arrived": failed once in a loaded
   gate on 25 Nov (it looks for the exact second, 0:42) and passed alone and in the next whole run.
 - `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
