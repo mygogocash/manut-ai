@@ -348,8 +348,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
 - **Mission Control's words:** a native speaker's check of the new Korean, Japanese and Chinese strings; the
   activity log's "Kept for 12 months, then deleted for good" is a policy promise the API must keep before any
   shop sees it.
-- **The offline cache's contents:** the desktop keeps reply drafts, recipients' LINE ids and schedule prompts
-  unencrypted in an owner-only file for up to 7 days; say if that is acceptable, or if 7 days is wrong.
+- **The offline cache's contents:** the desktop keeps reply drafts, recipients' LINE ids and schedule prompts in an
+  owner-only file for up to 7 days, sealed since December item 60 (AES-GCM, its key only in the keychain and deleted at
+  sign-out, `docs/runtime-adapter.md`); say if 7 days is wrong.
 - **Workers:** whether drafts should age out after 7 days like the messages they quote; whether the owner can end
   practice mode early and whether 3 days is right.
 - **Routines' switches:** `officeRoutines` and `officeCloud` are off in every environment, so each routine run is
