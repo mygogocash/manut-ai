@@ -3522,7 +3522,7 @@ export const en = {
   "skl.pick.refused": "These skills cannot be shared as they are:",
   "skl.why.switchedOff": "Sharing skills by link is off on this Mac. Turn it on in Settings › Artifacts.",
   "skl.why.featureOff": "Sharing skills by link is not turned on for Manut AI yet.",
-  "skl.why.noShell": "Skills can be shared only in the Manut AI app on this Mac.",
+  "skl.why.noShell": "Skills can be shared or installed only in the Manut AI app on this Mac.",
   "skl.ask.share": "Publish “{title}” as a public link?",
   "skl.ask.skills": "Skills",
   "skl.ask.files": "Files",

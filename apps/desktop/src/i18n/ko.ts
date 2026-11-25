@@ -3489,7 +3489,7 @@ export const ko: Record<Key, string> = {
   "skl.pick.refused": "이대로는 이 스킬을 공유할 수 없어요:",
   "skl.why.switchedOff": "이 Mac에서는 링크로 스킬 공유가 꺼져 있어요. 설정 › 결과물에서 켜세요.",
   "skl.why.featureOff": "Manut AI에서 링크로 스킬 공유가 아직 켜지지 않았어요.",
-  "skl.why.noShell": "스킬은 이 Mac의 Manut AI 앱에서만 공유할 수 있어요.",
+  "skl.why.noShell": "스킬 공유와 설치는 이 Mac의 Manut AI 앱에서만 할 수 있어요.",
   "skl.ask.share": "“{title}”을(를) 공개 링크로 게시할까요?",
   "skl.ask.skills": "스킬",
   "skl.ask.files": "파일",

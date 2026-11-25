@@ -3489,7 +3489,7 @@ export const zh: Record<Key, string> = {
   "skl.pick.refused": "这些技能目前无法分享：",
   "skl.why.switchedOff": "这台 Mac 上已关闭通过链接分享技能。请在 设置 › 成果 中开启。",
   "skl.why.featureOff": "Manut AI 尚未开启通过链接分享技能。",
-  "skl.why.noShell": "只能在这台 Mac 的 Manut AI 应用中分享技能。",
+  "skl.why.noShell": "只能在这台 Mac 的 Manut AI 应用中分享或安装技能。",
   "skl.ask.share": "要把“{title}”发布为公开链接吗？",
   "skl.ask.skills": "技能",
   "skl.ask.files": "文件",

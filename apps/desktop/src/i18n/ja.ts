@@ -3489,7 +3489,7 @@ export const ja: Record<Key, string> = {
   "skl.pick.refused": "このままではこれらのスキルを共有できません：",
   "skl.why.switchedOff": "この Mac ではリンクでのスキル共有がオフです。設定 › 成果物 でオンにしてください。",
   "skl.why.featureOff": "Manut AI ではリンクでのスキル共有がまだオンになっていません。",
-  "skl.why.noShell": "スキルはこの Mac の Manut AI アプリでのみ共有できます。",
+  "skl.why.noShell": "スキルの共有とインストールは、この Mac の Manut AI アプリでのみできます。",
   "skl.ask.share": "「{title}」を公開リンクとして公開しますか？",
   "skl.ask.skills": "スキル",
   "skl.ask.files": "ファイル",
