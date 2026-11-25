@@ -497,7 +497,7 @@ describe("several shops", () => {
 
   it("names a helper by the note they passed on at that shop, and no other shop's", async () => {
     const passed = { by: "helper-mint", name: "Mint", note: "Over to you.", at: iso(T0 + 150_000) };
-    const { api, shops, store } = await openedShops();
+    const { shops, store } = await openedShops();
     // Mint's note is on the open refund at Baan Mali, so her name is Baan Mali's to say, never Ran Pa Noi's
     shops.approvals[SHOP_A.id] = [approvalJson({ id: "a-refund", kind: "money", detail: { operationType: "shopee.refund", targetResourceId: "SP-1" }, passedOn: passed }), ...shops.approvals[SHOP_A.id]];
     await vi.advanceTimersByTimeAsync(POLL_MS);
@@ -514,7 +514,7 @@ describe("several shops", () => {
   it("closes a shop's card at once when its read answers, while another shop's slow read is waited for no longer than the others'", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const { api, shops, store } = await openedShops((fake) => async (url, init) => {
+    const { shops, store } = await openedShops((fake) => async (url, init) => {
       const bearer = init.headers.authorization ?? init.headers.Authorization;
       return url.endsWith("state=recent") && bearer === `Bearer ${OWNER_A}` ? gate.then(() => fake.fetch(url, init)) : fake.fetch(url, init);
     });
@@ -537,7 +537,7 @@ describe("several shops", () => {
   });
 
   it("leaves one shop's closing as it was when only that shop's read fails", async () => {
-    const { api, shops, store } = await openedShops();
+    const { shops, store } = await openedShops();
     shops.approvals[SHOP_A.id] = [];
     shops.approvals[SHOP_B.id] = [];
     shops.recent[SHOP_A.id] = { status: 503, json: { error: "approvals_unavailable" } };
