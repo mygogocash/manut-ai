@@ -128,6 +128,13 @@ describe("resume snapshot", () => {
     expect(back("kit/x")).toBeUndefined();
   });
 
+  it("keeps that a workflow started a lane, so it still asks before every change after a restart", () => {
+    const good = buildResume(input({ sessions: [{ ...input().sessions[0], workflow: "Nightly tests" }] }), T);
+    expect(parseResume(JSON.stringify(good))!.sessions[0].workflow).toBe("Nightly tests");
+    expect(parseResume(JSON.stringify({ ...good, sessions: [{ ...good.sessions[0], workflow: 7 }] }))!.sessions[0].workflow).toBeUndefined();
+    expect(parseResume(JSON.stringify(buildResume(input(), T)))!.sessions[0].workflow).toBeUndefined();
+  });
+
   it("keeps that an ended session's CLI could not continue its conversation, and only for an ended one", () => {
     const good = buildResume(input(), T);
     const raw = (resumeFailed: unknown, running: boolean) => JSON.stringify({ ...good, sessions: [{ ...good.sessions[2], running, resumeFailed }] });
