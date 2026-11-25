@@ -16,6 +16,7 @@ import type { ImportApp, ImportProfile } from "./term/import";
 import { readView, type GitView } from "../code/moved";
 import { MOCK_MOVED, MOCK_MOVED_ROOT } from "../code/mockMoved";
 import { readCleaned, readKept, readMade, readReleased, readRemoved, type KeptLane, type LaneCleaned, type LaneMade, type LaneReleased, type LaneRemoveAsk, type LaneRemoved } from "../code/laneBranch";
+import { readAgentConfig, type AgentConfig } from "../settings/mcp/agentConfig";
 
 /** What the person did in a chat. Mirrors `Input` in src-tauri/src/agent_chat.rs. `images`: saved copies
  *  (`saveFile`) of attached pictures, for the agent's own image input. */
@@ -153,6 +154,10 @@ export interface SessionHost extends HistoryHost {
   /** Settings › Worktrees: check the folder chosen for lanes' folders and make it; resolves with its real path, rejects with a
    *  code (`bad_root`, `root_too_broad`, `root_in_checkout`, `root_unwritable`). */
   laneRootCheck?(root: string): Promise<string>;
+  /** Settings › MCP and Skills: the MCP servers and skills Claude Code and Codex have, by name and where each comes from, read
+   *  from their own files (src-tauri/src/agent_config.rs) for the person's own home and, when given, the project folder `cwd`.
+   *  Only reads. Null where this computer's files cannot be read (a plain browser). */
+  agentConfig?(cwd?: string): Promise<AgentConfig[] | null>;
   /** A clean-up removes a deleted chat's folder only when nothing in it is changed, new or unpushed; the branch stays. */
   laneRelease?(worktree: string): Promise<LaneReleased>;
   /** A clean-up of the lanes of `cwd`'s repository whose pull request merged, through the person's own `gh` or `glab`;
@@ -344,6 +349,10 @@ export class TauriHost implements SessionHost, BuddyHost {
   async laneRootCheck(root: string) {
     const { invoke } = await this.core();
     return invoke<string>("lane_root_check", { root });
+  }
+  async agentConfig(cwd?: string) {
+    const { invoke } = await this.core();
+    return readAgentConfig(await invoke<unknown>("agent_config_list", { cwd: cwd || null }));
   }
   async laneRelease(worktree: string) {
     const { invoke } = await this.core();
@@ -645,6 +654,11 @@ export type MockGlobals = MockTurnGlobals & {
   __manutCleanMerged?: Record<string, { removed: string[]; kept: { branch: string; why: string }[]; cannot: string | null }>;
   /** e2e: how many changed files the developer's folders have, by folder: they do not come along into a lane's */
   __manutLeft?: Record<string, number>;
+  /** e2e: how many of a folder's own agent settings files come along into a lane (`config`) and how many stay (`stayed`) */
+  __manutConfig?: Record<string, number>;
+  __manutStayed?: Record<string, number>;
+  /** e2e: what the shell reads for Settings › MCP and Skills; without it, a browser has nothing to read */
+  __manutAgentConfig?: unknown;
   /** e2e: what git says of each folder for the main branch moving (src/code/moved.ts; none = the canvas's project, a
    *  lane whose main moved; a folder left out: nothing to say) */
   __manutMoved?: Record<string, GitView>;
@@ -1150,7 +1164,11 @@ export class MockHost implements SessionHost, BuddyHost {
     // e2e: `__manutRemoteFrom` names the remote branch a folder's base has; without one a lane asked to start from the remote
     // says the folder has no remote
     const remoteFrom = start?.remote ? (this.g.__manutRemoteFrom?.[cwd] ?? "") : "";
-    return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "" };
+    return { branch, base, dir: worktree, worktree, left: this.g.__manutLeft?.[cwd] ?? 0, from: remoteFrom, local: start?.remote && !remoteFrom ? "no_remote" : "", config: this.g.__manutConfig?.[cwd] ?? 0, stayed: this.g.__manutStayed?.[cwd] ?? 0 };
+  }
+  /** A browser cannot read this computer's files: nothing, unless e2e gave a stand-in of the shell's answer. */
+  async agentConfig(): Promise<AgentConfig[] | null> {
+    return this.g.__manutAgentConfig === undefined ? null : readAgentConfig(this.g.__manutAgentConfig);
   }
   /** As the shell: a folder inside a checkout (a folder `__manutBranches` knows, or one below it) is refused, as is a relative one. */
   async laneRootCheck(root: string): Promise<string> {

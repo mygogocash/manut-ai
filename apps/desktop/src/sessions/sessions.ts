@@ -56,6 +56,7 @@ import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
+import { noteMcpSeen } from "../settings/mcp/agentConfig";
 import { t as tr, type Key } from "../i18n";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
@@ -439,6 +440,9 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (key) {
         const said = [tr("lane.note.made", { branch: made.branch, base: made.base, folder: made.dir })];
         if (made.left > 0) said.push(made.left === 1 ? tr("lane.note.leftOne", { base: made.base }) : tr("lane.note.leftMany", { n: made.left, base: made.base }));
+        // the one exception: the project's own agent settings git does not hold, kept out of git in the lane
+        if (made.config > 0) said.push(made.config === 1 ? tr("lane.note.configOne") : tr("lane.note.configMany", { n: made.config }));
+        if (made.stayed > 0) said.push(made.stayed === 1 ? tr("lane.note.stayedOne") : tr("lane.note.stayedMany", { n: made.stayed }));
         // where it started, said whenever the person asked for the remote: from it, or why from the local branch
         if (made.from) said.push(tr("lane.note.fromRemote", { remote: made.from }));
         else if (ws.remote && made.local) said.push(tr(`lane.note.local.${made.local}` as Key, { base: made.base }));
@@ -583,6 +587,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         // the agent named the conversation (Claude Code's session title, a Codex thread name)
         if (typeof ev.title === "string" && ev.title.trim()) p.agentTitle = ev.title.trim();
         if (typeof ev.background === "number") p.background = ev.background;
+        // which MCP servers the agent connected, for Settings › MCP and Skills (names and a status word only)
+        if (Array.isArray(ev.mcp)) noteMcpSeen(rec(id)?.agent ?? "", ev.mcp);
         patchRec(id, p);
         const l: Partial<AgentLive> = {};
         if (typeof ev.rewind === "boolean") l.rewind = ev.rewind;

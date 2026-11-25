@@ -1,5 +1,6 @@
 // Settings view (main column while `ui.view === "settings"`). Left list: You (Accounts, when the runtime keeps them),
-// Bots (one page per bot: Profile, Model, Work) and App (General, Voice, Terminal, Agents, Computer, Worktrees, Developer). Pages are `bot:<name>`
+// Bots (one page per bot: Profile, Model, Work) and App (General, Voice, Terminal, Agents, Computer, Worktrees, MCP and
+// Skills, Developer). Pages are `bot:<name>`
 // and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
 // Oh My Hermes also had Providers (`hermes auth`) and Remote machines (Hermes over SSH) here; both needed its bridge.
 import { useEffect, useState } from "react";
@@ -29,6 +30,7 @@ import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
 import { VoicePage } from "./VoicePage";
+import { McpSkillsPage } from "./mcp/McpSkillsPage";
 
 export const slot = "settings";
 
@@ -41,6 +43,8 @@ const APP_PAGES: { id: string; label: Key }[] = [
   { id: "computer", label: "set.computer" },
   // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
   { id: "worktrees", label: "set.worktrees" },
+  // the MCP servers and skills each coding agent has, read from its own files; changes nothing (mcp/McpSkillsPage.tsx)
+  { id: "mcp", label: "set.mcp" },
   // Practice or Connected, and signing in to the API (DeveloperPage.tsx)
   { id: "developer", label: "set.developer" },
 ];
@@ -117,6 +121,8 @@ export default function Settings({ page }: SlotProps["settings"]) {
           <VoicePage />
         ) : current === "worktrees" ? (
           <WorktreesPage />
+        ) : current === "mcp" ? (
+          <McpSkillsPage />
         ) : current === "developer" ? (
           <DeveloperPage />
         ) : current === "people" ? (
