@@ -1,23 +1,21 @@
-// Settings › Agents: the agents SESSIONS offers, read-only, with their tier and whether each is installed; then the
-// person's own Agent Client Protocol agents, which they add and remove here. Nothing is saved from the form: Save
-// opens a confirm card that shows the exact command manut will run (the shell resolves it now), Cancel first and Add
-// second, and only Add asks the shell to write the entry (src-tauri/src/custom_agents.rs). Removing asks once, then
-// each open session of that agent ends. "Ask the bot" only puts a request in the current bot's composer; the bot's
-// reply can hold a draft whose chip opens this same card (AgentConfirmCard).
+// Settings › Providers › Your agents (Settings › Agents until item 74, whose list of the agents the app offers is now the
+// Providers list above it): the person's own Agent Client Protocol agents, which they add and remove here. Nothing is
+// saved from the form: Save opens a confirm card that shows the exact command manut will run (the shell resolves it
+// now), Cancel first and Add second, and only Add asks the shell to write the entry (src-tauri/src/custom_agents.rs).
+// Removing asks once, then each open session of that agent ends. "Ask the bot" only puts a request in the current bot's
+// composer; the bot's reply can hold a draft whose chip opens this same card (AgentConfirmCard).
 import { useEffect, useState } from "react";
 import "./agents.css";
 import { AgentMark } from "../../sessions/AgentMark";
 import { getHost } from "../../sessions/host";
 import { getSessions, useSessions } from "../../sessions/sessions";
-import { offeredAgents } from "../../sessions/agents";
-import { agentsPageModel, cardCommand, EMPTY_FORM, whyText, type CustomForm, type CustomList, type CustomPreview, type Tier } from "../../sessions/custom";
+import { agentsPageModel, cardCommand, EMPTY_FORM, whyText, type CustomForm, type CustomList, type CustomPreview } from "../../sessions/custom";
 import { t, tx, type Key } from "../../i18n";
 import { holdImeEnter } from "../../lib/ime";
 import { getStore } from "../../state/store";
 
-const TIER: Record<Tier, Key> = { main: "ag.tierMain", acp: "ag.tierAcp", builtin: "ag.tierBuiltin" };
-
-export function AgentsPage() {
+/** `onChanged`: an agent was added or removed (the Providers list reads its agents again). */
+export function YourAgents({ onChanged }: { onChanged?: () => void }) {
   const ss = useSessions();
   const [custom, setCustom] = useState<CustomList | null>(null);
   const [form, setForm] = useState<CustomForm | null>(null);
@@ -38,7 +36,7 @@ export function AgentsPage() {
     void reload();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const m = agentsPageModel(ss.agents && offeredAgents(ss.agents), custom);
+  const m = agentsPageModel(ss.agents, custom);
 
   /** Save: the shell checks the fields and resolves the command; nothing is written. */
   const preview = async () => {
@@ -64,6 +62,7 @@ export function AgentsPage() {
       setErr("");
       await reload();
       await getSessions().loadAgents();
+      onChanged?.();
     } catch (e) {
       setCard(null);
       setErr(whyText(e));
@@ -78,6 +77,7 @@ export function AgentsPage() {
       setRemoving(null);
       await getSessions().endAgent(id);
       await reload();
+      onChanged?.();
     } catch (e) {
       setErr(whyText(e));
     } finally {
@@ -108,28 +108,7 @@ export function AgentsPage() {
   );
 
   return (
-    <div className="st-page" data-testid="agents-page">
-      <div className="st-gh st-gh0">{t("ag.offered")}</div>
-      <div className="st-grp" data-testid="agents-builtins">
-        {m.builtins.map((a) => (
-          <div key={a.id} className="st-row ag-row" data-testid={`agents-row-${a.id}`}>
-            <div className="st-k st-kt">
-              <b className="st-kt">
-                <AgentMark agent={a.id} size={16} />
-                {a.label}
-              </b>
-            </div>
-            <div className="st-v ag-meta">
-              <span className={`ag-tier ${a.tier}`} data-testid={`agents-tier-${a.id}`}>
-                {t(TIER[a.tier])}
-              </span>
-              <span className={`ag-state${a.installed ? " on" : ""}`}>{a.installed ? t("ag.installed") : t("ag.notInstalled")}</span>
-            </div>
-          </div>
-        ))}
-        {ss.agents === null && <div className="st-row ag-empty">{t("ss.lookingAgents")}</div>}
-      </div>
-
+    <div data-testid="agents-page">
       <div className="st-gh">{t("ag.yours")}</div>
       <p className="st-note">{t("ag.yoursHint")}</p>
       <div className="st-grp" data-testid="agents-mine">
@@ -205,8 +184,8 @@ export function AgentsPage() {
               void preview();
             }}
           >
-            {field("label", "ag.name", "ag.nameHint", "Cursor Agent")}
-            {field("program", "ag.program", "ag.programHint", "cursor-agent", true)}
+            {field("label", "ag.name", "ag.nameHint", "My Agent")}
+            {field("program", "ag.program", "ag.programHint", "my-agent", true)}
             {field("args", "ag.args", "ag.argsHint", "acp", true)}
             {field("install", "ag.install", "ag.installHint", "npm install -g …", true)}
             <div className="st-row ag-formfoot">

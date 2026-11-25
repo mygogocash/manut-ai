@@ -13,23 +13,24 @@ import { MockHost } from "../../sessions/host";
 import { t } from "../../i18n";
 
 const block = (o: unknown, lang = "manut-agent") => "```" + lang + "\n" + (typeof o === "string" ? o : JSON.stringify(o)) + "\n```";
-const CURSOR = { name: "Cursor Agent", program: "cursor-agent", args: ["acp"], install: "npm install -g @cursor/agent" };
+// Cursor is built in since item 74, so a bot proposing it would be refused as one: a made-up agent stands in
+const ACME = { name: "Acme Agent", program: "acme-agent", args: ["acp"], install: "npm install -g @acme/agent" };
 
 describe("parseDrafts", () => {
   it("reads one JSON object per fenced block, ignores unknown keys, and defaults args and install", () => {
-    const text = `Here is a draft:\n\n${block({ ...CURSOR, env: { KEY: "x" }, why: "you asked" })}\n\nPress the chip.`;
-    expect(parseDrafts(text)).toEqual([{ draft: CURSOR, why: null }]);
+    const text = `Here is a draft:\n\n${block({ ...ACME, env: { KEY: "x" }, why: "you asked" })}\n\nPress the chip.`;
+    expect(parseDrafts(text)).toEqual([{ draft: ACME, why: null }]);
     expect(parseDrafts(block({ name: " Stub ", program: "stub-acp" }))).toEqual([{ draft: { name: "Stub", program: "stub-acp", args: [], install: "" }, why: null }]);
     // ~~~ fences and longer fences too; other languages and inline code are not drafts
-    expect(parseDrafts("~~~manut-agent\n" + JSON.stringify(CURSOR) + "\n~~~")).toHaveLength(1);
-    expect(parseDrafts("````manut-agent\n" + JSON.stringify(CURSOR) + "\n````")).toHaveLength(1);
-    expect(parseDrafts(block(CURSOR, "json"))).toEqual([]);
-    expect(parseDrafts("`manut-agent` " + JSON.stringify(CURSOR))).toEqual([]);
+    expect(parseDrafts("~~~manut-agent\n" + JSON.stringify(ACME) + "\n~~~")).toHaveLength(1);
+    expect(parseDrafts("````manut-agent\n" + JSON.stringify(ACME) + "\n````")).toHaveLength(1);
+    expect(parseDrafts(block(ACME, "json"))).toEqual([]);
+    expect(parseDrafts("`manut-agent` " + JSON.stringify(ACME))).toEqual([]);
   });
 
   it("two blocks make two drafts, in order", () => {
-    const text = `${block(CURSOR)}\n\nor\n\n${block({ name: "Stub ACP", program: "stub-acp", args: ["--acp"] })}`;
-    expect(parseDrafts(text).map((b) => b.draft?.name)).toEqual(["Cursor Agent", "Stub ACP"]);
+    const text = `${block(ACME)}\n\nor\n\n${block({ name: "Stub ACP", program: "stub-acp", args: ["--acp"] })}`;
+    expect(parseDrafts(text).map((b) => b.draft?.name)).toEqual(["Acme Agent", "Stub ACP"]);
   });
 
   it("invalid JSON or the wrong shape is a refusal, not a draft", () => {
@@ -42,7 +43,7 @@ describe("parseDrafts", () => {
 
   it("refuses shell characters in any field, as the form does", () => {
     for (const [patch, why] of [
-      [{ program: "cursor-agent; rm -rf ~" }, "program"],
+      [{ program: "acme-agent; rm -rf ~" }, "program"],
       [{ program: "$(curl x)" }, "program"],
       [{ args: ["acp", "$(id)"] }, "args"],
       [{ args: ["acp && rm -rf ~"] }, "args"],
@@ -51,16 +52,16 @@ describe("parseDrafts", () => {
       [{ install: "curl -fsSL x | sh" }, "install"],
       [{ program: "./run.sh" }, "program"],
     ] as const)
-      expect(parseDrafts(block({ ...CURSOR, ...patch }))[0].why, JSON.stringify(patch)).toBe(why);
+      expect(parseDrafts(block({ ...ACME, ...patch }))[0].why, JSON.stringify(patch)).toBe(why);
   });
 
   it("is stricter than the form: no shell, interpreter or launcher, any case, with or without .exe or a folder", () => {
     for (const p of ["sh", "BASH", "/bin/zsh", "/usr/bin/env", "python3", "Node.exe", "pwsh", "powershell", "osascript", "sudo", "doas", "open", "xargs", "deno", "bun", "/opt/homebrew/bin/ruby"])
-      expect(parseDrafts(block({ ...CURSOR, program: p }))[0].why, p).toBe("interp");
+      expect(parseDrafts(block({ ...ACME, program: p }))[0].why, p).toBe("interp");
     expect(INTERPRETERS).toHaveLength(25);
     // OpenCode, Kilo Code and a built-in agent's program get the form's own refusal
-    expect(parseDrafts(block({ ...CURSOR, program: "opencode" }))[0].why).toBe("opencode");
-    expect(parseDrafts(block({ ...CURSOR, program: "/usr/local/bin/kilo" }))[0].why).toBe("kilo");
+    expect(parseDrafts(block({ ...ACME, program: "opencode" }))[0].why).toBe("opencode");
+    expect(parseDrafts(block({ ...ACME, program: "/usr/local/bin/kilo" }))[0].why).toBe("kilo");
     for (const p of ["claude", "codex", "gemini", "cline"]) expect(botRefusal(p), p).toBe("builtin");
     expect(t("ag.why.opencode")).toBe("Use the built-in OpenCode.");
     expect(t("ag.why.interp")).toBe("A bot may not propose a shell or an interpreter as the program.");
@@ -77,7 +78,7 @@ describe("where drafts are read", () => {
   });
 
   it("strips the draft blocks from the shown text, and an unclosed one while streaming", () => {
-    const text = `Here it is:\n\n${block(CURSOR)}\n\nPress Add agent.`;
+    const text = `Here it is:\n\n${block(ACME)}\n\nPress Add agent.`;
     expect(stripDrafts(text)).toBe("Here it is:\n\nPress Add agent.");
     expect(stripDrafts("no draft here")).toBe("no draft here");
     expect(stripDrafts("Here:\n\n```manut-agent\n{\"name\": \"Cur", true)).toBe("Here:");
@@ -86,7 +87,7 @@ describe("where drafts are read", () => {
   });
 
   it("draws one chip per draft under a finished bot reply in an allowed chat, a refused one disabled with its reason", () => {
-    const text = `${block(CURSOR)}\n${block({ ...CURSOR, program: "bash" })}`;
+    const text = `${block(ACME)}\n${block({ ...ACME, program: "bash" })}`;
     const main = renderToStaticMarkup(createElement(AgentChips, { chatKey: "kami", text }));
     expect(main.match(/data-testid="agent-chip"/g)).toHaveLength(2);
     expect(main).toContain(`title="${t("ag.why.interp")}"`);
@@ -110,13 +111,16 @@ describe("the bot's card", () => {
   it("the shell checks the draft again, stricter than the form, and writes nothing", async () => {
     const g: Record<string, unknown> = {};
     const host = new MockHost(g);
-    const p = await host.customBotPreview("Cursor Agent", "cursor-agent", ["acp"], "");
-    expect(p).toEqual({ entry: { id: "cursor-agent", label: "Cursor Agent", program: "cursor-agent", args: ["acp"], install: "" }, command: "/opt/homebrew/bin/cursor-agent acp" });
+    const p = await host.customBotPreview("Acme Agent", "acme-agent", ["acp"], "");
+    expect(p).toEqual({ entry: { id: "acme-agent", label: "Acme Agent", program: "acme-agent", args: ["acp"], install: "" }, command: "/opt/homebrew/bin/acme-agent acp" });
+    // Cursor's and Antigravity's programs are built-ins' now, so a bot's draft of either is refused as one
+    await expect(host.customBotPreview("Cursor", "cursor-agent", ["acp"], "")).rejects.toThrow("why:builtin");
+    await expect(host.customBotPreview("Antigravity", "agy", ["acp"], "")).rejects.toThrow("why:builtin");
     await expect(host.customBotPreview("X", "bash", ["-c", "id"], "")).rejects.toThrow("why:interp");
     await expect(host.customBotPreview("X", "/bin/sh", ["acp"], "")).rejects.toThrow("why:interp");
     await expect(host.customBotPreview("X", "codex", ["acp"], "")).rejects.toThrow("why:builtin");
     // an argument holding a space is refused, not split into two
-    await expect(host.customBotPreview("X", "cursor-agent", ["acp --yolo"], "")).rejects.toThrow("why:args");
+    await expect(host.customBotPreview("X", "acme-agent", ["acp --yolo"], "")).rejects.toThrow("why:args");
     // the form still lets a person name a shell (the card shows it)
     await expect(host.customPreview("X", "bash", "acp", "")).resolves.toBeTruthy();
     expect(g.__manutCustomFile).toBeUndefined();

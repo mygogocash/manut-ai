@@ -1,6 +1,7 @@
-// Settings view (main column while `ui.view === "settings"`). Left list: You (Accounts, when the runtime keeps them),
-// Bots (one page per bot: Profile, Model, Work) and App (General, Voice, Terminal, Agents, Computer, Worktrees, MCP and
-// Skills, Developer). Pages are `bot:<name>`
+// Settings view (main column while `ui.view === "settings"`). Left list: Bots (one page per bot: Profile, Model, Work)
+// and App (General, Voice, Terminal, Providers, Computer, Worktrees, MCP and Skills, Developer). Providers (item 74) is
+// the coding agents with their settings, the person's own agents and the accounts, in every mode; the page ids of the
+// two pages it replaced, `agents` and `accounts`, open it (`accounts` at its accounts). Pages are `bot:<name>`
 // and the App page names; the page lives in the store (`ui.settingsPage`) so the model popover can deep-link to a bot.
 // Oh My Hermes also had Providers (`hermes auth`) and Remote machines (Hermes over SSH) here; both needed its bridge.
 import { useEffect, useState } from "react";
@@ -15,15 +16,13 @@ import { Avatar, GridIcon, ModelIcon, SourceIcon } from "../ui";
 import { Seg } from "../chat/model/Seg";
 import { reasoningLabel } from "../chat/model/levels";
 import { Appearance } from "./Appearance";
-import { AccountsPage } from "./accounts/AccountsPage";
 import { TerminalPage } from "./terminal/TerminalPage";
-import { can } from "../runtime";
 import { setBar, useTasks } from "../tasks/state";
 import { DISK_WARN_CHOICES, diskWarn, setDiskWarn } from "../lib/disk";
 import { hideDetails, quietHours, setHideDetails, setQuietHours } from "../lib/outside";
 import { Toggle } from "../pages/kit";
 import { awakeEnabled, closeHides, isMacPlatform, setAwakeEnabled, setCloseHides } from "../lib/power";
-import { AgentsPage } from "./agents/AgentsPage";
+import { ProvidersPage } from "./providers/ProvidersPage";
 import { AvatarEditor, BotFacts, NameEditor, PictureActions, placeName, useBotInfo, usePictureEditor } from "./BotIdentity";
 import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
@@ -40,7 +39,8 @@ const APP_PAGES: { id: string; label: Key }[] = [
   // the chat box's microphone and voice mode: the language spoken, this Mac or Apple, the voice (VoicePage.tsx)
   { id: "voice", label: "set.voice" },
   { id: "terminal", label: "set.terminal" },
-  { id: "agents", label: "set.agents" },
+  // every coding agent: on or off, its program, home, arguments and variables; your own agents; the accounts (item 74)
+  { id: "providers", label: "set.providers" },
   { id: "computer", label: "set.computer" },
   // where lanes' folders are made, the remote start, the branch prefix and the clean-up (WorktreesPage.tsx)
   { id: "worktrees", label: "set.worktrees" },
@@ -54,29 +54,20 @@ const STATUS: Record<string, Key> = { online: "bot.online", offline: "bot.offlin
 /** A bot's status in words; a status manut does not know stays as the bridge wrote it. */
 export const statusText = (status: string) => (STATUS[status] ? t(STATUS[status]) : status);
 
+/** The page a Settings link names: Agents and Accounts are parts of Providers since item 74. */
+export const pageOf = (page: string): string => (page === "agents" || page === "accounts" ? "providers" : page);
+
 export default function Settings({ page }: SlotProps["settings"]) {
   const s = useStore();
   const botName = page.startsWith("bot:") ? page.slice(4) : null;
   const bot = botName ? s.bots.find((b) => b.name === botName) : undefined;
-  const current = bot
-    ? `bot:${bot.name}`
-    : page === "bots" || (page === "accounts" && can("accounts")) || (page === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === page)
-      ? page
-      : "general";
+  const asked = pageOf(page);
+  const current = bot ? `bot:${bot.name}` : asked === "bots" || (asked === "people" && peopleOffered()) || APP_PAGES.some((p) => p.id === asked) ? asked : "general";
 
   return (
     <div className="st" data-testid="settings-view">
       <nav className="st-nav" aria-label={t("set.sections")}>
-        {/* coding-CLI logins are read by the runtime; one that keeps none has no Accounts page */}
-        {can("accounts") && (
-          <>
-            <div className="st-sh">{t("set.you")}</div>
-            <NavItem id="accounts" current={current} onPick={s.openSettings}>
-              {t("nav.accounts")}
-            </NavItem>
-          </>
-        )}
-        <div className={`st-sh${can("accounts") ? " st-sh2" : ""}`}>{t("set.bots")}</div>
+        <div className="st-sh">{t("set.bots")}</div>
         <NavItem id="bots" current={current} onPick={s.openSettings}>
           <span className="st-nav-i" aria-hidden="true">
             <GridIcon />
@@ -108,14 +99,12 @@ export default function Settings({ page }: SlotProps["settings"]) {
       <div className="st-body" data-testid={`settings-page-${current.replace(":", "-")}`}>
         {bot ? (
           <BotPage bot={bot} />
-        ) : current === "accounts" ? (
-          <AccountsPage />
         ) : current === "bots" ? (
           <BotsPage />
         ) : current === "terminal" ? (
           <TerminalPage />
-        ) : current === "agents" ? (
-          <AgentsPage />
+        ) : current === "providers" ? (
+          <ProvidersPage focus={page === "accounts" ? "accounts" : undefined} />
         ) : current === "computer" ? (
           <ComputerPage />
         ) : current === "voice" ? (

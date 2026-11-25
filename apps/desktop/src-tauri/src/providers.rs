@@ -176,6 +176,7 @@ impl Refusal {
 /// option, compared without case and with `_` read as `-` (Go's and yargs' spellings) and as its `--no-` form (yargs and
 /// commander turn a switch off with it). None of these eight parses an abbreviation as the whole option (commander,
 /// yargs, clap, Go's flag and Bun's parser do not), so a shorter name that is another option of its own stays allowed.
+#[derive(Serialize)]
 pub struct ArgRules {
     pub id: &'static str,
     /// Options that let the agent act without asking first, or outside its sandbox, or widen where it may act unasked.
@@ -1398,6 +1399,16 @@ mod tests {
         assert!(apply("my-agent", &Stored::default(), Patch { off: Some(true), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).is_ok());
         assert_eq!(apply("my-agent", &Stored::default(), Patch { path: Some("/x".into()), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err().why, Why::PathNone);
         assert_eq!(apply("../x", &Stored::default(), Patch { off: Some(true), ..Patch::default() }, Os::Unix, |_: &Path| true, |_: &Path| true).unwrap_err().why, Why::Unknown);
+    }
+
+    /// The page's copy (`src/settings/providers/argRules.json`, which the browser stand-in and the page's own first check
+    /// read) is this table exactly, with the variables the app sets and each agent's home variable.
+    #[test]
+    fn the_pages_copy_is_these_rules() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/settings/providers/argRules.json");
+        let copy: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let homes: serde_json::Map<String, Value> = ["claude", "codex", "pi", "omp", "grok", "gemini"].iter().map(|id| (id.to_string(), json!(home_var(id)))).collect();
+        assert_eq!(copy, json!({"rules": ARG_RULES, "appVars": APP_VARS, "homeVars": homes, "versionAgents": VERSION_AGENTS}));
     }
 
     #[test]
