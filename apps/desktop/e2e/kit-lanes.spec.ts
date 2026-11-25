@@ -274,8 +274,10 @@ test("the lane's states are in the owner's language", async ({ page }) => {
 test("closing a lane lets its folder go when nothing in it would be lost, and its branch stays", async ({ page }) => {
   const id = await startIn(page, "Thai date format");
   await close(page, id);
-  await expect.poll(async () => (await calls(page)).filter((c) => c.op === "lane.remove").map((c) => c.path)).toEqual([`${LANES}/thai-date-format`]);
-  expect((await calls(page)).find((c) => c.op === "lane.remove")?.branch).toBeUndefined();
+  // a closed lane's folder goes through the clean-up's release since item 73, which never forces and never takes a branch;
+  // Remove, which can do both, is only the person's own press
+  await expect.poll(async () => (await calls(page)).filter((c) => c.op === "lane.release").map((c) => c.path)).toEqual([`${LANES}/thai-date-format`]);
+  expect((await calls(page)).find((c) => c.op === "lane.remove")).toBeUndefined();
   expect(await page.evaluate(() => (window as any).__manutMockTaken)).toContain("kit/thai-date-format");
   await openCode(page);
   await expect(page.getByTestId("kept-lane")).toHaveCount(0);

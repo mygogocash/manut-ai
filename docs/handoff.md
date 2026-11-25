@@ -561,6 +561,13 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
+  `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
+  `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
+- The desktop's Playwright shards may fail without failing a CI run, so a spec that a merge breaks goes unseen: five did on
+  25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept in English). After merging an
+  item that changes a menu, a Settings page or a lane's life, read the newest run's "Desktop Playwright (all shards)"
+  summary, or run the specs named for that area before pushing.
 - `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
   tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
   for a moment after its row shows, and the test looked at once; it waits for the read since then.

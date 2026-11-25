@@ -159,7 +159,9 @@ describe("GET /v1/approvals", () => {
       attemptId: expect.any(String), detail: { operationType: "linear.issue.create" } } });
     // Nothing has left open yet.
     expect((await list(headers, "state=recent")).body).toEqual({ state: "recent", approvals: [] });
-  });
+    // Several whole requests against real objects: about two seconds alone, and past the five-second default once on
+    // a slow CI runner (25 Nov 2026, `7ef8505`, three files in one run), so it has thirty.
+  }, 30_000);
 
   it("moves each approval to recent once it is decided, expires or is superseded, saying which", async () => {
     const { tenant, headers } = await session();
