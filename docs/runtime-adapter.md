@@ -430,8 +430,10 @@ newest 50 tasks showed only those, and an owner could not reach older ones.
   event picked and the messages shown stay. A press while one is on its way does nothing, and the button keeps its focus. A page that
   could not be read says why in the runtime's own words (as an alert) and offers Try again. Once the list has no more, the line says
   "That is everything. There is no older work." and there is no button. The activity log still draws it when its newest events are
-  none, or the filters leave none, since older work may hold some. The words are in en, ko, ja and zh (`older.*`). The activity log's
-  date filter (the last 7 days unless changed) applies to older events too, so a person may need to widen it to see them. Mission
+  none, or the filters leave none, since older work may hold some. The words are in en, ko, ja and zh (`older.*`). On the activity
+  log, a press also widens the dates when a range of the last days (today, 7 or 30) would hide what it read: the read after the press
+  sets the dates from the day of the oldest event the log holds to today, so the older work shows (`widenFor`, `src/pages/activity.ts`).
+  A range of the person's own dates stays, and so do the other filters; going back to the last 7 days is a press of its chip. Mission
   Control's jobs are listed in History (a job for each task, with the threads that are not jobs); Home's and a member's Recent work
   show the newest three by design and say nothing of more.
 - **Practice.** The demo's lists never say there is more (its sample shop has 6 jobs), so no screen draws Show older there. Its

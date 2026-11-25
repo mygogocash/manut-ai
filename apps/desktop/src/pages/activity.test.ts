@@ -17,6 +17,7 @@ import {
   NO_FILTERS,
   selectedEvent,
   textView,
+  widenFor,
   type ExportState,
   type Filters,
 } from "./activity";
@@ -74,6 +75,31 @@ describe("a date range", () => {
     expect(inRange(at(2), "custom", NOW, "16 November", "not a date")).toBe(true);
     // a day that is not on the calendar is not a day
     expect(inRange(at(2), "custom", NOW, "2026-02-31", "")).toBe(true);
+  });
+});
+
+describe("the dates, once Show older has read older work", () => {
+  it("leave a range of the last days that already shows the oldest event, and a range of the person's own dates", () => {
+    const f: Filters = { ...NO_FILTERS, who: "nam", query: "parcel" };
+    expect(widenFor(f, at(16, 0, 0), NOW)).toBe(f);
+    const own: Filters = { ...NO_FILTERS, range: "custom", from: "2026-11-18", to: "2026-11-20" };
+    expect(widenFor(own, at(2), NOW)).toBe(own);
+  });
+
+  it("make a range of the last days that leaves the oldest event out the days from its day to today, and keep the rest", () => {
+    const f: Filters = { ...NO_FILTERS, who: "nam", kind: "money", query: "parcel" };
+    const widened = widenFor(f, at(10, 23, 59), NOW);
+    expect(widened).toEqual({ ...f, range: "custom", from: "2026-11-10", to: "2026-11-22" });
+    expect(inRange(at(10, 0, 0), widened.range, NOW, widened.from, widened.to)).toBe(true);
+    expect(widenFor({ ...NO_FILTERS, range: "today" }, at(21, 23, 59), NOW)).toEqual({ ...NO_FILTERS, range: "custom", from: "2026-11-21", to: "2026-11-22" });
+    const october = new Date(2026, 9, 23, 23, 59).getTime() / 1000;
+    expect(widenFor({ ...NO_FILTERS, range: "30" }, october, NOW)).toEqual({ ...NO_FILTERS, range: "custom", from: "2026-10-23", to: "2026-11-22" });
+  });
+
+  it("are widened by the filters' own action, from the filters as they are when it comes", () => {
+    expect(filterReduce(NO_FILTERS, { type: "widen", oldest: at(10), now: NOW })).toEqual({ ...NO_FILTERS, range: "custom", from: "2026-11-10", to: "2026-11-22" });
+    const own: Filters = { ...NO_FILTERS, range: "custom", from: "2026-11-18", to: "" };
+    expect(filterReduce(own, { type: "widen", oldest: at(10), now: NOW })).toBe(own);
   });
 });
 

@@ -45,10 +45,11 @@ type Stage = { __calls: Call[] };
 
 /** The desktop shell is stood in the page, as the connected runtime reaches the API only through its commands: a person who owns one shop,
  *  Baan Mali, with `total` tasks (`task-1` the oldest), each with a draft a member wrote on it, so each is one job and one event of the
- *  log. `failing` is how many times the API answers the first page after the newest 50 with a 503 before it answers it. */
-async function stubShell(page: Page, total: number, failing = 0) {
+ *  log. `failing` is how many times the API answers the first page after the newest 50 with a 503 before it answers it, and `gap` how
+ *  long before each task the one before it was made. */
+async function stubShell(page: Page, total: number, failing = 0, gap = 60_000) {
   await page.addInitScript(
-    ({ total, failing }) => {
+    ({ total, failing, gap }) => {
       localStorage.setItem("manut.runtime", JSON.stringify({ mode: "connected", origin: "https://dev.manut.xyz" }));
       const w = window as unknown as Stage;
       w.__calls = [];
@@ -57,11 +58,11 @@ async function stubShell(page: Page, total: number, failing = 0) {
       const shop = { id: "pilot:shop-a", name: "Baan Mali", ownerName: "Fon" };
       const reply = (status: number, json: unknown) => ({ status, body: JSON.stringify(json) });
       const cache = new Map<string, string>();
-      // the shop's index, newest first: task-N is the newest and task-1 the oldest, each a minute older than the one before
+      // the shop's index, newest first: task-N is the newest and task-1 the oldest, each `gap` older than the one before
       const ids = Array.from({ length: total }, (_, i) => `task-${total - i}`);
       const listed = (id: string) => {
         const n = Number(id.slice(5));
-        const at = now - (total - n + 1) * 60_000;
+        const at = now - (total - n + 1) * gap;
         return {
           task: { id, title: `Task ${n}`, objective: `Do task ${n}`, state: "completed", location: "cloud", funding: "managedAI", criteria: [], updatedAt: iso(at), tenantId: shop.id, schema: 1, rev: 3 },
           events: [{ seq: 1, kind: "created", at: iso(at - 1_000), rev: 1, via: "put" }],
@@ -119,7 +120,7 @@ async function stubShell(page: Page, total: number, failing = 0) {
         },
       };
     },
-    { total, failing },
+    { total, failing, gap },
   );
 }
 
@@ -189,6 +190,30 @@ test.describe("connected to a shop with more tasks than the newest 50", () => {
     await page.getByTestId("act-tab-jobs").click();
     await expect(rows(page)).toHaveCount(75);
     expect(await pagesAfter(page)).toHaveLength(2);
+  });
+
+  test("the log's last 7 days widen to the days Show older read, so what it read shows, and the rest stays as the person set it", async ({ page }) => {
+    // a task every four hours: the newest 50 reach back to 16 November, past the last 7 days, and the page after them to the 11th
+    await stubShell(page, 75, 0, 4 * 3_600_000);
+    await openHistory(page);
+    await page.getByTestId("history-activity").click();
+    // of the newest 50, the last 7 days (18 to 24 November) hold task 38 to task 75
+    await expect(page.getByTestId("act-row")).toHaveCount(38);
+    await expect(page.getByTestId("act-count")).toHaveText("38 events in the last 7 days");
+    await page.getByTestId("act-find").fill("Draft");
+    await show(page).click();
+    // every event the log holds shows, the oldest from 11 November, under the days the press read
+    await expect(page.getByTestId("act-row")).toHaveCount(75);
+    await expect(page.getByTestId("act-count")).toHaveText("75 events from Nov 11 to Nov 24");
+    await expect(page.getByTestId("act-range-custom")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#act-from")).toHaveValue("2026-11-11");
+    await expect(page.locator("#act-to")).toHaveValue("2026-11-24");
+    await expect(page.getByTestId("act-find")).toHaveValue("Draft");
+    await expect(line(page)).toHaveText("That is everything. There is no older work.");
+    // a range of the person's own dates is theirs: going back to the last 7 days and pressing nothing more widens nothing
+    await page.getByTestId("act-range-7").click();
+    await expect(page.getByTestId("act-row")).toHaveCount(38);
+    expect(await fits(page)).toBe(true);
   });
 
   test("walks to the end a page at a time: Show older stays while there is more, and says everything is shown after the last page", async ({ page }) => {

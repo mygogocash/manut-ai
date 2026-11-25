@@ -154,6 +154,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
   outpost routes answer 302 to Cloudflare Access without a key.
 - Dev was redeployed on 25 Nov at 06:42 from `1e1e58c`, with item 49's two step failures (API `37beffbf`, deployed
   whole, then pages `d4e5c73c` with the console's words for them).
+- Dev's API was redeployed on 25 Nov at 09:59 from `2692402`, with item 54's prune clearing the approval lookup (API
+  `a9f869ba`, deployed whole; the pages are unchanged since `d4e5c73c`). Smoke-tested: the pages 200, `/ops` and
+  `/v1/admin/prune` 302 to Access, and the session routes 401 with no session.
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -170,9 +173,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 53, the preview itself, first slice: Start, Open in the system browser and Stop in the pane's Preview view,
-     run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at 09:50.
+     run in the lane's own folder with sample secrets (`feat/preview-run`, Opus), started 25 Nov at about 09:40.
    - item 55, how a request that left was decided: one `state=recent` read for the shop an ask left closes its card
-     in plain words (`feat/how-decided`, Sonnet), started 25 Nov at 10:20.
+     in plain words (`feat/how-decided`, Sonnet), started 25 Nov at about 09:55.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.

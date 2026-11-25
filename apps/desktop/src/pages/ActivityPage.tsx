@@ -6,7 +6,7 @@
 // A customer's message text stays hidden until the owner shows it for that event, is never searched, and is left out of an
 // export unless that export ticks "Include customer message text". Saving a file needs the shell's save dialog, which the
 // desktop does not have yet (saveFile.ts), so Download CSV says "not yet" once it has made the file it would save.
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import "./mission.css";
 import { hhmm, monthDay } from "../app/time";
 import { t, type Key } from "../i18n";
@@ -575,9 +575,15 @@ export function ActivityView(p: ActivityViewProps) {
 export function ActivityPage() {
   const s = useStore();
   const [state, setState] = useState<Load<Log>>(LOADING);
-  // Show older has the log read again, which leaves what the page holds (the filters, the event picked, the messages shown) as it is
+  // Show older has the log read again, which leaves what the page holds (the event picked, the messages shown) as it is. Only the
+  // dates may move: the read that follows a press widens a range of the last days to the oldest event it holds (`widenFor`), so
+  // the older work the press read shows. A read for any other reason leaves the filters alone.
   const [reads, setReads] = useState(0);
-  const more = useShowOlder(() => setReads((n) => n + 1));
+  const widenNext = useRef(false);
+  const more = useShowOlder(() => {
+    widenNext.current = true;
+    setReads((n) => n + 1);
+  });
   const [filters, onFilter] = useReducer(filterReduce, NO_FILTERS);
   const [exporting, onExport] = useReducer(exportReduce, EXPORT_START);
   const [picked, setPicked] = useState<string | null>(null);
@@ -586,7 +592,12 @@ export function ActivityPage() {
   useEffect(() => {
     let live = true;
     void load(() => getStore().actions.missionActivity()).then((r) => {
-      if (live) setState(r);
+      if (!live) return;
+      setState(r);
+      if (!widenNext.current || r.kind !== "ready" || r.value.events.length === 0) return;
+      widenNext.current = false;
+      // The filters' own action, so the widening starts from the filters as they are now, not as this read found them.
+      onFilter({ type: "widen", oldest: r.value.events.reduce((low, e) => Math.min(low, e.at), Infinity), now: Date.now() });
     });
     return () => {
       live = false;

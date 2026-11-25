@@ -38,6 +38,8 @@ export type FilterAction =
   | { type: "from"; from: string }
   | { type: "to"; to: string }
   | { type: "query"; query: string }
+  /** Show older read older work into the log (`widenFor`): `oldest` is its oldest event (seconds), `now` the clock (ms) */
+  | { type: "widen"; oldest: number; now: number }
   | { type: "clear" };
 
 export function filterReduce(f: Filters, a: FilterAction): Filters {
@@ -54,9 +56,20 @@ export function filterReduce(f: Filters, a: FilterAction): Filters {
       return { ...f, to: a.to };
     case "query":
       return { ...f, query: a.query };
+    case "widen":
+      return widenFor(f, a.oldest, a.now);
     case "clear":
       return NO_FILTERS;
   }
+}
+
+/** The filters once Show older has read older work into the log, so that what it read can be seen. The person pressed
+ *  for older work, and a range of the last days (today, 7 or 30) would hide what is older than it, so the press would look
+ *  as if it did nothing: such a range that leaves out the oldest event the log now holds becomes the days from that
+ *  event's day to today. A range of the person's own dates stays as they set it, and so does every other filter. */
+export function widenFor(f: Filters, oldestSec: number, nowMs: number): Filters {
+  if (f.range === "custom" || inRange(oldestSec, f.range, nowMs, "", "")) return f;
+  return { ...f, range: "custom", from: dayOf(oldestSec * 1000), to: dayOf(nowMs) };
 }
 
 const midnight = (ms: number) => {
@@ -209,6 +222,12 @@ export interface ExportWords {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** A moment (ms) as its day on this computer, `YYYY-MM-DD`: how a range of dates and the file's day column write a day. */
+export function dayOf(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** The file: a header row and one row per event (its day and time, who, what, the item, who approved, how it ended, where,
  *  whether it can be undone, a note and the words). The words column holds the shop's own post text always and a customer's
  *  message text only when the export was asked to include it, so the message stays out of a file unless it is chosen. */
@@ -216,7 +235,7 @@ export function exportCsv(events: readonly ActivityEvent[], x: ExportState, nowM
   const rows = exportEvents(events, x, nowMs).map((e) => {
     const d = new Date(e.at * 1000);
     return [
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      dayOf(e.at * 1000),
       hhmm(d),
       words.who(e.who),
       words.kind(e.kind),
