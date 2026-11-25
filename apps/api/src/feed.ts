@@ -7,41 +7,57 @@
 /// then reads as it reads each minute, with its own session, so the feed can never show anyone what their session could
 /// not read. It decides nothing either: approvals still settle only through approval-core.
 ///
-/// - The Worker (`feedRoute`) takes a shop's session as the approvals list takes it (`callerOf`: an owner's or a
-///   helper's), checks the switch, and hands the upgrade to the shop's TenantObject. A browser's WebSocket can send no
-///   `Authorization` header, and a token never goes in a URL, so a page sends its session as one entry of the
-///   `Sec-WebSocket-Protocol` header, `manut-bearer.<token>`, beside `manut-feed.v1`, the one protocol ever answered. The
-///   Worker reads it and passes the object only the token's hash, the role and the shop.
+/// - The Worker's mint (`mintTicket`, `POST /v1/feed/ticket`) takes a shop's session as the approvals list takes it
+///   (`callerOf`: an owner's or a helper's), checks the switch, and has the shop's TenantObject keep a one-use ticket for
+///   that session. The session travels only in `Authorization`, which Cloudflare's request logs mask by its name.
+/// - The upgrade (`openFeed`, `GET /v1/feed`) carries nothing but that ticket. A browser's WebSocket can send no
+///   `Authorization` header and a token never goes in a URL, so a page sends the ticket as one entry of the
+///   `Sec-WebSocket-Protocol` header, `manut-ticket.<ticket>`, beside `manut-feed.v1`, the one protocol ever answered.
+///   Cloudflare's logs record that header as it is (they mask a header only when its name says it holds a secret), so a
+///   session there would be written into the account's logs. A ticket written there is worth nothing: the request that
+///   wrote it spends it, and it is dead 30 seconds after it was made. The Worker reads the shop from the ticket and passes
+///   the object only the SHA-256 of its secret, and the object takes the ticket out before anything else, so it opens one
+///   socket at most.
 /// - The TenantObject (`ShopFeed`) accepts the socket with the hibernation API, so an idle socket costs no object time,
 ///   and keeps everything a socket needs in its attachment, never in a field that hibernation would lose. It pings its
 ///   sockets after each write it takes that a screen reads (a task indexed, a request about to open, an attention item,
 ///   the routines and the team, the people), and after a task object tells it of a change of its own (feed-touch.ts), at
 ///   most once a second (`ShopFeed.coalesceMs`).
 /// - Limits: `MAX_FEEDS_PER_SESSION` sockets for one session and `ShopFeed.maxPerShop` for one shop, each refusal its own
-///   code. A socket lives an hour at most and is then closed with 4000, so its desktop opens it again, which checks the
-///   session and the switch again. Each ping first checks every socket's session and the switch: a socket whose session
-///   no longer works is closed with 4401 instead, and every socket with 4503 once the switch reads off. Every change to
-///   the shop's people pings, so a helper the owner removes or a device that signs out is closed within the second.
+///   code, and as many unused tickets. A socket lives an hour at most and is then closed with 4000, so its desktop mints a
+///   ticket and opens it again, which checks the session and the switch again. Each ping first checks every socket's
+///   session and the switch: a socket whose session no longer works is closed with 4401 instead, and every socket with
+///   4503 once the switch reads off. Every change to the shop's people pings, so a helper the owner removes or a device
+///   that signs out is closed within the second.
 ///
-/// Nothing here logs, so no token, hash or shop can reach a log.
+/// Nothing here logs, so no token, ticket, hash or shop can reach a log from here.
 
 import { sha256Hex } from "./auth";
+import { readJsonBody } from "./body";
 import { isValidTenant } from "./companies";
-import { callerOf, isShopSession, queryNamesSession, type PeopleEnv } from "./people";
+import { bearer, callerOf, fromBase64url, hasExactly, isShopSession, queryNamesSession, type PeopleEnv } from "./people";
 import { shopSessionWorks } from "./people-store";
+import { base64url } from "./relay";
 import { authCall, tenantStub, type TenantDataEnv } from "./tenant-data";
 
+/// The socket's address. A plain `GET` with no ticket is no longer a look at whether the feed is on: the mint says so.
 export const FEED_PATH = "/v1/feed";
-/// The one protocol the feed speaks, and the only one it ever answers. A client that offers protocols must offer this
-/// one, and a browser fails any handshake whose answer names a protocol it did not offer, or none when it offered some.
+/// Where a shop's session mints the ticket that opens its socket.
+export const FEED_TICKET_PATH = "/v1/feed/ticket";
+/// The one protocol the feed speaks, and the only one it ever answers. A page must offer it beside its ticket, and a
+/// browser fails any handshake whose answer names a protocol it did not offer, or none when it offered some.
 export const FEED_PROTOCOL = "manut-feed.v1";
-/// The protocol entry that carries a page's shop session: `manut-bearer.<token>`. A shop session's token is base64url and
-/// hex joined by dots, all characters a protocol entry may hold. The entry is read in the Worker and goes nowhere else:
-/// it is never answered, never passed to the object and never logged.
-export const BEARER_PROTOCOL = "manut-bearer.";
+/// The protocol entry that carries a ticket: `manut-ticket.<ticket>`. It is read in the Worker and never answered.
+export const TICKET_PROTOCOL = "manut-ticket.";
 /// The most sockets one session holds at a time. A desktop holds one for each shop session, and one more while it opens a
-/// socket again before the API has noticed that the old one dropped.
+/// socket again before the API has noticed that the old one dropped. A session holds as many unused tickets at most.
 export const MAX_FEEDS_PER_SESSION = 3;
+
+const MAX_BODY_BYTES = 16 * 1024;
+/// A ticket as the mint writes it: the shop in base64url, a dot, and the secret, 32 random bytes in base64url. The shop is
+/// spelled as a shop session spells it (people.ts), since a tenant may hold characters, such as `:`, that a protocol entry
+/// may not (RFC 6455 takes its entries as RFC 2616 tokens), and the dot cannot appear in either part.
+const TICKET = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/;
 
 /// Why the object closed a socket, in the range RFC 6455 leaves to applications, as the relay's codes are
 /// (relay-object.ts). The desktop opens the feed again at once after `renew`, waits an hour after `off`, and otherwise
@@ -65,6 +81,11 @@ export const FEED_CLOSE = {
 /// record keeps it), as what role, for which shop, when it was accepted and when its hour is over (Unix milliseconds).
 type FeedAttachment = { tenant: string; session: string; role: "owner" | "helper"; at: number; until: number };
 
+/// A ticket the shop's object keeps until it is used or its time is over, by the SHA-256 of its secret: the shop, whose
+/// session minted it (the SHA-256 of the token) and as what role, when it was kept, which is just after the mint read the
+/// switch as on, and when it ends (Unix milliseconds).
+type Ticket = { tenant: string; session: string; role: "owner" | "helper"; at: number; until: number };
+
 const FEED_TAG = "feed";
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const sessionTag = (session: string) => `session:${session}`;
@@ -73,55 +94,87 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
   return Response.json(data, { status, headers });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /// The protocols a handshake offers, in order. An empty entry is not one.
 function offeredProtocols(request: Request): string[] {
   const header = request.headers.get("sec-websocket-protocol");
   return header ? header.split(",").map((one) => one.trim()).filter((one) => one.length > 0) : [];
 }
 
-/// The bearer a request carries: its `Authorization` header, which a program sends, else the `manut-bearer.` protocol
-/// entry a page's handshake sends.
-function bearerOf(request: Request, offered: readonly string[]): string {
-  const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Bearer ")) return header.slice("Bearer ".length);
-  const entry = offered.find((one) => one.startsWith(BEARER_PROTOCOL));
-  return entry ? entry.slice(BEARER_PROTOCOL.length) : "";
+/// The ticket a handshake offers in its `manut-ticket.` entry, as the shop it names and its secret; null for none, and for
+/// one that names no shop, so nothing that could not be a ticket ever wakes a shop's object.
+function ticketOf(offered: readonly string[]): { shop: string; secret: string } | null {
+  const entry = offered.find((one) => one.startsWith(TICKET_PROTOCOL));
+  const match = entry ? TICKET.exec(entry.slice(TICKET_PROTOCOL.length)) : null;
+  const shop = match ? fromBase64url(match[1]!) : null;
+  return match && shop !== null && isValidTenant(shop) ? { shop, secret: match[2]! } : null;
 }
 
 export type FeedFlags = () => Promise<{ shopFeed: boolean }>;
 
-/// `GET /v1/feed` (docs/pilot-api.md, "The shop's live feed"). Answers null for any other path. In the order every session
-/// route keeps: who is asking first (the approvals list's own refusals, then 404 for a bearer that is no shop session,
-/// since a person's own sign-in has no shop), then the method, the query and the switch. Then a plain `GET` is the
-/// desktop's look at whether the feed is on (200), and an upgrade is handed to the shop's TenantObject, which answers 101
-/// or its own refusal (`ShopFeed.accept`).
+/// `POST /v1/feed/ticket` and `GET /v1/feed` (docs/pilot-api.md, "The shop's live feed"). Answers null for any other path.
 export async function feedRoute(request: Request, url: URL, env: PeopleEnv, flags: FeedFlags): Promise<Response | null> {
-  if (url.pathname !== FEED_PATH) return null;
-  const offered = offeredProtocols(request);
-  const token = bearerOf(request, offered);
-  // The bearer reaches `callerOf` as the header it reads, so the feed takes exactly the sessions the approvals list takes
-  // and refuses the others in the same words.
-  const caller = await callerOf(new Request(request.url, { headers: token ? { authorization: `Bearer ${token}` } : {} }), env);
+  if (url.pathname === FEED_TICKET_PATH) return mintTicket(request, url, env, flags);
+  if (url.pathname === FEED_PATH) return openFeed(request, url, env);
+  return null;
+}
+
+/// `POST /v1/feed/ticket` with exactly `{}`: a ticket that opens one socket of the session's own shop's feed within
+/// `ShopFeed.ticketMs`, answered with `cache-control: no-store`. In the order every session route keeps: who is asking
+/// first (the approvals list's own refusals, then 404 for a bearer that is no shop session, since a person's own sign-in
+/// has no shop), then the method, the query, the body and the switch. A body that does not say it is JSON never gets
+/// here: the Worker's front door answers it 415 (`jsonBodyRefusal` in index.ts), as it does for every POST.
+async function mintTicket(request: Request, url: URL, env: PeopleEnv, flags: FeedFlags): Promise<Response> {
+  const caller = await callerOf(request, env);
   if (caller instanceof Response) return caller;
+  const token = bearer(request);
   if (!isShopSession(token)) return json({ error: "not_found" }, 404);
-  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (queryNamesSession(url)) return json({ error: "invalid_request" }, 400);
+  // The session names the shop and the role. Nothing in the body may, so a body with any field is refused.
+  const parsed = await readJsonBody<unknown>(request, MAX_BODY_BYTES);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+  if (!isRecord(parsed.value) || !hasExactly(parsed.value, [])) return json({ error: "invalid_request" }, 400);
   if (!(await flags()).shopFeed) return json({ error: "feature_disabled", feature: "shopFeed" }, 403);
-  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return json({ feed: "on", protocol: FEED_PROTOCOL }, 200, { "cache-control": "no-store" });
-  }
-  if (offered.length > 0 && !offered.includes(FEED_PROTOCOL)) return json({ error: "invalid_request" }, 400);
-  // A request built here, never the client's: the object sees the upgrade, the shop, the role and the token's hash, and
-  // nothing the client sent can reach it.
-  const headers = new Headers({
-    upgrade: "websocket",
-    "x-feed": "1",
-    "x-feed-tenant": caller.shop,
-    "x-feed-role": caller.role,
-    "x-feed-session": await sha256Hex(token),
-  });
-  if (offered.length > 0) headers.set("x-feed-protocol", FEED_PROTOCOL);
-  return tenantStub(env, caller.shop).fetch(new Request("https://tenant/feed", { headers }));
+  const secret = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  // The object keeps only hashes, of the session as its people record keeps it and of the ticket's secret.
+  const kept = await tenantStub(env, caller.shop).fetch(new Request("https://tenant/feed/ticket", { method: "POST",
+    headers: { "x-feed": "1", "x-feed-tenant": caller.shop, "x-feed-role": caller.role,
+      "x-feed-session": await sha256Hex(token), "x-feed-ticket": await sha256Hex(secret) } })).catch(() => null);
+  // The shop's tickets are at their limit: its refusal, with when to try again, is the answer.
+  if (kept?.status === 429) return kept;
+  await kept?.body?.cancel();
+  if (!kept?.ok) return json({ error: "feed_unavailable" }, 503);
+  const ticket = `${base64url(new TextEncoder().encode(caller.shop))}.${secret}`;
+  return json({ feed: "on", protocol: FEED_PROTOCOL, ticket, expiresIn: Math.floor(ShopFeed.ticketMs / 1000) }, 200,
+    { "cache-control": "no-store" });
+}
+
+/// `GET /v1/feed` with `Upgrade: websocket` and the ticket among its protocols (`manut-feed.v1, manut-ticket.<ticket>`):
+/// the socket, or the refusal. The ticket is who is asking, so it is read first, and only the shop's object can say
+/// whether it keeps it. Nothing else names anyone: an `Authorization` header opens no socket, and a program mints a ticket
+/// as the desktop does. Every request that carries a ticket hands it to the object, which takes it out before it answers
+/// anything, so a ticket that reached a log was spent by the request that put it there, even one refused here for its
+/// method, its query or its protocols. The object's own refusal of the ticket comes first; this route's comes after.
+async function openFeed(request: Request, url: URL, env: PeopleEnv): Promise<Response> {
+  const offered = offeredProtocols(request);
+  const ticket = ticketOf(offered);
+  if (!ticket) return json({ error: "unauthorized" }, 401);
+  const refusal = request.method !== "GET" ? json({ error: "method_not_allowed" }, 405)
+    : request.headers.get("upgrade")?.toLowerCase() !== "websocket" || queryNamesSession(url) ||
+        !offered.includes(FEED_PROTOCOL) ? json({ error: "invalid_request" }, 400)
+      : null;
+  // A request built here, never the client's: the object sees the ticket's hash, and the upgrade only when this route
+  // would let the socket open, so that without it the object takes the ticket out and opens nothing.
+  const headers = new Headers({ "x-feed": "1", "x-feed-ticket": await sha256Hex(ticket.secret) });
+  if (!refusal) headers.set("upgrade", "websocket");
+  const answer = await tenantStub(env, ticket.shop).fetch(new Request("https://tenant/feed", { headers }));
+  if (!refusal || answer.status === 401) return answer;
+  await answer.body?.cancel();
+  return refusal;
 }
 
 type FeedObjectEnv = Pick<TenantDataEnv, "AUTH"> & { SHOP_FEED?: string };
@@ -161,9 +214,12 @@ function end(ws: WebSocket, code: number, reason: string): void {
 
 /// The sockets of one shop's live feed, inside its TenantObject (tenant-object.ts). It holds no state a socket needs
 /// beyond what hibernation keeps (the attachments), only what makes pings cheaper: the coalescing timer, the last `seq`
-/// and the last read of the switch, each of which a fresh instance simply starts again.
+/// and the last read of the switch, each of which a fresh instance simply starts again; and the tickets not yet used.
 export class ShopFeed {
   /// Static so tests can shorten them, as the relay's are.
+  /// How long a ticket opens a socket after it is minted. The desktop opens its socket as soon as the mint answers, so a
+  /// ticket is used within a second; this bounds what one that was never used is worth.
+  static ticketMs = 30_000;
   /// Pings are coalesced to at most one in this long: a write schedules the ping, and every write until it is sent rides
   /// with it, so a burst of writes is one ping and one read.
   static coalesceMs = 1_000;
@@ -182,6 +238,10 @@ export class ShopFeed {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private seq = 0;
   private switch: { on: boolean; at: number } | null = null;
+  /// The tickets minted and not yet used, by the SHA-256 of their secret, oldest first. In memory and never in storage: a
+  /// ticket lives seconds, so nothing durable is written for it and nothing is left to sweep after a restart. A ticket
+  /// this instance loses (evicted, or a deploy) is refused as unknown, which costs its desktop one retry with backoff.
+  private readonly tickets = new Map<string, Ticket>();
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -193,20 +253,60 @@ export class ShopFeed {
     return this.ctx.getWebSockets(tag).filter((ws) => ws.readyState === WebSocket.OPEN);
   }
 
-  /// `GET /feed` from the Worker (`feedRoute`), which has already checked the session and the switch: the upgrade
-  /// accepted as a hibernatable socket, or the refusal. The session is checked here once more against the shop's people
-  /// record, in case it ended in between. A socket past its hour never holds a place, and when a session or the shop is at
-  /// its limit, sockets that went silent give theirs up before anyone is refused.
-  accept(request: Request): Response {
+  /// `POST /feed/ticket` from the Worker's mint (`mintTicket`), which has checked the session and the switch: keeps the
+  /// ticket for `ticketMs`. One session holds at most `MAX_FEEDS_PER_SESSION` unused tickets, as it holds at most that
+  /// many sockets: its next ticket takes the place of its oldest, so however fast one session mints it never holds more,
+  /// and never takes another's place. The shop holds at most `maxPerShop`, as many as the sockets it may hold, and
+  /// refuses the next until one is used or over; tickets past their time are dropped first.
+  keep(request: Request): Response {
     const tenant = request.headers.get("x-feed-tenant") ?? "";
     const session = request.headers.get("x-feed-session") ?? "";
     const role = request.headers.get("x-feed-role");
-    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !isValidTenant(tenant) ||
-        !SHA256_HEX.test(session) || (role !== "owner" && role !== "helper")) {
+    const hash = request.headers.get("x-feed-ticket") ?? "";
+    if (!isValidTenant(tenant) || !SHA256_HEX.test(session) || !SHA256_HEX.test(hash) ||
+        (role !== "owner" && role !== "helper")) {
       return json({ error: "invalid_request" }, 400);
     }
     const now = Date.now();
-    if (!shopSessionWorks(this.ctx.storage.kv, tenant, session, now)) return json({ error: "unauthorized" }, 401);
+    this.dropOver(now);
+    const own = [...this.tickets].filter(([, held]) => held.session === session);
+    if (own.length >= MAX_FEEDS_PER_SESSION) this.tickets.delete(own[0]![0]);
+    if (this.tickets.size >= ShopFeed.maxPerShop) {
+      return json({ error: "feed_shop_full" }, 429, { "retry-after": String(Math.ceil(ShopFeed.ticketMs / 1000)) });
+    }
+    this.tickets.set(hash, { tenant, session, role, at: now, until: now + ShopFeed.ticketMs });
+    return json({ kept: true });
+  }
+
+  /// Drops every ticket whose time is over.
+  private dropOver(now: number): void {
+    for (const [hash, ticket] of this.tickets) if (ticket.until <= now) this.tickets.delete(hash);
+  }
+
+  /// `GET /feed` from the Worker (`openFeed`): the upgrade accepted as a hibernatable socket, or the refusal. The ticket is
+  /// taken out before anything else, so it opens one socket at most, whatever is answered. Then it must be one this object
+  /// keeps, within its time, for a session that still works now: its people record is read again, since the session may
+  /// have ended after the mint. A request the Worker sends without the upgrade only spends its ticket. A socket past its
+  /// hour never holds a place, and when a session or the shop is at its limit, sockets that went silent give theirs up
+  /// before anyone is refused.
+  accept(request: Request): Response {
+    const hash = request.headers.get("x-feed-ticket") ?? "";
+    if (!SHA256_HEX.test(hash)) return json({ error: "invalid_request" }, 400);
+    const now = Date.now();
+    this.dropOver(now);
+    const ticket = this.tickets.get(hash);
+    this.tickets.delete(hash);
+    if (!ticket || !shopSessionWorks(this.ctx.storage.kv, ticket.tenant, ticket.session, now)) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "invalid_request" }, 400);
+    // The mint read the switch as on just before the ticket was kept. A read here that is newer wins, so a ticket minted
+    // before the switch was turned off opens nothing once this object has read it off, and the mint's read never stands
+    // for a moment later than it was made.
+    const read = this.switch !== null && this.switch.at >= ticket.at ? this.switch : { on: true, at: ticket.at };
+    if (!read.on) return json({ error: "feature_disabled", feature: "shopFeed" }, 403);
+    this.switch = read;
+    const { tenant, session, role } = ticket;
     this.renew(now);
     if (this.full(this.sockets(sessionTag(session)), MAX_FEEDS_PER_SESSION, now)) {
       return json({ error: "feed_session_full" }, 429, { "retry-after": "60" });
@@ -217,11 +317,9 @@ export class ShopFeed {
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [FEED_TAG, sessionTag(session)]);
     server.serializeAttachment({ tenant, session, role, at: now, until: now + ShopFeed.maxAgeMs } satisfies FeedAttachment);
-    // The Worker hands an upgrade over only while the switch reads on, so that read stands for the next minute.
-    this.switch = { on: true, at: now };
-    const protocol: Record<string, string> = request.headers.get("x-feed-protocol") === FEED_PROTOCOL
-      ? { "sec-websocket-protocol": FEED_PROTOCOL } : {};
-    return new Response(null, { status: 101, webSocket: client, headers: protocol });
+    // The Worker hands an upgrade over only when the page offered the feed's protocol, and the answer names it and
+    // nothing else: never the ticket.
+    return new Response(null, { status: 101, webSocket: client, headers: { "sec-websocket-protocol": FEED_PROTOCOL } });
   }
 
   /// Whether `sockets` already fill `limit` places, once the ones that went silent have given theirs up.

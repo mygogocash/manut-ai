@@ -220,8 +220,9 @@ export class TenantObject extends DurableObject {
       if (request.method === "POST" && url.pathname === "/approvals/asked" && response.ok) this.feed.touch();
       return response;
     }
-    // The shop's live feed (feed.ts): a socket the Worker hands over, and a task object's word that a task changed.
-    if (url.pathname === "/feed" || url.pathname === "/feed/touch") {
+    // The shop's live feed (feed.ts): a ticket the Worker mints, the socket it opens, and a task object's word that a task
+    // changed.
+    if (url.pathname === "/feed" || url.pathname === "/feed/ticket" || url.pathname === "/feed/touch") {
       return this.feedRoute(request, url);
     }
     if (request.method === "GET" && url.pathname === "/tombstone") {
@@ -235,11 +236,13 @@ export class TenantObject extends DurableObject {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  /// `GET /feed`, a socket the Worker checked and hands over (feed.ts `feedRoute`), and `POST /feed/touch`, a task object
-  /// saying a change of its own reached what the screens read (feed-touch.ts `touchFeed`). Only the Worker and the shop's task
-  /// objects set `x-feed`, and no client route reaches this object's paths, as for `x-inbound` and `x-people`.
+  /// `POST /feed/ticket`, a ticket the Worker minted for a session it checked (feed.ts `mintTicket`); `GET /feed`, the
+  /// socket a ticket opens (feed.ts `openFeed`); and `POST /feed/touch`, a task object saying a change of its own reached
+  /// what the screens read (feed-touch.ts `touchFeed`). Only the Worker and the shop's task objects set `x-feed`, and no
+  /// client route reaches this object's paths, as for `x-inbound` and `x-people`.
   private async feedRoute(request: Request, url: URL): Promise<Response> {
     if (request.headers.get("x-feed") !== "1") return Response.json({ error: "forbidden" }, { status: 403 });
+    if (request.method === "POST" && url.pathname === "/feed/ticket") return this.feed.keep(request);
     if (request.method === "GET" && url.pathname === "/feed") {
       const answer = this.feed.accept(request);
       // The new socket's hour joins the alarm's jobs.

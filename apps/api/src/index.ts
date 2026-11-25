@@ -1218,8 +1218,9 @@ export default {
     const approvals = await approvalsRoute(request, url, env, () => featureFlags(env));
     if (approvals) return approvals;
 
-    // The shop's live feed (feed.ts): a WebSocket a shop's session opens, taken as the approvals list takes it, handed to
-    // the shop's TenantObject, and saying only that something changed. Off until `shopFeed` is turned on.
+    // The shop's live feed (feed.ts): a one-use ticket a shop's session mints, taken as the approvals list takes it, and
+    // the WebSocket that ticket opens, handed to the shop's TenantObject and saying only that something changed. Off until
+    // `shopFeed` is turned on.
     const feed = await feedRoute(request, url, env, () => featureFlags(env));
     if (feed) return feed;
 
