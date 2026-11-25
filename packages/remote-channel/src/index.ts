@@ -50,6 +50,28 @@ export {
 export { type MacPairing, type PairingOptions, type PhonePairing, macPairing, startPairing } from "./pairing";
 export { type PairingGrant, decodePairingGrant, doorTokenHash, encodePairingGrant, newPairingGrant } from "./grant";
 export {
+  type AssertionResult,
+  type PasskeyAssertion,
+  type PasskeyRefusal,
+  type PasskeyRegistration,
+  type RegistrationResult,
+  type RelyingParty,
+  type StoredPasskey,
+  verifyPasskeyAssertion,
+  verifyPasskeyRegistration,
+} from "./webauthn";
+export {
+  type DecisionAnswer,
+  type DecisionBinding,
+  type DecisionRefusal,
+  type DecisionResult,
+  type IssuedChallenge,
+  DECISION_LIMIT,
+  DECISION_TTL_MS,
+  DecisionChallenges,
+  decisionChallenge,
+} from "./decision";
+export {
   type MacSessionHandshake,
   type PhoneSessionHandshake,
   type SessionHandshakeOptions,

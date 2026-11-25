@@ -109,4 +109,34 @@ describe("the documented constructions", () => {
       expect(new TextDecoder().decode(plain.subarray(1))).toBe(counter === 0 ? "first" : "second");
     }
   });
+
+  it("pairing: someone with the secret who commits to one key and then reveals another is refused", async () => {
+    // The attack the commitment stops: knowing the secret, a party in the middle would like to pick
+    // its key after seeing the Mac's, trying keys until the Mac's check code matches the one the
+    // real phone shows. Here it commits to key A, sees the Mac's key, then reveals key B with a
+    // proof that is correct for B. Only the commitment check can refuse it.
+    const offer = newPairingOffer(HOST_ID, seededRandom(1));
+    const a = await fixedKeyPair("relayPhoneSide");
+    const b = await fixedKeyPair("relayMacSide");
+    const aPublic = new Uint8Array(await subtle.exportKey("raw", a.publicKey));
+    const bPublic = new Uint8Array(await subtle.exportKey("raw", b.publicKey));
+    const commit = cat(Uint8Array.of(0x10, 0x01), await sha256(enc("manut-remote-v1 pair commit"), aPublic));
+    const mac = macPairing(offer, 0);
+    const key = await mac.receiveCommit(commit, 1);
+
+    const proofCore = cat(Uint8Array.of(0x12, 0x01), bPublic);
+    const th = await sha256(enc("manut-remote-v1 pair"), fromBase64Url(HOST_ID), uuidToBytes(offer.doorId), commit, key, proofCore);
+    const shared = await ecdh(b, key.subarray(2));
+    const proof = cat(proofCore, await hmac(await hkdf(offer.secret, shared, "manut-remote-v1 pair phone confirm", th, 32), th));
+    await expect(mac.receiveProof(proof, 2)).rejects.toMatchObject({ problem: "unauthenticated" });
+
+    // The same steps with B committed to are accepted, so the refusal above is the commitment's.
+    const honestCommit = cat(Uint8Array.of(0x10, 0x01), await sha256(enc("manut-remote-v1 pair commit"), bPublic));
+    const honestMac = macPairing(offer, 0);
+    const honestKey = await honestMac.receiveCommit(honestCommit, 1);
+    const honestTh = await sha256(enc("manut-remote-v1 pair"), fromBase64Url(HOST_ID), uuidToBytes(offer.doorId), honestCommit, honestKey, proofCore);
+    const honestShared = await ecdh(b, honestKey.subarray(2));
+    const honestProof = cat(proofCore, await hmac(await hkdf(offer.secret, honestShared, "manut-remote-v1 pair phone confirm", honestTh, 32), honestTh));
+    expect((await honestMac.receiveProof(honestProof, 2)).checkCode).toMatch(/^\d{4}$/);
+  });
 });
