@@ -211,6 +211,30 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them. Since then three
+   builders run at once, their gates one at a time (`gate.sh` takes a lock), beside two read-only agents:
+   - item 69, a helper's own session on the connected desktop (`feat/helper-session`, Opus, `cc-item69-helper-session`);
+   - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
+   - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
+   - a security review of the twelve features merged on 25 Nov: done. Nine findings, one high (in merging a pull request
+     from a lane), four medium, four low, none in the published 0.1.1. Two helpers fix them before any more features
+     merge on those files: item 86 (`feat/fix-source-control`, Opus, `cc-item86-fix-git`) and item 87
+     (`feat/fix-computer-providers`, Opus, `cc-item87-fix-computer`), started 26 Nov at about 00:35. No build is cut
+     until both are merged. The findings are written into each fix's commits and tests, not into the public docs
+     before they are fixed. The reviewer's next places to look: MCP approvals keyed to the developer's folder but
+     applied to a lane's file, whether a preview starts a repository's script without a click, and other names for
+     the settings that skip an agent's asks.
+   - a design for reaching the app from another device (item 78): done, `docs/remote-access.md`. Its first two phases
+     need nothing from the owner, so item 78a, the channel both sides use (`feat/remote-channel`, Opus,
+     `cc-item78a-remote-channel`), started 26 Nov at about 00:20.
+   All started 25 Nov at about 23:45. Item 84 follows 83.
+   The owner then set the session's goal: every feature highlighted on 25 Nov, then whatever needs nothing from the
+   owner, and an app that feels premium and quiet, with motion on its states and details. The canvas's Motion board is
+   the rule for that (`BrandMotion.dc.html`; items 85a to 85i; the look at every page beside its board is done, 21
+   findings in `docs/design-audit.md`, whose fixes start once 85a has merged, since they touch the same stylesheets):
+   85a, the moves as a foundation and the controls
+   (`feat/motion`, Opus, `cc-item85a-motion`), and a read-only look at every page beside its board, started 26 Nov at
+   about 00:05.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -474,6 +498,10 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   then Allow once) and press Command-S, and check that Command-Q, System Settings and Manut AI itself are refused with
   no card. Both grants are lost at each update until builds are signed. A Claude Code too old to know `--plugin-dir`
   would fail to start a chat once Accessibility is on.
+- **Reaching your Mac from your phone (`docs/remote-access.md`):** the first version needs no sign-in. It needs the
+  owner's yes to the relay (`RELAY_ENABLED` on dev, then production; about $5 a month on Cloudflare's Workers Paid
+  plan, with a thousand paired Macs about $1 above it), the consent notice's words naming the business that runs
+  it, and a look on a real iPhone.
 - **The 0.1.0 draft:** an unpublished draft release and the tag `desktop-v0.1.0` are left from the first build, which had
   the placeholder icon. Nothing uses them; delete both on GitHub, or say so and the lead does.
 - **A test LINE Official Account** for the dry run (later, by the owner's choice).
