@@ -642,7 +642,8 @@ test("a node is its title, one mark with what ran it, and a status icon with a w
     expect(l.padding).toBe("10px 12px");
     expect(l.cursor).toBe("pointer");
     expect(l.transition[0]).toBe("border-color, box-shadow, transform");
-    expect(l.transition[1]).toBe("0.12s, 0.12s, 0.12s");
+    // the named moves (docs/motion.md): edge and shadow fade by Hover (0.15s), a lifted box answers by Press (0.2s)
+    expect(l.transition[1]).toBe("0.15s, 0.15s, 0.2s");
     expect(l.anim).toBe("none");
     expect(l.after).toBe("none");
     expect(l.rail[0]).toBe("2px");
