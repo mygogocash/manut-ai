@@ -9,6 +9,7 @@
 // asks for it (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts). The clock is fixed at 24 November 2026, 10:00 in Bangkok.
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { openHood } from "./start";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
 const ORIGIN = "https://dev.manut.xyz";
@@ -215,6 +216,7 @@ export function sealedCacheCases(): void {
     await page.goto("/");
     await keptOne(page);
     await page.getByTestId("nav-settings").click();
+    await openHood(page);
     await page.getByTestId("settings-nav-developer").click();
     await page.getByTestId("dev-sign-out").click();
     await expect.poll(async () => {

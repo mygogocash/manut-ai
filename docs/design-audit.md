@@ -1,4 +1,4 @@
-# The look, page by page, beside the canvas (26 Nov 2026)
+# The look, page by page, beside the canvas (25 Nov 2026)
 
 The owner asked for an app that feels premium, classic and quiet. A reviewer photographed every page of the side
 menu and of Settings in light and dark, at 1280 and at 900 wide (140 pictures), rendered 21 boards of the design

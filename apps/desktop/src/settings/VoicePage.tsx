@@ -6,7 +6,7 @@
 // `VoiceView` draws a given state so a test can draw each one (VoicePage.test.tsx); `VoicePage` reads the Mac and acts.
 import { useEffect, useState } from "react";
 import { t, type Key } from "../i18n";
-import { Seg } from "../chat/model/Seg";
+import { Modes } from "../ui/Modes";
 import { getVoiceEngines, voiceOffered, type MacVoice } from "../voice/engine";
 import { onPrefs, readPrefs, savePrefs, SPOKEN, spokenName, type Access, type HearStatus, type Spoken, type VoicePrefs, type Where } from "../voice/voice";
 import { Row } from "./DevRow";
@@ -59,10 +59,10 @@ export function VoiceView(p: VoiceViewProps) {
       <div className="st-gh st-gh0">{t("set.voice")}</div>
       <div className="st-grp">
         <Row title={t("voice.set.lang")} hint={t("voice.set.langHint")}>
-          <Seg label={t("voice.set.lang")} value={p.prefs.lang} onChange={(v) => p.onLang(v as Spoken)} options={SPOKEN.map((l) => ({ value: l, label: spokenName(l) }))} testId="voice-lang" />
+          <Modes label={t("voice.set.lang")} value={p.prefs.lang} onChange={(v) => p.onLang(v as Spoken)} options={SPOKEN.map((l) => ({ value: l, label: spokenName(l) }))} testId="voice-lang" />
         </Row>
         <Row title={t("voice.set.where")} hint={t("voice.set.whereHint")}>
-          <Seg
+          <Modes
             label={t("voice.set.where")}
             value={p.prefs.where}
             onChange={(v) => p.onWhere(v as Where)}

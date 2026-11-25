@@ -219,7 +219,7 @@ export function AutomationsPage() {
               {!filter && <span>{t("auto.emptyHint")}</span>}
             </div>
           ) : (
-            <div className="au-list" role="list" data-testid="auto-list">
+            <div className="au-list" role="list" data-arrive="automations" data-arrive-rows=".au-row" data-testid="auto-list">
               {shown.map((a) => (
                 <Row
                   key={keyOf(a)}

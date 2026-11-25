@@ -177,8 +177,16 @@ test("reduced motion: the text swaps without sliding", async ({ page }) => {
   await expect(act.getByTestId("activity-text")).toHaveText("Looking into it…");
   await mock("mock.emit", { events: [ev("tool.start", { tool_id: "r1", name: "read_file", detail: "a.txt" })] });
   await expect(act.getByTestId("activity-text")).toHaveText("Reading a.txt");
-  const anim = await act.getByTestId("activity-text").evaluate((e) => getComputedStyle(e).animationName);
-  expect(anim).toBe("none");
+  // Reduced motion ends a move at once rather than removing it (theme/motion.css, docs/motion.md), so a part that waits
+  // for the move's end still hears it: the line has no move, or one that is over within a millisecond and never repeats.
+  const move = await act.getByTestId("activity-text").evaluate((e) => {
+    const cs = getComputedStyle(e);
+    return { name: cs.animationName, seconds: parseFloat(cs.animationDuration), times: cs.animationIterationCount };
+  });
+  if (move.name !== "none") {
+    expect(move.seconds).toBeLessThan(0.001);
+    expect(move.times).toBe("1");
+  }
   await expect(act.locator(".act-tick-t.out")).toBeHidden();
   await mock("mock.emit", { events: [ev("turn.end", { outcome: "done" })] });
   await expect(act).toHaveAttribute("data-state", "done");

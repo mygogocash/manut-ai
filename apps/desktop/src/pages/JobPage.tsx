@@ -17,6 +17,7 @@ import { MenuPageFrame } from "./MenuPage";
 import { sendAsk } from "./home";
 import { initialOf, recipientTag, resultWord, satangText, timeline, tokensText, tookText, traceRows, traceText, traceTotal } from "./job";
 import { LOADING, load, type Load } from "./load";
+import { Loading } from "./Loading";
 
 /** The actions that do nothing yet. They say so when pressed instead of pretending. */
 export type Unwired = "wrong" | "again" | "replay";
@@ -77,9 +78,7 @@ export function JobView(p: JobViewProps) {
 
   if (p.load.kind === "loading")
     return frame(
-      <p className="none" role="status" data-testid="job-loading">
-        {t("job.loading")}
-      </p>,
+      <Loading label={t("job.loading")} testId="job-loading" strip={false} />,
     );
   if (p.load.kind === "unavailable")
     return frame(
@@ -97,7 +96,7 @@ export function JobView(p: JobViewProps) {
   const unwiredLabel = p.unwired === "wrong" ? t("job.wrong") : p.unwired === "again" ? t("job.again", { when: j.again ?? "" }) : p.unwired === "replay" ? t("job.replay") : "";
 
   return frame(
-    <div className="jobv" data-testid="job-body">
+    <div className="jobv" data-arrive="job" data-arrive-rows=".to .rowl, .trace .tr:not(.total)" data-testid="job-body">
       <div className="main">
         <div className="col">
           <div className="you" data-testid="job-goal">

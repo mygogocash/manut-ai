@@ -281,7 +281,7 @@ export function ArtifactsView(p: ArtifactsViewProps) {
             <div className="band" id="art-links-h">
               {t("art.links")}
             </div>
-            <ul className="rows" data-testid="art-links">
+            <ul className="rows" data-testid="art-links" data-arrive="artifacts" data-arrive-rows=":scope > li">
               {p.links.map((link) => (
                 <li key={link.id} className="rowl" data-testid="art-link" data-id={link.id}>
                   <span className="grow">

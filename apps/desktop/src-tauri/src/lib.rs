@@ -41,6 +41,7 @@ mod source_tools;
 mod shop_cache;
 mod shop_cache_key;
 mod skill_links;
+mod tailscale;
 mod tasks;
 mod term_history;
 mod term_import;
@@ -1696,7 +1697,8 @@ fn commands(invoke: tauri::ipc::Invoke) -> bool {
         voice::voice_listen,
         voice::voice_stop,
         computer::computer_status,
-        computer::computer_open
+        computer::computer_open,
+        tailscale::tailscale_state
     ];
     answer(invoke)
 }

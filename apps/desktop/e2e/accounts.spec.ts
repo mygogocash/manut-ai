@@ -170,20 +170,24 @@ test("the lines under each group keep one 8px rhythm", async ({ page }) => {
   for (const [cls, gap] of gaps) expect(gap, cls).toBe(8);
 });
 
-test("two left edges: page lines on the card's edge, each CLI's heading, names and lines on the rows' text column", async ({ page }) => {
+test("two left edges: page lines on the band's words, each CLI's heading, names and lines on the rows' text column", async ({ page }) => {
   await openAccounts(page);
   const x = await page.getByTestId("accounts-page").evaluate((p) => {
     const left = (sel: string, root: Element = p) => Math.round(root.querySelector(sel)!.getBoundingClientRect().left * 2) / 2;
     const g = p.querySelector("[data-testid=accounts-claude]")!;
     const ring = g.querySelector(".acc-row .acc-ring")!.getBoundingClientRect();
     const head = g.querySelector(".acc-gh-i")!.getBoundingClientRect();
+    // the title is a grey band since item 85h: its words start inside it, where Settings' rows start theirs
+    const band = p.querySelector(".st-gh")!;
     return {
-      title: left(".st-gh"), lead: left(".acc-lead"), card: left(".st-grp"), missing: left(".acc-missing"),
+      band: left(".st-gh"), title: left(".st-gh") + parseFloat(getComputedStyle(band).paddingLeft), lead: left(".acc-lead"), card: left(".st-grp"),
+      missing: left(".acc-missing"),
       gh: left(".acc-gh b", g), name: left(".acc-n", g), also: left(".acc-also", g), add: left(".acc-addbtn", g),
       ring: ring.left + ring.width / 2, headMark: head.left + head.width / 2,
     };
   });
-  for (const k of ["title", "lead", "missing"] as const) expect(x[k], k).toBe(x.card);
+  for (const k of ["lead", "missing"] as const) expect(x[k], k).toBe(x.title);
+  expect(x.card, "rows under the band").toBe(x.band);
   expect(x.gh, "heading name vs row name").toBe(x.name);
   expect(Math.abs(x.headMark - x.ring), "heading mark vs row mark").toBeLessThanOrEqual(0.5);
   expect(x.also, "Also found vs row names").toBe(x.name);

@@ -32,6 +32,10 @@ export default defineConfig({
             { name: "manut.notify.quiet", value: "00:00-00:00" },
             { name: "manut.roster", value: JSON.stringify(["kami", "friren", "default", "omh-tui"]) },
             { name: "manut.resume", value: chatResume("kami") },
+            // Settings' "Under the hood" left open, as by a developer who used its pages before (item 85h): the specs
+            // press a developer page's own entry in Settings' list, as they did before the pages moved under it.
+            // settings-column.spec.ts starts without it, as everyone else does, and opens it by hand.
+            { name: "manut.settings.hood", value: "1" },
           ],
         },
       ],

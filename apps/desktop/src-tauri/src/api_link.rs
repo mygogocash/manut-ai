@@ -510,7 +510,7 @@ pub(crate) mod mac {
 #[cfg(all(test, target_os = "macos"))]
 pub(crate) mod scratch_keychain {
     use core_foundation::base::TCFType;
-    use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
+    use security_framework::os::macos::keychain::{CreateOptions, KeychainSettings, SecKeychain};
     use security_framework_sys::base::SecKeychainRef;
     use std::path::PathBuf;
 
@@ -540,6 +540,10 @@ pub(crate) mod scratch_keychain {
         let dir = std::env::temp_dir().join(format!("manut-{tag}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut keychain = CreateOptions::new().password("test-only").create(dir.join("test.keychain")).unwrap();
+        // A new keychain locks itself when the Mac sleeps and after five minutes. With the screen locked it then waits
+        // for someone to unlock it, and every test that writes to it hangs for ten minutes and fails (26 Nov 2026, in
+        // gates run while the owner was away). A scratch keychain never locks itself.
+        keychain.set_settings(&KeychainSettings::new()).unwrap();
         keychain.unlock(Some("test-only")).unwrap();
         Scratch { keychain, dir }
     }

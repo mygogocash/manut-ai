@@ -1,7 +1,7 @@
 // Settings > General > Appearance: theme, colour set, bubble style and text size, with a live preview.
 // The choices only change how manut looks on this computer (saved in localStorage); nothing goes to Hermes.
 import { useStore, PALETTES, BUBBLE_STYLES, type BubbleStyle, type Palette, type TextSize, type Theme } from "../state/store";
-import { Seg } from "../chat/model/Seg";
+import { Modes } from "../ui/Modes";
 import { t, tx, type Key } from "../i18n";
 
 // OMH is the brand's own set and keeps its name in every language
@@ -55,7 +55,7 @@ export function Appearance() {
             <span>{t("look.themeHint")}</span>
           </div>
           <div className="st-v">
-            <Seg small label={t("look.theme")} value={s.ui.theme} options={opts(THEMES)} onChange={(v) => s.setTheme(v as Theme)} testId="theme-seg" />
+            <Modes label={t("look.theme")} value={s.ui.theme} options={opts(THEMES)} onChange={(v) => s.setTheme(v as Theme)} testId="theme-seg" />
           </div>
         </div>
         <div className="st-row ap-row-col">
@@ -89,8 +89,7 @@ export function Appearance() {
             <span data-testid="bubbles-hint">{t(BUBBLE_HINT[look.bubbles])}</span>
           </div>
           <div className="st-v">
-            <Seg
-              small
+            <Modes
               label={t("look.bubbles")}
               value={look.bubbles}
               options={BUBBLE_STYLES.map((b) => ({ value: b, label: t(BUBBLE_NAME[b]) }))}
@@ -105,8 +104,7 @@ export function Appearance() {
             <span>{t("look.sizeHint")}</span>
           </div>
           <div className="st-v">
-            <Seg
-              small
+            <Modes
               label={t("look.size")}
               value={look.text}
               options={opts(SIZES)}
