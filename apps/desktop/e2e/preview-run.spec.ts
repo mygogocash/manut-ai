@@ -55,7 +55,7 @@ async function fits(page: Page) {
   const width = await page.evaluate(() => window.innerWidth);
   for (const box of await page.locator('[data-testid^="lane-preview"]').all()) {
     const b = await box.boundingBox();
-    if (b) expect(b.x + b.width, await box.getAttribute("data-testid")).toBeLessThanOrEqual(width + 1);
+    if (b) expect(b.x + b.width, (await box.getAttribute("data-testid")) ?? "").toBeLessThanOrEqual(width + 1);
   }
 }
 
@@ -96,11 +96,13 @@ test("names the command first; Start runs it in the lane's own folder on samples
     ["PROMPTPAY_SHOP_ID", "0000000000"],
     ["STRIPE_SECRET_KEY", "sample-value"],
   ]);
-  // no sample's value is on the page, and no page of the project is drawn in the app
+  // no sample's value is on the page, and the one page of the project drawn in the app is its preview's own address, in the
+  // pane's sandboxed frame (preview-frame.spec.ts walks it)
   const text = await page.evaluate(() => document.body.innerText);
   expect(text).not.toContain("0000000000");
   expect(text).not.toContain("sample-value");
-  await expect(page.locator("iframe, webview")).toHaveCount(0);
+  await expect(page.locator("webview")).toHaveCount(0);
+  expect(await page.locator("iframe").evaluateAll((els) => els.map((e) => [(e as HTMLIFrameElement).src, e.getAttribute("sandbox")]))).toEqual([[URL, "allow-scripts allow-same-origin allow-forms"]]);
 
   await page.getByTestId("lane-preview-open").click();
   await expect.poll(async () => (await calls(page)).filter((c) => c.op === "open")).toEqual([{ op: "open", url: URL }]);

@@ -2,8 +2,9 @@
 // lane's). In the desktop app: the shell's `preview_read`, `preview_start`, `preview_stop` and `preview_open`
 // (src-tauri/src/preview.rs). In a plain browser (dev, e2e against the mock bridge, Practice) there is no shell, so a mock runs a
 // fake preview: it prints a dev server's lines and its address, lists itself with what keeps running (running/host.ts's mock),
-// and records every call in `window.__manutPreviewCalls`. A test says what a folder holds and how the run goes through
-// `window.__manutMockPreview`.
+// and records every call in `window.__manutPreviewCalls`. A test says what a folder holds, how the run goes and the address it
+// prints through `window.__manutMockPreview`. A test can also stand in for the shell itself (`window.__manutPreviewShell`, a
+// stubbed shell): the page then runs the desktop's own host against it, as it runs against the real shell.
 import { MockRunningHost, getRunningHost } from "../running/host";
 import { readProject, START_WAIT_MS, type PreviewProject } from "./previewRun";
 
@@ -102,7 +103,13 @@ export interface MockPreviewControl {
   readError: string | null;
   /** How long the view waits for an address before it stops saying it is starting (ms): a test need not wait a minute. */
   startWait: number;
+  /** The address the fake dev server prints as where it runs (`MOCK_URL` when not given): a spec points it at a stand-in page of
+   *  its own, so the frame beside the lane shows a page. */
+  url?: string;
 }
+
+/** Where the fake dev server says it runs, unless a test says otherwise: Vite's own default. */
+export const MOCK_URL = "http://localhost:5173/";
 
 export type MockPreviewCall =
   | { op: "read"; dir: string }
@@ -121,6 +128,15 @@ export const MOCK_PROJECT: PreviewProject = {
 };
 
 const ESC = "\u001b";
+
+/** An address as Vite prints it, its port in bold (`http://localhost:\x1b[1m5173\x1b[22m/`), so the app reads it through the
+ *  escapes as it reads a real one. */
+const banner = (url: string) => url.replace(/:(\d+)\/$/, `:${ESC}[1m$1${ESC}[22m/`);
+/** The port an address names, for what keeps running. */
+const portOf = (url: string): number[] => {
+  const port = /:(\d+)\/$/.exec(url);
+  return port ? [Number(port[1])] : [];
+};
 
 interface FakeRun {
   dir: string;
@@ -171,9 +187,10 @@ export class MockPreviewHost implements PreviewHost {
     const later = (ms: number, fn: () => void) => run.timers.push(setTimeout(fn, ms));
     later(0, () => onEvent({ event: "lines", lines: ["", `> baanmali-preorder@0.0.0 ${script} ${dir}`, "> vite", ""] }));
     if (mode === "serve") {
+      const url = this.control.url ?? MOCK_URL;
       later(this.control.delay, () => {
-        onEvent({ event: "lines", lines: [`  ${ESC}[32m${ESC}[1mVITE${ESC}[22m v7.1.2${ESC}[39m  ready in 312 ms`, "", `  ${ESC}[32m➜${ESC}[39m  ${ESC}[1mLocal${ESC}[22m:   ${ESC}[36mhttp://localhost:${ESC}[1m5173${ESC}[22m/${ESC}[39m`, `  ${ESC}[2m➜  Network: use --host to expose${ESC}[22m`] });
-        this.running()?.control.add({ kind: "preview", session: id, folder: dir, pid: run.pid, started: run.started, argv: run.argv, ports: [5173] });
+        onEvent({ event: "lines", lines: [`  ${ESC}[32m${ESC}[1mVITE${ESC}[22m v7.1.2${ESC}[39m  ready in 312 ms`, "", `  ${ESC}[32m➜${ESC}[39m  ${ESC}[1mLocal${ESC}[22m:   ${ESC}[36m${banner(url)}${ESC}[39m`, `  ${ESC}[2m➜  Network: use --host to expose${ESC}[22m`] });
+        this.running()?.control.add({ kind: "preview", session: id, folder: dir, pid: run.pid, started: run.started, argv: run.argv, ports: portOf(url) });
       });
     } else if (mode === "quiet") {
       later(this.control.delay, () => onEvent({ event: "lines", lines: ["Compiling the first build…", "Still compiling…"] }));
@@ -210,7 +227,30 @@ export class MockPreviewHost implements PreviewHost {
   }
 }
 
+// ---- A stubbed shell -------------------------------------------------------------------------
+
+/** What a test puts in `window.__manutPreviewShell` to stand in for the shell's preview commands in a plain browser: the shell's
+ *  `invoke`, and its `Channel`, whose `onmessage` the stand-in calls with each event. */
+export interface PreviewShellStub {
+  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
+  Channel: new () => { onmessage: (message: unknown) => void };
+}
+
+/** The desktop's own host, against a test's stand-in for the shell: the commands it calls, their arguments and its reading of
+ *  their answers and events are the ones the app runs. */
+export class StubbedPreviewHost extends TauriPreviewHost {
+  constructor(private stub: PreviewShellStub) {
+    super();
+  }
+  protected override async core() {
+    return { invoke: ((cmd: string, args?: Record<string, unknown>) => this.stub.invoke(cmd, args)) as never, Channel: this.stub.Channel as never };
+  }
+}
+
 let host: PreviewHost | null = null;
 export function getPreviewHost(): PreviewHost {
-  return (host ??= inTauri() ? new TauriPreviewHost() : new MockPreviewHost());
+  if (host) return host;
+  // Inside the desktop app the shell is real and nothing a page sets stands in for it.
+  const stub = inTauri() ? undefined : (globalThis as { __manutPreviewShell?: PreviewShellStub }).__manutPreviewShell;
+  return (host = inTauri() ? new TauriPreviewHost() : stub ? new StubbedPreviewHost(stub) : new MockPreviewHost());
 }

@@ -63,7 +63,20 @@ const record = (over: Partial<PreviewRecord> = {}): PreviewRecord => ({
   ...over,
 });
 const run = (over: Partial<PreviewRun>): PreviewRun => ({ ...NOT_STARTED, label: "pnpm run dev", since: 1, ...over });
-const previewOf = (over: Partial<LanePreviewProps> = {}): LanePreviewProps => ({ dir: DIR, record: record(), samples: [], onStart: vi.fn(), onStop: vi.fn(), onOpen: vi.fn(), ...over });
+/** The app's own page, as the desktop app on macOS serves it. */
+const APP = { origin: "tauri://localhost", windows: false };
+const previewOf = (over: Partial<LanePreviewProps> = {}): LanePreviewProps => ({
+  dir: DIR,
+  record: record(),
+  samples: [],
+  onStart: vi.fn(),
+  onStop: vi.fn(),
+  onOpen: vi.fn(),
+  here: APP,
+  reloads: 0,
+  onReload: vi.fn(),
+  ...over,
+});
 
 const props = (over: Partial<LanePaneProps> = {}): LanePaneProps => ({
   view: "diff",
@@ -256,17 +269,82 @@ describe("Preview", () => {
     expect(p.preview.onStop).toHaveBeenCalledTimes(1);
   });
 
-  it("running, says where with Open and Stop, and draws no page of the project in the app", () => {
+  it("running, says where with Reload, Open in browser and Stop, and draws the page at that very address in a sandboxed frame", () => {
     const p = withRun({ phase: "running", id: 3, url: "http://localhost:5173/" });
     expect(byId(p, "lane-preview-state")[0].props.children).toBe("Running at http://localhost:5173/");
+    const buttons = drawn(LanePaneView(p)).filter((e) => e.type === "button" && String(e.props["data-testid"]).startsWith("lane-preview-"));
+    expect(buttons.map((b) => b.props["data-testid"])).toEqual(["lane-preview-reload", "lane-preview-open", "lane-preview-stop"]);
+    expect(words(p)).toContain(" Reload Open in browser Stop ");
+    press(p, "lane-preview-reload");
+    expect(p.preview.onReload).toHaveBeenCalledTimes(1);
     press(p, "lane-preview-open");
     expect(p.preview.onOpen).toHaveBeenCalledTimes(1);
     press(p, "lane-preview-stop");
     expect(p.preview.onStop).toHaveBeenCalledTimes(1);
-    expect(html(p)).not.toMatch(/<(iframe|webview|object|embed|form|a )/);
+    const [frame] = byId(p, "lane-preview-frame");
+    expect(frame.type).toBe("iframe");
+    expect(frame.props).toMatchObject({
+      src: "http://localhost:5173/",
+      sandbox: "allow-scripts allow-same-origin allow-forms",
+      referrerPolicy: "no-referrer",
+      title: "The page at http://localhost:5173/",
+    });
+    // the one frame, and nothing else of the project's: no webview, object, embed, form or link of its own
+    expect(html(p).match(/<iframe/g)).toHaveLength(1);
+    expect(html(p)).not.toMatch(/<(webview|object|embed|form|a )/);
+    expect(byId(p, "lane-preview-frame-note")[0].props.children).toBe("Pop-ups, downloads and links to other sites do not open here. Open in browser shows the whole page.");
+    expect(byId(p, "lane-preview-noframe")).toHaveLength(0);
     expect(byId(p, "lane-preview-open-failed")).toHaveLength(0);
     const failed = withRun({ phase: "running", id: 3, url: "http://localhost:5173/" }, { openFailed: true });
     expect(byId(failed, "lane-preview-open-failed")[0].props.children).toBe("The browser could not be opened.");
+  });
+
+  it("makes the frame again at the same address on each Reload, and puts it under the preview's box, before the samples", () => {
+    const at = (reloads: number) => {
+      const p = preview({ preview: previewOf({ reloads, record: record({ run: run({ phase: "running", id: 3, url: "http://localhost:5173/" }) }) }) });
+      return byId(p, "lane-preview-frame")[0];
+    };
+    expect(at(0).key).toBe("http://localhost:5173/#0");
+    expect(at(1).key).toBe("http://localhost:5173/#1");
+    expect(at(1).props.src).toBe("http://localhost:5173/");
+    const p = preview({ preview: previewOf({ samples: ["PROMPTPAY_SHOP_ID"], record: record({ run: run({ phase: "running", id: 3, url: "http://localhost:5173/" }) }) }) });
+    const order = ids(p).filter((id) => ["lane-preview", "lane-preview-page", "lane-preview-frame-note", "lane-preview-samples"].includes(String(id)));
+    expect(order).toEqual(["lane-preview", "lane-preview-page", "lane-preview-frame-note", "lane-preview-samples"]);
+  });
+
+  it("draws the frame only while it runs at an address: not while it starts, prints none, is being stopped, or after it ended", () => {
+    for (const r of [
+      { phase: "starting", id: 3 },
+      { phase: "quiet", id: 3, lines: ["Compiling…"] },
+      { phase: "stopping", id: 3, url: "http://localhost:5173/" },
+      { phase: "stopped", url: "http://localhost:5173/" },
+      { phase: "ended", code: 1, url: "http://localhost:5173/", lines: ["Error"] },
+      { phase: "failed", why: "running" },
+      { phase: "running", id: 3, url: null },
+    ] as Partial<PreviewRun>[]) {
+      const p = withRun(r);
+      expect(html(p), r.phase).not.toContain("<iframe");
+      expect(byId(p, "lane-preview-reload"), r.phase).toHaveLength(0);
+      expect(byId(p, "lane-preview-frame-note"), r.phase).toHaveLength(0);
+    }
+  });
+
+  it("keeps Open in browser and says why when the address cannot be shown inside the app", () => {
+    const said = {
+      unnamed: [{ url: "http://[::1]:5173/" }, APP, "The app shows a page inside it only at localhost. Open this one in your browser."],
+      own: [{ url: "http://localhost:5207/" }, { origin: "http://localhost:5207", windows: false }, "This is the app's own address, so the page is not shown inside the app."],
+      windows: [{ url: "http://localhost:5173/" }, { origin: "http://tauri.localhost", windows: true }, "On Windows the page is not shown inside the app yet. Open it in your browser."],
+      not_loopback: [{ url: "http://192.168.1.5:5173/" }, APP, "This is not an address of this computer, so the page is not shown here."],
+    } as const;
+    for (const [why, [r, here, line]] of Object.entries(said)) {
+      const p = preview({ preview: previewOf({ here, record: record({ run: run({ phase: "running", id: 3, ...r }) }) }) });
+      expect(html(p), why).not.toContain("<iframe");
+      expect(byId(p, "lane-preview-noframe")[0].props["data-why"], why).toBe(why);
+      expect(byId(p, "lane-preview-noframe")[0].props.children, why).toBe(line);
+      expect(byId(p, "lane-preview-reload"), why).toHaveLength(0);
+      expect(byId(p, "lane-preview-open"), why).toHaveLength(1);
+      expect(byId(p, "lane-preview-stop"), why).toHaveLength(1);
+    }
   });
 
   it("stopping, its Stop is busy and pressing it again does nothing", () => {
@@ -493,6 +571,26 @@ describe("the pane's words", () => {
       const running = props({ view: "preview", preview: previewOf({ record: record({ run: run({ phase: "running", id: 3, url: "http://localhost:5173/" }) }) }) });
       expect(html(running), lang).toContain("http://localhost:5173/");
       expect(html(running), lang).not.toContain("Running at");
+      expect(html(running), lang).not.toContain("Reload");
+      expect(html(running), lang).not.toContain("Open in browser");
+      expect(html(running), lang).not.toContain("Pop-ups, downloads");
+      expect(html(running), lang).not.toContain("The page at");
+    }
+  });
+
+  it("say Reload, Open in browser and what does not open in the frame in all four languages", () => {
+    const running = props({ view: "preview", preview: previewOf({ record: record({ run: run({ phase: "running", id: 3, url: "http://localhost:5173/" }) }) }) });
+    for (const [lang, reload, open, title] of [
+      ["en", "Reload", "Open in browser", "The page at http://localhost:5173/"],
+      ["ko", "새로고침", "브라우저에서 열기", "http://localhost:5173/ 페이지"],
+      ["ja", "再読み込み", "ブラウザで開く", "http://localhost:5173/ のページ"],
+      ["zh", "重新加载", "在浏览器中打开", "http://localhost:5173/ 的页面"],
+    ] as const) {
+      setLang(lang);
+      expect(byId(running, "lane-preview-reload")[0].props.children, lang).toBe(reload);
+      expect(byId(running, "lane-preview-open")[0].props.children, lang).toBe(open);
+      expect(byId(running, "lane-preview-frame")[0].props.title, lang).toBe(title);
+      expect(String(byId(running, "lane-preview-frame-note")[0].props.children).length, lang).toBeGreaterThan(10);
     }
   });
 });
