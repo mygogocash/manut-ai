@@ -211,8 +211,6 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
    (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 77a, a command palette on the box Command-K opens (`feat/command-palette`, Sonnet, worktree
-     `cc-item77a-palette`), started 25 Nov at 23:05, planned by the lead.
    - item 75, source control: git and the CLIs' status, the default branch pulled when clean, a pull request made and
      merged from a lane, each asked first (`feat/source-control`, Opus, worktree `cc-item75-source`), started 25 Nov at
      23:10.
@@ -245,7 +243,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 71 (the lane pane's Diff read from the lane's own folder through git, read only and capped, so it is there
+   Merged: 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,
+   and the chats History's search finds; it has no power of its own, and a test holds it to that), 71 (the lane pane's
+   Diff read from the lane's own folder through git, read only and capped, so it is there
    after a restart and shows a subagent's and a hand's edits; planned by the lead and built by Sonnet in a quarter of
    an hour, the first item under the owner's split of thinking and carrying out), 74 (Settings, Providers in every
    mode: each agent with a switch the shell enforces, a name, its program's
