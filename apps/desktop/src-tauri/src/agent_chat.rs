@@ -1823,6 +1823,14 @@ impl Adapter for Claude {
                     }
                 }
             }
+            // The predicted next prompt Claude Code sends after a turn when it was started with `--prompt-suggestions` (item 76). It is
+            // a message of its own on the output stream, not part of the conversation; the page shows it greyed in the empty box.
+            "prompt_suggestion" if !sub => {
+                let text = s(&v, "suggestion");
+                if !text.trim().is_empty() {
+                    st.emit(ev("suggestion", json!({"text": clip(text.trim(), 500)})));
+                }
+            }
             "result" => {
                 // A turn Claude Code started by itself (a background task it ran finished): its result must not
                 // end the person's turn, which is still running.
@@ -3763,6 +3771,16 @@ fn agent_rules(probe: &RuleProbe, label: &str, argv: &[OsString], cwd: &Path, pa
     }
 }
 
+/// The arguments the setting "Suggested next message" adds to agent `agent_id`'s chat: Claude Code's `--prompt-suggestions true` when
+/// `suggest`, nothing otherwise and nothing for any other agent (none of them has a way to ask for one).
+pub fn suggest_args(agent_id: &str, suggest: bool) -> &'static [&'static str] {
+    if suggest && agent_id == "claude" {
+        &crate::sessions::CLAUDE_SUGGEST_ARGS
+    } else {
+        &[]
+    }
+}
+
 impl ChatSessions {
     pub fn new() -> Arc<ChatSessions> {
         Arc::new(ChatSessions::default())
@@ -3773,6 +3791,16 @@ impl ChatSessions {
     /// the chosen account's home variable, or nothing. Anything not on the allow-list, or without a chat
     /// mode, is refused before a process exists.
     pub fn start_agent<F>(&self, agent_id: &str, cwd: &Path, resume: Option<&str>, account_env: &[(String, String)], files: Option<&Path>, sink: F) -> Result<u32, String>
+    where
+        F: FnMut(ChatOut) + Send + 'static,
+    {
+        self.start_agent_with(agent_id, cwd, resume, account_env, files, false, sink)
+    }
+
+    /// [`ChatSessions::start_agent`], and `suggest`: the person turned on suggested next messages (item 76), so a Claude Code chat is
+    /// started with [`CLAUDE_SUGGEST_ARGS`] and sends a `suggestion` event after each turn. No other agent has a way to ask for one
+    /// (Codex's app-server protocol has none), so `suggest` changes nothing for them.
+    pub fn start_agent_with<F>(&self, agent_id: &str, cwd: &Path, resume: Option<&str>, account_env: &[(String, String)], files: Option<&Path>, suggest: bool, sink: F) -> Result<u32, String>
     where
         F: FnMut(ChatOut) + Send + 'static,
     {
@@ -3822,6 +3850,7 @@ impl ChatSessions {
             }
         }
         argv.extend(args.iter().map(OsString::from));
+        argv.extend(suggest_args(agent_id, suggest).iter().map(OsString::from));
         if let Some(r) = resume.filter(|_| thread.is_none()) {
             argv.extend(resume_args(agent_id, r)?);
         }
@@ -7906,6 +7935,38 @@ mod tests {
         let st = run(&mut p, &[r#"{"type":"agent_end","aborted":true}"#.into()]);
         assert_eq!(names(&st.events)[..2], ["message.dropped", "turn.end"]);
         assert_eq!(st.events[0]["id"], "b");
+    }
+
+    #[test]
+    fn a_suggested_next_message_is_asked_for_only_of_claude_code_and_only_when_turned_on() {
+        // item 76: Claude Code's own `--prompt-suggestions`; no other agent offers a way, so none is passed one
+        assert_eq!(suggest_args("claude", true), ["--prompt-suggestions", "true"]);
+        assert!(suggest_args("claude", false).is_empty());
+        for other in ["codex", "pi", "omp", "omo", "opencode", "cursor", "dsh", "grok"] {
+            assert!(suggest_args(other, true).is_empty(), "{other}");
+        }
+        // the fixed chat arguments are untouched: the setting adds, never replaces
+        assert!(!chat_args("claude").unwrap().contains(&"--prompt-suggestions"));
+    }
+
+    #[test]
+    fn claude_codes_predicted_next_prompt_reaches_the_page_as_a_suggestion_and_changes_nothing_else() {
+        let mut c = Claude::new("/w/proj");
+        let line = json!({"type": "prompt_suggestion", "suggestion": "  Now add a test for the empty cart  ", "uuid": "u1", "session_id": "s1"}).to_string();
+        let st = c.on_line(&line);
+        assert_eq!(st.events.len(), 1);
+        assert_eq!(st.events[0]["event"], "suggestion");
+        assert_eq!(st.events[0]["text"], "Now add a test for the empty cart");
+        assert!(st.write.is_empty(), "nothing is sent back to Claude Code");
+        assert!(!c.in_turn(), "it does not start a turn");
+        // an empty one, and one from a subagent, say nothing
+        let empty = json!({"type": "prompt_suggestion", "suggestion": "  ", "uuid": "u2", "session_id": "s1"}).to_string();
+        assert!(c.on_line(&empty).events.is_empty());
+        let sub = json!({"type": "prompt_suggestion", "suggestion": "x", "parent_tool_use_id": "t9"}).to_string();
+        assert!(c.on_line(&sub).events.is_empty());
+        // a very long one is cut
+        let long = json!({"type": "prompt_suggestion", "suggestion": "a".repeat(2000)}).to_string();
+        assert!(c.on_line(&long).events[0]["text"].as_str().unwrap().chars().count() <= 501);
     }
 
     #[test]

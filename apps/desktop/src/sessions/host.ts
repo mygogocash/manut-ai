@@ -128,7 +128,7 @@ export interface SessionHost extends HistoryHost {
   close(id: number): Promise<void>;
   /** Start `agent` in its chat mode in `cwd` (`resume`: a Claude Code or OmO session id or a Codex thread id to continue;
    *  `account`: as for `start`; `session`: the SESSIONS id, whose attachment folder a Claude Code chat reads without a card). */
-  chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string): Promise<number>;
+  chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean): Promise<number>;
   chatInput(id: number, input: ChatInput): Promise<void>;
   chatClose(id: number): Promise<void>;
   /** Save a file the person attached in session `session` under manut's own folder
@@ -259,11 +259,12 @@ export class TauriHost implements SessionHost, BuddyHost {
     exit.onmessage = (c) => onExit(c);
     return invoke<number>("session_start", { agent, cwd, sessionId: sessionId ?? null, resume: resume ?? null, link: link ?? null, account: account ?? null, cols, rows, onData: data, onExit: exit });
   }
-  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string) {
+  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean) {
     const { invoke, Channel } = await this.core();
     const ch = new Channel<ChatEvent>();
     ch.onmessage = (ev) => onEvent(ev);
-    return invoke<number>("chat_start", { agent, cwd, resume: resume ?? null, account: account ?? null, session: session ?? null, onEvent: ch });
+    // `suggest`: the person turned on suggested next messages (lib/suggest.ts); the shell passes Claude Code its own flag for it
+    return invoke<number>("chat_start", { agent, cwd, resume: resume ?? null, account: account ?? null, session: session ?? null, suggest: suggest === true, onEvent: ch });
   }
   async chatInput(id: number, input: ChatInput) {
     const { invoke } = await this.core();
@@ -670,6 +671,8 @@ export type MockGlobals = MockTurnGlobals & {
   __manutMockBuddySignedOut?: boolean;
   /** e2e: the Codex thread a chat resumes is gone (deleted or archived): the shell starts a new one */
   __manutMockGoneThreads?: boolean;
+  /** The text the mock Claude Code suggests after a turn, when the chat was started with suggestions on (lib/suggest.ts). */
+  __manutMockSuggestion?: string;
   /** e2e: Codex's own config runs without approvals and with full disk access (its thread reports
    *  `approvalPolicy: never`, `sandbox: dangerFullAccess`, as codex-12-late-step-init.jsonl) */
   __manutMockCodexUnguarded?: boolean;
@@ -987,7 +990,7 @@ export class MockHost implements SessionHost, BuddyHost {
 
   // ---- chat: a scripted agent with the same events the Rust adapters emit -------------------
   private chats = new Map<number, MockChat>();
-  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string) {
+  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean) {
     const id = ++this.next;
     this.log({ op: "chat.start", id, agent, cwd, ...(resume ? { resume } : {}), ...(account ? { account } : {}), ...(session ? { session } : {}) });
     const c = new MockChat(agent, onEvent, resume, cwd, {
@@ -996,6 +999,8 @@ export class MockHost implements SessionHost, BuddyHost {
       // person's own agent answers unless a test signs it out
       signedOut: acpRow(agent)?.custom ? !!this.g.__manutMockCustomSignedOut?.includes(agent) : !!acpRow(agent) && !this.g.__manutMockSignedIn?.includes(agent),
       gone: agent === "codex" && !!resume && !!this.g.__manutMockGoneThreads,
+      // the stand-in for Claude Code's `--prompt-suggestions`: a finished turn is followed by the one suggestion a test set (or a plain one)
+      suggest: agent === "claude" && suggest === true ? (this.g.__manutMockSuggestion ?? "Now add a test for it") : undefined,
       unguarded: agent === "codex" && !!this.g.__manutMockCodexUnguarded,
     });
     this.chats.set(id, c);
@@ -1461,7 +1466,7 @@ class MockChat {
     private emit: (ev: ChatEvent) => void,
     resume?: string,
     private cwd = "",
-    private how: { noChat?: boolean; gone?: boolean; unguarded?: boolean; signedOut?: boolean } = {},
+    private how: { noChat?: boolean; gone?: boolean; unguarded?: boolean; signedOut?: boolean; suggest?: string } = {},
   ) {
     this.model = MOCK_MODELS[agent]?.[0]?.label ?? agentDef(agent).label;
     this.session = resume ?? `${agent}-mock-${Math.random().toString(16).slice(2, 10)}-0000-0000-000000000000`;
@@ -1539,6 +1544,8 @@ class MockChat {
     // Stop drops what waited (OmO clears its queue; Codex never recorded it)
     if (outcome === "interrupted") for (const q of next) this.emit({ event: "message.dropped", id: q.id });
     this.emit({ event: "turn.end", outcome, ...(error ? { error } : {}) });
+    // Claude Code's predicted next prompt follows a turn that finished well (when the chat was started asking for it)
+    if (outcome === "done" && this.how.suggest) this.emit({ event: "suggestion", text: this.how.suggest });
     if (MOCK_REWINDS.includes(this.agent)) this.emit({ event: "session.info", rewind: this.sent > 0 });
     const c = MOCK_CONTROLS[this.agent];
     if (c) {
