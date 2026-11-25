@@ -49,13 +49,14 @@ import type { AccountCli, AccountGroup, ApprovalChoice, BridgeEvent, ClarifyAnsw
 import { settleApproval } from "../chat/cards/respond";
 import { kitAnswer, noteChange } from "../code/kitAsks";
 import { planLaneBranch, workDir, type LaneBranch } from "../code/laneBranch";
+import { startOf, worktreeSettings } from "../lib/worktrees";
 import { forgetLane, keptLanesChanged, noteLaneEvent } from "../code/laneStore";
 import { forgetPreview } from "../code/previewStore";
 import { continuesItself, type SavedSession } from "../app/resume";
 import { accountGroups } from "../settings/accounts/useAccounts";
 import { modesOf, steersOf } from "./controls";
 import { parseCommands, type AgentCommand } from "../chat/parts/commands";
-import { t as tr } from "../i18n";
+import { t as tr, type Key } from "../i18n";
 import { windowWatched, type SessionNote } from "../lib/notify";
 import { createCloseGrace, graceMs, restoreSplitIn, type SplitWas } from "./closeGrace";
 import { watchOpenFolder } from "./revealOpen";
@@ -424,9 +425,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     if (!r?.cwd || !host.laneWorktree) return;
     try {
       const current = await host.branch(r.cwd);
-      const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current });
+      const ws = worktreeSettings();
+      const plan = planLaneBranch({ title: r.title || r.promptTitle || "", current, prefix: ws.prefix });
       if (plan.kind === "none") return;
-      const made = await host.laneWorktree(r.cwd, plan.names);
+      const made = await host.laneWorktree(r.cwd, plan.names, startOf(ws));
       if (!rec(id)) {
         // closed while its folder was made: the folder goes as a close takes it (nothing is in it yet)
         void letLaneGo({ name: made.branch, base: made.base, dir: made.dir, worktree: made.worktree });
@@ -437,11 +439,20 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
       if (key) {
         const said = [tr("lane.note.made", { branch: made.branch, base: made.base, folder: made.dir })];
         if (made.left > 0) said.push(made.left === 1 ? tr("lane.note.leftOne", { base: made.base }) : tr("lane.note.leftMany", { n: made.left, base: made.base }));
+        // where it started, said whenever the person asked for the remote: from it, or why from the local branch
+        if (made.from) said.push(tr("lane.note.fromRemote", { remote: made.from }));
+        else if (ws.remote && made.local) said.push(tr(`lane.note.local.${made.local}` as Key, { base: made.base }));
         said.push(tr("lane.note.install"));
         store().dispatch({ type: "system.note", bot: key, text: said.join(" "), now: Date.now() });
       }
-    } catch {
-      /* no folder of its own */
+    } catch (e) {
+      /* no folder of its own. A folder the person chose that cannot be used now is said: the lane then works in the session's
+         folder, not where they asked, and nothing is made anywhere else. */
+      const code = e instanceof Error ? e.message : String(e);
+      const key = keys.get(id);
+      if (key && /^root_|^bad_root$/.test(code)) {
+        store().dispatch({ type: "system.note", bot: key, text: `${tr("worktrees.root.chat")} ${tr(`worktrees.root.${code}` as Key)}`, now: Date.now() });
+      }
     }
   };
 
@@ -449,8 +460,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
    *  changed or new (the Code page then lists it with Remove, which asks first), and the branch always stays. */
   const letLaneGo = async (lane: LaneBranch | undefined) => {
     if (!lane?.worktree || !host.laneRemove) return;
+    // Settings › Worktrees: off keeps every folder of a deleted chat, listed with the kept ones
+    if (!worktreeSettings().cleanDeleted) return;
     try {
-      await host.laneRemove(lane.worktree, { changed: 0, branch: false, ahead: null });
+      // the shell's clean-up also leaves a folder whose branch has commits on no remote; an older shell only knows Remove
+      if (host.laneRelease) await host.laneRelease(lane.worktree);
+      else await host.laneRemove(lane.worktree, { changed: 0, branch: false, ahead: null });
     } catch {
       /* kept: the Code page lists it */
     } finally {

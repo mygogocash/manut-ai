@@ -24,15 +24,19 @@ describe("TauriHost: a lane's folder", () => {
 
   it("asks the shell for a folder of its own with the names to try, and believes only a folder it can use", async () => {
     const h = new Host(() => ({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1 }));
-    expect(await h.laneWorktree("/Users/fon/web-app", ["kit/qr", "kit/qr-2"])).toEqual({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1 });
-    expect(h.sent).toEqual([{ cmd: "lane_worktree", args: { cwd: "/Users/fon/web-app", names: ["kit/qr", "kit/qr-2"] } }]);
+    expect(await h.laneWorktree("/Users/fon/web-app", ["kit/qr", "kit/qr-2"])).toEqual({ branch: "kit/qr", base: "main", dir, worktree: dir, left: 1, from: "", local: "" });
+    expect(h.sent).toEqual([{ cmd: "lane_worktree", args: { cwd: "/Users/fon/web-app", names: ["kit/qr", "kit/qr-2"], start: null } }]);
+    // Settings › Worktrees go with the call, and the shell says where the lane started
+    const r = new Host(() => ({ branch: "team/ana/qr", base: "main", dir, worktree: dir, left: 0, from: "origin/main", local: "" }));
+    expect(await r.laneWorktree("/w", ["team/ana/qr"], { root: "/Users/fon/lanes", remote: true })).toMatchObject({ branch: "team/ana/qr", from: "origin/main" });
+    expect(r.sent[0].args).toEqual({ cwd: "/w", names: ["team/ana/qr"], start: { root: "/Users/fon/lanes", remote: true } });
     // an answer with no folder is no lane: the session then works in its own folder
     await expect(new Host(() => ({ branch: "kit/qr", base: "main" })).laneWorktree("/w", ["kit/qr"])).rejects.toThrow("no_folder");
   });
 
   it("lists and removes with the numbers the person saw", async () => {
-    const h = new Host((cmd) => (cmd === "lane_list" ? [{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null }, { nope: 1 }] : { removed: true, deleted: false, changed: null, ahead: null, error: null }));
-    expect(await h.laneList("/Users/fon/web-app")).toEqual([{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null }]);
+    const h = new Host((cmd) => (cmd === "lane_list" ? [{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null, unpushed: 1 }, { nope: 1 }] : { removed: true, deleted: false, changed: null, ahead: null, error: null }));
+    expect(await h.laneList("/Users/fon/web-app")).toEqual([{ worktree: dir, dir, branch: "kit/qr", base: "main", made: 3, exists: true, changed: 2, ahead: null, unpushed: 1 }]);
     expect(await h.laneRemove(dir, { changed: 2, branch: true, ahead: 0 })).toMatchObject({ removed: true });
     expect(h.sent[1]).toEqual({ cmd: "lane_remove", args: { worktree: dir, ask: { changed: 2, branch: true, ahead: 0 } } });
   });
@@ -49,7 +53,7 @@ describe("MockHost: a lane's folder, as the shell makes it", () => {
     const { h, g } = host({ __manutLeft: { [DEV]: 2 } });
     const a = await h.laneWorktree(DEV, ["kit/qr"]);
     const b = await h.laneWorktree(DEV, ["kit/qr", "kit/qr-2"]);
-    expect(a).toEqual({ branch: "kit/qr", base: "main", dir: "/home/you/.manut/lanes/web-app/qr", worktree: "/home/you/.manut/lanes/web-app/qr", left: 2 });
+    expect(a).toEqual({ branch: "kit/qr", base: "main", dir: "/home/you/.manut/lanes/web-app/qr", worktree: "/home/you/.manut/lanes/web-app/qr", left: 2, from: "", local: "" });
     expect(b).toMatchObject({ branch: "kit/qr-2", base: "main", dir: "/home/you/.manut/lanes/web-app/qr-2" });
     expect(await h.branch(DEV)).toBe("main");
     expect(await h.branch(a.dir)).toBe("kit/qr");
@@ -79,3 +83,57 @@ describe("MockHost: a lane's folder, as the shell makes it", () => {
     expect(view).toMatchObject({ branch: "kit/thai-date", base: "main", ours: MOCK_MOVED.ours, theirs: MOCK_MOVED.theirs });
   });
 });
+
+describe("Settings › Worktrees through the hosts", () => {
+  it("TauriHost sends the folder to check, the folder to release and the project to clean up, and reads only what it can", async () => {
+    const h = new Host((cmd) =>
+      cmd === "lane_root_check"
+        ? "/Users/fon/lanes"
+        : cmd === "lane_release"
+          ? { removed: false, kept: "unpushed", changed: 0, unpushed: 2 }
+          : { removed: ["kit/a", "main", 3], kept: [{ branch: "kit/b", why: "open" }, { branch: "main", why: "open" }, { branch: "kit/c" }], cannot: null },
+    );
+    expect(await h.laneRootCheck("/Users/fon/lanes")).toBe("/Users/fon/lanes");
+    expect(await h.laneRelease("/w/x")).toEqual({ removed: false, kept: "unpushed", changed: 0, unpushed: 2 });
+    expect(await h.laneCleanMerged("/Users/fon/web-app", ["/w/held"])).toEqual({ removed: ["kit/a"], kept: [{ branch: "kit/b", why: "open" }], cannot: null });
+    expect(h.sent.map((s) => s.cmd)).toEqual(["lane_root_check", "lane_release", "lane_clean_merged"]);
+    expect(h.sent[2].args).toEqual({ cwd: "/Users/fon/web-app", held: ["/w/held"] });
+  });
+
+  const DEV = "/home/you/code/web-app";
+  const mock = (g: Record<string, unknown> = {}) => {
+    const globals = { __manutBranches: { [DEV]: "main" }, __manutMockTaken: [] as string[], __manutSessionCalls: [] as MockCall[], ...g };
+    return { h: new MockHost(globals as never), g: globals as typeof globals & Record<string, unknown> };
+  };
+
+  it("MockHost makes a lane under the chosen folder and says where it started", async () => {
+    const { h } = mock({ __manutRemoteFrom: { [DEV]: "origin/main" } });
+    const made = await h.laneWorktree(DEV, ["team/ana/qr"], { root: "/home/you/lanes/", remote: true });
+    expect(made).toMatchObject({ worktree: "/home/you/lanes/web-app/qr", from: "origin/main", local: "" });
+    expect(await mock().h.laneWorktree(DEV, ["kit/x"], { root: "", remote: true })).toMatchObject({ from: "", local: "no_remote" });
+    expect(await mock().h.laneWorktree(DEV, ["kit/x"], { root: "", remote: false })).toMatchObject({ from: "", local: "" });
+  });
+
+  it("MockHost refuses a folder for lanes inside a checkout, too broad or not absolute, as the shell does", async () => {
+    const { h } = mock();
+    await expect(h.laneRootCheck(`${DEV}/lanes`)).rejects.toThrow("root_in_checkout");
+    await expect(h.laneRootCheck("/home/you")).rejects.toThrow("root_too_broad");
+    await expect(h.laneRootCheck("relative")).rejects.toThrow("bad_root");
+    expect(await h.laneRootCheck("/home/you/lanes")).toBe("/home/you/lanes");
+  });
+
+  it("MockHost releases a folder only when nothing in it is changed or unpushed", async () => {
+    const { h, g } = mock();
+    const a = await h.laneWorktree(DEV, ["kit/a"]);
+    const b = await h.laneWorktree(DEV, ["kit/b"]);
+    const c = await h.laneWorktree(DEV, ["kit/c"]);
+    g.__manutLaneChanged = { [a.worktree]: 2 };
+    g.__manutLaneUnpushed = { [b.worktree]: 1 };
+    expect(await h.laneRelease(a.worktree)).toMatchObject({ removed: false, kept: "changes", changed: 2 });
+    expect(await h.laneRelease(b.worktree)).toMatchObject({ removed: false, kept: "unpushed", unpushed: 1 });
+    expect(await h.laneRelease(c.worktree)).toMatchObject({ removed: true });
+    expect((await h.laneList(DEV)).map((l) => l.branch).sort()).toEqual(["kit/a", "kit/b"]);
+    await expect(h.laneRelease("/nowhere")).rejects.toThrow("not_a_lane");
+  });
+});
+

@@ -1,6 +1,6 @@
 // A lane's branch, named from the work and planned before the shell makes it (src/code/laneBranch.ts).
 import { describe, expect, it } from "vitest";
-import { laneBranchNames, planLaneBranch, readKept, readMade, readRemoved, workDir } from "./laneBranch";
+import { isLaneBranch, laneBranchNames, planLaneBranch, readCleaned, readKept, readMade, readReleased, readRemoved, validPrefix, workDir } from "./laneBranch";
 
 /** What git takes as a branch name, as narrow as Kit makes them: one folder, lower case words joined by hyphens. */
 const VALID = /^kit\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -95,15 +95,15 @@ describe("where a session's agent works", () => {
 
 describe("the shell's answers about a lane's folder", () => {
   it("takes a made folder only with a branch Kit makes and absolute folders", () => {
-    const ok = { branch: "kit/qr", base: "main", dir: "/h/.manut/lanes/a/qr", worktree: "/h/.manut/lanes/a/qr", left: 2 };
+    const ok = { branch: "kit/qr", base: "main", dir: "/h/.manut/lanes/a/qr", worktree: "/h/.manut/lanes/a/qr", left: 2, from: "", local: "" };
     expect(readMade(ok)).toEqual(ok);
     expect(readMade({ ...ok, left: undefined })).toEqual({ ...ok, left: 0 });
     for (const bad of [null, "x", { ...ok, branch: "main" }, { ...ok, dir: "relative" }, { ...ok, worktree: "" }, { ...ok, base: "" }]) expect(readMade(bad), JSON.stringify(bad)).toBeNull();
   });
 
   it("lists the kept folders it can read, and counts it cannot as unknown", () => {
-    const k = { worktree: "/h/.manut/lanes/a/qr", dir: "/h/.manut/lanes/a/qr", branch: "kit/qr", base: "main", made: 5, exists: true, changed: 2, ahead: 0 };
-    expect(readKept([k, { ...k, branch: "main" }, null, { ...k, worktree: "" }, { ...k, changed: -1, ahead: "2", exists: "yes" }])).toEqual([k, { ...k, changed: null, ahead: null, exists: false }]);
+    const k = { worktree: "/h/.manut/lanes/a/qr", dir: "/h/.manut/lanes/a/qr", branch: "kit/qr", base: "main", made: 5, exists: true, changed: 2, ahead: 0, unpushed: 1 };
+    expect(readKept([k, { ...k, branch: "main" }, null, { ...k, worktree: "" }, { ...k, changed: -1, ahead: "2", unpushed: -1, exists: "yes" }])).toEqual([k, { ...k, changed: null, ahead: null, unpushed: null, exists: false }]);
     expect(readKept({})).toEqual([]);
   });
 
@@ -111,5 +111,39 @@ describe("the shell's answers about a lane's folder", () => {
     expect(readRemoved({ removed: true, deleted: true, changed: null, ahead: null, error: null })).toEqual({ removed: true, deleted: true, changed: null, ahead: null, error: null });
     expect(readRemoved({ removed: "yes", changed: 3, ahead: 1, error: "" })).toEqual({ removed: false, deleted: false, changed: 3, ahead: 1, error: null });
     expect(readRemoved(undefined)).toEqual({ removed: false, deleted: false, changed: null, ahead: null, error: null });
+  });
+});
+
+describe("the branch prefix (Settings › Worktrees)", () => {
+  it("takes one or two lower case words that each end in a slash, and nothing git or a shell could read as more", () => {
+    for (const ok of ["kit/", "manut/", "team/ana/", "fix-it/", "a1/"]) expect(validPrefix(ok), ok).toBe(true);
+    const long = `${"a".repeat(30)}/`;
+    for (const bad of ["", "/", "kit", "Kit/", "kit//", "/kit/", "a/b/c/", "kit/ana", "refs/", "kit /", "-kit/", "kit-/", "ki..t/", "kit/.lock/", "é/", "kit\n/", "x y/", "--help/", long]) expect(validPrefix(bad), JSON.stringify(bad)).toBe(false);
+  });
+
+  it("names a lane's branch under the prefix, and under kit/ when the prefix is not one", () => {
+    expect(laneBranchNames("PromptPay QR", 2, "team/ana/")).toEqual(["team/ana/promptpay-qr", "team/ana/promptpay-qr-2"]);
+    expect(laneBranchNames("PromptPay QR", 1, "Bad Prefix")).toEqual(["kit/promptpay-qr"]);
+    expect(planLaneBranch({ title: "Fix totals", current: "main", prefix: "manut/" })).toMatchObject({ kind: "make", names: expect.arrayContaining(["manut/fix-totals"]) });
+    expect(planLaneBranch({ title: "Fix totals", current: "main" })).toMatchObject({ names: expect.arrayContaining(["kit/fix-totals"]) });
+    for (const prefix of ["kit/", "manut/", "team/ana/"]) for (const n of laneBranchNames("Ünïcode ✓ Fix", 3, prefix)) expect(isLaneBranch(n), n).toBe(true);
+  });
+
+  it("reads a lane made under any earlier prefix, and no branch that is not one Kit makes", () => {
+    for (const ok of ["kit/qr", "team/ana/qr"]) expect(isLaneBranch(ok), ok).toBe(true);
+    for (const bad of ["main", "kit/", "kit/Qr", "a/b/c/d", "kit/a b", "refs/heads/x"]) expect(isLaneBranch(bad), bad).toBe(false);
+    const k = { worktree: "/h/l/a/qr", dir: "/h/l/a/qr", branch: "team/ana/qr", base: "main", made: 5, exists: true, changed: 0, ahead: 0, unpushed: 0 };
+    expect(readKept([k])).toEqual([k]);
+    expect(readMade({ branch: "team/ana/qr", base: "main", dir: "/h/l/a/qr", worktree: "/h/l/a/qr", left: 0, from: "origin/main", local: "" })).toMatchObject({ from: "origin/main" });
+  });
+});
+
+describe("the shell's answers to a clean-up", () => {
+  it("takes nothing as removed unless the shell said so", () => {
+    expect(readReleased({ removed: true, kept: null, changed: null, unpushed: null })).toEqual({ removed: true, kept: null, changed: null, unpushed: null });
+    expect(readReleased({ removed: "yes", kept: "unpushed", changed: 0, unpushed: 2 })).toEqual({ removed: false, kept: "unpushed", changed: 0, unpushed: 2 });
+    expect(readReleased(undefined)).toEqual({ removed: false, kept: null, changed: null, unpushed: null });
+    expect(readCleaned({ removed: ["kit/a", "main", 3], kept: [{ branch: "kit/b", why: "changes" }, { branch: "kit/c" }, null], cannot: "not_signed_in" })).toEqual({ removed: ["kit/a"], kept: [{ branch: "kit/b", why: "changes" }], cannot: "not_signed_in" });
+    expect(readCleaned("x")).toEqual({ removed: [], kept: [], cannot: null });
   });
 });
