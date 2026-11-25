@@ -1575,6 +1575,30 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn starting_from_the_remote_never_writes_over_a_file_git_ignores_in_the_developer_s_folder() {
+        let Some((home, d)) = repo("remote-ignored") else { return };
+        let bare = with_origin(&home, &d);
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".env\n").unwrap();
+        fs::write(d.join(".env"), "TOKEN=mine\n").unwrap();
+        // the remote's main brings a tracked `.env`
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        fs::write(other.join(".env"), "TOKEN=theirs\n").unwrap();
+        sh(&other, &["add", "-f", ".env"]);
+        sh(&other, &["commit", "-q", "-m", "env"]);
+        sh(&other, &["push", "-q", "origin", "main"]);
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let made = make_with(&home, &d, &names(&["kit/env"]), &Start { remote: true, ..Start::default() }).unwrap();
+        assert_eq!(made.from, "origin/main");
+        // the fetch moved only the remote-tracking branch; the checkout is a new folder, so the developer's file is theirs alone
+        assert_eq!(fs::read_to_string(d.join(".env")).unwrap(), "TOKEN=mine\n");
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert_eq!(fs::read_to_string(Path::new(&made.worktree).join(".env")).unwrap(), "TOKEN=theirs\n");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn the_remote_is_the_one_the_base_tracks_else_origin_and_a_missing_folder_falls_back() {
         let Some((home, d)) = repo("tracks") else { return };
         let bare = with_origin(&home, &d);

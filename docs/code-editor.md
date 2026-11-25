@@ -764,8 +764,12 @@ its choices kept on this computer by `src/lib/sourceControl.ts`). The page has t
   --untracked-files=all --ignore-submodules=none` lists nothing (ignored files do not count); and `git rev-list --count HEAD --not
   --remotes` is 0. Then it fetches that one branch exactly as Start from the remote does (`lane::fetch_branch`, ten seconds, no
   password) and moves the checkout only when its commit is an ancestor of the fetched one, with `git merge --ff-only
-  --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase, a stash or a force; no
-  hook runs. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
+  --no-overwrite-ignore --no-autostash --no-stat <commit>`: a fast-forward git refuses otherwise, never a merge commit, a rebase,
+  a stash or a force; no hook runs. An ignored file does not count as a change, but it is never written over: git's default
+  (`--overwrite-ignore`) would replace a person's ignored `.env` or `.mcp.json` with a tracked file an incoming commit adds at
+  the same path, so the pull passes `--no-overwrite-ignore` and git's refusal is said as the folder having changes (item 86).
+  A lane started from the remote cannot do this: its fetch moves only the remote-tracking branch, and its checkout is a new
+  folder. The cleanliness is read again just before that one write. Kit's panel for the project says in one line what happened:
   how many commits came, or why nothing was done (changes, commits on no remote, busy, another branch, no upstream, could not
   fetch, both moved).
 - **Default merge method** (default "The last one I chose", which starts as a merge commit) and **Remove agent credits when
