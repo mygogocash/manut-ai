@@ -128,6 +128,13 @@ export const ConnectionsIcon = () => (
   </Icon>
 );
 
+/// Two arrows chasing each other round a loop: what the team does again on its own, at the same time each day, week or month.
+export const RoutinesIcon = () => (
+  <Icon>
+    <path d="M3 8a5 5 0 018.5-3.5L13 6M13 3v3h-3M13 8a5 5 0 01-8.5 3.5L3 10M3 13v-3h3" />
+  </Icon>
+);
+
 /// A coin with a baht-like B: what the AI team spends on language models.
 export const SpendIcon = () => (
   <Icon>

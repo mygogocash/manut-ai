@@ -8,6 +8,7 @@ import {
   FlagIcon,
   MemoryIcon,
   PeopleIcon,
+  RoutinesIcon,
   ShopsIcon,
   SpendIcon,
   StoreIcon,
@@ -26,6 +27,7 @@ import { forgetOperatorKey, readOperatorKey, saveOperatorKey } from "./operatorK
 import { PaymentsTab } from "./PaymentsTab";
 import { PeopleView } from "./PeopleView";
 import { QuestionsTab } from "./QuestionsTab";
+import { RoutinesView } from "./RoutinesView";
 import { ShopDataTab } from "./ShopDataTab";
 import { ShopsView, type ShopPage } from "./ShopsView";
 import { useLoad } from "./useLoad";
@@ -42,6 +44,7 @@ import {
   newShopWords,
   peopleWords,
   questionsWords,
+  routinesWords,
   shopDataWords,
   shopsWords,
 } from "./words";
@@ -56,15 +59,18 @@ import {
 /// one shop, and is where an operator invites, removes and sets cover on the owner's word. The Model spend page reads one
 /// shop's model spend for a month against its monthly cap, and sets or clears the cap. The Connections page reads one shop's site
 /// sign-ins and outposts, so a sign-in the site refused or an outpost that is asleep is seen, and is where an operator removes a
-/// sign-in or an outpost, changes who may use a sign-in, or gives an outpost a new credential.
+/// sign-in or an outpost, changes who may use a sign-in, or gives an outpost a new credential. The Routines page, beside it, reads
+/// what the team does for one shop on its own schedule, with each routine's next run and how its last run ended, and is where an
+/// operator pauses, resumes or removes a routine, or pauses everyone and resumes: until the owner's account is linked, a pilot
+/// shop's routines are the operator's.
 
 export const REFRESH_MS = 15000;
 
 /// `questions` is a shop's first week, for a shop made from a template.
 type Tab = "messages" | "payments" | "data" | "questions";
 /// What the main column shows: the chosen shop, every shop at a glance, the Pilot gate across all of them, or one shop's
-/// audit log, memory, drafts, people, model spend or connections.
-type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model" | "connections";
+/// audit log, memory, drafts, people, model spend, connections or routines.
+type Page = "overview" | "shop" | "gate" | "audit" | "memory" | "drafts" | "people" | "model" | "connections" | "routines";
 
 export function OpsConsole() {
   const { api, mode } = useApiSetup();
@@ -237,6 +243,16 @@ export function OpsConsole() {
               <ConnectionsIcon />
               <span style={{ flex: 1, minWidth: 0 }}>{connectionsWords.nav}</span>
             </button>
+            <button
+              type="button"
+              className="nav"
+              style={{ width: "100%" }}
+              aria-current={page === "routines" ? "page" : undefined}
+              onClick={() => setPage("routines")}
+            >
+              <RoutinesIcon />
+              <span style={{ flex: 1, minWidth: 0 }}>{routinesWords.nav}</span>
+            </button>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 10px 4px" }}>
               <span className="mut" style={{ flex: 1, fontSize: 12 }} id="shops-label">
                 Shops
@@ -328,6 +344,8 @@ export function OpsConsole() {
           <ModelSpendView shops={shopList} tenant={tenant} onForget={forget} />
         ) : page === "connections" ? (
           <ConnectionsView shops={shopList} tenant={tenant} onForget={forget} />
+        ) : page === "routines" ? (
+          <RoutinesView shops={shopList} tenant={tenant} onForget={forget} />
         ) : (
           <>
             <div className="top">

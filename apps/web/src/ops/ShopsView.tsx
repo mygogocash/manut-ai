@@ -12,9 +12,9 @@ import { errorText, gateWords, isAuthError, modelSpendWords, shopsWords, spendLe
 /// table, and is never left out in silence. Each row links to the shop's other pages: the page opens on that shop.
 
 /// The pages a shop's row opens, as the console names them. `shop` is the shop's own messages page.
-export type ShopPage = "shop" | "drafts" | "audit" | "memory" | "people" | "model" | "connections";
+export type ShopPage = "shop" | "drafts" | "audit" | "memory" | "people" | "model" | "connections" | "routines";
 
-const OPEN_ORDER: readonly ShopPage[] = ["shop", "drafts", "audit", "memory", "people", "model", "connections"];
+const OPEN_ORDER: readonly ShopPage[] = ["shop", "drafts", "audit", "memory", "people", "model", "connections", "routines"];
 
 /// What reading one thing came to: its answer, or why there is none.
 type Reading<T> = { ok: true; value: T } | { ok: false; error: unknown };

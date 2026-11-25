@@ -22,7 +22,10 @@ import {
   type OutpostRemoval,
   type People,
   type PilotGate,
+  type Routine,
+  type RoutineRun,
   type Shop,
+  type Team,
   type WorkerDraft,
   type WorkerJobEnding,
 } from "../api";
@@ -1877,6 +1880,251 @@ export function connectionsErrorText(error: unknown, what: "sign-ins" | "outpost
   return errorText(error);
 }
 
+/// The Routines page: what Buddy's team does for one shop on its own schedule (docs/pilot-api.md, "Routines"), as the operator's routes
+/// list it: the team's state, and each routine with whose job it is, when it runs, its next run in Bangkok time or why there is none,
+/// whether it asks the owner first, the template it came from and how its last run ended. A routine only ever makes a draft for the
+/// owner to read, so nothing on the page sends anything; the console makes no routine yet. An action that changes something asks
+/// first, in its row, and the question names exactly what will happen. Sentences that hold a name or a time are functions.
+export const routinesWords = {
+  nav: "Routines",
+  title: "Routines",
+  intro:
+    "What Buddy's team does for this shop on its own schedule, with each routine's next run in Bangkok time. A routine only makes a draft for the owner to read: nothing it does is sent, posted or paid without the owner's yes.",
+  /// The one line that says what this page cannot do, and how it is done.
+  makeNote:
+    "This console does not make routines yet. An operator makes one with POST /v1/admin/routines, and a shop made from a template starts with the template's.",
+  shopLabel: "Shop",
+  refresh: "Refresh",
+  tryAgain: "Try again",
+  anotherKey: "Enter another key",
+  loading: "Loading routines",
+  noShops: "No shops yet.",
+  /// The routes' own refusals, and the page's reading of them. The shop is not one of the pilot's: nothing is read or changed for it.
+  notAShop: "This is not one of the pilot's shops, so it has no routines. It may have been deleted.",
+  shopUnavailable: "The API could not read this shop's record, so it cannot say whether it is a pilot shop. Nothing was changed. Try again.",
+  readUnavailable: "The API could not read this shop's routines, so they are not shown. Try again.",
+  changeUnavailable: "The API could not reach this shop's routines, so nothing may have changed. Press Refresh to check, then try again.",
+  routineGone: "That routine is already gone. The list was refreshed.",
+  removing: "Removing",
+
+  // The shop's team
+  teamTitle: (shop: string) => `Team for ${shop}`,
+  teamLoading: "Loading the shop's team",
+  teamOn: "Everyone is on.",
+  /// Since when everyone has been paused, and what that stops. A time that is not one is left out.
+  teamPaused: (since: string | null, now: number = Date.now()) => `Everyone is paused${since ? sinceText(since, now) : ""}.`,
+  teamPausedEffect:
+    "Nothing new starts for this shop: no routine runs, and a job an operator starts, or the owner's ask for a month of the books, is refused.",
+  /// Which members are on. A shop made from a template may have fewer than all three, and a routine that is one member's job does not
+  /// run while that member is off.
+  membersOn: (members: readonly string[]) => {
+    const off = (["nam", "pim", "ton"] as const).filter((member) => !members.includes(member));
+    const names = (list: readonly string[]) => listOf(list.map(memberName));
+    const on = members.length === 0 ? "Nobody is on." : `${names(members)} ${members.length === 1 ? "is" : "are"} on.`;
+    if (off.length === 0) return on;
+    return `${on} ${names(off)} ${off.length === 1 ? "is" : "are"} off, because the shop's template turned on fewer members, so a routine that is their job does not run.`;
+  },
+  pauseTeamButton: "Pause everyone",
+  pauseTeamLabel: (shop: string) => `Pause everyone for ${shop}`,
+  resumeTeamButton: "Resume",
+  resumeTeamLabel: (shop: string) => `Resume the team for ${shop}`,
+
+  // Pausing and resuming the team
+  pauseTeamTitle: (shop: string) => `Pause everyone for ${shop}?`,
+  pauseTeamEffect:
+    "Nothing new starts for this shop while everyone is paused: no routine runs, and a job an operator starts, or the owner's ask for a month of the books, is refused. A job already started is not stopped.",
+  pauseTeamNote: "Each routine keeps its own setting, so Resume puts everything back as it was. A run that would have started is written down as skipped.",
+  pauseTeamYes: "Pause everyone",
+  pauseTeamNo: "Keep everyone on",
+  pausing: "Pausing",
+  teamPausedDone: (shop: string) => `Paused everyone for ${shop}. Nothing new starts until the team is resumed.`,
+  resumeTeamTitle: (shop: string) => `Resume the team for ${shop}?`,
+  resumeTeamEffect:
+    "Routines that are on run again from their next time, and a job can be started again. A run that was skipped while everyone was paused is not made up.",
+  resumeTeamNote: "A routine that is paused itself stays paused.",
+  resumeTeamYes: "Resume everyone",
+  resumeTeamNo: "Keep everyone paused",
+  resuming: "Resuming",
+  teamResumedDone: (shop: string) => `Resumed the team for ${shop}. Routines that are on run again from their next time.`,
+
+  // The shop's routines
+  routinesTitle: (shop: string) => `Routines for ${shop}`,
+  routinesLabel: (shop: string) => `${shop}'s routines`,
+  routinesCount: (total: number, paused: number) => `${countOf(total, "routine", "routines")}${paused > 0 ? `, ${paused} paused` : ""}`,
+  routinesLoading: "Loading the shop's routines",
+  routinesEmpty:
+    "No routines yet. A shop made from a template starts with the template's routines, each paused. Any other is made by an operator with POST /v1/admin/routines.",
+  doneBy: (member: string) => `Done by ${memberName(member)}.`,
+  /// The trigger in the API's own words. A routine that runs in another zone than the shop's says which, since its times are that zone's.
+  when: (routine: Pick<Routine, "when" | "timeZone">) => {
+    const words = routine.when || "Its timing could not be read.";
+    return routine.timeZone === "Asia/Bangkok" ? words : `${words} (${routine.timeZone})`;
+  },
+  /// Whether it asks the owner first, which the API forces for a reply, a send, a payment and a deletion.
+  asksFirst: (asks: boolean) => (asks ? "Asks the owner first." : "Does not ask first: it only makes a draft for the owner to read."),
+  /// The template it came from, by name when the console knows it, and as the API sent it when not.
+  fromTemplate: (name: string) => `Made from the ${name} template.`,
+  neverRan: "Has not run yet.",
+  /// When the run was meant for, which is never when its alarm came.
+  lastRun: (instant: string, now: number = Date.now()) =>
+    Number.isNaN(Date.parse(instant)) ? "Last run." : `Last run was meant for ${meantFor(instant, now)}.`,
+  pauseButton: "Pause",
+  resumeButton: "Resume",
+  removeButton: "Remove",
+  pauseLabel: (name: string) => `Pause the routine ${name}`,
+  resumeLabel: (name: string) => `Resume the routine ${name}`,
+  removeLabel: (name: string) => `Remove the routine ${name}`,
+
+  // Pausing a routine
+  pauseTitle: (name: string) => `Pause ${name}?`,
+  pauseEffect: (routine: Pick<Routine, "name" | "waitsFor">) =>
+    `${routine.name} stops running at once, and nothing else about it changes.${routine.waitsFor ? "" : " Each time it would have run, a skipped run is written down, saying the routine was paused."}`,
+  pauseYes: (name: string) => `Pause ${name}`,
+  pauseNo: "Keep it on",
+  paused: (name: string) => `Paused ${name}. It will not run until it is resumed.`,
+
+  // Resuming a routine
+  resumeTitle: (name: string) => `Turn ${name} back on?`,
+  /// What resuming does, and what will still keep it from running, said before anything is sent.
+  resumeEffect: (routine: Pick<Routine, "name" | "member" | "waitsFor">, team: Team) => {
+    const still = noNextReasons({ paused: false, member: routine.member, ...(routine.waitsFor ? { waitsFor: routine.waitsFor } : {}) }, team);
+    return `${routine.name} runs again from its next time, which is worked out from now. A run it skipped while it was paused is not made up.${still.length > 0 ? ` It will still not run: ${listOf(still)}.` : ""}`;
+  },
+  resumeNote: "Each run still reads the switches and the owner's consent first.",
+  resumeYes: (name: string) => `Resume ${name}`,
+  resumeNo: "Keep it paused",
+  /// What the API answered: the routine's next run, worked out from now, or why it has none.
+  resumed: (routine: Routine, team: Team, now: number = Date.now()) =>
+    `Resumed ${routine.name}. ${nextRunText(routine, team, now)}`,
+
+  // Removing a routine
+  removeTitle: (name: string) => `Remove ${name}?`,
+  removeEffect: (name: string) => `${name}, its runs and its clock go at once, and it will not run again. The audit log keeps how each of its runs ended.`,
+  removeNote: "This cannot be undone. To have it again, an operator makes it again with POST /v1/admin/routines.",
+  removeYes: (name: string) => `Remove ${name}`,
+  removeNo: "Keep it",
+  removed: (name: string) => `Removed ${name}. Its runs and its clock are gone.`,
+} as const;
+
+/// "since 10:00 today" or "since 22 November at 10:00": since when the team has been paused.
+function sinceText(iso: string, now: number): string {
+  if (Number.isNaN(Date.parse(iso))) return "";
+  return dayOffset(iso, now) === 0 ? ` since ${formatClock(iso)} today` : ` since ${formatDate(iso)} at ${formatClock(iso)}`;
+}
+
+/// "10:00 today" or "23 November at 10:00": the instant a run was meant for.
+function meantFor(iso: string, now: number): string {
+  return dayOffset(iso, now) === 0 ? `${formatClock(iso)} today` : `${formatDate(iso)} at ${formatClock(iso)}`;
+}
+
+/// Why a routine has no next run, in the order the API decides it (`routineView` in apps/api/src/routine-setup.ts): it is paused,
+/// everyone is paused, its member is not on the team, or it waits on a stock feed, which Manut AI does not have yet. All that apply
+/// are said, since mending one leaves the others.
+export function noNextReasons(routine: Pick<Routine, "paused" | "member" | "waitsFor">, team: Team): string[] {
+  const reasons: string[] = [];
+  if (routine.paused) reasons.push("this routine is paused");
+  if (team.paused) reasons.push("everyone is paused");
+  if (!team.members.includes(routine.member)) reasons.push(`${memberName(routine.member)} is not on this shop's team`);
+  if (routine.waitsFor === "stock_feed") reasons.push("it waits for a stock feed, which Manut AI does not have yet");
+  return reasons;
+}
+
+/// When a routine runs next, in Bangkok time, or why it does not: "Next run at 08:00." "No next run: this routine is paused." A
+/// routine with no next run and no reason the API gives is said so, never left blank.
+export function nextRunText(routine: Pick<Routine, "next" | "paused" | "member" | "waitsFor">, team: Team, now: number = Date.now()): string {
+  if (routine.next !== null && !Number.isNaN(Date.parse(routine.next))) return `Next run ${whenText(routine.next, now)}.`;
+  const reasons = noNextReasons(routine, team);
+  return reasons.length > 0 ? `No next run: ${listOf(reasons)}.` : "No next run is set.";
+}
+
+/// Whether a routine is on, as a tag.
+export function routineTag(paused: boolean): { label: string; className: string } {
+  return paused ? { label: "Paused", className: "tag warn" } : { label: "On", className: "tag ok" };
+}
+
+/// Whether the team is on, as a tag.
+export function teamTag(paused: boolean): { label: string; className: string } {
+  return paused ? { label: "Paused", className: "tag warn" } : { label: "On", className: "tag ok" };
+}
+
+/// How a run ended, as a tag. A status a newer API sends is shown as it is.
+export function runTag(status: string): { label: string; className: string } {
+  switch (status) {
+    case "done":
+      return { label: "Done", className: "tag ok" };
+    case "failed":
+      return { label: "Failed", className: "tag err" };
+    case "skipped":
+      return { label: "Skipped", className: "tag" };
+    case "missed":
+      return { label: "Missed", className: "tag warn" };
+    case "running":
+      return { label: "Running", className: "tag run" };
+    default:
+      return { label: status, className: "tag" };
+  }
+}
+
+/// The words for the codes only a routine's run says: what the runner could not read, and the job's refusals. Every other code is the
+/// audit log's or the Drafts page's, which say why a run was held (`routine_paused`, `team_paused`, `member_off`, `not_counted_in`),
+/// refused by a switch or by consent (`routines_off`, `cloud_off`, `consent_required`), had nothing to do (`nothing_to_answer`) or
+/// failed. A code none of them knows is shown as it is.
+const RUN_REASONS: Readonly<Record<string, string>> = {
+  messages_unavailable: "The shop's customer messages could not be read.",
+  message_unavailable: "The customer message could not be read.",
+  message_not_found: "The customer message was not found.",
+  shop_unavailable: "The shop's record could not be read.",
+  shop_not_found: "The shop was not found.",
+  failed: "The job failed without a reason it could name.",
+};
+
+/// Why a run ended as it did, in plain words.
+export function routineReasonText(reason: string): string {
+  return Object.hasOwn(RUN_REASONS, reason) ? RUN_REASONS[reason]! : jobReasonText(reason);
+}
+
+/// What happened to a routine's latest run, said after its tag. A run says how it ended and, when it carries one, why: a skipped run is
+/// never left without its reason, and a missed one, which never has one, says what makes a run missed.
+export function runText(run: Pick<RoutineRun, "status" | "reason">): string {
+  if (typeof run.reason === "string" && run.reason !== "") return routineReasonText(run.reason);
+  switch (run.status) {
+    case "done":
+      return "It made a draft for the owner to read, on the Drafts page.";
+    case "missed":
+      return "Its alarm came more than 15 minutes late, so it was not run.";
+    case "running":
+      return "It started and has not said how it ended.";
+    case "failed":
+      return routineReasonText("unknown");
+    case "skipped":
+      return "It was not run.";
+    default:
+      return "";
+  }
+}
+
+/// The routine that was changed was removed by someone else: the list this page shows is out of date, and is read again.
+export const ROUTINES_MOVED_ON: ReadonlySet<string> = new Set(["not_found"]);
+
+/// What went wrong with reading or changing a shop's routines, in the page's words, and the console's usual words for the rest. A 503
+/// `routines_unavailable` on a change does not say whether it was made, so the words say so; `shop_unavailable` is raised before
+/// anything is written, so they say nothing was changed. A refusal that says the list moved on is followed by the page reading it again.
+export function routinesErrorText(error: unknown, what: "read" | "change"): string {
+  if (error instanceof ApiError && !isAuthError(error)) {
+    switch (error.code) {
+      case "routines_unavailable":
+        return what === "read" ? routinesWords.readUnavailable : routinesWords.changeUnavailable;
+      case "shop_unavailable":
+        return routinesWords.shopUnavailable;
+      case "shop_not_found":
+        return routinesWords.notAShop;
+      case "not_found":
+        return routinesWords.routineGone;
+    }
+  }
+  return errorText(error);
+}
+
 /// The Shops overview: every pilot shop on one page, from the routes the console already reads (the shop list, the pilot
 /// gate, each shop's model spend and its audit log), with a link to each of the shop's other pages. A part that could not
 /// be read is said so, with the shop it belongs to, and is never left out in silence.
@@ -1915,7 +2163,7 @@ export const shopsWords = {
   /// The pages a shop's row opens, in the order its links are laid out.
   open: {
     shop: "Messages", drafts: "Drafts", audit: "Audit", memory: "Memory", people: "People", model: "Model spend",
-    connections: "Connections",
+    connections: "Connections", routines: "Routines",
   },
   openLabel: (page: string, shop: string) => `${page} for ${shop}`,
 } as const;
