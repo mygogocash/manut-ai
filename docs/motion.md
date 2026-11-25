@@ -66,7 +66,7 @@ Decided once in `src/lib/firstPaint.ts`; a page only names what it has, with att
   four, counted per list). Never again: not on a re-render, a refetch, a filter, a sort, a row added later, or coming back
   to the page. The key is spent for the session, and the class comes off after 0.8 s so nothing is left to play twice.
   Home, Needs you, Team, History, Artifacts, Customize (Memory and routines), the activity log, a job, Automations, People
-  and the menu's Recent chats use it. A new ask appears and stays still.
+  and the menu's Recent chats use it. A row that IS an ask or a decision waiting (Home's and Needs you's rows, marked `data-ask`) does not rise: it fades where it stands (`.mo-fade`, Rise with no distance), so its transform is the same at every frame (asserted in `e2e/motion-lists.spec.ts`). A new ask appears and stays still.
 - **The body fades in once** (the Arrive move with no distance) under a header that does not move (`MenuPageFrame`).
 - **Rows that move.** A row pinned, snoozed, settled or removed slides to its place on the plain ease in the Switch's time
   (a small FLIP on the Web Animations API, no dependency): Team, History and the menu's Recent chats. A change of filter or

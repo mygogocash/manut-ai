@@ -78,7 +78,7 @@ export function NeedsView({ rows }: { rows: NeedRow[] }) {
         {rows.length ? (
           <ul className="rows" aria-label={t("needs.list")} data-arrive="needs" data-arrive-rows=":scope > li">
             {rows.map((r, i) => (
-              <li key={r.key} className="tli">
+              <li key={r.key} className="tli" data-ask>
                 <div className="rowl trow need" data-testid="needs-row">
                   <button type="button" className="rowmain" onClick={r.open} aria-describedby={`needs-ask-${i}`} data-testid="needs-open">
                     {r.face}

@@ -9,6 +9,24 @@ import { join } from "node:path";
 import { usePlatform } from "./term-find-helpers";
 import { chatOpen } from "./start";
 
+const MOCK = Number(process.env.MANUT_MOCK_PORT || 5308);
+async function mock(op: string, params: Record<string, unknown> = {}): Promise<any> {
+  const ws = new WebSocket(`ws://127.0.0.1:${MOCK}/?token=e2e`);
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("mock websocket error"));
+  });
+  const reply = await new Promise<any>((res) => {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      if (msg.id === "ml1") res(msg);
+    };
+    ws.send(JSON.stringify({ id: "ml1", op, ...params }));
+  });
+  ws.close();
+  return reply.result;
+}
+
 const DIR = process.env.LIST_SHOTS || "";
 
 type Moment = "start" | "middle" | "end";
@@ -35,7 +53,9 @@ const opacity = (row: Locator) => row.evaluate((el) => Number(getComputedStyle(e
 const still = (page: Page) =>
   page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity), undefined, { polling: "raf" });
 
-async function begin(page: Page, theme: "dark" | "light", reduced: boolean) {
+async function begin(page: Page, theme: "dark" | "light", reduced: boolean, seed?: () => Promise<void>) {
+  await mock("mock.reset");
+  await seed?.();
   if (DIR) mkdirSync(DIR, { recursive: true });
   await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
   await page.addInitScript((t) => localStorage.setItem("manut.theme", t), theme);
@@ -116,5 +136,83 @@ test.describe("lists arrive once", () => {
     await expect(rows.first()).toBeVisible();
     await expect.poll(() => arrivals(page.getByTestId("page-team")), { timeout: 300, intervals: [16, 16, 32, 50] }).toBe(0);
     expect(await opacity(rows.first())).toBe(1);
+  });
+
+  /** Start, middle and end frames of `root` held still, each saved when LIST_SHOTS is set; returns each row's vertical
+   *  translation at each moment, so a test can say whether a row moved. */
+  async function frames(page: Page, rootId: string, rows: string, name: string): Promise<Record<Moment, { opacity: number; y: number }[]>> {
+    const root = page.getByTestId(rootId);
+    const out = {} as Record<Moment, { opacity: number; y: number }[]>;
+    for (const at of ["start", "middle", "end"] as const) {
+      await hold(root, at);
+      out[at] = await root.locator(rows).evaluateAll((els) =>
+        els.map((el) => {
+          const cs = getComputedStyle(el);
+          return { opacity: Number(cs.opacity), y: new DOMMatrix(cs.transform === "none" ? undefined : cs.transform).m42 };
+        }),
+      );
+      if (DIR) await page.screenshot({ path: join(DIR, `${name}-${at}.png`) });
+    }
+    await release(root);
+    return out;
+  }
+
+  test("an ask fades where it stands: Home's and Needs you's rows never move", async ({ page }) => {
+    await begin(page, "light", false, async () => {
+      await mock("mock.ask", { bot: "friren", kind: "approval" });
+    });
+    await page.getByTestId("menu-new").click();
+    await expect(page.getByTestId("home-need").first()).toBeVisible();
+    const home = await frames(page, "page-home", '[data-testid="home-need"]', "home-asks-light");
+    expect(home.start.length).toBeGreaterThan(0);
+    for (const at of ["start", "middle", "end"] as const) for (const r of home[at]) expect(r.y, `a Home ask never moves (${at})`).toBe(0);
+    expect(home.start[0]!.opacity, "it starts out of sight").toBeLessThan(0.1);
+    expect(home.end[0]!.opacity).toBe(1);
+    await still(page);
+    await page.getByTestId("menu-needs").click();
+    await expect(page.getByTestId("needs-row").first()).toBeVisible();
+    const needs = await frames(page, "page-needs", 'li.tli', "needs-light");
+    for (const at of ["start", "middle", "end"] as const) for (const r of needs[at]) expect(r.y, `a Needs you row never moves (${at})`).toBe(0);
+    expect(needs.end[0]!.opacity).toBe(1);
+  });
+
+  test("Home with nothing waiting, and History, rise in order", async ({ page }) => {
+    await begin(page, "light", false, async () => {
+      await mock("mock.threads", { bot: "kami", threads: [{ title: "Late parcels" }, { title: "The 12.12 teaser" }, { title: "Check the books" }] });
+    });
+    await page.getByTestId("menu-new").click();
+    await expect(page.getByTestId("page-home")).toBeVisible();
+    const home = await frames(page, "page-home", ".rows > li", "home-none-light");
+    if (home.start.length) for (const r of home.start) expect(r.opacity).toBeLessThan(0.1);
+    await still(page);
+    await page.getByTestId("menu-history").click();
+    await expect(page.getByTestId("page-history")).toBeVisible();
+    await expect(page.getByTestId("history-row").first()).toBeVisible();
+    const hist = await frames(page, "page-history", ".hist-li", "history-light");
+    expect(hist.start.length).toBeGreaterThan(0);
+    for (const r of hist.start) expect(r.opacity).toBeLessThan(0.1);
+    expect(hist.end[0]!.opacity).toBe(1);
+  });
+
+  test("the menu's Recent chats rise at start", async ({ page }) => {
+    await mock("mock.reset");
+    await mock("mock.threads", { bot: "kami", threads: [{ title: "Late parcels" }, { title: "The 12.12 teaser" }, { title: "Check the books" }] });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await usePlatform(page);
+    await page.goto("/");
+    await page.locator(".sb-recent .rec-li.mo-rise").first().waitFor({ state: "attached" });
+    const f = await frames(page, "sidebar", ".sb-recent .rec-li", "recent-light");
+    expect(f.start.length).toBeGreaterThan(0);
+    expect(f.start[0]!.opacity).toBeLessThan(0.1);
+    expect(f.end[0]!.opacity).toBe(1);
+  });
+
+  test("Needs you in dark", async ({ page }) => {
+    await begin(page, "dark", false, async () => {
+      await mock("mock.ask", { bot: "friren", kind: "approval" });
+    });
+    await page.getByTestId("menu-needs").click();
+    await expect(page.getByTestId("needs-row").first()).toBeVisible();
+    await frames(page, "page-needs", 'li.tli', "needs-dark");
   });
 });

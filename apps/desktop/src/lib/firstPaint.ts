@@ -6,6 +6,7 @@
 // React, and a view stays a plain function of its props):
 //   data-arrive="<key>"      a container whose rows rise; `<key>` is spent for the session once its rows have shown
 //   data-arrive-rows="<css>" which descendants are the rows (a selector relative to the container)
+//   data-ask                 on a row that IS an ask or a decision waiting: it fades where it stands, never moves
 //   data-arrive-body="<key>" a page's body, which fades in once (the page's header stays still)
 //   data-flip-list           a container whose `data-flip="<key>"` children slide when they are reordered
 //   data-flip-scope="<s>"    a change of scope (a filter, a search) is another list, not a row moving: no slide
@@ -62,12 +63,13 @@ function arrive(): void {
     const steps = stepsOf(rows.map((r) => r.parentElement));
     rows.forEach((r, i) => {
       r.style.setProperty("--i", String(steps[i]));
-      r.classList.add("mo-rise");
+      // An ask or a decision waiting fades where it stands; every other row rises.
+      r.classList.add(r.hasAttribute("data-ask") ? "mo-fade" : "mo-rise");
     });
     setTimeout(
       () =>
         rows.forEach((r) => {
-          r.classList.remove("mo-rise");
+          r.classList.remove("mo-rise", "mo-fade");
           r.style.removeProperty("--i");
         }),
       ARRIVING_MS,

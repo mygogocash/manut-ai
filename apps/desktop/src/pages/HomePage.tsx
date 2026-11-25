@@ -233,7 +233,7 @@ export function HomeView(p: HomeViewProps) {
             <ul className="rows">
               {p.asks.map((r, i) =>
                 r.settled !== null ? (
-                  <li key={r.key} className="rowl" data-testid="home-settled">
+                  <li key={r.key} className="rowl" data-ask data-testid="home-settled">
                     <span className="tag ok">
                       <TickGlyph />
                       {r.settled}
@@ -249,7 +249,7 @@ export function HomeView(p: HomeViewProps) {
                     </span>
                   </li>
                 ) : (
-                  <li key={r.key} className="rowl" data-testid="home-need">
+                  <li key={r.key} className="rowl" data-ask data-testid="home-need">
                     {r.face}
                     <span className="grow">
                       <span className="l1" id={`home-need-${i}`}>
