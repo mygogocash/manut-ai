@@ -10,6 +10,8 @@ import "./home.css";
 import { t } from "../i18n";
 import { can } from "../runtime";
 import { holdImeEnter } from "../lib/ime";
+import type { ShopRow } from "../lib/protocol";
+import { helpedShop } from "../lib/shops";
 import { askFrom, getStore, isSessionChat, selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type Actions, type AppState, type Ask } from "../state/store";
 import { ALLOW_LABEL, settleApproval } from "../chat/cards/respond";
 import { useNow } from "../elsewhere/useNow";
@@ -104,6 +106,9 @@ export interface HomeViewProps {
   /** the newest jobs the runtime has, each opening its page; the part is not drawn without any */
   recent?: RecentRow[];
   onSeeHistory?: () => void;
+  /** The shop shown, when the person only helps there: Home says whose shop it is, and in place of who is working (the team is
+   *  the owner's, and a helper's session is not told) says that only the owner sees it. */
+  helped?: Pick<ShopRow, "name" | "owner"> | null;
 }
 
 /** The canvas's send arrow, routines calendar and settled tick, on its 16-unit grid (menuPages.css gives `.ic`). */
@@ -156,7 +161,7 @@ export function HomeView(p: HomeViewProps) {
             the shop here too, once the first-run setup took it, so the person sees the app is set up for their shop. */}
         {p.shop && (
           <p className="for" data-testid="home-shop">
-            {t("home.forShop", { shop: p.shop })}
+            {p.helped?.owner ? t("home.forHelped", { shop: p.shop, owner: p.helped.owner }) : t("home.forShop", { shop: p.shop })}
           </p>
         )}
         <form
@@ -289,7 +294,11 @@ export function HomeView(p: HomeViewProps) {
               {t("home.seeTeam")}
             </button>
           </div>
-          {p.working.length ? (
+          {p.helped ? (
+            <p className="none" data-testid="home-owners">
+              {t("owners.working", { owner: p.helped.owner || t("owners.theOwner"), shop: p.helped.name || t("shops.aShop") })}
+            </p>
+          ) : p.working.length ? (
             <ul className="rows">
               {p.working.map((w) => (
                 <li key={w.name}>
@@ -409,6 +418,7 @@ export function HomePage() {
   const now = useNow(asks.length > 0 || listed.some((b) => b.running || !!s.chats[b.name]?.turn), 5_000);
   const route = askRoute(mode, home, kit);
   const jobs = useJobs();
+  const helped = helpedShop(s.shops);
 
   const submit = async () => {
     const words = text.trim();
@@ -464,8 +474,10 @@ export function HomePage() {
       onSeeAll={() => s.openPage("needs")}
       working={workingRows(s, now)}
       onSeeTeam={() => s.openPage("team")}
-      automations={can("automations") ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
+      // A shop the person only helps at has no routines they may see, so no count of them is offered.
+      automations={can("automations") && !helped ? { count: s.automations?.length ?? 0, open: () => s.openAutomations() } : undefined}
       shop={viewedShopName(s)}
+      helped={helped}
       recent={recentRows(jobs, { nameOf: (b) => s.bots.find((x) => x.name === b)?.display_name ?? b, nowMs: now, open: (id) => s.openJob(id) })}
       onSeeHistory={() => s.openPage("history")}
     />

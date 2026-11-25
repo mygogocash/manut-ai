@@ -2741,6 +2741,17 @@ export const en = {
   "shops.left.unlinked": "You no longer have access to {shop}. Your account was unlinked from it on {date}",
   "shops.left.unlinkedNoDate": "You no longer have access to {shop}. Your account was unlinked from it",
   "shops.left.gone": "{shop} is no longer one of your shops",
+  // a shop the person only helps at: each page that is the owner's says so, in place of a list a helper's session cannot read
+  // (src/lib/shops.ts `ownersWords`, src/pages/OwnersOnly.tsx; docs/people.md, "The helper's session")
+  "owners.title": "Only {owner} sees this",
+  "owners.theOwner": "the owner",
+  "owners.team": "You help at {shop}. Its team, what each member is doing and Pause everyone are {owner}'s. What waits for you there is in Needs you.",
+  "owners.history": "You help at {shop}. Its past work is {owner}'s to see. What waits for you there is in Needs you.",
+  "owners.activity": "You help at {shop}. Its activity log is {owner}'s to see. What waits for you there is in Needs you.",
+  "owners.automations": "You help at {shop}. Its routines are {owner}'s to see and change. What waits for you there is in Needs you.",
+  "owners.working": "Only {owner} sees who is working at {shop}.",
+  "owners.toNeeds": "Open Needs you",
+  "home.forHelped": "Helping {owner} at {shop}",
   // an ask from one of several shops: a note passed on with it, and a helper asking the owner (the People board)
   "card.passedBy": "Passed on by {name}",
   "card.passedByHelper": "Passed on by a helper",

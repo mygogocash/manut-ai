@@ -17,7 +17,7 @@ import "../sessions/sessions.css";
 import "./menu.css";
 import { t, type Key } from "../i18n";
 import type { ShopRow } from "../lib/protocol";
-import { leftWords } from "../lib/shops";
+import { helpedShop, leftWords } from "../lib/shops";
 import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type ShopsState } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
@@ -91,6 +91,7 @@ export function SideMenu({
   recent,
   settings,
   account = accountLabel(EMPTY_SHOP),
+  helping = false,
   shops,
   notice,
   onRow,
@@ -107,6 +108,8 @@ export function SideMenu({
   settings: boolean;
   /** who the account row names and the initial in its avatar (onboarding/shop.ts `accountLabel`); "You" by default */
   account?: { name: string; initial: string };
+  /** the shop the account row names is one the person only helps at: the row says "Helper" after it */
+  helping?: boolean;
   /** the person's shops, for the switcher at the end of the account row; it shows only with two or more */
   shops?: { list: readonly ShopRow[]; current: string | null; onSwitch: (id: string) => void };
   /** that the person's place in a shop ended, said above the account row until dismissed */
@@ -177,6 +180,13 @@ export function SideMenu({
               {account.initial}
             </span>
             <span className="acct-n">{account.name}</span>
+            {/* A shop the person only helps at is marked so on the row that names it, as the switcher marks it, so a helper
+                with one shop (and so no switcher) knows too. */}
+            {helping && (
+              <span className="acct-role" data-testid="acct-role">
+                {t("shops.helper")}
+              </span>
+            )}
             <span className="vh">, {t("nav.settings")}</span>
           </button>
           {shops && <ShopSwitcher list={shops.list} current={shops.current} onSwitch={shops.onSwitch} />}
@@ -217,6 +227,7 @@ export function Sidebar() {
       recent={recent}
       settings={s.ui.view === "settings"}
       account={accountLabel({ person: s.ui.shop.person, shop: viewedShopName(s) })}
+      helping={!!helpedShop(s.shops)}
       shops={{ list: s.shops.list.map((r) => ({ ...r, name: shopName(s, r) })), current: s.shops.current, onSwitch: (id) => void s.switchShop(id) }}
       notice={shopNotice(s.shops, s.dismissShopNotice)}
       onRow={go}

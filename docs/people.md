@@ -115,6 +115,11 @@ same signed-in identity, gives a new one.
   that arrives after the removal is refused before anything is read.
 - **What they approved stays.** The audit log names a helper by id, and the people record keeps the names of removed
   helpers, so the activity log can still show "Mint".
+- **On the desktop** (`docs/runtime-adapter.md`, "A shop the person helps at"; 25 Nov 2026). The helper's app opens the shop
+  with this session and sends it only those routes: what waits, how an ask that left was settled, the live feed's ticket, a
+  decision, a note passed on, and the end of the session. The pages that are the owner's (the team and Pause everyone, past
+  work, the activity log, the routines, what the team knows, the connections, the people) say whose they are and read
+  nothing.
 
 ## Invites
 
