@@ -249,3 +249,45 @@
   align-items: center;
   gap: 6px;
 }
+
+/* The desktop's own (item 76): a lane's quiet "more" button, its pin mark, a settled lane's small and quiet type, and the line that
+   opens the snoozed and archived lanes. The button shows on hover, on focus and while its menu is open. */
+.kitp .lane {
+  position: relative;
+}
+.kitp .lane .lane-more {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.kitp .lane:hover .lane-more,
+.kitp .lane .lane-more:focus-visible,
+.kitp .lane.menu-open .lane-more {
+  opacity: 1;
+}
+.kitp .lane .lane-pin {
+  color: var(--aui-muted);
+  font-size: 9px;
+}
+.kitp .lane.settled {
+  opacity: 0.7;
+}
+.kitp .lane.settled .rowl {
+  min-height: 32px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.kitp .lane-away {
+  align-self: flex-start;
+  margin: 4px 10px;
+}
+.kitp .lane-away-word {
+  display: block;
+  padding: 4px 10px 0;
+  font-size: 12px;
+}

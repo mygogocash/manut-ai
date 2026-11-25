@@ -20,7 +20,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The lane's own branch (`kit/promptpay-qr`): "Kit works on a separate branch. Nothing is live." | Has (this branch): a chat session gets a branch of its own as it starts, named from its first message and made from the branch the developer's folder is on, checked out in a folder of its own (a git worktree under `~/.manut/lanes`), where its agent works. Several lanes work at once, none touching another's files or the developer's folder, whose branch, index, stash and HEAD never change because of a lane. The row and the composer's foot show the branch. Nothing is pushed or merged from here. See [Where a lane works](#where-a-lane-works) | `code/laneBranch.ts`, `src-tauri/src/lane.rs`, `sessions/sessions.ts` (`startLane`) |
 | "Checked: 14 tests passed" | Has (this branch): read from the test run's output (vitest, jest, node's own runner, pytest, `go test`, `cargo test`, mocha, Playwright Test and Python's `unittest`). A run that cannot be read is Not confirmed, never Checked | `code/testRun.ts`, `code/lane.ts` |
 | Revert this turn | Has: Rewind, on the line under the box beside the branch, puts back the files and the chat of a kept turn; the newest is picked first. Claude Code and Codex only. The agent's own Edit on the last message still takes back the chat only, and then the lane says the files stay as they are | `sessions/RewindPanel.tsx`, `sessions/rewind.ts`, `src-tauri/src/turn_files.rs`, `code/lane.ts` |
-| Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one | `tasks/` |
+| Open pull request | Part: Tasks lists pull requests through `gh`; a lane cannot open one. A lane whose branch has an open pull request shows "Pull request #12 (Open)" quietly under its title, and pressing it opens Tasks on that repository with the request selected (item 76, [Pinned, snoozed, settled and archived](#pinned-snoozed-settled-and-archived)) | `tasks/`, `tasks/pulls.ts`, `code/Lanes.tsx` |
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx` |
@@ -234,6 +234,60 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 
 `newMenu.test.ts` pins which agents each part lists, `ChatWay.test.tsx` draws the part and presses a row, `lanes.test.ts` takes a
 pick through to the lane, and `e2e/kit-lanes.spec.ts`, `terminals.spec.ts` and `integrate.spec.ts` walk the menu in a browser.
+
+### Pinned, snoozed, settled and archived
+
+Item 76 (the owner, 25 Nov, from T3 Code's Labs). The same four choices are in the menu of a row, never as buttons on every row: a
+quiet "more" button that shows on hover and focus, and a right-click. A chat (Buddy's threads: Recent in the sidebar and History) and a
+lane (the Lanes band) have Pin, Snooze, Done for now and Archive; a terminal session has Pin and Done for now, since it has no
+conversation to put away. A row is in one place: each choice replaces the others. The rules are `sidebar/rows.ts`; the menu is
+`sidebar/RowMenu.tsx`.
+
+- **Pinned** rows sit on top of their list in the order they were pinned (first pinned on top), with a small mark. In Recent the
+  pinned do not count against the three newest; in a terminal's folder group they come first.
+- **Snoozed**: hidden until a time from three plain choices (an hour, tomorrow morning at 9:00, next Monday at 9:00 on this computer's
+  clock), or until something in the row needs the person. A snoozed chat leaves Recent but stays in History, tagged "Snoozed until
+  09:00", so it can always be found; a snoozed lane is behind the Lanes band's "Snoozed and archived (n)" line.
+- **Done for now** (settled): the row drops below the others, smaller and quieter, until it is opened or something needs the person.
+- **An ask always brings a row back.** `placeOf` shows a snoozed or settled row that needs the person in its normal place whatever its
+  marks say, and `RowsWatcher` clears the mark as the ask arrives (a chat with an open approval or question, a lane whose chat has one,
+  a terminal that rang), so the row stays back once the ask is answered. Opening a settled row clears its mark; a snooze that has run
+  out is dropped when its time comes (one timer, for the next snooze only). Needs you is unchanged: none of this ever hides an ask.
+  Pinned stays on top and archived stays archived (the person's own word), and in both cases the ask is still in Needs you.
+- **Archive.** A chat leaves Recent and History's days and is listed in History's Archive, a heading at the foot of the page that
+  opens its list; a lane leaves the Lanes band and is listed behind its "Snoozed and archived (n)" line. Each is brought back from its
+  own menu ("Bring back from the archive"). Archiving only sets a mark: it never closes a session or touches a lane's folder or
+  branch (Settings, Worktrees and Kit's kept folders handle those).
+- **Where it is kept.** A chat's marks are kept on this computer (`localStorage` `manut.sidebar.rows`, chats only), where the chat
+  itself lives on across restarts. A lane's and a terminal's marks are of this run of the app, as their list is: the sessions list is
+  not saved, so their marks go when the session is closed. A record saved before this (no marks) reads as none, and a field this build
+  does not know is dropped when it is read, never an error.
+- **The pull request on a lane's row.** The shell's pull request list now carries the branch each request is made from (`gh`
+  `headRefName`, GitLab `source_branch`). A lane's own branch is matched to the open requests of its repository: those the Tasks page
+  has already listed, else one read of that repository's first page when the cache is older than five minutes. It is one call for the
+  repository, never one per lane and never on a timer: it runs when the Code page shows a lane with a branch of its own, a failed read
+  is not tried again within the five minutes, and a missing or signed-out `gh` shows no pull request. Nothing is written to GitHub or
+  GitLab. `tasks/pulls.ts`.
+
+### The suggested next message
+
+After a turn ends in a coding chat, the empty box may show one predicted next message in grey; Tab takes it into the box (where it is
+the person's own text), typing replaces it, and nothing is ever sent by itself. It costs an extra request on the person's own plan after
+every turn, so it is **off** until Settings › General › Suggested next message is turned on, and the setting says so in plain words.
+
+- **Claude Code** offers an honest way: `claude -p --prompt-suggestions true` (from `claude --help`: "In print/SDK mode, sends a
+  prompt_suggestion message after each turn with a predicted next user prompt"). Claude Code makes it with a request of its own that
+  never enters the conversation's history. The shell adds those two arguments to a Claude Code chat only when the setting is on
+  (`sessions.rs` `CLAUDE_SUGGEST_ARGS`, `agent_chat.rs` `suggest_args`) and turns the `prompt_suggestion` line into a `suggestion`
+  event (`{type, suggestion, uuid, session_id}`). The flag is chosen when the chat starts, so it applies to chats started after the
+  setting was turned on; turning it off stops the box showing them at once (a late one is dropped).
+- **Codex**: its app-server protocol (`codex app-server generate-json-schema`, 0.169.0) has no such request. **Every other agent**: none is
+  known to offer one. A side question would land in the chat's own history, so none is made, and the setting says it works with Claude
+  Code only.
+- **Not seen live yet.** Two one-turn probes of a real Claude Code 2.1.332 (`-p`, then stream-json input kept open for 30 s) sent no
+  `prompt_suggestion`: it seems to wait for a longer conversation. The message shape comes from Claude Code's own schema, and the
+  mock host (`__manutMockSuggestion`) stands in for it. A hands-on pass on a real chat of a few turns is still to do.
+- Not Buddy's chat: it is started by `buddy_chat`, not by a coding session, and its box is not a coding chat's.
 
 ### How a lane is read
 

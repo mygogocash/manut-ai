@@ -39,6 +39,8 @@ import { onSessionFg } from "./fg";
 import { termActs } from "./termActivity";
 import { isLinkId, LINK_COPIED_EVENT, newLinkId, termLinkUrl } from "./termLink";
 import { acpRow, agentDef, agentLabel, continues, draftAgent, draftFolder, draftOpen, hermesOnly, idInUse, installLine, isBuiltin, isGone, isShell, isTerminalRec, LAST_LINE_MAX, refusedResume, SHELL, termEnd, termMarkAgent, lastPrintedLine, OPEN_KEY, setsUpScreen, UI_BYTES, opensAs, parseOpens, parseRecent, pushRecent, RECENT_KEY, registerAcp, sessionMode, termGroups, type AgentId, type AgentInfo, type OpenAs, type Unseen, type Opens, type Recent, type SessionRec } from "./agents";
+import { clearSuggestion, noteSuggestion } from "../chat/suggestion";
+import { suggestOn, suggestWorks } from "../lib/suggest";
 import { NAME_MAX, parseTitles, promptTitle, putTitle, TITLES_KEY } from "./titles";
 import { getDraft, setDraft as setUnsent } from "../app/drafts";
 import { getHost, type ChatEvent, type ChatInput, type ConvState, type PastChat, type SessionHost } from "./host";
@@ -529,6 +531,12 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
   const dispatchChat = (id: string, ev: ChatEvent, quiet = false) => {
     const key = keys.get(id);
     if (!key) return;
+    // the agent's predicted next message (item 76) is the composer's, not the timeline's: it is kept apart, and a new turn drops it
+    if (ev.event === "suggestion") {
+      noteSuggestion(key, typeof ev.text === "string" ? ev.text : "");
+      return;
+    }
+    if (ev.event === "turn.start") clearSuggestion(key);
     const full = { ...ev, bot: key } as unknown as BridgeEvent;
     store().dispatch({ type: "event", ev: full, now: Date.now() });
     if (!quiet) notify?.(full);
@@ -741,7 +749,7 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     turns.forget(id);
     try {
       // a lane's agent works in the lane's own folder
-      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id);
+      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id, suggestOn() && suggestWorks(r.agent));
       // it said it is not signed in before manut knew its id: it is ended already, so only the process goes
       if (proc.signedOut) {
         void host.chatClose(proc.hostId).catch(() => undefined);

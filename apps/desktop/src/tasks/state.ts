@@ -38,6 +38,8 @@ export interface TasksState {
   accounts: ChosenAccount[];
   /** "이 저장소" on GitHub: the chosen account it reads as (null: picked for the repository, else gh's active one) */
   repoAccount: string | null;
+  /** A pull request to select as soon as the list shows it: a lane's row sent the person here (item 76). Not saved. */
+  open: number | null;
 }
 
 const KEY = "manut.tasks";
@@ -58,6 +60,7 @@ function fresh(): TasksState {
     mentionsOpen: false,
     accounts: [],
     repoAccount: null,
+    open: null,
   };
 }
 
@@ -101,7 +104,7 @@ const listeners = new Set<() => void>();
 
 function save() {
   if (typeof localStorage === "undefined") return;
-  const { page: _p, ...keep } = state;
+  const { page: _p, open: _o, ...keep } = state;
   localStorage.setItem(KEY, JSON.stringify(keep));
 }
 
@@ -184,6 +187,18 @@ export function cycleAccountColor(id: string) {
   set({
     accounts: state.accounts.map((a) => (accountId(a) === id ? { ...a, color: ACCOUNT_COLORS[(ACCOUNT_COLORS.indexOf(a.color) + 1) % ACCOUNT_COLORS.length] } : a)),
   });
+}
+
+/** Show pull request `number` of `repo` as Tasks shows it: that repository, pull requests, all open ones, and the request selected once the
+ *  list has it (TasksPage `open`). `folder`: where the repository is cloned, when known. A lane's row opens it this way (item 76). */
+export function showPull(source: CliSource, repo: string, number: number, folder?: string | null): boolean {
+  if (!setRepo(source, repo, folder)) return false;
+  set({ source, scope: "repo", kind: "prs", filter: "open", page: 0, open: number });
+  return true;
+}
+/** The selection a lane's row asked for was made (or the list has no such request). */
+export function clearOpen(): void {
+  if (state.open !== null) set({ open: null });
 }
 
 /** Tests: start from nothing. */

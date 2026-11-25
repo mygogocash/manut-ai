@@ -32,6 +32,8 @@ import { usePendingRequests } from "./termShare";
 import { countRender, useAnyFlowing, useTermFace } from "./termActivity";
 import { addFolder, addedFolders, allCollapsed, collapseOthers, folderGroups, pathKey, folderSummary, isCollapsed, isTildePath, getFolderPrefs, moveFolder, orderFolders, removeFolder, setAllFolders, setFolderGone, setFolderPrefs, toggleFolder, useFolderPrefs, useGoneFolders, withAdded } from "./folders";
 import { ChevronDown, ChevronRight } from "../ui/icons";
+import { rowChoices } from "../sidebar/RowMenu";
+import { arrange, markRow, sessionRowKey, useRowMarks, type RowMark as PlaceMark } from "../sidebar/rows";
 import { CUE_PX, useEdgeFade } from "../sidebar/edgeFade";
 import { getHost, type PastChat } from "./host";
 import { getSessions, useSessions } from "./sessions";
@@ -789,6 +791,7 @@ export function SessionList({ needle = "", query = "" }: { needle?: string; quer
     setRefocus(null);
   }, [refocus]);
   const folders = useFolderPrefs();
+  const marks = useRowMarks();
   // (the open terminal's folder opens wherever the person is, not here: sessions/revealOpen.ts)
   // the open terminal's row scrolls into view inside TERMINALS (never moving BOTS) and stays in view when the region
   // changes size (the dock gains a row, the window shrinks) or rows land above it (a newer folder lists first): only
@@ -850,7 +853,10 @@ export function SessionList({ needle = "", query = "" }: { needle?: string; quer
   const ticking = terms.some((r) => r.status === "running" || r.status === "starting");
   const added = addedFolders(folders);
   if (terms.length === 0 && added.length === 0) return <SessionStart />;
-  const shown = terms.filter((r) => sessionMatches(r, needle));
+  // pinned rows first in their folder, in the order pinned, then the rest, then the rows set aside as done for now (item 76); a
+  // terminal that rang is never set aside (rows.ts `placeOf`)
+  const placed = arrange(terms.filter((r) => sessionMatches(r, needle)).map((r) => ({ key: sessionRowKey(r.id), needs: ss.unseen[r.id] === "bell", r })), marks, Date.now());
+  const shown = [...placed.pinned, ...placed.normal, ...placed.settled].map((x) => x.r);
   // an added folder with no session is a group too; a search keeps it only when its path matches
   const groups = orderFolders(withAdded(folderGroups(shown), needle ? added.filter((c) => c.toLowerCase().includes(needle)) : added), folders.order);
   return (
@@ -1182,10 +1188,12 @@ export function rowMenuItems(rec: Pick<SessionRec, "cwd" | "agentSession">): Row
 }
 /** A TERMINALS row's menu: Rename, Reveal, Open in the system terminal, Copy link (its `manut://terminal/…`),
  *  New terminal here, Close. */
-export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">): RowAction[] {
-  return ["rename", ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
+export function termMenuItems(rec: Pick<SessionRec, "cwd" | "linkId">, mark?: PlaceMark | null): RowAction[] {
+  // Pin and Done for now come after Rename when the row's marks are given (item 76; a terminal has no Snooze or Archive)
+  const marks: RowAction[] = mark === undefined ? [] : (rowChoices("terminal", mark ?? undefined) as RowAction[]);
+  return ["rename", ...marks, ...(rec.cwd ? (["reveal", "terminal"] as const) : []), ...(rec.linkId ? (["link"] as const) : []), "here", "close"];
 }
-export type RowAction = "rename" | "reveal" | "terminal" | "copy" | "link" | "here" | "close";
+export type RowAction = "rename" | "reveal" | "terminal" | "copy" | "link" | "here" | "close" | "pin" | "unpin" | "settle" | "wake";
 
 /** \"Show in Finder\" on macOS, \"Show in Explorer\" on Windows, \"Show in file manager\" elsewhere. */
 const revealWord = () => {
@@ -1201,6 +1209,10 @@ const ROW_ACTION_LABEL: Record<RowAction, () => string> = {
   link: () => t("tlink.copy"),
   here: () => t("term.here"),
   close: () => t("ss.close"),
+  pin: () => t("row.pin"),
+  unpin: () => t("row.unpin"),
+  settle: () => t("row.settle"),
+  wake: () => t("row.wake"),
 };
 const ROW_ACTION_ID: Record<RowAction, string> = {
   rename: "session-rename",
@@ -1210,6 +1222,10 @@ const ROW_ACTION_ID: Record<RowAction, string> = {
   link: "session-copy-link",
   here: "session-new-here",
   close: "session-menu-close",
+  pin: "session-pin",
+  unpin: "session-unpin",
+  settle: "session-settle",
+  wake: "session-wake",
 };
 
 /** Right-click menu of a session row (rowMenuItems). Placed at the pointer, inside the window. Arrow keys move,
@@ -1379,10 +1395,12 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   const activity = termActivity({ agent: rec.agent, fgAgent: rec.fgAgent, lastLine: act.lastLine, oscTitle: act.oscTitle });
   // a CLI runs in it: the card's thin amber lane on its left edge (the folder summary's "running" counts the same)
   const running = live && markAgent !== null;
-  const actions = termMenuItems(rec);
+  const rowMark = useRowMarks()[sessionRowKey(rec.id)];
+  const actions = termMenuItems(rec, rowMark ?? null);
   const pick = (a: RowAction) => {
     const sx = getSessions();
-    if (a === "rename") setEditing(true);
+    if (a === "pin" || a === "unpin" || a === "settle" || a === "wake") markRow(sessionRowKey(rec.id), { do: a });
+    else if (a === "rename") setEditing(true);
     else if (a === "reveal") void sx.revealFolder(rec.id);
     else if (a === "terminal") void sx.openTerminal(rec.id);
     else if (a === "link") void sx.copyLink(rec.id);
@@ -1413,6 +1431,11 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
             setEditing(true);
           }}
         >
+          {rowMark?.pinned !== undefined && (
+            <span className="tr-pin" role="img" aria-label={t("row.pinned")} title={t("row.pinned")} data-testid="term-pin">
+              ◆
+            </span>
+          )}
           {split ? <span className="tr-nt">{title.title}</span> : title.title}
           {split && (
             <span className="tr-split" data-testid="term-split-glyph" role="img" aria-label={t(active ? "split.focusedPane" : "split.inSplit", { name: splitPaneName(rec, agents) })} title={t(active ? "split.focusedPane" : "split.inSplit", { name: splitPaneName(rec, agents) })}>
@@ -1453,7 +1476,7 @@ const TermRow = memo(function TermRow({ rec, agents, unseen, active, ticking, on
   return (
     <div
       ref={wrap}
-      className={`ss-row tr${active ? " active" : ""}${running ? " run" : ""}${menu ? " menu-open" : ""}${split ? (active ? " split-focus" : away ? " split split-away" : " split") : ""}`}
+      className={`ss-row tr${active ? " active" : ""}${running ? " run" : ""}${menu ? " menu-open" : ""}${rowMark?.pinned !== undefined ? " pinned" : ""}${rowMark?.settled ? " settled" : ""}${split ? (active ? " split-focus" : away ? " split split-away" : " split") : ""}`}
       data-split={split ? (active ? "focused" : away ? "away" : "in") : undefined}
       data-testid={`session-${rec.id}`}
       data-status={rec.status}

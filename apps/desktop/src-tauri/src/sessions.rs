@@ -88,6 +88,12 @@ pub const CLAUDE_CHAT_ARGS: [&str; 10] = [
     "--replay-user-messages",
 ];
 
+/// What a Claude Code chat adds to [`CLAUDE_CHAT_ARGS`] when the person turned on Settings › General › Suggested next message
+/// (item 76): `claude --help` says `--prompt-suggestions` makes print/SDK mode send a `prompt_suggestion` message after each turn
+/// with a predicted next user prompt. Claude Code makes it with a request of its own (it never enters the conversation's history)
+/// on the person's own plan, which is why it is off unless asked for. These two arguments are the only ones the setting adds.
+pub const CLAUDE_SUGGEST_ARGS: [&str; 2] = ["--prompt-suggestions", "true"];
+
 /// The fixed arguments that start agent `id` in its structured mode, or `None` when it has none here. These
 /// are the only arguments manut ever adds besides a conversation id ([`resume_args`]). A generic ACP agent's are
 /// its row in [`crate::acp_agents::ACP_LIST`] (`acp` or `--acp`).

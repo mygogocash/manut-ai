@@ -1,7 +1,8 @@
 // The side menu's rules as the design canvas draws them: which row is current for each place in the app, the page each
 // row opens, which member Home's ask box talks to, and which threads the Recent list names.
 import { describe, expect, it } from "vitest";
-import { currentRow, homeBot, MENU_ROWS, recentThreads, rowPage } from "./menu";
+import { currentRow, homeBot, MENU_ROWS, recentParts, recentThreads, rowPage } from "./menu";
+import { threadRowKey } from "./rows";
 import type { Ui } from "../state/store";
 import type { ThreadRow } from "../threads/types";
 
@@ -125,5 +126,45 @@ describe("the places Mission Control adds", () => {
   it("marks History for the activity log, which is History's own place, and no row for a job's page", () => {
     expect(at("activity")).toBe("history");
     expect(at("job")).toBeNull();
+  });
+});
+
+describe("Recent with pinned, settled, snoozed and archived chats", () => {
+  const NOW = 10_000;
+  const threads = {
+    buddy: [row("b1", "one", 100, 900), row("b2", "two", 100, 800), row("b3", "three", 100, 700), row("b4", "four", 100, 600), row("b5", "five", 100, 500), row("b6", "six", 100, 400)],
+  };
+  const calm = () => false;
+  const key = (t: string) => threadRowKey("buddy", t);
+  const ids = (xs: { thread: string }[]) => xs.map((x) => x.thread);
+
+  it("is the three newest and nothing else when no chat is marked", () => {
+    const p = recentParts(threads, ["buddy"], {}, calm, NOW);
+    expect(ids(p.recent)).toEqual(["b1", "b2", "b3"]);
+    expect(p.pinned).toEqual([]);
+    expect(p.settled).toEqual([]);
+  });
+
+  it("puts the pinned on top in the order pinned, whatever their age, and they do not count against the three", () => {
+    const p = recentParts(threads, ["buddy"], { [key("b6")]: { pinned: 2 }, [key("b4")]: { pinned: 1 } }, calm, NOW);
+    expect(ids(p.pinned)).toEqual(["b4", "b6"]);
+    expect(ids(p.recent)).toEqual(["b1", "b2", "b3"]);
+  });
+
+  it("leaves a snoozed chat out until its time, and an archived one out for good, and the next newest take their places", () => {
+    const marks = { [key("b1")]: { snoozed: NOW + 1 }, [key("b2")]: { archived: 5 } };
+    expect(ids(recentParts(threads, ["buddy"], marks, calm, NOW).recent)).toEqual(["b3", "b4", "b5"]);
+    // its time has come
+    expect(ids(recentParts(threads, ["buddy"], marks, calm, NOW + 1).recent)).toEqual(["b1", "b3", "b4"]);
+  });
+
+  it("lists a settled chat below the others, and brings a snoozed or settled chat back the moment it asks something", () => {
+    const marks = { [key("b1")]: { settled: true as const }, [key("b2")]: { snoozed: NOW + 5_000 } };
+    const quiet = recentParts(threads, ["buddy"], marks, calm, NOW);
+    expect(ids(quiet.settled)).toEqual(["b1"]);
+    expect(ids(quiet.recent)).toEqual(["b3", "b4", "b5"]);
+    const asked = recentParts(threads, ["buddy"], marks, (_bot, r) => r.thread === "b1" || r.thread === "b2", NOW);
+    expect(ids(asked.recent)).toEqual(["b1", "b2", "b3"]);
+    expect(asked.settled).toEqual([]);
   });
 });

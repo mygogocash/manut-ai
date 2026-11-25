@@ -29,6 +29,7 @@ import { ShopSettings } from "../onboarding/ShopSettings";
 import { PeoplePage, peopleOffered } from "../pages/PeoplePane";
 import { DeveloperPage } from "./DeveloperPage";
 import { WorktreesPage } from "./WorktreesPage";
+import { setSuggestOn, useSuggestOn } from "../lib/suggest";
 import { VoicePage } from "./VoicePage";
 import { McpSkillsPage } from "./mcp/McpSkillsPage";
 
@@ -605,6 +606,13 @@ function AwakeToggle() {
   );
 }
 
+/** Settings › General › Suggested next message (lib/suggest.ts): off until the person turns it on, since each suggestion is an extra
+ *  request on their own plan. */
+function SuggestToggle() {
+  const on = useSuggestOn();
+  return <Toggle on={on} label={t("suggest.title")} onChange={setSuggestOn} testId="set-suggest" />;
+}
+
 function GeneralPage() {
   const s = useStore();
   const h = s.hello;
@@ -642,6 +650,15 @@ function GeneralPage() {
         </Row>
       </div>
       <OutsideNotes />
+      <div className="st-gh">{t("suggest.group")}</div>
+      <div className="st-grp">
+        <Row title={t("suggest.title")} hint={t("suggest.hintCost")}>
+          <SuggestToggle />
+        </Row>
+        <Row title={t("suggest.agents")} hint={t("suggest.agentsHint")}>
+          <Value>{t("suggest.agentsValue")}</Value>
+        </Row>
+      </div>
       <div className="st-grp">
         <Row title={t("tasks.barSetting")} hint={t("tasks.barSettingHint")}>
           <TasksBarToggle />

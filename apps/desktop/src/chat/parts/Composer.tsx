@@ -59,6 +59,8 @@ export function Composer({
   mentions,
   actions,
   rows = false,
+  suggestion,
+  onSuggestionTaken,
   voice = false,
 }: {
   bot: Bot;
@@ -102,6 +104,11 @@ export function Composer({
   /** The text field on a row of its own, with the +, the controls and Send under it, as the design canvas draws its ask
    *  box: a chat whose box carries the model and the approval level (item 80) keeps a wide field however many there are. */
   rows?: boolean;
+  /** The next message the agent predicted (a coding chat with suggestions turned on, lib/suggest.ts): shown greyed in the empty box, Tab
+   *  takes it and typing replaces it. It never sends anything; the box must be empty and quiet for it to show. */
+  suggestion?: string | null;
+  /** Tab took the suggestion into the box: the chat drops it, so clearing the box does not bring it back. */
+  onSuggestionTaken?: () => void;
   /** The microphone, which puts the words heard into the text, and voice mode, which talks with the agent of this chat
    *  (item 81): a chat whose box carries the agent's controls, in the Mac app. */
   voice?: boolean;
@@ -454,6 +461,8 @@ export function Composer({
           ? "none"
           : lead === "/" ? "sigil" : null;
   const showStop = running && !has;
+  // the suggestion shows only in an empty box that is not waiting on anything else: no text, file, folder, reply or running turn
+  const ghost = suggestion && !text && !has && !offline && !reply && !running && !sending ? suggestion : null;
 
   // the parts of the row: the +, the text field and Send (or Stop); `rows` puts the field above the others
   const attachEl = (onSendFiles || onFolder || !!mentions?.length || actions) && (
@@ -481,7 +490,9 @@ export function Composer({
         placeholder={
           offline
             ? (offlineText ?? t("cmp.offline", { bot: bot.display_name }))
-            : reply
+            : ghost
+              ? ghost
+              : reply
               ? t("cmp.replyThere", { bot: bot.display_name })
               : asking
                 ? t("cmp.asking")
@@ -506,6 +517,14 @@ export function Composer({
         }}
         onKeyDown={(e) => {
           const composing = imeComposing(e);
+          // Tab takes the suggestion into the box, where it is the person's own text to edit and send; nothing is sent
+          if (ghost && e.key === "Tab" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !composing) {
+            e.preventDefault();
+            placeCaret.current = ghost.length;
+            edit(ghost);
+            onSuggestionTaken?.();
+            return;
+          }
           if (threadPicking && !composing) {
             // Enter or Tab puts `./thread ` in; Enter on a finished `./thread` sends (a new empty thread)
             if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && tFrag !== "thread")) && !e.shiftKey) {
@@ -704,6 +723,11 @@ export function Composer({
           </div>
         )}
       </div>
+      {ghost && (
+        <div className="cmp-sugg" role="note" data-testid="suggest-hint">
+          {t("suggest.hint")}
+        </div>
+      )}
       {heldNote && has && (
         <div className="cmp-held" role="note" data-testid="composer-held">
           {heldNote}

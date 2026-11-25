@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LANGS, setLang, t } from "../i18n";
 import { emptyLane, noteLane, type LaneRecord } from "./lane";
+import { sessionRowKey, type RowMarks } from "../sidebar/rows";
 import { LanesView, laneBase, laneRowOf, type LaneRow, type LaneRowInput } from "./Lanes";
 
 type Ev = { event: string; [k: string]: unknown };
@@ -114,7 +115,8 @@ function drawn(node: ReactNode): ReactElement<Record<string, unknown>>[] {
   if (Array.isArray(node)) return node.flatMap(drawn);
   if (!isValidElement(node)) return [];
   const el = node as ReactElement<Record<string, unknown>>;
-  if (typeof el.type === "function") return drawn((el.type as (props: unknown) => ReactNode)(el.props));
+  // a lane's menu keeps state of its own (item 76: Pin, Snooze, Done for now, Archive), so it is drawn by its own test and not called here
+  if (typeof el.type === "function") return el.type.name === "LaneMore" ? [] : drawn((el.type as (props: unknown) => ReactNode)(el.props));
   return [...(typeof el.type === "string" ? [el] : []), ...drawn(el.props.children as ReactNode)];
 }
 const byId = (rows: LaneRow[], id: string, onOpen = vi.fn()) => drawn(LanesView({ rows, now: 100_000, onOpen })).filter((e) => e.props["data-testid"] === id);
@@ -318,5 +320,66 @@ describe("Bring it back on a lane's row", () => {
     setLang("zh");
     const back = laneRowOf(input({ lane: feed([...tests(true, PASS14), { event: "rewound", id: "m-1" }, { event: "files.back" }]) }), (ms) => `at ${ms}`);
     expect(html([back])).toContain("聊天仍停留在回退后的位置。");
+  });
+});
+
+describe("pinned, settled, snoozed and archived lanes (item 76)", () => {
+  const NOW = 100_000;
+  const ids = (marks: RowMarks, over: { away?: boolean } = {}) => {
+    const out = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks, ...over }));
+    return [...out.matchAll(/data-testid="lane-(s\d)"/g)].map((m) => m[1]);
+  };
+
+  it("keeps the order it was given when nothing is marked", () => {
+    expect(ids({})).toEqual(["s1", "s2", "s3"]);
+  });
+
+  it("puts a pinned lane on top, in the order pinned, and a settled one last", () => {
+    expect(ids({ [sessionRowKey("s3")]: { pinned: 2 }, [sessionRowKey("s2")]: { pinned: 1 } })).toEqual(["s2", "s3", "s1"]);
+    expect(ids({ [sessionRowKey("s1")]: { settled: true } })).toEqual(["s2", "s3", "s1"]);
+  });
+
+  it("puts a snoozed and an archived lane away behind one line that counts them, and shows them when it is open", () => {
+    const marks: RowMarks = { [sessionRowKey("s1")]: { snoozed: NOW + 60_000 }, [sessionRowKey("s2")]: { archived: 5 } };
+    expect(ids(marks)).toEqual(["s3"]);
+    const closed = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks }));
+    expect(closed).toContain("Snoozed and archived (2)");
+    expect(closed).toContain('data-testid="lane-away"');
+    expect(closed).not.toContain('data-testid="lane-away-s1"');
+    expect(ids(marks, { away: true })).toEqual(["s3", "s1", "s2"]);
+  });
+
+  it("never puts away a lane that asks something: the Needs you lane stays in its place, snoozed or settled", () => {
+    const marks: RowMarks = { [sessionRowKey("s3")]: { snoozed: NOW + 60_000 }, [sessionRowKey("s1")]: { settled: true } };
+    expect(ids(marks)).toEqual(["s2", "s3", "s1"]);
+    expect(renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks }))).not.toContain("lane-away");
+  });
+
+  it("marks a pinned lane with its pin and a settled one as settled", () => {
+    const out = renderToString(createElement(LanesView, { rows: canvas(), now: NOW, onOpen: vi.fn(), marks: { [sessionRowKey("s1")]: { pinned: 1 }, [sessionRowKey("s2")]: { settled: true } } }));
+    expect(out).toContain('data-testid="lane-pin"');
+    expect(out).toMatch(/class="lane settled"[^>]*data-testid="lane-s2"/);
+  });
+});
+
+describe("the pull request on a lane's row (item 76)", () => {
+  const withPull = (): LaneRow[] => canvas().map((r, i) => (i === 0 ? { ...r, pull: { source: "github", repo: "o/r", number: 12, state: "open", title: "PromptPay QR" } } : r));
+
+  it("shows its number and state quietly, as a link to Tasks, on the lane that has one only", () => {
+    const out = renderToString(createElement(LanesView, { rows: withPull(), now: 100_000, onOpen: vi.fn() }));
+    expect(out).toContain("Pull request #12 (Open)");
+    expect(out.split('data-testid="lane-pr"').length - 1).toBe(1);
+    expect(renderToString(createElement(LanesView, { rows: canvas(), now: 100_000, onOpen: vi.fn() }))).not.toContain("lane-pr");
+  });
+
+  it("calls the Code page with the request when it is pressed, and says Draft for a draft", () => {
+    const onPull = vi.fn();
+    const els = drawn(LanesView({ rows: withPull(), now: 100_000, onOpen: vi.fn(), onPull })).filter((e) => e.props["data-testid"] === "lane-pr");
+    expect(els).toHaveLength(1);
+    (els[0].props.onClick as () => void)();
+    expect(onPull).toHaveBeenCalledWith({ source: "github", repo: "o/r", number: 12, state: "open", title: "PromptPay QR" }, "s1");
+    const draft = withPull();
+    draft[0] = { ...draft[0], pull: { source: "github", repo: "o/r", number: 12, state: "draft", title: "x" } };
+    expect(renderToString(createElement(LanesView, { rows: draft, now: 100_000, onOpen: vi.fn() }))).toContain("Pull request #12 (Draft)");
   });
 });

@@ -17,7 +17,8 @@ import { CopyButton } from "../chat/parts/Copy";
 import { openExternal } from "../lib/openExternal";
 import { addTerminalTab, getTermPanel, setTerminalCwd } from "../terminal/state";
 import { taskHost } from "./host";
-import { setFilter, setKind, setPage, setRepo, setRepoAccount, setScope, setSource, useTasks } from "./state";
+import { clearOpen, getTasks, setFilter, setKind, setPage, setRepo, setRepoAccount, setScope, setSource, useTasks } from "./state";
+import { notePulls } from "./pulls";
 import { accountsOnHost, pickRepoAccount } from "./me";
 import { MeView, AccountDot } from "./MeView";
 import { SourceMark, IssueMark } from "./marks";
@@ -207,7 +208,17 @@ export function TasksPage() {
     setLoading(true);
     setErr(null);
     try {
-      setPageData(await host.list(cli, repo, tk.kind, tk.filter, tk.page, account ?? undefined));
+      const got = await host.list(cli, repo, tk.kind, tk.filter, tk.page, account ?? undefined);
+      setPageData(got);
+      // What this page has read of a repository's pull requests is what the Code page's lane rows match their branch to (pulls.ts). It is
+      // noted here, where the request's own repository is in hand. A lane's row that sent the person here has its request selected.
+      if (tk.kind === "prs") notePulls(cli, repo, got.items, Date.now(), tk.filter === "open" && tk.page === 0 && !got.more);
+      const want = getTasks().open;
+      if (want !== null) {
+        const hit = got.items.find((i) => i.number === want);
+        if (hit) setSel(hit);
+        clearOpen();
+      }
     } catch (e) {
       setPageData(null);
       setErr(e instanceof Error ? e.message : String(e));
@@ -220,7 +231,8 @@ export function TasksPage() {
     else setPageData(null);
   }, [ready, load]);
   useEffect(() => setSel(null), [cli, repo, tk.kind]);
-
+  // a request a lane's row asked for is dropped when the page is left, so a later visit does not select it by surprise
+  useEffect(() => clearOpen, []);
   const needle = q.trim().toLowerCase();
   const rows = useMemo(
     () => (page?.items ?? []).filter((i) => !needle || i.title.toLowerCase().includes(needle) || `#${i.number}`.includes(needle) || i.labels.some((l) => l.name.toLowerCase().includes(needle))),

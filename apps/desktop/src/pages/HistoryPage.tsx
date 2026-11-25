@@ -20,6 +20,8 @@ import { stageTag } from "./job";
 import { useShowOlder, type OlderView } from "./older";
 import { useJobList } from "./RecentWork";
 import { ShowOlder } from "./ShowOlder";
+import { MoreButton, useRowMenu } from "../sidebar/RowMenu";
+import { placeOf, threadRowKey, untilWord, useRowMarks, type RowMark, type RowMarks, type RowPlace } from "../sidebar/rows";
 
 /** One thread as its row shows it. */
 export interface HistoryRowView {
@@ -35,6 +37,11 @@ export interface HistoryRowView {
   open: () => void;
   /** which of History's kinds it is; a row with none draws no kind tag */
   lane?: HistoryLane;
+  /** A chat's key for its menu and its marks (sidebar/rows.ts); a job has none. */
+  rowKey?: string;
+  /** What the person did to the chat (pinned, snoozed, done for now) and where it stands now: shown as a quiet tag. */
+  mark?: RowMark;
+  place?: RowPlace;
   /** "job": a job of the team (its page opens), not a thread. Its tag is its stage's, not a thread's status. */
   kind?: "job";
   tag?: { word: Key; cls: string };
@@ -86,7 +93,7 @@ export function historyLanes(s: AppState & Actions, jobs: readonly JobRow[] = []
 /** The days and rows for the threads in the store and the runtime's jobs that `query` finds (history.ts `matchWords`) and
  *  that are of the kind pressed (`lane`; all of them for "all"), each opening its thread or its page; threads and jobs are
  *  one list, newest first, as the canvas's History lists them. */
-export function historyDays(s: AppState & Actions, query: string, nowMs: number, jobs: readonly JobRow[] = [], lane: HistoryLane | "all" = "all"): HistoryDayView[] {
+export function historyDays(s: AppState & Actions, query: string, nowMs: number, jobs: readonly JobRow[] = [], lane: HistoryLane | "all" = "all", marks: RowMarks = {}): HistoryDayView[] {
   const members = selectSidebarBots(s).map((b) => b.name);
   const names = new Map(s.bots.map((b) => [b.name, b.display_name]));
   const untitled = t("thread.untitled");
@@ -94,14 +101,20 @@ export function historyDays(s: AppState & Actions, query: string, nowMs: number,
   const nameOf = (bot: string) => names.get(bot) ?? bot;
   const threads = threadsNotJobs(s, members, jobs)
     .filter((e) => matchWords({ title: e.row.title, preview: e.row.preview, who: nameOf(e.bot) }, query, untitled))
-    .map((e) => ({
+    .map((e) => ({ e, status: rowStatus(s, e.bot, e.row) }))
+    // an archived chat leaves the list and is found in the Archive under it (historyArchive)
+    .filter((x) => placeOf(marks[threadRowKey(x.e.bot, x.e.row.thread)], x.status === "needs_you", nowMs) !== "archived")
+    .map(({ e, status }) => ({
       ts: e.ts,
       row: {
         key: `${e.bot}:${e.row.thread}`,
+        rowKey: threadRowKey(e.bot, e.row.thread),
+        mark: marks[threadRowKey(e.bot, e.row.thread)],
+        place: placeOf(marks[threadRowKey(e.bot, e.row.thread)], status === "needs_you", nowMs),
         bot: e.bot,
         title: e.row.title || untitled,
         who: nameOf(e.bot),
-        status: rowStatus(s, e.bot, e.row),
+        status,
         time: hhmm(new Date(e.ts * 1000)),
         open: () => void s.openThread(e.bot, e.row.thread),
         lane: threadLane(e.bot, who),
@@ -133,6 +146,81 @@ export function historyDays(s: AppState & Actions, query: string, nowMs: number,
   });
 }
 
+/** The chats the person archived, newest first, as History's Archive lists them (item 76): the one place an archived chat is found, and
+ *  from which it is brought back. A chat's archive stays whatever happens in it; the ask of an archived chat is still in Needs you. */
+export function historyArchive(s: AppState & Actions, marks: RowMarks, nowMs: number): HistoryRowView[] {
+  const members = selectSidebarBots(s).map((b) => b.name);
+  const names = new Map(s.bots.map((b) => [b.name, b.display_name]));
+  const untitled = t("thread.untitled");
+  const who = laneWho(s);
+  return historyEntries(s.threads, members)
+    .filter((e) => marks[threadRowKey(e.bot, e.row.thread)]?.archived !== undefined)
+    .map((e) => ({
+      key: `${e.bot}:${e.row.thread}`,
+      rowKey: threadRowKey(e.bot, e.row.thread),
+      mark: marks[threadRowKey(e.bot, e.row.thread)],
+      place: "archived" as const,
+      bot: e.bot,
+      title: e.row.title || untitled,
+      who: names.get(e.bot) ?? e.bot,
+      status: rowStatus(s, e.bot, e.row),
+      time: hhmm(new Date(e.ts * 1000)),
+      open: () => void s.openThread(e.bot, e.row.thread),
+      lane: threadLane(e.bot, who),
+    }));
+}
+
+/** The words of a chat's mark on its row: Pinned, Snoozed until a time, Done for now; nothing for a plain row. */
+function markWord(r: HistoryRowView, nowMs: number): { text: string; tip?: string } | null {
+  if (r.place === "pinned") return { text: t("row.pinned") };
+  if (r.place === "snoozed" && r.mark?.snoozed !== undefined) return { text: t("row.snoozed", { when: untilWord(r.mark.snoozed, nowMs) }), tip: t("row.snoozedTip") };
+  if (r.place === "settled") return { text: t("row.settled") };
+  return null;
+}
+
+/** A chat's menu on its History row: the same Pin, Snooze, Done for now and Archive (or Bring back) as everywhere. It keeps state, so
+ *  it is its own element and `HistoryView` stays a function of its props. */
+export function HistoryMore({ row }: { row: HistoryRowView }) {
+  const marks = useRowMarks();
+  const menu = useRowMenu({ rowKey: row.rowKey ?? "", kind: "chat", mark: marks[row.rowKey ?? ""], name: row.title });
+  return (
+    <>
+      <MoreButton name={row.title} onOpen={menu.open} className="hist-more" />
+      {menu.menu}
+    </>
+  );
+}
+
+/** The Archive: the chats put away, under the days, opened by its heading. Each has its menu, whose one choice brings it back. */
+export function HistoryArchive({ rows }: { rows: HistoryRowView[] }) {
+  const [open, setOpen] = useState(false);
+  if (rows.length === 0) return null;
+  return (
+    <section className="day archive" aria-label={t("history.archive")} data-testid="history-archive">
+      <div className="band">
+        <button type="button" className="lk" aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="history-archive-toggle">
+          {t("history.archiveN", { n: rows.length })}
+        </button>
+      </div>
+      {open && (
+        <ul className="rows">
+          {rows.map((r) => (
+            <li key={r.key} className="hist-li">
+              <button type="button" className="rowl" onClick={r.open} data-testid="history-archive-row">
+                <Avatar bot={r.bot} size={24} />
+                <span className="grow">{r.title}</span>
+                <span className="when">{r.who}</span>
+                <span className="when">{r.time}</span>
+              </button>
+              <HistoryMore row={r} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function HistoryView({
   days,
   query,
@@ -144,8 +232,14 @@ export function HistoryView({
   lane = "all",
   onLane,
   older,
+  archive,
+  nowMs = Date.now(),
 }: {
   days: HistoryDayView[];
+  /** The chats the person archived (`historyArchive`): drawn as the Archive under the days, with a way to bring each back. */
+  archive?: HistoryRowView[];
+  /** The time now, for a snooze's end. */
+  nowMs?: number;
   query: string;
   /** whether the team has any thread or job at all, so an empty list can say why it is empty */
   hasThreads: boolean;
@@ -221,7 +315,7 @@ export function HistoryView({
                 {d.rows.map((r) => {
                   const st = r.tag ? { word: r.tag.word, tag: r.tag.cls } : STATUS[r.status];
                   return (
-                    <li key={r.key}>
+                    <li key={r.key} className="hist-li" data-place={r.place}>
                       <button type="button" className="rowl" onClick={r.open} data-testid="history-row">
                         {r.lane && (
                           <span className="tag kind" data-testid="history-kind">
@@ -233,8 +327,17 @@ export function HistoryView({
                         {r.kind === "job" && <span className="tag">{t("history.kind.job")}</span>}
                         <span className="when">{r.who}</span>
                         {st && <span className={st.tag}>{t(st.word)}</span>}
+                        {(() => {
+                          const m = markWord(r, nowMs);
+                          return m && (
+                            <span className="tag" title={m.tip} data-testid="history-mark">
+                              {m.text}
+                            </span>
+                          );
+                        })()}
                         <span className="when">{r.time}</span>
                       </button>
+                      {r.rowKey && <HistoryMore row={r} />}
                     </li>
                   );
                 })}
@@ -248,6 +351,7 @@ export function HistoryView({
         ) : (
           <Empty icon={<MenuIcon row="history" />} title={t("history.emptyTitle")} text={t("history.emptyText")} testId="history-empty" />
         )}
+        {archive && archive.length > 0 && <HistoryArchive rows={archive} />}
         {older && <ShowOlder view={older} />}
       </div>
     </MenuPageFrame>
@@ -275,11 +379,13 @@ export function HistoryPage() {
   // A kind that has no entry any more (its last one went) gives way to All, rather than leaving an empty list under a chip
   // that is gone.
   const [picked, setPicked] = useState<HistoryLane | "all">("all");
+  const marks = useRowMarks();
   const lanes = historyLanes(s, jobs);
   const lane = picked !== "all" && !lanes.includes(picked) ? "all" : picked;
   return (
     <HistoryView
-      days={historyDays(s, query, Date.now(), jobs, lane)}
+      days={historyDays(s, query, Date.now(), jobs, lane, marks)}
+      archive={historyArchive(s, marks, Date.now())}
       query={query}
       hasThreads={hasThreads}
       onQuery={setQuery}

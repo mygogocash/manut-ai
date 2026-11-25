@@ -448,3 +448,34 @@
   display: flex;
   flex-direction: column;
 }
+
+/* The desktop's own (item 76): a History row's quiet "more" button and the rows' marks. The button shows on hover, on focus and
+   while its menu is open; a chat set aside as done for now is small and quiet, as it is in Recent. */
+.mpage .hist-li {
+  position: relative;
+}
+.mpage .hist-li .hist-more {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--aui-muted);
+  opacity: 0;
+}
+.mpage .hist-li:hover .hist-more,
+.mpage .hist-li .hist-more:focus-visible {
+  opacity: 1;
+}
+.mpage .hist-li:hover .rowl,
+.mpage .hist-li:focus-within .rowl {
+  padding-right: 36px;
+}
+.mpage .hist-li[data-place="settled"] .rowl {
+  opacity: 0.7;
+}
+.mpage .archive .band .lk {
+  font: inherit;
+}

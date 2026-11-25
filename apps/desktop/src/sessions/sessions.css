@@ -2019,3 +2019,14 @@ body.split-dragging .xterm {
     transition: none;
   }
 }
+
+/* The desktop's own (item 76): a pinned terminal's small mark and a terminal set aside as done for now, small and quiet. */
+.tr-pin {
+  margin-right: 5px;
+  font-size: 8px;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+.ss-row.tr.settled {
+  opacity: 0.65;
+}
