@@ -14,6 +14,19 @@ logs=$(mktemp -d "${TMPDIR:-/tmp}/manut-gate.XXXXXX")
 cd "$wt" || exit 2
 fail=0
 
+# One gate at a time on this Mac, whoever runs it (the lead or any helper): two at once swap an 8 GB Mac and time tests
+# out that are not wrong. A lock left by a run that died is taken over when its process is gone.
+lock="$HOME/Library/Caches/manut-ai-gate.lock"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  holder=$(cat "$lock/pid" 2>/dev/null || true)
+  if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lock"; continue; fi
+  [ $waited -eq 0 ] && echo "waiting for another gate to finish (pid ${holder:-?})"
+  waited=1; sleep 10
+done
+echo $$ > "$lock/pid"
+trap 'rm -rf "$lock"' EXIT
+
 if [ -n "$(git status --porcelain)" ]; then echo "note: uncommitted files in $wt (the gate runs on what is on disk)"; fi
 
 pnpm install --frozen-lockfile --prefer-offline > "$logs/install.log" 2>&1 || { echo "install: FAILED ($logs/install.log)"; exit 1; }

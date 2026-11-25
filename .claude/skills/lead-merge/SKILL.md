@@ -26,7 +26,9 @@ model by the work, as the owner asked on 25 Nov 2026: think with the strongest m
 | Mechanical edits with no judgement (a rename, marking docs, moving text) | Haiku, or a script |
 
 When an item is large, the lead settles the design first and hands a lighter model the plan, rather than a strong model
-the whole thing. Two heavy helpers at a time on this Mac.
+the whole thing. The Mac, not the models, is the limit: reading and writing are light, a gate is heavy, and
+`gate.sh` lets only one run at a time, so three builders and a read-only reviewer or two can work together when the
+owner wants speed (25 Nov: credits were plentiful). More than that, and the lead's own review is the queue.
 
 ## 2. When the helper reports
 

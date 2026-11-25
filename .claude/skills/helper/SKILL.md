@@ -35,10 +35,14 @@ agent in a mode that skips its asks, never force a removal or a push.
   release build, never `tauri dev`, never open the app's window.
 - Playwright: update and run only the specs you change. If you change a menu, a Settings page, the chat box or a
   lane's life, find the specs that assert it (`grep -rl` in `apps/desktop/e2e`) and run those.
-- Before your last commit, the whole gate once from the worktree root, one command at a time:
-  `pnpm --config.verify-deps-before-run=false test`, then `... typecheck`, then the Rust suite if Rust changed. A test
-  that fails only under load and passes alone is in `docs/handoff.md`, "Known flaky tests"; anything else is yours.
-- This Mac has 8 GB and another helper is running. Do not start a second heavy thing beside your own gate.
+- Before your last commit, the whole gate once, with the script every helper and the lead share:
+  `.claude/skills/lead-merge/scripts/gate.sh <your worktree>` (add `--no-rust` only when you changed no Rust). It
+  installs, runs every package's tests, the type checks and the Rust suite, and waits its turn: only one gate runs on
+  this Mac at a time, so it may sit for some minutes saying it is waiting. Do not run the whole test suite any other
+  way. A test that fails only under load and passes alone is in `docs/handoff.md`, "Known flaky tests"; anything else
+  is yours.
+- This Mac has 8 GB and several helpers are running. Run only the files you touch while you work, and nothing heavy
+  beside the gate.
 
 ## On this Mac
 
