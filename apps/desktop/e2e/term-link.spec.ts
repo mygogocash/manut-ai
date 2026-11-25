@@ -106,7 +106,8 @@ test("the row menu's Copy link copies the link, and the terminal says so", async
   await openCode(page);
   await row.click({ button: "right" });
   const menu = page.getByTestId("session-row-menu");
-  await expect(menu.getByRole("menuitem")).toHaveText(["Rename", /^Show in (Finder|Explorer|file manager)$/, "Open in Terminal", "Copy link", "New terminal here", "Close session"]);
+  // Pin to top and Done for now came with the row's places (item 76); a terminal has no Snooze or Archive
+  await expect(menu.getByRole("menuitem")).toHaveText(["Rename", "Pin to top", "Done for now", /^Show in (Finder|Explorer|file manager)$/, "Open in Terminal", "Copy link", "New terminal here", "Close session"]);
   await menu.getByTestId("session-copy-link").click();
   await expect.poll(() => clip(page)).toBe(await linkOf(page, id));
   // (The terminal said "Link copied" beside the sidebar's row; the Code page shows no terminal, so the line is checked

@@ -24,7 +24,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | The request, "Edited 3 files and ran 14 tests", Kit's note, the changed files with their counts | Part: the session's timeline shows each step and a file edit's diff, and (this branch) the pane beside a lane lists the changed files with their counts. No line that counts the files and the tests together | `chat/activity/Work.tsx` (`DiffView`), `code/LanePane.tsx` |
 | Tell Kit what to change, add a file, the Code chip | Has: the session's composer (item 80, the same box as Buddy's), in two rows as the canvas draws it: the text, then a + for Add context (Files; Folder, named in the message by its path and never copied; Actions and skills, the agent's `/` menu, also over text already typed), the agent, the model with its effort, the approval level, the microphone and voice mode (item 81, the Mac app: speak the message, or talk with Kit and hear the answer, the asks still on their cards; `docs/voice.md`) and Send. No Mention: a coding agent knows no team | `sessions/SessionView.tsx`, `chat/box/`, `chat/parts/Attach.tsx`, `chat/parts/Composer.tsx`, `voice/` |
 | "Your Claude Code plan" in the composer | Part: a session runs on the developer's own sign-in; the box names the model (moved there from the header) and its effort, not the plan | `sessions/SessionView.tsx` (`SessionModel`), `chat/box/ModelMenu.tsx` |
-| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file the session changed, its newest change with the added and removed counts, drawn as the timeline draws a change. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
+| Diff, Preview and Tests beside the lane | Part (this branch): the chat of a lane has a pane beside it, "What to look at", with the chips Diff, Preview and Tests, Diff first; it goes under the chat when the column is too narrow for both. Diff: each file that really differs in the lane's own folder from where the lane started, read from git (so it holds after a restart and shows a subagent's edits), with the added and removed counts, drawn as the timeline draws a change; from the chat's own events where the shell cannot read. Tests: the last finished run's result as the lane read it, when it finished, the command that ran it, whether a file changed since, and any run in progress; none of the run's output, which the lane never kept. Preview (this branch): the lane's project run with its own dev server in the lane's own folder: the command named first (`$ pnpm run dev`) with Start, then Running at its address with Open in browser and Stop, Stopped, Ended with its exit code and its last lines, or Could not start with why; the Sample rows under it. While it runs at an address of this computer, its page is drawn in a frame that fills the view, as the board draws the page in a box, with Reload and Open in browser above it (this branch). See [The pane beside a lane](#the-pane-beside-a-lane), [The preview of a lane](#the-preview-of-a-lane) and [The page in the pane](#the-page-in-the-pane) | `code/LanePane.tsx`, `code/LanePreview.tsx`, `code/previewFrame.ts`, `code/previewStore.ts`, `src-tauri/src/preview.rs`, `code/changes.ts`, `code/laneFolder.ts`, `src-tauri/src/lane_diff.rs`, `code/lanepane.css`, `sessions/SessionView.tsx` (`LaneSplit`) |
 | The owner sees only the note; a developer gets the diff, the preview and the tests | Lacks: the Code page is the developer's view only | |
 
 ## StatesCode: lanes, test output and artifacts
@@ -71,7 +71,7 @@ state that needs the owner: a real GitHub account, money, a real sign-in or real
 | --- | --- | --- |
 | Working on your plan: "Costs nothing from the AI budget." | Part: sessions run on the developer's own sign-in; nothing says so | |
 | Your plan is at its limit: Wait, or use the AI budget for this job | Lacks (Owner: money, and a real plan to see the limit) | |
-| Your plan needs a sign-in | Part: a session that is not signed in says so and points to Settings › Accounts (Owner: a real sign-in to try it) | `sessions/sessions.ts` (`signedOutSaid`) |
+| Your plan needs a sign-in | Part: a session that is not signed in says so and points to Settings › Providers, where Accounts now is (Owner: a real sign-in to try it) | `sessions/sessions.ts` (`signedOutSaid`) |
 | Your own MCP servers and skills, wherever the agent runs | Has (item 72): see [MCP servers and skills](#mcp-servers-and-skills); an added Claude Code account does not get the servers added with `claude mcp add` | `src-tauri/src/lane_config.rs`, `accounts.rs` (`share`), `acp_mcp.rs`, `settings/mcp/McpSkillsPage.tsx` |
 
 ### Watching it run
@@ -202,8 +202,9 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 ⌘T) offers each coding agent two ways, as the owner chose on 25 November (item 66). Under its folder chip:
 
 - **Chat with Kit**, first: one row for each installed agent that runs as the app's chat (`chatAgents`: Claude Code, Codex, OmO,
-  pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents and a person's own, in the menu's order), with the account a new
-  session runs as. Never Grok, which has no chat here, and never oh-my-hermes. Picking one opens its New session chat in the
+  pi, oh-my-pi, OpenCode, DeepSeek Harness, the ACP agents (Cursor and Antigravity among them since item 74) and a person's
+  own, in the menu's order), with the account a new session runs as. An agent turned off on Settings › Providers is in neither
+  part of the menu (`offeredAgents`), and the shell would refuse its start anyway (see [Providers](#providers-each-agents-settings)). Never Grok, which has no chat here, and never oh-my-hermes. Picking one opens its New session chat in the
   folder the chip names (`draftChat`), as a chat whatever way the draft last kept for that agent. Nothing runs until the first
   message: it names the lane's branch, the shell makes the lane's folder (see [Where a lane works](#where-a-lane-works)), and the
   agent starts there. The chat then has the pane beside it, and the Code page's Lanes band lists the lane; TERMINALS does not.
@@ -222,8 +223,9 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
   (`claude auth login`, `codex login`) and that it can still start. The row stays pickable: signing in is the person's own
   step, and what the app read can be a minute old. The app reads it only for the account a new session runs as (the Accounts
   watcher's copy, `signedOut.ts`): Claude Code and Codex by the CLI's own status command, Grok (a terminal row only) by the
-  bridge's state, as Settings › Accounts words it. No agent is run to find out. For every other agent, and in Practice mode or
-  a browser where Settings › Accounts has no accounts, the app cannot tell and shows nothing new.
+  bridge's state, as Settings › Providers › Accounts words it. No agent is run to find out. For every other agent, and in a
+  browser, the app cannot tell and shows nothing new. Since item 74 the desktop app's shell keeps the accounts list, so
+  Practice and Connected read Claude Code's and Codex's sign-in too.
 - **Not signed in, said after.** Where it could not tell, the row is offered as usual. The chat starts and says what the agent answers: an ACP agent's "is not signed in. Run … in a terminal and
   sign in." with Open in Terminal, and Claude Code's or Codex's own refusal (not tried with a signed-out CLI); the lane's row says
   Failed with those words. Signing in stays the CLI's own, in a terminal.
@@ -241,6 +243,81 @@ The Code page's + menu (the Terminals header's +, the empty section's New sessio
 
 `newMenu.test.ts` pins which agents each part lists, `ChatWay.test.tsx` draws the part and presses a row, `lanes.test.ts` takes a
 pick through to the lane, and `e2e/kit-lanes.spec.ts`, `terminals.spec.ts` and `integrate.spec.ts` walk the menu in a browser.
+
+### Providers: each agent's settings
+
+Settings › Providers (item 74, the owner's T3 Code screenshot) is one page for the coding agents. It replaced Settings ›
+Agents (whose read-only list it is now) and Settings › Accounts (now a part of it), and works in every mode: the page names
+an agent id and a change, and the shell (`src-tauri/src/providers.rs`) checks every value, keeps it in its own file
+`~/.manut/providers.json` (0600, written through a temporary file, never through a link) and reads that file again at each
+start, so a file changed by hand never starts what the page would refuse.
+
+- **The list.** Every agent the app offers (the built-ins, the ACP agents, a person's own), each with its version (the
+  program's own `--version`, for the agents whose flag was read here: Claude Code, Codex, OpenCode, Gemini CLI, Grok, Cursor,
+  Antigravity), whether it is installed, whether it is signed in where the app can read that (Claude Code and Codex, through
+  the account new sessions use; no check is made up for any other agent) and a switch. oh-my-hermes, offered nowhere, is not
+  listed. Pressing a row opens its settings under it.
+- **Off.** Offered nowhere: neither part of the + menu, the empty section's tooltip, a new draft, Buddy (which says where to turn
+  it on). The shell refuses its start before any program is looked up: terminals and chats (`sessions::launch_with`), Buddy
+  (`start_buddy_mine`), DeepSeek Harness, and a person's own agent before its entry is resolved. Sessions already running
+  are not touched.
+- **Display name.** The name every menu, row and chat header uses (`agentDef`); the page keeps the agent's own beside it.
+- **Program path.** Empty: found as always. Otherwise absolute, without `..`, and a file this account may run (on Windows an
+  `.exe`, or a shim `cmd.exe` takes whole), checked again at each start. It replaces only where the program is found: the
+  arguments, the chat mode and the asks stay the app's, and the install-layout warning is not shown for a path the person
+  chose.
+- **Home folder.** The agent's own home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR` for pi and
+  oh-my-pi, `GROK_HOME`, `GEMINI_CLI_HOME`: the ones an added account already sets), an existing folder. It is what "This
+  computer" means for that agent: a session without an added account gets it, the "This computer" row's sign-in is read
+  there, and an added account's settings are linked from it. A session as an added account gets the account's own folder
+  instead, never both, and a variable of the same name is refused, so the two never fight.
+- **Extra arguments.** One per line, each one argument, never split by a shell, in the shape `--name`, `--name=value`, `-x` or
+  `-x=value` only (a word would be read as a command or a prompt, and `--` would turn the app's own arguments into words).
+  They go after every argument the app adds (the chat mode, `--permission-prompt-tool stdio`, a conversation id, the
+  attachment folder, the status line relay), so a value-taking option of theirs at the end can only fail, never take one
+  of the app's as its value; for an agent whose chat starts with a word (Codex's `app-server`, the `acp` of OpenCode,
+  Kimi Code, Cursor and Antigravity) they are that word's options. Refused by name, also without case, with `_`, as a
+  `--no-` form and with a value: the options that skip the asks or the sandbox, and the ones the app sets itself (the chat
+  mode, the conversation, the folder, where the asks go), as each CLI's own `--help` spells them (`ARG_RULES`, with the
+  page's copy `src/settings/providers/argRules.json` held equal by a Rust test):
+
+  | Agent | Refused as skipping the asks or the sandbox |
+  | --- | --- |
+  | Claude Code | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode`, `--allowedTools`, `--allowed-tools`, `--settings`, `--agents`, `--add-dir` |
+  | Codex | `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`, `-a`/`--ask-for-approval`, `-s`/`--sandbox`, `--approve-for-me`, `--add-dir`, `--search`, `-p`/`--profile`, and `-c`/`--config` whose key starts with `approval`, `sandbox` or `profile` |
+  | OpenCode | `--auto` |
+  | Gemini CLI | `-y`/`--yolo`, `--approval-mode`, `--allowed-tools`, `--policy`, `--admin-policy`, `--skip-trust`, `-s`/`--sandbox`, `--include-directories` |
+  | oh-my-pi | `--auto-approve`, `--approval-mode`, `--plan-yolo`, `--plan-yolo-into`, `--add-dir`, `--config`, `--profile` |
+  | Grok | `--always-approve`, `--allow` (and its `--allowedTools`, `--allowed-tools`), `--permission-mode`, `--sandbox`, `--add-dir`, `--agents` |
+  | Cursor | `-f`/`--force`, `--yolo`, `--auto-review`, `--sandbox`, `--approve-mcps`, `--trust`, `--add-dir` |
+  | Antigravity | `--dangerously-skip-permissions`, `--mode`, `--settings`, `--add-dir`, `--sandbox` |
+
+  The agents whose options could not be read on this Mac (OmO, DeepSeek Harness, pi, Qwen Code, Kimi Code and Copilot CLI are
+  not installed here, and Cline's `--help` did not return) take no extra arguments, and a person's own agent keeps its own on its entry. Buddy takes none
+  at all, so its `--permission-mode default` stays the last word on its asks.
+- **Environment variables.** Names and values, for that agent's chats and terminals only, not Buddy's. They come before the
+  home and the app's own variables, which therefore win; the names the app sets itself (`PATH`, `HOME`, `TERM`, `COLORTERM`,
+  `TERM_PROGRAM`, `MANUT_*`, OpenCode's `OPENCODE_CONFIG_CONTENT`), the home variable and Grok's `GROK_SANDBOX` are refused.
+  OpenCode's ask rules are read with the person's variables, so one that changes its own rules is read too. A value is a
+  secret: it stays in the shell's file and goes only into the agent's process; the page, an event, a refusal and a `{:?}`
+  name the variable, never its value (`View` carries names, `Var`'s `Debug` hides it). A saved variable shows as its name with
+  "Saved, hidden"; Save without retyping keeps the value the page never had.
+- **Accounts in every mode.** The Accounts page hid itself in Practice and Connected because its list and its changes
+  (`accounts.list`, `add`, `set_active`, `remove`, `label`, `discard`) were the Hermes bridge's ops, which only the WebSocket
+  runtime has. What they did was read and write folders and two small files under `~/.manut/accounts`, and the sign-in and
+  the status were already the shell's, so the shell now does them (`accounts::list_here` and five more, for Claude Code and
+  Codex, the CLIs whose sign-in it runs and reads); the page asks the shell in the desktop app and the runtime elsewhere. The
+  bridge's usage records and CLIProxyAPI rows are not read by the shell: a row's usage meter shows only where a bridge is.
+- **Cursor and Antigravity.** Both CLIs start an ACP server (`cursor-agent acp`, `agy acp`, read in their own help on this Mac)
+  and ask the client with `session/request_permission` before acting (Cursor's documentation, cursor.com/docs/cli/acp, and
+  its bundle, which asks before a write, a delete, a read, a command and an MCP tool unless `--force`; Antigravity's help,
+  whose `--dangerously-skip-permissions` is what turns its requests off, and its binary). So both are rows of `ACP_LIST`,
+  continued with `session/load`. Not run as a chat for this item: no message was sent to either.
+
+`providers.rs`' tests pin each check, the order of a start's arguments and that a value never leaves; `agent_chat.rs`'
+`providers_settings_reach_a_chat_and_never_weaken_its_start` and `sessions.rs`' terminal twin start a stand-in program and
+read back exactly what it was given; `accounts.rs` pins the shell's list. `src/settings/providers/*.test.ts(x)` pin the page's
+own check, the patch, the words and the mock host, and `e2e/agents-settings.spec.ts` walks the page.
 
 ### Pinned, snoozed, settled and archived
 
@@ -389,13 +466,34 @@ thing it starts is the lane's preview, when the person presses Start.
   side pane goes under the page under 920px: a top rule, at most 45% of the window's height, a scroll of its own, so the chat
   keeps its box for typing. The width is the session view's own (a container query), not the window's, since the side menu and
   the Plans panel take theirs first. `e2e/lane-pane.spec.ts` measures both.
-- **Diff.** The files the session changed, each once, with the newest change to each, the file that changed last first
-  (`changedFiles`). They are read from the chat's own steps (`Step.diff`, which is what the `tool.diff` events carried), so a
-  Rewind to before a turn, which cuts that turn's steps out of the chat, takes its files out of the list and leaves the earlier
-  turns' in. Each is drawn by the timeline's own diff view (`DiffView` in `chat/activity/Work.tsx`): the path, the added and
-  removed counts of that change, the lines in mono, and `maskSecrets` over every line, as the timeline does. The pane's diff
-  has ids of its own (`lane-diff-*`) and does not scroll itself into view, so the timeline's `diff-view` ids are the timeline's
-  alone. A file changed twice shows its later change, not both. "Kit has not changed any file yet." is said only while none is listed.
+- **Diff.** What really changed in the lane's own folder, read from git (item 71; `code/laneFolder.ts`, `code/useLaneFolder.ts`,
+  `src-tauri/src/lane_diff.rs`): every file that differs from the commit the lane started from, uncommitted work, files git has
+  not seen yet and the lane's own commits included, the file that changed last first. Each is drawn by the timeline's own diff
+  view (`DiffView` in `chat/activity/Work.tsx`): the path, its state (new, deleted, "renamed from `old`"; changed has no tag),
+  the added and removed counts, the lines in mono, and `maskSecrets` over every line (the shell masks them first, with the
+  same `mask_secrets` as every CLI answer, so a key is never shown nor sent to the page). The folder is the truth, so after an
+  app restart the pane is not empty, a subagent's edits and an edit by hand show, and a file the agent rewound disappears. The
+  chat's events are only the hint to read again (`changeMark`: a step began, ended or got its change, a subagent took a step
+  or ended, the turn ended) and the fallback. It is read when the lane opens, on such a hint, and never on a timer, at most
+  once a second and never two at once (`folderReader`); a read that fails keeps what was shown. Where the shell cannot read (a
+  plain browser, the tests' stand-in host, a session in the developer's own folder) the pane keeps the old behaviour: the
+  files the chat's own steps changed (`changedFiles`, from `Step.diff`, which `tool.diff` events carried; a Rewind to before a
+  turn takes its files out). The pane's diff has ids of its own (`lane-diff-*`) and does not scroll itself into view.
+  "Kit has not changed any file yet." is said only while none is listed.
+  - **What the shell reads** (`lane_diff`): only a folder the app made (the check the removal paths use, `own_lane`, plus git
+    listing it as a worktree of the recorded repository; a lane started in a subfolder is read at its subfolder too). It only
+    reads, through the lane's own `Git` runner (no hook, no file monitor, no prompt, no optional lock) with `--no-ext-diff
+    --no-textconv`, so no program the repository names runs to draw a diff; a clean filter can still run, as for the
+    developer's own `git status`. A file git ignores never shows, so a `.env` and the agent settings copied in (item 72) do not.
+  - **Bounded, and said.** At most 100 files ("and 12 more files"); a file whose diff is over 256 KiB or that is over 2 MiB on
+    disk says "Too large to show."; a binary file says it is binary; the diffs together stop at 1 MiB, and the files after that
+    are listed with "Not shown: this list is already long."; the whole read stops at 15 seconds the same way. A page draws at
+    most 400 lines of a file ("N more lines").
+  - **The start.** The commit the lane's branch was made at (its record's `at`), so a base branch that moved does not put its
+    changes in the Diff (the Code page's note says it moved). Once the base has been rebased onto or merged into the lane, the
+    commit where the lane and the base branch parted stands in, so only the lane's own work shows.
+  - **Renames.** Git pairs a deleted and an added file among the tracked ones (its default 50% similarity); a new file git has
+    not tracked yet shows as new next to the deleted old one until it is added.
 - **Preview.** The lane's project run with its own dev server in the lane's own folder (`LanePreview.tsx`; see
   [The preview of a lane](#the-preview-of-a-lane)): the command named first with Start, its state as it runs, its page in a frame
   that fills the view while it runs ([The page in the pane](#the-page-in-the-pane)), the names of the
@@ -745,7 +843,8 @@ still goes through the asks (How an ask is read, Kit's dial, Buddy's card).
   a throwaway `CLAUDE_CONFIG_DIR`); the copies are for what it does not (an untracked `.mcp.json`), for Codex, and for Windows,
   where it keeps local settings with the worktree.
 - **An added account** (`accounts.rs`, `share` and `prepare`). Before a session of Claude Code or Codex starts as an added
-  account, the account's home gets links to the person's own home for an allow-list of configuration: Codex's `config.toml`
+  account, the account's home gets links to the person's own home (the home folder set on Settings › Providers, else the
+  CLI's default) for an allow-list of configuration: Codex's `config.toml`
   (settings and MCP servers), `AGENTS.md`, `AGENTS.override.md`, `skills`, `prompts`, `plugins`; Claude Code's `skills`,
   `commands`, `agents`, `output-styles`, `rules`, `workflows`, `plugins`, `CLAUDE.md`. An entry the account has of its own
   stays its own, a link elsewhere is left alone, and nothing is written in the person's home. Claude Code's `settings.json` is
@@ -1016,11 +1115,9 @@ rewind.
 - A sign-in the app cannot read (pi, oh-my-pi, OpenCode, OmO, DeepSeek Harness, the ACP agents): no mark before the first
   message, only the chat's own words after it. A status command for each would need the shell's fixed list in
   `src-tauri/src/accounts.rs` to grow.
-- The pane beside a lane: a way to hide it (it is always there for a lane); a subagent's own edits in its Diff (they come as
-  `subagent` events, not `tool.diff`); the files that stay on disk after the agent's own rewind of the last message (its Diff
-  holds what the chat holds); the lane's own folder's real changes read from git, so a restart does not start the pane empty;
-  the totals of a file's several changes, not only the newest one; Diff, Preview and Tests of a lane from the Code page's row,
-  where only the session view has them.
+- The pane beside a lane: a way to hide it (it is always there for a lane); the totals of a file's several changes, not only the
+  newest one; Diff, Preview and Tests of a lane from the Code page's row, where only the session view has them; a Diff of a
+  session in the developer's own folder (it reads from the chat's events, as before).
 - A lane after a restart keeps its branch and its folder, but what its events showed (its test runs, Reverted) is of the run
   before and starts again.
 - The main-moved note for a lane whose folder has left its branch (Kit switched it): the shell reads only the branch the folder

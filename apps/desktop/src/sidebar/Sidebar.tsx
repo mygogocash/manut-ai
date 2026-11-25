@@ -21,12 +21,14 @@ import { leftWords } from "../lib/shops";
 import { can } from "../runtime";
 import { selectAsks, selectSidebarBots, shopName, useStore, viewedShopName, type ShopsState } from "../state/store";
 import { AccountsWatcher } from "../settings/accounts/useAccounts";
+import { isDesktop } from "../settings/accounts/native";
 import { accountLabel, EMPTY_SHOP } from "../onboarding/shop";
 import { currentRow, MENU_ROWS, recentParts, rowPage, type MenuRow } from "./menu";
 import { rowStatus } from "../threads/ThreadTree";
 import { MoreButton, useRowMenu } from "./RowMenu";
 import { threadRowKey, useRowMarks } from "./rows";
 import { RowsWatcher } from "./RowsWatcher";
+import { togglePalette } from "../palette/state";
 import { BrandMark, MenuIcon, SearchGlyph } from "./menuIcons";
 import { DiskChip } from "./DiskChip";
 import { ModeLine } from "./ModeLine";
@@ -218,7 +220,7 @@ export function Sidebar() {
       shops={{ list: s.shops.list.map((r) => ({ ...r, name: shopName(s, r) })), current: s.shops.current, onSwitch: (id) => void s.switchShop(id) }}
       notice={shopNotice(s.shops, s.dismissShopNotice)}
       onRow={go}
-      onSearch={() => s.openPage("history", { find: true })}
+      onSearch={() => togglePalette()}
       onAccount={() => s.openSettings()}
       foot={
         <>
@@ -226,7 +228,8 @@ export function Sidebar() {
           <DiskChip />
           {/* The coding CLIs' subscription usage, which only a runtime that reads their logins has. */}
           {can("accounts") && <Usage />}
-          {can("accounts") && <AccountsWatcher />}
+          {/* the desktop app's shell keeps the accounts in every mode (item 74); a runtime may keep them too */}
+          {(can("accounts") || isDesktop()) && <AccountsWatcher />}
           {/* A newer signed release, which shows nothing until in-app updates are turned on (updater.ts). */}
           <UpdateButton />
           {/* Practice mode, or the API host it is connected to: never a guess about which data this is. */}

@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::agent_chat::{call_detail, clip, ev, exit_turn_end, exit_why, last_line, s, tool_kind, ChatOut, Event, Input, Picture};
-use crate::sessions::{dsh_patch_path, dsh_turn_args, launch_for, resume_args, DSH_HEADLESS_PATCH};
+use crate::sessions::{dsh_patch_path, dsh_turn_args, launch_with, resume_args, DSH_HEADLESS_PATCH};
 
 /// The harness's `--json` run events for one DSH chat, across its messages. Pure: lines in, events out.
 #[derive(Default)]
@@ -260,7 +260,9 @@ fn home() -> Result<PathBuf, String> {
 impl DshChat {
     /// A DSH chat in `cwd`, continuing harness session `resume` (`session-<uuid>`) when given. Nothing runs yet:
     /// each message starts one run.
-    pub fn start<F>(cwd: &Path, resume: Option<&str>, sink: F) -> Result<DshChat, String>
+    /// `mine` is DSH's Settings › Providers settings: turned off, nothing starts; a program path set there is the harness's
+    /// CLI. Nothing else of them reaches its runs (the harness's own headless setup stays as it is).
+    pub fn start<F>(cwd: &Path, resume: Option<&str>, mine: &crate::providers::Stored, sink: F) -> Result<DshChat, String>
     where
         F: FnMut(ChatOut) + Send + 'static,
     {
@@ -270,7 +272,7 @@ impl DshChat {
         if let Some(r) = resume {
             resume_args("dsh", r)?;
         }
-        let (launch, path_env) = launch_for("dsh")?;
+        let (launch, path_env) = launch_with("dsh", mine)?;
         let chat = DshChat(Arc::new(Inner {
             cwd: cwd.to_path_buf(),
             patch: dsh_patch_path(&home()?),
@@ -505,7 +507,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("manut-real-dsh-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
-        let (launch, path_env) = launch_for("dsh").unwrap();
+        let (launch, path_env) = crate::sessions::launch_for("dsh").unwrap();
         println!("dsh = {launch:?}");
         assert!(launch[0].to_string_lossy().contains("DeepSeek Harness"), "{launch:?}");
         let rec = std::env::var("MANUT_DSH_RECORD").unwrap_or_else(|_| dir.join("rec.jsonl").to_string_lossy().into_owned());
@@ -708,8 +710,8 @@ mod tests {
         assert!(chat.input(Input::Effort { effort: "high".into() }).is_err());
         assert!(!chat.0.run.lock().unwrap().is_some());
         // a resume that is not a harness session id is refused before anything else
-        assert!(DshChat::start(&tmp, Some("eee5079a-c52e-4526-b633-f3d8cb7d6394"), |_| {}).is_err());
-        assert!(DshChat::start(&tmp, Some("session-x --yolo"), |_| {}).is_err());
+        assert!(DshChat::start(&tmp, Some("eee5079a-c52e-4526-b633-f3d8cb7d6394"), &Default::default(), |_| {}).is_err());
+        assert!(DshChat::start(&tmp, Some("session-x --yolo"), &Default::default(), |_| {}).is_err());
     }
 
     /// A stand-in harness on pipes: reads the message from stdin, prints a recorded run, and the chat shows it;

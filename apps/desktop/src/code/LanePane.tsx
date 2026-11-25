@@ -16,6 +16,8 @@ import { t, type Key } from "../i18n";
 import type { DiffFile } from "../lib/protocol";
 import type { Chat } from "../state/store";
 import { diffsOf, newestFirst, sameDiffs } from "./changes";
+import { changeMark, filesShown } from "./laneFolder";
+import { useLaneFolder } from "./useLaneFolder";
 import { laneTests, type LaneTests } from "./lane";
 import { laneOf, useLanesVersion } from "./laneStore";
 import { LanePreviewView, type LanePreviewProps } from "./LanePreview";
@@ -34,6 +36,8 @@ export interface LanePaneProps {
   onView: (view: PaneView) => void;
   /** The files the session changed, the newest change to each, the file that changed last first (changes.ts). */
   files: DiffFile[];
+  /** How many more files the lane's folder changed than are listed (laneFolder.ts); 0 when the files come from the chat's events. */
+  moreFiles?: number;
   /** The secrets Kit's changed code reads that a preview would run on a sample (preview.ts). */
   needs: Need[];
   /** The secret whose Add was pressed: the vault's note shows under it. */
@@ -55,7 +59,7 @@ const ChangedFiles = memo(function ChangedFiles({ files }: { files: DiffFile[] }
   return <DiffView files={files} scroll={false} testId="lane-diff" />;
 });
 
-function DiffPane({ files }: { files: DiffFile[] }) {
+function DiffPane({ files, moreFiles = 0 }: { files: DiffFile[]; moreFiles?: number }) {
   if (files.length === 0) {
     return (
       <p className="mut lp-none" data-testid="lane-diff-none">
@@ -63,7 +67,16 @@ function DiffPane({ files }: { files: DiffFile[] }) {
       </p>
     );
   }
-  return <ChangedFiles files={files} />;
+  return (
+    <>
+      <ChangedFiles files={files} />
+      {moreFiles > 0 && (
+        <p className="mut lp-none" data-testid="lane-diff-more-files">
+          {t("lane.pane.diff.moreFiles", { n: moreFiles })}
+        </p>
+      )}
+    </>
+  );
 }
 
 function PreviewPane({ needs, asked, onAdd, preview }: Pick<LanePaneProps, "needs" | "asked" | "onAdd" | "preview">) {
@@ -132,7 +145,7 @@ function TestsPane({ tests, time }: { tests: LaneTests; time: (ms: number) => st
   );
 }
 
-export function LanePaneView({ view, onView, files, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
+export function LanePaneView({ view, onView, files, moreFiles, needs, asked, onAdd, preview, tests, time = (ms) => hhmm(new Date(ms)), review }: LanePaneProps) {
   return (
     <aside className="lpane" data-testid="lane-pane" data-view={view}>
       {review}
@@ -144,7 +157,7 @@ export function LanePaneView({ view, onView, files, needs, asked, onAdd, preview
         ))}
       </div>
       <div className="lp-view" data-testid={`lane-view-${view}`}>
-        {view === "diff" && <DiffPane files={files} />}
+        {view === "diff" && <DiffPane files={files} moreFiles={moreFiles} />}
         {view === "preview" && <PreviewPane needs={needs} asked={asked} onAdd={onAdd} preview={preview} />}
         {view === "tests" && <TestsPane tests={tests} time={time} />}
       </div>
@@ -174,7 +187,10 @@ export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: s
   const [reloads, setReloads] = useState(0);
   // Where the page runs does not change while it is open.
   const here = useMemo(frameHere, []);
-  const files = useChangedFiles(chat);
+  const fromEvents = useChangedFiles(chat);
+  // The folder is the truth where the shell can read it; the chat's events are the hint to read again, and the files shown where it cannot.
+  const folder = useLaneFolder(laneDir, changeMark(chat));
+  const files = filesShown(folder, fromEvents);
   const record = usePreviewRecord(chatKey);
   const live = isLive(record.run);
   // The folder is read each time its Preview is looked at, so the command named is chosen from what the folder holds now.
@@ -196,5 +212,5 @@ export function LanePane({ chatKey, chat, laneDir = null, review }: { chatKey: s
     reloads,
     onReload: () => setReloads((n) => n + 1),
   };
-  return <LanePaneView view={view} onView={setView} files={files} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} review={review} />;
+  return <LanePaneView view={view} onView={setView} files={files} moreFiles={folder?.moreFiles ?? 0} needs={onSample(all)} asked={asked} onAdd={setAsked} preview={preview} tests={laneTests(laneOf(chatKey))} review={review} />;
 }

@@ -1,0 +1,136 @@
+/* Settings › Providers: one bordered group listing every agent (a row is a button that opens its settings, with its
+   switch at the right), the chosen agent's settings as a form group under it, then Your agents and Accounts as the
+   groups they were on their own pages. */
+.prov-lead {
+  margin: 0 0 12px;
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 640px;
+}
+.prov-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 0;
+}
+.prov-row.open {
+  background: var(--raise);
+}
+.prov-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+.prov-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prov-n {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+.prov-n b {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prov-own,
+.prov-ver {
+  color: var(--quiet);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.prov-ver {
+  font-family: var(--mono);
+}
+.prov-s {
+  font-size: 11.5px;
+  color: var(--body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prov-s.quiet,
+.prov-s.off {
+  color: var(--quiet);
+}
+.prov-s.warn {
+  color: var(--warn, var(--ink));
+}
+.prov-row.off .prov-n b {
+  color: var(--muted);
+}
+/* the chosen agent's settings, inside the list under its row: rows of their own, set in from the list's edge */
+.prov-detail {
+  background: var(--raise);
+  padding-left: 26px;
+}
+.prov-detail > * + * {
+  border-top: 1px solid var(--line);
+}
+.prov-status .st-k,
+.prov-runs .st-k {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.prov-mono,
+.prov-runs code {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.prov-quiet {
+  color: var(--quiet);
+}
+.prov-field .st-k {
+  max-width: 360px;
+}
+.prov-args {
+  height: auto;
+  padding: 6px 8px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.prov-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.prov-var {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.prov-var-n {
+  width: 150px;
+}
+.prov-var-v {
+  width: 170px;
+}
+.prov-acc {
+  scroll-margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .prov-var {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

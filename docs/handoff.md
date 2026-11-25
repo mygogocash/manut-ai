@@ -214,8 +214,6 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    - item 75, source control: git and the CLIs' status, the default branch pulled when clean, a pull request made and
      merged from a lane, each asked first (`feat/source-control`, Opus, worktree `cc-item75-source`), started 25 Nov at
      23:10.
-   - item 74, a Providers page for the coding agents: on or off, status, name, path, home, arguments and environment
-     (`feat/providers`, Opus, worktree `cc-item74-providers`), started 25 Nov at 22:00.
    Next, as each finishes: item 80 (the chat box: model, effort, approval, add context, after 67), 72 (MCP and Skills
    everywhere), 81 (voice), 82 (computer use, lifted from Orca), 73 (worktree settings), then 71, 74, 75, 69, 76, 77, and 83 and 84
    (artifacts and skills shared by a link, from two more of Orca's pages: built switched off, as they need a sign-in, an
@@ -245,7 +243,15 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 82 (computer use for Claude Code chats: Settings, Computer reads the two macOS permissions without prompting;
+   Merged: 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,
+   and the chats History's search finds; it has no power of its own, and a test holds it to that), 71 (the lane pane's
+   Diff read from the lane's own folder through git, read only and capped, so it is there
+   after a restart and shows a subagent's and a hand's edits; planned by the lead and built by Sonnet in a quarter of
+   an hour, the first item under the owner's split of thinking and carrying out), 74 (Settings, Providers in every
+   mode: each agent with a switch the shell enforces, a name, its program's
+   path, its home, extra arguments that go last and are refused by name when they would skip an ask, and variables
+   whose values are never shown again; Cursor and Antigravity added as ACP agents, never yet sent a message), 82
+   (computer use for Claude Code chats: Settings, Computer reads the two macOS permissions without prompting;
    looking at an app is asked once for a chat, and every click, typed text, key and menu choice is a card of its own
    that runs once; Manut AI's own windows, System Settings, password places and a locked screen are refused; lifted from
    Orca; never run against a real window, `docs/computer-use.md` has the owner's steps), 76 (a row's menu pins, snoozes, marks done for now and archives a chat or lane, with an ask always bringing a
@@ -561,6 +567,13 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `apps/web` files: timed out only when the whole Mac stalled for half a minute with four helpers running; each passes
   alone.
 - `apps/web` `test/ShopDataTab.test.tsx`, "says when the API could not be reached": failed once in a loaded full run.
+- `apps/api` `test/model-alerts.test.ts` ("notes 80% and then 100%"), `test/google-books.test.ts` ("makes the sheet once") and
+  `test/approvals-route.test.ts` ("lists the session's open approvals"): all three passed five seconds in one CI run on
+  `7ef8505` (25 Nov) and passed on the next commit; each has thirty seconds since.
+- The desktop's Playwright shards may fail without failing a CI run, so a spec that a merge breaks goes unseen: five did on
+  25 Nov (a row's menu, the Settings pages' order, a closed lane's clean-up, a word kept in English). After merging an
+  item that changes a menu, a Settings page or a lane's life, read the newest run's "Desktop Playwright (all shards)"
+  summary, or run the specs named for that area before pushing.
 - `apps/web` `test/MakeRoutineForm.test.tsx`, "lists two routines made one after another": failed once in CI's Web
   tests on `0646cc1` (25 Nov), counting two reads where it expected three. The read after the second routine is asked
   for a moment after its row shows, and the test looked at once; it waits for the read since then.
@@ -587,6 +600,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `wrangler whoami` lists the accounts by name: the dev Workers are in the one named GoGoCash). Run
   `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
   Worker whose name does not end in `-dev`.
+- Repeated work is in `.claude/skills/` since 25 Nov (`CLAUDE.md`, "Skills"): `helper` (a helper's standing rules),
+  `lead-merge` (gate, merge, mark and clean up an item, with scripts), `release-desktop` and `ci-read`. A brief names
+  the item and tells the helper to read `.claude/skills/helper/SKILL.md` first.
 - CI runs only what a push needs since 25 Nov (`docs/decisions.md`; `.github/scripts/changed-areas.mjs`): its first job,
   What changed, says in the run's summary which jobs run and why, measured from the last commit CI passed on. A docs
   push runs two short jobs. A pull request's own run of a `pilot/*` commit skips everything, as the push's run checks

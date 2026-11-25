@@ -182,7 +182,9 @@ describe("a month of the books, asked, approved once and sent once", () => {
     expect(world.google.appends()).toEqual([]);
     expect((await decide(owner.headers, fourth.body.requestId!)).body.action).toBe("confirmed");
     expect(world.google.appends()).toHaveLength(1);
-  });
+    // Several whole requests against real objects: about two seconds alone, and past the five-second default once on
+    // a slow CI runner (25 Nov 2026, `7ef8505`, three files in one run), so it has thirty.
+  }, 30_000);
 
   it("names the sheet as the owner renamed it, as one line of plain text", async () => {
     const { shop, owner } = await readyShop();

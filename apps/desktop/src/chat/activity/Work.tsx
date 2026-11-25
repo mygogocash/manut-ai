@@ -8,6 +8,8 @@ import { t, type Key } from "../../i18n";
 import { ChevronRight } from "../../ui";
 import "./work.css";
 
+const NOTE: Record<NonNullable<DiffFile["note"]>, Key> = { binary: "diff.binary", too_large: "diff.tooLarge", left_out: "diff.leftOut" };
+
 /** One file's change: path and counts, then its lines in mono, capped in height with their own scroll. */
 function DiffFileView({ f, testId }: { f: DiffFile; testId: string }) {
   return (
@@ -18,6 +20,11 @@ function DiffFileView({ f, testId }: { f: DiffFile; testId: string }) {
         </span>
         {f.kind === "add" && <span className="dv-kind">{t("diff.new")}</span>}
         {f.kind === "delete" && <span className="dv-kind">{t("diff.deleted")}</span>}
+        {f.from && (
+          <span className="dv-kind" title={f.from}>
+            {t("diff.renamed", { from: f.from })}
+          </span>
+        )}
         {f.added > 0 && <span className="dv-add">+{f.added}</span>}
         {f.removed > 0 && <span className="dv-del">−{f.removed}</span>}
       </div>
@@ -31,6 +38,7 @@ function DiffFileView({ f, testId }: { f: DiffFile; testId: string }) {
             </div>
           );
         })}
+        {f.note ? <div className="dv-l more">{t(NOTE[f.note])}</div> : null}
         {f.more ? <div className="dv-l more">{t("diff.more", { n: f.more })}</div> : null}
       </div>
     </div>

@@ -1,6 +1,7 @@
 // Ctrl+` (the bottom terminal panel) on every OS, by the physical key, and never while an input method composes.
 import { describe, expect, it } from "vitest";
 import { shortcutFor } from "./shortcuts";
+import { closePalette, openPalette, paletteOpen } from "../palette/state";
 
 type K = Parameters<typeof shortcutFor>[0];
 const k = (key: string, code: string | undefined, m: Partial<K> = {}): K => ({ key, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
@@ -73,14 +74,72 @@ describe("the shortcuts while the first-run setup fills the window", () => {
       onShortcutKey(ev);
     };
     const before = store.getState();
-    press(k("k", "KeyK", mod)); // History with its search box
+    press(k("k", "KeyK", mod)); // the command palette
     press(k(",", "Comma", mod)); // Settings
     press(k("2", "Digit2", mod)); // the second member's chat
     press(k("`", "Backquote", { ctrlKey: true })); // the terminal panel
     expect(store.getState()).toBe(before);
     expect(getTermPanel().open).toBe(false);
+    expect(paletteOpen()).toBe(false);
     store.actions.firstRunEnd();
     press(k("k", "KeyK", mod));
-    expect(store.getState().ui.view).toBe("history");
+    // the palette opens over the page; it does not move to History any more
+    expect(paletteOpen()).toBe(true);
+    expect(store.getState().ui.view).not.toBe("history");
+    closePalette();
+  });
+});
+
+describe("⌘K and the command palette", () => {
+  const mod = (isMac: boolean) => (isMac ? { metaKey: true } : { ctrlKey: true });
+  const press = async (e: K, target: unknown = null) => {
+    const { onShortcutKey } = await import("./shortcuts");
+    onShortcutKey({ ...e, target, repeat: false, defaultPrevented: false, preventDefault() {}, stopPropagation() {} } as unknown as KeyboardEvent);
+  };
+  const ready = async () => {
+    const { getStore } = await import("../state/store");
+    const store = getStore();
+    await store.actions.init();
+    store.actions.firstRunEnd();
+    closePalette({ restore: false });
+    return store;
+  };
+
+  it("opens on ⌘K and closes on a second ⌘K, with the focus given back", async () => {
+    await ready();
+    const { isMac } = await import("./shortcuts");
+    const focus = { calls: 0, isConnected: true, focus() { this.calls += 1; } };
+    openPalette(focus);
+    expect(paletteOpen()).toBe(true);
+    await press(k("k", "KeyK", mod(isMac())));
+    expect(paletteOpen()).toBe(false);
+    expect(focus.calls).toBe(1);
+  });
+
+  it("is not opened by ⌘K while an input method composes", async () => {
+    const { isMac } = await import("./shortcuts");
+    await ready();
+    await press(k("k", "KeyK", { ...mod(isMac()), isComposing: true }));
+    await press(k("Process", "KeyK", { ...mod(isMac()), keyCode: 229 }));
+    expect(paletteOpen()).toBe(false);
+  });
+
+  it("is not opened from a terminal, which keeps the key", async () => {
+    const { isMac } = await import("./shortcuts");
+    await ready();
+    const inXterm = { closest: (sel: string) => (sel === ".xterm" ? {} : null) };
+    await press(k("k", "KeyK", mod(isMac())), inXterm);
+    expect(paletteOpen()).toBe(false);
+  });
+
+  it("leaves every other shortcut to the palette's field while it is open", async () => {
+    const { isMac } = await import("./shortcuts");
+    const store = await ready();
+    openPalette(null);
+    const view = store.getState().ui.view;
+    await press(k(",", "Comma", mod(isMac())));
+    await press(k("2", "Digit2", mod(isMac())));
+    expect(store.getState().ui.view).toBe(view);
+    closePalette({ restore: false });
   });
 });

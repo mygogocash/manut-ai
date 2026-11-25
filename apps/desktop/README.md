@@ -85,6 +85,23 @@ the names omher's screens use, each pointed at a design token. `src/theme/tokens
 layer drifts from `tokens.json`. Geist, Geist Mono and IBM Plex Sans Thai are bundled (`src/theme/fonts.css`,
 `src/assets/fonts/`), because the app allows no remote font.
 
+## The command palette
+
+Command-K (Ctrl+K off macOS) and the side menu's Search open one box over whatever is showing (`src/palette`): a
+text field over a list in three groups, filtered as you type by plain, case-insensitive matching on the words the rows
+show, in the app's language. **Go to** is every page of the side menu and every Settings page. **Do** is what the app
+already offers somewhere else: a new thread with Buddy, New session, New lane, the microphone and voice mode, Pause
+everyone (which only opens the Team page's own question), the language, and Practice or Connected. **Chats** is what
+History's search finds for the same words, and the last row, "Search History for ...", opens History with them in its
+box. Up and Down move, Enter picks, Esc closes and gives the focus back to where it was; Command-K again closes it too.
+It does not open while an input method is composing, and a terminal keeps its own Command-K (clear) and Ctrl+K.
+
+It has no power of its own. `src/palette/registry.ts` lists the actions as data, each naming where else the app presses
+the same thing (`elsewhere`), and `registry.test.ts` fails when an action settles an ask, sends, removes or pays, or
+when its other place is gone. An action that needs a place that is not open (a chat box, a project, the Team page,
+Settings › Developer) is not listed, because that place registers it while it shows (`src/palette/places.ts`), and a
+later item adds an action with one entry in `ACTIONS`.
+
 ## Safety settings
 
 `src-tauri/tauri.conf.json` has a content security policy for the packaged app (scripts and styles from the app

@@ -70,7 +70,8 @@ async function openAccounts(page: Page, theme: "dark" | "light" = "dark") {
   await page.addInitScript(installHost);
   await page.goto("/");
   await chatOpen(page);
-  await openSettings(page, "accounts");
+  // Accounts are a part of Settings › Providers since item 74
+  await openSettings(page, "providers");
   await expect(page.getByTestId("accounts-page")).toBeVisible();
 }
 
@@ -80,10 +81,11 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("the account row opens Settings, and Accounts there: one plain header line, CLIs on this computer only", async ({ page }) => {
+test("Settings › Providers holds Accounts: one plain header line, CLIs on this computer only", async ({ page }) => {
   await openAccounts(page);
-  await expect(page.getByTestId("settings-nav-accounts")).toHaveAttribute("aria-current", "page");
-  await expect(page.locator(".st-nav button").first()).toHaveText("Accounts");
+  await expect(page.getByTestId("settings-nav-providers")).toHaveAttribute("aria-current", "page");
+  // no page of its own any more (item 74)
+  await expect(page.getByTestId("settings-nav-accounts")).toHaveCount(0);
   // the menu's account row is current while Settings is open, as on the design canvas's Settings board
   await expect(page.getByTestId("nav-settings")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("accounts-lead")).toHaveText("Logins Manut AI uses when it runs Claude Code, Codex or pi for you. Bots are set up under Bots.");
@@ -94,7 +96,7 @@ test("the account row opens Settings, and Accounts there: one plain header line,
   // "Bots" in the header line opens Settings › Bots
   await page.getByTestId("accounts-to-bots").click();
   await expect(page.getByTestId("settings-nav-bots")).toHaveAttribute("aria-current", "page");
-  await page.getByTestId("settings-nav-accounts").click();
+  await page.getByTestId("settings-nav-providers").click();
   const text = await page.getByTestId("accounts-page").innerText();
   for (const gone of ["Stack your logins", "fill-first", "config.yaml", "secret-key", "CPA ", "management"]) expect(text).not.toContain(gone);
 });

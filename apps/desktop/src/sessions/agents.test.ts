@@ -220,13 +220,14 @@ describe("mock session host", () => {
     expect(ops.filter((o) => o === "start")).toHaveLength(0); // a chat never starts a terminal
   });
 
-  it("reports claude, codex and omh installed and the eleven others missing", async () => {
+  it("reports claude, codex and omh installed and the thirteen others missing", async () => {
     const list = await new MockHost({}).agents();
     expect(list.filter((a) => a.path).map((a) => a.id)).toEqual(["claude", "codex", "omh"]);
-    expect(list.filter((a) => !a.path).map((a) => a.id)).toEqual(["omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline"]);
-    // the generic ACP agents come as the shell's rows, with nothing of theirs kept in this app
-    expect(list.filter((a) => a.acp).map((a) => a.acp!.id)).toEqual(["gemini", "qwen", "kimi", "copilot", "cline"]);
-    expect(list.map((a) => a.mode)).toEqual(["chat", "chat", "chat", "chat", "hermes", "chat", "chat", "terminal", "chat", "chat", "chat", "chat", "chat", "chat"]);
+    expect(list.filter((a) => !a.path).map((a) => a.id)).toEqual(["omo", "dsh", "pi", "omp", "grok", "opencode", "gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
+    // the generic ACP agents come as the shell's rows, with nothing of theirs kept in this app (Cursor and Antigravity
+    // since item 74)
+    expect(list.filter((a) => a.acp).map((a) => a.acp!.id)).toEqual(["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
+    expect(list.map((a) => a.mode)).toEqual(["chat", "chat", "chat", "chat", "hermes", "chat", "chat", "terminal", "chat", "chat", "chat", "chat", "chat", "chat", "chat", "chat"]);
   });
 });
 

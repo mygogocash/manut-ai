@@ -1,5 +1,6 @@
-// Shared copy of the Accounts data for the page and the auto-switch watcher: accounts.list from the bridge,
-// plus what the desktop app knows (which CLIs are on this computer, each CLI's own login status). The watcher
+// Shared copy of the Accounts data for the page and the auto-switch watcher: the accounts list from the desktop app's
+// shell (item 74, every mode) or else accounts.list from the bridge, plus what the desktop app knows (which CLIs are on
+// this computer, each CLI's own login status). The watcher
 // re-reads every minute (and on `accounts.update`); when a CLI's in-use account is limited and auto-switch is
 // on, the next signed-in account becomes the one new sessions use, with one quiet line in the bot chat.
 // Running sessions are never touched.
@@ -9,7 +10,7 @@ import { getStore, notifyEnabled, useStore } from "../../state/store";
 import { showNote } from "../../lib/notify";
 import { t } from "../../i18n";
 import { clock, limitName } from "../../sidebar/usageFormat";
-import { accountHost, type LoginStatus } from "./native";
+import { accountHost, accountOps, isDesktop, type LoginStatus } from "./native";
 import { accountName, autoSwitchOn, isCpa, lapseNotices, nextAccount, pruneSeen, resetFirstOn, switchNote, CLI_NAME } from "./rules";
 
 const REFRESH_MS = 60_000;
@@ -81,7 +82,9 @@ async function readVersions(groups: AccountGroup[]): Promise<Partial<Record<Acco
 export function reloadAccounts(): Promise<void> {
   inflight ??= (async () => {
     try {
-      const [r, onComputer] = await Promise.all([getStore().actions.accounts(), accountHost().clis().catch(() => null)]);
+      const host = accountHost();
+      const list = host.list ? host.list().then((groups) => ({ groups })) : getStore().actions.accounts();
+      const [r, onComputer] = await Promise.all([list, host.clis().catch(() => null)]);
       set({ groups: r.groups, error: null, onComputer });
       const here = r.groups.filter((g) => onComputer?.[g.cli] ?? g.installed);
       set({ status: await readStatuses(here) });
@@ -105,7 +108,7 @@ async function autoSwitch(groups: AccountGroup[]): Promise<void> {
     if (!move) continue;
     const text = switchNote(g, move.from, move.to, now, move.soonest);
     try {
-      await getStore().actions.setActiveAccount(g.cli, g.accounts[move.to].id);
+      await accountOps().setActive(g.cli, g.accounts[move.to].id);
     } catch {
       continue;
     }
@@ -166,11 +169,13 @@ export function useAccounts(): Snap {
   );
 }
 
-/** Mounted once in the sidebar: keeps the copy fresh and runs the auto-switch. Renders nothing. */
+/** Mounted once in the sidebar: keeps the copy fresh and runs the auto-switch. Renders nothing. In the desktop app the
+ *  shell keeps the list, so it runs whatever the runtime's connection; elsewhere it waits for the runtime. */
 export function AccountsWatcher() {
   const conn = useStore().conn;
+  const here = isDesktop();
   useEffect(() => {
-    if (conn !== "open") return;
+    if (conn !== "open" && !here) return;
     void reloadAccounts();
     const h = setInterval(() => void reloadAccounts(), REFRESH_MS);
     const off = getStore().actions.onBridgeEvent((ev) => {
@@ -180,6 +185,6 @@ export function AccountsWatcher() {
       clearInterval(h);
       off();
     };
-  }, [conn]);
+  }, [conn, here]);
   return null;
 }

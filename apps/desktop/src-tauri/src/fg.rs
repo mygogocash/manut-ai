@@ -14,7 +14,7 @@ use crate::sessions::{holds, parts_of, AGENTS, LAYOUTS};
 
 /// CLIs manut does not start itself but a person runs in a terminal: program name -> mark id (the ids of
 /// src/ui/AgentIcon.tsx; `hermes` is Hermes Agent itself).
-const OTHER_PROGRAMS: [(&str, &str); 5] = [("hermes", "hermes"), ("cursor-agent", "cursor"), ("amp", "amp"), ("goose", "goose"), ("aider", "aider")];
+const OTHER_PROGRAMS: [(&str, &str); 4] = [("hermes", "hermes"), ("amp", "amp"), ("goose", "goose"), ("aider", "aider")];
 
 /// npm / bun packages of agents without a [`LAYOUTS`] row: `node_modules/<package>` in a program's real path.
 const OTHER_PACKAGES: [(&str, &str); 8] = [
@@ -576,7 +576,9 @@ mod tests {
             ("/opt/homebrew/Cellar/omp/1.2.0/bin/omp", Some("omp")),
             ("/Users/me/.local/bin/omp", Some("omp")),
             ("/Users/me/.local/bin/omo", Some("omo")),
-            ("/Users/me/.local/bin/cursor-agent", Some("cursor")),
+            // Cursor's CLI is one of the ACP agents now (item 74): its id, which the page's marks read as Cursor's
+            ("/Users/me/.local/bin/cursor-agent", Some("cursor-agent")),
+            ("/Users/me/.local/bin/agy", Some("agy")),
             ("aider", Some("aider")),
             ("qwen", Some("qwen")),
             ("COPILOT.EXE", Some("copilot")),

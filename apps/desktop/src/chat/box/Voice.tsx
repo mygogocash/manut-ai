@@ -12,6 +12,7 @@ import { lang as uiLang, LANG_TAG, t } from "../../i18n";
 import { getVoiceEngines } from "../../voice/engine";
 import { createMic, type MicView } from "../../voice/mic";
 import { createVoiceMode, OFF, type ModeState } from "../../voice/mode";
+import { usePlace, type BoxPlace } from "../../palette/places";
 import { decide, onPrefs, readPrefs, refusalOf, refusalText, routeText, savePrefs, spokenName, type Spoken } from "../../voice/voice";
 
 const MicMark = () => (
@@ -237,6 +238,18 @@ export function useBoxVoice(o: { on: boolean; chatKey: string; text: string; set
     [mic, voice],
   );
 
+  // The command palette offers the same two presses while this box is the one on screen. It reads the latest state
+  // through a ref, so the registration holds still while the box re-renders.
+  const press = useRef<{ micLive: boolean; modeLive: boolean; lang: Spoken; mic: () => void; mode: () => void }>({ micLive: false, modeLive: false, lang, mic: () => {}, mode: () => {} });
+  const place = useMemo<BoxPlace | null>(
+    () =>
+      o.on && !o.offline && engines
+        ? { micLive: () => press.current.micLive, modeLive: () => press.current.modeLive, spoken: () => spokenName(press.current.lang), toggleMic: () => press.current.mic(), toggleMode: () => press.current.mode() }
+        : null,
+    [o.on, o.offline, engines],
+  );
+  usePlace("box", place);
+
   if (!o.on || !engines || !mic || !voice) return { buttons: null, above: null, typed: () => {}, escape: () => false, sending: () => {} };
 
   /** A press: what this Mac can do for the person's language decides whether it listens, asks first, or says why not. */
@@ -260,6 +273,8 @@ export function useBoxVoice(o: { on: boolean; chatKey: string; text: string; set
     if (then === "mic") void mic.start(prefs.lang, plan.apple);
     else voice.start();
   };
+
+  press.current = { micLive: micOn(micView), modeLive: modeOn(mode), lang, mic: () => (micOn(micView) ? mic.stop() : void begin("mic")), mode: () => (modeOn(mode) ? voice.stop() : void begin("mode")) };
 
   return {
     buttons: (

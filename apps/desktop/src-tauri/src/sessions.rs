@@ -6,6 +6,10 @@
 //! is not in [`AGENTS`] is refused, and there is no way to pass a command line or extra arguments from the
 //! UI beyond a conversation id to continue ([`resume_args`]). Agent discovery looks on `PATH` plus the usual install folders, because an app started from the Dock
 //! or the Start menu gets a much shorter `PATH` than a terminal does.
+//!
+//! What a person set for an agent on Settings › Providers is read by the shell from its own file at each start
+//! ([`crate::providers`]), never taken from the page: an agent turned off starts nothing ([`launch_with`]), a program path
+//! replaces only where the program is found, and the person's extra arguments go after every argument added here.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -495,10 +499,14 @@ fn find_agent(a: &Agent, dirs: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// The program manut would start for agent `id` when it lies in none of that agent's install layouts ([`LAYOUTS`]),
-/// so it may be another program with the same name; `None` when it is in one, or the agent has no row.
+/// so it may be another program with the same name; `None` when it is in one, the agent has no row, or the person set
+/// its path on Settings › Providers (they chose that program).
 pub fn unrecognized_program(id: &str) -> Option<PathBuf> {
     let a = agent(id)?;
     layout(id)?;
+    if !crate::providers::stored_here(id).path.is_empty() {
+        return None;
+    }
     let path = find_agent(a, &host_dirs())?;
     (!in_install_layout(id, &path, &real_path(&path), &host_env, |q| is_program_file(q) || q.is_file())).then_some(path)
 }
@@ -590,6 +598,12 @@ pub struct AgentInfo {
     /// install lines, mark and whether it continues a conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp: Option<&'static AcpEntry>,
+    /// Turned off on Settings › Providers: the page offers it nowhere, and the shell starts no session of it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub off: bool,
+    /// The display name the person set on Settings › Providers, when they set one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// What the oh-my-hermes row says the person has. Its session never runs `omh`: it is a Hermes chat in the folder
@@ -598,7 +612,7 @@ pub struct AgentInfo {
 /// Hermes. Neither: not installed.
 pub fn hermes_row(omh: Option<PathBuf>, hermes: Option<PathBuf>) -> AgentInfo {
     let a = agent("omh").expect("omh is on the allow-list");
-    let info = |label, path: Option<PathBuf>, via| AgentInfo { id: a.id, label, mode: a.mode, path: path.map(|p| p.to_string_lossy().into_owned()), via, acp: None };
+    let info = |label, path: Option<PathBuf>, via| AgentInfo { id: a.id, label, mode: a.mode, path: path.map(|p| p.to_string_lossy().into_owned()), via, acp: None, off: false, name: None };
     match (omh, hermes) {
         (Some(p), _) => info(a.label, Some(p), None),
         (None, Some(h)) => info(HERMES_LABEL, Some(h), Some("hermes")),
@@ -610,32 +624,69 @@ pub fn hermes_row(omh: Option<PathBuf>, hermes: Option<PathBuf>) -> AgentInfo {
 pub const HERMES_LABEL: &str = "Hermes";
 
 /// Every allow-listed agent with where it was found on this machine: the built-ins, then the generic ACP agents,
-/// each with its list row.
+/// each with its list row, and what Settings › Providers says of it. (The app reads the file once and calls
+/// [`agents_on_this_machine_with`]; the real-agent checks use this.)
+#[cfg(test)]
 pub fn agents_on_this_machine() -> Vec<AgentInfo> {
+    agents_on_this_machine_with(&crate::providers::load_here())
+}
+
+/// [`agents_on_this_machine`] with the Providers file `cfg`: an agent's program is the path the person set when that is
+/// still a program here, else where it is found as always; a set path that is not one any more is not installed (its
+/// session would refuse to start).
+pub fn agents_on_this_machine_with(cfg: &crate::providers::Loaded) -> Vec<AgentInfo> {
     let dirs = host_dirs();
     let rows = AGENTS.iter().map(|a| (a, None)).chain(acp_agents::ACP_LIST.iter().map(|e| (&e.agent, Some(e))));
     rows.map(|(a, acp)| {
-        let found = find_agent(a, &dirs);
-        if a.id == "omh" {
+        let mine = cfg.get(a.id);
+        let found = match crate::providers::set_program(a.label, &mine, Os::current(), is_program_file) {
+            Ok(Some(p)) => Some(p),
+            Ok(None) => find_agent(a, &dirs),
+            Err(_) => None,
+        };
+        let mut info = if a.id == "omh" {
             // Manut AI starts no Hermes bridge, so nothing looks for Hermes' own Python any more: the row is
             // installed only when the `omh` program itself is found.
-            return hermes_row(found, None);
-        }
-        AgentInfo { id: a.id, label: a.label, mode: a.mode, path: found.map(|p| p.to_string_lossy().into_owned()), via: None, acp }
+            hermes_row(found, None)
+        } else {
+            AgentInfo { id: a.id, label: a.label, mode: a.mode, path: found.map(|p| p.to_string_lossy().into_owned()), via: None, acp, off: false, name: None }
+        };
+        info.off = mine.off;
+        info.name = Some(mine.name).filter(|n| !n.is_empty());
+        info
     })
     .collect()
 }
 
 /// What manut runs for agent `id`: the allow-list entry resolved on this machine, as argv, plus the
 /// `PATH` the child gets (the program's own folder and the install folders first, so `#!/usr/bin/env node`
-/// shims find Node even when the app was started from the Dock).
+/// shims find Node even when the app was started from the Dock). What Settings › Providers says of it is read now. (Every
+/// start reads the file once and calls [`launch_with`]; the real-agent checks use this.)
+#[cfg(test)]
 pub fn launch_for(id: &str) -> Result<(Vec<OsString>, OsString), String> {
+    launch_with(id, &crate::providers::stored_here(id))
+}
+
+/// [`launch_for`] with agent `id`'s Providers settings `mine`: refused when the person turned it off, before anything is
+/// looked for or run; the program is the path they set (checked again now), else the one found as always. Nothing else of
+/// `mine` changes the launch: the person's arguments go after the app's ([`crate::providers::extra_args`]).
+pub fn launch_with(id: &str, mine: &crate::providers::Stored) -> Result<(Vec<OsString>, OsString), String> {
+    let a = agent(id).ok_or_else(|| format!("unknown agent \"{id}\""))?;
+    crate::providers::may_start(a.label, mine)?;
+    program_for(id, mine)
+}
+
+/// Agent `id`'s program and the child's `PATH`, whether or not it is turned off (the page reads its version with it).
+pub fn program_for(id: &str, mine: &crate::providers::Stored) -> Result<(Vec<OsString>, OsString), String> {
     let a = agent(id).ok_or_else(|| format!("unknown agent \"{id}\""))?;
     let dirs = host_dirs();
-    let path = find_agent(a, &dirs).ok_or_else(|| match a.id {
-        "dsh" => "DeepSeek Harness is not installed (no DeepSeek Harness `dsh` found)".to_string(),
-        _ => format!("{} is not installed (no `{}` found)", a.label, a.program),
-    })?;
+    let path = match crate::providers::set_program(a.label, mine, Os::current(), is_program_file)? {
+        Some(p) => p,
+        None => find_agent(a, &dirs).ok_or_else(|| match a.id {
+            "dsh" => "DeepSeek Harness is not installed (no DeepSeek Harness `dsh` found)".to_string(),
+            _ => format!("{} is not installed (no `{}` found)", a.label, a.program),
+        })?,
+    };
     let mut child_dirs: Vec<PathBuf> = path.parent().map(|p| vec![p.to_path_buf()]).unwrap_or_default();
     child_dirs.extend(dirs);
     let joined = std::env::join_paths(child_dirs.iter().filter(|d| d.is_dir())).map_err(|e| e.to_string())?;
@@ -1075,19 +1126,48 @@ impl Sessions {
     where
         F: FnMut(Output) + Send + 'static,
     {
+        let mine = crate::providers::stored_here(agent_id);
+        self.start_agent_mine(agent_id, cwd, new_session, resume, link, account_env, &mine, cols, rows, sink)
+    }
+
+    /// [`Sessions::start_agent`] with the agent's Providers settings `mine`, read once for the whole start: turned off, it
+    /// starts nothing; its home and variables come before the app's own variables (which win), and its arguments after
+    /// every argument added here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start_agent_mine<F>(
+        &self,
+        agent_id: &str,
+        cwd: &Path,
+        new_session: Option<&str>,
+        resume: Option<&str>,
+        link: Option<&str>,
+        account_env: &[(String, String)],
+        mine: &crate::providers::Stored,
+        cols: u16,
+        rows: u16,
+        sink: F,
+    ) -> Result<u32, String>
+    where
+        F: FnMut(Output) + Send + 'static,
+    {
         // DeepSeek Harness ships no terminal profile: DSH runs only as a chat
         if agent_id == "dsh" {
             return Err("DeepSeek Harness has no terminal view here".into());
         }
         let extra = terminal_args(agent_id, new_session, resume)?;
-        let mut env = account_env.to_vec();
-        env.extend(terminal_env(agent_id, link)?);
-        let (mut argv, path_env) = launch_for(agent_id)?;
+        let link_env = terminal_env(agent_id, link)?;
+        let (mut argv, path_env) = launch_with(agent_id, mine)?;
+        let through_cmd = argv.first().is_some_and(|p| p == "cmd.exe");
+        let mut env = crate::providers::session_env(agent_id, mine, account_env, true);
+        env.extend(link_env);
         argv.extend(extra);
         // Claude Code's status line runs manut's relay, which records the usage it reports and runs the person's own
         // status line unchanged (`claude_usage.rs`; Claude Code with the person's own status line, on macOS and Linux
-        // outside an AppImage)
-        argv.extend(crate::claude_usage::terminal_args(agent_id, cwd, account_env, &crate::claude_usage::RelayHost::current()));
+        // outside an AppImage). It reads the home the session runs with: an added account's, else the one set here.
+        let home_env = crate::providers::session_env(agent_id, mine, account_env, false);
+        argv.extend(crate::claude_usage::terminal_args(agent_id, cwd, &home_env, &crate::claude_usage::RelayHost::current()));
+        // the person's own arguments, last
+        argv.extend(crate::providers::extra_args(agent_id, mine, through_cmd)?);
         self.spawn(argv, cwd, Some(path_env), &env, cols, rows, sink)
     }
 
@@ -1807,7 +1887,7 @@ mod tests {
         let ids: Vec<&str> = AGENTS.iter().map(|a| a.id).collect();
         assert_eq!(ids, ["claude", "codex", "omo", "dsh", "omh", "pi", "omp", "grok", "opencode"]);
         let generic: Vec<&str> = crate::acp_agents::ACP_LIST.iter().map(|e| e.agent.id).collect();
-        assert_eq!(generic, ["gemini", "qwen", "kimi", "copilot", "cline"]);
+        assert_eq!(generic, ["gemini", "qwen", "kimi", "copilot", "cline", "cursor-agent", "agy"]);
         for a in AGENTS.iter().chain(crate::acp_agents::ACP_LIST.iter().map(|e| &e.agent)) {
             assert_eq!(a.id, a.program, "the id is the program name; nothing else is ever run");
             assert_eq!(agent(a.id), Some(a), "{}", a.id);
@@ -1844,7 +1924,7 @@ mod tests {
         assert_eq!(chat_args("opencode").unwrap(), ["acp"]);
         // the generic ACP agents: the list drives both the allow-list row and the one argument that starts its ACP
         // server, as 0.2.8 had them (Gemini's `--experimental-acp` is deprecated)
-        for (id, arg) in [("gemini", "--acp"), ("qwen", "--acp"), ("kimi", "acp"), ("copilot", "--acp"), ("cline", "--acp")] {
+        for (id, arg) in [("gemini", "--acp"), ("qwen", "--acp"), ("kimi", "acp"), ("copilot", "--acp"), ("cline", "--acp"), ("cursor-agent", "acp"), ("agy", "acp")] {
             let e = crate::acp_agents::entry(id).unwrap();
             assert_eq!(chat_args(id).unwrap(), [arg], "{id}");
             assert_eq!(chat_args(id).unwrap(), e.args, "{id}");
@@ -2990,6 +3070,39 @@ mod tests {
         let work = home.join(".manut").join("accounts").join("claude").join("work");
         assert!(text.contains(&format!("cfg={}", work.display())), "{text:?}");
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// Settings › Providers (item 74) on a terminal start: turned off, no process; otherwise the path set is the program,
+    /// the app's own arguments (here Codex's `resume <id>`) come first and the person's after them, and their variable and
+    /// the app's own link variable both reach the program.
+    #[cfg(unix)]
+    #[test]
+    fn providers_settings_reach_a_terminal_after_the_apps_own_arguments() {
+        use crate::providers::{Stored, Var};
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("manut-prov-term-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = base.canonicalize().unwrap();
+        let prog = dir.join("fake-codex");
+        let seen = dir.join("seen.txt");
+        std::fs::write(&prog, format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{s}.tmp'\nprintf 'VAR=%s\\n' \"$MY_TOKEN\" >> '{s}.tmp'\nmv '{s}.tmp' '{s}'\n", s = seen.display())).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let s = Sessions::default();
+        let id = "019a1c3b-9f55-7542-900c-c5f4dc80eefa";
+        let off = Stored { off: true, path: prog.to_string_lossy().into_owned(), ..Stored::default() };
+        assert!(s.start_agent_mine("codex", &dir, None, Some(id), None, &[], &off, 80, 24, |_| {}).unwrap_err().contains("turned off"));
+        assert_eq!(s.count(), 0);
+        let mine = Stored { path: prog.to_string_lossy().into_owned(), args: vec!["-m=o3".into(), "--config=model_reasoning_effort=\"high\"".into()], env: vec![Var { name: "MY_TOKEN".into(), value: "t0k".into() }], ..Stored::default() };
+        s.start_agent_mine("codex", &dir, None, Some(id), None, &[], &mine, 80, 24, |_| {}).unwrap();
+        assert!(wait_for(|| seen.exists()));
+        let lines: Vec<String> = std::fs::read_to_string(&seen).unwrap().lines().map(str::to_string).collect();
+        assert_eq!(lines, ["resume", id, "-m=o3", "--config=model_reasoning_effort=\"high\"", "VAR=t0k"]);
+        // one that would skip the asks, written into the file by hand, starts nothing
+        let bad = Stored { args: vec!["--ask-for-approval=never".into()], ..mine.clone() };
+        assert!(s.start_agent_mine("codex", &dir, None, None, None, &[], &bad, 80, 24, |_| {}).unwrap_err().contains("arg_skips:--ask-for-approval"));
+        s.close_all();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The real check on a developer machine: `claude --version` / `codex --version` through the same
