@@ -226,20 +226,79 @@ fn window_number(win: &Ax) -> Option<u32> {
     (unsafe { get(win.ptr(), &mut id) } == 0 && id != 0).then_some(id)
 }
 
-/// The bundle identifier of the app process `pid` runs, read from its `Info.plist`, or empty.
-fn bundle_of(pid: i32) -> String {
+/// The program file process `pid` runs, or empty when it cannot be read.
+fn path_of(pid: i32) -> String {
     let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
     if n <= 0 {
         return String::new();
     }
-    let path = String::from_utf8_lossy(&buf[..n as usize]).into_owned();
-    let Some(at) = path.rfind(".app/Contents/MacOS/") else { return String::new() };
-    let plist = format!("{}.app/Contents/Info.plist", &path[..at]);
+    String::from_utf8_lossy(&buf[..n as usize]).into_owned()
+}
+
+/// Whether process `pid` runs as this user, both its real and its effective user (`proc_pidinfo`'s `pbi_ruid` and
+/// `pbi_uid`); false when that cannot be read.
+fn runs_as_me(pid: i32) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut c_void, size) };
+    let me = unsafe { libc::getuid() };
+    n == size && info.pbi_uid == me && info.pbi_ruid == me
+}
+
+/// The bundle identifier of process `pid` as the system knows it (`NSRunningApplication`'s `bundleIdentifier`, which
+/// AppKit's header says is the `CFBundleIdentifier` of the app's `Info.plist`, for any kind of bundle), else read from the
+/// `Info.plist` of whatever bundle its program `path` is in, else empty. AppKit tracks only "user applications", so the
+/// second read is what finds macOS's own prompts that run from a `.bundle`.
+fn bundle_of(pid: i32, path: &str) -> String {
+    let known = objc2_app_kit::NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|a| a.bundleIdentifier()).map(|b| b.to_string());
+    known.filter(|b| !b.trim().is_empty()).unwrap_or_else(|| bundle_in(path))
+}
+
+/// The bundle identifier of the bundle whose program is at `path` (`<name>.<kind>/Contents/MacOS/<program>`, any kind:
+/// `.app`, `.bundle`, `.xpc`, `.appex`), from its `Info.plist`, or empty.
+fn bundle_in(path: &str) -> String {
+    let Some(at) = path.rfind("/Contents/MacOS/") else { return String::new() };
+    let root = &path[..at];
+    if !root.rsplit('/').next().is_some_and(|name| name.len() > 1 && name[1..].contains('.')) {
+        return String::new();
+    }
+    let plist = format!("{root}/Contents/Info.plist");
     plist::Value::from_file(plist)
         .ok()
         .and_then(|v| v.as_dictionary().and_then(|d| d.get("CFBundleIdentifier")).and_then(|b| b.as_string()).map(str::to_string))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// macOS's own prompts are not all apps: SecurityAgent (a password prompt) and the Touch ID and password prompt
+    /// (`coreautha`) are `.bundle`s, and their bundle identifiers are what the refused list names.
+    #[test]
+    fn a_prompt_in_any_kind_of_bundle_reads_its_bundle_identifier() {
+        let d = std::env::temp_dir().join(format!("mc-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (bundle, exe, id) in [("SecurityAgent.bundle", "SecurityAgent", "com.apple.SecurityAgent"), ("coreautha.bundle", "coreautha", "com.apple.LocalAuthentication.UIAgent"), ("TextEdit.app", "TextEdit", "com.apple.TextEdit"), ("Helper.xpc", "Helper", "com.example.helper")] {
+            let root = d.join(bundle).join("Contents");
+            std::fs::create_dir_all(root.join("MacOS")).unwrap();
+            std::fs::write(root.join("Info.plist"), format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>")).unwrap();
+            assert_eq!(bundle_in(&root.join("MacOS").join(exe).to_string_lossy()), id, "{bundle}");
+        }
+        // a program in no bundle has none
+        assert_eq!(bundle_in("/usr/bin/python3"), "");
+        let _ = std::fs::remove_dir_all(&d);
+        // and on this Mac, the two prompts' own bundles, as macOS ships them (read from their Info.plist, nothing run)
+        for (path, id) in [
+            ("/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent", "com.apple.SecurityAgent"),
+            ("/System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha", "com.apple.LocalAuthentication.UIAgent"),
+        ] {
+            if std::path::Path::new(path).exists() {
+                assert_eq!(bundle_in(path), id);
+            }
+        }
+    }
 }
 
 /// `_AXUIElementGetWindow`, which HIServices exports without declaring: the window number of a window element, found
@@ -372,7 +431,8 @@ impl Desk for Mac {
                 .and_then(|v| v.downcast::<CFString>())
                 .map(|s| s.to_string())
                 .unwrap_or_default();
-            out.push(App { pid: pid as i32, name, bundle: bundle_of(pid as i32) });
+            let path = path_of(pid as i32);
+            out.push(App { pid: pid as i32, name, bundle: bundle_of(pid as i32, &path), path, mine: runs_as_me(pid as i32) });
         }
         out
     }

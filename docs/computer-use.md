@@ -45,6 +45,8 @@ headers and the Mac's own files. Nothing was read from another app's window, no 
 | Windows, trees, actions | `AXUIElementCreateApplication`, `AXUIElementCopyAttributeValue` (`AXWindows`, `AXChildren`, `AXRole`, `AXSubrole`, `AXTitle`, `AXDescription`, `AXPlaceholderValue`, `AXValue`, `AXEnabled`, `AXFocusedWindow`, `AXMenuBar`), `AXUIElementPerformAction` (`AXPress`), `AXUIElementSetAttributeValue` (`AXValue`), a password field's role `AXSecureTextField`; `CGEventCreateKeyboardEvent`, `CGEventSetFlags`, `CGEventPostToPid`; key codes from `HIToolbox/Events.h` | the SDK's headers |
 | Pictures | `CGWindowListCreateImage` with the window alone, its frame left out, one pixel a point, made a PNG by ImageIO; deprecated for ScreenCaptureKit and still Orca's default engine | `CGWindow.h`, Orca `main.swift` `captureImage` |
 | Sensitive apps | Bundle identifiers read from this Mac's own `Info.plist` files: System Settings `com.apple.systempreferences`, Keychain Access `com.apple.keychainaccess`, Passwords `com.apple.Passwords`, the login window, SecurityAgent, Touch ID's prompt, TCC's prompt service, the Accessibility prompt and the others in `room.rs` `REFUSED` | `/System/...` |
+| A program's bundle identifier | `NSRunningApplication`'s `runningApplicationWithProcessIdentifier:` and `bundleIdentifier` ("the `CFBundleIdentifier` of the application, or nil if the application does not have an `Info.plist`"); it tracks "only user applications", so the `Info.plist` of the bundle a program runs from (`<name>.<kind>/Contents/MacOS/`) is read when it has none. SecurityAgent runs from `SecurityAgent.bundle` (`com.apple.SecurityAgent`) and the Touch ID and password prompt from `coreautha.bundle` (`com.apple.LocalAuthentication.UIAgent`) | AppKit's `NSRunningApplication.h`, the two bundles' `Info.plist` on this Mac |
+| Who a program runs as | `proc_pidinfo` with `PROC_PIDTBSDINFO`: `pbi_uid` and `pbi_ruid` | `sys/proc_info.h`, `libproc.h` |
 
 ## What was lifted from Orca
 
@@ -111,6 +113,13 @@ Reads (`room.rs` tests unless named):
 - Never Manut AI's own windows (so an agent cannot read or press its own asks), System Settings, Keychain Access,
   Passwords or the prompts (`manut_ai_system_settings_and_the_keychain_are_refused_before_any_card`; in the chat,
   `tap.rs` `a_refused_target_is_denied_with_its_reason_and_never_shown_as_a_card`).
+- The prompts that are not `.app`s (security review, 25 Nov 2026). The bundle identifier used to be read only for a
+  program under `.app/Contents/MacOS/`, so SecurityAgent (`SecurityAgent.bundle`) and the Touch ID and password prompt
+  (`coreautha.bundle`) read as having none and missed the list. Now it is the system's own (`NSRunningApplication`),
+  else the `Info.plist` of any kind of bundle (`mac.rs` `a_prompt_in_any_kind_of_bundle_reads_its_bundle_identifier`),
+  and besides the list, any window of a program that does not run as this person, and of one with no bundle identifier
+  that is under `/System/` or whose program cannot be read, is refused
+  (`macos_prompts_are_refused_whatever_kind_of_bundle_they_are`).
 - At most 400 elements and 30 levels a look; a picture only with Screen capture
   (`a_picture_comes_only_with_screen_capture`).
 

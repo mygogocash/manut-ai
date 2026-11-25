@@ -46,6 +46,10 @@ pub struct App {
     pub name: String,
     /// Its bundle identifier, or empty when it has none.
     pub bundle: String,
+    /// The program file it runs, or empty when that cannot be read.
+    pub path: String,
+    /// It runs as this user (its real and effective user both).
+    pub mine: bool,
 }
 
 /// One element of a window's accessibility tree, in the order the tree is walked.
@@ -202,12 +206,24 @@ pub const REFUSED: [(&str, &str); 12] = [
     ("com.apple.coreservices.uiagent", "a prompt about opening an app or file"),
 ];
 
-/// Why computer use stays away from `app`, or None when it may look at it.
+/// Why computer use stays away from `app`, or None when it may look at it. Besides Manut AI and the list above: any
+/// window of a program that does not run as this person (the login window, and macOS's prompts that run as the system),
+/// and any of a program with no bundle identifier that is part of macOS (under `/System/`) or whose program cannot be
+/// read, so a prompt this list does not name yet is still left alone.
 pub fn refused(app: &App, own_pid: i32) -> Option<String> {
     if app.pid == own_pid || app.bundle.eq_ignore_ascii_case(OWN_BUNDLE) {
         return Some("Manut AI's own windows, where you are asked before anything acts".into());
     }
-    REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)).map(|(_, why)| (*why).to_string())
+    if let Some((_, why)) = REFUSED.iter().find(|(b, _)| app.bundle.eq_ignore_ascii_case(b)) {
+        return Some((*why).to_string());
+    }
+    if !app.mine {
+        return Some("a window of a program that does not run as you, such as the login window or a macOS prompt".into());
+    }
+    if app.bundle.trim().is_empty() && (app.path.is_empty() || app.path.starts_with("/System/")) {
+        return Some("a window of macOS itself, such as one of its prompts".into());
+    }
+    None
 }
 
 /// What a card shows, as the page draws it in the person's language (`tool.computer` on the ask).
@@ -900,11 +916,11 @@ mod tests {
             assert!(!list.contains(hidden), "{hidden}");
         }
         assert!(!s.calls().iter().any(|c| [OWN, SETTINGS, KEYCHAIN].iter().any(|p| c.contains(&format!(" {p}")))));
+        let app = |bundle: &str, path: &str, mine: bool| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine };
         for (bundle, _) in REFUSED {
-            let app = App { pid: 9, name: "x".into(), bundle: bundle.to_uppercase() };
-            assert!(super::refused(&app, 1).is_some(), "{bundle}");
+            assert!(super::refused(&app(&bundle.to_uppercase(), "/Applications/x.app/Contents/MacOS/x", true), 1).is_some(), "{bundle}");
         }
-        assert!(super::refused(&App { pid: 9, name: "Notes".into(), bundle: "com.apple.Notes".into() }, 1).is_none());
+        assert!(super::refused(&app("com.apple.Notes", "/System/Applications/Notes.app/Contents/MacOS/Notes", true), 1).is_none());
     }
 
     /// One yes, one action: a write runs only after the person's Allow once on its own card, exactly as asked, once.
@@ -1171,6 +1187,33 @@ mod tests {
         look(&r, "TextEdit");
         assert!(card(&r, CLICK, &json!({"app": "TextEdit", "element_index": 2})).shown.picture.is_none());
         assert!(!s.calls().iter().any(|c| c.starts_with("snapshot")));
+    }
+
+    /// macOS's password prompt (SecurityAgent) and its Touch ID and password prompt (`coreautha`) run from `.bundle`s,
+    /// not `.app`s: refused by their bundle identifiers, and refused anyway when one is not read, as any window of a
+    /// program that is part of macOS with no bundle identifier, or of one that does not run as this person.
+    #[test]
+    fn macos_prompts_are_refused_whatever_kind_of_bundle_they_are() {
+        let app = |bundle: &str, path: &str, mine: bool| App { pid: 9, name: "x".into(), bundle: bundle.into(), path: path.into(), mine };
+        let agent = "/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent";
+        let touch = "/System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha";
+        for (bundle, path) in [("com.apple.SecurityAgent", agent), ("com.apple.LocalAuthentication.UIAgent", touch)] {
+            assert_eq!(super::refused(&app(bundle, path, true), 1).as_deref(), REFUSED.iter().find(|(b, _)| *b == bundle).map(|(_, w)| *w), "{bundle}");
+            // the identifier not read: part of macOS with none
+            assert!(super::refused(&app("", path, true), 1).unwrap().contains("macOS itself"), "{path}");
+            // running as another user (the system), whatever its identifier
+            assert!(super::refused(&app(bundle, path, false), 1).is_some(), "{path}");
+        }
+        assert!(super::refused(&app("com.apple.TextEdit", "/System/Applications/TextEdit.app/Contents/MacOS/TextEdit", false), 1).unwrap().contains("does not run as you"));
+        // a program whose path cannot be read and has no identifier is left alone too
+        assert!(super::refused(&app("", "", true), 1).is_some());
+        // the person's own program with no bundle (a script's window, say) outside /System stays possible
+        assert!(super::refused(&app("", "/Users/k/bin/tool", true), 1).is_none());
+        // and through the room: such an app is never offered or looked at
+        let (s, r) = room();
+        s.add_app(App { pid: 500, name: "SecurityAgent".into(), bundle: String::new(), path: agent.into(), mine: false });
+        assert!(refused(&r, LOOK, &json!({"app": "SecurityAgent"})).starts_with("Computer use never looks at or works"));
+        assert!(!r.run(LIST, &json!({})).text.contains("SecurityAgent"));
     }
 
     #[test]

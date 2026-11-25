@@ -48,7 +48,7 @@ pub struct Stand {
 
 impl Stand {
     pub fn new() -> Stand {
-        let app = |pid, name: &str, bundle: &str| App { pid, name: name.into(), bundle: bundle.into() };
+        let app = |pid, name: &str, bundle: &str| App { pid, name: name.into(), bundle: bundle.into(), path: format!("/Applications/{name}.app/Contents/MacOS/{name}"), mine: true };
         let apps = vec![
             app(OWN, "Manut AI", "xyz.manut.desktop"),
             app(TEXTEDIT, "TextEdit", "com.apple.TextEdit"),
@@ -133,6 +133,10 @@ impl Stand {
 
     pub fn focus(&self, pid: i32, title: &str) {
         self.focused.lock().unwrap().insert(pid, title.into());
+    }
+
+    pub fn add_app(&self, app: App) {
+        self.apps.lock().unwrap().push(app);
     }
 
     pub fn quit(&self, pid: i32) {
