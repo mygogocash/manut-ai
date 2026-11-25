@@ -20,6 +20,22 @@ Read `README.md` for the layout and commands, `docs/plan.md` for where things st
   the exact action, and through `packages/approval-core`'s rules. Never add a second way round.
 - **Secrets** live in Wrangler secrets or the credential vault. Never in source, logs, tests or a URL.
 
+## Skills (25 Nov 2026)
+
+Work that repeats is written down once in `.claude/skills/`, with its scripts beside it (the owner, 25 Nov: make a
+skill of anything repetitive). Read the one that fits before doing the work by hand:
+
+- `helper`: the standing rules for building one plan item in a worktree. A helper reads it first, so a brief only
+  says what to build.
+- `lead-merge`: the lead's routine for an item (start a worktree, gate, merge, mark, clean up), with `gate.sh`,
+  `keep-both.py`, `start-item.sh` and `finish-item.sh`.
+- `release-desktop`: cutting a desktop release and checking its files and signatures (`verify-release.mjs`).
+- `ci-read`: reading the newest CI run, failed browser specs included (`ci-failures.sh`).
+
+Which model does what (the owner, 25 Nov): think with the strongest model, execute with a lighter one. The lead and
+any item with unsettled design or a safety rule use Opus or Fable; carrying out a clear plan uses Sonnet;
+mechanical edits use Haiku or a script. `lead-merge` has the table.
+
 ## Standing permissions (owner, 23 Nov 2026)
 
 Do these without asking:

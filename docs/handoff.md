@@ -594,6 +594,9 @@ Every switch that turns a built part on, and what each needs from the owner, is 
   `wrangler whoami` lists the accounts by name: the dev Workers are in the one named GoGoCash). Run
   `node ../../.github/scripts/check-dev-deploys.mjs wrangler.web.jsonc wrangler.jsonc` first: it refuses any
   Worker whose name does not end in `-dev`.
+- Repeated work is in `.claude/skills/` since 25 Nov (`CLAUDE.md`, "Skills"): `helper` (a helper's standing rules),
+  `lead-merge` (gate, merge, mark and clean up an item, with scripts), `release-desktop` and `ci-read`. A brief names
+  the item and tells the helper to read `.claude/skills/helper/SKILL.md` first.
 - CI runs only what a push needs since 25 Nov (`docs/decisions.md`; `.github/scripts/changed-areas.mjs`): its first job,
   What changed, says in the run's summary which jobs run and why, measured from the last commit CI passed on. A docs
   push runs two short jobs. A pull request's own run of a `pilot/*` commit skips everything, as the push's run checks
