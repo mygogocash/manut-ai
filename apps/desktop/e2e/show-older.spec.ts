@@ -5,9 +5,12 @@
 // (`__MANUT_IN_PROCESS__`, src/lib/bridge.ts): the suite's server is built for the mock bridge, which has no Connected. The clock is fixed
 // at 24 November 2026, so every task is within the activity log's last seven days whatever day the suite runs.
 import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { DICT } from "../src/i18n";
 
 const PORT = Number(process.env.MANUT_PORT || 5307);
+const SHOTS = process.env.MANUT_SHOTS;
 
 test.use({
   timezoneId: "Asia/Bangkok",
@@ -131,6 +134,14 @@ const calls = (page: Page) => page.evaluate(() => (window as unknown as Stage)._
 /** The requests for a page of the task list after a cursor, as the query they carried and the session they were sent with. */
 const pagesAfter = async (page: Page) =>
   (await calls(page)).filter((c) => c.path === "/v1/tasks" && c.query?.includes("cursor=")).map((c) => [c.query, c.bearer]);
+/** A picture of the page when `MANUT_SHOTS` names a folder, as the other Connected specs take them, to look at a state by eye. */
+async function shot(page: Page, name: string) {
+  if (!SHOTS) return;
+  mkdirSync(SHOTS, { recursive: true });
+  // the line is under the whole list, so it is brought into the picture
+  await page.getByTestId("older").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(SHOTS, `show-older-${name}.png`) });
+}
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 const rows = (page: Page) => page.getByTestId("history-row");
 const line = (page: Page) => page.getByTestId("older-line");
@@ -226,6 +237,34 @@ test.describe("connected to a shop with more tasks than the newest 50", () => {
     await expect(page.getByTestId("act-row")).toHaveCount(50);
     await expect(page.getByTestId("older")).toHaveCount(0);
   });
+
+  for (const [name, scheme, width] of [["light", "light", 1280], ["dark", "dark", 1280], ["narrow", "light", 900]] as const) {
+    test(`draws every state in ${name}, History and the log, with nothing wider than the window`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await stubShell(page, 75, 1);
+      await openHistory(page);
+      await expect(line(page)).toBeVisible();
+      expect(await fits(page), "there is more").toBe(true);
+      await shot(page, `history-more-${name}`);
+      // the page could not be read
+      await show(page).click();
+      await expect(page.getByTestId("older")).toHaveAttribute("data-state", "failed");
+      expect(await fits(page), "could not be read").toBe(true);
+      await shot(page, `history-failed-${name}`);
+      // everything is shown
+      await show(page).click();
+      await expect(page.getByTestId("older")).toHaveAttribute("data-state", "end");
+      expect(await fits(page), "everything is shown").toBe(true);
+      await shot(page, `history-end-${name}`);
+      // the activity log, with its line under the last day
+      await page.getByTestId("history-activity").click();
+      await expect(page.getByTestId("act-row")).toHaveCount(75);
+      await expect(line(page)).toBeVisible();
+      expect(await fits(page), "the log").toBe(true);
+      await shot(page, `log-end-${name}`);
+    });
+  }
 
   test("speaks the owner's language: Korean, Japanese and Chinese, with nothing wider than the window", async ({ page }) => {
     await stubShell(page, 75);
