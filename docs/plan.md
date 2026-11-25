@@ -543,3 +543,5 @@ preview, from its `package.json` text and the names of the files at its root, fo
 Done when: each lockfile, the `packageManager` field, each script name in order, each refused form (and the next
 script answered after one), a broken `package.json`, an empty `scripts` and a project with no `package.json` are
 tested.
+
+Done on cloud/preview-command, 24 Nov 2026: `packages/preview-command` with `previewCommand`, choosing the manager, script and refusing publishing scripts (33 tests).
