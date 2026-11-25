@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 import "../theme/fonts.css";
 import "../theme/tokens.css";
 import "../theme/base.css";
+import "../theme/motion.css";
 import "./app.css";
 import { getStore, isMenuPage, useStore, type MenuPage } from "../state/store";
 import { MentionContext, type Mentions } from "../chat/parts/Mention";
