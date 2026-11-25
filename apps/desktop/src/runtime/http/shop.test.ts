@@ -4,7 +4,7 @@
 // wrote it.
 import { describe, expect, it } from "vitest";
 import { ApiSession, type StoredSession } from "./session";
-import { LISTED_TASKS, readShop, TASK_PAGE } from "./shop";
+import { LISTED_TASKS, readShop, readTaskList, readTaskPage, TASK_PAGE } from "./shop";
 import { approvalJson, attentionJson, clock, fakeApi, iso, listedJson, memoryVault, ORIGIN, scheduleJson, T0, taskJson, taskPage, type FakeApi } from "./testkit";
 
 const TASK = taskJson();
@@ -231,5 +231,80 @@ describe("readShop", () => {
     expect(await readShop(broken.session, broken.c.now)).toEqual({ ok: false, failure: "unavailable" });
     // it never reads the export, which holds every task's whole history
     for (const { api } of [one, two, many, broken]) expect(api.to("GET", "/v1/tenant/export")).toEqual([]);
+  });
+});
+
+describe("the cursor the newest read stopped at", () => {
+  const tasks = (n: number) => Array.from({ length: n }, (_, i) => taskJson({ task: { id: `task-${i}`, title: `Task ${i}` }, actions: [] }));
+  const cursor = async (n: number) => {
+    const { api, session, c } = setup();
+    serve(api, { tasks: tasks(n) });
+    const out = await readShop(session, c.now);
+    return out.ok ? (out.snapshot.more ?? null) : out.failure;
+  };
+
+  it("is the id of the last task the list looked at when the shop has older ones, the oldest task the read holds", async () => {
+    // 51 tasks: the newest 50 are task-1 .. task-50, and task-0 is older
+    expect(await cursor(51)).toBe("task-1");
+    expect(await cursor(70)).toBe("task-20");
+    expect(await cursor(200)).toBe("task-150");
+  });
+
+  it("is none when the list ended within the newest read: a shop of 50 tasks or fewer has nothing older", async () => {
+    for (const n of [0, 1, 25, 26, 49, 50]) expect(await cursor(n), `${n} tasks`).toBeNull();
+  });
+
+  it("is the one the second page gave, so a page after it is the next page of the list", async () => {
+    const { api, session, c } = setup();
+    serve(api, { tasks: tasks(80) });
+    const out = await readShop(session, c.now);
+    expect(out.ok && out.snapshot.more).toBe("task-30");
+    // the page after it, as Show older reads it: task-29 .. task-5, then the five left
+    const page = await readTaskPage((path) => session.read(path), "task-30");
+    expect(page.kind === "ok" && page.tasks.map((t) => t.id)).toEqual(tasks(30).slice(5, 30).map((t) => t.task.id));
+    expect(page.kind === "ok" && page.next).toBe("task-5");
+    expect(api.to("GET", "/v1/tasks").at(-1)?.url).toBe(`${ORIGIN}/v1/tasks?limit=25&cursor=task-30`);
+  });
+
+  it("is kept by the read of the list itself, and none for a list that answered no page", async () => {
+    const { api, session } = setup();
+    serve(api, { tasks: tasks(80) });
+    expect(await readTaskList((path) => session.read(path))).toMatchObject({ kind: "ok", next: "task-30" });
+    api.on("GET", "/v1/tasks", { status: 404, json: { error: "tenant_deleted", deletedAt: iso(T0) } });
+    expect(await readTaskList((path) => session.read(path))).toMatchObject({ kind: "refused", status: 404 });
+    const { api: other, session: again, c } = setup();
+    serve(other, { tasks: tasks(80) });
+    other.on("GET", "/v1/tasks", { status: 404, json: { error: "tenant_deleted", deletedAt: iso(T0) } });
+    const out = await readShop(again, c.now);
+    expect(out.ok && out.snapshot.more).toBeUndefined();
+  });
+});
+
+describe("readTaskPage", () => {
+  const page = (json: unknown) => readTaskPage(async () => ({ kind: "ok" as const, status: 200, json }), "task-9");
+  const entry = (id: string) => listedJson(taskJson({ task: { id, title: id }, actions: [] }));
+
+  it("reads a page as the screens keep tasks, oldest first, with the cursor of the page after it, and null on the last", async () => {
+    expect(await page({ tasks: [entry("task-8"), entry("task-7")], next: "task-7" })).toMatchObject({ kind: "ok", next: "task-7", tasks: [{ id: "task-7" }, { id: "task-8" }] });
+    expect(await page({ tasks: [], next: null })).toMatchObject({ kind: "ok", tasks: [], next: null });
+  });
+
+  it("keeps an entry it cannot read in `unreadable`, never silently dropped", async () => {
+    const out = await page({ tasks: [entry("task-8"), { task: { title: "no id" } }], next: null });
+    expect(out.kind === "ok" && out.tasks.map((t) => t.id)).toEqual(["task-8"]);
+    expect(out.kind === "ok" && out.unreadable).toEqual([{ task: { title: "no id" } }]);
+  });
+
+  it("is `unreadable` for a 200 that is not a page, never an empty page and never the end of the list", async () => {
+    for (const json of [null, "oops", [], {}, { error: "oops" }, { tasks: "none", next: null }, { tasks: {}, next: null }, { tasks: [] }, { tasks: [], next: "" }, { tasks: [], next: 7 }, { tasks: [], next: undefined }]) {
+      expect(await page(json), JSON.stringify(json)).toEqual({ kind: "unreadable" });
+    }
+  });
+
+  it("asks for the page after the cursor it is given, and gives every other answer back as it came", async () => {
+    const asked: string[] = [];
+    const answers = [{ kind: "refused" as const, status: 400, code: "invalid_cursor", json: {} }, { kind: "offline" as const }, { kind: "signed_out" as const }, { kind: "unavailable" as const }];
+    for (const answer of answers) expect(await readTaskPage(async (path) => (asked.push(path), answer), "a b/c")).toBe(answer);
+    expect(new Set(asked)).toEqual(new Set(["/v1/tasks?limit=25&cursor=a%20b%2Fc"]));
   });
 });

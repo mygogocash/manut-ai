@@ -74,7 +74,10 @@ function workOf(a: ShopAnswers, unreadable: unknown[]): ShopWork | null | ReadFa
   if (answers.some((x) => x.kind === "refused" && x.status === 403)) return null;
   const deleted = tasks.kind === "refused" && tasks.status === 404 && tasks.code === "tenant_deleted";
   if (routines.kind !== "ok" || schedules.kind !== "ok" || attention.kind !== "ok" || (tasks.kind !== "ok" && !deleted)) return "unavailable";
-  return decodeWork({ tasks: tasks.kind === "ok" ? tasks.tasks : [], schedules: schedules.json, attention: attention.json, routines: routines.json }, unreadable);
+  return decodeWork(
+    { tasks: tasks.kind === "ok" ? tasks.tasks : [], ...(tasks.kind === "ok" && tasks.next !== null ? { more: tasks.next } : {}), schedules: schedules.json, attention: attention.json, routines: routines.json },
+    unreadable,
+  );
 }
 
 /** A shop session is opened again this long before it ends, so an ending one is never sent. */

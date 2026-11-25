@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 import type { BridgeStatus } from "../lib/bridge";
 import { createRuntime, type RuntimeAdapter } from "../runtime";
 import type { MemoryFact } from "../runtime/memory";
-import type { ActivityEvent, Job, JobRow, TeamState } from "../runtime/mission";
+import type { ActivityEvent, Job, JobRow, OlderState, TeamState } from "../runtime/mission";
 import type { NewRoutine, RoutineRow } from "../runtime/routines";
 import { bringToFront, createNoteGate, noteFor, sessionNote, sessionRings, showNewDevice, showNote, watchMissedNote, windowWatched, type SessionNote } from "../lib/notify";
 import { noteAsk } from "../chat/cards/askNote";
@@ -2108,9 +2108,12 @@ export interface Actions {
   /** Mission Control's reads and Pause everyone, straight from the runtime (never cached in the store: a page keeps its
    *  own copy). They reject with the runtime's own error, as the connected runtime's "not yet" for a team it is not told of
    *  (the signed-in tenant's) and "only the owner" for a shop the person helps at. */
-  missionJobs(): Promise<{ jobs: JobRow[] }>;
+  missionJobs(): Promise<{ jobs: JobRow[]; older?: OlderState }>;
   missionJob(job: string): Promise<Job>;
-  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number | null }>;
+  missionActivity(): Promise<{ events: ActivityEvent[]; keptMonths: number | null; older?: OlderState }>;
+  /** Show older: the runtime reads the next page of the shop's older work, and the lists above, read again, hold it. Rejects with
+   *  the runtime's own error: `offline` while it cannot be reached, `unavailable` for a page it could not read. */
+  missionOlder(): Promise<{ older: OlderState }>;
   teamState(): Promise<TeamState>;
   /** Stops every member but the lead at the next safe point; unsends nothing. The members' rows learn of it through
    *  `bots.update`. */
@@ -3057,6 +3060,7 @@ export function createStore(bridge: BridgeLike, opts: StoreOptions = {}): Store 
     missionJobs: () => bridge.request("jobs.list", {}),
     missionJob: (job) => bridge.request("jobs.get", { job }),
     missionActivity: () => bridge.request("activity.list", {}),
+    missionOlder: () => bridge.request("jobs.older", {}),
     teamState: () => bridge.request("team.state", {}),
     teamPause: () => bridge.request("team.pause", {}),
     teamResume: () => bridge.request("team.resume", {}),

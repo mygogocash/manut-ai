@@ -139,12 +139,23 @@ export interface TeamState {
   holds?: "team" | "routines";
 }
 
+/** What a list of the shop's work (`jobs.list`, `activity.list`) says about the work it does not hold: `more` when the shop has
+ *  older work than the list holds, so a screen offers Show older (`jobs.older` reads the next page of it), and `end` once Show
+ *  older has read the last page, so the list is everything the shop has. A list that says nothing holds all the work there is,
+ *  as Practice's always does. */
+export type OlderState = "more" | "end";
+
 export interface MissionOps {
-  "jobs.list": { params: Record<string, never>; result: { jobs: JobRow[] } };
+  "jobs.list": { params: Record<string, never>; result: { jobs: JobRow[]; older?: OlderState } };
   "jobs.get": { params: { job: string }; result: Job };
+  /** Reads the next page of the shop's older work, from where the newest read stopped or the last page ended, and answers where
+   *  that leaves the list. The lists it changes (`jobs.list`, `activity.list`) are read again by the screen that asked. It is
+   *  refused `offline` while only a kept read is shown or the API cannot be reached, and `unavailable` for a page that cannot be
+   *  read; either way the work already listed stays as it was. */
+  "jobs.older": { params: Record<string, never>; result: { older: OlderState } };
   /** Newest first. `keptMonths` is how long the shop's log keeps an event before it is deleted for good, or null when the
    *  runtime keeps no fixed span (the connected runtime's events are the shop's tasks, kept until the shop deletes them). */
-  "activity.list": { params: Record<string, never>; result: { events: ActivityEvent[]; keptMonths: number | null } };
+  "activity.list": { params: Record<string, never>; result: { events: ActivityEvent[]; keptMonths: number | null; older?: OlderState } };
   "team.state": { params: Record<string, never>; result: TeamState };
   /** Stops every member at the next safe point and starts nothing new. Unsends nothing, takes no page offline. */
   "team.pause": { params: Record<string, never>; result: TeamState };

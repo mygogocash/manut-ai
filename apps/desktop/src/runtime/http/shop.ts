@@ -91,10 +91,25 @@ export interface TeamRoutine {
   trigger: unknown;
 }
 
+/** The tasks older than the newest `LISTED_TASKS` that Show older has read, kept in memory only (older.ts). */
+export interface OlderTasks {
+  /** oldest first, as `tasks` are. None of them is in `tasks`, and none lies between them and `tasks`: they are the tasks
+   *  right after the newest read, as far as the pages read reach. */
+  tasks: ShopTask[];
+  /** The cursor the next page is read from (the id of the last task the list looked at), or null when the list has none
+   *  left. */
+  next: string | null;
+}
+
 /** What an owner's session reads of a shop beyond what waits there (docs/several-shops.md): its tasks from the task list,
  *  its schedules and attention items, and its team and routines. */
 export interface ShopWork {
   tasks: ShopTask[];
+  /** The cursor the read of `tasks` stopped at, when the shop has older tasks than it holds; absent when the list ended
+   *  within them (and for a kept read, which has no cursor). Show older reads from here (older.ts). */
+  more?: string;
+  /** What Show older has read since, kept in memory and never in the kept read; absent until it has read a page. */
+  older?: OlderTasks;
   schedules: ShopSchedule[];
   attention: Attention[];
   team: ShopTeam;
@@ -181,6 +196,10 @@ export interface ShopPart {
 
 export interface ShopSnapshot {
   tasks: ShopTask[];
+  /** As `ShopWork`'s: the cursor the read of `tasks` stopped at, and the older tasks Show older has read. For the viewed shop
+   *  they are its work's; for the signed-in tenant, whose read this is whole, they are its own. */
+  more?: string;
+  older?: OlderTasks;
   /** approval-core's requests still waiting for an answer, as the API listed them */
   approvals: ShopApproval[];
   schedules: ShopSchedule[];
@@ -381,11 +400,12 @@ const isRoutineClock = (v: unknown) => isObj(v) && id(v.routineId) !== null;
  *  (`GET /v1/schedules`, `{ schedules }`) and attention items (`GET /v1/inbound/attention`, `{ items }`), and the team and
  *  routines of `GET /v1/routines`. Null when the routines' answer holds no team this build can read. A routine's clock is
  *  left out of the schedules, since the routine itself is listed. */
-export function decodeWork(read: { tasks: readonly unknown[]; schedules: unknown; attention: unknown; routines: unknown }, unreadable: unknown[]): ShopWork | null {
+export function decodeWork(read: { tasks: readonly unknown[]; more?: string; schedules: unknown; attention: unknown; routines: unknown }, unreadable: unknown[]): ShopWork | null {
   const team = decodeTeam(read.routines);
   if (!team) return null;
   return {
     tasks: decodeTasks(read.tasks, unreadable),
+    ...(read.more === undefined ? {} : { more: read.more }),
     schedules: list(isObj(read.schedules) ? read.schedules.schedules : null)
       .filter((v) => !isRoutineClock(v))
       .map((v) => decodeSchedule(v, unreadable))
@@ -410,31 +430,52 @@ function decodeTasks(entries: readonly unknown[], unreadable: unknown[]): ShopTa
 /** The task list's path, and how many tasks a page of it holds: the most the API gives in one (apps/api task-list.ts). */
 export const TASK_LIST = "/v1/tasks";
 export const TASK_PAGE = 25;
-/** The tasks the screens show: the newest this many of the shop's, read as two pages of the list each time the shop is
- *  read. A shop with more shows its newest; reading older ones when a screen asks for them is a later slice
- *  (docs/runtime-adapter.md, "Next slices"). Two pages keep a read's calls to the API, and the API's to the tasks, the same
- *  however many tasks the shop has kept. */
+/** The tasks the screens show without being asked for more: the newest this many of the shop's, read as two pages of the
+ *  list each time the shop is read. A shop with more shows its newest, and its screens offer Show older, which reads the next
+ *  page from the cursor this read stopped at (older.ts; docs/runtime-adapter.md, "Older tasks"). Two pages keep a read's calls
+ *  to the API, and the API's to the tasks, the same however many tasks the shop has kept. */
 export const LISTED_TASKS = 50;
 
-/** What reading the task list came to: its entries, newest first, or the first answer that was not a page. */
-export type TaskListRead<A> = { kind: "ok"; tasks: unknown[] } | Exclude<A, { kind: "ok" }>;
+/** One page of the list, newest first, from just after `cursor` (the newest page when there is none). */
+const taskPagePath = (cursor: string | null) => `${TASK_LIST}?limit=${TASK_PAGE}${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`;
+
+/** What reading the task list came to: its entries, newest first, and the cursor the read stopped at (null when the list ended
+ *  within them), or the first answer that was not a page. */
+export type TaskListRead<A> = { kind: "ok"; tasks: unknown[]; next: string | null } | Exclude<A, { kind: "ok" }>;
 
 /** Reads the newest `LISTED_TASKS` of the tenant's tasks from the task list, a page at a time with the cursor each page
  *  gives (the list stays stable while tasks are made, so no task is read twice or skipped), with `read`, which carries the
  *  session the tenant is read with. Any page that is not one ends the read with its answer: half a list is never shown as
- *  the whole one. */
+ *  the whole one. The cursor the read stopped at comes back with it, so a screen can read the pages after it. */
 export async function readTaskList<A extends { kind: string }>(read: (path: string) => Promise<A>): Promise<TaskListRead<A>> {
   const tasks: unknown[] = [];
   let cursor: string | null = null;
   for (let pages = 0; pages < LISTED_TASKS / TASK_PAGE; pages++) {
-    const answer = await read(`${TASK_LIST}?limit=${TASK_PAGE}${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
+    const answer = await read(taskPagePath(cursor));
     if (answer.kind !== "ok") return answer as Exclude<A, { kind: "ok" }>;
     const page = (answer as unknown as { json: unknown }).json;
     tasks.push(...list(isObj(page) ? page.tasks : null));
     cursor = isObj(page) && typeof page.next === "string" && page.next !== "" ? page.next : null;
     if (cursor === null) break;
   }
-  return { kind: "ok", tasks };
+  return { kind: "ok", tasks, next: cursor };
+}
+
+/** What reading one older page came to: its tasks, oldest first as `tasks` are, with the entries it could not read, and the
+ *  cursor of the page after it (null on the last); or the first answer that was not a page. A 200 that is not the list's shape
+ *  is `unreadable`, never an empty page: Show older says it has shown everything only when the API said the list ended. */
+export type TaskPageRead<A> = { kind: "ok"; tasks: ShopTask[]; next: string | null; unreadable: unknown[] } | { kind: "unreadable" } | Exclude<A, { kind: "ok" }>;
+
+/** Reads the one page of the list that comes after `cursor`, with `read` as `readTaskList` does: the session of the shop (or
+ *  the sign-in) whose tasks the cursor belongs to. */
+export async function readTaskPage<A extends { kind: string }>(read: (path: string) => Promise<A>, cursor: string): Promise<TaskPageRead<A>> {
+  const answer = await read(taskPagePath(cursor));
+  if (answer.kind !== "ok") return answer as Exclude<A, { kind: "ok" }>;
+  const page = (answer as unknown as { json: unknown }).json;
+  const next = isObj(page) ? page.next : undefined;
+  if (!isObj(page) || !Array.isArray(page.tasks) || !(next === null || (typeof next === "string" && next !== ""))) return { kind: "unreadable" };
+  const unreadable: unknown[] = [];
+  return { kind: "ok", tasks: decodeTasks(page.tasks, unreadable), next, unreadable };
 }
 
 function decodeSchedule(v: unknown, unreadable: unknown[]): ShopSchedule | null {
@@ -502,5 +543,7 @@ export async function readShop(session: ApiSession, now: () => number = Date.now
     .map((v) => decodeAttention(v, unreadable))
     .filter((x): x is Attention => !!x);
   const approvals = decodeApprovals(p.json, unreadable);
-  return { ok: true, snapshot: { tasks, approvals, schedules, attention, attentionOff: a.allowed === true, unreadable, readAt: now() } };
+  // Where the newest tasks stopped, when the list has older ones (a deleted tenant's list answered 404 and has none).
+  const more = listed.kind === "ok" ? listed.next : null;
+  return { ok: true, snapshot: { tasks, ...(more === null ? {} : { more }), approvals, schedules, attention, attentionOff: a.allowed === true, unreadable, readAt: now() } };
 }

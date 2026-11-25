@@ -1053,6 +1053,9 @@ export class MockHost {
       return this.jobView(job);
     },
     "activity.list": () => ({ events: copy([...this.activity].sort((x, y) => y.at - x.at)), keptMonths: ACTIVITY_KEPT_MONTHS }),
+    // Practice's lists hold everything the sample shop has and never say there is more, so no screen asks; if one did, there is
+    // nothing older to read.
+    "jobs.older": () => ({ older: "end" as const }),
     "team.state": () => this.teamState(),
     // Pausing is the one op here that acts. Every member but the lead stops at once, except a turn that waits on the
     // owner's answer, which keeps waiting (nothing expires while paused). It touches nothing already done.
