@@ -171,15 +171,17 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
      Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
-   - item 52, Show older on the connected desktop: History, Mission Control and the activity log read past the
-     newest 50 tasks from the cursor (`feat/show-older`, Sonnet), started 25 Nov when item 49 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 49 (the outpost on real-world forms: on macOS a hook of the outpost's own in front of wry's navigation
+   Merged: 52 (Show older on the connected desktop: History and the activity log say when a shop has more than its
+   newest 50 tasks and read 25 more at a time from the list's cursor, with the shop's own session; the older pages live
+   in memory only and the offline cache stays at version 5; the minute's read carries the tasks it pushes out into them,
+   and lets them go only when 50 or more tasks were made between two reads; desktop only, so nothing to deploy),
+   49 (the outpost on real-world forms: on macOS a hook of the outpost's own in front of wry's navigation
    delegate tells a frame from the page, so a refused frame fails no read and stops a write before its press with
    `navigation_refused`, nothing sent; fields in open shadow roots, check boxes, radio buttons and editors; every field
    read back before the press; a settings page that keeps its form read back after a fresh load; a sign-in over two
