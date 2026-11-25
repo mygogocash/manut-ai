@@ -3,6 +3,7 @@
 //   opens the thread.
 // - ThreadRouteCard: "Send this to <title>?" [Send there] [Keep here]. Nothing moves until Send there; Keep here only
 //   closes the card. Once answered it collapses to one gray line.
+import { useLanded } from "../parts/arrival";
 import "./cards.css";
 import { useState } from "react";
 import { useStore, type ThreadLinkItem, type ThreadRouteItem } from "../../state/store";
@@ -32,9 +33,10 @@ export function ThreadLinkLine({ item }: { item: ThreadLinkItem }) {
 export function ThreadRouteCard({ item }: { item: ThreadRouteItem }) {
   const s = useStore();
   const [busy, setBusy] = useState(false);
+  const landed = useLanded(!!item.done);
   if (item.done) {
     return (
-      <div className="line card-line" data-testid="thread-route-done">
+      <div className={`line card-line${landed ? " landed" : ""}`} data-testid="thread-route-done">
         <span className="line-ic">{item.done === "sent" ? "→" : "·"}</span>
         <span className="line-t">{item.done === "sent" ? t("thread.routeSent", { title: item.title }) : t("thread.routeKept")}</span>
       </div>

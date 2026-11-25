@@ -6,7 +6,7 @@ import { MockHost, TauriHost, type MockCall } from "../sessions/host";
 import { answerReviewAsk, openReviewAsk, resetReviewAsks, reviewAskRecord, withdrawReviewAsk } from "./reviewAsk";
 import type { ReviewAsk, ReviewDone } from "./source";
 
-const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two", number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
+const ASK: ReviewAsk = { id: "0123456789abcdef0123456789abcdef", kind: "open", source: "github", repo: "o/r", remote: "origin", from: "", branch: "kit/qr", base: "main", head: "a".repeat(40), commits: 2, uncommitted: 0, title: "Add the PromptPay QR", body: "- one\n- two", number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
 const OPENED: ReviewDone = { outcome: "opened", pushed: true, url: "https://github.com/o/r/pull/7", number: 7, step: "", error: "" };
 
 const shell = (answer: () => Promise<ReviewDone> = async () => OPENED) => {
@@ -111,7 +111,7 @@ describe("the host's way to the shell", () => {
   });
 
   it("sends a merge's pull request, method and the credit switch to be checked, and believes only a merge's ask", async () => {
-    const MERGE = { ...ASK, kind: "merge", number: 7, url: "https://github.com/o/r/pull/7", method: "squash", subject: "Add the PromptPay QR (#7)", message: "* one", dropped: 2 };
+    const MERGE = { ...ASK, kind: "merge", from: "o/r", number: 7, url: "https://github.com/o/r/pull/7", method: "squash", subject: "Add the PromptPay QR (#7)", message: "* one", dropped: 2 };
     const h = new Host(() => MERGE);
     expect(await h.reviewMerge("/w/qr", 7, "squash", true)).toEqual(MERGE);
     expect(await h.reviewMerge("/w/qr", 7, "squash")).toEqual(MERGE);
@@ -121,6 +121,9 @@ describe("the host's way to the shell", () => {
     ]);
     await expect(new Host(() => ASK).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
     await expect(new Host(() => ({ ...MERGE, method: "fast-forward" })).reviewMerge("/w/qr", 7, "merge")).rejects.toThrow("unread");
+    // a merge's ask that does not say where the pull request comes from, or at which commit, is not shown
+    await expect(new Host(() => ({ ...MERGE, from: "" })).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
+    await expect(new Host(() => ({ ...MERGE, head: "not-a-commit" })).reviewMerge("/w/qr", 7, "squash")).rejects.toThrow("unread");
   });
 
   it("MockHost keeps the shell's rules: one answer per ask, and the text the ask showed is the text it sends", async () => {

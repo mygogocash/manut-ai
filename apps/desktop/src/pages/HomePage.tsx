@@ -151,7 +151,7 @@ export function HomeView(p: HomeViewProps) {
         )
       }
     >
-      <div className="home hero">
+      <div className="home hero" data-arrive="home" data-arrive-rows=".rows > li">
         <div className="lockup">
           <BrandMark size={46} />
           <span>Manut AI</span>
@@ -233,7 +233,7 @@ export function HomeView(p: HomeViewProps) {
             <ul className="rows">
               {p.asks.map((r, i) =>
                 r.settled !== null ? (
-                  <li key={r.key} className="rowl" data-testid="home-settled">
+                  <li key={r.key} className="rowl" data-ask data-testid="home-settled">
                     <span className="tag ok">
                       <TickGlyph />
                       {r.settled}
@@ -249,7 +249,7 @@ export function HomeView(p: HomeViewProps) {
                     </span>
                   </li>
                 ) : (
-                  <li key={r.key} className="rowl" data-testid="home-need">
+                  <li key={r.key} className="rowl" data-ask data-testid="home-need">
                     {r.face}
                     <span className="grow">
                       <span className="l1" id={`home-need-${i}`}>
@@ -303,7 +303,7 @@ export function HomeView(p: HomeViewProps) {
               {p.working.map((w) => (
                 <li key={w.name}>
                   <button type="button" className="rowl" onClick={w.open} data-testid="home-worker">
-                    <Avatar bot={w.name} size={32} />
+                    <Avatar bot={w.name} size={32} live />
                     <span className="grow">
                       <span className="l1">{w.displayName}</span>
                       {w.description && <span className="l2">{w.description}</span>}
@@ -374,7 +374,7 @@ export function needsYouRows(
       who: askFrom(s, a.bot),
       ...(a.item.kind === "approval" && a.item.shop ? { shop: shopName(s, a.item.shop) } : {}),
       age: age(a.ts, nowMs),
-      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} />,
+      face: isSessionChat(a.bot) ? <SessionFace chatKey={a.bot} size={32} /> : <Avatar bot={a.bot} size={32} live />,
       settled: a.settled && resolved ? t(ALLOW_LABEL[resolved]) : null,
       ...(!a.settled && canApproveHere(a.item) ? { approve: () => onApprove(a) } : {}),
       look: () => void s.jumpToAsk(a.bot, a.item.id),

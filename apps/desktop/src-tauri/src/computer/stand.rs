@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::keys::Chord;
-use super::room::{App, Desk, Handle, Node};
+use super::room::{App, Desk, Handle, Node, Place};
 
 #[derive(Clone)]
 pub struct Facts {
@@ -15,10 +15,18 @@ pub struct Facts {
     pub label: String,
     pub value: Option<String>,
     pub enabled: bool,
+    /// Where it is: its index among its siblings from the window down, and its frame on screen.
+    pub path: Vec<usize>,
+    pub frame: [i64; 4],
 }
 
 fn f(role: &'static str, label: &str) -> Facts {
-    Facts { role, subrole: "", label: label.into(), value: None, enabled: true }
+    Facts { role, subrole: "", label: label.into(), value: None, enabled: true, path: Vec::new(), frame: [0, 0, 80, 24] }
+}
+
+/// The stand-in window numbers: app `pid`'s window `w` is `pid * 10 + w`.
+pub fn window_number(pid: i32, w: usize) -> u32 {
+    pid as u32 * 10 + w as u32
 }
 
 pub const OWN: i32 = 1;
@@ -40,7 +48,7 @@ pub struct Stand {
 
 impl Stand {
     pub fn new() -> Stand {
-        let app = |pid, name: &str, bundle: &str| App { pid, name: name.into(), bundle: bundle.into() };
+        let app = |pid, name: &str, bundle: &str| App { pid, name: name.into(), bundle: bundle.into(), path: format!("/Applications/{name}.app/Contents/MacOS/{name}"), mine: true };
         let apps = vec![
             app(OWN, "Manut AI", "xyz.manut.desktop"),
             app(TEXTEDIT, "TextEdit", "com.apple.TextEdit"),
@@ -68,6 +76,17 @@ impl Stand {
         nodes.insert((NOTES, 0), vec![f("AXWindow", "Groceries"), f("AXButton", "New Note")]);
         nodes.insert((OWN, 0), vec![f("AXWindow", "Manut AI"), f("AXButton", "Allow once")]);
         nodes.insert((SETTINGS, 0), vec![f("AXWindow", "Privacy & Security"), f("AXCheckBox", "Manut AI")]);
+        // each control at its own place: the window is the root, the rest its children in order, one under another
+        for list in nodes.values_mut() {
+            for (i, x) in list.iter_mut().enumerate() {
+                if i > 0 {
+                    x.path = vec![i - 1];
+                    x.frame = [100, 100 + 30 * i as i64, 80, 24];
+                } else {
+                    x.frame = [100, 80, 600, 400];
+                }
+            }
+        }
         Stand {
             ax: true,
             screen: true,
@@ -114,6 +133,10 @@ impl Stand {
 
     pub fn focus(&self, pid: i32, title: &str) {
         self.focused.lock().unwrap().insert(pid, title.into());
+    }
+
+    pub fn add_app(&self, app: App) {
+        self.apps.lock().unwrap().push(app);
     }
 
     pub fn quit(&self, pid: i32) {
@@ -167,6 +190,16 @@ impl Desk for Stand {
     fn again(&self, handle: &Handle) -> Option<Node> {
         let (pid, w, i) = Stand::at(handle);
         self.node(pid, w, i)
+    }
+    fn place(&self, handle: &Handle) -> Option<Place> {
+        let (pid, w, i) = Stand::at(handle);
+        let nodes = self.nodes.lock().unwrap();
+        let x = nodes.get(&(pid, w))?.get(i)?;
+        Some(Place { window: Some(window_number(pid, w)), path: x.path.clone(), frame: Some(x.frame) })
+    }
+    fn snapshot(&self, place: &Place) -> Result<Vec<u8>, String> {
+        self.note(format!("snapshot {} {:?}", place.window.unwrap_or(0), place.frame.unwrap_or_default()));
+        Ok(b"\x89PNG control".to_vec())
     }
     fn focused_window(&self, pid: i32) -> Option<String> {
         self.focused.lock().unwrap().get(&pid).cloned().or_else(|| self.windows.get(&pid)?.first().cloned())

@@ -1,0 +1,33 @@
+{
+  "about": "TEST ONLY. Throwaway P-256 key pairs made once with Web Crypto for these tests, so a handshake can be replayed byte for byte. They protect nothing.",
+  "keys": {
+    "phone": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "CYeNKKsF-JL_AJZMkDmX5a-bB1m1uXQxdYVt6StferU",
+      "y": "YzaRmYYbii1GXGK84idirxYr2a3e8ZYCngCJoXsbYho",
+      "d": "Oi-68MXnH0t-B3aSFn18pzdOVLnYbCBuWEBRxmTc5TE"
+    },
+    "mac": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "OfsPPY_wAA98T2PlCIbQmxoMbJIywcRqD2YhMjzzutw",
+      "y": "r-MvT0C4UMUQRbT9R1b1IwkdEoW7XKOrP-aqkJaBjVw",
+      "d": "8ydwwCJqgU1CypuXakKdyIIjG8MvzUxZLqqzOFBzgmA"
+    },
+    "relayPhoneSide": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "nBTG88IIv8cr8NyoQ92zIJUkc5znvTG1nQR5bdss1DQ",
+      "y": "7sFxWtVHP2nxiRETvMMTzw-DmwProwtae8AGdpIzcvE",
+      "d": "w2kMWuSghJ7NI8dPeaEP4v-1zDidFYKWIte6MeoFvz8"
+    },
+    "relayMacSide": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "ec5gEJVrbJmOwKT4eivEz_q5JE5jmc_XcP10JP36Teo",
+      "y": "vgNfUIa2RfXYsLggMauFSW_hJ6Vcar1fEltbn3P61Rk",
+      "d": "QeRWvyvzv4s14zhkOLZ4M3A-SRTKv1EyBT7ytwKPM4E"
+    }
+  }
+}

@@ -1429,7 +1429,7 @@ export class MockHost implements SessionHost, BuddyHost {
     if (r.commits.length === 0) throw new Error("no_commits");
     if (!title.trim() || /[\u0000-\u001f]/.test(title)) throw new Error("bad_title");
     const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
+    const ask: ReviewAsk = { id, kind: "open", source: r.source, repo: r.repo, remote: "origin", from: "", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: this.g.__manutLaneChanged?.[worktree] ?? 0, title: title.trim(), body: body.replace(/\r\n/g, "\n").trimEnd(), number: 0, url: "", method: "", subject: "", message: "", dropped: 0 };
     this.asks.set(id, { state: "waiting", ask });
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;
@@ -1450,7 +1450,7 @@ export class MockHost implements SessionHost, BuddyHost {
     const message = kept.join("\n");
     const dropped = lines.length - kept.length;
     const id = Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message, dropped };
+    const ask: ReviewAsk = { id, kind: "merge", source: r.source, repo: r.repo, remote: "origin", from: r.repo, branch: lane.branch, base: lane.base, head: "0".repeat(40), commits: r.commits.length, uncommitted: 0, title, body: "", number, url: `https://github.com/${r.repo}/pull/${number}`, method, subject, message, dropped };
     this.asks.set(id, { state: "waiting", ask });
     this.log({ op: "review.ask", path: worktree, branch: lane.branch });
     return ask;

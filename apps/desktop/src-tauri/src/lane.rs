@@ -23,9 +23,12 @@
 //! Settings › Worktrees (item 73): the folder lanes are made under can be the person's own (`Start::root`, checked by
 //! `check_lanes_root`: never inside a checkout, never unwritable), while the record stays under `~/.manut/lanes`; a lane can start
 //! from the remote's latest commit of its base branch (`Start::remote`, `remote_start`); the branch prefix is the page's
-//! (`valid_prefix`); and `release` removes a folder for a clean-up only when nothing in it is changed, new or unpushed.
+//! (`valid_prefix`); and `release` removes a folder for a clean-up only when nothing in it is changed, new or unpushed, and
+//! nothing git ignores in it is the developer's own (item 86: only what a project rebuilds and the agent settings the app copied
+//! in may go with it).
 //!
-//! When a folder goes: when its session is closed, if nothing in it would be lost (git says no file in it is changed or new).
+//! When a folder goes: when its session is closed, if nothing in it would be lost (git says no file in it is changed or new,
+//! and it ignores nothing there but what is rebuilt or the app's own copies).
 //! Otherwise it is kept, and the Code page lists it with Remove, which says how many changed files go with it; the branch
 //! stays unless the person also asks for it to go, and a branch with commits that are not on its base goes only after the
 //! person saw how many. Every refusal is a short code the page maps to its own words; the agent still starts without a
@@ -62,6 +65,10 @@ const RECORDS_MAX: usize = 500;
 const STATUS_MAX: usize = 20;
 /// The largest record read: one is a few hundred bytes.
 const RECORD_BYTES: u64 = 16 * 1024;
+/// The most ignored files and folders of a lane's folder a clean-up names when it keeps the folder for them.
+pub(crate) const IGNORED_SHOWN: usize = 20;
+/// The most ignored files and folders read in one lane's folder; a folder with more is kept, the first ones named.
+const IGNORED_MAX: usize = 2000;
 
 /// Making and removing lanes one at a time, so two calls never choose the same folder or remove one twice. Reads take no
 /// turn: they only look.
@@ -137,6 +144,9 @@ pub struct Kept {
     pub ahead: Option<u32>,
     /// How many commits on its branch are on no remote branch (null: not read): what a clean-up keeps a folder for.
     pub unpushed: Option<u32>,
+    /// The files and folders git ignores in it that are not plainly rebuilt and the app did not put there (see
+    /// [`Git::ignored_own`]), at most [`IGNORED_SHOWN`]: what a clean-up keeps a clean folder for.
+    pub ignored: Vec<String>,
 }
 
 /// What the person said yes to when a lane's folder goes. `changed`: how many changed or new files they saw counted and said
@@ -220,16 +230,93 @@ const REDIRECTS: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT
 /// The person's own `git`, run with no hook and no file-system monitor (each can run a program the repository names: a
 /// post-checkout hook that installs dependencies, a reference-transaction hook on a deleted branch), English messages, no
 /// prompt, and no optional lock (a status never takes the index's lock to refresh it).
+///
+/// Work the app starts by itself (the automatic pull, the merged clean-up, a deleted chat's folder, the kept list, the lane's
+/// Diff) first reads the repository's own config ([`Git::config_risk`]) and does nothing while it names a program git would
+/// run or another address to fetch from. Work the person asked for by pressing something (a lane started, a push after a Yes,
+/// Remove) runs with the person's and the repository's settings, as the same git in a terminal would, hooks and the file
+/// monitor aside.
 pub(crate) struct Git {
     pub(crate) exe: PathBuf,
     /// `core.hooksPath`: a folder that is never made, so git finds no hook in it.
     hooks: String,
+    /// Work the app starts by itself: `protocol.ext.allow=never` too, so a remote of the `ext::` kind (a shell command) never runs.
+    automatic: bool,
+}
+
+/// The settings of a repository's own config that make git run a program, or send a fetch somewhere else, without anyone
+/// asking, by `git help config`: `filter.<driver>.clean`, `.smudge` and `.process` (run by `status`, `diff` and a checkout),
+/// `core.sshCommand`, `core.gitProxy` and `core.askPass` (run by a fetch), `core.alternateRefsCommand` (run by a fetch in a
+/// repository with alternates), `credential.helper` and `credential.<url>.helper` (run by a fetch over https),
+/// `remote.<name>.uploadpack`, `.receivepack` and `.vcs` (a program for a remote), a `remote.<name>.url` or `.pushurl` of the
+/// `<transport>::<address>` form (a remote helper, `ext::` runs a shell command), and `url.<base>.insteadOf` and
+/// `.pushInsteadOf` (a fetch sent elsewhere). What the app's own runs switch off instead is not listed: hooks
+/// (`core.hooksPath`), `core.fsmonitor`, an external diff and a text conversion (`--no-ext-diff --no-textconv` on every diff),
+/// a signature check's `gpg.program` (`--no-verify-signatures` on the pull's one write), and a pager or an editor, which git
+/// starts only for a terminal. `key` is as `git config --list` prints it (section and name in lower case).
+fn runs_or_redirects(key: &str, value: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    let (section, rest) = lower.split_once('.').unwrap_or((lower.as_str(), ""));
+    let name = rest.rsplit('.').next().unwrap_or("");
+    let sub = rest.contains('.');
+    let helper = |v: &str| v.split_once("::").is_some_and(|(t, _)| !t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')));
+    match section {
+        "filter" => sub && matches!(name, "clean" | "smudge" | "process"),
+        "core" => !sub && matches!(name, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand"),
+        "credential" => name == "helper",
+        "remote" => sub && (matches!(name, "uploadpack" | "receivepack" | "vcs") || (matches!(name, "url" | "pushurl") && helper(value))),
+        "url" => sub && matches!(name, "insteadof" | "pushinsteadof"),
+        _ => false,
+    }
+}
+
+/// The first setting [`runs_or_redirects`] names in `listing`, the output of `git config --list --show-scope --includes -z`
+/// (`scoped`: each entry is its scope, then `key\nvalue`) or of `git config --list --local --includes -z` (every entry the
+/// repository's own). Only the repository's own scopes count (`local`, `worktree`, and the files they include): the person's
+/// global and system settings are theirs, and run in their terminal too. A subsection that is an address (`url.<base>`,
+/// `credential.<url>`) is shown as `*`, since it can hold a token, and the rest passes the one masker.
+pub(crate) fn risky_setting(listing: &str, scoped: bool) -> Option<String> {
+    let mut parts = listing.split('\0').filter(|p| !p.is_empty());
+    loop {
+        let scope = if scoped { parts.next()? } else { "local" };
+        let kv = parts.next()?;
+        if scope != "local" && scope != "worktree" {
+            continue;
+        }
+        let (key, value) = kv.split_once('\n').unwrap_or((kv, ""));
+        if runs_or_redirects(key, value) {
+            let lower = key.to_ascii_lowercase();
+            let shown = match lower.split_once('.') {
+                Some((section @ ("url" | "credential"), rest)) if rest.contains('.') => format!("{section}.*.{}", rest.rsplit('.').next().unwrap_or("")),
+                _ => key.to_string(),
+            };
+            return Some(tasks::mask_secrets(&shown));
+        }
+    }
 }
 
 impl Git {
     pub(crate) fn new(home: &Path) -> Result<Git, String> {
         let exe = tasks::find("git").ok_or("git_missing")?;
-        Ok(Git { exe, hooks: format!("core.hooksPath={}", lanes_dir(home).join(".no-hooks").display()) })
+        Ok(Git { exe, hooks: format!("core.hooksPath={}", lanes_dir(home).join(".no-hooks").display()), automatic: false })
+    }
+
+    /// The runner for work the app starts by itself (see [`Git`]): as [`Git::new`], and `ext::` remotes refused outright.
+    pub(crate) fn automatic(home: &Path) -> Result<Git, String> {
+        Ok(Git { automatic: true, ..Git::new(home)? })
+    }
+
+    /// The setting of the repository `cwd` is in that makes automatic work run a program or fetch elsewhere
+    /// ([`risky_setting`]), or None. Read with `--includes`, so a file the config includes counts as its own. A git too old to
+    /// say each setting's scope (before 2.26) is asked for the local file alone.
+    pub(crate) fn config_risk(&self, cwd: &Path) -> Option<String> {
+        if let Ok(r) = self.run(cwd, &["config", "--list", "--show-scope", "--includes", "-z"]) {
+            if r.code == Some(0) {
+                return risky_setting(&r.out, true);
+            }
+        }
+        let r = self.run(cwd, &["config", "--list", "--local", "--includes", "-z"]).ok()?;
+        (r.code == Some(0)).then(|| risky_setting(&r.out, false)).flatten()
     }
 
     /// `git -C <cwd> <args>`, at most `limit`.
@@ -240,6 +327,9 @@ impl Git {
     /// `run_for` with `extra` added to git's environment (a fetch's: nothing may ask for a password).
     pub(crate) fn run_with(&self, cwd: &Path, args: &[&str], limit: Duration, extra: &[(&str, &str)]) -> Result<tasks::Ran, String> {
         let mut argv: Vec<String> = vec!["-C".into(), cwd.to_string_lossy().into_owned(), "-c".into(), self.hooks.clone(), "-c".into(), "core.fsmonitor=false".into()];
+        if self.automatic {
+            argv.extend(["-c".into(), "protocol.ext.allow=never".into()]);
+        }
         argv.extend(args.iter().map(|a| (*a).to_string()));
         let mut env: Vec<(&str, &str)> = vec![("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C"), ("GIT_OPTIONAL_LOCKS", "0")];
         env.extend_from_slice(extra);
@@ -308,7 +398,54 @@ impl Git {
     }
 }
 
+/// Whether `rel` (a path git listed as ignored, a folder ending in `/`) is something a project rebuilds or the system writes:
+/// inside a folder named in `turn_files::REBUILT` (the list Rewind already leaves out of a folder with no ignore rules to read,
+/// `node_modules`, `target`, `dist`, `.next`, `.venv` and the rest), or a file named in `turn_files::SYSTEM_FILES` (`.DS_Store`).
+fn rebuilt(rel: &str) -> bool {
+    let folder = rel.ends_with('/');
+    let parts: Vec<&str> = rel.trim_end_matches('/').split('/').filter(|p| !p.is_empty()).collect();
+    let Some((last, dirs)) = parts.split_last() else { return false };
+    dirs.iter().any(|d| crate::turn_files::REBUILT.contains(d)) || (folder && crate::turn_files::REBUILT.contains(last)) || (!folder && crate::turn_files::SYSTEM_FILES.contains(last))
+}
+
 impl Git {
+    /// What git ignores in the lane's folder `wt` that a clean-up may not take without a yes: every ignored file or folder but
+    /// what a project rebuilds and the system writes ([`rebuilt`]) and the agent settings the app copied in for the lane made in
+    /// `prefix` (`lane_config::brought_here`). git lists a folder it ignores as a whole once (`--directory`, ending in `/`); one
+    /// that may hold copied settings (`.claude/`) is read inside, file by file. Sorted as git lists them, at most
+    /// [`IGNORED_MAX`]; None when git could not say.
+    pub(crate) fn ignored_own(&self, wt: &Path, prefix: &str) -> Option<Vec<String>> {
+        let list = |extra: &[&str]| -> Option<Vec<String>> {
+            let mut args = vec!["ls-files", "-z", "--others", "--ignored", "--exclude-standard"];
+            args.extend_from_slice(extra);
+            let ran = self.run_with(wt, &args, tasks::TIMEOUT, &[("GIT_LITERAL_PATHSPECS", "1")]).ok()?;
+            (ran.code == Some(0)).then(|| ran.out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+        };
+        let mut own: Vec<String> = Vec::new();
+        for e in list(&["--directory", "--no-empty-directory"])? {
+            if own.len() >= IGNORED_MAX {
+                break;
+            }
+            if rebuilt(&e) {
+                continue;
+            }
+            match e.strip_suffix('/') {
+                Some(dir) if crate::lane_config::may_hold_brought(dir, prefix) => {
+                    for f in list(&["--", dir])? {
+                        if !rebuilt(&f) && !crate::lane_config::brought_here(&f, prefix) {
+                            own.push(f);
+                        }
+                    }
+                }
+                Some(_) => own.push(e),
+                None if crate::lane_config::brought_here(&e, prefix) => {}
+                None => own.push(e),
+            }
+        }
+        own.truncate(IGNORED_MAX);
+        Some(own)
+    }
+
     /// How many commits on `branch` are on no remote branch (the ones a clean-up keeps a folder for), or None when git could
     /// not say. With no remote at all that is every commit of the branch.
     pub(crate) fn unpushed(&self, at: &Path, branch: &str) -> Option<u32> {
@@ -759,8 +896,10 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
     if !cwd.is_absolute() || !cwd.is_dir() || git_branch::git_dir(cwd).is_none() {
         return Ok(Vec::new());
     }
-    let Ok(git) = Git::new(home) else { return Ok(Vec::new()) };
+    let Ok(git) = Git::automatic(home) else { return Ok(Vec::new()) };
     let Some(repo) = git.common_dir(cwd) else { return Ok(Vec::new()) };
+    // the list is read by itself while the page is open: a repository whose config names a program is not read further
+    let risky = git.config_risk(cwd).is_some();
     let mut mine: Vec<Record> = records(home).into_iter().map(|(_, r)| r).filter(|r| real(Path::new(&r.repo)) == repo).collect();
     mine.sort_by(|a, b| b.made.cmp(&a.made).then_with(|| a.worktree.cmp(&b.worktree)));
     Ok(mine
@@ -769,13 +908,14 @@ pub fn list(home: &Path, cwd: &Path) -> Result<Vec<Kept>, String> {
         .map(|(i, r)| {
             let wt = PathBuf::from(&r.worktree);
             let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
-            let read = exists && i < STATUS_MAX;
+            let read = exists && i < STATUS_MAX && !risky;
             let dir = if r.prefix.is_empty() { wt.clone() } else { wt.join(&r.prefix) };
             Kept {
                 dir: dir.to_string_lossy().into_owned(),
                 changed: if read { git.changed(&wt) } else { None },
                 ahead: if read { git.ahead(&wt, &r) } else { None },
                 unpushed: if read { git.unpushed(&wt, &r.branch) } else { None },
+                ignored: if read { git.ignored_own(&wt, &r.prefix).map(|mut v| { v.truncate(IGNORED_SHOWN); v }).unwrap_or_default() } else { Vec::new() },
                 exists,
                 worktree: r.worktree,
                 branch: r.branch,
@@ -869,7 +1009,9 @@ pub(crate) fn own_lane(home: &Path, worktree: &str) -> Result<(PathBuf, PathBuf,
 }
 
 /// What a clean-up did with one lane's folder: `removed`, or why it was kept. `kept` is a short code the page words:
-/// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `busy` (git is partway through
+/// `changes` (a changed or new file), `unpushed` (commits on its branch that are on no remote), `ignored` (files git ignores
+/// that are not rebuilt and the app did not put there, named in `ignored`), `config` (the repository's own config names a
+/// program git would run, [`Git::config_risk`]), `busy` (git is partway through
 /// something there), `unread` (git could not say what is there), `changed` (it changed while this ran), `held` (a session still
 /// works in it). `changed` and `unpushed` give the numbers.
 #[derive(Debug, Serialize, PartialEq, Default)]
@@ -878,16 +1020,21 @@ pub struct Released {
     pub kept: Option<String>,
     pub changed: Option<u32>,
     pub unpushed: Option<u32>,
+    /// `ignored`: the files and folders git ignores that it keeps the folder for, at most [`IGNORED_SHOWN`].
+    pub ignored: Vec<String>,
 }
 
 /// Removes the lane's folder `worktree` for a clean-up (a deleted chat's, or one whose pull request merged), never one with
-/// work of its own in it: nothing changed or new, git not partway through something, and every commit on its branch on a
-/// remote (`pushed`, which a merged lane overrides in `lane_clean.rs` with the proof of its own). The branch always stays. No
-/// force flag reaches git here: the removal is [`remove`] with nothing to lose, which git itself refuses when it finds
-/// anything it would not take. `Err` as [`remove`]'s for a folder the app did not make.
+/// work of its own in it: nothing changed or new, git not partway through something, every commit on its branch on a
+/// remote (`pushed`, which a merged lane overrides in `lane_clean.rs` with the proof of its own), and nothing git ignores in it
+/// but what a project rebuilds and the agent settings the app copied in (`ignored`, named: [`Git::ignored_own`]). `git
+/// worktree remove` takes ignored files without a word, so a developer's `.env.local` or local database made in the lane would
+/// otherwise go with a deleted chat. The branch always stays. No force flag reaches git here: the removal is [`remove`] with
+/// nothing to lose, which git itself refuses when it finds anything it would not take. `Err` as [`remove`]'s for a folder the
+/// app did not make.
 pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, String> {
     let (wt, _, rec) = own_lane(home, worktree)?;
-    let git = Git::new(home)?;
+    let git = Git::automatic(home)?;
     let repo = real(Path::new(&rec.repo));
     let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
     if exists {
@@ -895,7 +1042,12 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
         if !ours {
             return Err("not_a_lane".into());
         }
-        let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed });
+        let keep = |code: &str, changed: Option<u32>, unpushed: Option<u32>| Ok(Released { removed: false, kept: Some(code.into()), changed, unpushed, ignored: Vec::new() });
+        // a clean-up is the app's own doing: nothing runs in a repository whose config names a program (a clean filter
+        // `status` and `git worktree remove` would run)
+        if git.config_risk(&wt).is_some() {
+            return keep("config", None, None);
+        }
         let changed = git.changed(&wt);
         match changed {
             None => return keep("unread", None, None),
@@ -913,11 +1065,19 @@ pub fn release(home: &Path, worktree: &str, pushed: bool) -> Result<Released, St
                 _ => {}
             }
         }
+        match git.ignored_own(&wt, &rec.prefix) {
+            None => return keep("unread", Some(0), None),
+            Some(mut own) if !own.is_empty() => {
+                own.truncate(IGNORED_SHOWN);
+                return Ok(Released { removed: false, kept: Some("ignored".into()), changed: Some(0), unpushed: None, ignored: own });
+            }
+            _ => {}
+        }
     }
     // a folder removed by hand has only git's note and the record left, which `remove` takes
     match remove(home, worktree, &RemoveAsk::default()) {
         Ok(r) if r.removed => Ok(Released { removed: true, ..Released::default() }),
-        Ok(r) => Ok(Released { removed: false, kept: Some("changed".into()), changed: r.changed, unpushed: None }),
+        Ok(r) => Ok(Released { removed: false, kept: Some("changed".into()), changed: r.changed, ..Released::default() }),
         Err(e) if e == "not_a_lane" => Err(e),
         // git's own refusal (an untracked file it will not take, a locked worktree): the folder stays
         Err(_) => Ok(Released { removed: false, kept: Some("changes".into()), ..Released::default() }),
@@ -1352,6 +1512,95 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(home);
     }
 
+    /// A program a repository's own config can name, standing in for one that someone else wrote: it notes that it ran in
+    /// `home/ran`, passes its input through (as a clean filter must) and, as `fail`, ends with an error (as a refused ssh).
+    pub(crate) fn spy(home: &Path, name: &str, fail: bool) -> (String, PathBuf) {
+        let marker = home.join("ran");
+        let script = home.join(format!("{name}.sh"));
+        fs::write(&script, format!("#!/bin/sh\necho {name} >> '{}'\n{}\n", marker.display(), if fail { "exit 1" } else { "cat" })).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (script.to_string_lossy().into_owned(), marker)
+    }
+
+    /// A clean filter named by `d`'s own config for every `.txt`, and `a.txt` touched so git must run it to compare.
+    pub(crate) fn filter_in(home: &Path, d: &Path, wt: &Path) -> PathBuf {
+        let (script, marker) = spy(home, "filter", false);
+        sh(d, &["config", "filter.spy.clean", &script]);
+        let attrs = sh(wt, &["rev-parse", "--git-path", "info/attributes"]);
+        let attrs = if Path::new(&attrs).is_absolute() { PathBuf::from(attrs) } else { wt.join(attrs) };
+        fs::create_dir_all(attrs.parent().unwrap()).unwrap();
+        fs::write(&attrs, "*.txt filter=spy\n").unwrap();
+        // a stat change with the same size: git has to read the file through the filter to know whether it changed
+        let a = wt.join("a.txt");
+        let text = fs::read(&a).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        fs::write(&a, text).unwrap();
+        marker
+    }
+
+    #[test]
+    fn reads_which_of_the_repository_s_own_settings_run_a_program_or_send_a_fetch_elsewhere() {
+        let entry = |scope: &str, kv: &str| format!("{scope}\0{kv}\0");
+        for (kv, shown) in [
+            ("filter.lfs.smudge\ngit-lfs smudge %f", "filter.lfs.smudge"),
+            ("filter.x.process\nx", "filter.x.process"),
+            ("core.sshcommand\nssh -i k", "core.sshcommand"),
+            ("core.gitproxy\nproxy", "core.gitproxy"),
+            ("core.askpass\naskpass", "core.askpass"),
+            ("core.alternaterefscommand\nx", "core.alternaterefscommand"),
+            ("credential.helper\nstore", "credential.helper"),
+            ("credential.https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com.helper\n!x", "credential.*.helper"),
+            ("remote.origin.uploadpack\nx", "remote.origin.uploadpack"),
+            ("remote.origin.receivepack\nx", "remote.origin.receivepack"),
+            ("remote.origin.vcs\nx", "remote.origin.vcs"),
+            ("remote.origin.url\next::sh -c x", "remote.origin.url"),
+            ("remote.up.pushurl\nfd::3", "remote.up.pushurl"),
+            ("url.https://TOKEN@evil.example/.insteadof\nhttps://github.com/", "url.*.insteadof"),
+            ("url./tmp/x.pushinsteadof\ny", "url.*.pushinsteadof"),
+        ] {
+            assert_eq!(risky_setting(&entry("local", kv), true).as_deref(), Some(shown), "{kv}");
+            assert_eq!(risky_setting(&entry("worktree", kv), true).as_deref(), Some(shown), "{kv}");
+            // the person's own settings are theirs
+            assert_eq!(risky_setting(&entry("global", kv), true), None, "{kv}");
+            assert_eq!(risky_setting(&entry("system", kv), true), None, "{kv}");
+            // a git that cannot say the scope is asked for the local file only
+            assert_eq!(risky_setting(&format!("{kv}\0"), false).as_deref(), Some(shown), "{kv}");
+        }
+        for kv in ["remote.origin.url\nhttps://github.com/o/r.git", "remote.origin.url\ngit@github.com:o/r.git", "core.hookspath\n.husky", "core.fsmonitor\ntrue", "diff.external\nx", "user.name\nAna", "core.bare\nfalse", "filter.lfs.required\ntrue", "core.sshcommandx\ny", "include.path\n../x"] {
+            assert_eq!(risky_setting(&entry("local", kv), true), None, "{kv}");
+        }
+        // the first one found is named, after any number of plain ones
+        let listing = format!("{}{}{}", entry("global", "credential.helper\nosxkeychain"), entry("local", "core.bare\nfalse"), entry("local", "core.sshCommand\nx"));
+        assert_eq!(risky_setting(&listing, true).as_deref(), Some("core.sshCommand"));
+        // read from a real repository, a setting in a file its config includes counts as its own
+        let Some((home, d)) = repo("config-risk") else { return };
+        let git = Git::new(&home).unwrap();
+        assert_eq!(git.config_risk(&d), None);
+        fs::write(d.join(".git/more.cfg"), "[credential]\n\thelper = store\n").unwrap();
+        sh(&d, &["config", "include.path", "more.cfg"]);
+        assert_eq!(git.config_risk(&d).as_deref(), Some("credential.helper"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn no_automatic_clean_up_or_list_runs_a_program_the_repository_s_own_config_names() {
+        let Some((home, d)) = repo("release-config") else { return };
+        with_origin(&home, &d);
+        let made = pushed_lane(&home, &d, "cfg");
+        let marker = filter_in(&home, &d, Path::new(&made.worktree));
+        let r = release(&home, &made.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("config")), "{r:?}");
+        let kept = list(&home, &d).unwrap().into_iter().find(|k| k.worktree == made.worktree).unwrap();
+        assert_eq!((kept.exists, kept.changed, kept.unpushed), (true, None, None));
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        assert!(Path::new(&made.worktree).join("a.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
     /// A bare repository `origin.git` in `home`, set as `origin` of `d` with `main` pushed and tracked.
     pub(crate) fn with_origin(home: &Path, d: &Path) -> PathBuf {
         let bare = home.join("origin.git");
@@ -1575,6 +1824,30 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn starting_from_the_remote_never_writes_over_a_file_git_ignores_in_the_developer_s_folder() {
+        let Some((home, d)) = repo("remote-ignored") else { return };
+        let bare = with_origin(&home, &d);
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".env\n").unwrap();
+        fs::write(d.join(".env"), "TOKEN=mine\n").unwrap();
+        // the remote's main brings a tracked `.env`
+        let other = home.join("other");
+        sh(&home, &["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()]);
+        fs::write(other.join(".env"), "TOKEN=theirs\n").unwrap();
+        sh(&other, &["add", "-f", ".env"]);
+        sh(&other, &["commit", "-q", "-m", "env"]);
+        sh(&other, &["push", "-q", "origin", "main"]);
+        let mine = sh(&d, &["rev-parse", "HEAD"]);
+        let made = make_with(&home, &d, &names(&["kit/env"]), &Start { remote: true, ..Start::default() }).unwrap();
+        assert_eq!(made.from, "origin/main");
+        // the fetch moved only the remote-tracking branch; the checkout is a new folder, so the developer's file is theirs alone
+        assert_eq!(fs::read_to_string(d.join(".env")).unwrap(), "TOKEN=mine\n");
+        assert_eq!(sh(&d, &["rev-parse", "HEAD"]), mine);
+        assert_eq!(fs::read_to_string(Path::new(&made.worktree).join(".env")).unwrap(), "TOKEN=theirs\n");
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn the_remote_is_the_one_the_base_tracks_else_origin_and_a_missing_folder_falls_back() {
         let Some((home, d)) = repo("tracks") else { return };
         let bare = with_origin(&home, &d);
@@ -1681,6 +1954,59 @@ pub(crate) mod tests {
         // and nothing that was kept lost a file
         assert_eq!(fs::read_to_string(Path::new(&a.worktree).join("a.txt")).unwrap(), "changed\n");
         assert!(Path::new(&c.worktree).join("apps/web/new/x.txt").exists() && Path::new(&e.worktree).join("e.txt").exists());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_keeps_a_folder_holding_files_git_ignores_that_are_the_developer_s_and_names_them() {
+        let Some((home, d)) = repo("release-ignored") else { return };
+        with_origin(&home, &d);
+        // the repository ignores local settings and databases (its exclude file is every worktree's)
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".env.local\n*.db\ndata/\n").unwrap();
+        let a = pushed_lane(&home, &d, "env");
+        let wt = Path::new(&a.worktree);
+        fs::write(wt.join(".env.local"), "KEY=only-here\n").unwrap();
+        fs::write(wt.join("dev.db"), "rows\n").unwrap();
+        fs::create_dir_all(wt.join("data/uploads")).unwrap();
+        fs::write(wt.join("data/uploads/photo.jpg"), "x").unwrap();
+        let r = release(&home, &a.worktree, true).unwrap();
+        assert_eq!((r.removed, r.kept.as_deref()), (false, Some("ignored")), "{r:?}");
+        assert_eq!(r.ignored, vec![".env.local".to_string(), "data/".into(), "dev.db".into()]);
+        assert_eq!(fs::read_to_string(wt.join(".env.local")).unwrap(), "KEY=only-here\n");
+        assert!(wt.join("dev.db").exists() && wt.join("data/uploads/photo.jpg").exists());
+        // the kept list names them too, so a folder kept after its chat was deleted says why
+        let kept = list(&home, &d).unwrap().into_iter().find(|k| k.worktree == a.worktree).unwrap();
+        assert_eq!(kept.ignored, vec![".env.local".to_string(), "data/".into(), "dev.db".into()]);
+        // the merged clean-up's path (no remote proof asked) keeps it the same way
+        assert_eq!(release(&home, &a.worktree, false).unwrap().kept.as_deref(), Some("ignored"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_clean_up_still_takes_what_a_project_rebuilds_and_the_agent_settings_the_app_copied_in() {
+        let Some((home, d)) = repo("release-rebuilt") else { return };
+        with_origin(&home, &d);
+        // the developer's own agent settings, which the lane brings in ignored (lane_config.rs)
+        fs::create_dir_all(d.join(".git/info")).unwrap();
+        fs::write(d.join(".git/info/exclude"), ".mcp.json\ntarget/\n.next/\n.DS_Store\n").unwrap();
+        fs::write(d.join(".mcp.json"), "{}\n").unwrap();
+        fs::create_dir_all(d.join(".claude")).unwrap();
+        fs::write(d.join(".claude/settings.local.json"), "{}\n").unwrap();
+        let a = pushed_lane(&home, &d, "deps");
+        assert_eq!(a.config, 2, "{a:?}");
+        let wt = Path::new(&a.worktree);
+        // an agent writes its own local setting (an "always allow"), and the lane installs and builds
+        fs::write(wt.join(".claude/settings.local.json"), "{\"allow\":[\"x\"]}\n").unwrap();
+        for f in ["node_modules/q/index.js", "apps/web/node_modules/r/i.js", "target/debug/app", ".next/cache/x", ".DS_Store"] {
+            fs::create_dir_all(wt.join(f).parent().unwrap()).unwrap();
+            fs::write(wt.join(f), "x").unwrap();
+        }
+        assert_eq!(list(&home, &d).unwrap()[0].ignored, Vec::<String>::new());
+        assert_eq!(release(&home, &a.worktree, true).map(|r| r.removed), Ok(true));
+        assert!(!wt.exists());
+        // the developer's own copies stay in their folder
+        assert!(d.join(".mcp.json").exists() && d.join(".claude/settings.local.json").exists());
         let _ = fs::remove_dir_all(home);
     }
 

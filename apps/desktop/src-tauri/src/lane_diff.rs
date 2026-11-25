@@ -12,7 +12,9 @@
 //! Only a folder the app made is read (`lane::own_lane`, the check the removal paths use, plus git listing the folder as a
 //! worktree of the recorded repository). Every call only reads, through the lane's own `Git` runner (no hook, no file monitor,
 //! no prompt, no optional lock), with `--no-ext-diff --no-textconv` so no program the repository names runs to draw a diff.
-//! A clean filter a repository names can still run when git compares a changed file, as for the developer's own `git status`.
+//! The Diff is read by itself whenever the lane is shown, so a repository whose own config names a program git would run while
+//! it compares (a clean filter) or fetches is not read at all (`config:<setting>`, `lane::Git::config_risk`; item 86): the pane
+//! then shows what the chat's own events said, as for a folder it cannot read.
 //!
 //! Bounded, and each bound is said: at most `MAX_FILES` files (the rest are counted), a file's diff over `MAX_FILE_DIFF` bytes or
 //! a file over `MAX_SOURCE` bytes is "too large to show", the diffs together stop at `MAX_TOTAL` bytes (later files are listed
@@ -200,15 +202,19 @@ fn diff_of(git: &Git, wt: &Path, start: &str, e: &Entry, left: Duration) -> Resu
 }
 
 /// What changed in the lane's folder `dir` since the lane started. `Err` is a short code: `not_a_lane` (a folder the app did not
-/// make, or one git does not list as a worktree of the recorded repository), `git_missing`, `unread`.
+/// make, or one git does not list as a worktree of the recorded repository), `git_missing`, `unread`, `config:<setting>` (the
+/// repository's own config names a program git would run).
 pub fn read(home: &Path, dir: &str) -> Result<LaneDiff, String> {
     let (wt, rec) = own_folder(home, dir)?;
-    let git = Git::new(home)?;
+    let git = Git::automatic(home)?;
     let repo = real(Path::new(&rec.repo));
     let exists = fs::symlink_metadata(&wt).map(|m| m.is_dir()).unwrap_or(false);
     let ours = exists && git.common_dir(&wt).as_ref() == Some(&repo) && git.worktrees(&repo).is_some_and(|l| l.contains(&real(&wt)) && l.first() != Some(&real(&wt)));
     if !ours {
         return Err("not_a_lane".into());
+    }
+    if let Some(setting) = git.config_risk(&wt) {
+        return Err(format!("config:{setting}"));
     }
     let begun = Instant::now();
     let start = start_commit(&git, &wt, &rec).ok_or("unread")?;
@@ -444,6 +450,16 @@ mod tests {
         fs::write(wt.join("fresh.txt"), "new\n").unwrap();
         let got = get(&home, &wt);
         assert!(find(&got, "a.txt").diff.contains("+changed"));
+        assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn a_lane_whose_repository_names_a_clean_filter_is_not_read_by_itself() {
+        let Some((home, d, wt)) = lane("ld-filter") else { return };
+        let marker = crate::lane::tests::filter_in(&home, &d, &wt);
+        let got = read(&home, &wt.to_string_lossy());
+        assert_eq!(got.unwrap_err(), "config:filter.spy.clean");
         assert!(!marker.exists(), "a program ran: {}", fs::read_to_string(&marker).unwrap_or_default());
         let _ = fs::remove_dir_all(home);
     }

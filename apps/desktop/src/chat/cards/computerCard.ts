@@ -27,6 +27,8 @@ export function computerWords(c: ComputerAsk): ComputerWords {
   const lines = [t("computer.ask.app", { app })];
   if (c.window !== undefined) lines.push(t("computer.ask.window", { window: c.window }));
   if (c.control !== undefined) lines.push(t("computer.ask.control", { control: c.control }));
+  // the control's name is the app's own words (a web page names its controls as it likes): the card says so
+  if (c.act === "click" || c.act === "set") lines.push(t("computer.ask.named", { app }));
   if (c.keys !== undefined) lines.push(t("computer.ask.keys", { keys: c.keys }));
   if (c.menu !== undefined) lines.push(t("computer.ask.menuPath", { menu }));
   if (c.text !== undefined) lines.push(t("computer.ask.text", { text: c.text }));

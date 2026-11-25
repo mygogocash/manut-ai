@@ -468,14 +468,17 @@ test("reduced motion: the live frame and the status arc stand still", async ({ p
   // the row, with its arc and frame, is on the Code page
   await openCode(page);
   await expect(page.getByTestId(`session-${a}`)).toHaveAttribute("data-term-status", "busy");
+  // Reduced motion ends a move at once rather than removing it (docs/motion.md): still means no animation, or one that
+  // is over within a millisecond and never repeats.
   const anim = await page.evaluate((id) => {
     const row = document.querySelector(`[data-testid="session-${id}"]`)!;
+    const still = (cs: CSSStyleDeclaration) => cs.animationName === "none" || (parseFloat(cs.animationDuration) < 0.001 && cs.animationIterationCount === "1");
     return {
-      arc: getComputedStyle(row.querySelector(".tst svg")!).animationName,
-      frame: getComputedStyle(row.querySelector(".trm")!, "::after").animationName,
+      arc: still(getComputedStyle(row.querySelector(".tst svg")!)),
+      frame: still(getComputedStyle(row.querySelector(".trm")!, "::after")),
     };
   }, a);
-  expect(anim).toEqual({ arc: "none", frame: "none" });
+  expect(anim).toEqual({ arc: true, frame: true });
 });
 
 test("status glyph from the session events: arc while output flows; a CLI's end goes back to the shell; x when the shell cannot start", async ({ page }) => {

@@ -1,5 +1,5 @@
 import "./ui.css";
-export { Avatar, avatarFor } from "./Avatar";
+export { Avatar } from "./Avatar";
 export { IconButton } from "./IconButton";
 export { Pill } from "./Pill";
 export { Modes, type ModesProps } from "./Modes";
