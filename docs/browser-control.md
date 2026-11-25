@@ -91,7 +91,8 @@ or the grant that carries them. The worker turns the name into the sign-in's id 
    removed or reported broken meanwhile, is refused. Another outpost's try leaves the grant for its own; any refusal
    after the grant was found to be the outpost's own, unused and on time, leaves it used up.
 4. **The outpost types it** into a page whose origin is one of the sign-in's origins, and keeps it nowhere: not on
-   disk, not in a log, not in what it reports back.
+   disk, not in a log, not in what it reports back. A site that asks for the account's name on one page and the
+   password on the next is signed in over both, the password typed only once a page on those origins asks for it.
 
 Every change and every redeem writes an audit entry with ids only: the sign-in, the outpost, the grant, the task and
 the attempt. The grant id may be written down, since it is worthless without the outpost's credential and dead after
@@ -205,7 +206,8 @@ with no password in either.
    be on for it, read from the sign-ins at that moment: a sign-in removed or broken since takes its origins with it. A
    step that may no longer run is refused for good, with the reason.
 3. **The outpost runs it** and stays on the step's origins: a page anywhere else stops the step
-   (`origin_not_allowed`).
+   (`origin_not_allowed`). A frame of the page from anywhere else is refused and stays empty; it stops a write step
+   (before the press with nothing sent, `navigation_refused`; after it, not known), and no step that only reads.
 4. **The outpost reports how it went**, once: `done` (with the text, for a read, at most 4 KB once written as JSON), or
    `failed` with a code from a fixed list. A second report, a late one, one for a step it was not handed, or one from
    another outpost is refused. The control plane reads the switches and consent again, then lands the outcome in the
@@ -215,7 +217,10 @@ with no password in either.
    (`port.browserStepOutcome(stepId)`). An outcome that cannot land is taken back: the step reads refused, and what it
    read is dropped.
 5. **A sign-in the site refused** comes back as `failed`, `sign_in_refused`, with the sign-in's id, and the worker
-   reports it broken (`port.signInBroken`) as above.
+   reports it broken (`port.signInBroken`) as above. A sign-in the site interrupted, asking for more than the saved
+   sign-in (a check that you are a person, a code sent to a phone, "verify it's you"), comes back as `failed`,
+   `sign_in_interrupted`: the site refused nothing, so the worker does not report it broken; it tells the owner, who
+   can sign in by hand.
 
 No password is in a step, its outcome or its audit entries. A step carries a grant's id, never what it unlocks, and
 the outpost types the password and keeps it nowhere. The control plane checks this too: a read whose text holds the
@@ -505,6 +510,86 @@ shop's broken sign-in or sleeping outpost without its owner. No API change.
   fake, the page's states, each question and its cancel, the credential gone after Done, a shop change and leaving the
   page. Each guard was broken in turn to see a test fail.
 
+The outpost ready for real sites' pages, this Mac (24 and 25 Nov 2026; December item 49, "Next slices" items 1 and 4). Nothing
+here has met a real site yet: every script runs against test pages in WebKit and Chromium, and the Rust around them
+against the fake browser. What the owner's first supervised write should check is below, under "Next slices".
+
+- **The page told from its frames** (`browser.rs`, `origin.rs`). wry's navigation hook is told only an address, so on
+  macOS the outpost puts a navigation delegate of its own in front of wry's: it reads WKWebView's navigation action, whose
+  target frame says whether the main frame is navigating, asks the guard with that, cancels what the guard refuses, and
+  hands everything else to wry's delegate as it came (which then asks wry's hook too). It is kept on the webview itself
+  and holds wry's delegate weakly; should wry's be gone, nothing is let through. What WebKit asks before it is in place
+  (the window's very first load) is judged by wry's hook alone, which counts any refusal as the page's. Checked once in a
+  real WKWebView with a throwaway program: a frame from another origin refused as a frame, a same-origin frame loaded, a
+  redirect of the page refused as the page, the page still loaded and still reported to wry.
+- **What a refusal does** (`step.rs`). The page going off the step's origins fails every kind of step, as before. A frame
+  from elsewhere stays empty: `open`, `read` and `sign_in` go on, since what they read or type is the page's own. A write
+  stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`, new, which the
+  API settles as failed), and after it as not known (`origin_not_allowed`). Before, a refusal before the press was
+  `origin_not_allowed` too, and settled the write as not known though nothing had been pressed.
+- **Fields inside a page's open shadow DOM** (`FIND` in `step.rs`). Every selector a step names, a read's and a write's
+  form and fields, and every field a sign-in looks for, is looked for in the page first and then in each open shadow
+  root inside it (a part of a page whose script keeps its elements apart, as web components do), in the order the page
+  holds them. A closed
+  shadow root cannot be reached by any script: what is in one is not on the page as far as the outpost can tell, so a
+  step naming it ends `selector_not_found` with nothing typed.
+- **More controls for a write** (`FIELDS`). Besides text fields, text areas and lists: a check box takes `"checked"` or
+  `"unchecked"`; a radio button takes the value of one of the buttons of its group (its form's buttons with its name),
+  which is then chosen; an editor that is not a form field (`contenteditable`, named by the element that is the editor
+  itself) takes text. Each is set the way a person's input sets it, so the page's own handlers run: a check box or a
+  radio button is clicked, and only when it is not already as asked (a second click would undo the first); an editor is
+  focused, everything in it selected from inside it, and the text typed over it through the browser's own editing
+  (`insertText`), each line break as Shift and Return make one (`insertLineBreak`), so a chat's editor never takes one as
+  Send. An editor that does not take the focus is typed into not at all. A value a control cannot take (`"yes"` for a
+  check box, a button the group does not have or that is turned off) is `selector_not_found` before anything is set.
+- **Read back before the press.** The press happens only while every field reads back as the approved request named
+  it: each box ticked or not as asked, the button asked for chosen, each list on its item, each text exactly as typed,
+  and an editor's text as a person reads it (each line break and each line of its own as one, a no-break space as a
+  space, the invisible marks editors keep for the caret left out, the empty line an editor keeps at its end not
+  counted). A field that does not read back as asked yet, or that the page still marks as wrong, is looked at again for
+  up to 10 seconds, as a button not yet turned on is (an editor may take a moment to take in its text); still so then is
+  `submit_refused`, with nothing pressed. Before, a value that did not hold was refused at the first look.
+- **A form the page draws after it loads.** Most sellers' centres draw their forms with their own script once the page
+  has loaded, so a write looks for its form and fields again for up to 10 seconds before it says they are not there
+  (`selector_not_found`). Nothing is typed until all of them are there, so looking again never types anything twice.
+- **Tested in two engines** (`apps/desktop/e2e/outpost-scripts.ts`): a web component's form and a closed one, check boxes
+  and radio buttons a page hears clicked once, a box the page unticks again (not pressed), a chat editor that sends on
+  Return and is not sent while typed into, and an editor's text read back from the ways editors draw it.
+- **A settings page that keeps its form** (`sent` and `saved` in `step.rs`, `SAVED`). After the press, a page that keeps
+  the form with every value as typed and nothing marked wrong answers `kept`, which decides nothing at first: a chat that
+  empties its box, or a form that moves or clears itself, does so within a moment, and its own answer is taken. Kept for
+  6 seconds, the outpost loads the approved page anew, after an empty page (never a reload, which could send the form
+  again, and never the same address again, which may only jump within the page), and reads every field back. Every one
+  holding exactly its approved value, with at least one of them a value an empty form would not show (some text, a
+  ticked box, a chosen button or item), for 3 seconds, is `done`: the site keeps what was approved. Anything else by the
+  end of the step's time is not known (`timed_out`); a page that will not load again is a browser error, also not
+  known, since after the press no code may say that nothing was sent. Nothing is typed or pressed again. The outcome
+  words stay as they were: done, failed and nothing sent, or not known. A write's time grows from 45 to 60 seconds for
+  it.
+- **A sign-in over two pages** (`sign_in`, `next` and `settle` in `step.rs`; `FORM`, `TYPE_USER`, `NEXT`, `TYPE_PASS`,
+  `CHECK`). The first look says what the page asks for: a password (one page, as before), the account's name alone, or
+  neither. A page asks for the name alone only when it says so plainly, never by a guess: its field marked "username"
+  for the browser's autofill, or else its only email field. The grant is redeemed only then; the first page is handed
+  the account's name and never the password, which waits in its wiped buffer. The next page is whatever shows a
+  password field a person can type into, on the sign-in's own origins, whether the site moved to a new page or swapped
+  its form in place; it is taken as soon as it is there, the address is checked against the sign-in's origins again,
+  and the password script checks it once more as it types. The first page still showing decides nothing (the site may
+  be checking the account, or saying beside the field that it does not know it): at the end of the sign-in's time that
+  is `timed_out`, never a refusal. Anything else that holds for 3 seconds between the pages (a check that you are a
+  person, a box for a code, "verify it's you", a choice of accounts) stops the step with the new code
+  `sign_in_interrupted`, and the password is typed nowhere. All of it keeps the sign-in's 40 seconds: the step lives
+  only as long as its grant's minute.
+- **The site's answer to the password**, after one page or two: a box for a one-time code (a field marked
+  "one-time-code") is `sign_in_interrupted`, where before no password field left counted as signed in; after two pages,
+  the first page back again is `sign_in_interrupted` too. Neither is ever `sign_in_refused`, which marks the sign-in
+  broken for everyone. The page going off the step's origins ends the wait at once rather than at the end of its time.
+- **A sign-in page drawn by its own script** is looked for again for up to 10 seconds, as a write's form is, before
+  the step says there is no form; nothing is redeemed until there is one. A sign-in's fields are found in open shadow
+  roots too.
+- **Tested in two engines**: a one-page sign-in in and refused and asking for a code, one in a web component, a first
+  page that moves to its password page, one that swaps its form in place, one that asks whether you are a person
+  between the pages, and a page with two email fields that is never taken for a first page.
+
 ## Choices made so far
 
 Each can be undone later; none is the owner's to make, so none waited.
@@ -544,7 +629,8 @@ The step channel's (24 Nov 2026):
 - A read brings back at most 4 KB as JSON, which fits one agent event with room to spare and keeps what a worker's
   model reads small. Longer is refused without using the step up, so the outpost can cut it and report again.
 - An outpost says a step failed with a code from a fixed list, never free text: `origin_not_allowed`,
-  `page_unavailable`, `selector_not_found`, `sign_in_refused`, `grant_refused`, `timed_out`, `browser_error`.
+  `page_unavailable`, `selector_not_found`, `sign_in_refused`, `grant_refused`, `timed_out`, `browser_error`. (Since
+  added: `submit_refused` and `not_run` for writes, `navigation_refused` and `sign_in_interrupted`, below.)
 - An outcome lands in the attempt's events as a tool call (`toolStarted`, then `toolUpdated`), the agent event
   contract's existing kinds, so no reader needs a new one. It lands when it is reported, so a step's row appears once
   it ended; the worker sees an outcome only once it has landed.
@@ -602,14 +688,17 @@ The desktop outpost's (24 Nov 2026), each in `docs/decisions.md`:
   session, unless the owner pressed Stop.
 - A heartbeat every 30 seconds on its own thread; steps asked for every 3 seconds (what the ingress limit is sized
   for), at once again after an ask that brought five; asks spaced out to a minute while the API cannot be reached.
-  Budgets: open 30 seconds, read 15, sign-in 40, a write 45. A report that got no answer is sent again, the same, at
+  Budgets: open 30 seconds, read 15, sign-in 40, a write 45 (60 since the read-back of a kept form, below). A report
+  that got no answer is sent again, the same, at
   most three times; a step held when the outpost stops is reported `not_run` if it had not begun (`browser_error` until
   the write steps), and `browser_error` if it was running.
 - The window is visible, without taking focus, and incognito. The navigation hook cannot tell a page's frames from the
-  page, so any navigation it refuses during a step fails the step, a frame from another origin included.
+  page, so any navigation it refuses during a step fails the step, a frame from another origin included. (Replaced the
+  same day: on macOS the hook tells them apart, below.)
 - A sign-in submits the form it typed into. The site's answer must hold for 3 seconds: no password field left is done,
   the same address with the password fields emptied is `sign_in_refused`, anything else is `timed_out`, never a guessed
-  refusal.
+  refusal. (Since 25 Nov 2026: a box for a one-time code, or after two pages the first page back, is
+  `sign_in_interrupted`, below.)
 - Connections counts steps, not the canvas's jobs, and names the outpost "This Mac" in the app's language.
 
 The desktop showing a browser write's (24 Nov 2026), each in `docs/decisions.md`:
@@ -625,11 +714,13 @@ The outpost's write steps (24 Nov 2026), each in `docs/decisions.md`:
 
 - A write fills only what a person types into or chooses one item from: an input of a text kind, a text area, a list.
   Never a password field (passwords come only from the vault), a hidden one, a check box, a radio button, a file or an
-  editor that is not a form field; a write naming one is `selector_not_found`, with nothing typed.
+  editor that is not a form field; a write naming one is `selector_not_found`, with nothing typed. (Widened the same
+  day: check boxes, radio buttons and editors too, above. Never a password field, a hidden one or a file.)
 - What goes is exactly what was approved: a page that changes a value once it is typed (formatting an amount, say) is not
   pressed. A text area's line break is compared as the one character it keeps.
 - `done` and `submit_refused` are taken only from what the page shows, held for 3 seconds; a site that keeps the form
-  and says nothing (a settings page) ends `timed_out`, and its write settles as not known.
+  and says nothing (a settings page) ends `timed_out`, and its write settles as not known. (Replaced on 25 Nov 2026: such a
+  page is loaded anew and read back, below.)
 - Not run covers a step the outpost did nothing for: a kind it does not know, a step missing what its kind needs (no
   origin it may be on included), a step held but not begun when it stops (before, `browser_error`), and a write it
   stopped under before typing.
@@ -698,13 +789,59 @@ Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
   the tab's own state only. An account typed with a paste's spaces at its ends is sent trimmed, unless it then matches the
   account the vault keeps, which is sent exactly as kept.
 
+The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/decisions.md`:
+
+- The page is told from its frames by WKWebView's navigation action, through a navigation delegate of the outpost's own
+  in front of wry's, on macOS. Anything judged without it counts as the page's.
+- A frame from elsewhere that the guard refused fails no step that only reads; the page going elsewhere fails every step.
+- A write stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`), after
+  it as not known (`origin_not_allowed`).
+- Selectors reach open shadow roots, the page's own elements first; closed ones are out of reach (`selector_not_found`).
+- A check box takes "checked" or "unchecked", a radio button the value of a button of its group, an editor its text; a
+  click sets a box or a button, only when not already as asked, and an editor is typed over through the browser's own
+  editing, a line break as Shift and Return.
+- An editor's text is compared as a person reads it; a value that does not read back, or a field marked wrong, is looked
+  at again for up to 10 seconds before the press is refused.
+- A write waits up to 10 seconds for its form and fields to be drawn.
+- A settings page that keeps its form as typed and says nothing for 6 seconds is loaded anew, after an empty page, and
+  read back: every value as approved, one of them one an empty form would not show, for 3 seconds, is done; anything
+  else is not known. A write has 60 seconds.
+- A sign-in over two pages takes the next page to be whatever shows a password field on the sign-in's own origins,
+  moved to or swapped in place, as soon as it shows; a first page must name its account field plainly. The first page
+  still showing decides nothing; anything else between the pages, and a code asked for after the password, is
+  `sign_in_interrupted`, never a refusal. A sign-in keeps its 40 seconds.
+
 ## Next slices
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
-   site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), telling a
-   page's frames from the page in the navigation hook (a refused frame from another origin fails a write step, and after
-   the press it settles the write as not known), fields inside frames or a page's shadow DOM, check boxes, radio buttons
-   and editors that are not form fields, and a way to know a settings page took a change when it keeps the form.
+   site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), fields
+   inside frames, and switches drawn as `role="switch"` or `role="checkbox"` rather than as check boxes (not reached
+   yet: a write naming one is `selector_not_found`). (Built 24 Nov 2026: telling a page's frames from the page in the
+   navigation hook; fields in a page's open shadow DOM; check boxes, radio buttons and editors that are not form
+   fields; knowing a settings page took a change when it keeps the form; above.)
+
+   **What the owner's first supervised write should check on the real site**, with the outpost's window in view:
+   - The window opens and loads pages as before, and Connections shows this Mac Online: the navigation delegate in
+     front of wry's was checked in a real WKWebView once, with a throwaway program, but not yet inside the app.
+   - The sign-in: one page or two; that the account's field is marked `autocomplete="username"` (or is the page's only
+     email field), else the outpost says there is no form; what the site shows when it wants a person check or a code
+     (`sign_in_interrupted`; the owner then signs in by hand in the outpost's window, whose session lasts while it is
+     open); and that the password is typed only on the sign-in's own addresses.
+   - Frames: whether the pages the team writes on hold frames from other sites (a chat widget, analytics, a payment
+     box). Any such frame stops every write on that page before the press (`navigation_refused`, nothing sent). If a
+     page needs one, the answer is a rule for which frames a write page may load, never adding the frame's address to
+     the sign-in, which would let the password be typed there.
+   - The fields: that each one the team will write is in the page or an open shadow root, not in a closed one or a
+     frame; that switches are check boxes, not `role="switch"` elements.
+   - **Fields that save as they change.** A box or a field the site saves the moment it changes makes typing itself a
+     write: if such a write then stopped before the press, the outpost would report nothing sent though the site had
+     saved. Find out which settings do this before the team writes them.
+   - The chat box: a text area or an editor; that a line break in a reply does not send it; that the reply reads back as
+     typed (an editor that rewrites spaces or emoji stops the press, `submit_refused`, with nothing sent).
+   - A settings page: how it answers a save (moves, clears, or keeps the form saying "Saved"); for the last, that the
+     page loaded anew shows the saved values, or the write ends not known; and that leaving it brings no "unsaved
+     changes" question, since the outpost loads an empty page before reading it back.
+   - Time: that pages load, forms draw (10 seconds), and answers come within a write's 60 seconds and a sign-in's 40.
 2. **The cloud outpost.** A machine that wakes when work arrives and costs nothing asleep; the offline state (work
    waiting for an outpost that cannot be reached, which the step channel now has); moving work there when the owner
    quits the app on this Mac ("Move them to the cloud outpost and quit").
@@ -737,10 +874,10 @@ Removing and changing a sign-in (24 Nov 2026), each in `docs/decisions.md`:
    (built 24 Nov 2026: changing a sign-in's members, by the owner from the app and by the operator, above);
    (built 24 Nov 2026: listing to a worker the sign-ins its member may use, `port.signIns()`); a live row for a
    step while it runs (its outcome lands when it ends); the page's text is what a site said, and a worker must treat it
-   as data, never as instructions, when it reaches a model. From the desktop outpost: telling a page's frames from the
-   page in the navigation hook (wry gives the hook only an address), sign-in forms inside frames or over two pages
-   (the username first), and the outpost on Windows and Linux (no keychain support there yet). (Built 24 Nov 2026: the
-   shop sessions of the several-shops switcher, which the outpost now follows, above.)
+   as data, never as instructions, when it reaches a model. From the desktop outpost: sign-in forms inside frames, and
+   the outpost on Windows and Linux (no keychain support there yet). (Built 24 Nov 2026: the shop sessions of the
+   several-shops switcher, which the outpost now follows, above; telling a page's frames from the page in the navigation
+   hook, above. Built 25 Nov 2026: sign-in forms over two pages, the username first, above.)
 
 ## Sources
 

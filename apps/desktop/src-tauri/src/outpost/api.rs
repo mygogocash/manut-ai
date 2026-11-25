@@ -81,6 +81,13 @@ pub enum Failure {
     /// The outpost did not do what the step asks: a kind it does not know, a step missing what its kind needs, or a
     /// stop before the step began or, for a write, before anything was typed. The API reads it as nothing submitted.
     NotRun,
+    /// A write step, before it pressed anything: the guard refused a navigation of the page or of one of its frames
+    /// to somewhere off the step's origins, and the outpost stopped there. The API reads it as nothing submitted.
+    NavigationRefused,
+    /// A sign-in step: the site asked for something the saved sign-in cannot give (a check that you are a person, a
+    /// code sent to a phone, "verify it's you", a page the outpost does not know between the account's name and the
+    /// password), and the outpost stopped there. The sign-in is not broken: it was never refused.
+    SignInInterrupted,
     TimedOut,
     BrowserError,
 }
@@ -95,6 +102,8 @@ impl Failure {
             Failure::GrantRefused => "grant_refused",
             Failure::SubmitRefused => "submit_refused",
             Failure::NotRun => "not_run",
+            Failure::NavigationRefused => "navigation_refused",
+            Failure::SignInInterrupted => "sign_in_interrupted",
             Failure::TimedOut => "timed_out",
             Failure::BrowserError => "browser_error",
         }
@@ -401,10 +410,11 @@ mod tests {
         assert_eq!(api.report_body("s-1", &Outcome::Failed(Failure::NotRun)),
             json!({ "tenant": "pilot:shop", "outpostId": "op-1", "stepId": "s-1", "outcome": "failed", "code": "not_run" }));
         let codes: Vec<&str> = [Failure::OriginNotAllowed, Failure::PageUnavailable, Failure::SelectorNotFound, Failure::SignInRefused,
-            Failure::GrantRefused, Failure::SubmitRefused, Failure::NotRun, Failure::TimedOut, Failure::BrowserError].iter().map(|f| f.code()).collect();
+            Failure::GrantRefused, Failure::SubmitRefused, Failure::NotRun, Failure::NavigationRefused, Failure::SignInInterrupted,
+            Failure::TimedOut, Failure::BrowserError].iter().map(|f| f.code()).collect();
         // the API's STEP_FAILURES, in its order
         assert_eq!(codes, ["origin_not_allowed", "page_unavailable", "selector_not_found", "sign_in_refused", "grant_refused",
-            "submit_refused", "not_run", "timed_out", "browser_error"]);
+            "submit_refused", "not_run", "navigation_refused", "sign_in_interrupted", "timed_out", "browser_error"]);
     }
 
     #[test]

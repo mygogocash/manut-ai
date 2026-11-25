@@ -398,6 +398,25 @@ describe("browser steps", () => {
     ]);
   });
 
+  it("lands a sign-in the site interrupted as failed, and leaves the sign-in working", async () => {
+    const s = await shop();
+    const signInId = await addSignIn(s.tenant);
+    const mac = await outpost(s.tenant);
+    const nam = await attempt(s, "nam");
+    const grantId = await grantOf(nam, signInId, mac.id);
+    const step = await queued(nam, { kind: "sign_in", outpostId: mac.id, grantId });
+    expect(await mac.take()).toHaveLength(1);
+    // The site asked for a check that you are a person, or a code: the outpost says so, with no text.
+    await refusal(await mac.report(step.stepId, { outcome: "failed", code: "sign_in_interrupted", text: "" }), 400, "invalid_report");
+    expect((await mac.report(step.stepId, { outcome: "failed", code: "sign_in_interrupted" })).status).toBe(200);
+    expect(await outcome(nam, step.stepId)).toEqual({ ...step, state: "failed", code: "sign_in_interrupted" });
+    expect((await landed(s, nam.job.attemptId)).at(-1)).toEqual({ type: "toolUpdated", id: step.stepId,
+      update: { status: "failed", output: "sign_in_interrupted" } });
+    // Nothing refused the saved password, so nothing marks the sign-in broken: it is working, for the next try.
+    const listed = await nam.signIns();
+    expect(listed.ok && listed.value.signIns.map(({ signInId: id, state }) => ({ id, state }))).toEqual([{ id: signInId, state: "working" }]);
+  });
+
   it("carries a grant in one step only, from its own attempt, for its own outpost, while it is good", async () => {
     const s = await shop();
     const signInId = await addSignIn(s.tenant);

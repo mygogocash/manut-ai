@@ -149,6 +149,11 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
 - Dev's API was redeployed on 24 Nov at 20:53 from `9224fb1`, with item 48's approval lookup (API `4c340b5d`, deployed
   whole, not as a gradual rollout); smoke-tested: `GET /v1/approvals?state=open` and a decision answer 401 without a
   session, and the approval page, `/app/` and the console's Access load. The pages are unchanged since 19:38.
+- Dev's pages were redeployed on 25 Nov at 02:39 from `1ea1207`, with item 50's Connections page (pages `7821c338`;
+  the API is unchanged since 20:53); smoke-tested: `/` and `/app/` answer 200, and `/ops` and the admin vault and
+  outpost routes answer 302 to Cloudflare Access without a key.
+- Dev was redeployed on 25 Nov at 06:42 from `1e1e58c`, with item 49's two step failures (API `37beffbf`, deployed
+  whole, then pages `d4e5c73c` with the console's words for them).
 - The night build's queue gained shop-memory, books and routine-rules; one run was started by hand for
   slip-rules.
 
@@ -164,16 +169,23 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 49, the outpost's steps on real-world forms: two-page sign-ins, shadow DOM fields, check boxes, radio
-     buttons, select menus and editors, settings pages that keep their form, and frames told from the page
-     (`feat/outpost-forms`, Opus), started when item 47 finished. Two heavy helpers at a time.
+   - item 51, the pane beside a lane: Diff, Preview and Tests as the canvas's Code board has them, and mocha,
+     Playwright and `unittest` read by `testRun.ts` (`feat/lane-pane`, Sonnet), started 25 Nov when item 50 merged.
+   - item 52, Show older on the connected desktop: History, Mission Control and the activity log read past the
+     newest 50 tasks from the cursor (`feat/show-older`, Sonnet), started 25 Nov when item 49 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
+   Merged: 49 (the outpost on real-world forms: on macOS a hook of the outpost's own in front of wry's navigation
+   delegate tells a frame from the page, so a refused frame fails no read and stops a write before its press with
+   `navigation_refused`, nothing sent; fields in open shadow roots, check boxes, radio buttons and editors; every field
+   read back before the press; a settings page that keeps its form read back after a fresh load; a sign-in over two
+   pages, the password typed only on a page of the sign-in's own origins that asks for it, and `sign_in_interrupted`
+   when a site asks for more; local pages only, and the owner's trial checklist is in `docs/browser-control.md`),
+   50 (the console's Connections page: a shop's sign-ins and outposts from the admin vault routes, each list
    with its own failure; remove a sign-in, change who may use it, remove an outpost and give it a new credential, each
    asked first in its row; the credential shown once and held only in the page's state; no password typed in the
    console; practice world version 12; no API change, so only the pages Worker is redeployed),
@@ -244,8 +256,9 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    device as an alert), 11 (the Playwright follow-up, #17: every spec runs, in six
    CI shards), 14 (the owner's link page naming the helper who decided), the Playwright revival (#15) and
    `notify-rules` (#16).
-2. The night build's queue has one task, `env-example` (added 24 Nov, for the code editor's preview); add pure
-   packages to `docs/plan.md` as the phases need them.
+2. The night build's queue has two tasks, `dev-url` and `preview-command` (added 25 Nov, for the code editor's preview
+   itself, with `env-example`, which landed on `cloud/env-example` and was merged on 25 Nov, `9fa8151`; nothing
+   imports it yet). Add pure packages to `docs/plan.md` as the phases need them.
 3. Next, from the December list in `docs/plan.md`, as slots free (at most four helpers on this Mac):
    - item 17 (an installable web app) waits for owners' sign-in, as there is no owner home page yet;
    - the cloud outpost, once the owner approves its cost (`docs/browser-control.md`).

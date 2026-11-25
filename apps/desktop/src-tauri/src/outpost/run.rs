@@ -258,9 +258,11 @@ pub mod tests {
         read: Duration::from_millis(300),
         sign_in: Duration::from_millis(300),
         submit: Duration::from_millis(300),
+        appear: Duration::from_millis(30),
         press: Duration::from_millis(30),
         poll: Duration::from_millis(1),
         settled: Duration::from_millis(3),
+        kept: Duration::from_millis(6),
     };
 
     /// An API that hands out the batches it is given, one per ask, and records what it is asked.
