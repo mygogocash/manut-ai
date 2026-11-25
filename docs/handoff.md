@@ -207,9 +207,20 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    Helpers are now that Claude Code session's own subagents, each in a worktree the lead made beside T3's
    (`~/.t3/worktrees/manut-ai/cc-item<N>-<name>`), and they stop when that session ends: check each worktree for
    commits that were never pushed before starting anything again.
-   No helper is running (25 Nov, 16:50): items 63 and 66 merged. A helper runs on its own branch from `pilot/week-1`;
-   review each, merge it after the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in
-   `docs/plan.md`.
+   The owner asked on 25 Nov, after the first release, for the smaller desktop items that need no decision (items 68 to
+   71 in `docs/plan.md`), and reported that Buddy "doesn't response" in Practice mode, where it gave a sample answer
+   (item 67). Two helpers run at a time, each on its own branch from `pilot/week-1`; review each, merge it after the
+   full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
+   - item 67, Buddy answering for real through the person's own coding agent (`feat/buddy-real-answers`, Opus, worktree
+     `cc-item67-buddy-real`), started 25 Nov at 17:25.
+   - item 70, a schedule's time zone shown when it is not this computer's (`feat/schedule-time-zone`, Sonnet, worktree
+     `cc-item70-schedule-zone`), started 25 Nov at 17:25.
+   Next, as each finishes: items 68, 69 and 71.
+   The owner also asked for the worktrees and branches to be cleaned up (25 Nov): 85 merged, clean worktrees and their
+   local branches were removed, and 84 merged remote branches (`feat/`, `fix/`, `test/`, `ci/`). Kept: the night build's
+   `cloud/*` branches, which it reads to know which tasks are done; `feat/owner-line-cards`, which is not merged; and
+   six worktrees with uncommitted or unmerged work (`test/fix-desktop-e2e-navigation`, `e2e-resume`,
+   `feat/desktop-customize-brain`, `owner-line-resume`, `job-flow-resume` and one with a detached head).
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
    it on. Item 50 failed so at 00:39 on 25 Nov, after its page, tests and visual check: its last commit was local only.
    Push such a commit from the helper's worktree, review it and finish what is left as the lead.
