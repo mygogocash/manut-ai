@@ -213,7 +213,6 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
    Late on 25 Nov the owner said the account had credits to spare for the next 22 hours and to use them. Since then three
    builders run at once, their gates one at a time (`gate.sh` takes a lock), beside two read-only agents:
-   - item 69, a helper's own session on the connected desktop (`feat/helper-session`, Opus, `cc-item69-helper-session`);
    - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
    - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
    - a security review of the twelve features merged on 25 Nov: done. Nine findings, one high (in merging a pull request
@@ -264,7 +263,9 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 75 (Settings, Source control; a lane put up for review and its pull request merged, each one ask that shows
+   Merged: 69 (at a shop the person only helps at, every page that is the owner's says so by name and asks the API
+   nothing; a helper's session makes five kinds of request and no other; tests and browser specs only, as no sign-in
+   is on), 75 (Settings, Source control; a lane put up for review and its pull request merged, each one ask that shows
    exactly what is sent and runs once, through a ledger in the shell whose runner takes a proof only the settle step
    makes; a pull that only fast-forwards a clean default branch; agent credit lines taken out of a merge's message
    on request; never yet run against a real remote), 77a (Command-K opens a palette: where to go, what to do from a short list of actions the app already offers,
