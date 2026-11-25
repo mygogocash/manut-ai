@@ -2,7 +2,7 @@
 // keychain that keeps one value in memory, and the disk that keeps the last good read. They stand where the desktop
 // shell's `api_request`, `api_session_*` and `shop_cache_*` commands stand in the app (shell.ts), so the tests run
 // without a shell or a network.
-import { decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
+import { decodeDecision, decodeRecord, encodeRecord, encodeStanding } from "@manut/approval-core";
 import { createRoutine, describeTrigger, nextRun, type ActionKind, type Trigger } from "@manut/routine-rules";
 import { confirm as confirmFact, correct as correctFact, emptyState, forget as forgetFact, propose, remember as rememberFact, type FactSource, type MemoryState, type Result } from "@manut/shop-memory";
 import { vi } from "vitest";
@@ -323,6 +323,24 @@ export function approvalJson(over: ApprovalOver = {}) {
   };
 }
 
+/** How a request stopped waiting: decided, taken back, run out of time, or ended with the work that asked it (approval-core's standing). */
+export type Settled = "decided" | "withdrawn" | "expired" | "attempt_ended" | "turn_ended" | "not_found";
+
+/** One entry of `GET /v1/approvals?state=recent`: a request that stopped waiting, as the API lists it (approvals.ts `listApprovals`), the
+ *  record and the standing approval-core gives it. `decided` is by the owner's own session, approving, unless `by`, `role`, `option` and `at`
+ *  say otherwise; `withdrawn` and `expired` carry their time in `at`. */
+export function settledJson(how: Settled, over: ApprovalOver & { by?: string; role?: string; option?: string; at?: number } = {}) {
+  const { by, role, option, at, ...entry } = over;
+  const id = entry.id ?? "action-1";
+  if (how === "decided") {
+    const decision = { requestId: id, optionId: option ?? "approve", seenRevision: entry.revision ?? 1, decidedBy: by ?? "owner-session", role: role ?? "owner", decidedAt: at ?? T0 + 300_000 };
+    return approvalJson({ ...entry, status: "decided", decision, standing: encodeStanding({ state: "decided", reason: "decided", decision: decodeDecision(decision) }) });
+  }
+  if (how === "withdrawn") return approvalJson({ ...entry, status: "withdrawn", standing: { state: "superseded", reason: "withdrawn" } });
+  if (how === "expired") return approvalJson({ ...entry, standing: encodeStanding({ state: "expired", reason: "expired", expiredAt: at ?? T0 + 24 * 3600_000 }) });
+  return approvalJson({ ...entry, standing: { state: "superseded", reason: how } });
+}
+
 /** The open requests the API lists for these tasks' LINE replies: one per reply still proposed and not past its
  *  expiry, as the task object opens a request with every reply and lists one stored before that as the request it would
  *  have opened (docs/pilot-api.md, "Approvals for a session"). */
@@ -386,15 +404,29 @@ export function taskPage(tasks: readonly unknown[], req: Recorded): FakeAnswer {
   return { status: 200, json: { tasks: looked.map(listedJson), next: end < newest.length ? (ids[end - 1] ?? null) : null } };
 }
 
+/** `GET /v1/approvals` as apps/api answers it: `state` names the list (`open`, or `recent` for the ones that stopped waiting) and says which
+ *  it is in the answer; any other is 400 `invalid_state`. */
+function approvalsListing(url: URL, open: unknown[], recent: Recent): FakeAnswer {
+  const state = url.searchParams.get("state");
+  if (state !== "open" && state !== "recent") return { status: 400, json: { error: "invalid_state" } };
+  // a recent list that is an answer instead of entries is that answer, to test what the app does when the read goes wrong
+  if (state === "recent" && !Array.isArray(recent)) return recent;
+  return { status: 200, json: { state, approvals: state === "open" ? open : recent } };
+}
+
+/** What `GET /v1/approvals?state=recent` answers: the entries it lists (`settledJson`), or the answer itself (a refusal, no answer at all,
+ *  anything). */
+export type Recent = unknown[] | FakeAnswer;
+
 /** Serves the four routes a read of the shop makes. Without `approvals`, the open approvals are the tasks' LINE replies
  *  still waiting, as the API would list them. Later calls to `api.on` replace one of them. */
-export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown[]; attention?: unknown[]; approvals?: unknown[] } = {}): FakeApi {
+export function serveShop(api: FakeApi, over: { tasks?: unknown[]; schedules?: unknown[]; attention?: unknown[]; approvals?: unknown[]; recent?: Recent } = {}): FakeApi {
   const tasks = over.tasks ?? [taskJson()];
   return api
     .on("GET", "/v1/tasks", (req) => taskPage(tasks, req))
     .on("GET", "/v1/schedules", { status: 200, json: { schedules: over.schedules ?? [scheduleJson()] } })
     .on("GET", "/v1/inbound/attention", { status: 200, json: { items: over.attention ?? [attentionJson()] } })
-    .on("GET", "/v1/approvals", () => ({ status: 200, json: { state: "open", approvals: over.approvals ?? openReplies(tasks, Date.now()) } }));
+    .on("GET", "/v1/approvals", (req) => approvalsListing(new URL(req.url), over.approvals ?? openReplies(tasks, Date.now()), over.recent ?? []));
 }
 
 /** The desktop shell's commands in memory, stood in `window.__TAURI_INTERNALS__` as the app's shell stands: the API
@@ -478,6 +510,8 @@ export interface ServedShops {
   list: ShopJson[];
   /** each shop's open approvals, by shop id */
   approvals: Record<string, unknown[]>;
+  /** each shop's recent approvals, the ones that stopped waiting (`settledJson`), by shop id; or the answer to give instead */
+  recent: Record<string, Recent>;
   /** shops whose sessions the API answers 401 `removed` or `unlinked` with this time, by shop id */
   ended: Record<string, { error: "removed" | "unlinked"; at: string }>;
   /** every token the fake gave, by token: its shop and role */
@@ -587,6 +621,7 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
   const served: ServedShops = {
     list,
     approvals,
+    recent: {},
     ended: {},
     tokens: new Map(),
     refused: new Set(),
@@ -625,9 +660,9 @@ export function serveShops(api: FakeApi, list: ShopJson[], approvals: Record<str
     });
   const listing = (req: Recorded): FakeAnswer => {
     const at = shopOf(req);
-    if (at === null) return { status: 200, json: { state: "open", approvals: [] } };
+    if (at === null) return approvalsListing(new URL(req.url), [], []);
     if (isAnswer(at)) return at;
-    return { status: 200, json: { state: "open", approvals: served.approvals[at.shop] ?? [] } };
+    return approvalsListing(new URL(req.url), served.approvals[at.shop] ?? [], served.recent[at.shop] ?? []);
   };
   api.on("GET", "/v1/approvals", listing);
   // An owner's session reads its shop's tasks, schedules, attention items and routines and changes its team, as apps/api

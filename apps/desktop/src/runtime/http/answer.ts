@@ -35,6 +35,9 @@ export interface AnswerContext {
   names: ReadonlyMap<string, string>;
   /** ms, this computer's clock */
   now: number;
+  /** The owner's name, when the person is a helper at the shop: a decision of the owner's is then "by Noi", never "by you". Absent
+   *  for the owner themselves, and for the signed-in tenant's own shop, where the person is the owner. */
+  owner?: string;
 }
 
 /** The request's decision route. Its id is one path segment, whatever it holds. */
@@ -60,21 +63,52 @@ const WAITING: Readonly<Record<string, Key>> = {
   invalid_request: "rt.ask.notRead",
 };
 
-/** Who decided first and when: the owner from this app or from the link on LINE, a helper by the name the shop gave
- *  them when this app was told it, otherwise as a helper, and anyone in a role this build does not know as no one in
- *  particular. With no time, no time is said. */
-export function decidedWords(decision: WireDecision, names: ReadonlyMap<string, string>, now: number): string {
-  if (!(decision.decidedAt > 0)) return t("rt.decided.already");
-  const time = dayTime(decision.decidedAt, now);
-  if (isUnknown(decision.role)) return t("rt.decided.someone", { time });
-  if (decision.role === "owner") return t(decision.decidedBy === OWNER_LINK ? "rt.decided.link" : "rt.decided.you", { time });
+/** Who decided a request, as the words name them. */
+export type Who = { kind: "you" } | { kind: "link" } | { kind: "named"; name: string } | { kind: "helper" } | { kind: "unknown" };
+
+/** Who decided, from what the API says (`decidedBy` and `role`, which it takes from the session): the owner from this app, or
+ *  from the link on LINE; the owner by name when the person reading is a helper (`owner` is set only for one: to a helper the
+ *  owner's decision is never "yours"); a helper by the name the shop gave them when this app was told it, otherwise as a helper;
+ *  and anyone in a role this build does not know as no one in particular. */
+export function whoDecided(decision: WireDecision, names: ReadonlyMap<string, string>, owner?: string): Who {
+  if (isUnknown(decision.role)) return { kind: "unknown" };
+  if (decision.role === "owner") {
+    if (owner !== undefined) return owner ? { kind: "named", name: owner } : { kind: "unknown" };
+    return { kind: decision.decidedBy === OWNER_LINK ? "link" : "you" };
+  }
   const name = names.get(decision.decidedBy);
-  return name ? t("rt.decided.by", { name, time }) : t("rt.decided.helper", { time });
+  return name ? { kind: "named", name } : { kind: "helper" };
 }
 
-function supersededWords(reason: unknown): string {
+/** Who decided first and when, in words. With no time, no time is said, and nor is who. */
+export function decidedWords(decision: WireDecision, names: ReadonlyMap<string, string>, now: number, owner?: string): string {
+  if (!(decision.decidedAt > 0)) return t("rt.decided.already");
+  const time = dayTime(decision.decidedAt, now);
+  const who = whoDecided(decision, names, owner);
+  switch (who.kind) {
+    case "unknown":
+      return t("rt.decided.someone", { time });
+    case "you":
+      return t("rt.decided.you", { time });
+    case "link":
+      return t("rt.decided.link", { time });
+    case "named":
+      return t("rt.decided.by", { name: who.name, time });
+    case "helper":
+      return t("rt.decided.helper", { time });
+  }
+}
+
+/** Why a request nobody decided is no longer asked: the work it was for stopped, the team took it back, or no more is said. */
+export function supersededWords(reason: unknown): string {
   if (reason === "attempt_ended" || reason === "turn_ended") return t("rt.ask.ended");
   return t(reason === "withdrawn" ? "rt.ask.withdrawn" : "rt.ask.gone");
+}
+
+/** When a request ran out of time: "Expired at 19:42", or "Timed out" when the API gave no time. */
+export function expiredWords(expiredAt: unknown, now: number): string {
+  const at = typeof expiredAt === "number" && expiredAt > 0 ? expiredAt : null;
+  return at === null ? t("card.timedOut") : t("rt.ask.expired", { time: dayTime(at, now) });
 }
 
 function removedWords(removedAt: unknown): string {
@@ -102,15 +136,13 @@ export function outcomeOf(answer: Answer, ctx: AnswerContext): Outcome {
     case "not_permitted":
       return { ok: false, code, words: t(NOT_PERMITTED[ctx.kind] ?? "rt.no.other") };
     case "already_decided":
-      return over(code, decidedWords(decodeDecision(result.decision), ctx.names, ctx.now), "resolved");
+      return over(code, decidedWords(decodeDecision(result.decision), ctx.names, ctx.now, ctx.owner), "resolved");
     case "changed":
       return over(code, t("rt.ask.changed"), "cancelled");
     case "superseded":
       return over(code, supersededWords(result.reason), "cancelled");
-    case "expired": {
-      const at = typeof result.expiredAt === "number" && result.expiredAt > 0 ? result.expiredAt : null;
-      return over(code, at === null ? t("card.timedOut") : t("rt.ask.expired", { time: dayTime(at, ctx.now) }), "timeout");
-    }
+    case "expired":
+      return over(code, expiredWords(result.expiredAt, ctx.now), "timeout");
     case "not_found":
       return over(code, t("rt.notFound"), "cancelled");
     case "removed":
