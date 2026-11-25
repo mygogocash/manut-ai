@@ -55,7 +55,10 @@ The fixes are items 85e to 85i in `docs/plan.md`; the motion is items 85a to 85c
 10. **Two segmented switches.** Home's is a 28px pill; Settings' (`.mseg`) are 22px rectangles with 11.5px text. Seen.
 11. **Two greys for second-line text.** `--quiet` (the placeholder's colour) is text in 219 rules beside `--muted`. On
     grey bands, the side menu and hovered rows it measures 4.0 to 4.3 to 1, under the 4.5 the Contrast board asks.
-    Measured.
+    Measured. Fixed in item 85i (26 Nov): 108 rules now use `--muted` (4.57 to 1 at its lowest, on a hovered row in
+    light); `--quiet` is left on placeholders and disabled controls, and `src/theme/quietRule.test.ts` keeps it there.
+    The chat's stylesheets (47 rules) wait for item 85f, which rewrites them; the test names them once the lead drops
+    its one exception.
 12. **Team's Pause everyone** is a red outlined button. Pausing can be undone, so red is wrong. Seen.
 
 ### Density and rhythm

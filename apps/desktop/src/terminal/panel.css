@@ -86,7 +86,7 @@
   width: 20px;
   height: 20px;
   border-radius: var(--r-sm);
-  color: var(--quiet);
+  color: var(--muted);
 }
 .termpanel-tab-x svg {
   width: 9px;
@@ -174,7 +174,7 @@
 .termpanel-tab-n {
   margin-left: 4px;
   font-size: 10px;
-  color: var(--quiet);
+  color: var(--muted);
 }
 /* a shell in the tab rang while the tab was not in front (TERMINALS' bell colour) */
 .termpanel-ring {
