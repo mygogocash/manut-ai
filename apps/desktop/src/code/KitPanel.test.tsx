@@ -161,6 +161,17 @@ describe("the lanes", () => {
     expect(p.onOpenLane).toHaveBeenCalledWith("s1");
   });
 
+  it("carry New lane on to the band, drawn even when the project has no lane", () => {
+    const onNewLane = vi.fn();
+    for (const lanes of [[lane], []]) {
+      const p = props({ lanes, onNewLane });
+      expect(byId(p, "lane-new")).toHaveLength(1);
+      expect(html(p).indexOf("New lane")).toBeLessThan(html(p).indexOf("How much Kit does alone"));
+    }
+    (byId(props({ lanes: [], onNewLane }), "lane-new")[0].props.onClick as () => void)();
+    expect(onNewLane).toHaveBeenCalledTimes(1);
+  });
+
   it("are not drawn when the project has none, and the panel is as it was", () => {
     for (const p of [props(), props({ lanes: [] })]) {
       const out = html(p);
