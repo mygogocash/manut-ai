@@ -175,8 +175,6 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    helper that ends its turn while its own gate runs in the background is marked finished without a report: send it on
    to wait with `t3_background_wait`. They run, each on its own branch from `pilot/week-1`; review each, merge it after
    the full root gate, add its decisions to `docs/decisions.md` and mark both trackers in `docs/plan.md`:
-   - item 59, making a routine from the console: a form over `POST /v1/admin/routines`, previewed in the API's words
-     and asked first (`feat/console-make-routine`, Sonnet), started 25 Nov when item 57 merged.
    - item 60, the offline cache sealed at rest: AES-GCM under a key held only in the keychain, version 6, no plain
      cache where there is no keychain (`feat/cache-sealed`, Opus), started 25 Nov when item 58 merged.
    A helper's run can also fail when the API sends nothing for 10 minutes; that is not a usage limit and nothing sends
@@ -192,7 +190,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 58 (the preview drawn in the pane: a sandboxed frame, `allow-scripts allow-same-origin allow-forms`, of the
+   Merged: 59 (making a routine from the console: a form whose every field `@manut/routine-rules` checks, every fault
+   beside its field, asked first with the routine in the API's words and its next run, then exactly the route's body;
+   asks first locked on for a reply, a send, a payment or a deletion; practice world v14; pages Worker redeployed),
+   58 (the preview drawn in the pane: a sandboxed frame, `allow-scripts allow-same-origin allow-forms`, of the
    lane's own running preview at a localhost address; `frame-src` widened to localhost only; a navigation hook keeps
    the app's window to its own pages and this computer's addresses; a framed page was shown to reach no command or
    plugin in a scratch Tauri program on this Mac and in a Rust test through Tauri's own check; `[::1]` and Windows
