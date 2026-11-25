@@ -9,6 +9,7 @@
         "allowedTools",
         "allowed-tools",
         "settings",
+        "setting-sources",
         "agents",
         "add-dir"
       ],
@@ -505,7 +506,8 @@
     "COLORTERM",
     "TERM_PROGRAM",
     "HOME",
-    "OPENCODE_CONFIG_CONTENT"
+    "OPENCODE_CONFIG_CONTENT",
+    "OPENCODE_DISABLE_PROJECT_CONFIG"
   ],
   "homeVars": {
     "claude": "CLAUDE_CONFIG_DIR",

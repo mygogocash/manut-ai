@@ -130,8 +130,10 @@ export interface SessionHost extends HistoryHost {
   resize(id: number, cols: number, rows: number): Promise<void>;
   close(id: number): Promise<void>;
   /** Start `agent` in its chat mode in `cwd` (`resume`: a Claude Code or OmO session id or a Codex thread id to continue;
-   *  `account`: as for `start`; `session`: the SESSIONS id, whose attachment folder a Claude Code chat reads without a card). */
-  chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean): Promise<number>;
+   *  `account`: as for `start`; `session`: the SESSIONS id, whose attachment folder a Claude Code chat reads without a card;
+   *  `mode`: the permission mode the person picked, one of `modesOf(agent)`, which the agent starts in. None: the shell starts
+   *  it in its careful mode, Ask (item 89), so no project file and no `defaultMode` of the agent's own chooses it). */
+  chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean, mode?: string): Promise<number>;
   chatInput(id: number, input: ChatInput): Promise<void>;
   chatClose(id: number): Promise<void>;
   /** Save a file the person attached in session `session` under manut's own folder
@@ -296,12 +298,13 @@ export class TauriHost implements SessionHost, BuddyHost {
     exit.onmessage = (c) => onExit(c);
     return invoke<number>("session_start", { agent, cwd, sessionId: sessionId ?? null, resume: resume ?? null, link: link ?? null, account: account ?? null, cols, rows, onData: data, onExit: exit });
   }
-  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean) {
+  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean, mode?: string) {
     const { invoke, Channel } = await this.core();
     const ch = new Channel<ChatEvent>();
     ch.onmessage = (ev) => onEvent(ev);
-    // `suggest`: the person turned on suggested next messages (lib/suggest.ts); the shell passes Claude Code its own flag for it
-    return invoke<number>("chat_start", { agent, cwd, resume: resume ?? null, account: account ?? null, session: session ?? null, suggest: suggest === true, onEvent: ch });
+    // `suggest`: the person turned on suggested next messages (lib/suggest.ts); the shell passes Claude Code its own flag for it.
+    // `mode`: checked again in the shell against the agent's own list, and none means its careful one
+    return invoke<number>("chat_start", { agent, cwd, resume: resume ?? null, account: account ?? null, session: session ?? null, suggest: suggest === true, mode: mode ?? null, onEvent: ch });
   }
   async chatInput(id: number, input: ChatInput) {
     const { invoke } = await this.core();
@@ -1203,9 +1206,9 @@ export class MockHost implements SessionHost, BuddyHost {
 
   // ---- chat: a scripted agent with the same events the Rust adapters emit -------------------
   private chats = new Map<number, MockChat>();
-  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean) {
+  async chatStart(agent: AgentId, cwd: string, onEvent: (ev: ChatEvent) => void, resume?: string, account?: string, session?: string, suggest?: boolean, mode?: string) {
     const id = ++this.next;
-    this.log({ op: "chat.start", id, agent, cwd, ...(resume ? { resume } : {}), ...(account ? { account } : {}), ...(session ? { session } : {}) });
+    this.log({ op: "chat.start", id, agent, cwd, ...(resume ? { resume } : {}), ...(account ? { account } : {}), ...(session ? { session } : {}), ...(mode ? { mode } : {}) });
     const c = new MockChat(agent, onEvent, resume, cwd, {
       noChat: !!this.g.__manutMockNoChat?.includes(agent),
       // the generic ACP agents are signed out on the mock host unless a test signs them in, as on a fresh Mac; a

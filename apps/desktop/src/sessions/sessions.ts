@@ -761,8 +761,10 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
     // and so no turn kept before it can be rewound: their snapshots go
     turns.forget(id);
     try {
-      // a lane's agent works in the lane's own folder
-      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id, suggestOn() && suggestWorks(r.agent));
+      // a lane's agent works in the lane's own folder, and starts in the mode the person picked (a restart, a Restart, a
+      // workflow's Ask): named at the start (item 89), so it holds from the first turn; none, and the shell picks the careful one
+      const mode = r.mode && modesOf(r.agent).includes(r.mode) ? r.mode : undefined;
+      proc.hostId = await host.chatStart(r.agent, workDir(r), onAgentEvent(id, proc), resume, accountOf(r), id, suggestOn() && suggestWorks(r.agent), mode);
       // it said it is not signed in before manut knew its id: it is ended already, so only the process goes
       if (proc.signedOut) {
         void host.chatClose(proc.hostId).catch(() => undefined);
@@ -774,9 +776,8 @@ export function createSessions(host: SessionHost, store: () => Store = getStore,
         return;
       }
       patchRec(id, { status: "running" });
-      // the mode and effort the person picked before (a restart, a Restart) are set again
+      // the effort the person picked before (a restart, a Restart) is set again; the mode went with the start
       const again = rec(id);
-      if (again?.mode && modesOf(again.agent).includes(again.mode)) await host.chatInput(proc.hostId, { kind: "mode", mode: again.mode }).catch(() => undefined);
       if (again?.effort) await host.chatInput(proc.hostId, { kind: "effort", effort: again.effort }).catch(() => undefined);
       void readBranch(id);
     } catch (e) {
