@@ -227,7 +227,12 @@ alike). Before it, an ask decided anywhere but this app (the web app, the owner'
   (`passedOn`: in the shop's open list as the app held it, or in the recent list), the one place this app learns a helper's name; the
   shop's people record is not read for it (`GET /v1/people` is the owner's alone, and a second request). Otherwise it is "a helper". A
   role this build does not know is no one in particular, and the words say none. A helper reading another helper's decision may be
-  reading their own on another device, so "a helper" is all that can be said.
+  reading their own on another device, so "a helper" is all that can be said. The words never say "on another device" either: the
+  API names no device, and an answer this app sent whose reply was lost reaches the read as the owner's own, so "by you" is true of it
+  and of a decision made on a phone alike.
+- **Ended work.** A request superseded because its attempt or turn ended says "No longer asked: the work it was for has stopped", the
+  decide route's own words for the same standing, and not that a newer ask replaced it: approval-core says only that the attempt or
+  turn that asked no longer holds the task, and a newer ask may not exist.
 - **The revision.** A record at another revision than the card showed says nothing, and the card closes as it did before: a request
   revised after the card was shown and then decided was decided at other words than the card showed, and "Approved" on the old card
   would say the exact words it showed were approved.
@@ -247,8 +252,9 @@ alike). Before it, an ask decided anywhere but this app (the web app, the owner'
   apps/api does: each closing under the app's own store, one read for several asks, one for each shop with that shop's session, no read
   when none left or for an ask answered here or asked again or for a shop left, every way the read can say nothing, the wait cut at
   4 seconds with a late answer unused, a sign-out or a stop while it is on the way, a failure in saying how, the person's place in a
-  shop ending in the read, and the file on disk the same whether or not the read said how); `e2e/google-sheets.spec.ts` (Connected
-  over a stubbed shell: Ton's request settled four ways elsewhere and one read that fails, the page's clock moved by hand).
+  shop ending in the read, and the file on disk the same whether or not the read said how); `several.test.ts` (a helper's refused answer
+  names the owner, and the owner's own is "you"); `e2e/google-sheets.spec.ts` (Connected over a stubbed shell: Ton's request settled four
+  ways elsewhere and one read that fails, the page's clock moved by hand).
 
 ### From a notification
 
