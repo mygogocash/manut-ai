@@ -216,7 +216,14 @@ for Apple silicon and Intel, with Manut AI's own mark as its icon.
    - item 69, a helper's own session on the connected desktop (`feat/helper-session`, Opus, `cc-item69-helper-session`);
    - item 83, artifacts shared by a link, built switched off (`feat/artifact-links`, Opus, `cc-item83-artifact-links`);
    - item 77b, workflows and coding work on a schedule, off by default (`feat/workflows`, Opus, `cc-item77b-workflows`);
-   - a security review of the twelve features merged on 25 Nov, findings only, whose report the lead turns into fixes;
+   - a security review of the twelve features merged on 25 Nov: done. Nine findings, one high (in merging a pull request
+     from a lane), four medium, four low, none in the published 0.1.1. Two helpers fix them before any more features
+     merge on those files: item 86 (`feat/fix-source-control`, Opus, `cc-item86-fix-git`) and item 87
+     (`feat/fix-computer-providers`, Opus, `cc-item87-fix-computer`), started 26 Nov at about 00:35. No build is cut
+     until both are merged. The findings are written into each fix's commits and tests, not into the public docs
+     before they are fixed. The reviewer's next places to look: MCP approvals keyed to the developer's folder but
+     applied to a lane's file, whether a preview starts a repository's script without a click, and other names for
+     the settings that skip an agent's asks.
    - a design for reaching the app from another device (item 78): done, `docs/remote-access.md`. Its first two phases
      need nothing from the owner, so item 78a, the channel both sides use (`feat/remote-channel`, Opus,
      `cc-item78a-remote-channel`), started 26 Nov at about 00:20.
