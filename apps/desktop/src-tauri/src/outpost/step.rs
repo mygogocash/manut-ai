@@ -342,8 +342,11 @@ return JSON.stringify({ s: "pending" });"#;
 ///
 /// A write fills what a person types text into, chooses from, or ticks: an input of a text kind, a text area or an
 /// editor that is not a form field (`contenteditable`, the element that is the editor itself) takes text; a list takes
-/// one of its items by value; a check box takes "checked" or "unchecked"; a radio button takes the value of one of the
-/// buttons of its group (the buttons of its form with its name), which is then chosen. Never a password field
+/// one of its items by value; a check box takes "checked" or "unchecked", and so does a switch or check box a page draws
+/// itself (an element that is not an input, with the role `switch` or `checkbox`, whose state is its `aria-checked`), but
+/// only while that says "true" or "false" and the element is not marked disabled or read-only: half on ("mixed") is no
+/// state a write can ask for; a radio button takes the value of one of the buttons of its group (the buttons of its form
+/// with its name), which is then chosen. Never a password field
 /// (passwords come only from the vault, through a sign-in step), a hidden one, a file, or anything that cannot be seen.
 ///
 /// Each is set the way a person's input sets it, so the page's own handlers run: text through the field's own setter
@@ -355,10 +358,18 @@ return JSON.stringify({ s: "pending" });"#;
 /// line of its own as "\n", a no-break space as a space, the invisible marks editors keep for the caret left out, and the
 /// empty line an editor keeps at its end for the caret not counted.
 const FIELDS: &str = r#"const TYPED = ["text", "search", "email", "tel", "url", "number", "date", "time", "datetime-local", "month", "week"];
-const toggle = (el) => el !== null && el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio");
+const drawn = (el) => el !== null && el.tagName !== "INPUT" && ["switch", "checkbox"].includes(el.getAttribute("role"));
+const toggle = (el) => el !== null && (drawn(el) || (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")));
+const ticked = (el) => drawn(el) ? el.getAttribute("aria-checked") === "true" : el.checked;
 const editor = (el) => el.isContentEditable === true && !(el.parentElement !== null && el.parentElement.isContentEditable);
 const kindOf = (el) => {
   if (!visible(el)) return null;
+  if (drawn(el)) {
+    // `visible` has already turned away one that is disabled as a form control is
+    const settable = ["true", "false"].includes(el.getAttribute("aria-checked")) &&
+      el.getAttribute("aria-disabled") !== "true" && el.getAttribute("aria-readonly") !== "true";
+    return settable ? "check" : null;
+  }
   if (el.tagName === "INPUT" && el.type === "checkbox") return "check";
   if (el.tagName === "INPUT" && el.type === "radio") return "radio";
   if (el.readOnly) return null;
@@ -390,7 +401,7 @@ const editorText = (el) => {
   return text.endsWith("\n") ? text.slice(0, -1) : text;
 };
 const read = (el) => {
-  if (el.tagName === "INPUT" && el.type === "checkbox") return el.checked ? "checked" : "unchecked";
+  if (drawn(el) || (el.tagName === "INPUT" && el.type === "checkbox")) return ticked(el) ? "checked" : "unchecked";
   if (el.tagName === "INPUT" && el.type === "radio") { const on = group(el).find((r) => r.checked); return on === undefined ? "" : on.value; }
   if (el.tagName === "TEXTAREA") return el.value.replace(/\r\n?/g, "\n");
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return el.value;
@@ -405,7 +416,7 @@ const fits = (el, kind, value) =>
   true;
 const SETTERS = { INPUT: HTMLInputElement, TEXTAREA: HTMLTextAreaElement, SELECT: HTMLSelectElement };
 const put = (el, kind, value) => {
-  if (kind === "check") { if (el.checked !== (value === "checked")) el.click(); return; }
+  if (kind === "check") { if (ticked(el) !== (value === "checked")) el.click(); return; }
   if (kind === "radio") { const r = group(el).find((x) => x.value === value && visible(x)); if (!r.checked) r.click(); return; }
   el.focus();
   if (kind === "editor") {

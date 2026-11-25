@@ -187,7 +187,10 @@ The owner wants speed and maximum reuse: lift whole modules from existing code b
    The security review of 24 Nov (findings only) found no critical issue, two high and three medium ones that need
    `EMAIL_SIGN_IN` or `SELF_SERVE_SHOPS` on, and three low ones; its proofs are in the review thread's report, and
    `docs/turning-on.md` says to keep both switches off until items 41 and 42 merge.
-   Merged: 54 (the retention prune clears the approval lookup's entries of the requests it removes: the task notes
+   Merged: 56 (the outpost sets switches and check boxes a page draws itself, `role="switch"` or `role="checkbox"`
+   with `aria-checked`, as it sets a check box, and refuses one half on, disabled or read-only; local pages in WebKit
+   and Chromium only; the Rust tests run in CI, as `step.rs` changed only inside its `FIELDS` script),
+   54 (the retention prune clears the approval lookup's entries of the requests it removes: the task notes
    the ids before it deletes them, reports them gone through the lookup's own report, and keeps what did not land
    for its next prune, the prune answering `prune_incomplete` with `approval-lookup` meanwhile; the API changed, so
    the next dev deploy carries it),

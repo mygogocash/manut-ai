@@ -534,7 +534,10 @@ against the fake browser. What the owner's first supervised write should check i
   shadow root cannot be reached by any script: what is in one is not on the page as far as the outpost can tell, so a
   step naming it ends `selector_not_found` with nothing typed.
 - **More controls for a write** (`FIELDS`). Besides text fields, text areas and lists: a check box takes `"checked"` or
-  `"unchecked"`; a radio button takes the value of one of the buttons of its group (its form's buttons with its name),
+  `"unchecked"`, and so does a switch or check box a page draws itself, as component libraries do (an element that is
+  not an input, with `role="switch"` or `role="checkbox"`, whose state is its `aria-checked`), while that says `true` or
+  `false` and the element is not marked disabled or read-only (half on, `mixed`, is no state a write can ask for); a
+  radio button takes the value of one of the buttons of its group (its form's buttons with its name),
   which is then chosen; an editor that is not a form field (`contenteditable`, named by the element that is the editor
   itself) takes text. Each is set the way a person's input sets it, so the page's own handlers run: a check box or a
   radio button is clicked, and only when it is not already as asked (a second click would undo the first); an editor is
@@ -553,7 +556,9 @@ against the fake browser. What the owner's first supervised write should check i
   has loaded, so a write looks for its form and fields again for up to 10 seconds before it says they are not there
   (`selector_not_found`). Nothing is typed until all of them are there, so looking again never types anything twice.
 - **Tested in two engines** (`apps/desktop/e2e/outpost-scripts.ts`): a web component's form and a closed one, check boxes
-  and radio buttons a page hears clicked once, a box the page unticks again (not pressed), a chat editor that sends on
+  and radio buttons a page hears clicked once, switches and check boxes a page draws itself (clicked once, read from
+  `aria-checked`, and refused while half on, disabled or read-only), a box or switch the page turns off again (not
+  pressed), a chat editor that sends on
   Return and is not sent while typed into, and an editor's text read back from the ways editors draw it.
 - **A settings page that keeps its form** (`sent` and `saved` in `step.rs`, `SAVED`). After the press, a page that keeps
   the form with every value as typed and nothing marked wrong answers `kept`, which decides nothing at first: a chat that
@@ -797,8 +802,9 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
 - A write stops at any refusal, the page's or a frame's: before the press with nothing sent (`navigation_refused`), after
   it as not known (`origin_not_allowed`).
 - Selectors reach open shadow roots, the page's own elements first; closed ones are out of reach (`selector_not_found`).
-- A check box takes "checked" or "unchecked", a radio button the value of a button of its group, an editor its text; a
-  click sets a box or a button, only when not already as asked, and an editor is typed over through the browser's own
+- A check box takes "checked" or "unchecked", and so does a switch or check box a page draws itself (`role` with
+  `aria-checked`); a radio button takes the value of a button of its group, an editor its text; a click sets a box, a
+  switch or a button, only when not already as asked, and an editor is typed over through the browser's own
   editing, a line break as Shift and Return.
 - An editor's text is compared as a person reads it; a value that does not read back, or a field marked wrong, is looked
   at again for up to 10 seconds before the press is refused.
@@ -815,10 +821,11 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
 
 1. **Write steps on real sites.** The outpost runs approved writes (above) against test pages, not yet a shop's real
    site. Before a real write: check the forms of the sites in the pilot (Shopee Seller Centre's chat first), fields
-   inside frames, and switches drawn as `role="switch"` or `role="checkbox"` rather than as check boxes (not reached
-   yet: a write naming one is `selector_not_found`). (Built 24 Nov 2026: telling a page's frames from the page in the
-   navigation hook; fields in a page's open shadow DOM; check boxes, radio buttons and editors that are not form
-   fields; knowing a settings page took a change when it keeps the form; above.)
+   inside frames, and switches a page draws with no role, whose state shows only in their look (a write naming one is
+   `selector_not_found`). (Built 24 Nov 2026: telling a page's frames from the page in the navigation hook; fields in a
+   page's open shadow DOM; check boxes, radio buttons and editors that are not form fields; knowing a settings page took
+   a change when it keeps the form; and on 25 Nov, switches and check boxes a page draws with `role="switch"` or
+   `role="checkbox"` and `aria-checked`; above.)
 
    **What the owner's first supervised write should check on the real site**, with the outpost's window in view:
    - The window opens and loads pages as before, and Connections shows this Mac Online: the navigation delegate in
@@ -832,7 +839,8 @@ The outpost ready for real sites' pages (24 and 25 Nov 2026), each in `docs/deci
      page needs one, the answer is a rule for which frames a write page may load, never adding the frame's address to
      the sign-in, which would let the password be typed there.
    - The fields: that each one the team will write is in the page or an open shadow root, not in a closed one or a
-     frame; that switches are check boxes, not `role="switch"` elements.
+     frame; that switches are check boxes, or say their state in `aria-checked` with `role="switch"` or `role="checkbox"`
+     (a switch whose state shows only in its look is not found as one).
    - **Fields that save as they change.** A box or a field the site saves the moment it changes makes typing itself a
      write: if such a write then stopped before the press, the outpost would report nothing sent though the site had
      saved. Find out which settings do this before the team writes them.

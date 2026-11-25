@@ -127,6 +127,41 @@ const PAGES: Record<string, string> = {
         document.body.dataset.saved = JSON.stringify(Object.fromEntries(new FormData(e.target)));
       });
     </script>`),
+  // Switches and check boxes a page draws itself, as component libraries do: an element with the role and its state in
+  // aria-checked, flipped by the page's own click handler. One is half on, one marked disabled, one marked read-only, one
+  // a disabled button, and one the page turns back off at once; a real check box with the role of a switch is a check box
+  // like any other.
+  "/switches": html(`
+    <section>
+      <button type="button" role="switch" aria-checked="false" id="vacation">Vacation mode</button>
+      <div role="checkbox" aria-checked="true" tabindex="0" id="cod">Cash on delivery</div>
+      <input type="checkbox" role="switch" id="native">
+      <div role="switch" aria-checked="mixed" id="mixed">Some days</div>
+      <button type="button" role="switch" aria-checked="false" aria-disabled="true" id="locked">Locked</button>
+      <div role="checkbox" aria-checked="false" aria-readonly="true" id="shown">Shown only</div>
+      <button type="button" role="switch" aria-checked="false" disabled id="off">Off</button>
+      <div role="switch" aria-checked="false" id="stubborn">Stubborn</div>
+      <button type="button" id="save">Save</button>
+    </section>
+    <script>
+      window.clicked = [];
+      for (const el of document.querySelectorAll("[role], input")) {
+        el.addEventListener("click", () => {
+          clicked.push(el.id);
+          if (el.tagName === "INPUT" || el.getAttribute("aria-disabled") === "true" || el.id === "mixed") return;
+          el.setAttribute("aria-checked", el.getAttribute("aria-checked") === "true" ? "false" : "true");
+        });
+      }
+      const stubborn = document.getElementById("stubborn");
+      stubborn.addEventListener("click", () => setTimeout(() => stubborn.setAttribute("aria-checked", "false"), 0));
+      document.getElementById("save").addEventListener("click", () => {
+        document.body.dataset.saved = JSON.stringify({
+          vacation: document.getElementById("vacation").getAttribute("aria-checked"),
+          cod: document.getElementById("cod").getAttribute("aria-checked"),
+          native: document.getElementById("native").checked,
+        });
+      });
+    </script>`),
   // A sign-in on one page: the right password signs in (no password field left); a wrong one empties the field where it
   // was; a code is asked for when the account is "otp@baanmali".
   "/login": html(`
@@ -433,6 +468,39 @@ export function outpostScriptCases(): void {
     const stubborn = v([["#stubborn", "checked"]]);
     expect(await run(p, SET, { o, f: "form#prefs", v: stubborn })).toEqual({ r: "set" });
     await expect.poll(async () => (await run(p, PRESS, { o, f: "form#prefs", v: stubborn })).r).toBe("changed");
+    expect(await p.evaluate(() => document.body.dataset.saved)).toBeUndefined();
+  });
+
+  test("ticks a switch or check box a page draws itself with one click, only when not already as asked", async ({ page: p }) => {
+    await serve(p);
+    await p.goto(`${ORIGIN}/switches`);
+    const set = (pairs: [string, string][]) => run(p, SET, { o, f: "#save", v: v(pairs) });
+    const clicked = () => p.evaluate(() => (window as unknown as { clicked: string[] }).clicked.splice(0));
+    // Half on, marked disabled or read-only, a disabled button, or asked for anything but checked or unchecked: no field a write can
+    // set, refused before anything is clicked.
+    for (const pairs of [[["#mixed", "checked"]], [["#locked", "checked"]], [["#shown", "checked"]], [["#off", "checked"]], [["#vacation", "on"]]] as [string, string][][]) {
+      expect(await set(pairs), JSON.stringify(pairs)).toEqual({ r: "field" });
+    }
+    expect(await clicked()).toEqual([]);
+    const pairs: [string, string][] = [["#vacation", "checked"], ["#cod", "unchecked"], ["#native", "checked"]];
+    expect(await set(pairs)).toEqual({ r: "set" });
+    expect(await clicked()).toEqual(["vacation", "cod", "native"]);
+    // Asked again, nothing already as asked is clicked: a second click would undo the first.
+    expect(await set(pairs)).toEqual({ r: "set" });
+    expect(await clicked()).toEqual([]);
+    for (const [s, value] of pairs) expect(await readBack(p, s), s).toBe(value);
+    // Every one reads back as asked, so Save is pressed once, and the page has what was approved.
+    expect((await run(p, PRESS, { o, f: "#save", v: v(pairs) })).r).toBe("pressed");
+    expect(JSON.parse(await p.evaluate(() => document.body.dataset.saved ?? "{}"))).toEqual({ vacation: "true", cod: "false", native: true });
+    // Read as a fresh look at a settings page reads it: a switch on shows the change was kept, and one only off proves
+    // nothing, as a form not yet filled in shows it too.
+    expect(await run(p, SAVED, { o, v: v([["#vacation", "checked"]]) })).toEqual({ s: "saved" });
+    expect(await run(p, SAVED, { o, v: v([["#cod", "unchecked"]]) })).toEqual({ s: "blank" });
+    // A switch the page turns back off: what would go is not what was approved, so nothing is pressed.
+    await p.goto(`${ORIGIN}/switches`);
+    const stubborn = v([["#stubborn", "checked"]]);
+    expect(await run(p, SET, { o, f: "#save", v: stubborn })).toEqual({ r: "set" });
+    await expect.poll(async () => (await run(p, PRESS, { o, f: "#save", v: stubborn })).r).toBe("changed");
     expect(await p.evaluate(() => document.body.dataset.saved)).toBeUndefined();
   });
 
