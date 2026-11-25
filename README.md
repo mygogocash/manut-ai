@@ -57,7 +57,13 @@ Code lifted from other projects keeps its notice here: GoSpark (`mygogocash/gosp
 idea behind an added account's home: Codex's own home shared entry by entry as links, its sign-in kept apart
 (`apps/desktop/src-tauri/src/accounts.rs`, `share`; rewritten in Rust with an allow-list, no code copied); and for the
 idea of the sidebar's places (pinned on top, snoozed and done-for-now below, an archive, the pull request on a row, a suggested
-next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied.
+next message): `apps/desktop/src/sidebar/rows.ts`, written here from the description, no code copied. Orca
+(MIT, Copyright (c) 2026 Lovecast Inc., `stablyai/orca` at `a634526a1d0995af34a75cc4845e3eef17610085`) for computer use
+(`apps/desktop/src-tauri/src/computer/`, `docs/computer-use.md`): its command names as the MCP tools, its
+`orca-computer-use` skill adapted as `computer/SKILL.md`, the macOS shortcuts it never sends
+(`computer-blocked-key-combos.ts`, which Orca ported from vercel-labs/agent-desktop, Apache-2.0), its lock check
+(`SessionLockProbe.swift`), the window number through `_AXUIElementGetWindow` (`AccessibilityWindowIdentity.swift`),
+the window picture and which windows count (`main.swift`), and the two System Settings addresses.
 
 Libraries added for one feature are named here too: `objc2-speech`, `objc2-avf-audio` and `objc2-av-foundation`
 (the objc2 project's bindings to Apple's Speech, AVFAudio and AVFoundation frameworks, Zlib OR Apache-2.0 OR MIT), which

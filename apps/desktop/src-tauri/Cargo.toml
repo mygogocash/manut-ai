@@ -43,6 +43,10 @@ libc = "0.2"
 # app's commands name (api_link.rs). Other systems have no keychain support yet, so Connected cannot sign in there.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+# Computer use (computer/mac.rs, docs/computer-use.md): the Core Foundation types its calls into the accessibility API,
+# CoreGraphics and ImageIO pass, and the windows' dictionaries they read. Already in the tree (security-framework builds
+# on it, and api_link.rs's tests use it), so nothing new is built.
+core-foundation = "0.10"
 # The outpost's browser reads its page through WKWebView's own callAsyncJavaScript, in a content world of its own,
 # through Tauri's with_webview (outpost/browser.rs). These are the crates wry already builds on, at the versions
 # Cargo.lock holds; they are named here only to reach that method and WKContentWorld (docs/decisions.md, 24 Nov 2026),
