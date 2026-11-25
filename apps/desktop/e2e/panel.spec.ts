@@ -48,7 +48,8 @@ test("the panel header is six tabs; the header keeps one control", async ({ page
     "Plans",
   ]);
   await expect(page.getByTestId("panel-tab-details")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
   // the selected tab is gray, not the brand gradient
   const bg = await page.getByTestId("panel-tab-details").evaluate((e) => getComputedStyle(e).backgroundImage);
   expect(bg).toBe("none");
@@ -199,5 +200,6 @@ test("a bot with no other places opens Details from its name in the header", asy
   await expect(page.getByTestId("details-panel")).toBeVisible();
   await page.getByTestId("panel-tab-terminal").click();
   await expect(page.getByTestId("panel-terminal")).toBeVisible();
-  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(2);
+  // the header right holds the panel button alone: the model is in the chat box since item 85f
+  await expect(page.getByTestId("head-right").locator(":scope > *")).toHaveCount(1);
 });

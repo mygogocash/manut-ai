@@ -42,12 +42,12 @@ test.beforeEach(async () => {
   await mock("mock.reset");
 });
 
-test("the panel button sits right of the model control: closed it opens Plans, open it closes; gray when on, no accent", async ({ page }) => {
+test("the panel button holds the header's right end: closed it opens Plans, open it closes; gray when on, no accent", async ({ page }) => {
   await load(page, "friren");
   const right = page.getByTestId("head-right");
-  await expect(right.locator(":scope > *")).toHaveCount(2);
+  // alone there: the model control is in the chat box since item 85f
+  await expect(right.locator(":scope > *")).toHaveCount(1);
   const btn = page.getByTestId("panel-button");
-  // the second and last child, after the model control
   expect(await right.evaluate((el) => (el.lastElementChild as HTMLElement).dataset.testid)).toBe("panel-button");
   await expect(btn).toHaveAttribute("aria-pressed", "false");
   await expect(btn).toHaveAttribute("title", /^Panel \((⌘|Ctrl\+)\.\)$/);
@@ -259,7 +259,7 @@ test("a run quiet for a day is not live: no live dot, a muted 'no update for', n
   expect(states[0]).toBe(false);
 });
 
-test("900px with a long model id: the model control gives way, the panel button stays whole and on top", async ({ page }) => {
+test("900px with a long model id: the model control in the box gives way, the panel button stays whole and on top", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
   const long = "openrouter-preview/anthropic/claude-opus-5-5-thinking-extended-2026-11-01";
   await mock("chat.set_model", { bot: "kami", model: long });
@@ -269,15 +269,18 @@ test("900px with a long model id: the model control gives way, the panel button 
   const b = (await btn.boundingBox())!;
   expect(Math.round(b.width)).toBe(26);
   expect(b.x + b.width).toBeLessThanOrEqual(head.x + head.width + 0.5);
-  const pill = (await page.getByTestId("model-pill").boundingBox())!;
-  expect(pill.x + pill.width).toBeLessThanOrEqual(b.x + 0.5);
+  // the model is in the chat box (item 85f): its long id ends in an ellipsis before Send, and the field keeps its room
+  const pill = (await page.locator(".cw").getByTestId("model-pill").boundingBox())!;
+  const send = (await page.getByTestId("send").boundingBox())!;
+  expect(pill.x + pill.width).toBeLessThanOrEqual(send.x + 0.5);
+  expect((await page.getByTestId("composer").boundingBox())!.width).toBeGreaterThan(200);
   const label = page.getByTestId("model-label");
   expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   // what is at the button's centre is the button (nothing overlaps it)
   const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-testid]")?.getAttribute("data-testid"), [b.x + b.width / 2, b.y + b.height / 2]);
   expect(hit).toBe("panel-button");
-  // the bot name, places chip and model control do not run into each other
-  const ids = ["who", "places", "model-pill", "panel-button"];
+  // the bot name, places chip and panel button do not run into each other
+  const ids = ["who", "places", "panel-button"];
   const rects = await page.evaluate((ids) => ids.map((id) => document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect().toJSON() ?? null), ids);
   const present = rects.filter(Boolean) as { left: number; right: number }[];
   for (let i = 1; i < present.length; i++) expect(present[i].left).toBeGreaterThanOrEqual(present[i - 1].right - 0.5);
