@@ -321,7 +321,8 @@ mod tests {
             ("Glob", json!({"pattern": "**/*.ts", "path": "/w/proj/src"}), json!({"kind": "read", "name": "Glob", "paths": ["/w/proj/src"], "cwd": "/w/proj"})),
             ("WebFetch", json!({"url": "https://example.com", "prompt": "read it"}), json!({"kind": "fetch", "name": "WebFetch", "cwd": "/w/proj"})),
             ("WebSearch", json!({"query": "qr"}), json!({"kind": "other", "name": "WebSearch", "cwd": "/w/proj"})),
-            ("mcp__shop__orders", json!({"status": "open"}), json!({"kind": "other", "name": "mcp__shop__orders", "cwd": "/w/proj"})),
+            // an MCP tool also names the server it belongs to, which the card shows beside the tool (item 67)
+            ("mcp__shop__orders", json!({"status": "open"}), json!({"kind": "other", "name": "mcp__shop__orders", "cwd": "/w/proj", "server": "shop"})),
         ];
         for (name, input, want) in cases {
             assert_eq!(claude_tool(name, &input, "", "/w/proj"), want, "{name}");

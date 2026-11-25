@@ -7264,7 +7264,8 @@ mod tests {
         assert_eq!(card("WebFetch", json!({"url": "https://example.com", "prompt": "title"})), ("Allow WebFetch?".into(), "https://example.com".into()));
         assert_eq!(card("EnterWorktree", json!({"name": "fix-a"})), ("Allow EnterWorktree?".into(), "name: fix-a".into()));
         assert_eq!(card("CronCreate", json!({"cron": "0 9 * * *", "recurring": true})), ("Allow CronCreate?".into(), "cron: 0 9 * * * · recurring: true".into()));
-        assert_eq!(card("mcp__x__y", json!({"ids": [1, 2], "opts": {"a": 1}})), ("Allow mcp__x__y?".into(), "ids: [1,2] · opts: {\"a\":1}".into()));
+        // an MCP tool's ask names its server and shows its whole input, a field to a line (item 67): it may write, send or pay
+        assert_eq!(card("mcp__x__y", json!({"ids": [1, 2], "opts": {"a": 1}})), ("Allow mcp__x__y from x?".into(), "ids: [1,2]\nopts: {\"a\":1}".into()));
     }
 
     /// codex-15-sub-edit: Codex 0.167 hands the edit to a sub-agent; the main thread has no file change, the
